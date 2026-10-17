@@ -567,6 +567,34 @@ REST_FRAMEWORK = {
 }
 ```
 
+- Yoriki自身のDBはPostgreSQLで、ドライバはpsycopg 3（依存は `psycopg[binary,pool]`）を使う。DjangoはUvicorn（ASGI）で動かし、同期のviewはリクエストごとに別のスレッドで実行されるので、接続を持ち続ける `CONN_MAX_AGE` ではなく、psycopg 3の接続プールを使う。
+
+```python
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.getenv("YORIKI_DATABASE_NAME"),
+        "USER": os.getenv("YORIKI_DATABASE_USER"),
+        "PASSWORD": os.getenv("YORIKI_DATABASE_PASSWORD"),
+        "HOST": os.getenv("YORIKI_DATABASE_HOST"),
+        "PORT": os.getenv("YORIKI_DATABASE_PORT", "5432"),
+        "CONN_MAX_AGE": 0,  # プールを使うので、Djangoの側では接続を持ち続けない
+        "OPTIONS": {
+            "pool": {
+                "min_size": int(os.getenv("YORIKI_DATABASE_POOL_MIN", "2")),
+                "max_size": int(os.getenv("YORIKI_DATABASE_POOL_MAX", "10")),
+                "timeout": 10,
+            },
+        },
+    }
+}
+```
+
+- DBへの接続数は、およそ「Uvicornのワーカー数 × プールの最大数 ＋ qclusterのプロセス数 ＋ SSEのLISTEN（プロセスごとに1本）」になる。サーバーを増やすときは、PostgreSQLの `max_connections` に収まるか確認する。PgBouncerを入れる場合、transactionモードではLISTENが使えないので、LISTENの接続はPgBouncerを通さない（realtime.md §4.1）。
+- SSEのLISTENには、ORMのプールとは別に、psycopg 3の非同期接続（`AsyncConnection`）をプロセスごとに1本持つ（realtime.md §4）。
+- Djangoの非同期ORM（`aget`、`afilter` 等）は、内部では同期の接続をスレッドで使う。非同期のview（SSE）でイベントループを止めずにDBを読むために使い、非同期のviewから同期のORMを直接呼ばない。
+- Connector（design.md §4.9）のドライバ（pyodbc、psycopg 3、mysqlclient）は、Yoriki自身のDBとは別に、同期で使う。Connectorを呼ぶのはqclusterと同期のviewだけなので、非同期のドライバは使わない。
+
 ### 6.2 認証（社内SSO）
 
 - ログインはバックエンドで処理し、Djangoのセッションでログイン状態を保つ。フロントエンドにトークンを持たせない（frontend-conventions.md §4）。

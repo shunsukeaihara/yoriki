@@ -11,6 +11,9 @@ export YORIKI_DATABASE_USER=yoriki
 export YORIKI_DATABASE_PASSWORD=yoriki
 export YORIKI_DATABASE_HOST=localhost
 export YORIKI_DATABASE_PORT=5432
+# 接続プールの大きさ（プロセスごと。backend-conventions.md §6.1）
+# export YORIKI_DATABASE_POOL_MIN=2
+# export YORIKI_DATABASE_POOL_MAX=10
 
 # LLMプロバイダのAPI key（使うものだけ設定する）。管理画面で登録する接続のSecret参照に
 # `env:YORIKI_OPENAI_API_KEY` のように変数名を書くと、Control Planeがこの値を読む。Sandboxには渡さない

@@ -44,6 +44,7 @@ yoriki/
 | `<org>/yoriki-sandbox-<profile>` | `sandbox/images/<profile>/` | Runごとに動的に起動 | 公開Docker Hub（design.md §10.1） |
 
 - `yoriki-api` は1つのイメージを、起動コマンドを変えて複数のサービスで使う（design.md §10）。
+- 本体のイメージ（`yoriki-api`、`yoriki-frontend`）は配布しない。導入する人がソースからビルドする。`yoriki-api` には、ライセンス上そのまま再配布できないもの（SQL Server用のMicrosoft ODBC Driver、GPL-2.0のmysqlclient）が入るため（design.md §4.9.2）。
 - 本体のイメージには、ビルド時に秘密情報を入れない。`collectstatic` はビルド時に行う。
 - Dockerfileのベースイメージは `mise.toml` のバージョンに合わせる（Node 24、Python 3.13）。`mise.toml` を変えたら、Dockerfileも同じ変更で更新する。
 - 公式イメージもタグだけでなくdigestで固定する。更新はDependabot等でdigestの変更を提案させ、レビューしてから取り込む。

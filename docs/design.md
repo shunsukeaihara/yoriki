@@ -665,7 +665,7 @@ Connectorは「境界」と「使い方」の2層に分けて管理する。
 |---|---|---|---|
 | SQL Server | pyodbc＋Microsoft ODBC Driver 18 | 問い合わせのtimeoutと `SET LOCK_TIMEOUT` | 業務DBに読取りの問い合わせを流すと、更新処理をロックで待たせることがある。読取り用のレプリカ（Always Onの読取り専用レプリカ等）か、DB側でSNAPSHOT分離が有効ならそれを使う。ODBC DriverはMicrosoftのライセンスのため、リポジトリには含めず、本体イメージのビルド時にMicrosoftのリポジトリから取得する（ビルドする人がライセンスに同意する）。本体イメージは公開しない（§10.1） |
 | PostgreSQL | psycopg 3 | `statement_timeout` | 読取り専用のtransactionで実行する |
-| MySQL | PyMySQL（MITライセンス） | `MAX_EXECUTION_TIME` | mysqlclientはGPLのため使わない |
+| MySQL | mysqlclient | `MAX_EXECUTION_TIME` | mysqlclientはGPL-2.0。Yorikiのソースには含めず依存として使うだけなので、ソースはMITのまま公開できる。組み込んだイメージを配布する場合はGPLの条件がかかるが、本体イメージは配布しない（§10.1）。ビルドにはMySQL（またはMariaDB）のクライアントライブラリが要る |
 
 - SQLの検査（上の3）は、sqlglotで各DBの方言（`tsql`、`postgres`、`mysql`）として構文解析して行う。
 - `datasource.describe` は、公開しているビュー・表の列名・型と、管理者が付けた説明を返す。列の意味の詳しい説明やSQLのひな形は、SkillのResource（データ辞書）に置く（§4.9.1の「使い方」）。

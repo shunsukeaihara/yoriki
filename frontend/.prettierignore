@@ -1,0 +1,5 @@
+.nuxt
+.output
+node_modules
+pnpm-lock.yaml
+app/api/schema.d.ts

@@ -1,0 +1,8 @@
+# 開発ツールのバージョン。`mise install` で揃える
+# node・pnpm・pythonは、パッチ版の更新を受け入れるため、あえてメジャー（pythonはマイナー）までで固定している。
+# Dockerfileのベースイメージ（Node 24、Python 3.13）もこれに合わせる。変えるときは同じ変更で両方を更新する。
+[tools]
+node = "24"
+pnpm = "12.13.0"
+python = "3.13"
+uv = "0.13.1"

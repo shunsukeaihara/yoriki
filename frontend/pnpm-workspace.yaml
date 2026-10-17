@@ -1,0 +1,6 @@
+allowBuilds:
+  esbuild: true
+  unrs-resolver: false
+  vue-demi: true
+minimumReleaseAgeExclude:
+  - '@nuxt/ui@4.12.0'

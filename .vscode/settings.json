@@ -1,0 +1,66 @@
+{
+  // このリポジトリの標準設定。個人のユーザー設定より優先される。
+  // 整形・lint の規則そのものは ruff.toml、frontend/.prettierrc、frontend/eslint.config.mjs、.editorconfig にあり、CI も同じものを使う。
+
+  // --- 共通 ---
+  "editor.formatOnSave": true,
+  "editor.rulers": [120],
+  "files.eol": "\n",
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+  "files.trimFinalNewlines": true,
+  "search.useIgnoreFiles": true,
+  "makefile.configureOnOpen": false,
+  "files.associations": {
+    ".envrc": "shellscript",
+    ".envrc.example": "shellscript",
+    "*.env.example": "dotenv"
+  },
+
+  // --- TypeScript / Vue（frontend/） ---
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  // .prettierrc がある場所（frontend/）だけ Prettier で整形する。docs/ の Markdown 等は勝手に整形しない
+  "prettier.requireConfig": true,
+  "[vue]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "[typescript]": { "editor.defaultFormatter": "esbenp.prettier-vscode" },
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "eslint.workingDirectories": ["./frontend"],
+  "typescript.tsdk": "frontend/node_modules/typescript/lib",
+  "typescript.enablePromptUseWorkspaceTsdk": true,
+  "tailwindCSS.experimental.configFile": "frontend/app/assets/css/main.css",
+  "tailwindCSS.classAttributes": ["class", "ui"],
+
+  // --- Python（api/） ---
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
+    }
+  },
+  "python.defaultInterpreterPath": "${workspaceFolder}/api/.venv/bin/python",
+  "python.analysis.extraPaths": ["${workspaceFolder}/api/src"],
+  // 型の検査は mypy（django-stubs）に一本化し、Pylance は補完と定義ジャンプに使う
+  "python.analysis.typeCheckingMode": "off",
+  "mypy-type-checker.cwd": "${workspaceFolder}/api",
+  "mypy-type-checker.importStrategy": "fromEnvironment",
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  "python.testing.cwd": "${workspaceFolder}/api",
+
+  // --- シェル・環境変数 ---
+  "[shellscript]": { "editor.defaultFormatter": "foxundermoon.shell-format" },
+  "[dotenv]": { "editor.defaultFormatter": "foxundermoon.shell-format" },
+
+  // --- Markdown（行末の空白2つは改行の意味を持つ） ---
+  "[markdown]": { "files.trimTrailingWhitespace": false },
+
+  // --- i18n（日本語の文をそのままキーにしている。frontend-conventions.md §10） ---
+  "i18n-ally.localesPaths": ["frontend/i18n/locales"],
+  "i18n-ally.sourceLanguage": "ja",
+  "i18n-ally.displayLanguage": "ja",
+  "i18n-ally.keystyle": "flat",
+  "i18n-ally.enabledFrameworks": ["vue"]
+}

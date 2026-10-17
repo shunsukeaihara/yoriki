@@ -1,0 +1,32 @@
+# Python の lint と整形の設定。VS Code の Ruff 拡張と CI（uv run ruff）で共通に使う。
+# lint と整形を ruff に一本化する。行の長さは 120 にそろえる。
+line-length = 120
+target-version = "py313"
+src = ["api/src"]
+
+[format]
+quote-style = "double"
+docstring-code-format = true
+
+[lint]
+select = [
+  "E", "W",   # pycodestyle
+  "F",        # pyflakes
+  "I",        # import の並び順
+  "B",        # 不具合になりやすい書き方
+  "UP",       # 新しい Python の書き方へ
+  "DJ",       # Django（null=True の CharField、__str__ の欠落など）
+  "DTZ",      # タイムゾーンなしの datetime
+  "SIM", "C4",
+  "PL",       # pylint 相当の検査
+  "RUF",
+]
+ignore = [
+  "RUF001", "RUF002", "RUF003",  # 全角の記号（「（」「：」等）を含む日本語の文字列・コメントを許可する
+  "PLR0913",                     # 引数の数（Serializer や管理コマンドで多くなりやすい）
+  "PLR2004",                     # 比較に使う数値の定数化
+]
+
+[lint.per-file-ignores]
+"**/tests/**" = ["PLR0915"]
+"**/migrations/**" = ["E501", "RUF012"]

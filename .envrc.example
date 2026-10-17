@@ -1,0 +1,47 @@
+# ローカル開発用の環境変数。`cp .envrc.example .envrc` してから値を埋め、`direnv allow` する。
+# .envrc は秘密情報を含むので git に入れない。本番ではこのファイルを使わず、環境変数を直接渡す。
+
+# --- バックエンド（Django） ---
+export DJANGO_SETTINGS_MODULE=app.settings
+export YORIKI_SECRET_KEY=dev-only-change-me
+export YORIKI_DEBUG=true
+export YORIKI_ALLOWED_HOSTS=localhost,127.0.0.1
+export YORIKI_DATABASE_NAME=yoriki
+export YORIKI_DATABASE_USER=yoriki
+export YORIKI_DATABASE_PASSWORD=yoriki
+export YORIKI_DATABASE_HOST=localhost
+export YORIKI_DATABASE_PORT=5432
+
+# LLMプロバイダのAPI key（使うものだけ設定する）。管理画面で登録する接続のSecret参照に
+# `env:YORIKI_OPENAI_API_KEY` のように変数名を書くと、Control Planeがこの値を読む。Sandboxには渡さない
+# export YORIKI_OPENAI_API_KEY=
+# export YORIKI_ANTHROPIC_API_KEY=
+# export YORIKI_GEMINI_API_KEY=
+
+# --- 社内SSO（使う認証基盤だけ設定する。backend-conventions.md §6.2） ---
+# export YORIKI_SSO_PROVIDERS=microsoft          # microsoft / google（カンマ区切りで複数可）。auth0 / oidc は後から対応予定
+# export YORIKI_SSO_ALLOWED_EMAIL_DOMAINS=example.co.jp
+# Microsoft 365（Entra ID）
+# export YORIKI_SSO_MICROSOFT_CLIENT_ID=
+# export YORIKI_SSO_MICROSOFT_CLIENT_SECRET=
+# export YORIKI_SSO_MICROSOFT_TENANT_ID=
+# Google Workspace
+# export YORIKI_SSO_GOOGLE_CLIENT_ID=
+# export YORIKI_SSO_GOOGLE_CLIENT_SECRET=
+# export YORIKI_SSO_GOOGLE_HOSTED_DOMAIN=example.co.jp
+# Auth0（後から対応予定）
+# export YORIKI_SSO_AUTH0_DOMAIN=
+# export YORIKI_SSO_AUTH0_CLIENT_ID=
+# export YORIKI_SSO_AUTH0_CLIENT_SECRET=
+# その他のOIDC（後から対応予定）
+# export YORIKI_SSO_OIDC_ISSUER=
+# export YORIKI_SSO_OIDC_CLIENT_ID=
+# export YORIKI_SSO_OIDC_CLIENT_SECRET=
+
+# --- Sandbox ---
+# 手元でビルドしたSandboxイメージに差し替える（開発時だけ有効。本番では無視する。deployment.md §3.3）
+# export YORIKI_SANDBOX_IMAGE_OVERRIDE=yoriki-sandbox-docs:dev
+
+# --- フロントエンド（Nuxt） ---
+# 開発サーバーが /api を転送する先（既定は http://localhost:8000）
+# export YORIKI_DEV_API_ORIGIN=http://localhost:8000

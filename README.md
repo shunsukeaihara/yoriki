@@ -65,4 +65,4 @@ pnpm dev            # http://localhost:3000 （/api は localhost:8000 の Djang
 
 ## ライセンス
 
-未定（OSSとして公開する前に決める）。
+[MIT License](LICENSE)

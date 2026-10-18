@@ -12,6 +12,19 @@ const createAPI = () => {
   return {
     http,
     // リソースは backend の ViewSet ごとに追加する（docs/frontend-conventions.md §3.2）
+    auth: {
+      session: {
+        // ログイン状態を返し、CSRF の Cookie を受け取る
+        get: () => http.get<Session, Session>('app/v1/auth/session/'),
+        delete: () => http.delete<undefined, undefined>('app/v1/auth/session/'),
+      },
+      providers: {
+        list: () => http.get<AuthProvider[], AuthProvider[]>('app/v1/auth/providers/'),
+      },
+    },
+    account: {
+      get: () => http.get<MyUser, MyUser>('app/v1/my/'),
+    },
   }
 }
 

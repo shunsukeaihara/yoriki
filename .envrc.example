@@ -6,6 +6,10 @@ export DJANGO_SETTINGS_MODULE=app.settings
 export YORIKI_SECRET_KEY=dev-only-change-me
 export YORIKI_DEBUG=true
 export YORIKI_ALLOWED_HOSTS=localhost,127.0.0.1
+# 本番では公開URL（例：https://yoriki.example.co.jp）。カンマ区切り
+# export YORIKI_CSRF_TRUSTED_ORIGINS=
+# セッションとCSRFのCookieにSecureを付けるか。開発（http://localhost）だけfalseにする。本番では設定しない（既定はtrue）
+export YORIKI_COOKIE_SECURE=false
 export YORIKI_DATABASE_NAME=yoriki
 export YORIKI_DATABASE_USER=yoriki
 export YORIKI_DATABASE_PASSWORD=yoriki

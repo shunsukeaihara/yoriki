@@ -30,10 +30,8 @@ API・認証・フォームの部品は、DRFの規約（snake_caseのJSON、カ
 | `createSubmit()` | 送信、loading、DRFのエラー辞書をまとめて扱う |
 | `getValidationError()` | 400はフィールドごとのエラー辞書に、それ以外は `nonFieldErrors: [detail]` に変換する |
 | `useAccountStore()` | ログイン状態と、`app/v1/my/` から取得したログインユーザー（権限を含む） |
-| `usePermission()` | 権限コードの判定 |
+| `usePermission()` | 権限コードと役割の判定 |
 | `D*` コンポーネント | Nuxt UIのラッパー。`errorMessages` の表示、API連動のオートコンプリート・テーブル・ダイアログ |
-
-このうち `useAccountStore()` と `usePermission()` はまだ実装しておらず、これから作る。
 
 ### 0.3 検証はサーバー、表示はフロントエンド
 
@@ -88,19 +86,19 @@ frontend/
     ├── error.vue               # （未）
     ├── assets/css/main.css     # @import "tailwindcss"; @import "@nuxt/ui";
     ├── api/
-    │   ├── schema.d.ts         # （未）openapi-typescriptが生成（手で編集しない）
-    │   ├── types.ts            # （未）生成した型をcamelCaseにした画面用の型
+    │   ├── schema.d.ts         # openapi-typescriptが生成（手で編集しない）
+    │   ├── types.ts            # 生成した型をcamelCaseにした画面用の型
     │   ├── client.ts           # axiosの生成、変換、interceptor、エラー変換
     │   ├── resource.ts         # ViewSetに対応したresource定義のヘルパー
     │   └── index.ts            # useAPI()。リソースを組み立てる
     ├── components/
     │   ├── common/             # D*ラッパー（prefixなしで自動import）
     │   └── <domain>/           # 業務コンポーネント（例：run/RunCancelDialog.vue）
-    ├── composables/            # field, date, form, list, confirm（実装済み）、stream, account, permission, <domain>（未）
-    ├── layouts/                # default（社員）、manage（管理・未）、anonymous（ログイン・未）
-    ├── middleware/             # （未）auth.global.ts、permission.global.ts
+    ├── composables/            # field, date, form, list, confirm, account, permission（実装済み）、stream, <domain>（未）
+    ├── layouts/                # default（社員）、anonymous（ログイン）、manage（管理・未）
+    ├── middleware/             # auth.global.ts、permission.global.ts
     ├── pages/                  # 社員向けはルート直下、管理向けは manage/ 以下、dev/ は開発用
-    └── plugins/                # （未）auth.client.ts、error-handler.ts
+    └── plugins/                # auth.client.ts、error-handler.ts（未）
 ```
 
 ```ts
@@ -275,8 +273,9 @@ if (error.value) throw createError(error.value)   // statusCode（404 / 403 等�
 社内SSOのログインは、すべてバックエンドで処理する（backend-conventions.md §6.2）。ログインはdjango-allauthのsocialaccountで行い、初期はGoogle WorkspaceとMicrosoft 365（Entra ID）に対応し、Auth0とその他のOIDCは後から追加する。フロントエンドは認証基盤ごとのSDKを持たない。ログイン状態はDjangoのセッションCookieで保つ。前段に認証プロキシ（oauth2-proxy）がある環境でも、Yorikiのログイン画面とログインの流れは変えない（認証プロキシはバリアとして置くだけ。deployment.md §8.6）。
 
 - 起動時に `plugins/auth.client.ts` で `await useAccountStore().init()` を実行する。この中で `app/v1/auth/session/` を呼んでCSRFのCookieを受け取り、`app/v1/my/` からログインユーザーを取得する。
-- `middleware/auth.global.ts` で、未ログインのユーザーを `/login?next=<元のパス>` に移動させる。`/login` だけは例外にする。
-- ログイン画面は、`app/v1/auth/providers/` が返す有効な認証基盤のボタンを並べる。ボタンを押したら、バックエンドのログイン開始URLへ画面ごと移動する（POSTのフォームで送り、CSRFトークンを付ける）。認証基盤から戻った後は、バックエンドが `next` のパスへリダイレクトする。
+- `middleware/auth.global.ts` で、未ログインのユーザーを `/login?next=<元のパス>` に移動させる。ログインの要らないページ（`/login`、`dev/` の開発用ページ）には `definePageMeta({ auth: false })` を付ける。
+- APIに届かず起動時の確認に失敗した場合は、未ログインとして扱い、ログイン画面を表示する。
+- ログイン画面（`pages/login.vue`、`layouts/anonymous.vue`）は、`app/v1/auth/providers/` が返す有効な認証基盤のボタンを並べる。ボタンを押したら、バックエンドのログイン開始URLへ画面ごと移動する（POSTのフォームで送り、CSRFトークンを付ける）。認証基盤から戻った後は、バックエンドが `next` のパスへリダイレクトする。許可されていないアカウントや認証の失敗では、バックエンドが `/login?error=not_allowed`、`/login?error=failed` へ戻すので、ログイン画面でその旨を表示する。
 - ログアウトは `app/v1/auth/session/` へのDELETEで行い、ログイン画面へ移動する。
 - 前段の認証プロキシのセッションが切れた場合は、§3.1のとおり画面ごと再読み込みする。ログアウトで消すのはYorikiのセッションだけにし、認証プロキシのセッションは消さない（前段の基盤のものなので）。
 - 画面とAPIクライアントが使うのは、`useAccountStore` の `isAuthenticated`、`user`、`init()`、`logout()` だけにする。
@@ -329,27 +328,44 @@ ViewSetの `@action`（停止、回答、公開等）も、入力があれば同
 export const PermissionCode = {
   MANAGE_DESTINATION: 'delivery.manage_destination',
   PUBLISH_SKILL: 'skill.publish_skill',
-  ADMIN_PLATFORM: 'user.admin_platform',
 } as const
 export type PermissionCode = (typeof PermissionCode)[keyof typeof PermissionCode]
+
+export const Role = {
+  BUSINESS_ADMIN: 'businessAdmin',
+  PLUGIN_PUBLISHER: 'pluginPublisher',
+  PLATFORM_ADMIN: 'platformAdmin',
+} as const
+export type Role = (typeof Role)[keyof typeof Role]
 
 export const usePermission = defineStore('permission', () => {
   const account = useAccountStore()
   const permissions = computed(() => account.user?.allPermissions ?? [])
   const hasPermission = (code: PermissionCode) => permissions.value.includes(code)
   const hasAny = (codes: PermissionCode[]) => codes.some(hasPermission)
-  return { permissions, hasPermission, hasAny }
+  // 基盤管理者は、業務管理者・Plugin公開者の役割も持つものとして扱う（バックエンドと同じ）
+  const hasRole = (role: Role) => {
+    const user = account.user
+    if (!user) return false
+    if (user.isPlatformAdmin) return true
+    if (role === Role.BUSINESS_ADMIN) return user.isBusinessAdmin
+    if (role === Role.PLUGIN_PUBLISHER) return user.isPluginPublisher
+    return false
+  }
+  const hasAnyRole = (roles: Role[]) => roles.some(hasRole)
+  return { permissions, hasPermission, hasAny, hasRole, hasAnyRole }
 })
 ```
 
 - 権限コードはDjangoの `app_label.codename` の形で、`app/v1/my/` の `allPermissions` から判定する（`usePermission`）。
 - 使う権限コードは `PermissionCode` に定数として追加し、画面のコードに文字列を直接書かない（`Permissions` はDOMの型名と衝突するので使わない）。
+- 役割（業務管理者・Plugin公開者・基盤管理者）は、`app/v1/my/` の `isBusinessAdmin`、`isPluginPublisher`、`isPlatformAdmin` から `hasRole` で判定する。基盤管理者はすべての役割を持つものとして扱う（backend-conventions.md §6.3）。
 
 ### 6.2 画面・メニュー・ボタン
 
-- ページの権限は `definePageMeta({ permission: PermissionCode.X })` で宣言し、`middleware/permission.global.ts` で確認する。権限がなければ403のエラー画面にする。
-- `permission` に配列を指定した場合は、いずれか1つを持っていればよい（`hasAny`）。
-- `definePageMeta` で `permission` を型付きで書けるよう、`PageMeta` を `permission?: PermissionCode | PermissionCode[]` で拡張する。
+- ページの権限は `definePageMeta({ permission: PermissionCode.X })`、役割は `definePageMeta({ role: Role.X })` で宣言し、`middleware/permission.global.ts` で確認する。権限がなければ403のエラー画面にする。
+- `permission`・`role` に配列を指定した場合は、いずれか1つを持っていればよい（`hasAny`、`hasAnyRole`）。`permission` と `role` を両方指定した場合は、両方を満たす必要がある。
+- `definePageMeta` で `permission`・`role`・`auth` を型付きで書けるよう、`app/types/page-meta.d.ts` で `PageMeta` を拡張している。
 - `pages/manage.vue` に `definePageMeta({ layout: 'manage', permission: [...] })` を書くと、`/manage` 以下の全ページに適用される（route metaは親から子に引き継がれる）。
 - サイドメニューの項目には `permission` を持たせ、権限のない項目は表示しない。
 - ボタンや操作は `v-if="hasPermission(PermissionCode.X)"` で出し分ける。コメントで「サーバー側でも403で弾かれる」ことを書いておく。

@@ -600,9 +600,9 @@ DATABASES = {
 - ログインはバックエンドで処理し、Djangoのセッションでログイン状態を保つ。フロントエンドにトークンを持たせない（frontend-conventions.md §4）。
 - SSOはdjango-allauthのsocialaccountで実装する。最初に対応するのはGoogle WorkspaceとMicrosoft 365（Entra ID）とする。Auth0やその他のOpenID Connectの認証基盤は、必要になったときに同じ仕組みで追加する。どの認証基盤を有効にするかと、client ID・secret・テナント等は環境変数で設定する。
 - 前段に認証プロキシ（oauth2-proxy等）を置く場合も、ログインは常にYoriki自身（django-allauth）で行う。認証プロキシはバリアとして扱い、プロキシが付けるヘッダーやIDトークンで利用者を決めない（前段の構成は deployment.md §8.6）。
-- 自社のアカウントだけを受け付ける。Entra IDはテナントID、Google Workspaceは `hd`（ドメイン）、後から追加する認証基盤はissuerと許可するメールドメインで確認する。
+- 自社のアカウントだけを受け付ける。Entra IDはテナントID、Google Workspaceは `hd`（ドメイン）、後から追加する認証基盤はissuerと許可するメールドメインで確認する。どの認証基盤でも、メールアドレスのドメインが `YORIKI_SSO_ALLOWED_EMAIL_DOMAINS` にあることを確認する（`user/adapters.py`）。許可しないアカウントは `/login?error=not_allowed`、認証の失敗は `/login?error=failed` へ戻す。
 - ユーザーは、許可された認証基盤で初めてログインした時点で作成し、通常社員の役割から始める。業務管理者・Plugin公開者・基盤管理者の役割は、Yorikiの管理画面で割り当てる（IdPのグループとの連携は必要になってから追加する）。
-- 最初の基盤管理者は `createsuperuser` で作る。SSOの設定前でも管理画面へ入れるようにするため、パスワードでのログインは管理者だけに許可する。
+- 最初の基盤管理者は `createsuperuser` で作る。SSOの設定前でも管理画面へ入れるようにするため、パスワードでのログインは基盤管理者だけに許可する（`utils.backends.PlatformAdminPasswordBackend`。allauthのメール・パスワードのログインは `SOCIALACCOUNT_ONLY` で使わない）。
 - `DEFAULT_AUTHENTICATION_CLASSES` は `utils.authentication.SessionAuthentication` だけにする。DRF標準の `SessionAuthentication` は未ログインを403で返すため、`authenticate_header` を実装したサブクラスにして401を返す。フロントエンドは401でログイン画面へ移動し、403（権限不足）とは区別する。JWT、Token、Basicの認証は使わない。
 - CSRFはDjango標準の仕組みを使う。`GET /api/app/v1/auth/session/`（`ensure_csrf_cookie`）でCSRFのCookieを渡し、書き込みの要求は `X-CSRFToken` ヘッダーで検証する。ログアウトは `DELETE /api/app/v1/auth/session/` で行う。有効なログイン方法の一覧は `GET /api/app/v1/auth/providers/` で返す。
 - セッションCookieは `Secure`、`HttpOnly`、`SameSite=Lax` にする。画面とAPIは同じオリジンに置くので、CORSは使わない。
@@ -619,13 +619,15 @@ DATABASES = {
 | `utils/views.py` | `SoftDeleteMixin`、利用者範囲のMixin、`PingAPIView` |
 | `utils/serializers.py` | `CountSerializer`、`PingSerializer`、`ReadOnlyModelSerializer`、複数アプリで使う最小Serializer |
 | `utils/permissions.py` | `AppUser`（通常社員以上）、`BusinessAdmin`、`PluginPublisher`、`PlatformAdmin`、`require_permission()` |
-| `utils/authentication.py` | 401を返す `SessionAuthentication`、`Hook*` 用の認証クラス |
+| `utils/authentication.py` | 401を返す `SessionAuthentication`（とそのOpenAPIの定義）、`Hook*` 用の認証クラス |
+| `utils/backends.py` | パスワードでのログインを基盤管理者だけに許可する認証バックエンド |
 | `utils/exceptions.py` | `Conflict`（409）等、DRFの `APIException` のサブクラス |
 | `utils/pagination.py` | `CursorPaginationWithPageSizeQuery`（`page_size` クエリ、上限200） |
 | `utils/handlers.py` | DRFの例外ハンドラ（500系だけ通知に流す） |
 | `utils/lock.py` | DBのadvisory lock |
 | `common/choices.py` | 複数アプリで使うChoices |
 
+- 役割は `User` に持たせる。基盤管理者は `is_superuser`、業務管理者は `is_business_admin`、Plugin公開者は `is_plugin_publisher` とする。基盤管理者は業務管理者・Plugin公開者の操作もできる（`BusinessAdmin`、`PluginPublisher` も許可する）。
 - 役割のpermissionは `_Xxx(BasePermission)` を定義し、公開名を `Xxx = IsAuthenticated & _Xxx` にする。
 - 役割より細かい権限は、Djangoのpermission（Modelの `Meta.permissions`）で定義し、`require_permission("<app_label>.<codename>")` で確認する。`require_permission` は、ログイン済みで `user.has_perm()` が真の場合に許可するpermissionクラスを返す（例：`permission_classes = [require_permission("delivery.manage_destination")]`）。
 

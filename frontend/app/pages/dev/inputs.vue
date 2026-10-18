@@ -1,6 +1,7 @@
 <script setup lang="ts">
 // D*ラッパーの見た目とエラー表示を確認するための開発用ページ
 definePageMeta({
+  auth: false,
   middleware: () => {
     if (!import.meta.dev) return abortNavigation({ statusCode: 404 })
   },

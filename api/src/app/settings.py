@@ -1,0 +1,235 @@
+"""Yorikiの基本設定。
+
+秘密情報と環境依存の値は、すべて環境変数（`YORIKI_` で始まる）から読む。
+ローカル開発ではリポジトリルートの `.envrc`（direnv）、本番では実行環境から渡す（backend-conventions.md §6.1）。
+"""
+
+import os
+from pathlib import Path
+
+from django.utils.translation import gettext_lazy as _
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _env_list(name: str, default: str = "") -> list[str]:
+    return [v.strip() for v in os.getenv(name, default).split(",") if v.strip()]
+
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+SECRET_KEY = os.environ["YORIKI_SECRET_KEY"]
+DEBUG = _env_bool("YORIKI_DEBUG")
+ALLOWED_HOSTS = _env_list("YORIKI_ALLOWED_HOSTS", "localhost,127.0.0.1")
+# 画面とAPIは同じオリジンに置く。HTTPSの公開URL（例：https://yoriki.example.co.jp）を指定する
+CSRF_TRUSTED_ORIGINS = _env_list("YORIKI_CSRF_TRUSTED_ORIGINS")
+
+INSTALLED_APPS = [
+    "app.apps.YorikiAdminConfig",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+    "rest_framework",
+    "django_filters",
+    "drf_spectacular",
+    "django_extensions",
+    "django_q",
+    "auditlog",
+    "allauth",
+    "allauth.account",
+    "allauth.socialaccount",
+    "allauth.socialaccount.providers.google",
+    "allauth.socialaccount.providers.microsoft",
+    "user",
+]
+
+MIDDLEWARE = [
+    "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.locale.LocaleMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
+    "allauth.account.middleware.AccountMiddleware",
+    "auditlog.middleware.AuditlogMiddleware",
+]
+
+ROOT_URLCONF = "app.urls"
+
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
+            ],
+        },
+    },
+]
+
+ASGI_APPLICATION = "app.asgi.application"
+WSGI_APPLICATION = "app.wsgi.application"
+
+# Yoriki自身のDB。Uvicorn（ASGI）では同期のviewがスレッドごとに動くので、psycopg 3の接続プールを使う（§6.1）
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.getenv("YORIKI_DATABASE_NAME"),
+        "USER": os.getenv("YORIKI_DATABASE_USER"),
+        "PASSWORD": os.getenv("YORIKI_DATABASE_PASSWORD"),
+        "HOST": os.getenv("YORIKI_DATABASE_HOST"),
+        "PORT": os.getenv("YORIKI_DATABASE_PORT", "5432"),
+        "CONN_MAX_AGE": 0,  # プールを使うので、Djangoの側では接続を持ち続けない
+        "OPTIONS": {
+            "pool": {
+                "min_size": int(os.getenv("YORIKI_DATABASE_POOL_MIN", "2")),
+                "max_size": int(os.getenv("YORIKI_DATABASE_POOL_MAX", "10")),
+                "timeout": 10,
+            },
+        },
+    }
+}
+
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+AUTH_USER_MODEL = "user.User"
+
+# パスワードでのログインは基盤管理者だけに許可する。社員はSSO（django-allauth）でログインする（§6.2）
+AUTHENTICATION_BACKENDS = ["utils.backends.PlatformAdminPasswordBackend"]
+
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator", "OPTIONS": {"min_length": 12}},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
+
+# --- セッションとCSRF ---
+# 画面とAPIは同じオリジンに置くので、CORSは使わない。CSRFのCookieは画面のJavaScriptが読んでヘッダーに付ける
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
+# 開発時（http://localhost）だけSecureを外せるようにする。本番では必ずtrue
+SESSION_COOKIE_SECURE = _env_bool("YORIKI_COOKIE_SECURE", default=True)
+CSRF_COOKIE_SECURE = SESSION_COOKIE_SECURE
+SESSION_COOKIE_AGE = int(os.getenv("YORIKI_SESSION_COOKIE_AGE", str(60 * 60 * 24 * 14)))
+# nginx（やCloudflare Tunnel）の後ろでHTTPSを判定する（deployment.md §4）
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+# --- 国際化 ---
+# 翻訳元の言語は日本語（§10）
+LANGUAGE_CODE = "ja"
+LANGUAGES = [("ja", _("日本語"))]
+LOCALE_PATHS = [BASE_DIR / "locale"]
+TIME_ZONE = os.getenv("YORIKI_TIME_ZONE", "Asia/Tokyo")
+USE_I18N = True
+USE_TZ = True
+
+STATIC_URL = "/api/static/"
+STATIC_ROOT = os.getenv("YORIKI_STATIC_ROOT", str(BASE_DIR / "static"))
+
+# --- DRF ---
+REST_FRAMEWORK = {
+    "DEFAULT_PAGINATION_CLASS": "utils.pagination.CursorPaginationWithPageSizeQuery",
+    "PAGE_SIZE": 20,
+    "DEFAULT_FILTER_BACKENDS": (
+        "django_filters.rest_framework.DjangoFilterBackend",
+        "rest_framework.filters.OrderingFilter",
+        "rest_framework.filters.SearchFilter",
+    ),
+    "DEFAULT_AUTHENTICATION_CLASSES": ("utils.authentication.SessionAuthentication",),
+    "DEFAULT_PERMISSION_CLASSES": ("utils.permissions.PlatformAdmin",),  # 指定漏れは最も厳しい権限で閉じる
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "EXCEPTION_HANDLER": "utils.handlers.exception_handler",
+}
+
+SPECTACULAR_SETTINGS = {
+    "TITLE": "Yoriki API",
+    "VERSION": "0.1.0",
+    "COMPONENT_SPLIT_REQUEST": True,
+    "SERVE_INCLUDE_SCHEMA": False,
+    "SERVE_PERMISSIONS": ["utils.permissions.AppUser"],
+    "SCHEMA_PATH_PREFIX": "/api/",
+}
+
+# --- Django Q2 ---
+# 単一ホストでは1つのqclusterが両方を処理する。複数台構成では、Workerサーバーで Q_CLUSTER_NAME=runner を
+# 設定し、Agentの実行taskだけを受け取る（backend-conventions.md §8.4、deployment.md §3.2）
+Q_CLUSTER = {
+    "name": "default",
+    "orm": "default",
+    "workers": int(os.getenv("YORIKI_Q_WORKERS", "2")),
+    "timeout": 600,
+    "retry": 660,
+    "max_attempts": 1,
+    "ALT_CLUSTERS": {
+        "runner": {"workers": int(os.getenv("YORIKI_Q_RUNNER_WORKERS", "2")), "timeout": 3600, "retry": 3660},
+    },
+}
+
+# --- 社内SSO（django-allauth） ---
+# パスワード・メールでのアカウント作成とログインは使わず、SSOだけにする（§6.2）
+SOCIALACCOUNT_ONLY = True
+ACCOUNT_EMAIL_VERIFICATION = "none"
+ACCOUNT_LOGIN_METHODS = {"email"}
+ACCOUNT_SIGNUP_FIELDS = ["email*"]
+ACCOUNT_ADAPTER = "user.adapters.AccountAdapter"
+SOCIALACCOUNT_ADAPTER = "user.adapters.SocialAccountAdapter"
+SOCIALACCOUNT_AUTO_SIGNUP = True
+SOCIALACCOUNT_STORE_TOKENS = False
+# ログインの開始はPOSTだけにする（画面からCSRFトークン付きのフォームで送る）
+SOCIALACCOUNT_LOGIN_ON_GET = False
+LOGIN_URL = "/login"
+LOGIN_REDIRECT_URL = "/"
+
+# 有効にする認証基盤（microsoft / google。カンマ区切り）
+YORIKI_SSO_PROVIDERS = _env_list("YORIKI_SSO_PROVIDERS")
+# 受け付けるメールアドレスのドメイン（自社のアカウントだけを受け付ける）
+YORIKI_SSO_ALLOWED_EMAIL_DOMAINS = [d.lower() for d in _env_list("YORIKI_SSO_ALLOWED_EMAIL_DOMAINS")]
+YORIKI_SSO_GOOGLE_HOSTED_DOMAIN = os.getenv("YORIKI_SSO_GOOGLE_HOSTED_DOMAIN", "")
+
+SOCIALACCOUNT_PROVIDERS: dict[str, dict] = {}
+if "microsoft" in YORIKI_SSO_PROVIDERS:
+    SOCIALACCOUNT_PROVIDERS["microsoft"] = {
+        "APPS": [
+            {
+                "client_id": os.environ["YORIKI_SSO_MICROSOFT_CLIENT_ID"],
+                "secret": os.environ["YORIKI_SSO_MICROSOFT_CLIENT_SECRET"],
+                # テナントを固定し、自社のEntra IDのアカウントだけを受け付ける
+                "settings": {"tenant": os.environ["YORIKI_SSO_MICROSOFT_TENANT_ID"]},
+            }
+        ],
+        "SCOPE": ["User.Read"],
+    }
+if "google" in YORIKI_SSO_PROVIDERS:
+    SOCIALACCOUNT_PROVIDERS["google"] = {
+        "APPS": [
+            {
+                "client_id": os.environ["YORIKI_SSO_GOOGLE_CLIENT_ID"],
+                "secret": os.environ["YORIKI_SSO_GOOGLE_CLIENT_SECRET"],
+            }
+        ],
+        "SCOPE": ["openid", "profile", "email"],
+        # hdは認証画面への指定だけなので、戻ったIDトークンのhdも user.adapters で確認する
+        "AUTH_PARAMS": {"hd": YORIKI_SSO_GOOGLE_HOSTED_DOMAIN} if YORIKI_SSO_GOOGLE_HOSTED_DOMAIN else {},
+    }
+
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "root": {"handlers": ["console"], "level": os.getenv("YORIKI_LOG_LEVEL", "INFO")},
+}

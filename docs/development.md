@@ -54,6 +54,8 @@ VS Codeを標準のエディタとし、リポジトリの `.vscode/settings.jso
 - mypyの設定は、`api/` の雛形を作るときに `api/pyproject.toml` に置く（`plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]`、`[tool.django-stubs] django_settings_module = "app.settings"`）。
 - lintの警告は、`# noqa` で抑止せずにコードを直して解消する。抑止する場合は理由をコメントに書く（backend-conventions.md §10）。
 - テストはSQLiteではなくPostgreSQLで実行する（`select_for_update`、`LISTEN/NOTIFY`、advisory lock等、PostgreSQLの機能に依存するため）。ローカルでは `deploy/compose.dev.yaml` のPostgreSQLを使う。
+- pytestは `app.settings_test` を使う。`.envrc` の `DJANGO_SETTINGS_MODULE` より優先させるため、`pyproject.toml` の `addopts` に `--ds` で指定している。テスト用DBは `--reuse-db` で使い回すので、マイグレーションを変えたら `uv run pytest --create-db` で作り直す。
+- settingsの読み込みに環境変数（`YORIKI_SECRET_KEY` 等）が要るので、mypy（django-stubs）とpytestは `.envrc` を読み込んだ状態で実行する。
 
 ### 3.2 フロントエンド（`frontend/`）
 

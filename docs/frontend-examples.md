@@ -25,6 +25,8 @@
 | `useConfirmDialog` | `frontend/app/composables/confirm.ts`、`frontend/app/components/common/DConfirmModal.vue` |
 | `D*` ラッパー | `frontend/app/components/common/`（一覧は frontend-conventions.md §7.2） |
 | `useAPI`、`resource`、`readOnlyResource`、`Paginated` | `frontend/app/api/` |
+| `useAccountStore` | `frontend/app/composables/account.ts`（frontend-conventions.md §4） |
+| `usePermission`、`PermissionCode`、`Role` | `frontend/app/composables/permission.ts`（frontend-conventions.md §6） |
 
 ### これから作るもの
 
@@ -34,8 +36,6 @@
 |---|---|
 | `ListPageTitle`、`TableSearchForm` | `frontend/app/components/common/` |
 | `formatDatetime` | `frontend/app/composables/date.ts` |
-| `usePermission`、`PermissionCode` | `frontend/app/composables/permission.ts`（frontend-conventions.md §6） |
-| `useAccountStore` | `frontend/app/composables/account.ts`（frontend-conventions.md §4） |
 | `useEventStream` | `frontend/app/composables/stream.ts`（[realtime.md](realtime.md) §5） |
 | `layouts/manage` | `frontend/app/layouts/manage.vue` |
 | `RunStatus`、`ClarificationStatus`、`runStatusItems`、`isCancellable` | `frontend/app/composables/run.ts` |
@@ -191,7 +191,7 @@ const saved = (value: Destination) => {
 // /manage 以下の全ページに適用される。配列はいずれか1つを持っていればよい
 definePageMeta({
   layout: 'manage',
-  permission: [PermissionCode.MANAGE_DESTINATION, PermissionCode.PUBLISH_SKILL, PermissionCode.ADMIN_PLATFORM],
+  role: [Role.BUSINESS_ADMIN, Role.PLUGIN_PUBLISHER, Role.PLATFORM_ADMIN],
 })
 </script>
 

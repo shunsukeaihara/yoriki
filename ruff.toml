@@ -25,8 +25,9 @@ ignore = [
   "RUF001", "RUF002", "RUF003",  # 全角の記号（「（」「：」等）を含む日本語の文字列・コメントを許可する
   "PLR0913",                     # 引数の数（Serializer や管理コマンドで多くなりやすい）
   "PLR2004",                     # 比較に使う数値の定数化
+  "RUF012",                      # クラス属性の可変値（DRFの permission_classes、Serializerの Meta.fields 等で常に使う）
 ]
 
 [lint.per-file-ignores]
 "**/tests/**" = ["PLR0915"]
-"**/migrations/**" = ["E501", "RUF012"]
+"**/migrations/**" = ["E501", "I001"]  # 自動生成のファイル

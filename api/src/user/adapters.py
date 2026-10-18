@@ -29,9 +29,10 @@ def is_allowed_account(sociallogin: SocialLogin) -> bool:
 
     extra = sociallogin.account.extra_data
     if provider == "google":
-        # Google Workspaceのアカウントか（個人のGoogleアカウントを除く）をIDトークンのhdで確認する
+        # Google Workspaceのアカウントか（個人のGoogleアカウントを除く）をIDトークンのhdで確認する。
+        # ドメインが設定されていなければ、誰も受け付けない（settingsでも起動時に確認している）
         hosted_domain = settings.YORIKI_SSO_GOOGLE_HOSTED_DOMAIN
-        if hosted_domain and extra.get("hd") != hosted_domain:
+        if not hosted_domain or extra.get("hd") != hosted_domain:
             return False
         if not extra.get("email_verified", False):
             return False

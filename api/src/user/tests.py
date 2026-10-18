@@ -103,6 +103,11 @@ class TestAllowedAccount:
     def test_is_allowed_account(self, login, allowed):
         assert is_allowed_account(login) is allowed
 
+    def test_google_without_hosted_domain_setting_is_rejected(self, settings):
+        settings.YORIKI_SSO_GOOGLE_HOSTED_DOMAIN = ""
+        login = _sociallogin("google", "taro@example.co.jp", hd="example.co.jp", email_verified=True)
+        assert is_allowed_account(login) is False
+
     def test_pre_social_login_redirects_to_login_page(self):
         request = RequestFactory().get("/")
         with pytest.raises(ImmediateHttpResponse) as e:

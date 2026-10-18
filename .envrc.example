@@ -35,7 +35,7 @@ export YORIKI_DATABASE_PORT=5432
 # Google Workspace
 # export YORIKI_SSO_GOOGLE_CLIENT_ID=
 # export YORIKI_SSO_GOOGLE_CLIENT_SECRET=
-# export YORIKI_SSO_GOOGLE_HOSTED_DOMAIN=example.co.jp
+# export YORIKI_SSO_GOOGLE_HOSTED_DOMAIN=example.co.jp  # Googleを有効にするときは必須（未設定なら起動しない）
 # Auth0（後から対応予定）
 # export YORIKI_SSO_AUTH0_DOMAIN=
 # export YORIKI_SSO_AUTH0_CLIENT_ID=

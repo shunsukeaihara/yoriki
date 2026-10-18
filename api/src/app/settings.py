@@ -7,6 +7,7 @@
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
 from django.utils.translation import gettext_lazy as _
 
 
@@ -199,6 +200,7 @@ LOGIN_REDIRECT_URL = "/"
 YORIKI_SSO_PROVIDERS = _env_list("YORIKI_SSO_PROVIDERS")
 # 受け付けるメールアドレスのドメイン（自社のアカウントだけを受け付ける）
 YORIKI_SSO_ALLOWED_EMAIL_DOMAINS = [d.lower() for d in _env_list("YORIKI_SSO_ALLOWED_EMAIL_DOMAINS")]
+# Google Workspaceのドメイン。Googleを有効にするときは必須（個人のGoogleアカウントを受け付けないため）
 YORIKI_SSO_GOOGLE_HOSTED_DOMAIN = os.getenv("YORIKI_SSO_GOOGLE_HOSTED_DOMAIN", "")
 
 SOCIALACCOUNT_PROVIDERS: dict[str, dict] = {}
@@ -215,6 +217,8 @@ if "microsoft" in YORIKI_SSO_PROVIDERS:
         "SCOPE": ["User.Read"],
     }
 if "google" in YORIKI_SSO_PROVIDERS:
+    if not YORIKI_SSO_GOOGLE_HOSTED_DOMAIN:
+        raise ImproperlyConfigured("Googleを有効にするときは YORIKI_SSO_GOOGLE_HOSTED_DOMAIN を設定してください")
     SOCIALACCOUNT_PROVIDERS["google"] = {
         "APPS": [
             {
@@ -224,7 +228,7 @@ if "google" in YORIKI_SSO_PROVIDERS:
         ],
         "SCOPE": ["openid", "profile", "email"],
         # hdは認証画面への指定だけなので、戻ったIDトークンのhdも user.adapters で確認する
-        "AUTH_PARAMS": {"hd": YORIKI_SSO_GOOGLE_HOSTED_DOMAIN} if YORIKI_SSO_GOOGLE_HOSTED_DOMAIN else {},
+        "AUTH_PARAMS": {"hd": YORIKI_SSO_GOOGLE_HOSTED_DOMAIN},
     }
 
 LOGGING = {

@@ -14,7 +14,9 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@internationalized/date": "^3.12.4",
@@ -33,14 +35,18 @@
   },
   "devDependencies": {
     "@nuxt/eslint": "^1.17.0",
+    "@nuxt/test-utils": "^4.3.4",
     "@types/node": "^26.6.5",
     "@types/qs": "^6.14.0",
+    "@vue/test-utils": "^2.5.1",
     "eslint": "^10.12.0",
     "eslint-config-prettier": "^10.1.8",
+    "happy-dom": "^21.0.3",
     "openapi-typescript": "^7.13.0",
     "prettier": "^3.6.0",
     "type-fest": "^5.10.0",
     "typescript": "~5.9.3",
+    "vitest": "^5.0.5",
     "vue-tsc": "^3.3.13"
   }
 }

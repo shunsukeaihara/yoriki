@@ -1,0 +1,53 @@
+[project]
+name = "yoriki-api"
+version = "0.1.0"
+requires-python = "==3.13.*"
+dependencies = [
+    "django>=6.1.2",
+    "django-allauth[socialaccount]>=65.20.0",
+    "django-auditlog>=3.4.1",
+    "django-extensions>=4.1",
+    "django-filter>=26.2",
+    "django-q2>=1.11.1",
+    "djangorestframework>=3.18.3",
+    "drf-spectacular>=0.30.0",
+    "nanoid>=2.0.0",
+    "psycopg[binary,pool]>=3.3.6",
+    "uvicorn>=0.54.0",
+]
+
+[dependency-groups]
+dev = [
+    "django-stubs>=6.1.2",
+    "djangorestframework-stubs>=3.18.1",
+    "factory-boy>=3.3.3",
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
+    "pytest-django>=4.14.0",
+    "ruff>=0.17.1",
+]
+
+[tool.uv]
+package = false
+
+[tool.mypy]
+mypy_path = "src"
+python_version = "3.13"
+plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]
+check_untyped_defs = true
+warn_unused_ignores = true
+exclude = ["/migrations/"]
+
+[[tool.mypy.overrides]]
+module = ["allauth.*", "auditlog.*", "django_filters.*", "django_q.*", "nanoid.*"]
+ignore_missing_imports = true
+
+[tool.django-stubs]
+django_settings_module = "app.settings"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["src"]
+python_files = ["tests.py", "test_*.py", "*_test.py"]
+# .envrc の DJANGO_SETTINGS_MODULE より優先させるため、iniではなくコマンドラインの引数で指定する
+addopts = "--ds=app.settings_test --reuse-db"

@@ -1,0 +1,163 @@
+openapi: 3.0.3
+info:
+  title: Yoriki API
+  version: 0.1.0
+paths:
+  /api/app/v1/auth/providers/:
+    get:
+      operationId: app_v1_auth_providers_list
+      description: 有効な認証基盤の一覧
+      tags:
+      - app/auth/provider
+      security:
+      - cookieAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AuthProvider'
+          description: ''
+  /api/app/v1/auth/session/:
+    get:
+      operationId: app_v1_auth_session_retrieve
+      description: ログイン状態を返し、CSRFのCookieを設定する
+      tags:
+      - app/auth/session
+      security:
+      - cookieAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+          description: ''
+    delete:
+      operationId: app_v1_auth_session_destroy
+      description: ログアウトする
+      tags:
+      - app/auth/session
+      security:
+      - cookieAuth: []
+      - {}
+      responses:
+        '204':
+          description: No response body
+  /api/app/v1/my/:
+    get:
+      operationId: app_v1_my_retrieve
+      description: ログイン中の利用者と権限を返す
+      tags:
+      - app/my
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MyUser'
+          description: ''
+  /api/ping/:
+    get:
+      operationId: ping_retrieve
+      description: ヘルスチェック
+      tags:
+      - ping
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Ping'
+          description: ''
+components:
+  schemas:
+    AuthProvider:
+      type: object
+      description: ログイン画面に並べる認証基盤。ログインは `login_url` へPOSTのフォームで送って始める
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        login_url:
+          type: string
+          readOnly: true
+      required:
+      - id
+      - login_url
+      - name
+    MyUser:
+      type: object
+      description: ログイン中の利用者。画面の表示と権限の判定に使う
+      properties:
+        id:
+          type: string
+          readOnly: true
+        username:
+          type: string
+          readOnly: true
+          title: ユーザー名
+          description: この項目は必須です。半角アルファベット、半角数字、@/./+/-/_ で150文字以下にしてください。
+          pattern: ^[\w.@+-]+$
+          maxLength: 150
+        email:
+          readOnly: true
+          title: メールアドレス
+          oneOf:
+          - type: string
+            format: email
+            maxLength: 254
+          - type: string
+            maxLength: 0
+        display_name:
+          type: string
+          readOnly: true
+          title: 表示名
+          maxLength: 150
+        is_platform_admin:
+          type: boolean
+          readOnly: true
+        all_permissions:
+          type: array
+          items:
+            type: string
+          readOnly: true
+      required:
+      - all_permissions
+      - display_name
+      - email
+      - id
+      - is_platform_admin
+      - username
+    Ping:
+      type: object
+      properties:
+        status:
+          type: string
+          readOnly: true
+      required:
+      - status
+    Session:
+      type: object
+      properties:
+        is_authenticated:
+          type: boolean
+          readOnly: true
+      required:
+      - is_authenticated
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: sessionid

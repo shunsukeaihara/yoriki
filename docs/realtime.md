@@ -98,6 +98,8 @@ uvicorn app.asgi:application --host 0.0.0.0 --port 8000 --workers 4 --proxy-head
 
 LLM出力の差分は頻度が高いので、Runnerで100〜200ミリ秒ごとにまとめてから送る。
 
+テストも本番と同じPostgreSQLで実行し、NOTIFYを送ってからLISTENで受け取るまでを実際に確認する（backend-conventions.md §9）。
+
 ## 5 フロントエンドの実装
 
 - `useEventStream(path, { onEvent })` を `composables/stream.ts` に用意する。標準の `EventSource` を使う（画面と同じオリジンなので、セッションCookieが自動で送られる）。切断時は `EventSource` が `Last-Event-ID` を付けて自動で再接続する。

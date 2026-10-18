@@ -9,7 +9,9 @@
 - `main` を常にリリースできる状態に保つ。直接pushせず、作業ブランチからPull Requestで取り込む。
 - 作業ブランチの名前は `<種類>/<内容>` にする（例：`feature/run-cancel`、`fix/autocomplete-scroll`、`docs/deployment`）。
 - Pull Requestは1つの目的に絞る。バックエンド・フロントエンド・Sandboxをまたぐ変更でも、1つの機能なら1つのPull Requestにしてよい（モノレポにした理由）。
-- マージはsquash mergeにする。
+- マージは、Pull Requestのコミットの中身を見て、squash mergeか通常のmerge（merge commit）かを選ぶ。rebase mergeは使わない。
+  - **squash merge（既定）**：レビューへの対応、途中でやめた方針とその取り消し、作業途中のコミット（`wip`、`fix typo` 等）を含む場合。1つの機能として1コミットにまとめた方が、`main` の履歴が読みやすいとき。まとめたコミットのメッセージは、取り込む変更の最終的な内容に合わせて書き直す（途中でやめた方針は書かない）。
+  - **通常のmerge**：どのコミットも独立した意味のある単位で、それぞれでテストが通り、メッセージも履歴に残す価値がある場合（例：依存の更新、リネーム、機能の追加を順に積み、後で個別に戻す可能性がある）。迷ったらsquash mergeにする。
 - CIのチェック（§4）がすべて通り、レビューで承認されたものだけをマージする。
 
 ## 2 コミットとPull Requestの書き方
@@ -53,7 +55,9 @@ VS Codeを標準のエディタとし、リポジトリの `.vscode/settings.jso
 - 日本語のコメントや文字列に全角の記号（「（」「：」等）を使うので、ruffの `RUF001`〜`RUF003` は無効にしている。
 - mypyの設定は、`api/` の雛形を作るときに `api/pyproject.toml` に置く（`plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]`、`[tool.django-stubs] django_settings_module = "app.settings"`）。
 - lintの警告は、`# noqa` で抑止せずにコードを直して解消する。抑止する場合は理由をコメントに書く（backend-conventions.md §10）。
-- テストはSQLiteではなくPostgreSQLで実行する（`select_for_update`、`LISTEN/NOTIFY`、advisory lock等、PostgreSQLの機能に依存するため）。ローカルでは `deploy/compose.dev.yaml` のPostgreSQLを使う。
+- テストはSQLiteではなくPostgreSQLで実行する（`select_for_update`、LISTEN/NOTIFY、advisory lock等、PostgreSQLの機能に依存するため）。ローカルでは `deploy/compose.dev.yaml` のPostgreSQLを使う。
+- pytestは `app.settings_test` を使う。`.envrc` の `DJANGO_SETTINGS_MODULE` より優先させるため、`pyproject.toml` の `addopts` に `--ds` で指定している。テスト用DBは `--reuse-db` で使い回すので、マイグレーションを変えたら `uv run pytest --create-db` で作り直す。
+- settingsの読み込みに環境変数（`YORIKI_SECRET_KEY` 等）が要るので、mypy（django-stubs）とpytestは `.envrc` を読み込んだ状態で実行する。
 
 ### 3.2 フロントエンド（`frontend/`）
 

@@ -1,0 +1,24 @@
+# ローカル開発の補助サービス。api と frontend は手元で直接起動する（docs/deployment.md §3.3）
+#   docker compose -f deploy/compose.dev.yaml up -d
+name: yoriki-dev
+
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_DB: yoriki
+      POSTGRES_USER: yoriki
+      POSTGRES_PASSWORD: yoriki
+    ports:
+      # 他のプロジェクトのPostgreSQLと重ならないよう、ホスト側のポートを変えられるようにする
+      - "127.0.0.1:${YORIKI_DATABASE_PORT:-5432}:5432"
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yoriki -d yoriki"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres:

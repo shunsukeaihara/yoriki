@@ -7,6 +7,7 @@ Yoriki（よりき）は、社員が業務用AI Agentを安全に使うための
 
 ## 参照する文書
 
+- 開発の状況と次の作業（作業を始める前に読む）：[docs/status.md](docs/status.md)
 - 製品の設計・要件・データモデル・状態遷移：[docs/design.md](docs/design.md)（大きいため、必要な章だけを読む）
 - バックエンドの実装規約：[docs/backend-conventions.md](docs/backend-conventions.md)
 - Model / Serializer / ViewSetの実装例：[docs/backend-examples.md](docs/backend-examples.md)

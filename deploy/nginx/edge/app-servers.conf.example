@@ -1,0 +1,4 @@
+# エッジのnginxが振り分けるアプリサーバー（私設ネットワークのアドレスと、アプリサーバーのnginxのポート）。
+# /etc/yoriki/edge/app-servers.conf にコピーして書き換え、台数を変えたら `nginx -s reload` する
+server 10.0.1.11:80 max_fails=3 fail_timeout=10s;
+server 10.0.1.12:80 max_fails=3 fail_timeout=10s;

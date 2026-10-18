@@ -17,3 +17,12 @@ updates:
     cooldown: { default-days: 14 }
     groups:
       npm: { patterns: ['*'], update-types: [minor, patch] }
+  # Dockerfileのベースイメージと、Composeの公式イメージ（digestの更新を提案させる）
+  - package-ecosystem: docker
+    directories: [/api, /frontend]
+    schedule: { interval: weekly }
+    cooldown: { default-days: 14 }
+  - package-ecosystem: docker-compose
+    directory: /deploy
+    schedule: { interval: weekly }
+    cooldown: { default-days: 14 }

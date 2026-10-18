@@ -1,4 +1,8 @@
+from typing import Any
+
+import psycopg
 import pytest
+from django.conf import settings
 from rest_framework.test import APIClient
 
 from user.factories import UserFactory
@@ -23,3 +27,24 @@ def fixture_other_user(db) -> User:
 @pytest.fixture(name="platform_admin")
 def fixture_platform_admin(db) -> User:
     return UserFactory.create(is_superuser=True, is_staff=True)
+
+
+def pytest_sessionstart(session):
+    """PostgreSQLに接続できなければ、接続の待ちで長く止まらずに、起動方法を案内して終わる"""
+    db: dict[str, Any] = settings.DATABASES["default"]
+    try:
+        psycopg.connect(
+            host=db["HOST"],
+            port=db["PORT"],
+            user=db["USER"],
+            password=db["PASSWORD"],
+            dbname=db["NAME"],
+            connect_timeout=3,
+        ).close()
+    except psycopg.OperationalError as e:
+        pytest.exit(
+            f"PostgreSQL（{db['HOST']}:{db['PORT']}）に接続できません: {e}\n"
+            "テストはPostgreSQLで実行します。リポジトリのルートで次のコマンドを実行して起動してください。\n"
+            "  docker compose -f deploy/compose.dev.yaml up -d",
+            returncode=2,
+        )

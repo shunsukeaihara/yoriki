@@ -725,9 +725,7 @@ class Command(BaseCommand):
 ## 9 テスト
 
 - pytestとpytest-djangoを使う。`pyproject.toml` の `addopts` で `--ds=app.settings_test` を指定し、`python_files = ["tests.py", "test_*.py", "*_test.py"]` を設定する。
-- ローカルのテストはSQLite（メモリ上）で実行し、PostgreSQLを起動しなくてよい。CIの結合テストでは `YORIKI_TEST_DATABASE=postgres` でPostgreSQLを使い、すべてのテストを実行する。
-- PostgreSQLの機能（`select_for_update` の行ロック、advisory lock、LISTEN/NOTIFY、JSONの検索等）に依存するテストには `@pytest.mark.postgres` を付ける。SQLiteでは自動で飛ばす（`conftest.py`）。SQLiteでも動く部分（状態遷移表の判定、Serializerの検証、権限）は、マーカーを付けずにテストを分けて書く。
-- 通知（NOTIFY）を送る処理は、`stream/notifier.py` の送信を差し替えて、送ったイベントを記録するだけのテスト用実装で検証する。LISTENから配信までの流れは `postgres` マーカーを付けたテストで確認する（realtime.md §4）。
+- テストはローカルでもCIでも、本番と同じPostgreSQLで実行する（`select_for_update` の行ロック、advisory lock、LISTEN/NOTIFY、JSONの検索等に依存するため）。SQLiteは使わない。ローカルでは `deploy/compose.dev.yaml` のPostgreSQLを起動しておく。
 - テストデータは各アプリの `factories.py` に `DjangoModelFactory` で定義する。
 - 複数アプリで使うfixtureはルートの `conftest.py` に置き、`@pytest.fixture(name="xxx")` で名前を付ける。ユーザーのfixtureは役割を表す名前にする（例：`app_user`、`other_user`、`platform_admin`）。
 - APIを呼ぶクライアントのfixtureは `api_client` とする。`client` はpytest-djangoの同名のfixtureを隠してしまうので使わない。

@@ -98,7 +98,7 @@ uvicorn app.asgi:application --host 0.0.0.0 --port 8000 --workers 4 --proxy-head
 
 LLM出力の差分は頻度が高いので、Runnerで100〜200ミリ秒ごとにまとめてから送る。
 
-テストでは、送る側（状態の変更と同じtransactionでイベントを送ること）は、`stream/notifier.py` の送信を、送ったイベントを記録するだけのテスト用実装に差し替えて確認する。これはローカルのSQLiteでも動く。LISTENから配信までの流れは、PostgreSQLが必要なテスト（`@pytest.mark.postgres`）としてCIの結合テストで確認する（backend-conventions.md §9）。SQLiteにNOTIFYを足す拡張（Honker等）は、本番と別の仕組みになるので使わない。
+テストも本番と同じPostgreSQLで実行し、NOTIFYを送ってからLISTENで受け取るまでを実際に確認する（backend-conventions.md §9）。
 
 ## 5 フロントエンドの実装
 

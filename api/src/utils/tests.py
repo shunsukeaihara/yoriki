@@ -80,7 +80,6 @@ class TestAdminSite:
             assert api_client.get("/api/admin/").status_code == status
 
 
-@pytest.mark.postgres
 @pytest.mark.django_db
 def test_lock_can_be_acquired_twice_in_sequence():
     for _ in range(2):

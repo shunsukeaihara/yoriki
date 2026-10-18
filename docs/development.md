@@ -53,8 +53,8 @@ VS Codeを標準のエディタとし、リポジトリの `.vscode/settings.jso
 - 日本語のコメントや文字列に全角の記号（「（」「：」等）を使うので、ruffの `RUF001`〜`RUF003` は無効にしている。
 - mypyの設定は、`api/` の雛形を作るときに `api/pyproject.toml` に置く（`plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]`、`[tool.django-stubs] django_settings_module = "app.settings"`）。
 - lintの警告は、`# noqa` で抑止せずにコードを直して解消する。抑止する場合は理由をコメントに書く（backend-conventions.md §10）。
-- ローカルのテストはSQLite（メモリ上）で実行し、PostgreSQLを起動しなくてよい。PostgreSQLの機能（`select_for_update`、LISTEN/NOTIFY、advisory lock等）に依存するテストは `@pytest.mark.postgres` を付け、SQLiteでは飛ばす。CIの結合テストでは `YORIKI_TEST_DATABASE=postgres` を設定し、PostgreSQLで全件を実行する（手元で確かめるときは `deploy/compose.dev.yaml` のPostgreSQLを使う）。
-- pytestは `app.settings_test` を使う。`.envrc` の `DJANGO_SETTINGS_MODULE` より優先させるため、`pyproject.toml` の `addopts` に `--ds` で指定している。PostgreSQLで実行するときはテスト用DBを `--reuse-db` で使い回すので、マイグレーションを変えたら `--create-db` を付けて作り直す。
+- テストはSQLiteではなくPostgreSQLで実行する（`select_for_update`、LISTEN/NOTIFY、advisory lock等、PostgreSQLの機能に依存するため）。ローカルでは `deploy/compose.dev.yaml` のPostgreSQLを使う。
+- pytestは `app.settings_test` を使う。`.envrc` の `DJANGO_SETTINGS_MODULE` より優先させるため、`pyproject.toml` の `addopts` に `--ds` で指定している。テスト用DBは `--reuse-db` で使い回すので、マイグレーションを変えたら `uv run pytest --create-db` で作り直す。
 - settingsの読み込みに環境変数（`YORIKI_SECRET_KEY` 等）が要るので、mypy（django-stubs）とpytestは `.envrc` を読み込んだ状態で実行する。
 
 ### 3.2 フロントエンド（`frontend/`）
@@ -94,7 +94,7 @@ GitHub Actionsで、Pull Requestと `main` へのpushごとに実行する。変
 
 | job | 対象の変更 | 内容 |
 |---|---|---|
-| backend | `api/**` | ruff check、ruff format --check、mypy、pytest（PostgreSQLのserviceコンテナ、`YORIKI_TEST_DATABASE=postgres`）、`makemigrations --check --dry-run`、`spectacular --validate --fail-on-warn` |
+| backend | `api/**` | ruff check、ruff format --check、mypy、pytest（PostgreSQLのserviceコンテナ）、`makemigrations --check --dry-run`、`spectacular --validate --fail-on-warn` |
 | frontend | `frontend/**` | lint、format:check、typecheck、vitest、`nuxt build` |
 | api-types | `api/**`、`frontend/**` | スキーマとフロントエンドの型を生成し、コミット済みのものと差分がないこと（`git diff --exit-code`） |
 | e2e | `api/**`、`frontend/**` | Composeでバックエンドとフロントエンドを起動し、Playwrightを実行（`main` へのpushと、ラベルを付けたPull Requestだけ） |

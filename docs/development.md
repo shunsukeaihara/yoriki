@@ -18,6 +18,7 @@
 
 - コミットメッセージは英語で、`<種類>: <要約>` の形にする（Conventional Commits）。種類は `feat`、`fix`、`docs`、`refactor`、`test`、`chore`、`ci`。
   - 例：`feat: add cancel action for runs`
+- CIを動かす必要のないコミットは、メッセージの本文の最後の行に `[skip ci]` を書く（GitHub Actionsは、pushとPull Requestの先頭のコミットのメッセージにこれがあると、workflowを動かさない）。使ってよい場合と使わない場合は §4.1 に従う。
 - Pull Requestの説明は日本語で書く。何を・なぜ変えたか、確認した方法、画面の変更があればスクリーンショットを書く。
 - 設計（design.md）や規約（docs/*.md）と食い違う変更をする場合は、同じPull Requestで文書も直す。
 
@@ -109,6 +110,22 @@ GitHub Actionsで、Pull Requestと `main` へのpushごとに実行する。変
 
 - 依存の更新はDependabot（`.github/dependabot.yml`。GitHub Actions、uv、npm）でPull Requestにし、CIを通してからマージする。公開から日の浅い版を避けるため、Dependabotは `cooldown` を14日にし、npmはpnpmの `minimumReleaseAge` も維持する。
 - CIのSecret（Docker Hubのtoken等）は、GitHubのEnvironmentに置き、`main` のjobだけが使えるようにする。
+
+### 4.1 `[skip ci]` の使い方
+
+CIは、変更されたディレクトリに関係するworkflowだけが動く（`paths`）。それでも同じ確認が重なる場合は、コミットメッセージに `[skip ci]` を書いて飛ばす。
+
+| 場面 | `[skip ci]` |
+|---|---|
+| Pull Requestの途中のpushで、すぐ後に続けてpushする（作業途中、細かい修正をまとめて送る前） | 付けてよい |
+| レビューを依頼する前・マージする前の最後のpush | 付けない。Pull Requestの最後のコミットで、必ずCIを通す |
+| squash merge・mergeで `main` に入るコミット。Pull Requestの最後のコミットでCIが通っていて、その後 `main` に他の変更が入っていない（ブランチが `main` の最新を含んでいる） | 付ける（同じ内容の確認を `main` で繰り返さない） |
+| 同上で、Pull RequestのCIの後に `main` が進んでいる | 付けない（`main` との組み合わせを `main` で確認する） |
+| `main` へ直接入れるコミット（原則しない） | 付けない |
+| Dependabotの更新 | 付けない |
+
+- `docs/` だけの変更など、どのworkflowの `paths` にも当たらない変更では、CIはもともと動かないので付けなくてよい。
+- `[skip ci]` で飛ばしたコミットが最後に残ったままマージしない。必要なら空のコミット（`git commit --allow-empty`）を足して、CIを動かす。
 
 ## 5 マイグレーション
 

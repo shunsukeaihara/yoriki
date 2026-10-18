@@ -1,0 +1,53 @@
+# OpenAPIスキーマとフロントエンドの型が、Serializerと一致しているか（docs/development.md §3.3、§4）
+name: api-types
+
+on:
+  pull_request:
+    paths: ['api/**', 'frontend/**', 'mise.toml', '.github/workflows/api-types.yml']
+  push:
+    branches: [main]
+    paths: ['api/**', 'frontend/**', 'mise.toml', '.github/workflows/api-types.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api-types:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DJANGO_SETTINGS_MODULE: app.settings
+      YORIKI_SECRET_KEY: ci-only-not-secret
+      UV_PYTHON_DOWNLOADS: never
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('api/uv.lock') }}
+      - id: pnpm-store
+        working-directory: frontend
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('frontend/pnpm-lock.yaml') }}
+      - working-directory: api
+        run: |
+          uv sync --locked
+          uv run python src/manage.py spectacular --file ../frontend/schema.yaml --validate --fail-on-warn
+      - working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm gen:api
+      - name: 生成したスキーマと型がコミット済みのものと同じか
+        run: |
+          if ! git diff --exit-code -- frontend/schema.yaml frontend/app/api/schema.d.ts; then
+            echo "::error::Serializerとスキーマ・型が一致しません。docs/development.md §3.3 の手順で生成し直してコミットしてください"
+            exit 1
+          fi

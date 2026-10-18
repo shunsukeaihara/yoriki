@@ -1,0 +1,39 @@
+# フロントエンド（frontend/）のlint・整形・型チェック・ビルド（docs/development.md §4）
+name: frontend
+
+on:
+  pull_request:
+    paths: ['frontend/**', 'mise.toml', '.github/workflows/frontend.yml']
+  push:
+    branches: [main]
+    paths: ['frontend/**', 'mise.toml', '.github/workflows/frontend.yml']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+      - id: pnpm-store
+        run: echo "path=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ hashFiles('frontend/pnpm-lock.yaml') }}
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm typecheck
+      # 単体テスト（vitest）は、最初のテストを書くときに追加する（docs/development.md §3.2）
+      - run: pnpm build

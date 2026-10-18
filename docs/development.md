@@ -92,18 +92,22 @@ cd frontend && pnpm gen:api
 
 ## 4 CI
 
-GitHub Actionsで、Pull Requestと `main` へのpushごとに実行する。変更されたディレクトリに関係するjobだけを動かす。
+GitHub Actionsで、Pull Requestと `main` へのpushごとに実行する。変更されたディレクトリに関係するjobだけを動かす（workflowごとに `paths` で絞る）。workflowは `.github/workflows/` に置く。
+
+- ツールの版は、ローカルと同じく `mise.toml` から入れる（`jdx/mise-action`）。
+- 使うActionはタグではなくコミットのSHAで固定し、横にタグをコメントで書く。公開から日の浅い版（目安として2週間以内）は使わない。
+- workflowの権限は `permissions: contents: read` を基本にし、必要なjobだけに広げる。
 
 | job | 対象の変更 | 内容 |
 |---|---|---|
-| backend | `api/**` | ruff check、ruff format --check、mypy、pytest（PostgreSQLのserviceコンテナ）、`makemigrations --check --dry-run`、`spectacular --validate --fail-on-warn` |
-| frontend | `frontend/**` | lint、format:check、typecheck、vitest、`nuxt build` |
-| api-types | `api/**`、`frontend/**` | スキーマとフロントエンドの型を生成し、コミット済みのものと差分がないこと（`git diff --exit-code`） |
-| e2e | `api/**`、`frontend/**` | Composeでバックエンドとフロントエンドを起動し、Playwrightを実行（`main` へのpushと、ラベルを付けたPull Requestだけ） |
-| sandbox | `sandbox/**`、毎週の定期実行 | イメージのビルド、契約テスト、脆弱性スキャン。`main` ではDocker Hubへ公開（deployment.md §2.1） |
-| app-images | `main` へのpush | `yoriki-api`、`yoriki-frontend` のイメージをビルドしてレジストリへpush |
+| backend（`backend.yml`） | `api/**` | ruff check、ruff format --check、mypy、pytest（PostgreSQLのserviceコンテナ）、`makemigrations --check --dry-run`、`spectacular --validate --fail-on-warn` |
+| frontend（`frontend.yml`） | `frontend/**` | lint、format:check、typecheck、vitest（最初のテストを書くときに追加）、`nuxt build` |
+| api-types（`api-types.yml`） | `api/**`、`frontend/**` | スキーマとフロントエンドの型を生成し、コミット済みのものと差分がないこと（`git diff --exit-code`） |
+| e2e（未） | `api/**`、`frontend/**` | Composeでバックエンドとフロントエンドを起動し、Playwrightを実行（`main` へのpushと、ラベルを付けたPull Requestだけ） |
+| sandbox（未） | `sandbox/**`、毎週の定期実行 | イメージのビルド、契約テスト、脆弱性スキャン。`main` ではDocker Hubへ公開（deployment.md §2.1） |
+| app-images（未） | `main` へのpush | `yoriki-api`、`yoriki-frontend` のイメージをビルドしてレジストリへpush |
 
-- 依存の更新はDependabot（またはRenovate）でPull Requestにし、CIを通してからマージする。npmは公開から日の浅い版を避ける設定（pnpmの `minimumReleaseAge`）を維持する。
+- 依存の更新はDependabot（`.github/dependabot.yml`。GitHub Actions、uv、npm）でPull Requestにし、CIを通してからマージする。公開から日の浅い版を避けるため、Dependabotは `cooldown` を14日にし、npmはpnpmの `minimumReleaseAge` も維持する。
 - CIのSecret（Docker Hubのtoken等）は、GitHubのEnvironmentに置き、`main` のjobだけが使えるようにする。
 
 ## 5 マイグレーション

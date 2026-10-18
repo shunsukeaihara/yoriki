@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-19（#8）
+- 最終更新：2026-10-19（#9）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -18,6 +18,7 @@
 | #5 | Node.js 26 |
 | #6 | Dockerfile（api、frontend）、Compose一式（単一ホスト、アプリ、DB、Worker、Cloudflare Tunnel、エッジ）、nginxの設定、環境変数のexample、app-imagesのCI（イメージのビルドと起動後の疎通確認） |
 | #8 | フロントエンドの土台の残り：`plugins/error-handler.ts`、`error.vue`、`layouts/manage.vue`（`useManageMenu()` のメニューを権限で出し分け、表示できる項目がなければ `/manage` は403）、Vitest（`test/nuxt/`。composables・APIクライアント・`D*` ラッパーの最初のテスト）とCIへの追加 |
+| #9 | 開発時（DEBUG）の静的ファイルを `StaticFilesStorage` にし、Djangoの管理画面が500になる不具合を修正 |
 
 確認済みのこと：
 
@@ -42,7 +43,6 @@
 - CSPのインラインのスクリプトを、ハッシュかnonceで絞る（deployment.md §4.1）。
 - フロントエンド：`app.config.ts`（テーマの色。primary / neutralを決める）、E2E（Playwright）。
 - 管理画面のメニューは、まだ項目が1つもない（`composables/manage.ts`）。最初の項目（LLMの接続）を足すまで、基盤管理者も `/manage` には入れない。
-- バックエンド：開発時（`YORIKI_DEBUG=true`）にDjangoの管理画面（`/api/admin/`）を開くと500になる。`STATIC_ROOT` が `None` のまま `ManifestStaticFilesStorage` を使っているため。開発時は `StaticFilesStorage` にする。
 - CI：e2e、sandbox、本体のイメージのレジストリへのpush（使うレジストリが未決。design.md §13）。
 - Compose：channel-listener（Channelの受信を実装するとき）。
 - 管理コマンド：`drain_workers`・`resume_workers`（Workerの実行を実装するとき）。
@@ -63,7 +63,7 @@ design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにし
 8. **最初の2つのAgent**（design.md §13）：請求書PDF → 社内DBと照合 → 取込用のCSV、契約書レビュー → Zapierへ結果。
 9. **Channel Plugin**（Teams・Slack・Discord）。
 
-並行してよいもの：実際のIdPでのログインの確認（client IDが用意でき次第）、CSPの改善、開発時のDjango管理画面の500（§3）の修正。
+並行してよいもの：実際のIdPでのログインの確認（client IDが用意でき次第）、CSPの改善。
 
 ## 5 作業を始めるときの手順
 

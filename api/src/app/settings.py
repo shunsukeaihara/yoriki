@@ -145,8 +145,12 @@ STATIC_URL = "/api/static/"
 STATIC_ROOT = None if DEBUG else os.getenv("YORIKI_STATIC_ROOT", str(BASE_DIR / "static"))
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-    # ファイル名に内容のハッシュを付け、nginxで長くキャッシュさせる
-    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"},
+    # 本番はファイル名に内容のハッシュを付け、nginxで長くキャッシュさせる。
+    # 開発時は collectstatic しない（manifest がない）ので、ハッシュを付けない
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage."
+        + ("StaticFilesStorage" if DEBUG else "ManifestStaticFilesStorage")
+    },
 }
 
 # --- DRF ---

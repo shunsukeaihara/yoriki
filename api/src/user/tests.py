@@ -1,12 +1,14 @@
 import pytest
 from allauth.core.exceptions import ImmediateHttpResponse
 from allauth.socialaccount.models import SocialAccount, SocialLogin
-from django.contrib.auth.models import Permission
+from django.contrib.auth.models import Group, Permission
 from django.test import RequestFactory
 from rest_framework.test import APIClient
 
 from .adapters import SocialAccountAdapter, is_allowed_account
+from .factories import UserFactory
 from .models import User
+from .roles import ROLES, sync_role_groups
 
 
 class TestAuthSession:
@@ -64,6 +66,37 @@ class TestMyUser:
         api_client.force_login(app_user)
         User.objects.filter(pk=app_user.pk).update(is_active=False)
         assert api_client.get(self.url).status_code in (401, 403)
+
+
+class TestRoleGroups:
+    @pytest.mark.django_db
+    def test_role_groups_are_created(self):
+        assert set(Group.objects.filter(name__in=ROLES).values_list("name", flat=True)) == set(ROLES)
+
+    @pytest.mark.django_db
+    def test_sync_adds_permissions_and_keeps_manual_ones(self, monkeypatch):
+        group = Group.objects.get(name="業務管理者")
+        manual = Permission.objects.get(codename="change_user")
+        group.permissions.add(manual)
+        monkeypatch.setitem(ROLES, "業務管理者", ["user.view_user"])
+        sync_role_groups()
+        assert set(group.permissions.values_list("codename", flat=True)) == {"view_user", "change_user"}
+
+
+class TestWithPermission:
+    @pytest.mark.django_db
+    def test_direct_group_and_superuser(self, app_user, other_user, platform_admin):
+        view_user = Permission.objects.get(codename="view_user")
+        app_user.user_permissions.add(view_user)
+        group = Group.objects.create(name="閲覧")
+        group.permissions.add(view_user)
+        other_user.groups.add(group)
+        inactive = UserFactory.create(is_active=False, is_superuser=True)
+        UserFactory.create()  # 権限なし
+
+        users = set(User.objects.with_permission("user.view_user"))
+        assert users == {app_user, other_user, platform_admin}
+        assert inactive not in users
 
 
 class TestAuthProviders:

@@ -45,20 +45,35 @@ class Conflict(APIException):
 # utils/permissions.py（抜粋）
 from rest_framework.permissions import BasePermission, IsAuthenticated, OperandHolder
 
-AppUser = IsAuthenticated & _AppUser                  # 通常社員以上
-BusinessAdmin = IsAuthenticated & _BusinessAdmin      # 業務管理者
-PluginPublisher = IsAuthenticated & _PluginPublisher  # Plugin公開者
-PlatformAdmin = IsAuthenticated & _PlatformAdmin      # 基盤管理者
+
+class AppPermission(Enum):
+    """Yorikiで定義するpermission。値は（app_label、codename、表示名）"""
+
+    MANAGE_DESTINATIONS = "delivery", "can_manage_destinations", _("通知先を管理できる")
+    PUBLISH_COMPANY_SKILLS = "skill", "can_publish_company_skills", _("全社向けのSkillを公開できる")
+    ...  # perm（"<app_label>.<codename>"）、meta（Meta.permissionsに書く組）のproperty
 
 
-def require_permission(perm: str) -> OperandHolder:
+AppUser = IsAuthenticated & _AppUser              # ログインしている社員
+PlatformAdmin = IsAuthenticated & _PlatformAdmin  # 基盤管理者
+
+
+def require_permission(perm: AppPermission | str) -> OperandHolder:
     """Djangoのpermission（"<app_label>.<codename>"）を持つログインユーザーだけを許可する"""
 
     class _HasPermission(BasePermission):
         def has_permission(self, request, view) -> bool:
-            return request.user.has_perm(perm)
+            return request.user.has_perm(to_perm_str(perm))
 
     return IsAuthenticated & _HasPermission
+```
+
+```python
+# user/roles.py（抜粋）。migrateのたびに同名のGroupを作り、permissionを追加する
+ROLES = {
+    "業務管理者": [AppPermission.MANAGE_DESTINATIONS],
+    "Plugin公開者": [AppPermission.PUBLISH_COMPANY_SKILLS],
+}
 ```
 
 `utils.views.SoftDeleteMixin`、`utils.serializers.ReadOnlyModelSerializer`、`utils.serializers.CountSerializer` は汎用の部品。`User` は `uid` を持つ。
@@ -82,6 +97,7 @@ from django.db import models
 from django.utils.translation import gettext_lazy as _
 
 from utils.fields import NanoidField
+from utils.permissions import AppPermission
 
 
 class DestinationKind(models.IntegerChoices):
@@ -108,7 +124,7 @@ class Destination(models.Model):
     class Meta:
         verbose_name = _("通知先")
         verbose_name_plural = verbose_name
-        permissions = [("manage_destination", _("通知先を管理できる"))]
+        permissions = [AppPermission.MANAGE_DESTINATIONS.meta]
 
     def __str__(self):
         return self.name
@@ -181,7 +197,7 @@ from django_filters import rest_framework as filters
 from drf_spectacular.utils import extend_schema
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
-from utils.permissions import AppUser, require_permission
+from utils.permissions import AppPermission, AppUser, require_permission
 from utils.views import SoftDeleteMixin
 from .models import Destination, DestinationKind
 from .serializers import AppDestinationSerializer, DestinationSerializer
@@ -199,7 +215,7 @@ class DestinationFilter(filters.FilterSet):
 @extend_schema(description="通知先の管理API", tags=["manage/destination"])
 class DestinationViewSet(SoftDeleteMixin, ModelViewSet):
     # 一覧・作成・更新・削除のすべてを同じpermissionで判定する
-    permission_classes = [require_permission("delivery.manage_destination")]
+    permission_classes = [require_permission(AppPermission.MANAGE_DESTINATIONS)]
     lookup_field = "uid"
     queryset = Destination.objects.filter(deleted=False).select_related("created_by")
     serializer_class = DestinationSerializer
@@ -232,7 +248,7 @@ urlpatterns = router.urls
 
 要点：
 - Viewに書いてあるのは、取得対象、権限、作成者の受け渡しだけ。検証と整形はすべてSerializerにある。
-- 管理用の権限は、役割ではなくDjangoのpermission（`Meta.permissions` の `manage_destination`）で判定する。`require_permission` は削除（destroy）を含むすべての操作に効く。
+- 管理用の権限は、役割（Group）の名前ではなくDjangoのpermission（`AppPermission.MANAGE_DESTINATIONS`）で判定する。役割には `user/roles.py` で割り当てる。`require_permission` は削除（destroy）を含むすべての操作に効く。
 - 通常社員向けは、別のSerializer（`AppDestinationSerializer`）とViewSetで出す項目を絞る。1つのSerializerの中で利用者によって分岐させない。
 - 種別の表示名は `kind_display` としてサーバーで返す。フロントエンドはこれを表示に使う（frontend-examples.md）。
 - `ordering` の最後に `pk` を置き、カーソル方式のページングで並び順が一意に決まるようにする。
@@ -978,6 +994,7 @@ from django.db import models, transaction
 from django.utils.translation import gettext_lazy as _
 
 from utils.fields import NanoidField
+from utils.permissions import AppPermission
 from .errors import VersionConflict
 
 
@@ -994,6 +1011,7 @@ class Skill(models.Model):
     class Meta:
         verbose_name = _("Skill")
         verbose_name_plural = verbose_name
+        permissions = [AppPermission.PUBLISH_COMPANY_SKILLS.meta]
 
     def __str__(self):
         return self.name
@@ -1104,7 +1122,7 @@ from rest_framework.generics import get_object_or_404
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
-from utils.permissions import PluginPublisher
+from utils.permissions import AppPermission, require_permission
 from utils.views import SoftDeleteMixin
 from .models import Skill, SkillVersion
 from .serializers import SkillPublishSerializer, SkillSerializer, SkillVersionSerializer
@@ -1125,7 +1143,7 @@ class SkillMixin:
 
 @extend_schema(description="Skillの管理API", tags=["manage/skill"])
 class SkillViewSet(SoftDeleteMixin, ModelViewSet):
-    permission_classes = [PluginPublisher]
+    permission_classes = [require_permission(AppPermission.PUBLISH_COMPANY_SKILLS)]
     lookup_field = "uid"
     queryset = Skill.objects.filter(deleted=False).select_related("owner")
     serializer_class = SkillSerializer
@@ -1151,7 +1169,7 @@ class SkillViewSet(SoftDeleteMixin, ModelViewSet):
 
 @extend_schema(description="Skillの公開済みの版", tags=["manage/skill/version"])
 class SkillVersionViewSet(SkillMixin, ReadOnlyModelViewSet):
-    permission_classes = [PluginPublisher]
+    permission_classes = [require_permission(AppPermission.PUBLISH_COMPANY_SKILLS)]
     lookup_field = "number"  # 版番号で識別する子リソースの例外（backend-conventions.md §4.1）
     queryset = SkillVersion.objects.select_related("created_by")
     serializer_class = SkillVersionSerializer

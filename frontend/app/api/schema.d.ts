@@ -95,10 +95,6 @@ export interface components {
             readonly email: string;
             /** 表示名 */
             readonly display_name: string;
-            /** 業務管理者 */
-            readonly is_business_admin: boolean;
-            /** Plugin公開者 */
-            readonly is_plugin_publisher: boolean;
             readonly is_platform_admin: boolean;
             readonly all_permissions: string[];
         };

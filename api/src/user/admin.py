@@ -14,17 +14,15 @@ class UserAdmin(BaseUserAdmin):
         "username",
         "email",
         "display_name",
-        "is_business_admin",
-        "is_plugin_publisher",
         "is_superuser",
         "is_active",
     )
-    list_filter = ("is_business_admin", "is_plugin_publisher", "is_superuser", "is_active")
+    list_filter = ("is_superuser", "is_active", "groups")
     search_fields = ("username", "email", "display_name", "uid")
     fieldsets = (
         (None, {"fields": ("uid", "username", "password")}),
         (_("個人情報"), {"fields": ("display_name", "email", "first_name", "last_name")}),
-        (_("役割"), {"fields": ("is_active", "is_business_admin", "is_plugin_publisher", "is_superuser", "is_staff")}),
-        (_("権限"), {"fields": ("groups", "user_permissions")}),
+        # 役割はGroup（user/roles.py）で割り当てる。個別のpermissionも追加できる
+        (_("権限"), {"fields": ("is_active", "is_superuser", "is_staff", "groups", "user_permissions")}),
         (_("日時"), {"fields": ("last_login", "date_joined", "created", "updated")}),
     )

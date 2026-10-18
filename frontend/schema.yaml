@@ -125,14 +125,6 @@ components:
           readOnly: true
           title: 表示名
           maxLength: 150
-        is_business_admin:
-          type: boolean
-          readOnly: true
-          title: 業務管理者
-        is_plugin_publisher:
-          type: boolean
-          readOnly: true
-          title: Plugin公開者
         is_platform_admin:
           type: boolean
           readOnly: true
@@ -146,9 +138,7 @@ components:
       - display_name
       - email
       - id
-      - is_business_admin
       - is_platform_admin
-      - is_plugin_publisher
       - username
     Ping:
       type: object

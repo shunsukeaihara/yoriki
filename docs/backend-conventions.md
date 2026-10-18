@@ -408,7 +408,7 @@ class AppConversationMessageViewSet(MyConversationMixin, ListModelMixin, CreateM
 | 接頭辞 | 利用者 | 認証 | permission |
 |---|---|---|---|
 | `App*` | 通常社員（自分の会話・Run・Skill） | 既定（セッション） | `AppUser` |
-| （接頭辞なし） | 業務管理者・Plugin公開者・基盤管理者 | 既定（セッション） | `BusinessAdmin`、`PluginPublisher`、`PlatformAdmin`、または `require_permission("<app_label>.<codename>")` |
+| （接頭辞なし） | 業務管理者・Plugin公開者・基盤管理者 | 既定（セッション） | `require_permission(AppPermission.XXX)`、基盤管理者だけの操作は `PlatformAdmin` |
 | `Hook*` | Trigger・Channelの受信endpoint | ViewSetで `authentication_classes` を指定する（連携ごとの署名・token） | 認証した連携に対象を限るpermissionを指定する |
 
 - `DEFAULT_PERMISSION_CLASSES` は `PlatformAdmin` なので（§6.1）、`permission_classes` を書き忘れたViewSetは基盤管理者しか使えない。すべてのViewSetで明示する。
@@ -601,7 +601,7 @@ DATABASES = {
 - SSOはdjango-allauthのsocialaccountで実装する。最初に対応するのはGoogle WorkspaceとMicrosoft 365（Entra ID）とする。Auth0やその他のOpenID Connectの認証基盤は、必要になったときに同じ仕組みで追加する。どの認証基盤を有効にするかと、client ID・secret・テナント等は環境変数で設定する。
 - 前段に認証プロキシ（oauth2-proxy等）を置く場合も、ログインは常にYoriki自身（django-allauth）で行う。認証プロキシはバリアとして扱い、プロキシが付けるヘッダーやIDトークンで利用者を決めない（前段の構成は deployment.md §8.6）。
 - 自社のアカウントだけを受け付ける。Entra IDはテナントID、Google Workspaceは `hd`（ドメイン。Googleを有効にするときは `YORIKI_SSO_GOOGLE_HOSTED_DOMAIN` を必須とし、未設定なら起動しない。IDトークンの `hd` が一致しないアカウントは、個人のGoogleアカウントとみなして拒否する）、後から追加する認証基盤はissuerと許可するメールドメインで確認する。どの認証基盤でも、メールアドレスのドメインが `YORIKI_SSO_ALLOWED_EMAIL_DOMAINS` にあることを確認する（`user/adapters.py`）。許可しないアカウントは `/login?error=not_allowed`、認証の失敗は `/login?error=failed` へ戻す。
-- ユーザーは、許可された認証基盤で初めてログインした時点で作成し、通常社員の役割から始める。業務管理者・Plugin公開者・基盤管理者の役割は、Yorikiの管理画面で割り当てる（IdPのグループとの連携は必要になってから追加する）。
+- ユーザーは、許可された認証基盤で初めてログインした時点で作成し、通常社員の役割から始める。業務管理者・Plugin公開者などの役割はGroupとして管理画面で割り当て、基盤管理者は `is_superuser` にする（§6.3。IdPのグループとの連携は必要になってから追加する）。
 - 最初の基盤管理者は `createsuperuser` で作る。SSOの設定前でも管理画面へ入れるようにするため、パスワードでのログインは基盤管理者だけに許可する（`utils.backends.PlatformAdminPasswordBackend`。allauthのメール・パスワードのログインは `SOCIALACCOUNT_ONLY` で使わない）。
 - `DEFAULT_AUTHENTICATION_CLASSES` は `utils.authentication.SessionAuthentication` だけにする。DRF標準の `SessionAuthentication` は未ログインを403で返すため、`authenticate_header` を実装したサブクラスにして401を返す。フロントエンドは401でログイン画面へ移動し、403（権限不足）とは区別する。JWT、Token、Basicの認証は使わない。
 - CSRFはDjango標準の仕組みを使う。`GET /api/app/v1/auth/session/`（`ensure_csrf_cookie`）でCSRFのCookieを渡し、書き込みの要求は `X-CSRFToken` ヘッダーで検証する。ログアウトは `DELETE /api/app/v1/auth/session/` で行う。有効なログイン方法の一覧は `GET /api/app/v1/auth/providers/` で返す。
@@ -618,7 +618,7 @@ DATABASES = {
 | `utils/fields.py` | `NanoidField`、`NormalizedTextField`（改行・行末空白の正規化）、ファイル・Base64系のSerializerフィールド |
 | `utils/views.py` | `SoftDeleteMixin`、利用者範囲のMixin、`PingAPIView` |
 | `utils/serializers.py` | `CountSerializer`、`PingSerializer`、`ReadOnlyModelSerializer`、複数アプリで使う最小Serializer |
-| `utils/permissions.py` | `AppUser`（通常社員以上）、`BusinessAdmin`、`PluginPublisher`、`PlatformAdmin`、`require_permission()` |
+| `utils/permissions.py` | `AppPermission`（Yorikiで定義するpermissionの一覧）、`AppUser`（ログインしている社員）、`PlatformAdmin`（基盤管理者）、`require_permission()` |
 | `utils/authentication.py` | 401を返す `SessionAuthentication`（とそのOpenAPIの定義）、`Hook*` 用の認証クラス |
 | `utils/backends.py` | パスワードでのログインを基盤管理者だけに許可する認証バックエンド |
 | `utils/exceptions.py` | `Conflict`（409）等、DRFの `APIException` のサブクラス |
@@ -627,9 +627,15 @@ DATABASES = {
 | `utils/lock.py` | DBのadvisory lock |
 | `common/choices.py` | 複数アプリで使うChoices |
 
-- 役割は `User` に持たせる。基盤管理者は `is_superuser`、業務管理者は `is_business_admin`、Plugin公開者は `is_plugin_publisher` とする。基盤管理者は業務管理者・Plugin公開者の操作もできる（`BusinessAdmin`、`PluginPublisher` も許可する）。
-- 役割のpermissionは `_Xxx(BasePermission)` を定義し、公開名を `Xxx = IsAuthenticated & _Xxx` にする。
-- 役割より細かい権限は、Djangoのpermission（Modelの `Meta.permissions`）で定義し、`require_permission("<app_label>.<codename>")` で確認する。`require_permission` は、ログイン済みで `user.has_perm()` が真の場合に許可するpermissionクラスを返す（例：`permission_classes = [require_permission("delivery.manage_destination")]`）。
+- 権限はDjangoのpermissionで判定する。Userのフラグや役割の名前では判定しない。流れは「permissionを定義する → Groupに割り当てる → Groupをユーザーに割り当てる」とする。
+  1. Yorikiで定義するpermissionは `utils.permissions.AppPermission` に（app_label、codename、表示名）として1か所にまとめる。codenameは `can_<動詞>_<対象>` にする（例：`skill.can_publish_company_skills`）。
+  2. 対象アプリのModelの `Meta.permissions` に `AppPermission.XXX.meta` を書き、マイグレーションでpermissionを作る。
+  3. 役割（業務管理者・Plugin公開者等）はGroupで表す。初期の役割と、それに含めるpermissionは `user/roles.py` の `ROLES` に書く。`migrate` のたびに同名のGroupを作り、定義したpermissionを追加する（管理画面でGroupに足したpermissionは消さない）。
+  4. Groupは、基盤管理者がDjangoの管理画面でユーザーに割り当てる。個別のpermissionを直接付けてもよい。
+- 基盤管理者は `is_superuser` で表し、すべてのpermissionを持つ。基盤管理者だけに許す操作（基盤の設定等）は `PlatformAdmin` で判定する。
+- ViewSetでは `require_permission(AppPermission.XXX)` で確認する。`require_permission` は、ログイン済みで `user.has_perm()` が真の場合に許可するpermissionクラスを返す。Django標準のpermissionは `"<app_label>.<codename>"` の文字列で渡す。
+- permissionを持つユーザーの一覧（通知の宛先等）は `User.objects.with_permission(AppPermission.XXX)` で取得する（直接・Group経由・基盤管理者を含む）。
+- `AppUser`・`PlatformAdmin` は `_Xxx(BasePermission)` を定義し、公開名を `Xxx = IsAuthenticated & _Xxx` にする。
 
 ---
 
@@ -718,7 +724,10 @@ class Command(BaseCommand):
 
 ## 9 テスト
 
-- pytestとpytest-djangoを使う。`pyproject.toml` に `DJANGO_SETTINGS_MODULE` と `python_files = ["tests.py", "test_*.py", "*_test.py"]` を設定する。
+- pytestとpytest-djangoを使う。`pyproject.toml` の `addopts` で `--ds=app.settings_test` を指定し、`python_files = ["tests.py", "test_*.py", "*_test.py"]` を設定する。
+- ローカルのテストはSQLite（メモリ上）で実行し、PostgreSQLを起動しなくてよい。CIの結合テストでは `YORIKI_TEST_DATABASE=postgres` でPostgreSQLを使い、すべてのテストを実行する。
+- PostgreSQLの機能（`select_for_update` の行ロック、advisory lock、LISTEN/NOTIFY、JSONの検索等）に依存するテストには `@pytest.mark.postgres` を付ける。SQLiteでは自動で飛ばす（`conftest.py`）。SQLiteでも動く部分（状態遷移表の判定、Serializerの検証、権限）は、マーカーを付けずにテストを分けて書く。
+- 通知（NOTIFY）を送る処理は、`stream/notifier.py` の送信を差し替えて、送ったイベントを記録するだけのテスト用実装で検証する。LISTENから配信までの流れは `postgres` マーカーを付けたテストで確認する（realtime.md §4）。
 - テストデータは各アプリの `factories.py` に `DjangoModelFactory` で定義する。
 - 複数アプリで使うfixtureはルートの `conftest.py` に置き、`@pytest.fixture(name="xxx")` で名前を付ける。ユーザーのfixtureは役割を表す名前にする（例：`app_user`、`other_user`、`platform_admin`）。
 - APIを呼ぶクライアントのfixtureは `api_client` とする。`client` はpytest-djangoの同名のfixtureを隠してしまうので使わない。

@@ -1,12 +1,12 @@
 import pytest
 from django.contrib.auth import authenticate
-from django.contrib.auth.models import AnonymousUser, Permission
+from django.contrib.auth.models import AnonymousUser, Group, Permission
 from django.test import RequestFactory
 
 from user.factories import UserFactory
 
 from .lock import lock
-from .permissions import AppUser, BusinessAdmin, PlatformAdmin, PluginPublisher, require_permission
+from .permissions import AppUser, PlatformAdmin, require_permission
 
 
 @pytest.mark.django_db
@@ -22,35 +22,44 @@ def _allowed(permission, user) -> bool:
     return permission().has_permission(request, None)
 
 
-class TestRolePermissions:
+class TestPermissions:
     @pytest.mark.django_db
     @pytest.mark.parametrize(
         ("user_kwargs", "expected"),
         [
-            # AppUser, BusinessAdmin, PluginPublisher, PlatformAdmin
-            ({}, (True, False, False, False)),
-            ({"is_business_admin": True}, (True, True, False, False)),
-            ({"is_plugin_publisher": True}, (True, False, True, False)),
-            ({"is_superuser": True}, (True, True, True, True)),
-            ({"is_active": False, "is_superuser": True}, (False, True, True, True)),
+            # AppUser, PlatformAdmin
+            ({}, (True, False)),
+            ({"is_superuser": True}, (True, True)),
+            ({"is_active": False}, (False, False)),
         ],
     )
-    def test_roles(self, user_kwargs, expected):
+    def test_app_user_and_platform_admin(self, user_kwargs, expected):
         user = UserFactory.create(**user_kwargs)
-        actual = tuple(_allowed(p, user) for p in (AppUser, BusinessAdmin, PluginPublisher, PlatformAdmin))
-        assert actual == expected
+        assert (_allowed(AppUser, user), _allowed(PlatformAdmin, user)) == expected
 
-    @pytest.mark.parametrize("permission", [AppUser, BusinessAdmin, PluginPublisher, PlatformAdmin])
+    @pytest.mark.parametrize("permission", [AppUser, PlatformAdmin, require_permission("user.view_user")])
     def test_anonymous_is_denied(self, permission):
         assert _allowed(permission, AnonymousUser()) is False
 
     @pytest.mark.django_db
-    def test_require_permission(self, app_user):
+    def test_require_permission_by_user_permission(self, app_user):
         permission = require_permission("user.view_user")
         assert _allowed(permission, app_user) is False
         app_user.user_permissions.add(Permission.objects.get(codename="view_user"))
         app_user = type(app_user).objects.get(pk=app_user.pk)  # permissionのキャッシュを捨てる
         assert _allowed(permission, app_user) is True
+
+    @pytest.mark.django_db
+    def test_require_permission_by_group(self, app_user):
+        # 役割（Group）に付けたpermissionでも許可される
+        group = Group.objects.create(name="テスト用の役割")
+        group.permissions.add(Permission.objects.get(codename="view_user"))
+        app_user.groups.add(group)
+        assert _allowed(require_permission("user.view_user"), app_user) is True
+
+    @pytest.mark.django_db
+    def test_platform_admin_has_every_permission(self, platform_admin):
+        assert _allowed(require_permission("user.view_user"), platform_admin) is True
 
 
 class TestPasswordLogin:
@@ -65,12 +74,13 @@ class TestPasswordLogin:
 
 class TestAdminSite:
     @pytest.mark.django_db
-    def test_only_platform_admin(self, api_client, app_user, business_admin, platform_admin):
-        for user, status in ((app_user, 302), (business_admin, 302), (platform_admin, 200)):
+    def test_only_platform_admin(self, api_client, app_user, platform_admin):
+        for user, status in ((app_user, 302), (platform_admin, 200)):
             api_client.force_login(user)
             assert api_client.get("/api/admin/").status_code == status
 
 
+@pytest.mark.postgres
 @pytest.mark.django_db
 def test_lock_can_be_acquired_twice_in_sequence():
     for _ in range(2):

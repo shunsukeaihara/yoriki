@@ -1,4 +1,4 @@
-import type { PermissionCode, Role } from '~/composables/permission'
+import type { PermissionCode } from '~/composables/permission'
 
 declare module '#app' {
   interface PageMeta {
@@ -6,8 +6,6 @@ declare module '#app' {
     auth?: boolean
     /** ページを見るのに必要な権限コード。配列はいずれか1つ */
     permission?: PermissionCode | PermissionCode[]
-    /** ページを見るのに必要な役割。配列はいずれか1つ */
-    role?: Role | Role[]
   }
 }
 

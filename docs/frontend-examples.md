@@ -26,7 +26,7 @@
 | `D*` ラッパー | `frontend/app/components/common/`（一覧は frontend-conventions.md §7.2） |
 | `useAPI`、`resource`、`readOnlyResource`、`Paginated` | `frontend/app/api/` |
 | `useAccountStore` | `frontend/app/composables/account.ts`（frontend-conventions.md §4） |
-| `usePermission`、`PermissionCode`、`Role` | `frontend/app/composables/permission.ts`（frontend-conventions.md §6） |
+| `usePermission`、`PermissionCode` | `frontend/app/composables/permission.ts`（frontend-conventions.md §6） |
 
 ### これから作るもの
 
@@ -191,7 +191,7 @@ const saved = (value: Destination) => {
 // /manage 以下の全ページに適用される。配列はいずれか1つを持っていればよい
 definePageMeta({
   layout: 'manage',
-  role: [Role.BUSINESS_ADMIN, Role.PLUGIN_PUBLISHER, Role.PLATFORM_ADMIN],
+  permission: [PermissionCode.MANAGE_DESTINATIONS, PermissionCode.PUBLISH_COMPANY_SKILLS],
 })
 </script>
 
@@ -206,7 +206,7 @@ definePageMeta({
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 
-definePageMeta({ permission: PermissionCode.MANAGE_DESTINATION })
+definePageMeta({ permission: PermissionCode.MANAGE_DESTINATIONS })
 
 const api = useAPI()
 const { t } = useI18n()
@@ -320,7 +320,7 @@ const onDelete = async () => {
     <template #footer>
       <!-- 削除はサーバー側でも権限を確認し、権限がなければ403になる -->
       <DBtn
-        v-if="hasPermission(PermissionCode.MANAGE_DESTINATION)"
+        v-if="hasPermission(PermissionCode.MANAGE_DESTINATIONS)"
         color="error"
         variant="ghost"
         @click="onDelete"

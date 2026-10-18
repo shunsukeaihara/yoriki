@@ -20,15 +20,13 @@ class MyUserSerializer(ReadOnlyModelSerializer):
             "username",
             "email",
             "display_name",
-            "is_business_admin",
-            "is_plugin_publisher",
             "is_platform_admin",
             "all_permissions",
         )
 
     @extend_schema_field(serializers.ListField(child=serializers.CharField()))
     def get_all_permissions(self, obj: User) -> list[str]:
-        """Djangoのpermission（"<app_label>.<codename>"）。画面の出し分けに使う"""
+        """Djangoのpermission（"<app_label>.<codename>"）。Groupから得たものを含む。画面の出し分けに使う"""
         return sorted(obj.get_all_permissions())
 
 

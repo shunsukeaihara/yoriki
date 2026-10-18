@@ -51,3 +51,4 @@ testpaths = ["src"]
 python_files = ["tests.py", "test_*.py", "*_test.py"]
 # .envrc の DJANGO_SETTINGS_MODULE より優先させるため、iniではなくコマンドラインの引数で指定する
 addopts = "--ds=app.settings_test --reuse-db"
+markers = ["postgres: PostgreSQLが必要なテスト（SQLiteでは飛ばす）"]

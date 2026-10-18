@@ -30,7 +30,7 @@ API・認証・フォームの部品は、DRFの規約（snake_caseのJSON、カ
 | `createSubmit()` | 送信、loading、DRFのエラー辞書をまとめて扱う |
 | `getValidationError()` | 400はフィールドごとのエラー辞書に、それ以外は `nonFieldErrors: [detail]` に変換する |
 | `useAccountStore()` | ログイン状態と、`app/v1/my/` から取得したログインユーザー（権限を含む） |
-| `usePermission()` | 権限コードと役割の判定 |
+| `usePermission()` | 権限コードの判定 |
 | `D*` コンポーネント | Nuxt UIのラッパー。`errorMessages` の表示、API連動のオートコンプリート・テーブル・ダイアログ |
 
 ### 0.3 検証はサーバー、表示はフロントエンド
@@ -326,46 +326,29 @@ ViewSetの `@action`（停止、回答、公開等）も、入力があれば同
 ```ts
 // composables/permission.ts
 export const PermissionCode = {
-  MANAGE_DESTINATION: 'delivery.manage_destination',
-  PUBLISH_SKILL: 'skill.publish_skill',
+  MANAGE_DESTINATIONS: 'delivery.can_manage_destinations',
+  PUBLISH_COMPANY_SKILLS: 'skill.can_publish_company_skills',
 } as const
 export type PermissionCode = (typeof PermissionCode)[keyof typeof PermissionCode]
-
-export const Role = {
-  BUSINESS_ADMIN: 'businessAdmin',
-  PLUGIN_PUBLISHER: 'pluginPublisher',
-  PLATFORM_ADMIN: 'platformAdmin',
-} as const
-export type Role = (typeof Role)[keyof typeof Role]
 
 export const usePermission = defineStore('permission', () => {
   const account = useAccountStore()
   const permissions = computed(() => account.user?.allPermissions ?? [])
   const hasPermission = (code: PermissionCode) => permissions.value.includes(code)
   const hasAny = (codes: PermissionCode[]) => codes.some(hasPermission)
-  // 基盤管理者は、業務管理者・Plugin公開者の役割も持つものとして扱う（バックエンドと同じ）
-  const hasRole = (role: Role) => {
-    const user = account.user
-    if (!user) return false
-    if (user.isPlatformAdmin) return true
-    if (role === Role.BUSINESS_ADMIN) return user.isBusinessAdmin
-    if (role === Role.PLUGIN_PUBLISHER) return user.isPluginPublisher
-    return false
-  }
-  const hasAnyRole = (roles: Role[]) => roles.some(hasRole)
-  return { permissions, hasPermission, hasAny, hasRole, hasAnyRole }
+  return { permissions, hasPermission, hasAny }
 })
 ```
 
 - 権限コードはDjangoの `app_label.codename` の形で、`app/v1/my/` の `allPermissions` から判定する（`usePermission`）。
 - 使う権限コードは `PermissionCode` に定数として追加し、画面のコードに文字列を直接書かない（`Permissions` はDOMの型名と衝突するので使わない）。
-- 役割（業務管理者・Plugin公開者・基盤管理者）は、`app/v1/my/` の `isBusinessAdmin`、`isPluginPublisher`、`isPlatformAdmin` から `hasRole` で判定する。基盤管理者はすべての役割を持つものとして扱う（backend-conventions.md §6.3）。
+- 役割（業務管理者・Plugin公開者等）の名前では判定しない。役割はpermissionをまとめたGroupで、`allPermissions` にはGroupから得たpermissionも含まれる。基盤管理者はすべてのpermissionを持つ（backend-conventions.md §6.3）。
 
 ### 6.2 画面・メニュー・ボタン
 
-- ページの権限は `definePageMeta({ permission: PermissionCode.X })`、役割は `definePageMeta({ role: Role.X })` で宣言し、`middleware/permission.global.ts` で確認する。権限がなければ403のエラー画面にする。
-- `permission`・`role` に配列を指定した場合は、いずれか1つを持っていればよい（`hasAny`、`hasAnyRole`）。`permission` と `role` を両方指定した場合は、両方を満たす必要がある。
-- `definePageMeta` で `permission`・`role`・`auth` を型付きで書けるよう、`app/types/page-meta.d.ts` で `PageMeta` を拡張している。
+- ページの権限は `definePageMeta({ permission: PermissionCode.X })` で宣言し、`middleware/permission.global.ts` で確認する。権限がなければ403のエラー画面にする。
+- `permission` に配列を指定した場合は、いずれか1つを持っていればよい（`hasAny`）。
+- `definePageMeta` で `permission`・`auth` を型付きで書けるよう、`app/types/page-meta.d.ts` で `PageMeta` を拡張している。
 - `pages/manage.vue` に `definePageMeta({ layout: 'manage', permission: [...] })` を書くと、`/manage` 以下の全ページに適用される（route metaは親から子に引き継がれる）。
 - サイドメニューの項目には `permission` を持たせ、権限のない項目は表示しない。
 - ボタンや操作は `v-if="hasPermission(PermissionCode.X)"` で出し分ける。コメントで「サーバー側でも403で弾かれる」ことを書いておく。

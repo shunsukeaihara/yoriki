@@ -73,7 +73,7 @@ VS Codeを標準のエディタとし、リポジトリの `.vscode/settings.jso
 
 - ESLintは不具合につながる書き方の検出だけを担当し、見た目の整形はPrettierに任せる（`eslint-config-prettier` で整形系の規則を外している）。
 - `any` は使わない。どうしても必要な場合は、理由をコメントに書いて `// eslint-disable-next-line` で1行だけ外す。
-- 単体テスト（Vitest）とE2E（Playwright）は、最初のテストを書くときに導入する。
+- 単体テスト（Vitest）は導入済み（書き方は frontend-conventions.md §13）。E2E（Playwright）は、最初のテストを書くときに導入する。
 - 単体テストは、`composables/`（`createSubmit`、`getValidationError`、日付の変換等）と `D*` ラッパーの値の受け渡しを対象にする。
 - E2Eは、ログイン、会話の送信、Runの停止・回答など、主要な流れだけに絞る。APIはテスト用のバックエンドを起動して使い、モックで置き換えない。
 - `D*` ラッパーを変更したら、`/dev/inputs` で通常の表示とエラーの表示も目で確認する（frontend-conventions.md §7.3）。
@@ -103,7 +103,7 @@ GitHub Actionsで、Pull Requestと `main` へのpushごとに実行する。変
 | job | 対象の変更 | 内容 |
 |---|---|---|
 | backend（`backend.yml`） | `api/**` | ruff check、ruff format --check、mypy、pytest（PostgreSQLのserviceコンテナ）、`makemigrations --check --dry-run`、`spectacular --validate --fail-on-warn` |
-| frontend（`frontend.yml`） | `frontend/**` | lint、format:check、typecheck、vitest（最初のテストを書くときに追加）、`nuxt build` |
+| frontend（`frontend.yml`） | `frontend/**` | lint、format:check、typecheck、vitest、`nuxt build` |
 | api-types（`api-types.yml`） | `api/**`、`frontend/**` | スキーマとフロントエンドの型を生成し、コミット済みのものと差分がないこと（`git diff --exit-code`） |
 | app-images（`app-images.yml`） | Dockerfile、依存のlock、`deploy/**` | 本体のイメージをビルドし、`deploy/compose.yaml` を起動して疎通を確認する（`/api/ping/`、画面、API、静的ファイル、セキュリティのヘッダー）。レジストリへのpushは、使うレジストリを決めてから追加する。コードだけの変更では動かさない |
 | e2e（未） | `api/**`、`frontend/**` | Composeでバックエンドとフロントエンドを起動し、Playwrightを実行（`main` へのpushと、ラベルを付けたPull Requestだけ） |

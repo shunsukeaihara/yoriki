@@ -27,6 +27,8 @@
 | `useAPI`、`resource`、`readOnlyResource`、`Paginated` | `frontend/app/api/` |
 | `useAccountStore` | `frontend/app/composables/account.ts`（frontend-conventions.md §4） |
 | `usePermission`、`PermissionCode` | `frontend/app/composables/permission.ts`（frontend-conventions.md §6） |
+| 管理画面のlayoutとメニュー | `frontend/app/layouts/manage.vue`、`frontend/app/composables/manage.ts`、`frontend/app/middleware/manage.ts`、`frontend/app/pages/manage.vue` |
+| エラー画面 | `frontend/app/error.vue`、`frontend/app/plugins/error-handler.ts` |
 
 ### これから作るもの
 
@@ -37,7 +39,6 @@
 | `ListPageTitle`、`TableSearchForm` | `frontend/app/components/common/` |
 | `formatDatetime` | `frontend/app/composables/date.ts` |
 | `useEventStream` | `frontend/app/composables/stream.ts`（[realtime.md](realtime.md) §5） |
-| `layouts/manage` | `frontend/app/layouts/manage.vue` |
 | `RunStatus`、`ClarificationStatus`、`runStatusItems`、`isCancellable` | `frontend/app/composables/run.ts` |
 | `RunStatusBadge`、`RunEventTimeline` | `frontend/app/components/run/` |
 
@@ -184,20 +185,21 @@ const saved = (value: Destination) => {
 </template>
 ```
 
-### pages/manage.vue
+### composables/manage.ts（メニューに追加する）
 
-```vue
-<script setup lang="ts">
-// /manage 以下の全ページに適用される。配列はいずれか1つを持っていればよい
-definePageMeta({
-  layout: 'manage',
-  permission: [PermissionCode.MANAGE_DESTINATIONS, PermissionCode.PUBLISH_COMPANY_SKILLS],
-})
-</script>
+`pages/manage.vue` と `middleware/manage.ts` は実装済みで、変更しない。ページを追加したら、メニューの項目を足す。`/manage` に入れるかどうかは、表示できる項目があるかで決まる。
 
-<template>
-  <NuxtPage />
-</template>
+```ts
+const { $i18n } = useNuxtApp()
+const all = computed<ManageMenuItem[]>(() => [
+  {
+    label: $i18n.t('通知先'),
+    icon: 'i-lucide-send',
+    to: '/manage/destinations',
+    // リンク先のページの definePageMeta と同じ権限
+    permission: PermissionCode.MANAGE_DESTINATIONS,
+  },
+])
 ```
 
 ### pages/manage/destinations.vue

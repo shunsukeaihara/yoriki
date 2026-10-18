@@ -35,5 +35,5 @@ jobs:
       - run: pnpm lint
       - run: pnpm format:check
       - run: pnpm typecheck
-      # 単体テスト（vitest）は、最初のテストを書くときに追加する（docs/development.md §3.2）
+      - run: pnpm test
       - run: pnpm build

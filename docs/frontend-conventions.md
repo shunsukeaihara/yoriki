@@ -80,10 +80,12 @@ frontend/
 ├── tsconfig.json           # .nuxt/tsconfig.*.json を参照するだけ
 ├── i18n/i18n.config.ts     # vue-i18nの設定（§10）
 ├── i18n/locales/ja.json    # 日本語は空（キーがそのまま日本語の文）
+├── vitest.config.ts        # 単体テスト（Nuxtの環境で動かす）
+├── test/nuxt/              # 単体テスト（api/、composables/、components/。§13）
 └── app/                      # （未）が付いたものは、これから作る
-    ├── app.vue                 # <UApp :locale>（i18nの言語に合わせる）<NuxtLayout><NuxtPage /></NuxtLayout></UApp>
+    ├── app.vue                 # <UApp :locale="useUiLocale()"><NuxtLayout><NuxtPage /></NuxtLayout></UApp>
     ├── app.config.ts           # （未）Nuxt UIのテーマ（primary / neutralの色）
-    ├── error.vue               # （未）
+    ├── error.vue               # エラー画面（403・404・その他。APIのエラーはサーバーの detail を表示）
     ├── assets/css/main.css     # @import "tailwindcss"; @import "@nuxt/ui";
     ├── api/
     │   ├── schema.d.ts         # openapi-typescriptが生成（手で編集しない）
@@ -94,11 +96,11 @@ frontend/
     ├── components/
     │   ├── common/             # D*ラッパー（prefixなしで自動import）
     │   └── <domain>/           # 業務コンポーネント（例：run/RunCancelDialog.vue）
-    ├── composables/            # field, date, form, list, confirm, account, permission（実装済み）、stream, <domain>（未）
-    ├── layouts/                # default（社員）、anonymous（ログイン）、manage（管理・未）
-    ├── middleware/             # auth.global.ts、permission.global.ts
+    ├── composables/            # field, date, form, list, confirm, account, permission, manage, locale（実装済み）、stream, <domain>（未）
+    ├── layouts/                # default（社員）、anonymous（ログイン）、manage（管理）
+    ├── middleware/             # auth.global.ts、permission.global.ts、manage.ts（/manage の入口）
     ├── pages/                  # 社員向けはルート直下、管理向けは manage/ 以下、dev/ は開発用
-    └── plugins/                # auth.client.ts、error-handler.ts（未）
+    └── plugins/                # auth.client.ts、error-handler.ts
 ```
 
 ```ts
@@ -264,7 +266,8 @@ export type RunListParams = ListParams & { status?: number }
 const { data: run, error, refresh } = await useAsyncData(`run-${runId}`, () => api.runs(runId).get())
 if (error.value) throw createError(error.value)   // statusCode（404 / 403 等）を引き継ぐ
 ```
-- `plugins/error-handler.ts` で、処理されなかった `AxiosError` を `showError({ statusCode })` に変換する。
+- `plugins/error-handler.ts` で、処理されなかった `AxiosError`（コンポーネントの `vue:error` と `unhandledrejection`）を `showError({ statusCode, data: { detail } })` に変換する。`detail` は `makeErrorMsg()` の文で、`error.vue` に表示する。401はAPIクライアントがログイン画面へ移動させるので、エラー画面にしない。
+- `error.vue` は、ステータス（403・404・その他）ごとの見出しと案内、`data.detail` を表示する。`error.message` は利用者向けの文ではない（英語の内部メッセージ等）ので表示しない。`error.vue` は `app.vue` の代わりに描画されるので、`UApp` を自分で置く（`useUiLocale()`）。
 
 ---
 
@@ -349,8 +352,9 @@ export const usePermission = defineStore('permission', () => {
 - ページの権限は `definePageMeta({ permission: PermissionCode.X })` で宣言し、`middleware/permission.global.ts` で確認する。権限がなければ403のエラー画面にする。
 - `permission` に配列を指定した場合は、いずれか1つを持っていればよい（`hasAny`）。
 - `definePageMeta` で `permission`・`auth` を型付きで書けるよう、`app/types/page-meta.d.ts` で `PageMeta` を拡張している。
-- `pages/manage.vue` に `definePageMeta({ layout: 'manage', permission: [...] })` を書くと、`/manage` 以下の全ページに適用される（route metaは親から子に引き継がれる）。
-- サイドメニューの項目には `permission` を持たせ、権限のない項目は表示しない。
+- 管理画面のサイドメニューは `composables/manage.ts` の `useManageMenu()` に1か所で定義する。各項目に `permission`（リンク先のページの `definePageMeta` と同じもの）を持たせ、権限のない項目は表示しない。
+- `pages/manage.vue` の `definePageMeta({ layout: 'manage', middleware: 'manage' })` は `/manage` 以下の全ページに適用される（route metaは親から子に引き継がれる）。`middleware/manage.ts` は、表示できるメニュー項目が1つもなければ403にする。`/manage` に入れる権限の一覧を別に持たず、メニューの定義から決める。`/manage` 自体はメニューの最初の項目へ移動する。
+- 社員向けのlayoutの「管理」の入口も、表示できるメニュー項目があるときだけ出す。
 - ボタンや操作は `v-if="hasPermission(PermissionCode.X)"` で出し分ける。コメントで「サーバー側でも403で弾かれる」ことを書いておく。
 - 特定の組織IDやユーザーIDをフロントエンドに直接書いて機能を出し分けない。出し分けが必要なら、サーバーが権限か設定値として返す。
 
@@ -442,7 +446,7 @@ pages/
 ├── conversations/[conversationId].vue
 ├── runs.vue
 ├── runs/[runId].vue              # 詳細ドロワー
-├── manage.vue                    # definePageMeta({ layout: 'manage', permission: ... })＋<NuxtPage />
+├── manage.vue                    # definePageMeta({ layout: 'manage', middleware: 'manage' })＋<NuxtPage />
 └── manage/
     ├── destinations.vue
     ├── destinations/[destinationId].vue
@@ -511,3 +515,12 @@ OSSとして公開するため、最初から多言語化しておく。当面�
 - コメントアウトしたテンプレートやコード、`console.log` / `console.debug` の消し忘れ。
 - 組織IDの一覧をフロントエンドに直接書くfeature flag。
 - typoのあるコンポーネント名。
+
+## 13 単体テスト
+
+- Vitestを `@nuxt/test-utils` のNuxtの環境（`environment: 'nuxt'`）で動かす。自動importされる関数・コンポーネントを、画面と同じ形で使える（`import` は書かない。コンポーネントは `#components` からimportする）。
+- テストは `test/nuxt/` の下に、`app/` と同じ分け方（`api/`、`composables/`、`components/`）で置く（Nuxtの型チェックの対象になる）。ファイル名は `<対象>.test.ts`。
+- コンポーネントは `mountSuspended()` でマウントし、`v-model` の受け渡し（`update:modelValue` の値）、`errorMessages` の表示を確かめる。見た目は `/dev/inputs` で確かめる（§7.3）。
+- 日時の変換を環境によらず同じ結果にするため、テストのタイムゾーンは `Asia/Tokyo` に固定している（`vitest.config.ts`）。
+- APIを呼ぶ処理は、axiosのエラー（`AxiosError`）や戻り値を作って渡して確かめる。バックエンドと通して確かめるのはE2E（development.md §3.2）。
+

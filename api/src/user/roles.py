@@ -7,7 +7,11 @@ APIや画面では役割の名前で判定せず、個々のpermissionで判定�
 permissionは消さないので、導入先で役割の中身を調整してよい。
 """
 
+from django.apps import apps as global_apps
+from django.contrib.auth.management import create_permissions
 from django.contrib.auth.models import Group, Permission
+from django.contrib.contenttypes.management import create_contenttypes
+from django.db import DEFAULT_DB_ALIAS
 
 from utils.permissions import AppPermission, to_perm_str
 
@@ -22,10 +26,19 @@ ROLES: dict[str, list[AppPermission | str]] = {
 }
 
 
-def sync_role_groups(**kwargs) -> None:
+def sync_role_groups(using: str = DEFAULT_DB_ALIAS, **kwargs) -> None:
     """役割のGroupを作り、定義したpermissionを付ける（post_migrateで呼ぶ）"""
-    for name, perms in ROLES.items():
-        group, _created = Group.objects.get_or_create(name=name)
-        for perm in perms:
-            app_label, codename = to_perm_str(perm).split(".", 1)
-            group.permissions.add(Permission.objects.get(content_type__app_label=app_label, codename=codename))
+    perms = {name: [to_perm_str(p).split(".", 1) for p in perm_list] for name, perm_list in ROLES.items()}
+
+    # post_migrateはアプリごとに順に送られ、permissionもその中で作られる。参照するアプリのpermissionが
+    # まだ作られていない場合があるので、アプリの順番に依存しないよう、ここで先に作っておく（既にあれば何もしない）
+    for app_label in {app_label for perm_list in perms.values() for app_label, _codename in perm_list}:
+        app_config = global_apps.get_app_config(app_label)
+        create_contenttypes(app_config, verbosity=0, using=using)
+        create_permissions(app_config, verbosity=0, using=using)
+
+    for name, perm_list in perms.items():
+        group, _created = Group.objects.using(using).get_or_create(name=name)
+        for app_label, codename in perm_list:
+            permission = Permission.objects.using(using).get(content_type__app_label=app_label, codename=codename)
+            group.permissions.add(permission)

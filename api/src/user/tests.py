@@ -82,6 +82,15 @@ class TestRoleGroups:
         sync_role_groups()
         assert set(group.permissions.values_list("codename", flat=True)) == {"view_user", "change_user"}
 
+    @pytest.mark.django_db
+    def test_sync_creates_missing_permissions_first(self, monkeypatch):
+        # post_migrateの順番で、参照するアプリのpermissionがまだ作られていない場合
+        Permission.objects.filter(content_type__app_label="user", codename="view_user").delete()
+        monkeypatch.setitem(ROLES, "Plugin公開者", ["user.view_user"])
+        sync_role_groups()
+        group = Group.objects.get(name="Plugin公開者")
+        assert list(group.permissions.values_list("codename", flat=True)) == ["view_user"]
+
 
 class TestWithPermission:
     @pytest.mark.django_db

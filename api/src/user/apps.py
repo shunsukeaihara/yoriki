@@ -10,5 +10,5 @@ class UserConfig(AppConfig):
         # Modelの読み込み後でないとimportできないので、ready()の中でimportする
         from .roles import sync_role_groups  # noqa: PLC0415
 
-        # すべてのアプリのpermissionが作られた後に同期するため、senderを限定しない
-        post_migrate.connect(sync_role_groups, dispatch_uid="user.sync_role_groups")
+        # 同期は1回で済むので、このアプリの分だけ受け取る。参照するpermissionは同期の中で先に作る
+        post_migrate.connect(sync_role_groups, sender=self, dispatch_uid="user.sync_role_groups")

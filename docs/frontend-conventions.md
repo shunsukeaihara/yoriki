@@ -56,7 +56,7 @@ API・認証・フォームの部品は、DRFの規約（snake_caseのJSON、カ
 | 型生成 | openapi-typescript＋type-fest |
 | リアルタイム | SSE（[realtime.md](realtime.md)） |
 | ユーティリティ | @vueuse/nuxt、date-fns |
-| ツールのバージョン | mise（リポジトリルートの `mise.toml` でNode.js 24とpnpmを固定） |
+| ツールのバージョン | mise（リポジトリルートの `mise.toml` でNode.js 26とpnpmを固定） |
 | パッケージ管理 | pnpm |
 | lint | ESLint（`@nuxt/eslint`＋`eslint-config-prettier`） |
 | 整形 | Prettier（`semi: false`、`singleQuote: true`、`printWidth: 120`） |

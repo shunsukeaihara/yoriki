@@ -24,9 +24,10 @@ yoriki/
 │   ├── compose.app.yaml        # 複数台構成のアプリサーバー（postgresを除く、§8.4）
 │   ├── compose.db.yaml         # 複数台構成のDBサーバー（§8.4）
 │   ├── compose.qcluster.yaml   # qclusterだけのWorkerサーバー（§3.2）
-│   ├── nginx/                  # Nginxの設定
-│   └── env/                    # 本番の環境変数の一覧（値は空のexample）
-├── .github/workflows/      # app.yml（本体）、sandbox.yml（Sandboxイメージ）
+│   ├── nginx/                  # Nginxの設定（sites/：tls.conf・http.conf、snippets/、edge/）
+│   ├── env/                    # 本番の環境変数の一覧（yoriki.env・postgres.env・cloudflared.env の example）
+│   └── .env.example            # Composeファイル自体の変数（イメージ名等。秘密情報は書かない）
+├── .github/workflows/      # backend.yml、frontend.yml、api-types.yml、app-images.yml、sandbox.yml（未）
 ├── mise.toml
 └── .envrc.example
 ```
@@ -46,6 +47,8 @@ yoriki/
 - `yoriki-api` は1つのイメージを、起動コマンドを変えて複数のサービスで使う（design.md §10）。
 - 本体のイメージ（`yoriki-api`、`yoriki-frontend`）は配布しない。導入する人がソースからビルドする。`yoriki-api` には、ライセンス上そのまま再配布できないもの（SQL Server用のMicrosoft ODBC Driver、GPL-2.0のmysqlclient）が入るため（design.md §4.9.2）。
 - 本体のイメージには、ビルド時に秘密情報を入れない。`collectstatic` はビルド時に行う。
+- Djangoの静的ファイル（管理画面等）はnginxが `/api/static/` で配る。apiのイメージに入れた静的ファイルを、一度だけ動く `static` サービスが共有のボリュームへコピーし、nginxはそれを読み取り専用でmountする。イメージを更新すると `up -d` のたびにコピーし直す（古い版のファイルは、開いたままの画面が使うので消さない）。ファイル名に内容のハッシュが付くので、長くキャッシュさせる。
+- Dockerfileは `api/Dockerfile`、`frontend/Dockerfile`。apiは依存をuv（`uv sync --locked --no-dev`）で入れ、root以外のユーザーで動かす。frontendはNode 25以降にcorepackが同梱されないので、pnpmを `mise.toml` と同じ版でnpmから入れる。
 - Dockerfileのベースイメージは `mise.toml` のバージョンに合わせる（Node 26、Python 3.13）。`mise.toml` を変えたら、Dockerfileも同じ変更で更新する。
 - 公式イメージもタグだけでなくdigestで固定する。更新はDependabot等でdigestの変更を提案させ、レビューしてから取り込む。
 - Sandboxイメージは、本体がdigestで固定して参照する（`RuntimeProfileVersion`）。本体のリリースとは連動させない。
@@ -70,12 +73,15 @@ yoriki/
 | frontend | yoriki-frontend | `node .output/server/index.mjs` | edge | なし |
 | api | yoriki-api | `uvicorn app.asgi:application ...` | edge、backend、egress | objects（Local保存のとき） |
 | qcluster | yoriki-api | `python manage.py qcluster` | backend、egress | workspaces、Dockerソケット |
-| channel-listener | yoriki-api | `python manage.py run_channel_listener` | backend、egress | なし（profile `channels` のときだけ起動） |
+| channel-listener | yoriki-api | `python manage.py run_channel_listener` | backend、egress | なし（profile `channels` のときだけ起動。Channelの受信を実装するときにComposeへ追加する） |
+| static | yoriki-api | 静的ファイルを共有ボリュームへコピーして終わる | なし | static（nginxと共有） |
+| backup | postgres | `pg_dump` | backend | `/var/lib/yoriki/backups`（profile `tools`、cron等で実行） |
 | postgres | postgres | — | backend | DB |
 | migrate | yoriki-api | `python manage.py migrate` | backend | なし（profile `tools`、手動で実行） |
 
 ```yaml
-# deploy/compose.yaml（抜粋）
+# deploy/compose.yaml の考え方（抜粋。実際のファイルは compose.app.yaml のサービスを extends で取り込み、
+# postgres、nginxのTLS、qclusterのDockerソケットを加える）
 services:
   api:
     image: ${YORIKI_API_IMAGE:?}
@@ -191,11 +197,14 @@ cd frontend && pnpm dev
 | `/api/files/<token>/` | api:8000 | 成果物の期限付き取得。セッションを使わずtokenを確認する。rate limitを付ける |
 | `/_protected/` | （nginxの内部location） | `internal;` を付け、apiの `X-Accel-Redirect` からだけ使う。外から直接は取得できない |
 | `/api/ping/` | api:8000 | ヘルスチェック（認証なし） |
+| `/api/static/` | （nginxが直接返す） | Djangoの静的ファイル（§2）。長くキャッシュさせる |
 
 - 画面とAPIを同じドメインにまとめる。認証はセッションCookie（`Secure`、`HttpOnly`、`SameSite=Lax`）で行うので、CORSは使わない。
 - HTTPは443へリダイレクトし、HTTP/2を有効にする（SSEの複数の接続を1本にまとめるため）。
 - `X-Forwarded-For`、`X-Forwarded-Proto` を付けて転送する。Uvicornは `--proxy-headers` で受け取り、Djangoは `SECURE_PROXY_SSL_HEADER` を設定する。
-- HSTS、`X-Content-Type-Options`、`Referrer-Policy`、フロントエンド向けのCSPを付ける。
+- HSTS、`X-Content-Type-Options`、`Referrer-Policy`、フロントエンド向けのCSPを付ける（`deploy/nginx/snippets/`）。HSTSはHTTPSで受けたときだけ付ける。
+- CSPは、NuxtのSPAがHTMLにインラインのスクリプト（色モードの初期化、`window.__NUXT__` の設定）を含むため、`script-src` に `'unsafe-inline'` を許可している。インラインのスクリプトのハッシュかnonceで絞るのは今後の課題とする。
+- nginxの設定は2種類ある。nginxでTLSを終端して直接公開する `sites/tls.conf`（`compose.yaml`）と、前段（Cloudflare Tunnel、認証プロキシ、エッジのnginx）がTLSを終端し、80番で受ける `sites/http.conf`（`compose.app.yaml`、`compose.cloudflare.yaml`）。`http.conf` は前段が付けた `X-Forwarded-For`・`X-Forwarded-Proto` を、私設のアドレスからのものだけ信頼するので、インターネットへ直接公開しない。
 - `client_max_body_size` はパスごとに決める（通常のAPIは小さく、添付のアップロードだけ大きくする）。
 - 成果物のダウンロード（Local保存）は、apiが権限と期限付きtokenを確認した後、`X-Accel-Redirect` でnginxの内部location（`location /_protected/ { internal; }`）からファイルを返す。nginxから保存先のディレクトリを直接公開しない。
 
@@ -228,7 +237,8 @@ SSEのパスにだけ適用する。apiのレスポンスにも `X-Accel-Bufferi
 
 - 本番の環境変数は、ホストの `/etc/yoriki/yoriki.env`（所有者root、権限600）に置き、Composeの `env_file` で渡す。
 - 変数の一覧は `deploy/env/yoriki.env.example` に、説明と空の値で管理する。新しい変数を追加したら、`.envrc.example` と合わせて更新する。
-- Composeファイル自体の変数（`YORIKI_API_IMAGE` 等のイメージのdigest）は、`deploy/.env` に置く。ここには秘密情報を書かない。
+- PostgreSQLの初期設定は `/etc/yoriki/postgres.env`（`deploy/env/postgres.env.example`）、Cloudflare Tunnelのトークンは `/etc/yoriki/cloudflared.env`（`deploy/env/cloudflared.env.example`）に置く。どれも所有者root、権限600にする。
+- Composeファイル自体の変数（`YORIKI_API_IMAGE` 等のイメージのdigest、証明書のディレクトリ、dockerグループのGID）は、`deploy/.env`（`deploy/.env.example` をコピー）に置く。ここには秘密情報を書かない。
 - LLMのAPI key、Connector・外部連携の資格情報は、管理画面で登録する接続のSecret参照として扱い、apiとqcluster（Workerサーバーのqclusterを含む）の中だけで使う。Sandboxに渡す環境変数には含めない。
 - Secret参照は、初期には環境変数名を指す（例：`env:YORIKI_OPENAI_API_KEY`）。値は `yoriki.env`（開発では `.envrc`）に置き、管理画面には変数名だけを登録する。
 - クラウドのSecret管理を使う環境では、起動時にSecretを環境変数として渡す仕組み（ECSのsecrets、systemdのcredential等）を使う。アプリは渡し方に依存せず、環境変数を読むだけにする。
@@ -258,6 +268,7 @@ docker compose -f deploy/compose.yaml exec api python manage.py resume_workers
 ```
 
 - design.md §10の順序（イメージ → migration → 起動）に従う。
+- `drain_workers`・`resume_workers` は、Workerの実行（Run）を実装するときに作る。それまでは手順2と6を飛ばす。
 - migrationは、旧バージョンのコードでも動く形（列の追加は先、削除は次のリリース）で書き、更新中に旧apiが動いていても壊れないようにする。
 - Workerサーバー（§3.2）は、手順2のdrainの後、手順6の再開の前に同じイメージへ入れ替える。
 

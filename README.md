@@ -53,15 +53,26 @@ mise trust && mise install
 cp .envrc.example .envrc
 direnv allow
 
-# フロントエンド
+# PostgreSQL（ローカル開発用）
+docker compose -f deploy/compose.dev.yaml up -d
+
+# バックエンド（http://localhost:8000）
+cd api
+uv sync
+uv run python src/manage.py migrate
+uv run python src/manage.py createsuperuser   # 最初の基盤管理者（/api/admin/ にパスワードでログインできる）
+uv run uvicorn app.asgi:application --reload --app-dir src
+
+# フロントエンド（別のターミナルで）
 cd frontend
 pnpm install
 pnpm dev            # http://localhost:3000 （/api は localhost:8000 の Django へ転送される）
 ```
 
 `/dev/inputs` で、フロントエンドの入力コンポーネントの一覧を確認できる（開発時のみ）。
+社内SSOでログインするには、`.envrc` の `YORIKI_SSO_*` に認証基盤のアプリの値を設定する（[docs/backend-conventions.md](docs/backend-conventions.md) §6.2）。
 
-バックエンド（`api/`）とローカル用のComposeファイル（`deploy/compose.dev.yaml`）の起動手順は、雛形を作るときにここへ追記する（予定している手順は [docs/deployment.md](docs/deployment.md) §3.3）。
+テストと静的解析は [docs/development.md](docs/development.md) §3、本番の配備（Docker Compose、nginx）は [docs/deployment.md](docs/deployment.md) を参照。
 
 ## ライセンス
 

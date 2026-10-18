@@ -57,6 +57,7 @@ VS Codeを標準のエディタとし、リポジトリの `.vscode/settings.jso
 - mypyの設定は、`api/` の雛形を作るときに `api/pyproject.toml` に置く（`plugins = ["mypy_django_plugin.main", "mypy_drf_plugin.main"]`、`[tool.django-stubs] django_settings_module = "app.settings"`）。
 - lintの警告は、`# noqa` で抑止せずにコードを直して解消する。抑止する場合は理由をコメントに書く（backend-conventions.md §10）。
 - テストはSQLiteではなくPostgreSQLで実行する（`select_for_update`、LISTEN/NOTIFY、advisory lock等、PostgreSQLの機能に依存するため）。ローカルでは `deploy/compose.dev.yaml` のPostgreSQLを使う。
+- PostgreSQLに接続できないときは、pytestは接続を長く待たずに、起動のコマンド（`docker compose -f deploy/compose.dev.yaml up -d`）を案内して終わる（`conftest.py`）。
 - pytestは `app.settings_test` を使う。`.envrc` の `DJANGO_SETTINGS_MODULE` より優先させるため、`pyproject.toml` の `addopts` に `--ds` で指定している。テスト用DBは `--reuse-db` で使い回すので、マイグレーションを変えたら `uv run pytest --create-db` で作り直す。
 - settingsの読み込みに環境変数（`YORIKI_SECRET_KEY` 等）が要るので、mypy（django-stubs）とpytestは `.envrc` を読み込んだ状態で実行する。
 
@@ -104,11 +105,11 @@ GitHub Actionsで、Pull Requestと `main` へのpushごとに実行する。変
 | backend（`backend.yml`） | `api/**` | ruff check、ruff format --check、mypy、pytest（PostgreSQLのserviceコンテナ）、`makemigrations --check --dry-run`、`spectacular --validate --fail-on-warn` |
 | frontend（`frontend.yml`） | `frontend/**` | lint、format:check、typecheck、vitest（最初のテストを書くときに追加）、`nuxt build` |
 | api-types（`api-types.yml`） | `api/**`、`frontend/**` | スキーマとフロントエンドの型を生成し、コミット済みのものと差分がないこと（`git diff --exit-code`） |
+| app-images（`app-images.yml`） | Dockerfile、依存のlock、`deploy/**` | 本体のイメージをビルドし、`deploy/compose.yaml` を起動して疎通を確認する（`/api/ping/`、画面、API、静的ファイル、セキュリティのヘッダー）。レジストリへのpushは、使うレジストリを決めてから追加する。コードだけの変更では動かさない |
 | e2e（未） | `api/**`、`frontend/**` | Composeでバックエンドとフロントエンドを起動し、Playwrightを実行（`main` へのpushと、ラベルを付けたPull Requestだけ） |
 | sandbox（未） | `sandbox/**`、毎週の定期実行 | イメージのビルド、契約テスト、脆弱性スキャン。`main` ではDocker Hubへ公開（deployment.md §2.1） |
-| app-images（未） | `main` へのpush | `yoriki-api`、`yoriki-frontend` のイメージをビルドしてレジストリへpush |
 
-- 依存の更新はDependabot（`.github/dependabot.yml`。GitHub Actions、uv、npm）でPull Requestにし、CIを通してからマージする。公開から日の浅い版を避けるため、Dependabotは `cooldown` を14日にし、npmはpnpmの `minimumReleaseAge` も維持する。
+- 依存の更新はDependabot（`.github/dependabot.yml`。GitHub Actions、uv、npm、Dockerfileのベースイメージ、Composeの公式イメージ）でPull Requestにし、CIを通してからマージする。公開から日の浅い版を避けるため、Dependabotは `cooldown` を14日にし、npmはpnpmの `minimumReleaseAge` も維持する。
 - CIのSecret（Docker Hubのtoken等）は、GitHubのEnvironmentに置き、`main` のjobだけが使えるようにする。
 
 ### 4.1 `[skip ci]` の使い方

@@ -1,0 +1,33 @@
+# 複数台構成のエッジ（docs/deployment.md §8.4のC）。cloudflaredと、アプリサーバーへ振り分けるnginx。
+# 2台で動かして冗長化する。アプリサーバーの役割を重ねてもよい。
+#   docker compose -f deploy/compose.edge.yaml up -d
+#   docker compose -f deploy/compose.app.yaml -f deploy/compose.edge.yaml up -d   # アプリ兼エッジ
+# Cloudflare側のトンネルの設定で、公開するホスト名を http://edge-nginx:80 へ転送する。
+# 振り分け先は /etc/yoriki/edge/app-servers.conf（nginx/edge/app-servers.conf.example を元に作る）。
+services:
+  edge-nginx:
+    image: nginx:1.30@sha256:eb1c896deef834f4e056829fd6dadac8305501f16cc71ba65fb252c8d0aa168e
+    volumes:
+      - ./nginx/edge/edge.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${YORIKI_EDGE_CONF_DIR:-/etc/yoriki/edge}:/etc/nginx/yoriki:ro
+    networks: [tunnel]
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: '5' }
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.0@sha256:9b49eed8f62806d5d45ddf59ecefb5710429598ea6d3fcccd2af938f621b2b07
+    command: tunnel --no-autoupdate run
+    env_file: [{ path: '${YORIKI_CLOUDFLARED_ENV_FILE:-/etc/yoriki/cloudflared.env}' }] # TUNNEL_TOKEN
+    networks: [tunnel]
+    depends_on: [edge-nginx]
+    deploy:
+      replicas: 2
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options: { max-size: 10m, max-file: '5' }
+
+networks:
+  tunnel: {}

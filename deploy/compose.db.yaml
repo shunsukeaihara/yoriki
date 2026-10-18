@@ -1,0 +1,44 @@
+# 複数台構成のDBサーバー（docs/deployment.md §8.4）。マネージドのDB（RDS等）を使うなら不要。
+#   docker compose -f deploy/compose.db.yaml up -d
+#   docker compose -f deploy/compose.db.yaml run --rm backup   # cron等で定期的に実行する
+name: yoriki-db
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: 10m, max-file: '5' }
+
+services:
+  postgres:
+    image: postgres:18@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336
+    env_file: [{ path: '${YORIKI_DB_ENV_FILE:-/etc/yoriki/postgres.env}' }] # POSTGRES_DB / POSTGRES_USER / POSTGRES_PASSWORD
+    ports:
+      # 私設ネットワークのアドレスだけで待ち受ける（インターネットには公開しない）
+      - '${YORIKI_PRIVATE_BIND:-127.0.0.1}:5432:5432'
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    shm_size: 256m
+    restart: unless-stopped
+    logging: *logging
+
+  # pg_dump で /var/lib/yoriki/backups に保存する。ファイルの保存先（S3等）のバックアップと同じ時点で取る（§7）
+  backup:
+    image: postgres:18@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336
+    env_file: [{ path: '${YORIKI_DB_ENV_FILE:-/etc/yoriki/postgres.env}' }]
+    command:
+      - sh
+      - -c
+      - 'PGPASSWORD="$$POSTGRES_PASSWORD" pg_dump -h postgres -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -Fc -f "/backups/yoriki-$$(date +%Y%m%d-%H%M%S).dump"'
+    volumes:
+      - /var/lib/yoriki/backups:/backups
+    depends_on:
+      postgres: { condition: service_healthy }
+    profiles: [tools]
+    restart: 'no'
+
+volumes:
+  postgres: {}

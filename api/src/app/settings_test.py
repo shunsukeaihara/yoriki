@@ -6,6 +6,13 @@
 
 from .settings import *  # noqa: F403  基本設定をすべて取り込んで上書きする
 
+# テストではcollectstaticしないので、ハッシュ付きのファイル名を使わない
+STATIC_ROOT = None
+STORAGES = {
+    **STORAGES,  # noqa: F405
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+}
+
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 
 SOCIALACCOUNT_PROVIDERS = {

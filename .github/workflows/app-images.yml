@@ -1,0 +1,105 @@
+# 本体のイメージ（yoriki-api、yoriki-frontend）をビルドし、単一ホストの構成（deploy/compose.yaml）を
+# 起動して疎通を確認する（docs/development.md §4）。レジストリへのpushは、使うレジストリを決めてから追加する。
+# イメージや配備に関わるファイルが変わったときだけ動かす（コードだけの変更では動かさない）
+name: app-images
+
+on:
+  pull_request:
+    paths:
+      - 'api/Dockerfile'
+      - 'api/.dockerignore'
+      - 'api/pyproject.toml'
+      - 'api/uv.lock'
+      - 'frontend/Dockerfile'
+      - 'frontend/.dockerignore'
+      - 'frontend/package.json'
+      - 'frontend/pnpm-lock.yaml'
+      - 'frontend/nuxt.config.ts'
+      - 'deploy/**'
+      - '.github/workflows/app-images.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      YORIKI_API_IMAGE: yoriki-api:ci
+      YORIKI_FRONTEND_IMAGE: yoriki-frontend:ci
+      YORIKI_ENV_FILE: ${{ github.workspace }}/ci/yoriki.env
+      YORIKI_DB_ENV_FILE: ${{ github.workspace }}/ci/postgres.env
+      YORIKI_NGINX_CERTS_DIR: ${{ github.workspace }}/ci/certs
+      COMPOSE: docker compose -f deploy/compose.yaml
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: 設定ファイルと自己署名の証明書を用意する
+        run: |
+          mkdir -p ci/certs
+          cat > ci/yoriki.env <<'ENV'
+          DJANGO_SETTINGS_MODULE=app.settings
+          YORIKI_SECRET_KEY=ci-only-not-secret
+          YORIKI_ALLOWED_HOSTS=localhost
+          YORIKI_DATABASE_NAME=yoriki
+          YORIKI_DATABASE_USER=yoriki
+          YORIKI_DATABASE_PASSWORD=yoriki
+          YORIKI_DATABASE_HOST=postgres
+          YORIKI_SSO_PROVIDERS=microsoft
+          YORIKI_SSO_ALLOWED_EMAIL_DOMAINS=example.co.jp
+          YORIKI_SSO_MICROSOFT_CLIENT_ID=ci
+          YORIKI_SSO_MICROSOFT_CLIENT_SECRET=ci
+          YORIKI_SSO_MICROSOFT_TENANT_ID=ci
+          ENV
+          printf 'POSTGRES_DB=yoriki\nPOSTGRES_USER=yoriki\nPOSTGRES_PASSWORD=yoriki\n' > ci/postgres.env
+          openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost \
+            -keyout ci/certs/privkey.pem -out ci/certs/fullchain.pem
+          echo "YORIKI_DOCKER_GID=$(getent group docker | cut -d: -f3)" >> "$GITHUB_ENV"
+
+      - name: イメージをビルドする
+        run: $COMPOSE build
+
+      - name: migrationを実行して起動する
+        run: |
+          $COMPOSE run --rm migrate
+          $COMPOSE up -d
+          # static はコピーして終わるサービスなので、--wait ではなく nginx 経由の応答を待つ
+          curl -fsk --retry 40 --retry-delay 3 --retry-all-errors https://localhost/api/ping/
+
+      - name: 疎通を確認する
+        run: |
+          set -eux
+          base=https://localhost
+          # ヘルスチェック
+          test "$(curl -fsSk $base/api/ping/)" = '{"status":"ok"}'
+          # HTTPはHTTPSへリダイレクトする
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost/)" = 301
+          # フロントエンド（SPAのHTML）とセキュリティのヘッダー
+          curl -fsSk -D headers.txt -o /dev/null $base/login
+          grep -qi '^content-security-policy:' headers.txt
+          grep -qi '^strict-transport-security:' headers.txt
+          # API（未ログイン）とCSRFのCookie
+          curl -fsSk -c cookies.txt $base/api/app/v1/auth/session/ | grep -q '"is_authenticated":false'
+          grep -q csrftoken cookies.txt
+          test "$(curl -sk -o /dev/null -w '%{http_code}' $base/api/app/v1/my/)" = 401
+          # 管理画面の静的ファイルをnginxが返す
+          css=$(curl -fsSk $base/api/admin/login/ | grep -o '/api/static/admin/css/base\.[0-9a-f]*\.css' | head -1)
+          test -n "$css"
+          curl -fsSk -D static.txt -o /dev/null "$base$css"
+          grep -qi '^cache-control: public, max-age=31536000, immutable' static.txt
+
+      - name: 失敗したときのログ
+        if: failure()
+        run: |
+          $COMPOSE ps -a
+          $COMPOSE logs --no-color --tail 200
+
+      - name: 後片付け
+        if: always()
+        run: $COMPOSE down -v

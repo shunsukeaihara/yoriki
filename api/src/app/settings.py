@@ -140,7 +140,14 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "/api/static/"
-STATIC_ROOT = os.getenv("YORIKI_STATIC_ROOT", str(BASE_DIR / "static"))
+# 本番はイメージのビルド時に collectstatic し、nginxが /api/static/ を配る（deployment.md §2、§4.1）。
+# 開発時（DEBUG）は collectstatic せず、app/urls.py で各アプリから直接配る
+STATIC_ROOT = None if DEBUG else os.getenv("YORIKI_STATIC_ROOT", str(BASE_DIR / "static"))
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    # ファイル名に内容のハッシュを付け、nginxで長くキャッシュさせる
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"},
+}
 
 # --- DRF ---
 REST_FRAMEWORK = {

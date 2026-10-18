@@ -1,0 +1,67 @@
+# 単一ホストの本番構成（docs/deployment.md §3.1）。compose.app.yaml のサービスに、postgres と、
+# Agentの実行（Sandboxの起動）を受け持つqclusterの設定を加え、nginxでTLSを終端して443で公開する。
+#   docker compose -f deploy/compose.yaml up -d
+#   docker compose -f deploy/compose.yaml run --rm migrate   # 更新のたびに（§6）
+# Cloudflare Tunnelで公開するときは compose.cloudflare.yaml を重ねる（§8.3）。
+name: yoriki
+
+services:
+  nginx:
+    extends: { file: compose.app.yaml, service: nginx }
+    ports: !override
+      - '80:80'
+      - '443:443'
+    volumes: !override
+      - ./nginx/sites/tls.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/snippets:/etc/nginx/snippets:ro
+      - static:/var/lib/yoriki/static:ro
+      - ${YORIKI_NGINX_CERTS_DIR:-/etc/yoriki/certs}:/etc/nginx/certs:ro
+
+  frontend:
+    extends: { file: compose.app.yaml, service: frontend }
+
+  api:
+    extends: { file: compose.app.yaml, service: api }
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # 単一ホストでは、1つのqclusterが配信等とAgentの実行の両方を受け持つ（クラスタを分けない。§3.2）
+  qcluster:
+    extends: { file: compose.app.yaml, service: qcluster }
+    volumes:
+      # Sandboxはホストのdockerdが起動するので、ホストとコンテナで同じパスにする
+      - /var/lib/yoriki/workspaces:/var/lib/yoriki/workspaces
+      # Dockerソケットはqclusterにだけ渡す（ホストのrootと同等の権限なので、他のサービスには渡さない）
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add: ['${YORIKI_DOCKER_GID:-999}']
+    stop_grace_period: 10m # 実行中のRunがCheckpointを保存するまで待つ
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  static:
+    extends: { file: compose.app.yaml, service: static }
+
+  migrate:
+    extends: { file: compose.app.yaml, service: migrate }
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  postgres:
+    extends: { file: compose.db.yaml, service: postgres }
+    ports: !reset []
+    networks: [backend]
+
+  # docker compose -f deploy/compose.yaml run --rm backup（cron等で定期的に実行する。§7）
+  backup:
+    extends: { file: compose.db.yaml, service: backup }
+    networks: [backend]
+
+volumes:
+  static: {}
+  postgres: {}
+
+networks:
+  edge: {}
+  backend:
+    internal: true
+  egress: {}

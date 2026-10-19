@@ -1,10 +1,13 @@
 import pytest
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import AnonymousUser, Group, Permission
+from django.core.exceptions import ImproperlyConfigured
 from django.test import RequestFactory
 
+from llm.factories import LLMConnectionFactory
 from user.factories import UserFactory
 
+from .crypto import encrypt_secret
 from .lock import lock
 from .permissions import AppUser, PlatformAdmin, require_permission
 
@@ -85,3 +88,23 @@ def test_lock_can_be_acquired_twice_in_sequence():
     for _ in range(2):
         with lock("test-lock", timeout=1):
             pass
+
+
+class TestSecretField:
+    """EncryptedSecretField と SecretValue（llm.models.LLMConnection の api_key で確かめる）"""
+
+    @pytest.mark.django_db
+    def test_assignment_encrypts_and_never_shows_plaintext(self):
+        connection = LLMConnectionFactory.build(api_key="sk-0123456789abcd")
+        assert "sk-0123" not in connection.api_key.ciphertext
+        assert str(connection.api_key) == "****abcd"
+        assert "sk-0123" not in repr(connection.api_key)
+        assert connection.api_key.reveal() == "sk-0123456789abcd"
+        connection.api_key = ""
+        assert not connection.api_key
+        assert str(connection.api_key) == ""
+
+    def test_invalid_key_is_improperly_configured(self, settings):
+        settings.YORIKI_SECRET_ENCRYPTION_KEYS = ["not-a-fernet-key"]
+        with pytest.raises(ImproperlyConfigured):
+            encrypt_secret("x")

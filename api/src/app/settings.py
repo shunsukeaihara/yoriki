@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     "allauth.socialaccount.providers.microsoft",
     "common",
     "user",
+    "llm",
 ]
 
 MIDDLEWARE = [
@@ -176,6 +177,8 @@ SPECTACULAR_SETTINGS = {
     "SERVE_INCLUDE_SCHEMA": False,
     "SERVE_PERMISSIONS": ["utils.permissions.AppUser"],
     "SCHEMA_PATH_PREFIX": "/api/",
+    # choicesのenumの名前を固定する（項目名から付けると、別のアプリの kind 等と衝突する）
+    "ENUM_NAME_OVERRIDES": {"ProviderKindEnum": "llm.models.ProviderKind"},
 }
 
 # --- Django Q2 ---

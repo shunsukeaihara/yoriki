@@ -54,7 +54,7 @@
 
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。提案する順番：
 
-1. **LLMの管理画面**：`/manage` でプロバイダ接続（種別、API key、base URL、上限）とモデル設定（版の作成と履歴）を登録・変更する画面。接続の確認（`check`）のボタン。`composables/manage.ts` にメニューの最初の項目を足す（permissionは `llm.change_llmconnection` 等。backend-conventions.md §6.3）。
+1. **LLMの管理画面**：`/manage` でプロバイダ接続（種別、API key、base URL、上限）とモデル設定（版の作成と履歴）を登録・変更する画面。接続の確認（`check`）のボタン。`composables/manage.ts` にメニューの最初の項目を足す（permissionは `llm.change_llmconnection` 等。backend-conventions.md §6.3）。種別の選択の近くに「個人情報を扱う業務ではローカルLLMを使ってください」と案内を出す（仕組みでは強制しない。design.md §4.8）。
 2. **認証の方式の見直し**（design.md §10.0 を直してから実装する）：
    - SSOの設定（認証基盤の種別、client ID、client secret（暗号化）、テナント、許可するドメイン）を、環境変数ではなく管理画面で行う（django-allauthの `SocialApp` に合わせ、secretは復号して渡す）。
    - SSOを設定したら、社員はSSOだけでログインする。SSOがなければ、Yoriki自身のアカウントとパスワードでログインする（基盤管理者がアカウントを作り、招待のリンクから本人がパスワードを設定する。試行回数の制限）。

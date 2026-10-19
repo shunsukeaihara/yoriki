@@ -60,7 +60,7 @@ design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにし
    - SSOを設定したら、社員はSSOだけでログインする。SSOがなければ、Yoriki自身のアカウントとパスワードでログインする（基盤管理者がアカウントを作り、招待のリンクから本人がパスワードを設定する。試行回数の制限）。
    - 基盤管理者のパスワードでのログインは、SSOの設定の誤りやIdPの停止に備えて残す。
 3. **Agent（`agent`）**：Agent、AgentRevision（不変の版）、管理画面と、社員がAgentを選ぶ画面。
-4. **会話と実行（`conversation`、`run`、`stream`）**：Conversation・ConversationMessage、Runの状態遷移（遷移表と行ロック）、claim / lease、`cancel`・`answer`、SSE（`stream/notifier.py` のLISTEN/NOTIFY）。まずSandboxなしでLLMと会話できるところまで。
+4. **会話と実行（`conversation`、`run`、`stream`）**：Conversation・ConversationMessage、Runの状態遷移（遷移表と行ロック）、claim / lease、`cancel`・`answer`、SSE（`stream/notifier.py` のLISTEN/NOTIFY）。まずSandboxなしでLLMと会話できるところまで。会話を始めるときのウィザードで、個人情報や機密情報を扱うかを確かめ、扱う場合はローカルLLMのモデルを勧める（design.md §4冒頭）。
 5. **Sandbox（`sandbox/`、`runtime`）**：CONTRACT.md、docsのイメージ、Launcher（`network_mode: none`、コンテナからの脱出への対策の1〜4。design.md §7）、Runnerからのshell実行。gVisorの評価もこの段階で行う。
 6. **成果物とファイル（`artifact`）**：Local・S3のStorage Backend、添付、成果物の取得（`/api/files/<token>/`、`X-Accel-Redirect`）。
 7. **Skill（`skill`、`plugin`）**：Draft・Version・公開、会話からのSkill更新。

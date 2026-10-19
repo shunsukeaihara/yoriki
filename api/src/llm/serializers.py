@@ -4,7 +4,6 @@ from typing import Any
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
-from common.choices import DataClassification
 from utils.crypto import is_encryption_configured
 from utils.exceptions import Conflict
 
@@ -29,7 +28,7 @@ class LLMConnectionSerializer(serializers.ModelSerializer):
         allow_blank=True,
         max_length=1000,
         trim_whitespace=True,
-        help_text=_("送らなければ変更しない。空文字はAPI keyなし（OpenAI互換だけ）"),
+        help_text=_("送らなければ変更しない。空文字はAPI keyなし（ローカルLLMだけ）"),
     )
     has_api_key = serializers.BooleanField(read_only=True)
     created_by: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(slug_field="uid", read_only=True)
@@ -77,7 +76,7 @@ class LLMConnectionSerializer(serializers.ModelSerializer):
 
         errors = defaultdict(list)
         if kind.uses_base_url and not base_url:
-            errors["base_url"].append(_("OpenAI互換の接続では、base URLを入力してください"))
+            errors["base_url"].append(_("ローカルLLMでは、base URLを入力してください"))
         if not kind.uses_base_url and base_url:
             errors["base_url"].append(_("この種別では、base URLを指定できません"))
 
@@ -146,7 +145,6 @@ VERSION_FIELDS = [
     "supports_structured_output",
     "supports_prompt_caching",
     "supports_reasoning",
-    "data_classification",
     "change_reason",
 ]
 
@@ -155,7 +153,6 @@ class ModelProfileVersionSerializer(serializers.ModelSerializer):
     id = serializers.CharField(source="uid", read_only=True)
     connection: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(slug_field="uid", read_only=True)
     connection_info = MinimumLLMConnectionSerializer(source="connection", read_only=True)
-    data_classification_display = serializers.CharField(source="get_data_classification_display", read_only=True)
     created_by: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(slug_field="uid", read_only=True)
 
     class Meta:
@@ -165,7 +162,6 @@ class ModelProfileVersionSerializer(serializers.ModelSerializer):
             "number",
             *VERSION_FIELDS,
             "connection_info",
-            "data_classification_display",
             "created_by",
             "created",
         ]
@@ -195,15 +191,6 @@ class ModelProfileVersionWriteSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         errors = defaultdict(list)
-        connection: LLMConnection = attrs["connection"]
-        if (
-            attrs.get("data_classification") == DataClassification.INTERNAL_ONLY
-            and connection.kind != ProviderKind.OPENAI_COMPATIBLE
-        ):
-            # 公式APIは社外のサーバーなので「社内のみ」にできない。社内のサーバーかどうかは登録する基盤管理者が確認する
-            errors["data_classification"].append(
-                _("「社内のみ」は、OpenAI互換（社内のサーバー）の接続だけに指定できます")
-            )
         if attrs["max_output_tokens"] > attrs["max_input_tokens"]:
             errors["max_output_tokens"].append(_("最大出力tokenは、最大入力token以下にしてください"))
         if errors:

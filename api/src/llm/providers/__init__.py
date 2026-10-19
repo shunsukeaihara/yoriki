@@ -10,7 +10,7 @@ from .openai import OpenAIAdapter
 
 ADAPTERS: dict[int, type[ProviderAdapter]] = {
     ProviderKind.OPENAI: OpenAIAdapter,
-    ProviderKind.OPENAI_COMPATIBLE: OpenAIAdapter,
+    ProviderKind.LOCAL: OpenAIAdapter,
     ProviderKind.ANTHROPIC: AnthropicAdapter,
     ProviderKind.GEMINI: GeminiAdapter,
 }

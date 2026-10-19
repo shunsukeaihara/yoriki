@@ -12,7 +12,6 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.utils.translation import gettext_lazy as _
 
-from common.choices import DataClassification
 from utils.crypto import decrypt_secret, encrypt_secret, rotate_secret, secret_hint
 from utils.fields import NanoidField
 
@@ -21,19 +20,20 @@ from .errors import VersionConflict
 
 class ProviderKind(models.IntegerChoices):
     OPENAI = 1, _("OpenAI")
-    ANTHROPIC = 2, _("Anthropic")
+    ANTHROPIC = 2, _("Anthropic（Claude）")
     GEMINI = 3, _("Google Gemini")
-    OPENAI_COMPATIBLE = 4, _("OpenAI互換")
+    # セルフホストのLLM（vLLM、Ollama、LM Studio、llama.cpp server等）。OpenAI互換のAPIで呼ぶ
+    LOCAL = 4, _("ローカルLLM")
 
     @property
     def requires_api_key(self) -> bool:
-        # OpenAI互換のローカルLLM（Ollama等）は、API keyなしで動くものがある
-        return self != ProviderKind.OPENAI_COMPATIBLE
+        # ローカルLLMは、API keyなしで動くものがある
+        return self != ProviderKind.LOCAL
 
     @property
     def uses_base_url(self) -> bool:
-        # 公式APIの接続先は固定する。接続先を変えられると、API keyを別のサーバーへ送れてしまう
-        return self == ProviderKind.OPENAI_COMPATIBLE
+        # クラウドサービスの接続先は固定する。base URLを指定するのはローカルLLMだけ
+        return self == ProviderKind.LOCAL
 
 
 # 接続先を変えようとしたときの文（LLMConnection.check_target_change() と LLMConnectionSerializer で使う）
@@ -89,9 +89,8 @@ class LLMConnection(models.Model):
     def check_target_change(self) -> None:
         """種別とbase URLは、作成した後は変えられない。違反すれば ValidationError（フィールド名ごと）
 
-        接続先ごとに接続を作る（API keyは差し替えられる）。接続先を後から変えられると、モデル設定の版
-        （進行中のRunが使う）の意味が変わり、「社内のみ」の版が社外のサーバーへ向いたり、登録済みのAPI keyが
-        別のサーバーへ送られたりする
+        接続先ごとに接続を作る（API keyは差し替えられる）。接続先を後から変えられると、登録済みのAPI keyが
+        別のサーバーへ送られたり、モデル設定の版（進行中のRunが使う）の呼出し先が後から変わったりする
         """
         saved = getattr(self, "_saved_target", None)
         if saved is None:
@@ -131,7 +130,7 @@ class LLMConnection(models.Model):
 
 
 class ModelProfile(models.Model):
-    """モデル設定。中身（接続、モデル名、上限、単価、能力、データ区分）は不変の版（ModelProfileVersion）で持つ。
+    """モデル設定。中身（接続、モデル名、上限、単価、能力）は不変の版（ModelProfileVersion）で持つ。
     Runは受付時の版を固定して使うので、版を変えても進行中のRunには影響しない
     """
 
@@ -213,9 +212,6 @@ class ModelProfileVersion(models.Model):
     supports_structured_output = models.BooleanField(_("構造化出力"), default=False)
     supports_prompt_caching = models.BooleanField(_("prompt caching"), default=False)
     supports_reasoning = models.BooleanField(_("推論の制御"), default=False)
-    data_classification = models.PositiveSmallIntegerField(
-        _("データ区分"), choices=DataClassification.choices, default=DataClassification.EXTERNAL_ALLOWED
-    )
     change_reason = models.CharField(_("変更理由"), max_length=500, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+", verbose_name=_("作成者")

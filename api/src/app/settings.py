@@ -179,7 +179,6 @@ SPECTACULAR_SETTINGS = {
     # choicesのenumの名前を固定する（項目名から付けると、別のアプリの kind 等と衝突する）
     "ENUM_NAME_OVERRIDES": {
         "ProviderKindEnum": "llm.models.ProviderKind",
-        "DataClassificationEnum": "common.choices.DataClassification",
     },
 }
 

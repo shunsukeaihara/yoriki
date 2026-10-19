@@ -227,12 +227,6 @@ export interface components {
             readonly name: string;
             readonly login_url: string;
         };
-        /**
-         * @description * `1` - 社外送信可
-         *     * `2` - 社内のみ
-         * @enum {integer}
-         */
-        DataClassificationEnum: 1 | 2;
         /** @description プロバイダ接続。API keyは書き込み専用で、応答には末尾の4文字（api_key_hint）だけを出す */
         LLMConnection: {
             readonly id: string;
@@ -274,7 +268,7 @@ export interface components {
             /** 種別 */
             kind: components["schemas"]["ProviderKindEnum"];
             base_url?: string;
-            /** @description 送らなければ変更しない。空文字はAPI keyなし（OpenAI互換だけ） */
+            /** @description 送らなければ変更しない。空文字はAPI keyなし（ローカルLLMだけ） */
             api_key?: string;
             /** タイムアウト（秒） */
             timeout_seconds?: number;
@@ -360,8 +354,6 @@ export interface components {
             supports_prompt_caching?: boolean;
             /** 推論の制御 */
             supports_reasoning?: boolean;
-            /** データ区分 */
-            data_classification?: components["schemas"]["DataClassificationEnum"];
             /** 変更理由 */
             change_reason?: string;
         };
@@ -401,12 +393,9 @@ export interface components {
             readonly supports_prompt_caching: boolean;
             /** 推論の制御 */
             readonly supports_reasoning: boolean;
-            /** データ区分 */
-            readonly data_classification: components["schemas"]["DataClassificationEnum"];
             /** 変更理由 */
             readonly change_reason: string;
             readonly connection_info: components["schemas"]["MinimumLLMConnection"];
-            readonly data_classification_display: string;
             readonly created_by: string;
             /** Format: date-time */
             readonly created: string;
@@ -445,8 +434,6 @@ export interface components {
             supports_prompt_caching?: boolean;
             /** 推論の制御 */
             supports_reasoning?: boolean;
-            /** データ区分 */
-            data_classification?: components["schemas"]["DataClassificationEnum"];
             /** 変更理由 */
             change_reason?: string;
         };
@@ -511,7 +498,7 @@ export interface components {
             /** 種別 */
             kind?: components["schemas"]["ProviderKindEnum"];
             base_url?: string;
-            /** @description 送らなければ変更しない。空文字はAPI keyなし（OpenAI互換だけ） */
+            /** @description 送らなければ変更しない。空文字はAPI keyなし（ローカルLLMだけ） */
             api_key?: string;
             /** タイムアウト（秒） */
             timeout_seconds?: number;
@@ -534,9 +521,9 @@ export interface components {
         };
         /**
          * @description * `1` - OpenAI
-         *     * `2` - Anthropic
+         *     * `2` - Anthropic（Claude）
          *     * `3` - Google Gemini
-         *     * `4` - OpenAI互換
+         *     * `4` - ローカルLLM
          * @enum {integer}
          */
         ProviderKindEnum: 1 | 2 | 3 | 4;
@@ -656,9 +643,9 @@ export interface operations {
                  * @description 種別
                  *
                  *     * `1` - OpenAI
-                 *     * `2` - Anthropic
+                 *     * `2` - Anthropic（Claude）
                  *     * `3` - Google Gemini
-                 *     * `4` - OpenAI互換
+                 *     * `4` - ローカルLLM
                  */
                 kind?: 1 | 2 | 3 | 4;
                 /** @description 名前 */
@@ -834,13 +821,6 @@ export interface operations {
                 connection?: string;
                 /** @description The pagination cursor value. */
                 cursor?: string;
-                /**
-                 * @description データ区分
-                 *
-                 *     * `1` - 社外送信可
-                 *     * `2` - 社内のみ
-                 */
-                data_classification?: 1 | 2;
                 is_active?: boolean;
                 /** @description 名前 */
                 name?: string;

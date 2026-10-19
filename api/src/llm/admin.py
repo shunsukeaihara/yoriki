@@ -32,7 +32,7 @@ class ModelProfileAdmin(admin.ModelAdmin):
 class ModelProfileVersionAdmin(admin.ModelAdmin):
     raw_id_fields = ("profile", "connection", "created_by")
     readonly_fields = ("uid", "created")
-    list_display = ("id", "profile", "number", "connection", "model_name", "data_classification", "created")
+    list_display = ("id", "profile", "number", "connection", "model_name", "created")
 
     def has_change_permission(self, request, obj=None):
         return False

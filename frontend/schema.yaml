@@ -107,9 +107,9 @@ paths:
           種別
 
           * `1` - OpenAI
-          * `2` - Anthropic
+          * `2` - Anthropic（Claude）
           * `3` - Google Gemini
-          * `4` - OpenAI互換
+          * `4` - ローカルLLM
       - in: query
         name: name
         schema:
@@ -307,19 +307,6 @@ paths:
         description: The pagination cursor value.
         schema:
           type: string
-      - in: query
-        name: data_classification
-        schema:
-          type: integer
-          title: データ区分
-          enum:
-          - 1
-          - 2
-        description: |-
-          データ区分
-
-          * `1` - 社外送信可
-          * `2` - 社内のみ
       - in: query
         name: is_active
         schema:
@@ -614,14 +601,6 @@ components:
       - id
       - login_url
       - name
-    DataClassificationEnum:
-      enum:
-      - 1
-      - 2
-      type: integer
-      description: |-
-        * `1` - 社外送信可
-        * `2` - 社内のみ
     LLMConnection:
       type: object
       description: プロバイダ接続。API keyは書き込み専用で、応答には末尾の4文字（api_key_hint）だけを出す
@@ -742,7 +721,7 @@ components:
         api_key:
           type: string
           writeOnly: true
-          description: 送らなければ変更しない。空文字はAPI keyなし（OpenAI互換だけ）
+          description: 送らなければ変更しない。空文字はAPI keyなし（ローカルLLMだけ）
           maxLength: 1000
         timeout_seconds:
           type: integer
@@ -919,12 +898,6 @@ components:
         supports_reasoning:
           type: boolean
           title: 推論の制御
-        data_classification:
-          allOf:
-          - $ref: '#/components/schemas/DataClassificationEnum'
-          title: データ区分
-          minimum: 0
-          maximum: 32767
         change_reason:
           type: string
           title: 変更理由
@@ -998,11 +971,6 @@ components:
           type: boolean
           readOnly: true
           title: 推論の制御
-        data_classification:
-          allOf:
-          - $ref: '#/components/schemas/DataClassificationEnum'
-          readOnly: true
-          title: データ区分
         change_reason:
           type: string
           readOnly: true
@@ -1010,9 +978,6 @@ components:
         connection_info:
           allOf:
           - $ref: '#/components/schemas/MinimumLLMConnection'
-          readOnly: true
-        data_classification_display:
-          type: string
           readOnly: true
         created_by:
           type: string
@@ -1028,8 +993,6 @@ components:
       - connection_info
       - created
       - created_by
-      - data_classification
-      - data_classification_display
       - id
       - input_price
       - max_input_tokens
@@ -1094,12 +1057,6 @@ components:
         supports_reasoning:
           type: boolean
           title: 推論の制御
-        data_classification:
-          allOf:
-          - $ref: '#/components/schemas/DataClassificationEnum'
-          title: データ区分
-          minimum: 0
-          maximum: 32767
         change_reason:
           type: string
           title: 変更理由
@@ -1234,7 +1191,7 @@ components:
         api_key:
           type: string
           writeOnly: true
-          description: 送らなければ変更しない。空文字はAPI keyなし（OpenAI互換だけ）
+          description: 送らなければ変更しない。空文字はAPI keyなし（ローカルLLMだけ）
           maxLength: 1000
         timeout_seconds:
           type: integer
@@ -1284,9 +1241,9 @@ components:
       type: integer
       description: |-
         * `1` - OpenAI
-        * `2` - Anthropic
+        * `2` - Anthropic（Claude）
         * `3` - Google Gemini
-        * `4` - OpenAI互換
+        * `4` - ローカルLLM
     Session:
       type: object
       properties:

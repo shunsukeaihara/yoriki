@@ -1,4 +1,4 @@
-"""OpenAIとOpenAI互換のAPI（vLLM、Ollama、LM Studio、llama.cpp server等）。Chat Completionsで呼ぶ"""
+"""OpenAIと、OpenAI互換のAPIを持つローカルLLM（vLLM、Ollama、LM Studio、llama.cpp server等）。Chat Completionsで呼ぶ"""
 
 import json
 from collections.abc import Iterator
@@ -47,11 +47,11 @@ def _message(message: Message) -> dict[str, Any]:
 
 class OpenAIAdapter(ProviderAdapter):
     def _client(self) -> openai.OpenAI:
-        compatible = self.connection.kind == ProviderKind.OPENAI_COMPATIBLE
+        local = self.connection.kind == ProviderKind.LOCAL
         return openai.OpenAI(
             # SDKはAPI keyを必須にするので、API keyのないローカルLLMには仮の値を渡す
             api_key=self.connection.get_api_key() or "not-required",
-            base_url=self.connection.base_url if compatible else None,
+            base_url=self.connection.base_url if local else None,
             timeout=self.connection.timeout_seconds,
             max_retries=0,  # 再試行と代替モデルへの切替えはRunnerが判断する
             http_client=self.http_client,
@@ -73,8 +73,8 @@ class OpenAIAdapter(ProviderAdapter):
                 for t in request.tools
             ]
         if request.max_output_tokens is not None:
-            # OpenAIの新しいモデルは max_tokens を受け付けない。互換のサーバーは max_tokens だけを知っているものが多い
-            key = "max_tokens" if self.connection.kind == ProviderKind.OPENAI_COMPATIBLE else "max_completion_tokens"
+            # OpenAIの新しいモデルは max_tokens を受け付けない。ローカルLLMのサーバーは max_tokens だけを知るものが多い
+            key = "max_tokens" if self.connection.kind == ProviderKind.LOCAL else "max_completion_tokens"
             params[key] = request.max_output_tokens
         if request.temperature is not None:
             params["temperature"] = request.temperature

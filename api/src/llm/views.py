@@ -7,7 +7,6 @@ from rest_framework.generics import get_object_or_404
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
-from common.choices import DataClassification
 from utils.exceptions import Conflict
 from utils.permissions import PlatformAdmin
 from utils.views import SoftDeleteMixin
@@ -70,13 +69,10 @@ class LLMConnectionViewSet(SoftDeleteMixin, ModelViewSet):
 class ModelProfileFilter(filters.FilterSet):
     name = filters.CharFilter(label=_("名前"), lookup_expr="icontains")
     connection = filters.CharFilter(label=_("プロバイダ接続"), field_name="current_version__connection__uid")
-    data_classification = filters.ChoiceFilter(
-        label=_("データ区分"), field_name="current_version__data_classification", choices=DataClassification.choices
-    )
 
     class Meta:
         model = ModelProfile
-        fields = ["name", "is_active", "connection", "data_classification"]
+        fields = ["name", "is_active", "connection"]
 
 
 @extend_schema(description="モデル設定の管理API（基盤管理者だけ）", tags=["manage/model_profile"])

@@ -3,7 +3,6 @@ from django.contrib.auth.models import Permission
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.test import override_settings
 
-from common.choices import DataClassification
 from llm.factories import LLMConnectionFactory, ModelProfileFactory
 from llm.models import LLMConnection, ModelProfile, ModelProfileVersion, ProviderKind
 from llm.providers.base import ProviderError
@@ -67,13 +66,13 @@ class TestLLMConnection:
         assert set(res.json()) == {"api_key", "base_url"}
 
     @pytest.mark.django_db
-    def test_compatible_requires_base_url_but_not_key(self, admin_client):
-        res = admin_client.post(CONNECTIONS, {"name": "a", "kind": ProviderKind.OPENAI_COMPATIBLE})
+    def test_local_requires_base_url_but_not_key(self, admin_client):
+        res = admin_client.post(CONNECTIONS, {"name": "a", "kind": ProviderKind.LOCAL})
         assert res.status_code == 400
         assert set(res.json()) == {"base_url"}
         res = admin_client.post(
             CONNECTIONS,
-            {"name": "a", "kind": ProviderKind.OPENAI_COMPATIBLE, "base_url": "http://ollama.internal:11434/v1"},
+            {"name": "a", "kind": ProviderKind.LOCAL, "base_url": "http://ollama.internal:11434/v1"},
         )
         assert res.status_code == 201, res.json()
         assert res.json()["has_api_key"] is False
@@ -97,13 +96,13 @@ class TestLLMConnection:
         assert connection.get_api_key() == "sk-new-0123456789abcd"
 
     @pytest.mark.django_db
-    def test_clear_api_key_only_for_compatible(self, admin_client):
+    def test_clear_api_key_only_for_local(self, admin_client):
         official = LLMConnectionFactory.create()
         assert admin_client.patch(f"{CONNECTIONS}{official.uid}/", {"api_key": ""}).status_code == 400
-        compatible = LLMConnectionFactory.create(kind=ProviderKind.OPENAI_COMPATIBLE, base_url="http://x.internal/v1")
-        assert admin_client.patch(f"{CONNECTIONS}{compatible.uid}/", {"api_key": ""}).status_code == 200
-        compatible.refresh_from_db()
-        assert not compatible.has_api_key
+        local = LLMConnectionFactory.create(kind=ProviderKind.LOCAL, base_url="http://x.internal/v1")
+        assert admin_client.patch(f"{CONNECTIONS}{local.uid}/", {"api_key": ""}).status_code == 200
+        local.refresh_from_db()
+        assert not local.has_api_key
 
     @pytest.mark.django_db
     def test_name_is_unique_among_not_deleted(self, admin_client):
@@ -170,7 +169,6 @@ class TestModelProfile:
         assert data["current_version"]["number"] == 1
         assert data["current_version"]["model_name"] == "gpt-test"
         assert data["current_version"]["connection_info"]["name"] == connection.name
-        assert data["current_version"]["data_classification_display"] == "社外送信可"
         profile = ModelProfile.objects.get(uid=data["id"])
         assert profile.created_by == platform_admin
         assert profile.versions.count() == 1
@@ -181,17 +179,6 @@ class TestModelProfile:
         res = admin_client.post(PROFILES, {"name": "a", "version": _version(connection)}, format="json")
         assert res.status_code == 400
         assert "connection" in res.json()["version"]
-
-    @pytest.mark.django_db
-    def test_internal_only_requires_compatible_connection(self, admin_client):
-        official = LLMConnectionFactory.create()
-        version = _version(official, data_classification=DataClassification.INTERNAL_ONLY)
-        res = admin_client.post(PROFILES, {"name": "a", "version": version}, format="json")
-        assert "data_classification" in res.json()["version"]
-
-        local = LLMConnectionFactory.create(kind=ProviderKind.OPENAI_COMPATIBLE, base_url="http://llm.internal/v1")
-        version = _version(local, data_classification=DataClassification.INTERNAL_ONLY)
-        assert admin_client.post(PROFILES, {"name": "a", "version": version}, format="json").status_code == 201
 
     @pytest.mark.django_db
     def test_revise_creates_new_version(self, admin_client):
@@ -248,7 +235,7 @@ class TestConnectionTargetIsFixed:
 
     @pytest.mark.django_db
     def test_kind_cannot_change(self, admin_client):
-        connection = LLMConnectionFactory.create(kind=ProviderKind.OPENAI_COMPATIBLE, base_url="http://llm.internal/v1")
+        connection = LLMConnectionFactory.create(kind=ProviderKind.LOCAL, base_url="http://llm.internal/v1")
         res = admin_client.patch(
             f"{CONNECTIONS}{connection.uid}/",
             {"kind": ProviderKind.OPENAI, "base_url": "", "api_key": "sk-new-0123456789"},
@@ -258,7 +245,7 @@ class TestConnectionTargetIsFixed:
 
     @pytest.mark.django_db
     def test_base_url_cannot_change_even_with_new_key(self, admin_client):
-        connection = LLMConnectionFactory.create(kind=ProviderKind.OPENAI_COMPATIBLE, base_url="http://llm.internal/v1")
+        connection = LLMConnectionFactory.create(kind=ProviderKind.LOCAL, base_url="http://llm.internal/v1")
         res = admin_client.patch(
             f"{CONNECTIONS}{connection.uid}/",
             {"base_url": "https://external.example.com/v1", "api_key": "k-0123456789ab"},
@@ -270,10 +257,10 @@ class TestConnectionTargetIsFixed:
 
     @pytest.mark.django_db
     def test_put_with_same_target(self, admin_client):
-        connection = LLMConnectionFactory.create(kind=ProviderKind.OPENAI_COMPATIBLE, base_url="http://llm.internal/v1")
+        connection = LLMConnectionFactory.create(kind=ProviderKind.LOCAL, base_url="http://llm.internal/v1")
         res = admin_client.put(
             f"{CONNECTIONS}{connection.uid}/",
-            {"name": "改名", "kind": ProviderKind.OPENAI_COMPATIBLE, "base_url": "http://llm.internal/v1"},
+            {"name": "改名", "kind": ProviderKind.LOCAL, "base_url": "http://llm.internal/v1"},
         )
         assert res.status_code == 200, res.json()
 
@@ -283,7 +270,7 @@ class TestConnectionTargetGuardInModel:
 
     @pytest.mark.django_db
     def test_kind_and_base_url(self):
-        connection = LLMConnectionFactory.create(kind=ProviderKind.OPENAI_COMPATIBLE, base_url="http://llm.internal/v1")
+        connection = LLMConnectionFactory.create(kind=ProviderKind.LOCAL, base_url="http://llm.internal/v1")
         connection = LLMConnection.objects.get(pk=connection.pk)
         connection.base_url = "https://attacker.example.com/v1"
         connection.set_api_key("new-key-0123456789")
@@ -309,7 +296,7 @@ class TestConnectionTargetGuardInModel:
 
     @pytest.mark.django_db
     def test_django_admin_cannot_edit_target(self, api_client, platform_admin):
-        connection = LLMConnectionFactory.create(kind=ProviderKind.OPENAI_COMPATIBLE, base_url="http://llm.internal/v1")
+        connection = LLMConnectionFactory.create(kind=ProviderKind.LOCAL, base_url="http://llm.internal/v1")
         api_client.force_login(platform_admin)
         url = f"/api/admin/llm/llmconnection/{connection.pk}/change/"
         page = api_client.get(url).content.decode()
@@ -320,7 +307,7 @@ class TestConnectionTargetGuardInModel:
             url,
             {
                 "name": connection.name,
-                "kind": ProviderKind.OPENAI_COMPATIBLE,
+                "kind": ProviderKind.LOCAL,
                 "base_url": "https://attacker.example.com/v1",
                 "timeout_seconds": 120,
                 "max_concurrency": 4,

@@ -351,7 +351,7 @@ LLMと提供テキストだけで完結するRunは、Sandboxを起動せずに�
 
 LLM経路はDjango側のPythonモジュールとして実装し、RunnerはQClusterのプロセスの中から呼ぶ。専用Gatewayサービスや内部APIを必須にしない。Sandboxからは呼べない。
 
-なお、外部LLM APIを使う以上、モデルへ渡すプロンプトやファイル由来の内容は外部サービスへ送られる。「実行時の外部通信禁止」はSandboxからの任意通信を禁止する意味とする。データの外部送信自体を禁止する用途には、§4.8のOpenAI互換のローカルLLMを登録し、データ区分「社内のみ」のモデルだけを選べるようにする。Connectorで取得した社内DB・SharePoint等の内容も、要約や抜粋としてLLMへ渡る点は同じである（§4.9）。
+なお、外部LLM APIを使う以上、モデルへ渡すプロンプトやファイル由来の内容は外部サービスへ送られる。「実行時の外部通信禁止」はSandboxからの任意通信を禁止する意味とする。データを外部のサービスへ送りたくない用途には、§4.8のローカルLLM（セルフホスト）を登録し、そのモデルを選ぶ。Connectorで取得した社内DB・SharePoint等の内容も、要約や抜粋としてLLMへ渡る点は同じである（§4.9）。
 
 Zapier等への結果送信も明示的な外部データ連携として扱う。どのタスクが何をどこへ送れるかを設定し、結果に含める項目と成果物だけを許可する。Skillのマスターファイル、会話全体、内部ログを自動的に配信対象へ含めない。
 
@@ -606,14 +606,15 @@ Agentが使うLLMは、管理画面で登録したプロバイダ接続とモデ
 | OpenAI | 公式API | 汎用 |
 | Anthropic（Claude） | 公式API | 汎用 |
 | Google（Gemini） | 公式API | 汎用 |
-| OpenAI互換（ローカルLLM） | base URLを指定したOpenAI互換API（vLLM、Ollama、LM Studio、llama.cpp server等） | 社外へデータを送れない業務、検証、費用の抑制 |
+| ローカルLLM | セルフホストのサーバー。base URLを指定し、OpenAI互換のAPIで呼ぶ（vLLM、Ollama、LM Studio、llama.cpp server等） | データを外部のサービスへ送りたくない業務、検証、費用の抑制 |
 
-- **プロバイダ接続（LLMConnection）**：種別、API keyのSecret参照、base URL（OpenAI互換のみ）、timeout、同時実行数・rate limitを持つ。基盤管理者だけが登録・変更できる。API keyはSandboxへ渡さず、ログ・画面へも出さない。MVPではProvider AdapterをControl Planeのプロセス（apiと、Runnerが動くqcluster。同じイメージ）の中で動かす。QClusterだけのWorkerサーバー（§6.1）のRunnerも、HTTPを介さず同じプロセスの中のProvider Adapterを通してLLMを呼ぶ（モデルのAPIへ直接接続しない）。API keyを読めるのはControl Planeと同じ信頼範囲のサーバーだけにし、SandboxとLLMへは渡さない。API keyは管理画面で接続と一緒に登録し、DBに暗号化して保存する（鍵はDBに置かず環境変数で渡す。deployment.md §5）。API keyは書き込み専用で、画面とAPIには末尾の4文字だけを出す。接続の種別とbase URLは、作成した後は変えられない。接続先ごとに接続を作り（複数を登録できる）、API keyはいつでも差し替えられる。接続先を後から変えられると、モデル設定の版の意味が変わり、「社内のみ」の版が社外へ向いたり、登録済みのAPI keyが別のサーバーへ送られたりするため。接続先を変えるときは新しい接続を作り、モデル設定の新しい版でそれを選ぶ。公式API（OpenAI・Anthropic・Gemini）の接続先は固定し、base URLを指定できるのはOpenAI互換だけにする。Connector・外部連携の資格情報も同じ方式で保存する（§4.9）。
-- **モデル設定（ModelProfile）**：接続、モデル名、最大入力・出力token、入出力の単価、対応能力（Tool呼出し、画像入力、構造化出力、prompt caching、推論の制御）、データ区分（社外送信可・社内のみ）を版付きで持つ。単価はUsageLedgerの金額計算に使い、ローカルLLMは0または設定した原価とする。
+種別の違いは、クラウドサービス（OpenAI・Anthropic・Gemini）かセルフホスト（ローカルLLM）かだけである。どの種別も、接続先ごとに複数の接続を登録できる。
+
+- **プロバイダ接続（LLMConnection）**：種別、API keyのSecret参照、base URL（ローカルLLMのみ）、timeout、同時実行数・rate limitを持つ。基盤管理者だけが登録・変更できる。API keyはSandboxへ渡さず、ログ・画面へも出さない。MVPではProvider AdapterをControl Planeのプロセス（apiと、Runnerが動くqcluster。同じイメージ）の中で動かす。QClusterだけのWorkerサーバー（§6.1）のRunnerも、HTTPを介さず同じプロセスの中のProvider Adapterを通してLLMを呼ぶ（モデルのAPIへ直接接続しない）。API keyを読めるのはControl Planeと同じ信頼範囲のサーバーだけにし、SandboxとLLMへは渡さない。API keyは管理画面で接続と一緒に登録し、DBに暗号化して保存する（鍵はDBに置かず環境変数で渡す。deployment.md §5）。API keyは書き込み専用で、画面とAPIには末尾の4文字だけを出す。接続の種別とbase URLは、作成した後は変えられない。接続先ごとに接続を作り（複数を登録できる）、API keyはいつでも差し替えられる。接続先を後から変えられると、登録済みのAPI keyが別のサーバーへ送られたり、モデル設定の版の呼出し先が後から変わったりするため。接続先を変えるときは新しい接続を作り、モデル設定の新しい版でそれを選ぶ。クラウドサービス（OpenAI・Anthropic・Gemini）の接続先は固定し、base URLを指定できるのはローカルLLMだけにする。Connector・外部連携の資格情報も同じ方式で保存する（§4.9）。
+- **モデル設定（ModelProfile）**：接続、モデル名、最大入力・出力token、入出力の単価、対応能力（Tool呼出し、画像入力、構造化出力、prompt caching、推論の制御）を版付きで持つ。単価はUsageLedgerの金額計算に使い、ローカルLLMは0または設定した原価とする。
 - **Agentでの選択**：Agentの版に主モデルと任意の代替モデルを指定する。Run受付時に使うModelProfileの版を固定し、実行中に管理画面でモデルを変えても進行中のRunは切り替えない。
 - **能力の検証**：Agentの公開時に、SkillやToolが必要とする能力（Tool呼出し、画像入力等）をモデルが持つかを検証し、満たさない組合せは公開できないようにする。ローカルLLMでTool呼出しが不安定なモデルは、Tool呼出し不可として登録する。
-- **データ区分**：社外送信を禁止する業務のAgentやタスクには「社内のみ」のモデルしか選べないようにする（§4冒頭の外部送信の注意を、設定で強制できる形にする）。
-- **代替モデル**：主モデルの接続障害・rate limitで失敗した場合に代替モデルへ切り替えるかはAgentの設定とし、切り替えた事実をRunEventとUsageLedgerに記録する。データ区分が異なるモデルへは切り替えない。
+- **代替モデル**：主モデルの接続障害・rate limitで失敗した場合に代替モデルへ切り替えるかはAgentの設定とし、切り替えた事実をRunEventとUsageLedgerに記録する。
 
 Provider Adapterは、メッセージ・Tool定義・オプションを受け取り、テキストの差分、Tool呼出し、利用量、プロバイダの要求IDを共通のイベントとして返す。プロバイダ固有の機能（prompt caching等）は能力として宣言し、Runnerは能力がある場合だけ使う。
 
@@ -752,7 +753,7 @@ Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプ�
 | Delivery | Run、event_id、配信キー、送信Binding版、外部thread参照、確定内容・質問・結果・成果物参照、配信状態 |
 | DeliveryAttempt | 試行番号、送信payload、URL期限、受付結果・外部ID、エラー、次回試行時刻 |
 | LLMConnection | プロバイダ種別、API key（暗号化して保存）、base URL、timeout、同時実行数・rate limit（§4.8） |
-| ModelProfile / ModelProfileVersion | 接続、モデル名、token上限、単価、対応能力、データ区分を版付きで保持（§4.8） |
+| ModelProfile / ModelProfileVersion | 接続、モデル名、token上限、単価、対応能力を版付きで保持（§4.8） |
 | Connector / ConnectorRevision | Adapter実装版、接続先、認証方式、資格情報（暗号化して保存）、公開範囲、上限、宣言した操作（§4.9） |
 | ConnectorBinding / ConnectorBindingRevision | Agent、Connector版、許可した操作と対象、読取り・書込みの区分 |
 | UserOAuthToken | 社内ユーザー、provider、scope、暗号化したaccess token・refresh token、有効期限（§4.9.1） |
@@ -1521,7 +1522,7 @@ QClusterだけを動かすWorkerサーバー（同じ私設ネットワーク、
 
 本案の推奨決定は、人間が方向を決めるチャット型UX、AgentとPluginを中心とするモデル、共通Runでの実行と配信状態の分離、本文と参照ファイルをまとめた不変のSkill Version、AgentによるSkill・マスター編集と添付置換・権限内での自動公開である。実行基盤はDjango Q2とORM broker、RunnerとネットワークなしSandbox、管理されたPython依存追加、公開Docker Hubの共通実行イメージ、RunとAttemptの分離を採用する。
 
-LLMはProvider Adapterを介して呼び出し、OpenAI・Claude・Gemini・OpenAI互換のローカルLLMを管理画面で登録して、Agentごとにモデルを選ぶ。
+LLMはProvider Adapterを介して呼び出し、OpenAI・Claude・Gemini・ローカルLLM（セルフホスト）を管理画面で登録して、Agentごとにモデルを選ぶ。
 
 起動と通知は型を分けたPlugin契約とし、フローが起動Binding・プロンプト・Agent・任意の対話Binding・結果通知Bindingをまとめる。通知Skillは内容を整え、通知AdapterとDispatcherが確定済みイベントを配信する。初期仕様はフローごとに対話チャネルと結果連携先をそれぞれ最大一つ選択できる。
 
@@ -1546,7 +1547,7 @@ Sandboxイメージの定義は本体と同じリポジトリの `sandbox/` で�
 1. **請求書PDFの取込データ作成**：社員がチャットで請求書のPDFを渡すと、Agentが請求明細を読み取り、Skillの参照ファイルとして置いた社内マスター（取引先・品目・勘定科目等）と突合して、社内システムへ取り込める形式のExcelまたはCSVを作る。社内データベースとの照合は、読取り専用のConnector（§4.9.2）で行う。DBに置かれていないマスターは、SkillのResource（CSV等）として置く。読み取った明細の合計と請求書の合計額が一致するか等の検算をSkillのスクリプトで行い、不一致は成果物と一緒に利用者へ示す。スキャンした画像のPDFは、画像入力に対応したモデルで読む。
 2. **契約書レビューの自動実行**：Webhook（Zapier等）で契約書を受け取り、Skillに置いたレビュー基準・社内規程に沿ってレビューし、「OK」または「差し戻し」とその理由をZapier経由で投稿する。判定と理由は業務結果のSchema（判定、理由の一覧、指摘箇所）で確定し、通知はその確定結果から作る。投稿にはAIによるレビュー結果であることを明記する。
 
-外部LLMへ渡すデータの範囲は、当面は技術的に制限しない。請求書・契約書等の業務文書は外部LLMへ渡してよい。人事情報や顧客の個人情報など、個人情報を主な内容とするデータは業務の運用で扱わないようにする。LLMプロバイダとは、入力を学習に使わない法人向けの条件で契約・設定する。§4.8のデータ区分は、すべてのモデルを「社外送信可」として開始し、必要になった時点で「社内のみ」の区分を使う。
+外部LLMへ渡すデータの範囲は、当面は技術的に制限しない。請求書・契約書等の業務文書は外部LLMへ渡してよい。人事情報や顧客の個人情報など、個人情報を主な内容とするデータは業務の運用で扱わないようにする。LLMプロバイダとは、入力を学習に使わない法人向けの条件で契約・設定する。外部のサービスへ送りたくない業務が出てきたら、ローカルLLMのモデルを使う。
 
 実装着手前に選ぶ項目は、初期Agentで使うモデル（ModelProfile）の選定、Skillと資料の編集・公開権限とscope、予算、保持期限、対応ファイル形式と編集能力、マスターのSchema、ファイル容量上限、初期packageカタログ、Docker Hubの組織名と本体イメージのレジストリである。Worker分散を見据えたデータモデルは先に作り、Workerサーバーは実行量に応じて追加する。
 
@@ -1596,4 +1597,4 @@ Sandboxイメージの定義は本体と同じリポジトリの `sandbox/` で�
 | 0.14 | 2026年10月16日 | 文書間の整合性を確認し、SSE・同一オリジン・Connector・認証・配備の記述を各章へ反映 |
 | 0.15 | 2026年10月16日 | 文書間の整合性を再確認し、認証（前段の認証プロキシの裏に置く場合）、Workerの配置（QClusterだけのWorkerサーバー、共有S3）、清掃の定期実行、Webhook受付パスの記述を他の文書と揃えた |
 | 0.16 | 2026年10月17日 | プロダクト名をYuhitsuからYorikiに変更。Connectorの境界と使い方の2層、汎用のHTTP Connector、Skillのスクリプトからの呼出し、Connectorが動く場所、DB用Connector（SQL Server・PostgreSQL・MySQL）、文書処理にLibreOfficeを使わない方針、Sandbox脱出への対策の順序を追加 |
-| 0.17 | 2026年10月20日 | LLMのAPI key・Connectorの資格情報を、管理画面で登録してDBに暗号化して保存する方式に変更（§4.8）。モデル設定の単価は100万tokenあたりの米ドル |
+| 0.17 | 2026年10月20日 | LLMのAPI key・Connectorの資格情報を、管理画面で登録してDBに暗号化して保存する方式に変更（§4.8）。接続の種別とbase URLを作成後は変えられないようにした。「OpenAI互換」を「ローカルLLM」とし、データ区分（社外送信可・社内のみ）をやめた。モデル設定の単価は100万tokenあたりの米ドル |

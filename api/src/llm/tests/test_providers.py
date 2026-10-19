@@ -115,12 +115,12 @@ class TestOpenAI:
         assert sent["tools"][0]["function"]["name"] == "get_weather"
 
     @pytest.mark.django_db
-    def test_compatible_uses_base_url_without_key(self):
+    def test_local_uses_base_url_without_key(self):
         recorder = Recorder(
             body={"object": "list", "data": [{"id": "llama", "object": "model", "created": 1, "owned_by": "me"}]}
         )
         connection = LLMConnectionFactory.create(
-            kind=ProviderKind.OPENAI_COMPATIBLE, base_url="http://llm.internal:8000/v1", api_key=""
+            kind=ProviderKind.LOCAL, base_url="http://llm.internal:8000/v1", api_key=""
         )
         assert get_adapter(connection, http_client=_httpx2(recorder)).list_models() == ["llama"]
         assert str(recorder.requests[-1].url) == "http://llm.internal:8000/v1/models"

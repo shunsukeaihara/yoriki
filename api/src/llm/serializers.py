@@ -9,7 +9,15 @@ from utils.crypto import is_encryption_configured
 from utils.exceptions import Conflict
 
 from .errors import VersionConflict
-from .models import LLMConnection, ModelProfile, ModelProfileVersion, ProviderKind
+from .models import (
+    API_KEY_REQUIRED_FOR_NEW_TARGET,
+    BASE_URL_IS_FIXED,
+    KIND_IS_FIXED,
+    LLMConnection,
+    ModelProfile,
+    ModelProfileVersion,
+    ProviderKind,
+)
 
 
 class LLMConnectionSerializer(serializers.ModelSerializer):
@@ -23,7 +31,7 @@ class LLMConnectionSerializer(serializers.ModelSerializer):
         allow_blank=True,
         max_length=1000,
         trim_whitespace=True,
-        help_text=_("送らなければ変更しない。空文字はAPI keyなし（OpenAI互換だけ）。種別やbase URLを変えるときは必須"),
+        help_text=_("送らなければ変更しない。空文字はAPI keyなし（OpenAI互換だけ）。base URLを変えるときは必須"),
     )
     has_api_key = serializers.BooleanField(read_only=True)
     created_by: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(slug_field="uid", read_only=True)
@@ -76,10 +84,15 @@ class LLMConnectionSerializer(serializers.ModelSerializer):
             errors["base_url"].append(_("この種別では、base URLを指定できません"))
 
         if self.instance is not None:
-            changed_target = kind != self.instance.kind or base_url != self.instance.base_url
-            # 登録済みのAPI keyを、別の接続先へ送れないようにする
-            if changed_target and self.instance.has_api_key and api_key is None:
-                errors["api_key"].append(_("種別やbase URLを変えるときは、API keyを入力し直してください"))
+            # 接続先の変更の制限は LLMConnection.check_target_change() と同じ。ここではフィールドごとのエラーにする
+            if kind != self.instance.kind:
+                errors["kind"].append(KIND_IS_FIXED)
+            elif base_url != self.instance.base_url:
+                if self.instance.is_referenced():
+                    errors["base_url"].append(BASE_URL_IS_FIXED)
+                elif self.instance.has_api_key and api_key is None:
+                    # 登録済みのAPI keyを、別の接続先へ送れないようにする
+                    errors["api_key"].append(API_KEY_REQUIRED_FOR_NEW_TARGET)
         has_key_after = bool(api_key) if api_key is not None else bool(self.instance and self.instance.has_api_key)
         if kind.requires_api_key and not has_key_after and "api_key" not in errors:
             errors["api_key"].append(_("この種別では、API keyを入力してください"))

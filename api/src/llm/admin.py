@@ -13,6 +13,12 @@ class LLMConnectionAdmin(admin.ModelAdmin):
     list_filter = ("kind", "is_active", "deleted")
     search_fields = ("uid", "name")
 
+    def get_readonly_fields(self, request, obj=None):
+        # 接続先は変えさせない。API keyを入れ直す欄がないので、登録済みのAPI keyが別のサーバーへ送られてしまう。
+        # 変更はYorikiの管理画面（API keyの入れ直しと、参照中の接続の制限がある）で行う
+        fields = super().get_readonly_fields(request, obj)
+        return (*fields, "kind", "base_url") if obj else fields
+
 
 @admin.register(ModelProfile)
 class ModelProfileAdmin(admin.ModelAdmin):

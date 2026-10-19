@@ -644,7 +644,8 @@ DATABASES = {
 - 管理画面で登録するSecret（LLMのAPI key、Connectorのパスワード・token、HTTP Connectorのヘッダー等）は、`utils.crypto.encrypt_secret()` で暗号化してDBに保存する。平文の列を作らない。暗号化した値を返すフィールドや、復号した値を自動で持つModelのフィールドも作らない（誤って応答やログに出さないため）。
 - Modelには、暗号化した値（`<名前>_encrypted`）と、画面に出す末尾の4文字（`<名前>_hint`。`secret_hint()`）を持たせ、`set_<名前>()` / `get_<名前>()` で読み書きする。復号は、外部へ接続する処理（Provider Adapter、Connector）の中でだけ行う。
 - Serializerでは、Secretを `write_only=True` の項目で受け、応答には `has_<名前>` と `<名前>_hint` だけを出す。送られなければ変更しない。
-- 接続先（種別、ホスト、base URL）を変えるときは、Secretの入力し直しを必須にする。登録済みのSecretを別のサーバーへ送らせないため。
+- 接続先（種別、ホスト、base URL）を変えるときは、Secretの入力し直しを必須にする。登録済みのSecretを別のサーバーへ送らせないため。版（`*Version`）から参照されている接続は、接続先を変えられないようにする（版の意味が後から変わらないように。変えるときは新しい接続を作る）。
+- この制限はSerializerの検証だけでなく、Modelの `save()` でも確かめる（`LLMConnection.check_target_change()`）。Django管理画面やshellから保存しても破られないようにするため。Django管理画面では、既存の接続の接続先を読み取り専用にする。
 - 監査ログ（auditlog）では、暗号化した値の列を `exclude_fields` に入れる。Django管理画面でも `exclude` で出さない。
 - 鍵の交換は `rotate_secret_encryption` コマンドで行う。Secretを持つModelを追加したら、このコマンドの対象にも加える。
 

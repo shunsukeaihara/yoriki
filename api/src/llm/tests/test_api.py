@@ -1,5 +1,6 @@
 import pytest
 from django.contrib.auth.models import Permission
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.test import override_settings
 
 from common.choices import DataClassification
@@ -245,3 +246,98 @@ class TestModelProfile:
         uid = _current(target).connection.uid
         results = admin_client.get(PROFILES, {"connection": uid}).json()["results"]
         assert [r["id"] for r in results] == [target.uid]
+
+
+class TestConnectionTargetIsFixed:
+    """接続先（種別・base URL）を後から変えさせない。版は接続先も含めて固定する（「社内のみ」の版を社外へ向けない）"""
+
+    @pytest.mark.django_db
+    def test_kind_cannot_change(self, admin_client):
+        connection = LLMConnectionFactory.create(kind=ProviderKind.OPENAI_COMPATIBLE, base_url="http://llm.internal/v1")
+        res = admin_client.patch(
+            f"{CONNECTIONS}{connection.uid}/",
+            {"kind": ProviderKind.OPENAI, "base_url": "", "api_key": "sk-new-0123456789"},
+        )
+        assert res.status_code == 400
+        assert "kind" in res.json()
+
+    @pytest.mark.django_db
+    def test_base_url_of_referenced_connection_cannot_change(self, admin_client):
+        local = LLMConnectionFactory.create(kind=ProviderKind.OPENAI_COMPATIBLE, base_url="http://llm.internal/v1")
+        profile = ModelProfileFactory.create(
+            version__connection=local, version__data_classification=DataClassification.INTERNAL_ONLY
+        )
+        # 現在の版が別の接続に移っても、過去の版（進行中のRunが使う）が参照している
+        profile.revise(
+            actor=profile.created_by,
+            expected_version=1,
+            connection=LLMConnectionFactory.create(),
+            model_name="x",
+            max_input_tokens=10,
+            max_output_tokens=1,
+        )
+        res = admin_client.patch(
+            f"{CONNECTIONS}{local.uid}/", {"base_url": "https://external.example.com/v1", "api_key": "k-0123456789ab"}
+        )
+        assert res.status_code == 400
+        assert "base_url" in res.json()
+        local.refresh_from_db()
+        assert local.base_url == "http://llm.internal/v1"
+
+
+class TestConnectionTargetGuardInModel:
+    """API以外（Django管理画面・shell）から保存しても、同じ制限がかかる"""
+
+    @pytest.mark.django_db
+    def test_base_url_change_without_new_key(self):
+        connection = LLMConnectionFactory.create(kind=ProviderKind.OPENAI_COMPATIBLE, base_url="http://llm.internal/v1")
+        connection = LLMConnection.objects.get(pk=connection.pk)
+        connection.base_url = "https://attacker.example.com/v1"
+        with pytest.raises(DjangoValidationError) as info:
+            connection.save()
+        assert "api_key" in info.value.message_dict
+
+        connection.set_api_key("new-key-0123456789")
+        connection.save()
+
+    @pytest.mark.django_db
+    def test_kind_and_referenced_base_url(self):
+        connection = _current(ModelProfileFactory.create()).connection
+        connection = LLMConnection.objects.get(pk=connection.pk)
+        connection.kind = ProviderKind.ANTHROPIC
+        with pytest.raises(DjangoValidationError):
+            connection.save()
+
+        local = LLMConnectionFactory.create(kind=ProviderKind.OPENAI_COMPATIBLE, base_url="http://llm.internal/v1")
+        ModelProfileFactory.create(version__connection=local)
+        local = LLMConnection.objects.get(pk=local.pk)
+        local.base_url = "https://external.example.com/v1"
+        local.set_api_key("new-key-0123456789")
+        with pytest.raises(DjangoValidationError) as info:
+            local.save()
+        assert "base_url" in info.value.message_dict
+
+    @pytest.mark.django_db
+    def test_django_admin_cannot_edit_target(self, api_client, platform_admin):
+        connection = LLMConnectionFactory.create(kind=ProviderKind.OPENAI_COMPATIBLE, base_url="http://llm.internal/v1")
+        api_client.force_login(platform_admin)
+        url = f"/api/admin/llm/llmconnection/{connection.pk}/change/"
+        page = api_client.get(url).content.decode()
+        assert 'name="base_url"' not in page
+        assert 'name="kind"' not in page
+
+        res = api_client.post(
+            url,
+            {
+                "name": connection.name,
+                "kind": ProviderKind.OPENAI_COMPATIBLE,
+                "base_url": "https://attacker.example.com/v1",
+                "timeout_seconds": 120,
+                "max_concurrency": 4,
+                "is_active": "on",
+                "created_by": connection.created_by.pk,
+            },
+        )
+        assert res.status_code == 302
+        connection.refresh_from_db()
+        assert connection.base_url == "http://llm.internal/v1"

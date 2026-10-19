@@ -239,9 +239,13 @@ SSEのパスにだけ適用する。apiのレスポンスにも `X-Accel-Bufferi
 - 変数の一覧は `deploy/env/yoriki.env.example` に、説明と空の値で管理する。新しい変数を追加したら、`.envrc.example` と合わせて更新する。
 - PostgreSQLの初期設定は `/etc/yoriki/postgres.env`（`deploy/env/postgres.env.example`）、Cloudflare Tunnelのトークンは `/etc/yoriki/cloudflared.env`（`deploy/env/cloudflared.env.example`）に置く。どれも所有者root、権限600にする。
 - Composeファイル自体の変数（`YORIKI_API_IMAGE` 等のイメージのdigest、証明書のディレクトリ、dockerグループのGID）は、`deploy/.env`（`deploy/.env.example` をコピー）に置く。ここには秘密情報を書かない。
-- LLMのAPI key、Connector・外部連携の資格情報は、管理画面で登録する接続のSecret参照として扱い、apiとqcluster（Workerサーバーのqclusterを含む）の中だけで使う。Sandboxに渡す環境変数には含めない。
-- Secret参照は、初期には環境変数名を指す（例：`env:YORIKI_OPENAI_API_KEY`）。値は `yoriki.env`（開発では `.envrc`）に置き、管理画面には変数名だけを登録する。
-- クラウドのSecret管理を使う環境では、起動時にSecretを環境変数として渡す仕組み（ECSのsecrets、systemdのcredential等）を使う。アプリは渡し方に依存せず、環境変数を読むだけにする。
+- LLMのAPI key、Connector・外部連携の資格情報は、基盤管理者が管理画面で接続と一緒に登録し、DBに暗号化して保存する（`utils/crypto.py`）。apiとqcluster（Workerサーバーのqclusterを含む）の中でだけ復号して使い、APIの応答・画面・ログ・監査ログ・Sandboxへは出さない。画面には「設定済み」と末尾の4文字だけを出す。
+- 暗号化の鍵は `YORIKI_SECRET_ENCRYPTION_KEYS`（Fernetの鍵。カンマ区切り）で渡し、DBには置かない。DBやそのバックアップだけが漏れても、Secretは読めない。apiとqcluster（Workerサーバーを含む）で同じ値にする。
+  - 生成：`python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`（apiのイメージの中で実行できる）。
+  - 鍵を失うと、登録したSecretはすべて入力し直しになる。DBのバックアップとは別の場所にも控える。
+  - 鍵の交換：新しい鍵を先頭に足して再起動し（古い鍵は残す）、`python manage.py rotate_secret_encryption` で暗号化し直してから、古い鍵を外して再起動する。
+  - 鍵が設定されていなくても起動はする。Secretを保存しようとしたときに入力エラーになる。
+- クラウドのSecret管理を使う環境では、暗号化の鍵を起動時に環境変数として渡す仕組み（ECSのsecrets、systemdのcredential等）を使う。アプリは渡し方に依存せず、環境変数を読むだけにする。
 
 ---
 

@@ -19,11 +19,10 @@ export YORIKI_DATABASE_PORT=5432
 # export YORIKI_DATABASE_POOL_MIN=2
 # export YORIKI_DATABASE_POOL_MAX=10
 
-# LLMプロバイダのAPI key（使うものだけ設定する）。管理画面で登録する接続のSecret参照に
-# `env:YORIKI_OPENAI_API_KEY` のように変数名を書くと、Control Planeがこの値を読む。Sandboxには渡さない
-# export YORIKI_OPENAI_API_KEY=
-# export YORIKI_ANTHROPIC_API_KEY=
-# export YORIKI_GEMINI_API_KEY=
+# 管理画面で登録するSecret（LLMのAPI key、Connectorのパスワード等）をDBに暗号化して保存する鍵（Fernet）。
+# 次のコマンドで作る。カンマ区切りで複数を書くと、先頭で暗号化し、すべての鍵で復号する（deployment.md §5）
+#   cd api && uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# export YORIKI_SECRET_ENCRYPTION_KEYS=
 
 # --- 社内SSO（使う認証基盤だけ設定する。backend-conventions.md §6.2） ---
 # export YORIKI_SSO_PROVIDERS=microsoft          # microsoft / google（カンマ区切りで複数可）。auth0 / oidc は後から対応予定

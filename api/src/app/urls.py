@@ -17,6 +17,7 @@ urlpatterns: list[URLPattern | URLResolver] = [
                 path("schema/", SpectacularAPIView.as_view(), name="schema"),
                 path("schema/swagger-ui/", SpectacularSwaggerView.as_view(url_name="schema")),
                 path("", include("user.urls")),
+                path("", include("llm.urls")),
             ]
         ),
     ),

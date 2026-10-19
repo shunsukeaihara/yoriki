@@ -1,10 +1,12 @@
 import pytest
 from django.contrib.auth import authenticate
 from django.contrib.auth.models import AnonymousUser, Group, Permission
+from django.core.exceptions import ImproperlyConfigured
 from django.test import RequestFactory
 
 from user.factories import UserFactory
 
+from .crypto import decrypt_secret, encrypt_secret, secret_hint
 from .lock import lock
 from .permissions import AppUser, PlatformAdmin, require_permission
 
@@ -85,3 +87,16 @@ def test_lock_can_be_acquired_twice_in_sequence():
     for _ in range(2):
         with lock("test-lock", timeout=1):
             pass
+
+
+class TestCrypto:
+    def test_round_trip_and_hint(self):
+        token = encrypt_secret("sk-0123456789abcd")
+        assert "sk-" not in token
+        assert decrypt_secret(token) == "sk-0123456789abcd"
+        assert secret_hint("sk-0123456789abcd") == "abcd"
+
+    def test_invalid_key_is_improperly_configured(self, settings):
+        settings.YORIKI_SECRET_ENCRYPTION_KEYS = ["not-a-fernet-key"]
+        with pytest.raises(ImproperlyConfigured):
+            encrypt_secret("x")

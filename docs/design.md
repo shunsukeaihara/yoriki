@@ -1,13 +1,13 @@
 # Yoriki — 社内AI Agent基盤 設計企画書
 
 作成日：2026年10月2日  
-更新日：2026年10月17日  
-版：0.16 設計案  
+更新日：2026年10月20日  
+版：0.17 設計案  
 対象：サービス企画、開発、運用担当
 
 プロダクト名はYoriki（よりき）とする（0.16でYuhitsuから変更）。同名の製品・サービスがあることは承知の上で、検索での見つけやすさは重視しない。名称の商標・ドメイン等の確認は本設計の対象外とする。
 
-主な改訂内容は§15を参照。0.16ではプロダクト名をYorikiに変更し、Connectorの調整方法（境界と使い方の2層、Skillのスクリプトからの呼出し）とSandboxの安全対策の順序を追加した。
+主な改訂内容は§15を参照。0.17では、LLMのAPI keyとConnectorの資格情報を、管理画面で登録してDBに暗号化して保存する方式に変更した。
 
 ## 1 目的と基本方針
 
@@ -608,7 +608,7 @@ Agentが使うLLMは、管理画面で登録したプロバイダ接続とモデ
 | Google（Gemini） | 公式API | 汎用 |
 | OpenAI互換（ローカルLLM） | base URLを指定したOpenAI互換API（vLLM、Ollama、LM Studio、llama.cpp server等） | 社外へデータを送れない業務、検証、費用の抑制 |
 
-- **プロバイダ接続（LLMConnection）**：種別、API keyのSecret参照、base URL（OpenAI互換のみ）、timeout、同時実行数・rate limitを持つ。基盤管理者だけが登録・変更できる。API keyはSandboxへ渡さず、ログ・画面へも出さない。MVPではProvider AdapterをControl Planeのプロセス（apiと、Runnerが動くqcluster。同じイメージ）の中で動かす。QClusterだけのWorkerサーバー（§6.1）のRunnerも、HTTPを介さず同じプロセスの中のProvider Adapterを通してLLMを呼ぶ（モデルのAPIへ直接接続しない）。API keyを読めるのはControl Planeと同じ信頼範囲のサーバーだけにし、SandboxとLLMへは渡さない。Secret参照は、初期には環境変数名を指す（例：`env:YORIKI_OPENAI_API_KEY`）。
+- **プロバイダ接続（LLMConnection）**：種別、API keyのSecret参照、base URL（OpenAI互換のみ）、timeout、同時実行数・rate limitを持つ。基盤管理者だけが登録・変更できる。API keyはSandboxへ渡さず、ログ・画面へも出さない。MVPではProvider AdapterをControl Planeのプロセス（apiと、Runnerが動くqcluster。同じイメージ）の中で動かす。QClusterだけのWorkerサーバー（§6.1）のRunnerも、HTTPを介さず同じプロセスの中のProvider Adapterを通してLLMを呼ぶ（モデルのAPIへ直接接続しない）。API keyを読めるのはControl Planeと同じ信頼範囲のサーバーだけにし、SandboxとLLMへは渡さない。API keyは管理画面で接続と一緒に登録し、DBに暗号化して保存する（鍵はDBに置かず環境変数で渡す。deployment.md §5）。API keyは書き込み専用で、画面とAPIには末尾の4文字だけを出す。登録済みのAPI keyを別の接続先へ送らせないよう、種別やbase URLを変えるときはAPI keyの入力し直しを必須にする。公式API（OpenAI・Anthropic・Gemini）の接続先は固定し、base URLを指定できるのはOpenAI互換だけにする。Connector・外部連携の資格情報も同じ方式で保存する（§4.9）。
 - **モデル設定（ModelProfile）**：接続、モデル名、最大入力・出力token、入出力の単価、対応能力（Tool呼出し、画像入力、構造化出力、prompt caching、推論の制御）、データ区分（社外送信可・社内のみ）を版付きで持つ。単価はUsageLedgerの金額計算に使い、ローカルLLMは0または設定した原価とする。
 - **Agentでの選択**：Agentの版に主モデルと任意の代替モデルを指定する。Run受付時に使うModelProfileの版を固定し、実行中に管理画面でモデルを変えても進行中のRunは切り替えない。
 - **能力の検証**：Agentの公開時に、SkillやToolが必要とする能力（Tool呼出し、画像入力等）をモデルが持つかを検証し、満たさない組合せは公開できないようにする。ローカルLLMでTool呼出しが不安定なモデルは、Tool呼出し不可として登録する。
@@ -625,7 +625,7 @@ Provider Adapterは、メッセージ・Tool定義・オプションを受け取
 
 | 項目 | 内容 |
 |---|---|
-| 登録 | 基盤管理者が管理画面で接続（Connector）を登録する。種別、接続先、認証方式、Secret参照、公開する範囲（スキーマ・ビュー、サイト・フォルダ等）、上限を版付きで持つ |
+| 登録 | 基盤管理者が管理画面で接続（Connector）を登録する。種別、接続先（DBの種別・ホスト・DB名、HTTPのホスト・ヘッダー等）、認証方式、資格情報（パスワード・token等。DBに暗号化して保存する。§4.8）、公開する範囲（スキーマ・ビュー、サイト・フォルダ等）、上限を版付きで持つ |
 | 操作 | Connectorは提供する操作を、読取り（`read`）と書込み（`write`）に分類して宣言する。例：`sharepoint.search`（read）、`sharepoint.download`（read）、`sharepoint.upload`（write） |
 | 利用の許可 | どのAgentがどのConnectorのどの操作を使えるかをBindingで指定し、Run受付時に固定する。既定は読取りの操作だけとし、書込みは対象（サイト・フォルダ等）を限定して明示的に許可する |
 | Skillからの利用 | Skillは必要な操作（例：`sharepoint.download`）を要件として宣言する。社員やAgentがチャットでSkillを作るときも同じで、公開時に、割り当てたAgentのBindingで要件を満たせるかを検証する（§4.8のモデルの能力の検証と同じ） |
@@ -675,7 +675,7 @@ Connectorは「境界」と「使い方」の2層に分けて管理する。
 
 SharePoint・OneDrive（Microsoft Graph）、Google Driveは、検索、一覧、ダウンロード、（許可した場合の）アップロードの操作を持つConnectorとして実装する。ダウンロードしたファイルはArtifactとして保存し、版とhashを記録して、どの時点の原本を使ったかを後から確認できるようにする。
 
-社内システムのREST APIは、APIごとにAdapterのコードを書かず、汎用のHTTP Connectorの設定で追加できるようにする。基盤管理者が、接続先のURL、認証（Secret参照）、呼んでよい操作（メソッドとパスのパターン、読取り・書込みの分類、入出力の説明）を登録する。登録していないパスやホストへは送信しない。
+社内システムのREST APIは、APIごとにAdapterのコードを書かず、汎用のHTTP Connectorの設定で追加できるようにする。基盤管理者が、接続先のURL、認証（資格情報は暗号化して保存）、呼んでよい操作（メソッドとパスのパターン、読取り・書込みの分類、入出力の説明）を登録する。登録していないパスやホストへは送信しない。
 
 外部サービスが公式のMCP（Model Context Protocol）サーバーを提供している場合は、MCPサーバーに接続するConnectorとして取り込める。この場合もMCPサーバーへの接続はControl Planeだけが行い、Bindingで許可したtoolだけをAgentへ見せる。MCPのtoolも読取り・書込みに分類し、分類できないtoolは書込みとして扱う。
 
@@ -751,9 +751,9 @@ Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプ�
 | Destination / DestinationRevision | 種別、宛先、Secret参照、許可scope、出力・再送設定、状態 |
 | Delivery | Run、event_id、配信キー、送信Binding版、外部thread参照、確定内容・質問・結果・成果物参照、配信状態 |
 | DeliveryAttempt | 試行番号、送信payload、URL期限、受付結果・外部ID、エラー、次回試行時刻 |
-| LLMConnection | プロバイダ種別、API keyのSecret参照、base URL、timeout、同時実行数・rate limit（§4.8） |
+| LLMConnection | プロバイダ種別、API key（暗号化して保存）、base URL、timeout、同時実行数・rate limit（§4.8） |
 | ModelProfile / ModelProfileVersion | 接続、モデル名、token上限、単価、対応能力、データ区分を版付きで保持（§4.8） |
-| Connector / ConnectorRevision | Adapter実装版、接続先、認証方式、Secret参照、公開範囲、上限、宣言した操作（§4.9） |
+| Connector / ConnectorRevision | Adapter実装版、接続先、認証方式、資格情報（暗号化して保存）、公開範囲、上限、宣言した操作（§4.9） |
 | ConnectorBinding / ConnectorBindingRevision | Agent、Connector版、許可した操作と対象、読取り・書込みの区分 |
 | UserOAuthToken | 社内ユーザー、provider、scope、暗号化したaccess token・refresh token、有効期限（§4.9.1） |
 
@@ -1596,3 +1596,4 @@ Sandboxイメージの定義は本体と同じリポジトリの `sandbox/` で�
 | 0.14 | 2026年10月16日 | 文書間の整合性を確認し、SSE・同一オリジン・Connector・認証・配備の記述を各章へ反映 |
 | 0.15 | 2026年10月16日 | 文書間の整合性を再確認し、認証（前段の認証プロキシの裏に置く場合）、Workerの配置（QClusterだけのWorkerサーバー、共有S3）、清掃の定期実行、Webhook受付パスの記述を他の文書と揃えた |
 | 0.16 | 2026年10月17日 | プロダクト名をYuhitsuからYorikiに変更。Connectorの境界と使い方の2層、汎用のHTTP Connector、Skillのスクリプトからの呼出し、Connectorが動く場所、DB用Connector（SQL Server・PostgreSQL・MySQL）、文書処理にLibreOfficeを使わない方針、Sandbox脱出への対策の順序を追加 |
+| 0.17 | 2026年10月20日 | LLMのAPI key・Connectorの資格情報を、管理画面で登録してDBに暗号化して保存する方式に変更（§4.8）。モデル設定の単価は100万tokenあたりの米ドル |

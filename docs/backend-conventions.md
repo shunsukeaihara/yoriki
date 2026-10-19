@@ -625,6 +625,7 @@ DATABASES = {
 | `utils/pagination.py` | `CursorPaginationWithPageSizeQuery`（`page_size` クエリ、上限200） |
 | `utils/handlers.py` | DRFの例外ハンドラ（500系だけ通知に流す） |
 | `utils/lock.py` | DBのadvisory lock |
+| `utils/crypto.py` | 管理画面で登録するSecret（LLMのAPI key、Connectorのパスワード等）の暗号化・復号（Fernet。鍵は `YORIKI_SECRET_ENCRYPTION_KEYS`） |
 | `common/choices.py` | 複数アプリで使うChoices |
 
 - 権限はDjangoのpermissionで判定する。Userのフラグや役割の名前では判定しない。流れは「permissionを定義する → Groupに割り当てる → Groupをユーザーに割り当てる」とする。
@@ -636,6 +637,16 @@ DATABASES = {
 - ViewSetでは `require_permission(AppPermission.XXX)` で確認する。`require_permission` は、ログイン済みで `user.has_perm()` が真の場合に許可するpermissionクラスを返す。Django標準のpermissionは `"<app_label>.<codename>"` の文字列で渡す。
 - permissionを持つユーザーの一覧（通知の宛先等）は `User.objects.with_permission(AppPermission.XXX)` で取得する（直接・Group経由・基盤管理者を含む）。
 - `AppUser`・`PlatformAdmin` は `_Xxx(BasePermission)` を定義し、公開名を `Xxx = IsAuthenticated & _Xxx` にする。
+- 基盤管理者だけが使う管理画面（LLMの接続等）は、APIを `PlatformAdmin` で守り、画面のメニューはそのModelのDjango標準のpermission（`llm.change_llmconnection` 等）で出し分ける。基盤管理者はすべてのpermissionを持つので表示される。標準のpermissionを他の人に付けても、APIは403になる（frontend-conventions.md §6.2）。
+
+### 6.4 Secret
+
+- 管理画面で登録するSecret（LLMのAPI key、Connectorのパスワード・token、HTTP Connectorのヘッダー等）は、`utils.crypto.encrypt_secret()` で暗号化してDBに保存する。平文の列を作らない。暗号化した値を返すフィールドや、復号した値を自動で持つModelのフィールドも作らない（誤って応答やログに出さないため）。
+- Modelには、暗号化した値（`<名前>_encrypted`）と、画面に出す末尾の4文字（`<名前>_hint`。`secret_hint()`）を持たせ、`set_<名前>()` / `get_<名前>()` で読み書きする。復号は、外部へ接続する処理（Provider Adapter、Connector）の中でだけ行う。
+- Serializerでは、Secretを `write_only=True` の項目で受け、応答には `has_<名前>` と `<名前>_hint` だけを出す。送られなければ変更しない。
+- 接続先（種別、ホスト、base URL）を変えるときは、Secretの入力し直しを必須にする。登録済みのSecretを別のサーバーへ送らせないため。
+- 監査ログ（auditlog）では、暗号化した値の列を `exclude_fields` に入れる。Django管理画面でも `exclude` で出さない。
+- 鍵の交換は `rotate_secret_encryption` コマンドで行う。Secretを持つModelを追加したら、このコマンドの対象にも加える。
 
 ---
 

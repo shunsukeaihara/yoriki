@@ -73,6 +73,150 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/llm_connections/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description LLMのプロバイダ接続の管理API（基盤管理者だけ） */
+        get: operations["v1_llm_connections_list"];
+        put?: never;
+        /** @description LLMのプロバイダ接続の管理API（基盤管理者だけ） */
+        post: operations["v1_llm_connections_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/llm_connections/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description LLMのプロバイダ接続の管理API（基盤管理者だけ） */
+        get: operations["v1_llm_connections_retrieve"];
+        /** @description LLMのプロバイダ接続の管理API（基盤管理者だけ） */
+        put: operations["v1_llm_connections_update"];
+        post?: never;
+        /** @description LLMのプロバイダ接続の管理API（基盤管理者だけ） */
+        delete: operations["v1_llm_connections_destroy"];
+        options?: never;
+        head?: never;
+        /** @description LLMのプロバイダ接続の管理API（基盤管理者だけ） */
+        patch: operations["v1_llm_connections_partial_update"];
+        trace?: never;
+    };
+    "/api/v1/llm_connections/{uid}/check/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 接続先に問い合わせて、API keyと接続先が正しいかを確かめる。使えるモデル名も返す */
+        post: operations["v1_llm_connections_check_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model_profiles/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description モデル設定の管理API（基盤管理者だけ） */
+        get: operations["v1_model_profiles_list"];
+        put?: never;
+        /** @description モデル設定の管理API（基盤管理者だけ） */
+        post: operations["v1_model_profiles_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model_profiles/{model_profile}/versions/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description モデル設定の版（基盤管理者だけ） */
+        get: operations["v1_model_profiles_versions_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model_profiles/{model_profile}/versions/{number}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description モデル設定の版（基盤管理者だけ） */
+        get: operations["v1_model_profiles_versions_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/model_profiles/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description モデル設定の管理API（基盤管理者だけ） */
+        get: operations["v1_model_profiles_retrieve"];
+        /** @description モデル設定の管理API（基盤管理者だけ） */
+        put: operations["v1_model_profiles_update"];
+        post?: never;
+        /** @description モデル設定の管理API（基盤管理者だけ） */
+        delete: operations["v1_model_profiles_destroy"];
+        options?: never;
+        head?: never;
+        /** @description モデル設定の管理API（基盤管理者だけ） */
+        patch: operations["v1_model_profiles_partial_update"];
+        trace?: never;
+    };
+    "/api/v1/model_profiles/{uid}/revise/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 中身を変えた新しい版を作り、現在の版にする。進行中のRunは受付時の版を使い続ける */
+        post: operations["v1_model_profiles_revise_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -82,6 +226,229 @@ export interface components {
             readonly id: string;
             readonly name: string;
             readonly login_url: string;
+        };
+        /**
+         * @description * `1` - 社外送信可
+         *     * `2` - 社内のみ
+         * @enum {integer}
+         */
+        DataClassificationEnum: 1 | 2;
+        /** @description プロバイダ接続。API keyは書き込み専用で、応答には末尾の4文字（api_key_hint）だけを出す */
+        LLMConnection: {
+            readonly id: string;
+            /** 名前 */
+            name: string;
+            /** 種別 */
+            kind: components["schemas"]["ProviderKindEnum"];
+            readonly kind_display: string;
+            base_url?: string;
+            readonly has_api_key: boolean;
+            /** API keyの末尾 */
+            readonly api_key_hint: string;
+            /** タイムアウト（秒） */
+            timeout_seconds?: number;
+            /** 同時実行数の上限 */
+            max_concurrency?: number;
+            /** 1分あたりの要求数の上限 */
+            requests_per_minute?: number | null;
+            /** 有効 */
+            is_active?: boolean;
+            readonly created_by: string;
+            /** Format: date-time */
+            readonly created: string;
+            /** Format: date-time */
+            readonly updated: string;
+        };
+        /** @description 接続の確認の結果 */
+        LLMConnectionCheck: {
+            readonly ok: boolean;
+            /** @description 失敗の理由。成功したら空文字 */
+            readonly detail: string;
+            /** @description 接続先で使えるモデル名 */
+            readonly models: string[];
+        };
+        /** @description プロバイダ接続。API keyは書き込み専用で、応答には末尾の4文字（api_key_hint）だけを出す */
+        LLMConnectionRequest: {
+            /** 名前 */
+            name: string;
+            /** 種別 */
+            kind: components["schemas"]["ProviderKindEnum"];
+            base_url?: string;
+            /** @description 送らなければ変更しない。空文字はAPI keyなし（OpenAI互換だけ）。種別やbase URLを変えるときは必須 */
+            api_key?: string;
+            /** タイムアウト（秒） */
+            timeout_seconds?: number;
+            /** 同時実行数の上限 */
+            max_concurrency?: number;
+            /** 1分あたりの要求数の上限 */
+            requests_per_minute?: number | null;
+            /** 有効 */
+            is_active?: boolean;
+        };
+        MinimumLLMConnection: {
+            readonly id: string;
+            /** 名前 */
+            readonly name: string;
+            /** 種別 */
+            readonly kind: components["schemas"]["ProviderKindEnum"];
+            readonly kind_display: string;
+            /** 有効 */
+            readonly is_active: boolean;
+        };
+        /** @description モデル設定。名前と有効・無効だけを更新できる。中身を変えるときは新しい版を作る（revise） */
+        ModelProfile: {
+            readonly id: string;
+            /** 名前 */
+            name: string;
+            /** 有効 */
+            is_active?: boolean;
+            readonly current_version: components["schemas"]["ModelProfileVersion"];
+            readonly created_by: string;
+            /** Format: date-time */
+            readonly created: string;
+            /** Format: date-time */
+            readonly updated: string;
+        };
+        /** @description モデル設定と最初の版を作る */
+        ModelProfileCreateRequest: {
+            /** 名前 */
+            name: string;
+            /** 有効 */
+            is_active?: boolean;
+            version: components["schemas"]["ModelProfileVersionWriteRequest"];
+        };
+        /** @description モデル設定。名前と有効・無効だけを更新できる。中身を変えるときは新しい版を作る（revise） */
+        ModelProfileRequest: {
+            /** 名前 */
+            name: string;
+            /** 有効 */
+            is_active?: boolean;
+        };
+        /** @description 新しい版を作り、現在の版にする */
+        ModelProfileReviseRequest: {
+            /** @description 編集を始めた時点の現在の版 */
+            expected_version: number;
+            connection: string;
+            /** モデル名 */
+            model_name: string;
+            /** 最大入力token */
+            max_input_tokens: number;
+            /** 最大出力token */
+            max_output_tokens: number;
+            /**
+             * 入力の単価
+             * Format: decimal
+             */
+            input_price?: string;
+            /**
+             * キャッシュされた入力の単価
+             * Format: decimal
+             */
+            cached_input_price?: string;
+            /**
+             * 出力の単価
+             * Format: decimal
+             */
+            output_price?: string;
+            /** Tool呼出し */
+            supports_tools?: boolean;
+            /** 画像入力 */
+            supports_images?: boolean;
+            /** 構造化出力 */
+            supports_structured_output?: boolean;
+            /** Prompt caching */
+            supports_prompt_caching?: boolean;
+            /** 推論の制御 */
+            supports_reasoning?: boolean;
+            /** データ区分 */
+            data_classification?: components["schemas"]["DataClassificationEnum"];
+            /** 変更理由 */
+            change_reason?: string;
+        };
+        ModelProfileVersion: {
+            readonly id: string;
+            /** 版 */
+            readonly number: number;
+            readonly connection: string;
+            /** モデル名 */
+            readonly model_name: string;
+            /** 最大入力token */
+            readonly max_input_tokens: number;
+            /** 最大出力token */
+            readonly max_output_tokens: number;
+            /**
+             * 入力の単価
+             * Format: decimal
+             */
+            readonly input_price: string;
+            /**
+             * キャッシュされた入力の単価
+             * Format: decimal
+             */
+            readonly cached_input_price: string;
+            /**
+             * 出力の単価
+             * Format: decimal
+             */
+            readonly output_price: string;
+            /** Tool呼出し */
+            readonly supports_tools: boolean;
+            /** 画像入力 */
+            readonly supports_images: boolean;
+            /** 構造化出力 */
+            readonly supports_structured_output: boolean;
+            /** Prompt caching */
+            readonly supports_prompt_caching: boolean;
+            /** 推論の制御 */
+            readonly supports_reasoning: boolean;
+            /** データ区分 */
+            readonly data_classification: components["schemas"]["DataClassificationEnum"];
+            /** 変更理由 */
+            readonly change_reason: string;
+            readonly connection_info: components["schemas"]["MinimumLLMConnection"];
+            readonly data_classification_display: string;
+            readonly created_by: string;
+            /** Format: date-time */
+            readonly created: string;
+        };
+        /** @description 版の中身の入力。最初の版（ModelProfileCreateSerializer）と新しい版（ModelProfileReviseSerializer）で使う */
+        ModelProfileVersionWriteRequest: {
+            connection: string;
+            /** モデル名 */
+            model_name: string;
+            /** 最大入力token */
+            max_input_tokens: number;
+            /** 最大出力token */
+            max_output_tokens: number;
+            /**
+             * 入力の単価
+             * Format: decimal
+             */
+            input_price?: string;
+            /**
+             * キャッシュされた入力の単価
+             * Format: decimal
+             */
+            cached_input_price?: string;
+            /**
+             * 出力の単価
+             * Format: decimal
+             */
+            output_price?: string;
+            /** Tool呼出し */
+            supports_tools?: boolean;
+            /** 画像入力 */
+            supports_images?: boolean;
+            /** 構造化出力 */
+            supports_structured_output?: boolean;
+            /** Prompt caching */
+            supports_prompt_caching?: boolean;
+            /** 推論の制御 */
+            supports_reasoning?: boolean;
+            /** データ区分 */
+            data_classification?: components["schemas"]["DataClassificationEnum"];
+            /** 変更理由 */
+            change_reason?: string;
         };
         /** @description ログイン中の利用者。画面の表示と権限の判定に使う */
         MyUser: {
@@ -98,9 +465,81 @@ export interface components {
             readonly is_platform_admin: boolean;
             readonly all_permissions: string[];
         };
+        PaginatedLLMConnectionList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["LLMConnection"][];
+        };
+        PaginatedModelProfileList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["ModelProfile"][];
+        };
+        PaginatedModelProfileVersionList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["ModelProfileVersion"][];
+        };
+        /** @description プロバイダ接続。API keyは書き込み専用で、応答には末尾の4文字（api_key_hint）だけを出す */
+        PatchedLLMConnectionRequest: {
+            /** 名前 */
+            name?: string;
+            /** 種別 */
+            kind?: components["schemas"]["ProviderKindEnum"];
+            base_url?: string;
+            /** @description 送らなければ変更しない。空文字はAPI keyなし（OpenAI互換だけ）。種別やbase URLを変えるときは必須 */
+            api_key?: string;
+            /** タイムアウト（秒） */
+            timeout_seconds?: number;
+            /** 同時実行数の上限 */
+            max_concurrency?: number;
+            /** 1分あたりの要求数の上限 */
+            requests_per_minute?: number | null;
+            /** 有効 */
+            is_active?: boolean;
+        };
+        /** @description モデル設定。名前と有効・無効だけを更新できる。中身を変えるときは新しい版を作る（revise） */
+        PatchedModelProfileRequest: {
+            /** 名前 */
+            name?: string;
+            /** 有効 */
+            is_active?: boolean;
+        };
         Ping: {
             readonly status: string;
         };
+        /**
+         * @description * `1` - OpenAI
+         *     * `2` - Anthropic
+         *     * `3` - Google Gemini
+         *     * `4` - OpenAI互換
+         * @enum {integer}
+         */
+        ProviderKindEnum: 1 | 2 | 3 | 4;
         Session: {
             readonly is_authenticated: boolean;
         };
@@ -204,6 +643,433 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Ping"];
                 };
+            };
+        };
+    };
+    v1_llm_connections_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                is_active?: boolean;
+                /**
+                 * @description 種別
+                 *
+                 *     * `1` - OpenAI
+                 *     * `2` - Anthropic
+                 *     * `3` - Google Gemini
+                 *     * `4` - OpenAI互換
+                 */
+                kind?: 1 | 2 | 3 | 4;
+                /** @description 名前 */
+                name?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedLLMConnectionList"];
+                };
+            };
+        };
+    };
+    v1_llm_connections_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LLMConnectionRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["LLMConnectionRequest"];
+                "multipart/form-data": components["schemas"]["LLMConnectionRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LLMConnection"];
+                };
+            };
+        };
+    };
+    v1_llm_connections_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LLMConnection"];
+                };
+            };
+        };
+    };
+    v1_llm_connections_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LLMConnectionRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["LLMConnectionRequest"];
+                "multipart/form-data": components["schemas"]["LLMConnectionRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LLMConnection"];
+                };
+            };
+        };
+    };
+    v1_llm_connections_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_llm_connections_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedLLMConnectionRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedLLMConnectionRequest"];
+                "multipart/form-data": components["schemas"]["PatchedLLMConnectionRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LLMConnection"];
+                };
+            };
+        };
+    };
+    v1_llm_connections_check_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LLMConnectionCheck"];
+                };
+            };
+        };
+    };
+    v1_model_profiles_list: {
+        parameters: {
+            query?: {
+                /** @description プロバイダ接続 */
+                connection?: string;
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /**
+                 * @description データ区分
+                 *
+                 *     * `1` - 社外送信可
+                 *     * `2` - 社内のみ
+                 */
+                data_classification?: 1 | 2;
+                is_active?: boolean;
+                /** @description 名前 */
+                name?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedModelProfileList"];
+                };
+            };
+        };
+    };
+    v1_model_profiles_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelProfileCreateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["ModelProfileCreateRequest"];
+                "multipart/form-data": components["schemas"]["ModelProfileCreateRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelProfile"];
+                };
+            };
+        };
+    };
+    v1_model_profiles_versions_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                model_profile: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedModelProfileVersionList"];
+                };
+            };
+        };
+    };
+    v1_model_profiles_versions_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                model_profile: string;
+                number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelProfileVersion"];
+                };
+            };
+        };
+    };
+    v1_model_profiles_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelProfile"];
+                };
+            };
+        };
+    };
+    v1_model_profiles_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelProfileRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["ModelProfileRequest"];
+                "multipart/form-data": components["schemas"]["ModelProfileRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelProfile"];
+                };
+            };
+        };
+    };
+    v1_model_profiles_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_model_profiles_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedModelProfileRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedModelProfileRequest"];
+                "multipart/form-data": components["schemas"]["PatchedModelProfileRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelProfile"];
+                };
+            };
+        };
+    };
+    v1_model_profiles_revise_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ModelProfileReviseRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["ModelProfileReviseRequest"];
+                "multipart/form-data": components["schemas"]["ModelProfileReviseRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelProfileVersion"];
+                };
+            };
+            /** @description 他の変更と競合した */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

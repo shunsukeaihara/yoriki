@@ -78,6 +78,523 @@ paths:
               schema:
                 $ref: '#/components/schemas/Ping'
           description: ''
+  /api/v1/llm_connections/:
+    get:
+      operationId: v1_llm_connections_list
+      description: LLMのプロバイダ接続の管理API（基盤管理者だけ）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+      - in: query
+        name: kind
+        schema:
+          type: integer
+          title: 種別
+          enum:
+          - 1
+          - 2
+          - 3
+          - 4
+        description: |-
+          種別
+
+          * `1` - OpenAI
+          * `2` - Anthropic
+          * `3` - Google Gemini
+          * `4` - OpenAI互換
+      - in: query
+        name: name
+        schema:
+          type: string
+        description: 名前
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - manage/llm_connection
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedLLMConnectionList'
+          description: ''
+    post:
+      operationId: v1_llm_connections_create
+      description: LLMのプロバイダ接続の管理API（基盤管理者だけ）
+      tags:
+      - manage/llm_connection
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LLMConnectionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/LLMConnectionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/LLMConnectionRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMConnection'
+          description: ''
+  /api/v1/llm_connections/{uid}/:
+    get:
+      operationId: v1_llm_connections_retrieve
+      description: LLMのプロバイダ接続の管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/llm_connection
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMConnection'
+          description: ''
+    put:
+      operationId: v1_llm_connections_update
+      description: LLMのプロバイダ接続の管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/llm_connection
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LLMConnectionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/LLMConnectionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/LLMConnectionRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMConnection'
+          description: ''
+    patch:
+      operationId: v1_llm_connections_partial_update
+      description: LLMのプロバイダ接続の管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/llm_connection
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedLLMConnectionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedLLMConnectionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedLLMConnectionRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMConnection'
+          description: ''
+    delete:
+      operationId: v1_llm_connections_destroy
+      description: LLMのプロバイダ接続の管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/llm_connection
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/llm_connections/{uid}/check/:
+    post:
+      operationId: v1_llm_connections_check_create
+      description: 接続先に問い合わせて、API keyと接続先が正しいかを確かめる。使えるモデル名も返す
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/llm_connection
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LLMConnectionCheck'
+          description: ''
+  /api/v1/model_profiles/:
+    get:
+      operationId: v1_model_profiles_list
+      description: モデル設定の管理API（基盤管理者だけ）
+      parameters:
+      - in: query
+        name: connection
+        schema:
+          type: string
+        description: プロバイダ接続
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - in: query
+        name: data_classification
+        schema:
+          type: integer
+          title: データ区分
+          enum:
+          - 1
+          - 2
+        description: |-
+          データ区分
+
+          * `1` - 社外送信可
+          * `2` - 社内のみ
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+      - in: query
+        name: name
+        schema:
+          type: string
+        description: 名前
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - manage/model_profile
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedModelProfileList'
+          description: ''
+    post:
+      operationId: v1_model_profiles_create
+      description: モデル設定の管理API（基盤管理者だけ）
+      tags:
+      - manage/model_profile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelProfileCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ModelProfileCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ModelProfileCreateRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelProfile'
+          description: ''
+  /api/v1/model_profiles/{model_profile}/versions/:
+    get:
+      operationId: v1_model_profiles_versions_list
+      description: モデル設定の版（基盤管理者だけ）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - in: path
+        name: model_profile
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - manage/model_profile/version
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedModelProfileVersionList'
+          description: ''
+  /api/v1/model_profiles/{model_profile}/versions/{number}/:
+    get:
+      operationId: v1_model_profiles_versions_retrieve
+      description: モデル設定の版（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: model_profile
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: number
+        schema:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          title: 版
+        required: true
+      tags:
+      - manage/model_profile/version
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelProfileVersion'
+          description: ''
+  /api/v1/model_profiles/{uid}/:
+    get:
+      operationId: v1_model_profiles_retrieve
+      description: モデル設定の管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/model_profile
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelProfile'
+          description: ''
+    put:
+      operationId: v1_model_profiles_update
+      description: モデル設定の管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/model_profile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelProfileRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ModelProfileRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ModelProfileRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelProfile'
+          description: ''
+    patch:
+      operationId: v1_model_profiles_partial_update
+      description: モデル設定の管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/model_profile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedModelProfileRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedModelProfileRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedModelProfileRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelProfile'
+          description: ''
+    delete:
+      operationId: v1_model_profiles_destroy
+      description: モデル設定の管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/model_profile
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/model_profiles/{uid}/revise/:
+    post:
+      operationId: v1_model_profiles_revise_create
+      description: 中身を変えた新しい版を作り、現在の版にする。進行中のRunは受付時の版を使い続ける
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/model_profile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelProfileReviseRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ModelProfileReviseRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ModelProfileReviseRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelProfileVersion'
+          description: ''
+        '409':
+          description: 他の変更と競合した
 components:
   schemas:
     AuthProvider:
@@ -97,6 +614,501 @@ components:
       - id
       - login_url
       - name
+    DataClassificationEnum:
+      enum:
+      - 1
+      - 2
+      type: integer
+      description: |-
+        * `1` - 社外送信可
+        * `2` - 社内のみ
+    LLMConnection:
+      type: object
+      description: プロバイダ接続。API keyは書き込み専用で、応答には末尾の4文字（api_key_hint）だけを出す
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          title: 名前
+          maxLength: 100
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/ProviderKindEnum'
+          title: 種別
+          minimum: 0
+          maximum: 32767
+        kind_display:
+          type: string
+          readOnly: true
+        base_url:
+          oneOf:
+          - type: string
+            format: uri
+            maxLength: 500
+          - type: string
+            maxLength: 0
+        has_api_key:
+          type: boolean
+          readOnly: true
+        api_key_hint:
+          type: string
+          readOnly: true
+          title: API keyの末尾
+        timeout_seconds:
+          type: integer
+          maximum: 3600
+          minimum: 1
+          title: タイムアウト（秒）
+        max_concurrency:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          title: 同時実行数の上限
+        requests_per_minute:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
+          nullable: true
+          title: 1分あたりの要求数の上限
+        is_active:
+          type: boolean
+          title: 有効
+        created_by:
+          type: string
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - api_key_hint
+      - created
+      - created_by
+      - has_api_key
+      - id
+      - kind
+      - kind_display
+      - name
+      - updated
+    LLMConnectionCheck:
+      type: object
+      description: 接続の確認の結果
+      properties:
+        ok:
+          type: boolean
+          readOnly: true
+        detail:
+          type: string
+          readOnly: true
+          description: 失敗の理由。成功したら空文字
+        models:
+          type: array
+          items:
+            type: string
+          readOnly: true
+          description: 接続先で使えるモデル名
+      required:
+      - detail
+      - models
+      - ok
+    LLMConnectionRequest:
+      type: object
+      description: プロバイダ接続。API keyは書き込み専用で、応答には末尾の4文字（api_key_hint）だけを出す
+      properties:
+        name:
+          type: string
+          minLength: 1
+          title: 名前
+          maxLength: 100
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/ProviderKindEnum'
+          title: 種別
+          minimum: 0
+          maximum: 32767
+        base_url:
+          oneOf:
+          - type: string
+            format: uri
+            maxLength: 500
+          - type: string
+            maxLength: 0
+        api_key:
+          type: string
+          writeOnly: true
+          description: 送らなければ変更しない。空文字はAPI keyなし（OpenAI互換だけ）。種別やbase URLを変えるときは必須
+          maxLength: 1000
+        timeout_seconds:
+          type: integer
+          maximum: 3600
+          minimum: 1
+          title: タイムアウト（秒）
+        max_concurrency:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          title: 同時実行数の上限
+        requests_per_minute:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
+          nullable: true
+          title: 1分あたりの要求数の上限
+        is_active:
+          type: boolean
+          title: 有効
+      required:
+      - kind
+      - name
+    MinimumLLMConnection:
+      type: object
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+          title: 名前
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/ProviderKindEnum'
+          readOnly: true
+          title: 種別
+        kind_display:
+          type: string
+          readOnly: true
+        is_active:
+          type: boolean
+          readOnly: true
+          title: 有効
+      required:
+      - id
+      - is_active
+      - kind
+      - kind_display
+      - name
+    ModelProfile:
+      type: object
+      description: モデル設定。名前と有効・無効だけを更新できる。中身を変えるときは新しい版を作る（revise）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          title: 名前
+          maxLength: 100
+        is_active:
+          type: boolean
+          title: 有効
+        current_version:
+          allOf:
+          - $ref: '#/components/schemas/ModelProfileVersion'
+          readOnly: true
+        created_by:
+          type: string
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created
+      - created_by
+      - current_version
+      - id
+      - name
+      - updated
+    ModelProfileCreateRequest:
+      type: object
+      description: モデル設定と最初の版を作る
+      properties:
+        name:
+          type: string
+          minLength: 1
+          title: 名前
+          maxLength: 100
+        is_active:
+          type: boolean
+          title: 有効
+        version:
+          allOf:
+          - $ref: '#/components/schemas/ModelProfileVersionWriteRequest'
+          writeOnly: true
+      required:
+      - name
+      - version
+    ModelProfileRequest:
+      type: object
+      description: モデル設定。名前と有効・無効だけを更新できる。中身を変えるときは新しい版を作る（revise）
+      properties:
+        name:
+          type: string
+          minLength: 1
+          title: 名前
+          maxLength: 100
+        is_active:
+          type: boolean
+          title: 有効
+      required:
+      - name
+    ModelProfileReviseRequest:
+      type: object
+      description: 新しい版を作り、現在の版にする
+      properties:
+        expected_version:
+          type: integer
+          minimum: 0
+          description: 編集を始めた時点の現在の版
+        connection:
+          type: string
+          minLength: 1
+        model_name:
+          type: string
+          minLength: 1
+          title: モデル名
+          maxLength: 200
+        max_input_tokens:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
+          title: 最大入力token
+        max_output_tokens:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
+          title: 最大出力token
+        input_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,6})?$
+          title: 入力の単価
+        cached_input_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,6})?$
+          title: キャッシュされた入力の単価
+        output_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,6})?$
+          title: 出力の単価
+        supports_tools:
+          type: boolean
+          title: Tool呼出し
+        supports_images:
+          type: boolean
+          title: 画像入力
+        supports_structured_output:
+          type: boolean
+          title: 構造化出力
+        supports_prompt_caching:
+          type: boolean
+          title: Prompt caching
+        supports_reasoning:
+          type: boolean
+          title: 推論の制御
+        data_classification:
+          allOf:
+          - $ref: '#/components/schemas/DataClassificationEnum'
+          title: データ区分
+          minimum: 0
+          maximum: 32767
+        change_reason:
+          type: string
+          title: 変更理由
+          maxLength: 500
+      required:
+      - connection
+      - expected_version
+      - max_input_tokens
+      - max_output_tokens
+      - model_name
+    ModelProfileVersion:
+      type: object
+      properties:
+        id:
+          type: string
+          readOnly: true
+        number:
+          type: integer
+          readOnly: true
+          title: 版
+        connection:
+          type: string
+          readOnly: true
+        model_name:
+          type: string
+          readOnly: true
+          title: モデル名
+        max_input_tokens:
+          type: integer
+          readOnly: true
+          title: 最大入力token
+        max_output_tokens:
+          type: integer
+          readOnly: true
+          title: 最大出力token
+        input_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,6})?$
+          readOnly: true
+          title: 入力の単価
+        cached_input_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,6})?$
+          readOnly: true
+          title: キャッシュされた入力の単価
+        output_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,6})?$
+          readOnly: true
+          title: 出力の単価
+        supports_tools:
+          type: boolean
+          readOnly: true
+          title: Tool呼出し
+        supports_images:
+          type: boolean
+          readOnly: true
+          title: 画像入力
+        supports_structured_output:
+          type: boolean
+          readOnly: true
+          title: 構造化出力
+        supports_prompt_caching:
+          type: boolean
+          readOnly: true
+          title: Prompt caching
+        supports_reasoning:
+          type: boolean
+          readOnly: true
+          title: 推論の制御
+        data_classification:
+          allOf:
+          - $ref: '#/components/schemas/DataClassificationEnum'
+          readOnly: true
+          title: データ区分
+        change_reason:
+          type: string
+          readOnly: true
+          title: 変更理由
+        connection_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumLLMConnection'
+          readOnly: true
+        data_classification_display:
+          type: string
+          readOnly: true
+        created_by:
+          type: string
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - cached_input_price
+      - change_reason
+      - connection
+      - connection_info
+      - created
+      - created_by
+      - data_classification
+      - data_classification_display
+      - id
+      - input_price
+      - max_input_tokens
+      - max_output_tokens
+      - model_name
+      - number
+      - output_price
+      - supports_images
+      - supports_prompt_caching
+      - supports_reasoning
+      - supports_structured_output
+      - supports_tools
+    ModelProfileVersionWriteRequest:
+      type: object
+      description: 版の中身の入力。最初の版（ModelProfileCreateSerializer）と新しい版（ModelProfileReviseSerializer）で使う
+      properties:
+        connection:
+          type: string
+          minLength: 1
+        model_name:
+          type: string
+          minLength: 1
+          title: モデル名
+          maxLength: 200
+        max_input_tokens:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
+          title: 最大入力token
+        max_output_tokens:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
+          title: 最大出力token
+        input_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,6})?$
+          title: 入力の単価
+        cached_input_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,6})?$
+          title: キャッシュされた入力の単価
+        output_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,6})?$
+          title: 出力の単価
+        supports_tools:
+          type: boolean
+          title: Tool呼出し
+        supports_images:
+          type: boolean
+          title: 画像入力
+        supports_structured_output:
+          type: boolean
+          title: 構造化出力
+        supports_prompt_caching:
+          type: boolean
+          title: Prompt caching
+        supports_reasoning:
+          type: boolean
+          title: 推論の制御
+        data_classification:
+          allOf:
+          - $ref: '#/components/schemas/DataClassificationEnum'
+          title: データ区分
+          minimum: 0
+          maximum: 32767
+        change_reason:
+          type: string
+          title: 変更理由
+          maxLength: 500
+      required:
+      - connection
+      - max_input_tokens
+      - max_output_tokens
+      - model_name
     MyUser:
       type: object
       description: ログイン中の利用者。画面の表示と権限の判定に使う
@@ -140,6 +1152,121 @@ components:
       - id
       - is_platform_admin
       - username
+    PaginatedLLMConnectionList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/LLMConnection'
+    PaginatedModelProfileList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModelProfile'
+    PaginatedModelProfileVersionList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModelProfileVersion'
+    PatchedLLMConnectionRequest:
+      type: object
+      description: プロバイダ接続。API keyは書き込み専用で、応答には末尾の4文字（api_key_hint）だけを出す
+      properties:
+        name:
+          type: string
+          minLength: 1
+          title: 名前
+          maxLength: 100
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/ProviderKindEnum'
+          title: 種別
+          minimum: 0
+          maximum: 32767
+        base_url:
+          oneOf:
+          - type: string
+            format: uri
+            maxLength: 500
+          - type: string
+            maxLength: 0
+        api_key:
+          type: string
+          writeOnly: true
+          description: 送らなければ変更しない。空文字はAPI keyなし（OpenAI互換だけ）。種別やbase URLを変えるときは必須
+          maxLength: 1000
+        timeout_seconds:
+          type: integer
+          maximum: 3600
+          minimum: 1
+          title: タイムアウト（秒）
+        max_concurrency:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          title: 同時実行数の上限
+        requests_per_minute:
+          type: integer
+          maximum: 2147483647
+          minimum: 1
+          nullable: true
+          title: 1分あたりの要求数の上限
+        is_active:
+          type: boolean
+          title: 有効
+    PatchedModelProfileRequest:
+      type: object
+      description: モデル設定。名前と有効・無効だけを更新できる。中身を変えるときは新しい版を作る（revise）
+      properties:
+        name:
+          type: string
+          minLength: 1
+          title: 名前
+          maxLength: 100
+        is_active:
+          type: boolean
+          title: 有効
     Ping:
       type: object
       properties:
@@ -148,6 +1275,18 @@ components:
           readOnly: true
       required:
       - status
+    ProviderKindEnum:
+      enum:
+      - 1
+      - 2
+      - 3
+      - 4
+      type: integer
+      description: |-
+        * `1` - OpenAI
+        * `2` - Anthropic
+        * `3` - Google Gemini
+        * `4` - OpenAI互換
     Session:
       type: object
       properties:

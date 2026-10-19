@@ -274,7 +274,7 @@ export interface components {
             /** 種別 */
             kind: components["schemas"]["ProviderKindEnum"];
             base_url?: string;
-            /** @description 送らなければ変更しない。空文字はAPI keyなし（OpenAI互換だけ）。base URLを変えるときは必須 */
+            /** @description 送らなければ変更しない。空文字はAPI keyなし（OpenAI互換だけ） */
             api_key?: string;
             /** タイムアウト（秒） */
             timeout_seconds?: number;
@@ -511,7 +511,7 @@ export interface components {
             /** 種別 */
             kind?: components["schemas"]["ProviderKindEnum"];
             base_url?: string;
-            /** @description 送らなければ変更しない。空文字はAPI keyなし（OpenAI互換だけ）。base URLを変えるときは必須 */
+            /** @description 送らなければ変更しない。空文字はAPI keyなし（OpenAI互換だけ） */
             api_key?: string;
             /** タイムアウト（秒） */
             timeout_seconds?: number;

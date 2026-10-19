@@ -36,10 +36,8 @@ class ProviderKind(models.IntegerChoices):
         return self == ProviderKind.OPENAI_COMPATIBLE
 
 
-# 接続先の変更を断るときの文（LLMConnection.check_target_change() と LLMConnectionSerializer で使う）
-KIND_IS_FIXED = _("種別は変更できません。新しいプロバイダ接続を作ってください")
-BASE_URL_IS_FIXED = _("モデル設定が使っている接続は、base URLを変更できません。新しいプロバイダ接続を作ってください")
-API_KEY_REQUIRED_FOR_NEW_TARGET = _("base URLを変えるときは、API keyを入力し直してください")
+# 接続先を変えようとしたときの文（LLMConnection.check_target_change() と LLMConnectionSerializer で使う）
+TARGET_IS_FIXED = _("作成した後は変更できません。接続先ごとに、新しいプロバイダ接続を作ってください")
 
 
 class LLMConnection(models.Model):
@@ -78,43 +76,34 @@ class LLMConnection(models.Model):
     def save(self, *args, **kwargs):
         self.check_target_change()
         super().save(*args, **kwargs)
-        self._saved_target = (self.kind, self.base_url, self.api_key_encrypted)
+        self._saved_target = (self.kind, self.base_url)
 
     @classmethod
     def from_db(cls, db, field_names, values, *args, **kwargs):
         instance = super().from_db(db, field_names, values, *args, **kwargs)
         # 保存されている接続先を覚えておき、save() で変更を確かめる（API・Django管理画面・shellのどこから保存しても）
-        if {"kind", "base_url", "api_key_encrypted"} <= set(field_names):
-            instance._saved_target = (instance.kind, instance.base_url, instance.api_key_encrypted)
+        if {"kind", "base_url"} <= set(field_names):
+            instance._saved_target = (instance.kind, instance.base_url)
         return instance
 
     def check_target_change(self) -> None:
-        """接続先の変更を制限する。違反すれば ValidationError（フィールド名ごと）
+        """種別とbase URLは、作成した後は変えられない。違反すれば ValidationError（フィールド名ごと）
 
-        - 種別は変更できない。
-        - モデル設定の版（過去の版を含む）が参照している接続は、base URLを変更できない。版は接続先も含めて固定する
-          ものなので、接続先を変えるときは新しい接続を作る（「社内のみ」の版が社外の接続先へ向かないようにする）。
-        - 参照されていない接続でも、base URLを変えるときはAPI keyを入れ直す
-          （登録済みのAPI keyを別のサーバーへ送らせない）。
+        接続先ごとに接続を作る（API keyは差し替えられる）。接続先を後から変えられると、モデル設定の版
+        （進行中のRunが使う）の意味が変わり、「社内のみ」の版が社外のサーバーへ向いたり、登録済みのAPI keyが
+        別のサーバーへ送られたりする
         """
         saved = getattr(self, "_saved_target", None)
         if saved is None:
             return
-        kind, base_url, api_key_encrypted = saved
+        kind, base_url = saved
+        errors = {}
         if self.kind != kind:
-            raise ValidationError({"kind": KIND_IS_FIXED})
-        if self.base_url == base_url:
-            return
-        if self.is_referenced():
-            raise ValidationError(
-                {
-                    "base_url": _(
-                        "モデル設定が使っている接続は、base URLを変更できません。新しいプロバイダ接続を作ってください"
-                    )
-                }
-            )
-        if api_key_encrypted and self.api_key_encrypted == api_key_encrypted:
-            raise ValidationError({"api_key": API_KEY_REQUIRED_FOR_NEW_TARGET})
+            errors["kind"] = TARGET_IS_FIXED
+        if self.base_url != base_url:
+            errors["base_url"] = TARGET_IS_FIXED
+        if errors:
+            raise ValidationError(errors)
 
     @property
     def has_api_key(self) -> bool:
@@ -139,10 +128,6 @@ class LLMConnection(models.Model):
     def is_in_use(self) -> bool:
         """削除されていないモデル設定の現在の版が、この接続を使っている"""
         return ModelProfile.objects.filter(deleted=False, current_version__connection=self).exists()
-
-    def is_referenced(self) -> bool:
-        """モデル設定の版（過去の版や、削除したモデル設定の版を含む）が、この接続を参照している"""
-        return self.model_versions.exists()
 
 
 class ModelProfile(models.Model):

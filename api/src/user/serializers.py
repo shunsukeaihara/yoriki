@@ -2,15 +2,21 @@ import re
 from collections import defaultdict
 from typing import Any
 
+from django.contrib.auth import authenticate
+from django.contrib.auth.models import Group
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
+from rest_framework.exceptions import Throttled
 
+from utils.backends import LOCKOUT_MESSAGE
 from utils.crypto import is_encryption_configured
 from utils.serializers import ReadOnlyModelSerializer
 
-from .models import SSOKind, SSOProvider, User
+from .models import Invitation, SSOKind, SSOProvider, User, can_use_password
 
 # ドメイン名（ラベルを . でつないだもの）。メールアドレスやURLを書いたものを入力エラーにするための簡単な確認
 DOMAIN_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
@@ -44,12 +50,229 @@ class SessionSerializer(serializers.Serializer):
     is_authenticated = serializers.BooleanField(read_only=True)
 
 
+class LoginSerializer(serializers.Serializer):
+    """パスワードでのログイン。有効なSSOの設定があれば基盤管理者だけ（utils.backends.PasswordBackend）"""
+
+    email = serializers.CharField(write_only=True, max_length=254, help_text=_("メールアドレス"))
+    password = serializers.CharField(write_only=True, max_length=4096, trim_whitespace=False)
+
+    def validate(self, attrs):
+        # django-axes は Django の HttpRequest に、止めたかどうか（axes_locked_out）を書き込む
+        request = self.context["request"]._request
+        user = authenticate(request, username=attrs["email"].strip(), password=attrs["password"])
+        if getattr(request, "axes_locked_out", False):
+            raise Throttled(detail=LOCKOUT_MESSAGE)
+        if user is None:
+            raise serializers.ValidationError(_("メールアドレスかパスワードが正しくありません。"))
+        attrs["user"] = user
+        return attrs
+
+
 class AuthProviderSerializer(serializers.Serializer):
     """ログイン画面に並べる認証基盤。ログインは `login_url` へPOSTのフォームで送って始める"""
 
     id = serializers.CharField(read_only=True)
     name = serializers.CharField(read_only=True)
     login_url = serializers.CharField(read_only=True)
+
+
+class AuthMethodsSerializer(serializers.Serializer):
+    """ログイン画面に出すログインの方法"""
+
+    providers = AuthProviderSerializer(many=True, read_only=True)
+    password_login = serializers.BooleanField(
+        read_only=True,
+        help_text=_(
+            "パスワードの欄を出すか。有効なSSOの設定があれば出さない（基盤管理者は /login?method=password で使う）"
+        ),
+    )
+
+
+# --- 招待・再設定のリンク ---
+
+INVALID_INVITATION = _(
+    "このリンクは使えません。期限が切れたか、使用済みです。基盤管理者に発行し直してもらってください。"
+)
+SSO_ONLY = _("SSOが有効になったため、このリンクは使えません。SSOでログインしてください。")
+
+
+class InvitationLinkSerializer(serializers.Serializer):
+    """発行したリンク。URLはこの応答でしか分からない（tokenはDBにハッシュだけを保存する）"""
+
+    url = serializers.CharField(read_only=True, help_text=_("本人に渡すURL。tokenはURLのフラグメントに入れる"))
+    purpose = serializers.IntegerField(read_only=True)
+    purpose_display = serializers.CharField(read_only=True)
+    expires_at = serializers.DateTimeField(read_only=True)
+
+
+def _invitation_link(request, invitation: Invitation, token: str) -> dict:
+    # tokenはアクセスログに残らないよう、URLのフラグメントに置く（サーバーへは送られない）
+    return {
+        "url": f"{request.build_absolute_uri('/invitation')}#{token}",
+        "purpose": invitation.purpose,
+        "purpose_display": invitation.get_purpose_display(),
+        "expires_at": invitation.expires_at,
+    }
+
+
+class InvitationTokenSerializer(serializers.Serializer):
+    """リンクの確認。宛先のメールアドレスと期限を返す"""
+
+    token = serializers.CharField(write_only=True, max_length=200)
+    email = serializers.EmailField(source="user.email", read_only=True)
+    display_name = serializers.CharField(source="user.display_name", read_only=True)
+    purpose = serializers.IntegerField(read_only=True)
+    purpose_display = serializers.CharField(source="get_purpose_display", read_only=True)
+    expires_at = serializers.DateTimeField(read_only=True)
+
+    def _find(self, token: str, *, for_update: bool = False) -> Invitation:
+        invitation = Invitation.find_usable(token, for_update=for_update)
+        if invitation is None:
+            raise serializers.ValidationError({"token": [INVALID_INVITATION]})
+        # SSOが有効な間は、基盤管理者以外にリンクを使わせない（SSOだけでログインする規則を迂回させない）
+        if not can_use_password(invitation.user):
+            raise serializers.ValidationError({"token": [SSO_ONLY]})
+        return invitation
+
+    def validate(self, attrs):
+        attrs["invitation"] = self._find(attrs["token"])
+        return attrs
+
+
+class InvitationAcceptSerializer(InvitationTokenSerializer):
+    """パスワードを設定してリンクを使用済みにする。Viewのtransactionの中で、リンクを行ロックして確かめる"""
+
+    password = serializers.CharField(write_only=True, max_length=4096, trim_whitespace=False)
+
+    def validate(self, attrs):
+        invitation = self._find(attrs["token"], for_update=True)
+        try:
+            validate_password(attrs["password"], invitation.user)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"password": list(exc.messages)}) from exc
+        attrs["invitation"] = invitation
+        return attrs
+
+    def create(self, validated_data) -> Invitation:
+        invitation: Invitation = validated_data["invitation"]
+        invitation.accept(validated_data["password"])
+        return invitation
+
+
+# --- ユーザー（管理） ---
+
+
+class GroupSerializer(serializers.ModelSerializer):
+    """役割（Group）。ユーザーへの割り当てでは名前で指定する"""
+
+    class Meta:
+        model = Group
+        fields = ["name"]
+        read_only_fields = fields
+
+
+class ManageUserSerializer(serializers.ModelSerializer):
+    """ユーザーの作成・表示（基盤管理者だけ）。Yorikiのアカウントのパスワードは、本人が招待のリンクで設定する"""
+
+    id = serializers.CharField(source="uid", read_only=True)
+    email = serializers.EmailField(max_length=254)
+    groups: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(
+        many=True, slug_field="name", queryset=Group.objects.all(), required=False, help_text=_("役割の名前")
+    )
+    is_platform_admin = serializers.BooleanField(read_only=True)
+    has_password = serializers.SerializerMethodField(help_text=_("パスワードを設定済みか"))
+    sso_providers = serializers.SerializerMethodField(help_text=_("紐付いているSSOの認証基盤"))
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "email",
+            "display_name",
+            "groups",
+            "is_active",
+            "is_platform_admin",
+            "has_password",
+            "sso_providers",
+            "last_login",
+            "created",
+            "updated",
+        ]
+        read_only_fields = ["last_login", "created", "updated"]
+
+    def get_has_password(self, obj: User) -> bool:
+        return obj.has_usable_password()
+
+    def get_sso_providers(self, obj: User) -> list[str]:
+        # allauthの SocialAccount の逆参照（django-stubs は allauth の型を知らない）
+        return sorted({account.provider for account in obj.socialaccount_set.all()})  # type: ignore[attr-defined]
+
+    def validate_email(self, value: str) -> str:
+        value = value.strip().lower()
+        others = User.objects.filter(email__iexact=value) | User.objects.filter(username=value)
+        if self.instance:
+            others = others.exclude(pk=self.instance.pk)
+        if others.exists():
+            raise serializers.ValidationError(_("同じメールアドレスのユーザーがいます"))
+        return value
+
+    def validate_is_active(self, value: bool) -> bool:
+        request = self.context.get("request")
+        if not value and self.instance is not None and request and self.instance.pk == request.user.pk:
+            raise serializers.ValidationError(_("自分のアカウントは無効にできません"))
+        return value
+
+
+class ManageUserCreateSerializer(ManageUserSerializer):
+    """ユーザーの作成。パスワードでログインできる場合（SSOが無効）は、招待のリンクを発行して一度だけ返す"""
+
+    invitation = serializers.SerializerMethodField()
+
+    class Meta(ManageUserSerializer.Meta):
+        fields = [*ManageUserSerializer.Meta.fields, "invitation"]
+
+    @extend_schema_field(InvitationLinkSerializer(allow_null=True))
+    def get_invitation(self, obj: User) -> dict | None:
+        return getattr(obj, "invitation_link", None)
+
+    def create(self, validated_data) -> User:
+        actor = validated_data.pop("created_by")
+        groups = validated_data.pop("groups", [])
+        # ユーザー名はメールアドレスにする（Django管理画面のログインでも使える）
+        user = User(username=validated_data["email"], **validated_data)
+        user.set_unusable_password()
+        user.save()
+        user.groups.set(groups)
+        if can_use_password(user):
+            invitation, token = Invitation.issue(user=user, actor=actor)
+            # 作成の応答（get_invitation）でだけ返す。保存しない
+            user.invitation_link = _invitation_link(self.context["request"], invitation, token)  # type: ignore[attr-defined]
+        # SSOが有効なら、本人がSSOで初めてログインしたときに、このアカウントに紐付く
+        return user
+
+
+class ManageUserUpdateSerializer(ManageUserSerializer):
+    """ユーザーの更新。メールアドレスはSSOの紐付けに使うので変えない"""
+
+    # 宣言したフィールドには Meta.read_only_fields が効かないので、宣言し直す
+    email = serializers.EmailField(read_only=True)
+
+
+class IssueInvitationSerializer(serializers.Serializer):
+    """招待・再設定のリンクの発行。SSOが有効な間は基盤管理者のアカウントにだけ発行できる"""
+
+    def validate(self, attrs):
+        if not can_use_password(self.context["user"]):
+            raise serializers.ValidationError(
+                _(
+                    "SSOが有効な間は、基盤管理者以外のアカウントにはリンクを発行できません。SSOでログインしてもらってください。"
+                )
+            )
+        return attrs
+
+    def create(self, validated_data) -> dict:
+        invitation, token = Invitation.issue(user=self.context["user"], actor=self.context["request"].user)
+        return _invitation_link(self.context["request"], invitation, token)
 
 
 # --- SSOの設定 ---

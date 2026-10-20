@@ -8,6 +8,7 @@ Modelの `Meta.permissions` で作り、Group（役割。`user/roles.py`）に�
 from enum import Enum
 
 from django.utils.functional import Promise
+from rest_framework import authentication
 from rest_framework.permissions import BasePermission, IsAuthenticated, OperandHolder
 
 
@@ -67,3 +68,14 @@ def require_permission(perm: AppPermission | str) -> OperandHolder:
             return request.user.has_perm(perm_str)
 
     return IsAuthenticated & _HasPermission
+
+
+class CsrfProtected(BasePermission):
+    """未ログインの要求でもCSRFを確かめる（ログイン、招待の受け入れ等）。
+
+    DRFは、ログインしていない要求ではCSRFを確かめないので、ログインCSRF（攻撃者のアカウントでログインさせる）を防げない
+    """
+
+    def has_permission(self, request, view) -> bool:
+        authentication.SessionAuthentication().enforce_csrf(request)
+        return True

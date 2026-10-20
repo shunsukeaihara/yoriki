@@ -202,6 +202,7 @@ cd frontend && pnpm dev
 - 画面とAPIを同じドメインにまとめる。認証はセッションCookie（`Secure`、`HttpOnly`、`SameSite=Lax`）で行うので、CORSは使わない。
 - HTTPは443へリダイレクトし、HTTP/2を有効にする（SSEの複数の接続を1本にまとめるため）。
 - `X-Forwarded-For`、`X-Forwarded-Proto` を付けて転送する。Uvicornは `--proxy-headers` で受け取り、Djangoは `SECURE_PROXY_SSL_HEADER` を設定する。
+- `X-Forwarded-For` は、nginxが判定した利用者のIPアドレス（`$remote_addr`。前段がある構成では `set_real_ip_from` で解決済み）だけで上書きする。受け取った値に付け足さない（`$proxy_add_x_forwarded_for` を使わない）。付け足すと利用者が書いた値が先頭に残り、Uvicornがそれを `REMOTE_ADDR` にするので、ログインの試行回数の制限（backend-conventions.md §6.2）を逃れられる。apiのポートはnginxからしか届かないようにする（Dockerのネットワークの中だけに開く）。
 - HSTS、`X-Content-Type-Options`、`Referrer-Policy`、フロントエンド向けのCSPを付ける（`deploy/nginx/snippets/`）。HSTSはHTTPSで受けたときだけ付ける。
 - CSPは、NuxtのSPAがHTMLにインラインのスクリプト（色モードの初期化、`window.__NUXT__` の設定）を含むため、`script-src` に `'unsafe-inline'` を許可している。インラインのスクリプトのハッシュかnonceで絞るのは今後の課題とする。
 - nginxの設定は2種類ある。nginxでTLSを終端して直接公開する `sites/tls.conf`（`compose.yaml`）と、前段（Cloudflare Tunnel、認証プロキシ、エッジのnginx）がTLSを終端し、80番で受ける `sites/http.conf`（`compose.app.yaml`、`compose.cloudflare.yaml`）。`http.conf` は前段が付けた `X-Forwarded-For`・`X-Forwarded-Proto` を、私設のアドレスからのものだけ信頼するので、インターネットへ直接公開しない。
@@ -311,7 +312,7 @@ docker compose -f deploy/compose.yaml exec api python manage.py resume_workers
 - ALBのアイドルタイムアウトは、既定の60秒から延ばす（数分〜1時間）。SSEは15秒ごとにkeep-aliveを送るので既定でも切れにくいが、余裕を持たせる。ALBは応答をバッファしないので、SSEはそのまま通る。
 - デプロイでターゲットを外すと（deregistration delayの後）SSEは切れるが、ブラウザが `Last-Event-ID` を付けて再接続するので、イベントは欠けない。
 - ターゲットグループのヘルスチェックは `/api/ping/` にする。
-- 利用者のIPアドレスで判定する設定（rate limit、任意で追加するIPの制限）が効くように、nginxで `set_real_ip_from <VPCのCIDR>` と `real_ip_header X-Forwarded-For` を設定する。Uvicornの `--forwarded-allow-ips` も、`"*"` ではなく信頼するプロキシの範囲に絞る。
+- 利用者のIPアドレスで判定する設定（rate limit、任意で追加するIPの制限）が効くように、nginxで `set_real_ip_from <VPCのCIDR>` と `real_ip_header X-Forwarded-For` を設定する。apiのポートが他のホストから届く構成では、Uvicornの `--forwarded-allow-ips` も、`"*"` ではなく各ホストのnginxのアドレスに絞る。
 - Workerサーバーは外からの接続を受けないので、ALBには載せない。
 - CloudFrontを前に置く場合は、オリジンの読み取りタイムアウトがSSEのkeep-aliveの間隔（15秒）より長いことを確認する。
 
@@ -339,7 +340,7 @@ docker compose -f deploy/compose.yaml -f deploy/compose.cloudflare.yaml up -d
 ```
 
 - Cloudflare側のトンネルの設定で、`<ドメイン>` を `http://nginx:80` へ転送する。`/` と `/api/` の振り分けはnginxが行う。TLSの証明書はホストに置かない。
-- 利用者のIPアドレスは、nginxで `real_ip_header CF-Connecting-IP` と `set_real_ip_from <cloudflaredのネットワーク>` を設定して取得する。管理画面と `/api/schema/` はYorikiのログインと役割で守っているので、Cloudflare Accessは使わなくてよい（§8.5）。
+- 利用者のIPアドレスは、nginx（`sites/http.conf`）で `set_real_ip_from <私設のアドレス>`、`real_ip_header X-Forwarded-For`、`real_ip_recursive on` を設定して取得する。Cloudflareは、利用者が送った `X-Forwarded-For` の後ろに実際の接続元のIPアドレスを付け足すので、右から読んで信頼しない最初のアドレス（実際の利用者）を使えば、先頭に書かれた偽の値は使われない。nginxはその値だけを `X-Forwarded-For` に入れてapiへ渡す（§4.1）。管理画面と `/api/schema/` はYorikiのログインと役割で守っているので、Cloudflare Accessは使わなくてよい（§8.5）。
 - SSEは、Cloudflareが `text/event-stream` をバッファしないのでそのまま通る。無通信が100秒続くと切られるが、15秒ごとのkeep-aliveで防げる。
 - Webhook（Zapier、Slack、Teams等）のPOSTが止められないよう、WAFのルールで `/api/hooks/` を除外する。Bot Fight Modeは無料プランではパスごとに除外できないので有効にしない（§8.5）。Cloudflare Accessを使う場合も、`/api/hooks/` は対象にしない。
 - キャッシュは、フロントエンドの静的ファイル（`/_nuxt/*`）だけを対象にし、`/api/` はキャッシュしない。
@@ -447,3 +448,4 @@ Cloudflareは無料プランだけを使う。§8.3・§8.4は、次の制約の
 - **バリアのセッション切れ**：oauth2-proxyのセッションが切れると、APIの呼び出しはIdPへのリダイレクトになり、XHRではCORSのエラーかJSONでない応答になる。フロントエンドは、APIの呼び出しがネットワークエラーやJSONでない応答になったら画面ごと再読み込みし、oauth2-proxyに改めて認証させる（frontend-conventions.md §3.1）。
 - **ログアウト**：消すのはYorikiのセッションだけにする。oauth2-proxyのセッションは前段の基盤のもので、ほかのアプリと共有しているので、そのままにする。
 - **IPアドレスの制限は使わない**：前段の他のアプリと同じく、oauth2-proxyのバリアとYorikiのログイン・役割で守る。
+- **利用者のIPアドレスを前段のnginxで解決して渡す**：ログインの試行回数の制限は送信元のIPアドレスごとにも数える（backend-conventions.md §6.2）。前段のnginxは、Cloudflareから受けた `CF-Connecting-IP` で利用者のIPアドレスを解決し（`set_real_ip_from <CloudflareのIPアドレスの範囲、またはcloudflaredのネットワーク>`、`real_ip_header CF-Connecting-IP`）、`X-Forwarded-For` を `$remote_addr` で上書きしてYorikiのnginxへ渡す。解決しないまま自分から見た接続元（CloudflareのエッジのIPアドレス）を付け足すと、Yorikiには多くの社員が同じIPアドレスに見え、誰かの失敗が続くと関係のない人も一定時間ログインできなくなる（制限を逃れられるわけではない。アカウントごとの制限はそのまま効く）。Yorikiのnginxは `sites/http.conf`（私設のアドレスだけを信頼する）を使う。

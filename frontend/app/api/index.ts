@@ -16,16 +16,35 @@ const createAPI = () => {
       session: {
         // ログイン状態を返し、CSRF の Cookie を受け取る
         get: () => http.get<Session, Session>('app/v1/auth/session/'),
+        // パスワードでのログイン（SSO が有効なら基盤管理者だけ）
+        create: (data: Login) => http.post<Session, Session>('app/v1/auth/session/', data),
         delete: () => http.delete<undefined, undefined>('app/v1/auth/session/'),
       },
-      providers: {
-        list: () => http.get<AuthProvider[], AuthProvider[]>('app/v1/auth/providers/'),
+      // ログイン画面に出すログインの方法（SSO の認証基盤と、パスワードの欄を出すか）
+      methods: {
+        get: () => http.get<AuthMethods, AuthMethods>('app/v1/auth/providers/'),
+      },
+      // 招待・再設定のリンク。token はリンクの URL のフラグメントにあり、本文で送る
+      invitations: {
+        verify: (token: string) =>
+          http.post<InvitationToken, InvitationToken>('app/v1/auth/invitations/verify/', { token }),
+        accept: (data: InvitationAccept) => http.post<Session, Session>('app/v1/auth/invitations/accept/', data),
       },
     },
     account: {
       get: () => http.get<MyUser, MyUser>('app/v1/my/'),
     },
     manage: {
+      users: (id?: string) => ({
+        ...readOnlyResource<ManageUser, ManageUserListParams>(http, 'v1/users', id),
+        // 作成の応答にだけ、招待のリンク（invitation）が入る
+        create: (data: ManageUserWrite) => http.post<ManageUserCreated, ManageUserCreated>('v1/users/', data),
+        patch: (data: Partial<ManageUserUpdate>) => http.patch<ManageUser, ManageUser>(`v1/users/${id}/`, data),
+        invitation: () => http.post<InvitationLink, InvitationLink>(`v1/users/${id}/invitation/`),
+      }),
+      groups: {
+        list: () => http.get<Group[], Group[]>('v1/groups/'),
+      },
       ssoProviders: (id?: string) => ({
         ...resource<SSOProvider, SSOProviderWrite>(http, 'v1/sso_providers', id),
         // 更新では種別を送れない

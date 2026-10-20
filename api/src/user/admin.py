@@ -4,7 +4,7 @@ from django.utils.translation import gettext_lazy as _
 
 from utils.admin import ReadOnlyAdmin
 
-from .models import SSOProvider, User
+from .models import Invitation, SSOProvider, User
 
 
 @admin.register(User)
@@ -42,3 +42,14 @@ class SSOProviderAdmin(ReadOnlyAdmin):
     list_display = ("id", "uid", "kind", "client_id", "is_active", "deleted", "updated")
     list_filter = ("kind", "is_active", "deleted")
     search_fields = ("uid", "client_id")
+
+
+@admin.register(Invitation)
+class InvitationAdmin(ReadOnlyAdmin):
+    """招待・再設定のリンクは、Yorikiの管理画面（v1/users の invitation）で発行する。tokenはハッシュだけを持つ"""
+
+    readonly_fields = ("uid", "user", "purpose", "expires_at", "used_at", "revoked_at", "created_by", "created")
+    exclude = ("token_hash",)
+    list_display = ("id", "uid", "user", "purpose", "expires_at", "used_at", "revoked_at", "created")
+    list_filter = ("purpose",)
+    search_fields = ("uid", "user__email")

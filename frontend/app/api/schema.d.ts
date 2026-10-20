@@ -4,6 +4,40 @@
  */
 
 export interface paths {
+    "/api/app/v1/auth/invitations/accept/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description パスワードを設定してリンクを使用済みにし、ログインする */
+        post: operations["app_v1_auth_invitations_accept_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/auth/invitations/verify/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description リンクを確かめ、宛先のメールアドレスと期限を返す */
+        post: operations["app_v1_auth_invitations_verify_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/app/v1/auth/providers/": {
         parameters: {
             query?: never;
@@ -11,8 +45,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description 有効な認証基盤の一覧 */
-        get: operations["app_v1_auth_providers_list"];
+        /** @description ログインの方法 */
+        get: operations["app_v1_auth_providers_retrieve"];
         put?: never;
         post?: never;
         delete?: never;
@@ -31,7 +65,8 @@ export interface paths {
         /** @description ログイン状態を返し、CSRFのCookieを設定する */
         get: operations["app_v1_auth_session_retrieve"];
         put?: never;
-        post?: never;
+        /** @description メールアドレスとパスワードでログインする。有効なSSOの設定があれば基盤管理者だけ。失敗が続くと、アカウントごと・送信元のIPアドレスごとに一定時間止める（429） */
+        post: operations["app_v1_auth_session_create"];
         /** @description ログアウトする */
         delete: operations["app_v1_auth_session_destroy"];
         options?: never;
@@ -65,6 +100,40 @@ export interface paths {
         };
         /** @description ヘルスチェック */
         get: operations["ping_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/groups/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 役割（Group）の一覧（基盤管理者だけ） */
+        get: operations["v1_groups_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/groups/{name}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 役割（Group）の一覧（基盤管理者だけ） */
+        get: operations["v1_groups_retrieve"];
         put?: never;
         post?: never;
         delete?: never;
@@ -238,15 +307,108 @@ export interface paths {
         patch: operations["v1_sso_providers_partial_update"];
         trace?: never;
     };
+    "/api/v1/users/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description ユーザーの管理API（基盤管理者だけ） */
+        get: operations["v1_users_list"];
+        put?: never;
+        /** @description ユーザーの管理API（基盤管理者だけ） */
+        post: operations["v1_users_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/users/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description ユーザーの管理API（基盤管理者だけ） */
+        get: operations["v1_users_retrieve"];
+        /** @description ユーザーの管理API（基盤管理者だけ） */
+        put: operations["v1_users_update"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** @description ユーザーの管理API（基盤管理者だけ） */
+        patch: operations["v1_users_partial_update"];
+        trace?: never;
+    };
+    "/api/v1/users/{uid}/invitation/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 招待・パスワードの再設定のリンクを発行する（同じユーザーの未使用のリンクは無効になる）。SSOが有効な間は、基盤管理者のアカウントにだけ発行できる */
+        post: operations["v1_users_invitation_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description ログイン画面に出すログインの方法 */
+        AuthMethods: {
+            readonly providers: components["schemas"]["AuthProvider"][];
+            /** @description パスワードの欄を出すか。有効なSSOの設定があれば出さない（基盤管理者は /login?method=password で使う） */
+            readonly password_login: boolean;
+        };
         /** @description ログイン画面に並べる認証基盤。ログインは `login_url` へPOSTのフォームで送って始める */
         AuthProvider: {
             readonly id: string;
             readonly name: string;
             readonly login_url: string;
+        };
+        /** @description 役割（Group）。ユーザーへの割り当てでは名前で指定する */
+        Group: {
+            /** 名前 */
+            readonly name: string;
+        };
+        /** @description パスワードを設定してリンクを使用済みにする。Viewのtransactionの中で、リンクを行ロックして確かめる */
+        InvitationAcceptRequest: {
+            token: string;
+            password: string;
+        };
+        /** @description 発行したリンク。URLはこの応答でしか分からない（tokenはDBにハッシュだけを保存する） */
+        InvitationLink: {
+            /** @description 本人に渡すURL。tokenはURLのフラグメントに入れる */
+            readonly url: string;
+            readonly purpose: number;
+            readonly purpose_display: string;
+            /** Format: date-time */
+            readonly expires_at: string;
+        };
+        /** @description リンクの確認。宛先のメールアドレスと期限を返す */
+        InvitationToken: {
+            /** Format: email */
+            readonly email: string;
+            readonly display_name: string;
+            readonly purpose: number;
+            readonly purpose_display: string;
+            /** Format: date-time */
+            readonly expires_at: string;
+        };
+        /** @description リンクの確認。宛先のメールアドレスと期限を返す */
+        InvitationTokenRequest: {
+            token: string;
         };
         /** @description プロバイダ接続の作成と表示。API keyは書き込み専用で、応答には末尾の4文字（api_key_hint）だけを出す */
         LLMConnection: {
@@ -312,6 +474,97 @@ export interface components {
             /** 1分あたりの要求数の上限 */
             requests_per_minute?: number | null;
             /** 有効 */
+            is_active?: boolean;
+        };
+        /** @description パスワードでのログイン。有効なSSOの設定があれば基盤管理者だけ（utils.backends.PasswordBackend） */
+        LoginRequest: {
+            /** @description メールアドレス */
+            email: string;
+            password: string;
+        };
+        /** @description ユーザーの作成・表示（基盤管理者だけ）。Yorikiのアカウントのパスワードは、本人が招待のリンクで設定する */
+        ManageUser: {
+            readonly id: string;
+            /** Format: email */
+            email: string;
+            /** 表示名 */
+            display_name?: string;
+            /** @description 役割の名前 */
+            groups?: string[];
+            /**
+             * 有効
+             * @description ユーザーがアクティブかどうかを示します。アカウントを削除する代わりに選択を解除してください。
+             */
+            is_active?: boolean;
+            readonly is_platform_admin: boolean;
+            /** @description パスワードを設定済みか */
+            readonly has_password: boolean;
+            /** @description 紐付いているSSOの認証基盤 */
+            readonly sso_providers: string[];
+            /**
+             * 最終ログイン
+             * Format: date-time
+             */
+            readonly last_login: string | null;
+            /** Format: date-time */
+            readonly created: string;
+            /** Format: date-time */
+            readonly updated: string;
+        };
+        /** @description ユーザーの作成。パスワードでログインできる場合（SSOが無効）は、招待のリンクを発行して一度だけ返す */
+        ManageUserCreate: {
+            readonly id: string;
+            /** Format: email */
+            email: string;
+            /** 表示名 */
+            display_name?: string;
+            /** @description 役割の名前 */
+            groups?: string[];
+            /**
+             * 有効
+             * @description ユーザーがアクティブかどうかを示します。アカウントを削除する代わりに選択を解除してください。
+             */
+            is_active?: boolean;
+            readonly is_platform_admin: boolean;
+            /** @description パスワードを設定済みか */
+            readonly has_password: boolean;
+            /** @description 紐付いているSSOの認証基盤 */
+            readonly sso_providers: string[];
+            /**
+             * 最終ログイン
+             * Format: date-time
+             */
+            readonly last_login: string | null;
+            /** Format: date-time */
+            readonly created: string;
+            /** Format: date-time */
+            readonly updated: string;
+            readonly invitation: components["schemas"]["InvitationLink"] | null;
+        };
+        /** @description ユーザーの作成。パスワードでログインできる場合（SSOが無効）は、招待のリンクを発行して一度だけ返す */
+        ManageUserCreateRequest: {
+            /** Format: email */
+            email: string;
+            /** 表示名 */
+            display_name?: string;
+            /** @description 役割の名前 */
+            groups?: string[];
+            /**
+             * 有効
+             * @description ユーザーがアクティブかどうかを示します。アカウントを削除する代わりに選択を解除してください。
+             */
+            is_active?: boolean;
+        };
+        /** @description ユーザーの更新。メールアドレスはSSOの紐付けに使うので変えない */
+        ManageUserUpdateRequest: {
+            /** 表示名 */
+            display_name?: string;
+            /** @description 役割の名前 */
+            groups?: string[];
+            /**
+             * 有効
+             * @description ユーザーがアクティブかどうかを示します。アカウントを削除する代わりに選択を解除してください。
+             */
             is_active?: boolean;
         };
         MinimumLLMConnection: {
@@ -490,6 +743,19 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["LLMConnection"][];
         };
+        PaginatedManageUserList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["ManageUser"][];
+        };
         PaginatedModelProfileList: {
             /**
              * Format: uri
@@ -542,6 +808,18 @@ export interface components {
             /** 1分あたりの要求数の上限 */
             requests_per_minute?: number | null;
             /** 有効 */
+            is_active?: boolean;
+        };
+        /** @description ユーザーの更新。メールアドレスはSSOの紐付けに使うので変えない */
+        PatchedManageUserUpdateRequest: {
+            /** 表示名 */
+            display_name?: string;
+            /** @description 役割の名前 */
+            groups?: string[];
+            /**
+             * 有効
+             * @description ユーザーがアクティブかどうかを示します。アカウントを削除する代わりに選択を解除してください。
+             */
             is_active?: boolean;
         };
         /**
@@ -686,7 +964,57 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
-    app_v1_auth_providers_list: {
+    app_v1_auth_invitations_accept_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvitationAcceptRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["InvitationAcceptRequest"];
+                "multipart/form-data": components["schemas"]["InvitationAcceptRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Session"];
+                };
+            };
+        };
+    };
+    app_v1_auth_invitations_verify_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InvitationTokenRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["InvitationTokenRequest"];
+                "multipart/form-data": components["schemas"]["InvitationTokenRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationToken"];
+                };
+            };
+        };
+    };
+    app_v1_auth_providers_retrieve: {
         parameters: {
             query?: never;
             header?: never;
@@ -700,7 +1028,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AuthProvider"][];
+                    "application/json": components["schemas"]["AuthMethods"];
                 };
             };
         };
@@ -713,6 +1041,31 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Session"];
+                };
+            };
+        };
+    };
+    app_v1_auth_session_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LoginRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["LoginRequest"];
+                "multipart/form-data": components["schemas"]["LoginRequest"];
+            };
+        };
         responses: {
             200: {
                 headers: {
@@ -776,6 +1129,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Ping"];
+                };
+            };
+        };
+    };
+    v1_groups_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Group"][];
+                };
+            };
+        };
+    };
+    v1_groups_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Group"];
                 };
             };
         };
@@ -1330,6 +1723,159 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SSOProvider"];
+                };
+            };
+        };
+    };
+    v1_users_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description 役割 */
+                group?: string;
+                is_active?: boolean;
+                is_superuser?: boolean;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedManageUserList"];
+                };
+            };
+        };
+    };
+    v1_users_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManageUserCreateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["ManageUserCreateRequest"];
+                "multipart/form-data": components["schemas"]["ManageUserCreateRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManageUserCreate"];
+                };
+            };
+        };
+    };
+    v1_users_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManageUser"];
+                };
+            };
+        };
+    };
+    v1_users_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ManageUserUpdateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["ManageUserUpdateRequest"];
+                "multipart/form-data": components["schemas"]["ManageUserUpdateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManageUser"];
+                };
+            };
+        };
+    };
+    v1_users_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedManageUserUpdateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedManageUserUpdateRequest"];
+                "multipart/form-data": components["schemas"]["PatchedManageUserUpdateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManageUser"];
+                };
+            };
+        };
+    };
+    v1_users_invitation_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationLink"];
                 };
             };
         };

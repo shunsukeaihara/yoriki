@@ -89,6 +89,24 @@ jobs:
           curl -fsSk -D static.txt -o /dev/null "$base$css"
           grep -qi '^cache-control: public, max-age=31536000, immutable' static.txt
 
+      - name: 偽装した X-Forwarded-For でログインの試行回数の制限を逃れられない
+        run: |
+          set -eux
+          base=https://localhost
+          curl -fsSk -c login.txt -o /dev/null $base/api/app/v1/auth/session/
+          csrf=$(awk '$6 == "csrftoken" { print $7 }' login.txt)
+          login() {
+            curl -sk -b login.txt -o /dev/null -w '%{http_code}' \
+              -H "X-CSRFToken: $csrf" -H "Referer: $base/login" -H 'Content-Type: application/json' \
+              -H "X-Forwarded-For: $1" -d "{\"email\": \"$2@example.co.jp\", \"password\": \"wrong\"}" \
+              $base/api/app/v1/auth/session/
+          }
+          # 毎回別のアカウントと別の偽のIPアドレスで失敗させる。nginxが X-Forwarded-For を上書きするので、
+          # 同じ送信元（このrunner）として数えられ、10回で止まる（AXES_FAILURE_LIMIT）
+          for i in $(seq 1 9); do test "$(login "198.51.100.$i" "ci-$i")" = 400; done
+          test "$(login 198.51.100.10 ci-10)" = 429
+          test "$(login 203.0.113.1 ci-11)" = 429
+
       - name: 失敗したときのログ
         if: failure()
         run: |

@@ -122,21 +122,26 @@ class TestAuthProviders:
         SSOProviderFactory.create(kind=SSOKind.GOOGLE, deleted=True)
         res = api_client.get("/api/app/v1/auth/providers/")
         assert res.status_code == 200
-        assert res.json() == [
-            {"id": "microsoft", "name": "Microsoft 365", "login_url": "/api/accounts/microsoft/login/"},
-            {"id": "google", "name": "Google Workspace", "login_url": "/api/accounts/google/login/"},
-        ]
+        assert res.json() == {
+            "providers": [
+                {"id": "microsoft", "name": "Microsoft 365", "login_url": "/api/accounts/microsoft/login/"},
+                {"id": "google", "name": "Google Workspace", "login_url": "/api/accounts/google/login/"},
+            ],
+            # SSOが有効なら、パスワードの欄は出さない
+            "password_login": False,
+        }
 
     @pytest.mark.django_db
     def test_inactive_provider_is_hidden(self, api_client, sso_providers):
         sso_providers[1].is_active = False
         sso_providers[1].save()
-        assert [p["id"] for p in api_client.get("/api/app/v1/auth/providers/").json()] == ["microsoft"]
+        providers = api_client.get("/api/app/v1/auth/providers/").json()["providers"]
+        assert [p["id"] for p in providers] == ["microsoft"]
         assert is_sso_enabled()
 
     @pytest.mark.django_db
     def test_no_provider(self, api_client):
-        assert api_client.get("/api/app/v1/auth/providers/").json() == []
+        assert api_client.get("/api/app/v1/auth/providers/").json() == {"providers": [], "password_login": True}
         assert not is_sso_enabled()
 
 

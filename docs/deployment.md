@@ -340,7 +340,7 @@ docker compose -f deploy/compose.yaml -f deploy/compose.cloudflare.yaml up -d
 ```
 
 - Cloudflare側のトンネルの設定で、`<ドメイン>` を `http://nginx:80` へ転送する。`/` と `/api/` の振り分けはnginxが行う。TLSの証明書はホストに置かない。
-- 利用者のIPアドレスは、nginxで `real_ip_header CF-Connecting-IP` と `set_real_ip_from <cloudflaredのネットワーク>` を設定して取得する。管理画面と `/api/schema/` はYorikiのログインと役割で守っているので、Cloudflare Accessは使わなくてよい（§8.5）。
+- 利用者のIPアドレスは、nginx（`sites/http.conf`）で `set_real_ip_from <私設のアドレス>`、`real_ip_header X-Forwarded-For`、`real_ip_recursive on` を設定して取得する。Cloudflareは、利用者が送った `X-Forwarded-For` の後ろに実際の接続元のIPアドレスを付け足すので、右から読んで信頼しない最初のアドレス（実際の利用者）を使えば、先頭に書かれた偽の値は使われない。nginxはその値だけを `X-Forwarded-For` に入れてapiへ渡す（§4.1）。管理画面と `/api/schema/` はYorikiのログインと役割で守っているので、Cloudflare Accessは使わなくてよい（§8.5）。
 - SSEは、Cloudflareが `text/event-stream` をバッファしないのでそのまま通る。無通信が100秒続くと切られるが、15秒ごとのkeep-aliveで防げる。
 - Webhook（Zapier、Slack、Teams等）のPOSTが止められないよう、WAFのルールで `/api/hooks/` を除外する。Bot Fight Modeは無料プランではパスごとに除外できないので有効にしない（§8.5）。Cloudflare Accessを使う場合も、`/api/hooks/` は対象にしない。
 - キャッシュは、フロントエンドの静的ファイル（`/_nuxt/*`）だけを対象にし、`/api/` はキャッシュしない。
@@ -448,3 +448,4 @@ Cloudflareは無料プランだけを使う。§8.3・§8.4は、次の制約の
 - **バリアのセッション切れ**：oauth2-proxyのセッションが切れると、APIの呼び出しはIdPへのリダイレクトになり、XHRではCORSのエラーかJSONでない応答になる。フロントエンドは、APIの呼び出しがネットワークエラーやJSONでない応答になったら画面ごと再読み込みし、oauth2-proxyに改めて認証させる（frontend-conventions.md §3.1）。
 - **ログアウト**：消すのはYorikiのセッションだけにする。oauth2-proxyのセッションは前段の基盤のもので、ほかのアプリと共有しているので、そのままにする。
 - **IPアドレスの制限は使わない**：前段の他のアプリと同じく、oauth2-proxyのバリアとYorikiのログイン・役割で守る。
+- **利用者のIPアドレスを前段のnginxで解決して渡す**：ログインの試行回数の制限は送信元のIPアドレスごとにも数える（backend-conventions.md §6.2）。前段のnginxは、Cloudflareから受けた `CF-Connecting-IP` で利用者のIPアドレスを解決し（`set_real_ip_from <CloudflareのIPアドレスの範囲、またはcloudflaredのネットワーク>`、`real_ip_header CF-Connecting-IP`）、`X-Forwarded-For` を `$remote_addr` で上書きしてYorikiのnginxへ渡す。解決しないまま自分から見た接続元（CloudflareのエッジのIPアドレス）を付け足すと、Yorikiには多くの社員が同じIPアドレスに見え、誰かの失敗が続くと関係のない人も一定時間ログインできなくなる（制限を逃れられるわけではない。アカウントごとの制限はそのまま効く）。Yorikiのnginxは `sites/http.conf`（私設のアドレスだけを信頼する）を使う。

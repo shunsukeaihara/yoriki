@@ -6,7 +6,7 @@
 
 ## 1 ブランチとPull Request
 
-- `main` を常にリリースできる状態に保つ。コードの変更は作業ブランチからPull Requestで取り込む。`docs/status.md` の更新のような文書だけの小さな変更は、Pull Requestを作らずに `main` へ直接コミットしてよい（文書だけの変更ではCIは動かない）。
+- `main` を常にリリースできる状態に保つ。コードの変更は作業ブランチからPull Requestで取り込む。文書だけの変更は内容による：`docs/status.md` の状況の更新や誤字の修正のように判断を含まないものは `main` へ直接コミットしてよい。design.md や規約の、方針や設計の判断を変える変更は、読んで判断してもらうためにPull Requestにする。迷ったら相談する。
 - 作業ブランチの名前は `<種類>/<内容>` にする（例：`feature/run-cancel`、`fix/autocomplete-scroll`、`docs/deployment`）。
 - Pull Requestは1つの目的に絞る。バックエンド・フロントエンド・Sandboxをまたぐ変更でも、1つの機能なら1つのPull Requestにしてよい（モノレポにした理由）。
 - マージは、Pull Requestのコミットの中身を見て、squash mergeか通常のmerge（merge commit）かを選ぶ。rebase mergeは使わない。

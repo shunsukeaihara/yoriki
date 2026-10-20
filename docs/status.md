@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-21（#19 のマージ後。design.md 0.19：標準のエージェント1つとSkillを中心とするモデル）
+- 最終更新：2026-10-21（#20 のマージ後）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -25,6 +25,8 @@
 | #16 | SSOの設定の管理画面：`user.SSOProvider`（client secretは暗号化）、`v1/sso_providers`、`/manage/sso_providers`（リダイレクトURIの表示）。allauthへは `list_apps()` で保存しない `SocialApp` を渡す。SSOの初回ログインで同じメールアドレスのユーザーに紐付ける。環境変数 `YORIKI_SSO_*` を廃止 |
 | #17 | Secretを持つModel・版を作るModel（LLMの接続、モデル設定、SSOの設定）を、Django管理画面では見るだけにする（`utils.admin.ReadOnlyAdmin`） |
 | #18 | Yorikiのアカウント：`/manage/users`（`v1/users`、`v1/groups`。作成・役割・無効化・招待／再設定のリンクの発行）、`/invitation#<token>`（`app/v1/auth/invitations/verify`・`accept`）、パスワードでのログイン（`POST app/v1/auth/session/`、`utils.backends.PasswordBackend`。SSOが有効なら基盤管理者だけ。`/login?method=password`）、django-axesによる試行回数の制限（アカウントごと・送信元IPごと、10回で15分）。未ログインのPOSTでもCSRFを確かめる `utils.permissions.CsrfProtected`。`app/v1/auth/providers/` は `{providers, password_login}` を返す |
+| #19 | 設計（design.md 0.19）：「エージェント」を標準のハーネス1つだけにし、業務ごとのAgentとSkillを束ねる業務のPluginをやめた。業務の単位はSkill（Tool・資料・Connector・実行環境・必要な能力を版で持ち、公開範囲で誰が使えるかが決まる）。SkillとConnectorは `/`・`@` で明示するか、エージェントが利用者の権限で使えるものから探す。モデルは会話・タスクで直接選び、自動で変えるのはeffortだけ。障害時は会話なら利用者に切り替えを求め、タスクならエラーを通知する |
+| #20 | 設計（design.md 0.20）：Webhookのpayloadはそのままファイルとして渡し、読み方はSkillで吸収する。受付時に必要な項目だけをBindingの表で取り出せる（JSONのpath・必須・型、サンプルで試せる）。重複のキーは送り元のイベントIDか `Idempotency-Key` だけ。Webhookのタスクは失敗の通知先が必須。処理の流れを組む画面は作らない |
 
 確認済みのこと：
 

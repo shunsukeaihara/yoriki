@@ -112,9 +112,8 @@ design.md §5.1の永続オブジェクトを、次の単位で分ける。実�
 | アプリ | 主なModel |
 |---|---|
 | `user` | User、役割と権限、SSOのログイン（django-allauth） |
-| `agent` | Agent、AgentRevision |
-| `plugin` | Plugin、PluginRelease、PluginChannel、PluginExtension |
-| `skill` | Skill、SkillVersion、SkillDraft、SkillChange、SkillEvaluation、SkillAssetBinding |
+| `plugin` | PluginExtension（サーバーに配備する拡張のRegistry。design.md §3.11） |
+| `skill` | Skill、SkillVersion、SkillDraft、SkillChange、SkillEvaluation、SkillAssetBinding（Skillが使うTool・資料・Connector・実行環境・必要な能力も版で持つ。design.md §3.2） |
 | `resource` | Resource、ResourceVersion |
 | `conversation` | Conversation、ConversationMessage、UserInstruction |
 | `run` | Run、ExecutionAttempt、RunEvent、ClarificationRequest、Checkpoint、ToolInvocation、ResultEnvelope、Outbox（`dispatch.py`） |
@@ -125,7 +124,7 @@ design.md §5.1の永続オブジェクトを、次の単位で分ける。実�
 | `worker` | Workerの登録情報 |
 | `usage` | UsageLedger、クオータ |
 | `llm` | LLMConnection、ModelProfile、Provider Adapter（design.md §4.8） |
-| `connector` | Connector、ConnectorのBinding、操作のAdapter（社内DB、SharePoint、Google Drive、MCP。design.md §4.9） |
+| `connector` | Connector、ConnectorPermission（使える利用者・役割と操作）、操作のAdapter（社内DB、SharePoint、Google Drive、MCP。design.md §4.9） |
 | `stream` | SSEのストリームview、イベントのSerializer（realtime.md） |
 
 ---
@@ -186,7 +185,7 @@ class Run(models.Model):
 ### 2.2 共通フィールド
 
 - 作成日時と更新日時は `created = models.DateTimeField(auto_now_add=True)`、`updated = models.DateTimeField(auto_now=True)` とする。名前に `_at` を付けない。一覧で並べ替えるものは `created` に `db_index=True` を付ける。
-- 論理削除する可変のマスター（Agent、Destination等）は `deleted = models.BooleanField(default=False)` を持つ。QuerySetでは `filter(deleted=False)` を明示して書く。既定のManagerで自動的に除外する仕組みは作らない。
+- 論理削除する可変のマスター（Skill、Destination等）は `deleted = models.BooleanField(default=False)` を持つ。QuerySetでは `filter(deleted=False)` を明示して書く。既定のManagerで自動的に除外する仕組みは作らない。
 - 不変オブジェクト（`*Version`、`*Revision`、`RunEvent`、`UsageLedger`、`ChannelMessageReceipt` 等の履歴・監査記録）は `deleted` を持たせず、作成後に更新・削除しない。切り戻しも新しい版を作って行う（design.md §3.2、§3.10）。
 
 ### 2.3 Choicesと状態
@@ -409,7 +408,7 @@ class AppConversationMessageViewSet(MyConversationMixin, ListModelMixin, CreateM
 | 接頭辞 | 利用者 | 認証 | permission |
 |---|---|---|---|
 | `App*` | 通常社員（自分の会話・Run・Skill） | 既定（セッション） | `AppUser` |
-| （接頭辞なし） | 業務管理者・Plugin公開者・基盤管理者 | 既定（セッション） | `require_permission(AppPermission.XXX)`、基盤管理者だけの操作は `PlatformAdmin` |
+| （接頭辞なし） | 業務管理者・Skill公開者・基盤管理者 | 既定（セッション） | `require_permission(AppPermission.XXX)`、基盤管理者だけの操作は `PlatformAdmin` |
 | `Hook*` | Trigger・Channelの受信endpoint | ViewSetで `authentication_classes` を指定する（連携ごとの署名・token） | 認証した連携に対象を限るpermissionを指定する |
 
 - `DEFAULT_PERMISSION_CLASSES` は `PlatformAdmin` なので（§6.1）、`permission_classes` を書き忘れたViewSetは基盤管理者しか使えない。すべてのViewSetで明示する。
@@ -604,7 +603,7 @@ DATABASES = {
 - django-allauthへは、`SocialAccountAdapter.list_apps()` で有効な `SSOProvider` から保存しない `SocialApp` を作って渡し、client secretはその中でだけ復号する。allauthの `SocialApp` のテーブルとDjango管理画面のその画面は使わない（client secretが平文で保存されるため）。
 - 前段に認証プロキシ（oauth2-proxy等）を置く場合も、ログインは常にYoriki自身で行う。認証プロキシはバリアとして扱い、プロキシが付けるヘッダーやIDトークンで利用者を決めない（前段の構成は deployment.md §8.6）。
 - 自社のアカウントだけを受け付ける。Entra IDはテナントID、Google Workspaceは `hd`（ドメイン。Googleの設定では必須にする。IDトークンの `hd` が一致しないアカウントは、個人のGoogleアカウントとみなして拒否する）、後から追加する認証基盤はissuerで確認する。どの認証基盤でも、メールアドレスのドメインがその設定の許可するドメインにあることを確認する（`user/adapters.py`）。許可しないアカウントは `/login?error=not_allowed`、認証の失敗は `/login?error=failed` へ戻す。
-- SSOで初めてログインしたとき、同じメールアドレス（大文字・小文字を区別しない）のユーザーがいれば、そのユーザーに紐付ける（`pre_social_login` で `sociallogin.connect()`）。いなければ作成し、通常社員の役割から始める。業務管理者・Plugin公開者などの役割はGroupとして管理画面で割り当て、基盤管理者は `is_superuser` にする（§6.3。IdPのグループとの連携は必要になってから追加する）。
+- SSOで初めてログインしたとき、同じメールアドレス（大文字・小文字を区別しない）のユーザーがいれば、そのユーザーに紐付ける（`pre_social_login` で `sociallogin.connect()`）。いなければ作成し、通常社員の役割から始める。業務管理者・Skill公開者などの役割はGroupとして管理画面で割り当て、基盤管理者は `is_superuser` にする（§6.3。IdPのグループとの連携は必要になってから追加する）。
 - Yorikiのアカウントは、基盤管理者が管理画面（`v1/users`。役割の選択肢は `v1/groups`）で作る。ユーザーは削除せず、無効にする。作成と再設定では、期限付きで1回だけ使える招待のtoken（既定は7日。DBにはハッシュだけを保存する）を発行し、そのURLを応答に一度だけ含めて画面に表示する。tokenはアクセスログに残らないよう、URLのフラグメント（`/invitation#<token>`）に置く。本人の画面は本文でtokenを送り、`POST app/v1/auth/invitations/verify/`（宛先のメールアドレスと期限を返す）と `POST app/v1/auth/invitations/accept/`（パスワードを設定してログインする）を呼ぶ。Yorikiからメールは送らない。
 - 有効なSSOの設定がある間は、招待・再設定のtokenを基盤管理者以外に発行せず、`verify`・`accept` でも対象が基盤管理者でなければ断る（ログインの判定と同じ `PasswordBackend` の規則を使い、セッションを作る前に確かめる）。SSOの設定が有効になった時点（作成・有効への変更）で、基盤管理者以外の未使用のtokenを同じtransactionで無効にする。
 - パスワードでのログインは `POST app/v1/auth/session/`（メールアドレス、パスワード）で行う。判定は認証バックエンド（`utils.backends.PasswordBackend`）に置き、有効なSSOの設定があれば基盤管理者（`is_superuser`）だけに、なければ有効なユーザーすべてに許可する。パスワードは `AUTH_PASSWORD_VALIDATORS` で検証する。allauthのメール・パスワードのログインとアカウント作成は使わない（`SOCIALACCOUNT_ONLY`）。
@@ -640,7 +639,7 @@ DATABASES = {
 - 権限はDjangoのpermissionで判定する。Userのフラグや役割の名前では判定しない。流れは「permissionを定義する → Groupに割り当てる → Groupをユーザーに割り当てる」とする。
   1. Yorikiで定義するpermissionは `utils.permissions.AppPermission` に（app_label、codename、表示名）として1か所にまとめる。codenameは `can_<動詞>_<対象>` にする（例：`skill.can_publish_company_skills`）。
   2. 対象アプリのModelの `Meta.permissions` に `AppPermission.XXX.meta` を書き、マイグレーションでpermissionを作る。
-  3. 役割（業務管理者・Plugin公開者等）はGroupで表す。初期の役割と、それに含めるpermissionは `user/roles.py` の `ROLES` に書く。`migrate` のたびに同名のGroupを作り、定義したpermissionを追加する（管理画面でGroupに足したpermissionは消さない）。post_migrateはアプリごとに順に送られるので、同期の中で参照するアプリのpermissionを先に作り、アプリの順番に依存しないようにしている。
+  3. 役割（業務管理者・Skill公開者等）はGroupで表す。初期の役割と、それに含めるpermissionは `user/roles.py` の `ROLES` に書く。`migrate` のたびに同名のGroupを作り、定義したpermissionを追加する（管理画面でGroupに足したpermissionは消さない）。post_migrateはアプリごとに順に送られるので、同期の中で参照するアプリのpermissionを先に作り、アプリの順番に依存しないようにしている。
   4. Groupは、基盤管理者がDjangoの管理画面でユーザーに割り当てる。個別のpermissionを直接付けてもよい。
 - 基盤管理者は `is_superuser` で表し、すべてのpermissionを持つ。基盤管理者だけに許す操作（基盤の設定等）は `PlatformAdmin` で判定する。
 - ViewSetでは `require_permission(AppPermission.XXX)` で確認する。`require_permission` は、ログイン済みで `user.has_perm()` が真の場合に許可するpermissionクラスを返す。Django標準のpermissionは `"<app_label>.<codename>"` の文字列で渡す。
@@ -746,7 +745,7 @@ class Command(BaseCommand):
 - taskの引数にはIDだけを渡す（Runには `run_id`、配信には `delivery_id`）。本文、成果物、Secretをキューに載せない（design.md §10）。
 - 実行状態の正本はPostgreSQLのRun / Deliveryに置く。Q2の結果テーブルを履歴として使わない。
 - taskは再配送されても安全にする。最初にclaimし、claimできなければ何もせずに終わる。
-- 複数台構成では、Q2のクラスタを `runner`（Agentの実行。Workerサーバーだけが受け取る）と `default`（配信、Outbox、清掃。アプリサーバーが受け取る）に分ける。Runの実行taskは `runner` クラスタへ送る。単一ホストでは1つのqclusterが両方を処理する（deployment.md §3.2）。
+- 複数台構成では、Q2のクラスタを `runner`（エージェントの実行。Workerサーバーだけが受け取る）と `default`（配信、Outbox、清掃。アプリサーバーが受け取る）に分ける。Runの実行taskは `runner` クラスタへ送る。単一ホストでは1つのqclusterが両方を処理する（deployment.md §3.2）。
 
 ---
 

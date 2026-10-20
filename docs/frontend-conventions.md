@@ -156,7 +156,7 @@ export default defineNuxtConfig({
 - `Accept-Language` に現在の言語を付ける。DjangoのLocaleMiddlewareにより、Serializerのエラーメッセージもその言語で返る。
 - 401の処理は `createHttp()` の第3引数（`HttpHooks.onUnauthorized`）で渡す。`api/index.ts` でログイン画面への移動をつないでいる。
 - エラーには `statusCode`（HTTPステータス）を付けて返す。Nuxtの `createError` / `showError` にそのまま渡せる。
-- タイムアウトは通常15秒、ファイル送信だけ60秒にする（`API_TIMEOUT`、`UPLOAD_TIMEOUT`）。ファイルを送る要求は `http.post(url, formData, { timeout: UPLOAD_TIMEOUT })` のように指定する。Agentの長い処理は非同期のRunなので、APIの応答を長く待つことはない。
+- タイムアウトは通常15秒、ファイル送信だけ60秒にする（`API_TIMEOUT`、`UPLOAD_TIMEOUT`）。ファイルを送る要求は `http.post(url, formData, { timeout: UPLOAD_TIMEOUT })` のように指定する。エージェントの長い処理は非同期のRunなので、APIの応答を長く待つことはない。
 
 ### 3.2 リソース定義
 
@@ -347,7 +347,7 @@ export const usePermission = defineStore('permission', () => {
 - 権限コードはDjangoの `app_label.codename` の形で、`app/v1/my/` の `allPermissions` から判定する（`usePermission`）。
 - 使う権限コードは `PermissionCode` に定数として追加し、画面のコードに文字列を直接書かない（`Permissions` はDOMの型名と衝突するので使わない）。
 - 基盤管理者だけが使える画面（LLMの接続等）は、そのModelのDjango標準のpermission（`llm.change_llmconnection` 等）で出し分ける。基盤管理者はすべてのpermissionを持つ。APIは `PlatformAdmin` で守っている（backend-conventions.md §6.3）。`isPlatformAdmin` では判定しない。
-- 役割（業務管理者・Plugin公開者等）の名前では判定しない。役割はpermissionをまとめたGroupで、`allPermissions` にはGroupから得たpermissionも含まれる。基盤管理者はすべてのpermissionを持つ（backend-conventions.md §6.3）。
+- 役割（業務管理者・Skill公開者等）の名前では判定しない。役割はpermissionをまとめたGroupで、`allPermissions` にはGroupから得たpermissionも含まれる。基盤管理者はすべてのpermissionを持つ（backend-conventions.md §6.3）。
 
 ### 6.2 画面・メニュー・ボタン
 
@@ -407,12 +407,12 @@ export const usePermission = defineStore('permission', () => {
 ```vue
 <DTextField v-model="form.name" :label="$t('名前')" required :error-messages="errors.name" />
 <DAutocomplete
-  v-model="form.agent"
+  v-model="form.modelProfile"
   :label="$t('エージェント')"
-  :search-fn="api.agents().list"
+  :search-fn="api.modelProfiles().list"
   item-description="description"
-  :initial-selected="conversation?.agentInfo"
-  :error-messages="errors.agent"
+  :initial-selected="conversation?.modelProfileInfo"
+  :error-messages="errors.modelProfile"
 />
 <DDateRange v-model:from="params.createdFrom" v-model:to="params.createdTo" :label="$t('開始日時')" />
 ```

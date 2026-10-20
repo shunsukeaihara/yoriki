@@ -57,7 +57,7 @@ yoriki/
 
 - `.github/workflows/sandbox.yml` は、`sandbox/**` の変更時と毎週の定期実行で動く。
 - buildxでamd64とarm64をビルドし、provenanceとSBOMを付けてDocker Hubへpushする。イメージ名は `<org>/yoriki-sandbox-<profile>`、タグは日付（`YYYY.MM.DD`）とする（例：`<org>/yoriki-sandbox-docs:2026.10.16`）。
-- 公開したdigest（index＝manifest listのdigest）をworkflowの出力とリリースノートに残す。管理画面でRuntime Profileの新しい版としてdigestを登録すると、Agentで使えるようになる。
+- 公開したdigest（index＝manifest listのdigest）をworkflowの出力とリリースノートに残す。管理画面でRuntime Profileの新しい版としてdigestを登録すると、Skillで使えるようになる。
 - イメージにはラベル `org.yoriki.sandbox-contract=<契約番号>` を付ける。Runnerが対応しない契約番号のイメージは、管理画面で登録できない。契約を変えたらCONTRACT.mdとラベルの番号を同時に上げ、契約テストで検出できるようにする。
 - リポジトリがprivateの間も、Docker Hubのイメージはpublicで公開できる。ただし、レイヤーの中身は誰でも見られるので、秘密情報や社内向けの設定を入れない。
 
@@ -134,9 +134,9 @@ networks:
 - **外へ通信するサービス**：api（LLM、Connector、外部連携）、qcluster（LLM、配信、イメージのpull）、channel-listener（Slack等への常時接続）は、`backend` に加えて外へ出られる `egress` ネットワークにも参加させる。postgresは参加させない。
 - **migrateは自動で実行しない。** apiの起動時に実行すると、複数のプロセスが同時にmigrationを走らせるため。更新手順（§6）で明示的に実行する。
 
-### 3.2 Agentの実行を別のサーバーに出す
+### 3.2 エージェントの実行を別のサーバーに出す
 
-Agentの実行（Runner・Sandbox）を別のサーバーに出すときは、QClusterだけを動かすWorkerサーバーを追加する（design.md §6.1）。すべてのサーバー（アプリ、Worker、DB、エッジ）は同じ私設ネットワークに置き、私設ネットワークの外のサーバーは想定しない。
+エージェントの実行（Runner・Sandbox）を別のサーバーに出すときは、QClusterだけを動かすWorkerサーバーを追加する（design.md §6.1）。すべてのサーバー（アプリ、Worker、DB、エッジ）は同じ私設ネットワークに置き、私設ネットワークの外のサーバーは想定しない。
 
 #### QClusterだけのWorkerサーバー（`deploy/compose.qcluster.yaml`）
 
@@ -148,7 +148,7 @@ services:
     command: python manage.py qcluster
     env_file: [/etc/yoriki/yoriki.env]
     environment:
-      Q_CLUSTER_NAME: runner          # Agentの実行だけを受け取るクラスタ
+      Q_CLUSTER_NAME: runner          # エージェントの実行だけを受け取るクラスタ
     volumes:
       - /var/lib/yoriki/workspaces:/var/lib/yoriki/workspaces
       - /var/run/docker.sock:/var/run/docker.sock
@@ -156,7 +156,7 @@ services:
     restart: unless-stopped
 ```
 
-- Django Q2のクラスタを2つに分ける。`runner`（Agentの実行）はWorkerサーバーだけが受け取り、アプリサーバーのqcluster（`default`）は配信、Outbox、清掃などの軽い処理だけを受け取る。Runの実行taskは `runner` クラスタへ送る（Django Q2の複数クラスタの機能を使う）。
+- Django Q2のクラスタを2つに分ける。`runner`（エージェントの実行）はWorkerサーバーだけが受け取り、アプリサーバーのqcluster（`default`）は配信、Outbox、清掃などの軽い処理だけを受け取る。Runの実行taskは `runner` クラスタへ送る（Django Q2の複数クラスタの機能を使う）。
 - Sandboxを起動するのはWorkerサーバーだけになるので、アプリサーバーのqclusterにはDockerソケットとworkspacesのmountが不要になる。
 - WorkerサーバーはDB・S3に直接接続するので、アプリサーバーと同じ `yoriki.env` を使い、同じ私設ネットワークに置く。ファイルの保存先はS3等の共有のものにする（Localは使えない）。
 - 台数は実行枠に合わせて増減する。RunのclaimとleaseがDBで行われるので、何台あっても同じRunを二重に実行しない。
@@ -379,7 +379,7 @@ Cの構成：
   - ファイルの保存先：Local Backendはサーバーをまたいで共有できないので、S3（または互換のストレージ）に切り替える（design.md §7.10の移行手順）。成果物のダウンロードは、`X-Accel-Redirect` ではなくS3の期限付きURLかapi経由で返す。
 - **増やしてよいもの・1つだけにするもの**：
   - frontend、api：何台でも増やせる（状態を持たない。セッションはDB、SSEの取りこぼしはDBから読み直す）。
-  - qcluster：何台でも増やせる（RunとDeliveryはDBのclaimで重複しない）。アプリサーバーのqclusterは `default` クラスタ（配信・Outbox・清掃）だけを受け持ち、Agentの実行（`runner` クラスタ）はWorkerサーバーが受け持つ（§3.2）。Dockerソケットとworkspacesの領域を持つのはWorkerサーバーだけ。
+  - qcluster：何台でも増やせる（RunとDeliveryはDBのclaimで重複しない）。アプリサーバーのqclusterは `default` クラスタ（配信・Outbox・清掃）だけを受け持ち、エージェントの実行（`runner` クラスタ）はWorkerサーバーが受け持つ（§3.2）。Dockerソケットとworkspacesの領域を持つのはWorkerサーバーだけ。
   - channel-listener：Slack Socket Mode等の接続ごとに、受信する担当を1つにする（design.md §10。複数台で動かす場合も、DBで担当を決めて重複して受信しない）。
   - migrate：更新のたびに1か所から1回だけ実行する（§6）。
 - **Composeでの立て方**：どのサーバーもDocker Composeで立てる。サーバーの役割ごとにComposeファイルを分け、1台に複数の役割を重ねてよい。
@@ -387,7 +387,7 @@ Cの構成：
 | 役割 | Composeファイル | 台数 | 動かすサービス |
 |---|---|---|---|
 | アプリ | `compose.app.yaml` | 必要なだけ | nginx、frontend、api、qcluster（`default` クラスタ：配信・Outbox・清掃。必要なら channel-listener） |
-| Worker | `compose.qcluster.yaml` | 実行枠に合わせて | qclusterだけ（`runner` クラスタ：Agentの実行、Sandbox）。§3.2 |
+| Worker | `compose.qcluster.yaml` | 実行枠に合わせて | qclusterだけ（`runner` クラスタ：エージェントの実行、Sandbox）。§3.2 |
 | エッジ | `compose.edge.yaml` | 2（冗長化） | cloudflared、振り分け用のnginx |
 | DB | `compose.db.yaml` | 1 | postgres、バックアップ（マネージドのDBを使うなら不要） |
 

@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-20（LLMのPRの作業中）
+- 最終更新：2026-10-20（#12）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -19,7 +19,7 @@
 | #6 | Dockerfile（api、frontend）、Compose一式（単一ホスト、アプリ、DB、Worker、Cloudflare Tunnel、エッジ）、nginxの設定、環境変数のexample、app-imagesのCI（イメージのビルドと起動後の疎通確認） |
 | #8 | フロントエンドの土台の残り：`plugins/error-handler.ts`、`error.vue`、`layouts/manage.vue`（`useManageMenu()` のメニューを権限で出し分け、表示できる項目がなければ `/manage` は403）、Vitest（`test/nuxt/`。composables・APIクライアント・`D*` ラッパーの最初のテスト）とCIへの追加 |
 | #9 | 開発時（DEBUG）の静的ファイルを `StaticFilesStorage` にし、Djangoの管理画面が500になる不具合を修正 |
-| （LLM。PR未作成） | `llm` アプリ：LLMConnection（種別はOpenAI・Anthropic・Gemini・ローカルLLM。API keyは `EncryptedSecretField` で暗号化してDBに保存。種別とbase URLは作成後は変えられない）、ModelProfile（中身を変えると不変の版 ModelProfileVersion が自動で増える）、Provider Adapter（各社のAPIクライアントでストリーミング・Tool呼出し・利用量・エラーを共通化）、管理API（`v1/llm_connections`（`check` で接続の確認）、`v1/model_profiles`、版の履歴）、Secretの暗号化（`utils/crypto.py`、`utils.fields.EncryptedSecretField`、`common` の `rotate_secret_encryption`）。各社のAgent SDKは使わず、自前のハーネスで動かす決定（design.md §4.8） |
+| #12 | `llm` アプリ：LLMConnection（種別はOpenAI・Anthropic・Gemini・ローカルLLM。API keyは `EncryptedSecretField` で暗号化してDBに保存。種別とbase URLは作成後は変えられない）、ModelProfile（中身を変えると不変の版 ModelProfileVersion が自動で増える）、Provider Adapter（各社のAPIクライアントでストリーミング・Tool呼出し・利用量・エラーを共通化）、管理API（`v1/llm_connections`（`check` で接続の確認）、`v1/model_profiles`、版の履歴）、Secretの暗号化（`utils/crypto.py`、`utils.fields.EncryptedSecretField`、`common` の `rotate_secret_encryption`）。各社のAgent SDKは使わず、自前のハーネスで動かす決定（design.md §4.8） |
 
 確認済みのこと：
 

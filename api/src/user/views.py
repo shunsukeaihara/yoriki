@@ -1,37 +1,71 @@
-from django.contrib.auth import logout
+from django.contrib.auth import login, logout
+from django.contrib.auth.models import Group
+from django.db import transaction
 from django.middleware.csrf import get_token
 from django.urls import reverse
+from django.utils.translation import gettext_lazy as _
+from django_filters import rest_framework as filters
 from drf_spectacular.utils import extend_schema, extend_schema_view
-from rest_framework import status
+from rest_framework import mixins, status
+from rest_framework.decorators import action
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.viewsets import GenericViewSet, ModelViewSet
+from rest_framework.viewsets import GenericViewSet, ModelViewSet, ReadOnlyModelViewSet
 
-from utils.permissions import AppUser, PlatformAdmin
+from utils.permissions import AppUser, CsrfProtected, PlatformAdmin
 from utils.views import SoftDeleteMixin
 
-from .models import SSOProvider
+from .models import Invitation, SSOProvider, User
 from .serializers import (
-    AuthProviderSerializer,
+    AuthMethodsSerializer,
+    GroupSerializer,
+    InvitationAcceptSerializer,
+    InvitationLinkSerializer,
+    InvitationTokenSerializer,
+    IssueInvitationSerializer,
+    LoginSerializer,
+    ManageUserCreateSerializer,
+    ManageUserSerializer,
+    ManageUserUpdateSerializer,
     MyUserSerializer,
     SessionSerializer,
     SSOProviderSerializer,
     SSOProviderUpdateSerializer,
 )
 
+PASSWORD_BACKEND = "utils.backends.PasswordBackend"
+
 
 @extend_schema(tags=["app/auth/session"])
 class AuthSessionAPIView(APIView):
-    """ログイン状態の確認とログアウト。画面の起動時に呼んで、CSRFのCookieも受け取る"""
+    """ログイン状態の確認、パスワードでのログイン、ログアウト。画面の起動時に呼んで、CSRFのCookieも受け取る"""
 
     permission_classes = [AllowAny]
+
+    def get_permissions(self):
+        # 未ログインでもCSRFを確かめる（ログインCSRFを防ぐ）
+        if self.request.method == "POST":
+            return [CsrfProtected()]
+        return super().get_permissions()
 
     @extend_schema(description="ログイン状態を返し、CSRFのCookieを設定する", request=None, responses=SessionSerializer)
     def get(self, request: Request) -> Response:
         get_token(request)  # ensure_csrf_cookieと同じく、CSRFのCookieを応答に付ける
         return Response(SessionSerializer({"is_authenticated": request.user.is_authenticated}).data)
+
+    @extend_schema(
+        description="メールアドレスとパスワードでログインする。有効なSSOの設定があれば基盤管理者だけ。"
+        "失敗が続くと、アカウントごと・送信元のIPアドレスごとに一定時間止める（429）",
+        request=LoginSerializer,
+        responses=SessionSerializer,
+    )
+    def post(self, request: Request) -> Response:
+        serializer = LoginSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        login(request, serializer.validated_data["user"])
+        return Response(SessionSerializer({"is_authenticated": True}).data)
 
     @extend_schema(description="ログアウトする", request=None, responses={204: None})
     def delete(self, request: Request) -> Response:
@@ -40,21 +74,52 @@ class AuthSessionAPIView(APIView):
 
 
 @extend_schema(tags=["app/auth/provider"])
-class AuthProviderViewSet(GenericViewSet):
-    """ログイン画面に並べる、有効な認証基盤の一覧"""
+class AuthMethodsAPIView(APIView):
+    """ログイン画面に出すログインの方法（有効なSSOの認証基盤と、パスワードの欄を出すか）"""
 
     permission_classes = [AllowAny]
-    serializer_class = AuthProviderSerializer
-    pagination_class = None
-    filter_backends = []
 
-    @extend_schema(description="有効な認証基盤の一覧", responses=AuthProviderSerializer(many=True))
-    def list(self, request: Request) -> Response:
+    @extend_schema(description="ログインの方法", request=None, responses=AuthMethodsSerializer)
+    def get(self, request: Request) -> Response:
         providers = [
             {"id": sso.kind, "name": sso.get_kind_display(), "login_url": reverse(f"{sso.kind}_login")}
             for sso in SSOProvider.objects.active().order_by("created", "pk")
         ]
-        return Response(self.get_serializer(providers, many=True).data)
+        return Response(AuthMethodsSerializer({"providers": providers, "password_login": not providers}).data)
+
+
+@extend_schema(tags=["app/auth/invitation"])
+class AuthInvitationViewSet(GenericViewSet):
+    """招待・再設定のリンク。本人がパスワードを設定する（ログインしていなくても使う）。
+
+    tokenはURLのフラグメントにあり、画面が本文で送る（アクセスログに残さない）
+    """
+
+    permission_classes = [CsrfProtected]
+    serializer_class = InvitationTokenSerializer
+    pagination_class = None
+    filter_backends = []
+
+    @extend_schema(description="リンクを確かめ、宛先のメールアドレスと期限を返す", responses=InvitationTokenSerializer)
+    @action(detail=False, methods=["post"])
+    def verify(self, request: Request) -> Response:
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(self.get_serializer(serializer.validated_data["invitation"]).data)
+
+    @extend_schema(
+        description="パスワードを設定してリンクを使用済みにし、ログインする",
+        request=InvitationAcceptSerializer,
+        responses=SessionSerializer,
+    )
+    @action(detail=False, methods=["post"], serializer_class=InvitationAcceptSerializer)
+    def accept(self, request: Request) -> Response:
+        with transaction.atomic():
+            serializer = self.get_serializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            invitation = serializer.save()
+        login(request, invitation.user, backend=PASSWORD_BACKEND)
+        return Response(SessionSerializer({"is_authenticated": True}).data)
 
 
 @extend_schema(tags=["app/my"])
@@ -90,5 +155,88 @@ class SSOProviderViewSet(SoftDeleteMixin, ModelViewSet):
             return SSOProviderUpdateSerializer
         return super().get_serializer_class()
 
+    @transaction.atomic
+    def perform_create(self, serializer):
+        self._revoke_invitations_if_active(serializer.save(created_by=self.request.user))
+
+    @transaction.atomic
+    def perform_update(self, serializer):
+        self._revoke_invitations_if_active(serializer.save())
+
+    def _revoke_invitations_if_active(self, sso: SSOProvider) -> None:
+        # SSOを有効にしたら、基盤管理者以外の未使用の招待・再設定のリンクを無効にする（design.md §10.0）
+        if sso.is_active and not sso.deleted:
+            Invitation.revoke_for_sso()
+
+
+class ManageUserFilter(filters.FilterSet):
+    group = filters.CharFilter(label=_("役割"), field_name="groups__name")
+
+    class Meta:
+        model = User
+        fields = ["is_active", "is_superuser", "group"]
+
+
+@extend_schema(description="ユーザーの管理API（基盤管理者だけ）", tags=["manage/user"])
+@extend_schema_view(
+    create=extend_schema(request=ManageUserCreateSerializer, responses={201: ManageUserCreateSerializer}),
+    update=extend_schema(request=ManageUserUpdateSerializer, responses=ManageUserSerializer),
+    partial_update=extend_schema(request=ManageUserUpdateSerializer, responses=ManageUserSerializer),
+)
+class ManageUserViewSet(
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.CreateModelMixin,
+    mixins.UpdateModelMixin,
+    GenericViewSet,
+):
+    """Yorikiのアカウントの作成、役割の割り当て、無効化、招待・再設定のリンクの発行。
+
+    ユーザーは削除せず、無効にする（会話・成果物・監査ログの持ち主として残す）
+    """
+
+    permission_classes = [PlatformAdmin]
+    lookup_field = "uid"
+    queryset = User.objects.prefetch_related("groups", "socialaccount_set")
+    serializer_class = ManageUserSerializer
+    filterset_class = ManageUserFilter
+    search_fields = ("email", "display_name")
+    ordering = ("email", "pk")
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return ManageUserCreateSerializer
+        if self.action in ("update", "partial_update"):
+            return ManageUserUpdateSerializer
+        return super().get_serializer_class()
+
+    @transaction.atomic
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user)
+
+    @extend_schema(
+        description="招待・パスワードの再設定のリンクを発行する（同じユーザーの未使用のリンクは無効になる）。"
+        "SSOが有効な間は、基盤管理者のアカウントにだけ発行できる",
+        request=None,
+        responses={201: InvitationLinkSerializer},
+    )
+    @action(detail=True, methods=["post"], serializer_class=IssueInvitationSerializer)
+    def invitation(self, request: Request, *args, **kwargs) -> Response:
+        user = self.get_object()
+        serializer = IssueInvitationSerializer(data={}, context={"request": request, "user": user})
+        serializer.is_valid(raise_exception=True)
+        link = serializer.save()
+        return Response(InvitationLinkSerializer(link).data, status=status.HTTP_201_CREATED)
+
+
+@extend_schema(description="役割（Group）の一覧（基盤管理者だけ）", tags=["manage/group"])
+class GroupViewSet(ReadOnlyModelViewSet):
+    permission_classes = [PlatformAdmin]
+    lookup_field = "name"
+    queryset = Group.objects.all()
+    serializer_class = GroupSerializer
+    pagination_class = None  # 役割は少ないので、ページングしない
+    filter_backends = []
+
+    def get_queryset(self):
+        return super().get_queryset().order_by("name")

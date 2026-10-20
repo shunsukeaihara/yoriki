@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-21（#16 のマージ後）
+- 最終更新：2026-10-21（Yorikiのアカウント。`feature/yoriki-accounts`、PR作成前）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -23,6 +23,8 @@
 | #14 | LLMの管理画面：`/manage/llm_connections`（接続の登録・API keyの差し替え・接続の確認。種別の選択の近くにローカルLLMを推奨する案内）、`/manage/model_profiles`（モデル設定。中身を変えると新しい版、版の履歴、編集中の競合（409）からの読み直し、接続先のモデル名からの選択）。管理画面のメニューの最初の項目（permissionは `llm.change_llmconnection`・`llm.change_modelprofile`）。共通部品 `ListPageTitle`・`TableSearchForm`・`formatDatetime`。API側は接続とモデル設定の一覧に名前の検索（`search`）を追加 |
 | #15 | 認証の方式の見直しの設計（design.md 0.18 §10.0）：SSOの設定を管理画面へ、SSOのない導入先のYorikiのアカウント（招待・パスワード・試行回数の制限）、SSOへの切り替え時のメールアドレスでの紐付け |
 | #16 | SSOの設定の管理画面：`user.SSOProvider`（client secretは暗号化）、`v1/sso_providers`、`/manage/sso_providers`（リダイレクトURIの表示）。allauthへは `list_apps()` で保存しない `SocialApp` を渡す。SSOの初回ログインで同じメールアドレスのユーザーに紐付ける。環境変数 `YORIKI_SSO_*` を廃止 |
+| #17 | Secretを持つModel・版を作るModel（LLMの接続、モデル設定、SSOの設定）を、Django管理画面では見るだけにする（`utils.admin.ReadOnlyAdmin`） |
+| （PR作成前） | Yorikiのアカウント：`/manage/users`（`v1/users`、`v1/groups`。作成・役割・無効化・招待／再設定のリンクの発行）、`/invitation#<token>`（`app/v1/auth/invitations/verify`・`accept`）、パスワードでのログイン（`POST app/v1/auth/session/`、`utils.backends.PasswordBackend`。SSOが有効なら基盤管理者だけ。`/login?method=password`）、django-axesによる試行回数の制限（アカウントごと・送信元IPごと、10回で15分）。未ログインのPOSTでもCSRFを確かめる `utils.permissions.CsrfProtected`。`app/v1/auth/providers/` は `{providers, password_login}` を返す |
 
 確認済みのこと：
 
@@ -62,13 +64,8 @@
 
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。提案する順番：
 
-1. **Yorikiのアカウント**（design.md §10.0、backend-conventions.md §6.2、frontend-conventions.md §4 の0.18の設計で実装する。SSOの設定はできている）：
-   - SSOがなければ、Yorikiのアカウントでログインする（基盤管理者が `v1/users` で作り、招待のリンク（`/invitation#<token>`、7日、1回だけ）を画面でコピーして渡す。再設定も同じ）。
-   - SSOが有効な間は基盤管理者以外のリンクを発行・使用させず、SSOを有効にしたら未使用のリンクを無効にする（`SSOProvider` の作成・有効への変更と同じtransaction）。
-   - パスワードでのログインは `POST app/v1/auth/session/`、`utils.backends.PasswordBackend`（`is_sso_enabled()` なら基盤管理者だけ）。基盤管理者の入口は `/login?method=password`。`app/v1/auth/providers/` でパスワードの欄を出すかを返す。
-   - 試行回数の制限は django-axes で、アカウントごとと送信元IPごとに別々に数える（15分、解除は管理コマンド）。
-2. **Agent（`agent`）**：Agent、AgentRevision（不変の版）、管理画面と、社員がAgentを選ぶ画面。
-3. **ハーネスの調査と設計（`docs/harness.md`）**：各社のAgent SDKやCLI製品は使わず、Provider Adapterの上にYoriki自身のRunnerを置く（design.md §4.8）。実装の前に、公開されているハーネスをリポジトリの外（例：`~/work/yoriki-reference/`。gitに入れない）にcloneして設計思想を読み、業務ツールとしてのハーネスをYoriki独自に設計する。読むもの：
+1. **Agent（`agent`）**：Agent、AgentRevision（不変の版）、管理画面と、社員がAgentを選ぶ画面。
+2. **ハーネスの調査と設計（`docs/harness.md`）**：各社のAgent SDKやCLI製品は使わず、Provider Adapterの上にYoriki自身のRunnerを置く（design.md §4.8）。実装の前に、公開されているハーネスをリポジトリの外（例：`~/work/yoriki-reference/`。gitに入れない）にcloneして設計思想を読み、業務ツールとしてのハーネスをYoriki独自に設計する。読むもの：
    - **DeepSeek Harness**（`deepseek-ai/deepseek-harness`）：追記専用のセッションログから毎回モデルへの入力を組み立てる規約（RunEventを正本にするYorikiの形と同じ）、常駐ターミナル・バックグラウンドジョブ・長い出力の退避、fsとsubprocessのproviderをリモートのsandboxへ向ける構成、compaction・guard、deliverables（成果物）。developer previewで互換性が変わるので依存はしない。
    - **OpenCode**（`anomalyco/opencode`）：Toolの一式（`bash`、`read`、`edit`、`write`、`apply_patch`、`grep`、`glob`、`skill`、`question`）と、Toolごとの `allow` / `ask` / `deny` の権限、`plan`（読み取り専用）と `build` のエージェントの分け方。
    - **Codex CLI**：system promptの構成、Toolの説明文、`apply_patch` 形式、Sandbox前提のコマンド実行。
@@ -77,13 +74,13 @@ design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにし
    - **SWE-agent / mini-swe-agent**：Tool（ACI）の設計原則と、最小のループ。
    - Claude Codeは非OSSなので、Agent SDKの文書と観察できる挙動（Toolの役割分担、Bashの説明文、質問の仕方）を参考にする。
    設計では、土台のコーディングエージェント（ファイルの読み書き・編集・検索、常駐シェル、バックグラウンド実行、出力の退避、圧縮、エラーからの立て直し）と、業務の層（Skill、Connector、成果物、確認待ち、予算、権限）を分けて書き、最初の2つのAgent（請求書の照合、契約書レビュー）でどのToolとSkillをどう使うかを書き下して確かめる。GNU toolsやPythonを含む大量のコマンドがSandboxの中で確実に動くことを要件に入れる。
-4. **会話と実行（`conversation`、`run`、`stream`）**：Conversation・ConversationMessage、Runの状態遷移（遷移表と行ロック）、claim / lease、`cancel`・`answer`、SSE（`stream/notifier.py` のLISTEN/NOTIFY）。まずSandboxなしでLLMと会話できるところまで。会話を始めるときのウィザードで、個人情報や機密情報を扱うかを確かめ、扱う場合はローカルLLMのモデルだけに絞る（design.md §4冒頭、§11.3）。
-5. **Sandbox（`sandbox/`、`runtime`）**：CONTRACT.md、docsのイメージ、Launcher（`network_mode: none`、コンテナからの脱出への対策の1〜4。design.md §7）、Runnerからのshell実行。gVisorの評価もこの段階で行う。
-6. **成果物とファイル（`artifact`）**：Local・S3のStorage Backend、添付、成果物の取得（`/api/files/<token>/`、`X-Accel-Redirect`）。
-7. **Skill（`skill`、`plugin`）**：Draft・Version・公開、会話からのSkill更新。
-8. **Connector（`connector`）とタスク・配信（`task`、`delivery`）**：読取り専用のDB Connector、Webhook・Zapierの通知、Trigger。DB Connector（種別：PostgreSQL・MySQL・SQL Server、ホスト、DB名、ユーザー、パスワード等）とHTTP Connector（ホスト、ヘッダー、認証情報等）の設定は管理画面で登録し、資格情報は `utils/crypto.py` で暗号化してDBに保存する（backend-conventions.md §6.4）。個人情報を主な中身とする接続先には機密のフラグを付けられるようにし、フラグの付いたConnectorはローカルLLMのモデルを使うタスク・会話にだけ割り当てる（design.md §4冒頭、§4.9.1）。
-9. **最初の2つのAgent**（design.md §13）：請求書PDF → 社内DBと照合 → 取込用のCSV、契約書レビュー → Zapierへ結果。
-10. **Channel Plugin**（Teams・Slack・Discord）。
+3. **会話と実行（`conversation`、`run`、`stream`）**：Conversation・ConversationMessage、Runの状態遷移（遷移表と行ロック）、claim / lease、`cancel`・`answer`、SSE（`stream/notifier.py` のLISTEN/NOTIFY）。まずSandboxなしでLLMと会話できるところまで。会話を始めるときのウィザードで、個人情報や機密情報を扱うかを確かめ、扱う場合はローカルLLMのモデルだけに絞る（design.md §4冒頭、§11.3）。
+4. **Sandbox（`sandbox/`、`runtime`）**：CONTRACT.md、docsのイメージ、Launcher（`network_mode: none`、コンテナからの脱出への対策の1〜4。design.md §7）、Runnerからのshell実行。gVisorの評価もこの段階で行う。
+5. **成果物とファイル（`artifact`）**：Local・S3のStorage Backend、添付、成果物の取得（`/api/files/<token>/`、`X-Accel-Redirect`）。
+6. **Skill（`skill`、`plugin`）**：Draft・Version・公開、会話からのSkill更新。
+7. **Connector（`connector`）とタスク・配信（`task`、`delivery`）**：読取り専用のDB Connector、Webhook・Zapierの通知、Trigger。DB Connector（種別：PostgreSQL・MySQL・SQL Server、ホスト、DB名、ユーザー、パスワード等）とHTTP Connector（ホスト、ヘッダー、認証情報等）の設定は管理画面で登録し、資格情報は `utils/crypto.py` で暗号化してDBに保存する（backend-conventions.md §6.4）。個人情報を主な中身とする接続先には機密のフラグを付けられるようにし、フラグの付いたConnectorはローカルLLMのモデルを使うタスク・会話にだけ割り当てる（design.md §4冒頭、§4.9.1）。
+8. **最初の2つのAgent**（design.md §13）：請求書PDF → 社内DBと照合 → 取込用のCSV、契約書レビュー → Zapierへ結果。
+9. **Channel Plugin**（Teams・Slack・Discord）。
 
 並行してよいもの：実際のIdPでのログインの確認（client IDが用意でき次第）、CSPの改善。
 

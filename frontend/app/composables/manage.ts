@@ -30,6 +30,12 @@ export const useManageMenu = () => {
       permission: PermissionCode.CHANGE_MODEL_PROFILE,
     },
     {
+      label: $i18n.t('ユーザー'),
+      icon: 'i-lucide-users',
+      to: '/manage/users',
+      permission: PermissionCode.CHANGE_USER,
+    },
+    {
       label: $i18n.t('SSOの設定'),
       icon: 'i-lucide-key-round',
       to: '/manage/sso_providers',

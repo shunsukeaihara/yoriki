@@ -28,3 +28,16 @@ export type SSOProviderKindEnum = Schemas['SSOProviderKindEnum']
 export type SSOProvider = Api<'SSOProvider'>
 export type SSOProviderWrite = Api<'SSOProviderRequest'>
 export type SSOProviderUpdate = Api<'SSOProviderUpdateRequest'>
+
+export type AuthMethods = Api<'AuthMethods'>
+export type Login = Api<'LoginRequest'>
+export type InvitationToken = Api<'InvitationToken'>
+export type InvitationAccept = Api<'InvitationAcceptRequest'>
+export type InvitationLink = Api<'InvitationLink'>
+export type ManageUser = Api<'ManageUser'>
+export type ManageUserCreated = Api<'ManageUserCreate'>
+export type ManageUserWrite = Api<'ManageUserCreateRequest'>
+export type ManageUserUpdate = Api<'ManageUserUpdateRequest'>
+export type Group = Api<'Group'>
+
+export type ManageUserListParams = ListParams & { isActive?: boolean; isSuperuser?: boolean; group?: string }

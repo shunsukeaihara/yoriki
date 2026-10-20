@@ -1,12 +1,12 @@
 import pytest
-from django.contrib.auth import authenticate
 from django.contrib.auth.models import AnonymousUser, Group, Permission
 from django.core.exceptions import ImproperlyConfigured
 from django.test import RequestFactory
 
 from llm.factories import LLMConnectionFactory
-from user.factories import UserFactory
+from user.factories import SSOProviderFactory, UserFactory
 
+from .backends import PasswordBackend
 from .crypto import encrypt_secret
 from .lock import lock
 from .permissions import AppUser, PlatformAdmin, require_permission
@@ -65,14 +65,30 @@ class TestPermissions:
         assert _allowed(require_permission("user.view_user"), platform_admin) is True
 
 
-class TestPasswordLogin:
+class TestPasswordBackend:
     @pytest.mark.django_db
-    def test_only_platform_admin_can_login_with_password(self):
-        for user in (UserFactory.create(username="admin", is_superuser=True), UserFactory.create(username="taro")):
+    def test_sso_limits_password_login_to_platform_admin(self):
+        users = (UserFactory.create(username="admin", is_superuser=True), UserFactory.create(username="taro"))
+        for user in users:
             user.set_password("pass-for-test")
             user.save()
-        assert authenticate(username="admin", password="pass-for-test") is not None
-        assert authenticate(username="taro", password="pass-for-test") is None
+        backend = PasswordBackend()
+        # ユーザー名（Django管理画面）とメールアドレス（Yorikiのログイン画面）のどちらでもよい
+        assert backend.authenticate(None, username="taro", password="pass-for-test") == users[1]
+        assert backend.authenticate(None, username="TARO@example.co.jp", password="pass-for-test") == users[1]
+        assert backend.authenticate(None, username="taro", password="wrong") is None
+
+        SSOProviderFactory.create()
+        assert backend.authenticate(None, username="admin", password="pass-for-test") == users[0]
+        assert backend.authenticate(None, username="taro", password="pass-for-test") is None
+
+    @pytest.mark.django_db
+    def test_ambiguous_email_is_rejected(self):
+        for name in ("a", "b"):
+            user = UserFactory.create(username=name, email="same@example.co.jp")
+            user.set_password("pass-for-test")
+            user.save()
+        assert PasswordBackend().authenticate(None, username="same@example.co.jp", password="pass-for-test") is None
 
 
 class TestAdminSite:

@@ -1,4 +1,4 @@
-/** ログイン状態とログインユーザー。画面からは isAuthenticated、user、init()、logout() だけを使う */
+/** ログイン状態とログインユーザー。画面からは isAuthenticated、user、init()、login()、logout() だけを使う */
 export const useAccountStore = defineStore('account', () => {
   const user = ref<MyUser | null>(null)
   const isAuthenticated = computed(() => user.value !== null)
@@ -10,6 +10,13 @@ export const useAccountStore = defineStore('account', () => {
     user.value = session.isAuthenticated ? await api.account.get() : null
   }
 
+  /** パスワードでログインし、ログインユーザーを取得する。失敗は呼び出し元（createSubmit）でエラーとして表示する */
+  const login = async (data: Login) => {
+    const api = useAPI()
+    await api.auth.session.create(data)
+    user.value = await api.account.get()
+  }
+
   /** Yoriki のセッションだけを消す（前段の認証プロキシのセッションは消さない） */
   const logout = async () => {
     await useAPI().auth.session.delete()
@@ -17,5 +24,5 @@ export const useAccountStore = defineStore('account', () => {
     await navigateTo('/login')
   }
 
-  return { user, isAuthenticated, init, logout }
+  return { user, isAuthenticated, init, login, logout }
 })

@@ -1,10 +1,14 @@
+import hashlib
+import secrets
+from datetime import timedelta
 from typing import ClassVar
 
 from auditlog.registry import auditlog
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser, Permission, UserManager
 from django.contrib.postgres.fields import ArrayField
-from django.db import models
+from django.db import models, transaction
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from utils.fields import EncryptedSecretField, NanoidField
@@ -129,6 +133,107 @@ def is_sso_enabled() -> bool:
     return SSOProvider.objects.active().exists()
 
 
+def can_use_password(user: User) -> bool:
+    """パスワードでログインしてよいか。SSOが有効な間は基盤管理者だけ（設定の誤りや認証基盤の停止に備える）。
+
+    ログイン（utils.backends.PasswordBackend）と、招待・再設定のリンクの発行・使用で同じ規則を使う
+    """
+    return user.is_superuser or not is_sso_enabled()
+
+
+# 招待・再設定のリンクの有効期限
+INVITATION_TTL = timedelta(days=7)
+
+
+class InvitationPurpose(models.IntegerChoices):
+    INVITE = 1, _("招待")
+    RESET = 2, _("パスワードの再設定")
+
+
+class InvitationQuerySet(models.QuerySet):
+    def usable(self) -> "InvitationQuerySet":
+        """使用済み・無効・期限切れでないもの"""
+        return self.filter(used_at__isnull=True, revoked_at__isnull=True, expires_at__gt=timezone.now())
+
+
+def _hash_token(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+class Invitation(models.Model):
+    """Yorikiのアカウントの招待・パスワードの再設定のリンク（design.md §10.0）。
+
+    基盤管理者が発行し、画面に一度だけ表示したURLを本人に渡す。tokenはDBにハッシュだけを保存する。
+    期限付きで1回だけ使え、新しいリンクを発行すると同じユーザーの未使用のリンクは無効になる。
+    SSOが有効な間は基盤管理者のアカウントにしか使えず、SSOを有効にしたときに他の未使用のリンクを無効にする
+    """
+
+    uid = NanoidField(unique=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="invitations", verbose_name=_("ユーザー")
+    )
+    purpose = models.PositiveSmallIntegerField(_("用途"), choices=InvitationPurpose.choices)
+    token_hash = models.CharField(max_length=64, unique=True)
+    expires_at = models.DateTimeField(_("有効期限"))
+    used_at = models.DateTimeField(_("使用日時"), null=True, blank=True)
+    revoked_at = models.DateTimeField(_("無効にした日時"), null=True, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+", verbose_name=_("発行者")
+    )
+
+    created = models.DateTimeField(auto_now_add=True)
+
+    objects = InvitationQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = _("招待のリンク")
+        verbose_name_plural = verbose_name
+
+    def __str__(self):
+        return f"{self.user} {self.get_purpose_display()}"
+
+    @classmethod
+    @transaction.atomic
+    def issue(cls, *, user: User, actor: User) -> tuple["Invitation", str]:
+        """リンクを発行し、（招待、token）を返す。tokenはこの戻り値でしか分からない"""
+        cls.objects.usable().filter(user=user).update(revoked_at=timezone.now())
+        token = secrets.token_urlsafe(32)
+        invitation = cls.objects.create(
+            user=user,
+            # まだパスワードを設定していなければ招待、設定済みなら再設定
+            purpose=InvitationPurpose.RESET if user.has_usable_password() else InvitationPurpose.INVITE,
+            token_hash=_hash_token(token),
+            expires_at=timezone.now() + INVITATION_TTL,
+            created_by=actor,
+        )
+        return invitation, token
+
+    @classmethod
+    def find_usable(cls, token: str, *, for_update: bool = False) -> "Invitation | None":
+        queryset = cls.objects.usable().select_related("user")
+        if for_update:
+            queryset = queryset.select_for_update(of=("self",))
+        return queryset.filter(token_hash=_hash_token(token)).first()
+
+    @classmethod
+    def revoke_for_sso(cls) -> int:
+        """SSOを有効にしたときに、基盤管理者以外の未使用のリンクを無効にする"""
+        return cls.objects.usable().filter(user__is_superuser=False).update(revoked_at=timezone.now())
+
+    @transaction.atomic
+    def accept(self, password: str) -> User:
+        """パスワードを設定してリンクを使用済みにする。同じユーザーの他の未使用のリンクも無効にする"""
+        now = timezone.now()
+        user = self.user
+        user.set_password(password)
+        user.save(update_fields=["password", "updated"])
+        self.used_at = now
+        self.save(update_fields=["used_at"])
+        Invitation.objects.usable().filter(user=user).exclude(pk=self.pk).update(revoked_at=now)
+        return user
+
+
 auditlog.register(User, exclude_fields=["password", "last_login", "updated"])
 # client secretは暗号化した値でも監査ログに残さない
 auditlog.register(SSOProvider, exclude_fields=["client_secret", "updated"])
+auditlog.register(Invitation, exclude_fields=["token_hash"])

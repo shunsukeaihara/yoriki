@@ -5,6 +5,7 @@
 """
 
 import os
+from datetime import timedelta
 from pathlib import Path
 
 from django.utils.translation import gettext_lazy as _
@@ -43,6 +44,7 @@ INSTALLED_APPS = [
     "django_extensions",
     "django_q",
     "auditlog",
+    "axes",
     "allauth",
     "allauth.account",
     "allauth.socialaccount",
@@ -64,6 +66,8 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "allauth.account.middleware.AccountMiddleware",
     "auditlog.middleware.AuditlogMiddleware",
+    # ログインを止めたときの応答を返す。最後に置く（django-axesの指定）
+    "axes.middleware.AxesMiddleware",
 ]
 
 ROOT_URLCONF = "app.urls"
@@ -110,8 +114,24 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 AUTH_USER_MODEL = "user.User"
 
-# パスワードでのログインは基盤管理者だけに許可する。社員はSSO（django-allauth）でログインする（§6.2）
-AUTHENTICATION_BACKENDS = ["utils.backends.PlatformAdminPasswordBackend"]
+# パスワードでのログインは、有効なSSOの設定があれば基盤管理者だけに許可する（§6.2）。
+# django-axes のバックエンドを先頭に置き、試行回数の制限で止めたログインは後ろのバックエンドへ進ませない
+AUTHENTICATION_BACKENDS = ["axes.backends.AxesStandaloneBackend", "utils.backends.PasswordBackend"]
+
+# --- ログインの試行回数の制限（django-axes。記録はPostgreSQL） ---
+# アカウントごとと送信元のIPアドレスごとに別々に数える。組だけで数えると、多数のIPアドレスから
+# 同じアカウントのパスワードを推測できるため（design.md §10.0）
+AXES_LOCKOUT_PARAMETERS = ["username", "ip_address"]
+AXES_FAILURE_LIMIT = 10
+# アカウントごとの制限は他人がそのアカウントを止められることにもなるので、止める時間は短くする。
+# 解除は `axes_reset_username` 等の管理コマンドで行う
+AXES_COOLOFF_TIME = timedelta(minutes=15)
+# 止めている間の失敗で止める時間を延ばさない（延ばし続けて、ずっと止められないように）
+AXES_RESET_COOL_OFF_ON_FAILURE_DURING_LOCKOUT = False
+AXES_RESET_ON_SUCCESS = True
+AXES_USERNAME_CALLABLE = "utils.backends.axes_username"
+AXES_CLIENT_IP_CALLABLE = "utils.backends.client_ip"
+AXES_LOCKOUT_CALLABLE = "utils.backends.lockout_response"
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},

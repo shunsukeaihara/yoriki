@@ -49,3 +49,12 @@ export const isoTimeToTime = (value: string | null | undefined): Time | undefine
 
 export const timeToIsoTime = (value: Time | null | undefined): string | null =>
   value ? value.toString().slice(0, 5) : null
+
+/** DateTimeField（ISO 8601）を、現在の言語の書式でローカル時刻として表示する */
+export const formatDatetime = (value: string | null | undefined): string => {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const { $i18n } = useNuxtApp()
+  return new Intl.DateTimeFormat($i18n.locale.value, { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+}

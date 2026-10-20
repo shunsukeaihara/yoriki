@@ -25,6 +25,23 @@ const createAPI = () => {
     account: {
       get: () => http.get<MyUser, MyUser>('app/v1/my/'),
     },
+    manage: {
+      llmConnections: (id?: string) => ({
+        ...resource<LLMConnection, LLMConnectionWrite, LLMConnectionListParams>(http, 'v1/llm_connections', id),
+        // 更新では種別と base URL（接続先）を送れない
+        update: (data: LLMConnectionUpdate) =>
+          http.put<LLMConnection, LLMConnection>(`v1/llm_connections/${id}/`, data),
+        patch: (data: Partial<LLMConnectionUpdate>) =>
+          http.patch<LLMConnection, LLMConnection>(`v1/llm_connections/${id}/`, data),
+        check: () => http.post<LLMConnectionCheck, LLMConnectionCheck>(`v1/llm_connections/${id}/check/`),
+      }),
+      modelProfiles: (id?: string) => ({
+        ...resource<ModelProfile, ModelProfileWrite, ModelProfileListParams>(http, 'v1/model_profiles', id),
+        // 版は版番号で識別する
+        versions: (number?: number) =>
+          readOnlyResource<ModelProfileVersion>(http, `v1/model_profiles/${id}/versions`, number?.toString()),
+      }),
+    },
   }
 }
 

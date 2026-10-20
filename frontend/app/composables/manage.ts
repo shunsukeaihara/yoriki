@@ -14,10 +14,21 @@ export type ManageMenuItem = NavigationMenuItem & {
  */
 export const useManageMenu = () => {
   const { hasAny } = usePermission()
+  const { $i18n } = useNuxtApp()
 
-  // 項目を足すときは、ここで const { $i18n } = useNuxtApp() を取って label を翻訳する
   const all = computed<ManageMenuItem[]>(() => [
-    // 例: { label: $i18n.t('通知先'), icon: 'i-lucide-send', to: '/manage/destinations', permission: PermissionCode.MANAGE_DESTINATIONS },
+    {
+      label: $i18n.t('LLMの接続'),
+      icon: 'i-lucide-plug',
+      to: '/manage/llm_connections',
+      permission: PermissionCode.CHANGE_LLM_CONNECTION,
+    },
+    {
+      label: $i18n.t('モデル設定'),
+      icon: 'i-lucide-cpu',
+      to: '/manage/model_profiles',
+      permission: PermissionCode.CHANGE_MODEL_PROFILE,
+    },
   ])
 
   const items = computed(() =>

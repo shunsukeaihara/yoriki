@@ -151,9 +151,13 @@ class InvitationPurpose(models.IntegerChoices):
 
 
 class InvitationQuerySet(models.QuerySet):
+    def open(self) -> "InvitationQuerySet":
+        """使用済みでも無効でもないもの（期限切れを含む）。ユーザーごとに1つまで（uniq_open_invitation_per_user）"""
+        return self.filter(used_at__isnull=True, revoked_at__isnull=True)
+
     def usable(self) -> "InvitationQuerySet":
         """使用済み・無効・期限切れでないもの"""
-        return self.filter(used_at__isnull=True, revoked_at__isnull=True, expires_at__gt=timezone.now())
+        return self.open().filter(expires_at__gt=timezone.now())
 
 
 def _hash_token(token: str) -> str:
@@ -188,6 +192,14 @@ class Invitation(models.Model):
     class Meta:
         verbose_name = _("招待のリンク")
         verbose_name_plural = verbose_name
+        constraints = [
+            # 新しいリンクを発行したら前のリンクは使えない、をDBでも守らせる
+            models.UniqueConstraint(
+                fields=["user"],
+                condition=models.Q(used_at__isnull=True, revoked_at__isnull=True),
+                name="uniq_open_invitation_per_user",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.user} {self.get_purpose_display()}"
@@ -195,8 +207,12 @@ class Invitation(models.Model):
     @classmethod
     @transaction.atomic
     def issue(cls, *, user: User, actor: User) -> tuple["Invitation", str]:
-        """リンクを発行し、（招待、token）を返す。tokenはこの戻り値でしか分からない"""
-        cls.objects.usable().filter(user=user).update(revoked_at=timezone.now())
+        """リンクを発行し、（招待、token）を返す。tokenはこの戻り値でしか分からない。
+
+        同じユーザーへの発行が同時に来ても、前のリンクの無効化と作成を1つずつ行うよう、ユーザーの行をロックする
+        """
+        User.objects.select_for_update().filter(pk=user.pk).first()
+        cls.objects.open().filter(user=user).update(revoked_at=timezone.now())
         token = secrets.token_urlsafe(32)
         invitation = cls.objects.create(
             user=user,
@@ -218,7 +234,7 @@ class Invitation(models.Model):
     @classmethod
     def revoke_for_sso(cls) -> int:
         """SSOを有効にしたときに、基盤管理者以外の未使用のリンクを無効にする"""
-        return cls.objects.usable().filter(user__is_superuser=False).update(revoked_at=timezone.now())
+        return cls.objects.open().filter(user__is_superuser=False).update(revoked_at=timezone.now())
 
     @transaction.atomic
     def accept(self, password: str) -> User:
@@ -229,7 +245,7 @@ class Invitation(models.Model):
         user.save(update_fields=["password", "updated"])
         self.used_at = now
         self.save(update_fields=["used_at"])
-        Invitation.objects.usable().filter(user=user).exclude(pk=self.pk).update(revoked_at=now)
+        Invitation.objects.open().filter(user=user).exclude(pk=self.pk).update(revoked_at=now)
         return user
 
 

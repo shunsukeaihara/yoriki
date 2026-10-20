@@ -47,6 +47,8 @@ services:
 
   api:
     <<: *api
+    # apiの8000番はDockerのネットワークの中だけに開き、nginxからしか届かない。nginxは X-Forwarded-For を
+    # 利用者のIPアドレス1つで上書きして渡すので（deploy/nginx/snippets/proxy.conf）、ここでは送信元を絞らない
     command: >-
       uvicorn app.asgi:application --host 0.0.0.0 --port 8000 --workers ${YORIKI_API_WORKERS:-4}
       --proxy-headers --forwarded-allow-ips=* --timeout-graceful-shutdown 30

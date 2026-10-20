@@ -202,6 +202,7 @@ cd frontend && pnpm dev
 - 画面とAPIを同じドメインにまとめる。認証はセッションCookie（`Secure`、`HttpOnly`、`SameSite=Lax`）で行うので、CORSは使わない。
 - HTTPは443へリダイレクトし、HTTP/2を有効にする（SSEの複数の接続を1本にまとめるため）。
 - `X-Forwarded-For`、`X-Forwarded-Proto` を付けて転送する。Uvicornは `--proxy-headers` で受け取り、Djangoは `SECURE_PROXY_SSL_HEADER` を設定する。
+- `X-Forwarded-For` は、nginxが判定した利用者のIPアドレス（`$remote_addr`。前段がある構成では `set_real_ip_from` で解決済み）だけで上書きする。受け取った値に付け足さない（`$proxy_add_x_forwarded_for` を使わない）。付け足すと利用者が書いた値が先頭に残り、Uvicornがそれを `REMOTE_ADDR` にするので、ログインの試行回数の制限（backend-conventions.md §6.2）を逃れられる。apiのポートはnginxからしか届かないようにする（Dockerのネットワークの中だけに開く）。
 - HSTS、`X-Content-Type-Options`、`Referrer-Policy`、フロントエンド向けのCSPを付ける（`deploy/nginx/snippets/`）。HSTSはHTTPSで受けたときだけ付ける。
 - CSPは、NuxtのSPAがHTMLにインラインのスクリプト（色モードの初期化、`window.__NUXT__` の設定）を含むため、`script-src` に `'unsafe-inline'` を許可している。インラインのスクリプトのハッシュかnonceで絞るのは今後の課題とする。
 - nginxの設定は2種類ある。nginxでTLSを終端して直接公開する `sites/tls.conf`（`compose.yaml`）と、前段（Cloudflare Tunnel、認証プロキシ、エッジのnginx）がTLSを終端し、80番で受ける `sites/http.conf`（`compose.app.yaml`、`compose.cloudflare.yaml`）。`http.conf` は前段が付けた `X-Forwarded-For`・`X-Forwarded-Proto` を、私設のアドレスからのものだけ信頼するので、インターネットへ直接公開しない。
@@ -311,7 +312,7 @@ docker compose -f deploy/compose.yaml exec api python manage.py resume_workers
 - ALBのアイドルタイムアウトは、既定の60秒から延ばす（数分〜1時間）。SSEは15秒ごとにkeep-aliveを送るので既定でも切れにくいが、余裕を持たせる。ALBは応答をバッファしないので、SSEはそのまま通る。
 - デプロイでターゲットを外すと（deregistration delayの後）SSEは切れるが、ブラウザが `Last-Event-ID` を付けて再接続するので、イベントは欠けない。
 - ターゲットグループのヘルスチェックは `/api/ping/` にする。
-- 利用者のIPアドレスで判定する設定（rate limit、任意で追加するIPの制限）が効くように、nginxで `set_real_ip_from <VPCのCIDR>` と `real_ip_header X-Forwarded-For` を設定する。Uvicornの `--forwarded-allow-ips` も、`"*"` ではなく信頼するプロキシの範囲に絞る。
+- 利用者のIPアドレスで判定する設定（rate limit、任意で追加するIPの制限）が効くように、nginxで `set_real_ip_from <VPCのCIDR>` と `real_ip_header X-Forwarded-For` を設定する。apiのポートが他のホストから届く構成では、Uvicornの `--forwarded-allow-ips` も、`"*"` ではなく各ホストのnginxのアドレスに絞る。
 - Workerサーバーは外からの接続を受けないので、ALBには載せない。
 - CloudFrontを前に置く場合は、オリジンの読み取りタイムアウトがSSEのkeep-aliveの間隔（15秒）より長いことを確認する。
 

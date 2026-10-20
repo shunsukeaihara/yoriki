@@ -3,10 +3,12 @@
 パスワードでのログイン、試行回数の制限、招待・再設定のリンク、ユーザーの管理
 """
 
+import threading
 from datetime import timedelta
 
 import pytest
 from django.contrib.auth.models import Group
+from django.db import IntegrityError, connection, transaction
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -217,6 +219,52 @@ class TestInvitation:
         token = _token(_create_user(admin_client).json()["invitation"]["url"])
         client = APIClient(enforce_csrf_checks=True)
         assert client.post(ACCEPT, {"token": token, "password": PASSWORD}, format="json").status_code == 403
+
+
+class TestInvitationIssue:
+    @pytest.mark.django_db
+    def test_one_open_link_per_user_in_db(self, password_user, platform_admin):
+        Invitation.issue(user=password_user, actor=platform_admin)
+        with pytest.raises(IntegrityError), transaction.atomic():
+            Invitation.objects.create(
+                user=password_user,
+                purpose=InvitationPurpose.RESET,
+                token_hash="x" * 64,
+                expires_at=timezone.now(),
+                created_by=platform_admin,
+            )
+
+    @pytest.mark.django_db
+    def test_expired_link_is_replaced(self, password_user, platform_admin):
+        first, _ = Invitation.issue(user=password_user, actor=platform_admin)
+        Invitation.objects.update(expires_at=timezone.now() - timedelta(days=1))
+        Invitation.issue(user=password_user, actor=platform_admin)
+        first.refresh_from_db()
+        assert first.revoked_at is not None
+        assert Invitation.objects.open().count() == 1
+
+    @pytest.mark.django_db(transaction=True)
+    def test_concurrent_issue_leaves_one_usable_link(self, password_user, platform_admin):
+        barrier = threading.Barrier(2)
+        errors: list[BaseException] = []
+
+        def issue():
+            try:
+                barrier.wait()
+                Invitation.issue(user=password_user, actor=platform_admin)
+            except BaseException as exc:
+                errors.append(exc)
+            finally:
+                connection.close()
+
+        threads = [threading.Thread(target=issue) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        assert errors == []
+        assert Invitation.objects.count() == 2
+        assert Invitation.objects.usable().count() == 1
 
 
 class TestInvitationWithSSO:

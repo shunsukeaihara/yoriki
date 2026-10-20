@@ -200,6 +200,44 @@ export interface paths {
         patch: operations["v1_model_profiles_partial_update"];
         trace?: never;
     };
+    "/api/v1/sso_providers/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 社内SSOの設定の管理API（基盤管理者だけ） */
+        get: operations["v1_sso_providers_list"];
+        put?: never;
+        /** @description 社内SSOの設定の管理API（基盤管理者だけ） */
+        post: operations["v1_sso_providers_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sso_providers/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 社内SSOの設定の管理API（基盤管理者だけ） */
+        get: operations["v1_sso_providers_retrieve"];
+        /** @description 社内SSOの設定の管理API（基盤管理者だけ） */
+        put: operations["v1_sso_providers_update"];
+        post?: never;
+        /** @description 社内SSOの設定の管理API（基盤管理者だけ） */
+        delete: operations["v1_sso_providers_destroy"];
+        options?: never;
+        head?: never;
+        /** @description 社内SSOの設定の管理API（基盤管理者だけ） */
+        patch: operations["v1_sso_providers_partial_update"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -478,6 +516,19 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["ModelProfileVersion"][];
         };
+        PaginatedSSOProviderList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["SSOProvider"][];
+        };
         /** @description プロバイダ接続の更新。種別とbase URL（接続先）は変えられないので、読み取り専用にする */
         PatchedLLMConnectionUpdateRequest: {
             /** 名前 */
@@ -537,6 +588,20 @@ export interface components {
             supports_reasoning: boolean;
             change_reason?: string;
         };
+        /** @description SSOの設定の更新。種別は変えられないので、読み取り専用にする */
+        PatchedSSOProviderUpdateRequest: {
+            client_id?: string;
+            /** @description 作成では必須。更新では、送らなければ変更しない */
+            client_secret?: string;
+            /** テナントID */
+            tenant_id?: string;
+            /** Workspaceのドメイン */
+            hosted_domain?: string;
+            /** @description 受け付けるメールアドレスのドメイン（例：example.co.jp） */
+            allowed_email_domains?: string[];
+            /** 有効 */
+            is_active?: boolean;
+        };
         Ping: {
             readonly status: string;
         };
@@ -548,6 +613,67 @@ export interface components {
          * @enum {integer}
          */
         ProviderKindEnum: 1 | 2 | 3 | 4;
+        /** @description SSOの設定の作成と表示。client secretは書き込み専用で、応答には末尾の4文字（client_secret_hint）だけを出す */
+        SSOProvider: {
+            readonly id: string;
+            /** 種別 */
+            kind: components["schemas"]["SSOProviderKindEnum"];
+            readonly kind_display: string;
+            client_id: string;
+            readonly has_client_secret: boolean;
+            readonly client_secret_hint: string;
+            /** テナントID */
+            tenant_id?: string;
+            /** Workspaceのドメイン */
+            hosted_domain?: string;
+            /** @description 受け付けるメールアドレスのドメイン（例：example.co.jp） */
+            allowed_email_domains: string[];
+            /** @description 認証基盤のアプリの登録に、リダイレクトURIとして登録するURL */
+            readonly callback_url: string;
+            /** 有効 */
+            is_active?: boolean;
+            readonly created_by: string;
+            /** Format: date-time */
+            readonly created: string;
+            /** Format: date-time */
+            readonly updated: string;
+        };
+        /**
+         * @description * `microsoft` - Microsoft 365
+         *     * `google` - Google Workspace
+         * @enum {string}
+         */
+        SSOProviderKindEnum: "microsoft" | "google";
+        /** @description SSOの設定の作成と表示。client secretは書き込み専用で、応答には末尾の4文字（client_secret_hint）だけを出す */
+        SSOProviderRequest: {
+            /** 種別 */
+            kind: components["schemas"]["SSOProviderKindEnum"];
+            client_id: string;
+            /** @description 作成では必須。更新では、送らなければ変更しない */
+            client_secret?: string;
+            /** テナントID */
+            tenant_id?: string;
+            /** Workspaceのドメイン */
+            hosted_domain?: string;
+            /** @description 受け付けるメールアドレスのドメイン（例：example.co.jp） */
+            allowed_email_domains: string[];
+            /** 有効 */
+            is_active?: boolean;
+        };
+        /** @description SSOの設定の更新。種別は変えられないので、読み取り専用にする */
+        SSOProviderUpdateRequest: {
+            client_id: string;
+            /** @description 作成では必須。更新では、送らなければ変更しない */
+            client_secret?: string;
+            /** テナントID */
+            tenant_id?: string;
+            /** Workspaceのドメイン */
+            hosted_domain?: string;
+            /** @description 受け付けるメールアドレスのドメイン（例：example.co.jp） */
+            allowed_email_domains: string[];
+            /** 有効 */
+            is_active?: boolean;
+        };
         Session: {
             readonly is_authenticated: boolean;
         };
@@ -1051,6 +1177,160 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    v1_sso_providers_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                is_active?: boolean;
+                /**
+                 * @description * `microsoft` - Microsoft 365
+                 *     * `google` - Google Workspace
+                 */
+                kind?: "google" | "microsoft";
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedSSOProviderList"];
+                };
+            };
+        };
+    };
+    v1_sso_providers_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SSOProviderRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["SSOProviderRequest"];
+                "multipart/form-data": components["schemas"]["SSOProviderRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SSOProvider"];
+                };
+            };
+        };
+    };
+    v1_sso_providers_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SSOProvider"];
+                };
+            };
+        };
+    };
+    v1_sso_providers_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SSOProviderUpdateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["SSOProviderUpdateRequest"];
+                "multipart/form-data": components["schemas"]["SSOProviderUpdateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SSOProvider"];
+                };
+            };
+        };
+    };
+    v1_sso_providers_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_sso_providers_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedSSOProviderUpdateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedSSOProviderUpdateRequest"];
+                "multipart/form-data": components["schemas"]["PatchedSSOProviderUpdateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SSOProvider"];
+                };
             };
         };
     };

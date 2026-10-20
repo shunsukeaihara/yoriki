@@ -7,7 +7,6 @@
 import os
 from pathlib import Path
 
-from django.core.exceptions import ImproperlyConfigured
 from django.utils.translation import gettext_lazy as _
 
 
@@ -37,6 +36,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.postgres",
     "rest_framework",
     "django_filters",
     "drf_spectacular",
@@ -211,40 +211,14 @@ SOCIALACCOUNT_LOGIN_ON_GET = False
 LOGIN_URL = "/login"
 LOGIN_REDIRECT_URL = "/"
 
-# 有効にする認証基盤（microsoft / google。カンマ区切り）
-YORIKI_SSO_PROVIDERS = _env_list("YORIKI_SSO_PROVIDERS")
-# 受け付けるメールアドレスのドメイン（自社のアカウントだけを受け付ける）
-YORIKI_SSO_ALLOWED_EMAIL_DOMAINS = [d.lower() for d in _env_list("YORIKI_SSO_ALLOWED_EMAIL_DOMAINS")]
-# Google Workspaceのドメイン。Googleを有効にするときは必須（個人のGoogleアカウントを受け付けないため）
-YORIKI_SSO_GOOGLE_HOSTED_DOMAIN = os.getenv("YORIKI_SSO_GOOGLE_HOSTED_DOMAIN", "")
-
-SOCIALACCOUNT_PROVIDERS: dict[str, dict] = {}
-if "microsoft" in YORIKI_SSO_PROVIDERS:
-    SOCIALACCOUNT_PROVIDERS["microsoft"] = {
-        "APPS": [
-            {
-                "client_id": os.environ["YORIKI_SSO_MICROSOFT_CLIENT_ID"],
-                "secret": os.environ["YORIKI_SSO_MICROSOFT_CLIENT_SECRET"],
-                # テナントを固定し、自社のEntra IDのアカウントだけを受け付ける
-                "settings": {"tenant": os.environ["YORIKI_SSO_MICROSOFT_TENANT_ID"]},
-            }
-        ],
-        "SCOPE": ["User.Read"],
-    }
-if "google" in YORIKI_SSO_PROVIDERS:
-    if not YORIKI_SSO_GOOGLE_HOSTED_DOMAIN:
-        raise ImproperlyConfigured("Googleを有効にするときは YORIKI_SSO_GOOGLE_HOSTED_DOMAIN を設定してください")
-    SOCIALACCOUNT_PROVIDERS["google"] = {
-        "APPS": [
-            {
-                "client_id": os.environ["YORIKI_SSO_GOOGLE_CLIENT_ID"],
-                "secret": os.environ["YORIKI_SSO_GOOGLE_CLIENT_SECRET"],
-            }
-        ],
-        "SCOPE": ["openid", "profile", "email"],
-        # hdは認証画面への指定だけなので、戻ったIDトークンのhdも user.adapters で確認する
-        "AUTH_PARAMS": {"hd": YORIKI_SSO_GOOGLE_HOSTED_DOMAIN},
-    }
+# 認証基盤の設定（client ID・secret・テナント・ドメイン）は、基盤管理者が管理画面で登録する（user.models.SSOProvider）。
+# allauthへは user.adapters.SocialAccountAdapter.list_apps() で渡すので、ここには認証基盤ごとの固定の設定だけを置く
+SOCIALACCOUNT_PROVIDERS: dict[str, dict] = {
+    "microsoft": {"SCOPE": ["User.Read"]},
+    # Googleのhdは認証画面への指定（SSOProvider.app_settings()）だけなので、
+    # 戻ったIDトークンのhdも user.adapters で確認する
+    "google": {"SCOPE": ["openid", "profile", "email"]},
+}
 
 # --- Secretの暗号化（utils/crypto.py、utils.fields.EncryptedSecretField） ---
 # LLMのAPI key、Connectorのパスワード等を暗号化してDBに保存する鍵（Fernet。カンマ区切り）。

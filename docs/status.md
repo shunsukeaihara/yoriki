@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-20（#14 のマージ後）
+- 最終更新：2026-10-21（SSOの設定の管理画面。`feature/auth-accounts`、PR作成前）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -21,6 +21,8 @@
 | #9 | 開発時（DEBUG）の静的ファイルを `StaticFilesStorage` にし、Djangoの管理画面が500になる不具合を修正 |
 | #12 | `llm` アプリ：LLMConnection（種別はOpenAI・Anthropic・Gemini・ローカルLLM。API keyは `EncryptedSecretField` で暗号化してDBに保存。種別とbase URLは作成後は変えられない）、ModelProfile（中身を変えると不変の版 ModelProfileVersion が自動で増える）、Provider Adapter（各社のAPIクライアントでストリーミング・Tool呼出し・利用量・エラーを共通化）、管理API（`v1/llm_connections`（`check` で接続の確認）、`v1/model_profiles`、版の履歴）、Secretの暗号化（`utils/crypto.py`、`utils.fields.EncryptedSecretField`、`common` の `rotate_secret_encryption`）。各社のAgent SDKは使わず、自前のハーネスで動かす決定（design.md §4.8） |
 | #14 | LLMの管理画面：`/manage/llm_connections`（接続の登録・API keyの差し替え・接続の確認。種別の選択の近くにローカルLLMを推奨する案内）、`/manage/model_profiles`（モデル設定。中身を変えると新しい版、版の履歴、編集中の競合（409）からの読み直し、接続先のモデル名からの選択）。管理画面のメニューの最初の項目（permissionは `llm.change_llmconnection`・`llm.change_modelprofile`）。共通部品 `ListPageTitle`・`TableSearchForm`・`formatDatetime`。API側は接続とモデル設定の一覧に名前の検索（`search`）を追加 |
+| #15 | 認証の方式の見直しの設計（design.md 0.18 §10.0）：SSOの設定を管理画面へ、SSOのない導入先のYorikiのアカウント（招待・パスワード・試行回数の制限）、SSOへの切り替え時のメールアドレスでの紐付け |
+| （PR作成前） | SSOの設定の管理画面：`user.SSOProvider`（client secretは暗号化）、`v1/sso_providers`、`/manage/sso_providers`（リダイレクトURIの表示）。allauthへは `list_apps()` で保存しない `SocialApp` を渡す。SSOの初回ログインで同じメールアドレスのユーザーに紐付ける。環境変数 `YORIKI_SSO_*` を廃止 |
 
 確認済みのこと：
 
@@ -60,11 +62,11 @@
 
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。提案する順番：
 
-1. **認証の方式の見直し**（design.md §10.0、backend-conventions.md §6.2、frontend-conventions.md §4 の0.18の設計で実装する）：
-   - SSOの設定（`SSOProvider`。種別、client ID、client secret（`EncryptedSecretField`）、テナント、Workspaceのドメイン、許可するメールドメイン）を管理画面で登録する。allauthへは `list_apps()` で保存しない `SocialApp` として渡す。環境変数 `YORIKI_SSO_*` はやめる。
-   - SSOがなければ、Yorikiのアカウントでログインする（基盤管理者が `v1/users` で作り、招待のリンク（`/invitation#<token>`、7日、1回だけ）を画面でコピーして渡す。再設定も同じ。SSOが有効な間は基盤管理者以外のリンクを発行・使用させず、SSOを有効にしたら未使用のリンクを無効にする。試行回数の制限は django-axes で、アカウントごとと送信元IPごとに別々に数える）。
-   - SSOを設定したら社員はSSOだけ。SSOの初回ログインで、同じメールアドレスのアカウントに紐付ける。
-   - 基盤管理者のパスワードでのログインは残す（SSOが有効な間は `/login?method=password` だけに出す）。
+1. **Yorikiのアカウント**（design.md §10.0、backend-conventions.md §6.2、frontend-conventions.md §4 の0.18の設計で実装する。SSOの設定はできている）：
+   - SSOがなければ、Yorikiのアカウントでログインする（基盤管理者が `v1/users` で作り、招待のリンク（`/invitation#<token>`、7日、1回だけ）を画面でコピーして渡す。再設定も同じ）。
+   - SSOが有効な間は基盤管理者以外のリンクを発行・使用させず、SSOを有効にしたら未使用のリンクを無効にする（`SSOProvider` の作成・有効への変更と同じtransaction）。
+   - パスワードでのログインは `POST app/v1/auth/session/`、`utils.backends.PasswordBackend`（`is_sso_enabled()` なら基盤管理者だけ）。基盤管理者の入口は `/login?method=password`。`app/v1/auth/providers/` でパスワードの欄を出すかを返す。
+   - 試行回数の制限は django-axes で、アカウントごとと送信元IPごとに別々に数える（15分、解除は管理コマンド）。
 2. **Agent（`agent`）**：Agent、AgentRevision（不変の版）、管理画面と、社員がAgentを選ぶ画面。
 3. **ハーネスの調査と設計（`docs/harness.md`）**：各社のAgent SDKやCLI製品は使わず、Provider Adapterの上にYoriki自身のRunnerを置く（design.md §4.8）。実装の前に、公開されているハーネスをリポジトリの外（例：`~/work/yoriki-reference/`。gitに入れない）にcloneして設計思想を読み、業務ツールとしてのハーネスをYoriki独自に設計する。読むもの：
    - **DeepSeek Harness**（`deepseek-ai/deepseek-harness`）：追記専用のセッションログから毎回モデルへの入力を組み立てる規約（RunEventを正本にするYorikiの形と同じ）、常駐ターミナル・バックグラウンドジョブ・長い出力の退避、fsとsubprocessのproviderをリモートのsandboxへ向ける構成、compaction・guard、deliverables（成果物）。developer previewで互換性が変わるので依存はしない。

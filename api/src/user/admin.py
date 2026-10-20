@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.utils.translation import gettext_lazy as _
 
-from .models import User
+from .models import SSOProvider, User
 
 
 @admin.register(User)
@@ -26,3 +26,22 @@ class UserAdmin(BaseUserAdmin):
         (_("権限"), {"fields": ("is_active", "is_superuser", "is_staff", "groups", "user_permissions")}),
         (_("日時"), {"fields": ("last_login", "date_joined", "created", "updated")}),
     )
+
+
+@admin.register(SSOProvider)
+class SSOProviderAdmin(admin.ModelAdmin):
+    """client secretは管理画面に出さない（EncryptedSecretField は editable=False）。
+
+    登録と差し替えはYorikiの管理画面で行う
+    """
+
+    raw_id_fields = ("created_by",)
+    readonly_fields = ("uid", "created", "updated")
+    list_display = ("id", "uid", "kind", "client_id", "is_active", "deleted", "updated")
+    list_filter = ("kind", "is_active", "deleted")
+    search_fields = ("uid", "client_id")
+
+    def get_readonly_fields(self, request, obj=None):
+        # 種別は作成した後は変えない
+        fields = super().get_readonly_fields(request, obj)
+        return (*fields, "kind") if obj else fields

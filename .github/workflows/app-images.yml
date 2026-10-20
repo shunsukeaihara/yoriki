@@ -51,11 +51,6 @@ jobs:
           YORIKI_DATABASE_USER=yoriki
           YORIKI_DATABASE_PASSWORD=yoriki
           YORIKI_DATABASE_HOST=postgres
-          YORIKI_SSO_PROVIDERS=microsoft
-          YORIKI_SSO_ALLOWED_EMAIL_DOMAINS=example.co.jp
-          YORIKI_SSO_MICROSOFT_CLIENT_ID=ci
-          YORIKI_SSO_MICROSOFT_CLIENT_SECRET=ci
-          YORIKI_SSO_MICROSOFT_TENANT_ID=ci
           ENV
           printf 'POSTGRES_DB=yoriki\nPOSTGRES_USER=yoriki\nPOSTGRES_PASSWORD=yoriki\n' > ci/postgres.env
           openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj /CN=localhost \

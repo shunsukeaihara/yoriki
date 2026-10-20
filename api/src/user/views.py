@@ -1,24 +1,25 @@
-from django.conf import settings
 from django.contrib.auth import logout
 from django.middleware.csrf import get_token
 from django.urls import reverse
-from django.utils.translation import gettext_lazy as _
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework import status
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.viewsets import GenericViewSet
+from rest_framework.viewsets import GenericViewSet, ModelViewSet
 
-from utils.permissions import AppUser
+from utils.permissions import AppUser, PlatformAdmin
+from utils.views import SoftDeleteMixin
 
-from .serializers import AuthProviderSerializer, MyUserSerializer, SessionSerializer
-
-PROVIDER_NAMES = {
-    "microsoft": _("Microsoft 365"),
-    "google": _("Google Workspace"),
-}
+from .models import SSOProvider
+from .serializers import (
+    AuthProviderSerializer,
+    MyUserSerializer,
+    SessionSerializer,
+    SSOProviderSerializer,
+    SSOProviderUpdateSerializer,
+)
 
 
 @extend_schema(tags=["app/auth/session"])
@@ -50,8 +51,8 @@ class AuthProviderViewSet(GenericViewSet):
     @extend_schema(description="有効な認証基盤の一覧", responses=AuthProviderSerializer(many=True))
     def list(self, request: Request) -> Response:
         providers = [
-            {"id": pid, "name": PROVIDER_NAMES.get(pid, pid), "login_url": reverse(f"{pid}_login")}
-            for pid in settings.YORIKI_SSO_PROVIDERS
+            {"id": sso.kind, "name": sso.get_kind_display(), "login_url": reverse(f"{sso.kind}_login")}
+            for sso in SSOProvider.objects.active().order_by("created", "pk")
         ]
         return Response(self.get_serializer(providers, many=True).data)
 
@@ -65,3 +66,29 @@ class MyUserAPIView(APIView):
     @extend_schema(description="ログイン中の利用者と権限を返す", request=None, responses=MyUserSerializer)
     def get(self, request: Request) -> Response:
         return Response(MyUserSerializer(request.user).data)
+
+
+@extend_schema(description="社内SSOの設定の管理API（基盤管理者だけ）", tags=["manage/sso_provider"])
+@extend_schema_view(
+    update=extend_schema(request=SSOProviderUpdateSerializer, responses=SSOProviderSerializer),
+    partial_update=extend_schema(request=SSOProviderUpdateSerializer, responses=SSOProviderSerializer),
+)
+class SSOProviderViewSet(SoftDeleteMixin, ModelViewSet):
+    """有効な設定が1つでもあれば、社員はSSOだけでログインする（design.md §10.0）"""
+
+    # client secretを扱い、誰がログインできるかを決めるので、基盤管理者だけにする
+    permission_classes = [PlatformAdmin]
+    lookup_field = "uid"
+    queryset = SSOProvider.objects.filter(deleted=False).select_related("created_by")
+    serializer_class = SSOProviderSerializer
+    filterset_fields = ["kind", "is_active"]
+    ordering = ("created", "pk")
+
+    def get_serializer_class(self):
+        # 更新では種別を変えられない
+        if self.action in ("update", "partial_update"):
+            return SSOProviderUpdateSerializer
+        return super().get_serializer_class()
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)

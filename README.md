@@ -70,7 +70,7 @@ pnpm dev            # http://localhost:3000 （/api は localhost:8000 の Djang
 ```
 
 `/dev/inputs` で、フロントエンドの入力コンポーネントの一覧を確認できる（開発時のみ）。
-社内SSOでログインするには、`.envrc` の `YORIKI_SSO_*` に認証基盤のアプリの値を設定する（[docs/backend-conventions.md](docs/backend-conventions.md) §6.2）。
+社内SSOでログインするには、基盤管理者でログインし、管理画面の「SSOの設定」（`/manage/sso_providers`）に認証基盤のアプリの値を登録する（[docs/backend-conventions.md](docs/backend-conventions.md) §6.2）。
 
 テストと静的解析は [docs/development.md](docs/development.md) §3、本番の配備（Docker Compose、nginx）は [docs/deployment.md](docs/deployment.md) を参照。
 

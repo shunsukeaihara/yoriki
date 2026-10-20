@@ -26,6 +26,12 @@ const createAPI = () => {
       get: () => http.get<MyUser, MyUser>('app/v1/my/'),
     },
     manage: {
+      ssoProviders: (id?: string) => ({
+        ...resource<SSOProvider, SSOProviderWrite>(http, 'v1/sso_providers', id),
+        // 更新では種別を送れない
+        patch: (data: Partial<SSOProviderUpdate>) =>
+          http.patch<SSOProvider, SSOProvider>(`v1/sso_providers/${id}/`, data),
+      }),
       llmConnections: (id?: string) => ({
         ...resource<LLMConnection, LLMConnectionWrite, LLMConnectionListParams>(http, 'v1/llm_connections', id),
         // 更新では種別と base URL（接続先）を送れない

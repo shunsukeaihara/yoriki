@@ -1,11 +1,12 @@
 from django.urls import path
 from rest_framework.routers import DefaultRouter
 
-from .views import AuthProviderViewSet, AuthSessionAPIView, MyUserAPIView
+from .views import AuthProviderViewSet, AuthSessionAPIView, MyUserAPIView, SSOProviderViewSet
 
 router = DefaultRouter()
 
 router.register("app/v1/auth/providers", AuthProviderViewSet, basename="app_auth_provider_viewset")
+router.register("v1/sso_providers", SSOProviderViewSet, basename="sso_provider_viewset")
 
 urlpatterns = [
     path("app/v1/auth/session/", AuthSessionAPIView.as_view()),

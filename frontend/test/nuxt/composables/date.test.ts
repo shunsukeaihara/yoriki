@@ -38,3 +38,14 @@ describe('時刻', () => {
     expect(timeToIsoTime(null)).toBeNull()
   })
 })
+
+describe('formatDatetime', () => {
+  it('ISO 8601 をローカル時刻（Asia/Tokyo）で表示する', () => {
+    expect(formatDatetime('2026-10-20T03:04:00Z')).toBe('2026/10/20 12:04')
+  })
+
+  it('空や不正な値は空文字にする', () => {
+    expect(formatDatetime(null)).toBe('')
+    expect(formatDatetime('not-a-date')).toBe('')
+  })
+})

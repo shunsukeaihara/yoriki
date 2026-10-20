@@ -29,6 +29,9 @@
 | `usePermission`、`PermissionCode` | `frontend/app/composables/permission.ts`（frontend-conventions.md §6） |
 | 管理画面のlayoutとメニュー | `frontend/app/layouts/manage.vue`、`frontend/app/composables/manage.ts`、`frontend/app/middleware/manage.ts`、`frontend/app/pages/manage.vue` |
 | エラー画面 | `frontend/app/error.vue`、`frontend/app/plugins/error-handler.ts` |
+| `ListPageTitle`、`TableSearchForm` | `frontend/app/components/common/` |
+| `formatDatetime` | `frontend/app/composables/date.ts` |
+| 管理画面のCRUDの実装例（例1と同じ形） | `frontend/app/pages/manage/llm_connections.vue`、`model_profiles.vue`、`frontend/app/components/llm-connection/`、`model-profile/` |
 
 ### これから作るもの
 
@@ -36,8 +39,6 @@
 
 | 部品 | 置く場所 |
 |---|---|
-| `ListPageTitle`、`TableSearchForm` | `frontend/app/components/common/` |
-| `formatDatetime` | `frontend/app/composables/date.ts` |
 | `useEventStream` | `frontend/app/composables/stream.ts`（[realtime.md](realtime.md) §5） |
 | `RunStatus`、`ClarificationStatus`、`runStatusItems`、`isCancellable` | `frontend/app/composables/run.ts` |
 | `RunStatusBadge`、`RunEventTimeline` | `frontend/app/components/run/` |
@@ -106,7 +107,9 @@ const { onSubmit, loading, errors } = createSubmit({
   fn: ({ id, ...data }) =>
     id ? api.manage.destinations(id).patch(data) : api.manage.destinations().create(data),
   onSuccess: (result) => {
-    emit(form.value.id ? 'updated' : 'created', result)
+    // emit の名前を三項演算子で選ぶと型が合わないので、分けて呼ぶ
+    if (form.value.id) emit('updated', result)
+    else emit('created', result)
     modelValue.value = result
     toast.add({ title: t('保存しました'), color: 'success' })
   },

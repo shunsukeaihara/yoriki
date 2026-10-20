@@ -143,6 +143,13 @@ class TestLLMConnection:
         assert connection.deleted
 
     @pytest.mark.django_db
+    def test_search_by_name(self, admin_client):
+        target = LLMConnectionFactory.create(name="社内のvLLM")
+        LLMConnectionFactory.create(name="OpenAI")
+        results = admin_client.get(CONNECTIONS, {"search": "vllm"}).json()["results"]
+        assert [r["id"] for r in results] == [target.uid]
+
+    @pytest.mark.django_db
     def test_check(self, admin_client, monkeypatch):
         connection = LLMConnectionFactory.create()
         url = f"{CONNECTIONS}{connection.uid}/check/"
@@ -271,4 +278,11 @@ class TestModelProfile:
         ModelProfileFactory.create()
         uid = _current(target).connection.uid
         results = admin_client.get(PROFILES, {"connection": uid}).json()["results"]
+        assert [r["id"] for r in results] == [target.uid]
+
+    @pytest.mark.django_db
+    def test_search_by_name(self, admin_client):
+        target = ModelProfileFactory.create(name="GPT（社外）")
+        ModelProfileFactory.create(name="Claude")
+        results = admin_client.get(PROFILES, {"search": "gpt"}).json()["results"]
         assert [r["id"] for r in results] == [target.uid]

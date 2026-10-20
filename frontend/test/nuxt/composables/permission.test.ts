@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-// PermissionCode はまだ空なので、型を外して任意のコードで判定を確かめる
+// 画面で使っていないコードでも判定できることを確かめるため、型を外して任意のコードを渡す
 const code = (value: string) => value as PermissionCode
 
 describe('usePermission', () => {

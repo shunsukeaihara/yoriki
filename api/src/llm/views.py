@@ -43,6 +43,7 @@ class LLMConnectionViewSet(SoftDeleteMixin, ModelViewSet):
     queryset = LLMConnection.objects.filter(deleted=False).select_related("created_by")
     serializer_class = LLMConnectionSerializer
     filterset_class = LLMConnectionFilter
+    search_fields = ("name",)  # 選択肢の検索（DAutocomplete の search）
     ordering = ("name", "pk")
 
     def get_serializer_class(self):
@@ -101,6 +102,7 @@ class ModelProfileViewSet(SoftDeleteMixin, ModelViewSet):
     )
     serializer_class = ModelProfileSerializer
     filterset_class = ModelProfileFilter
+    search_fields = ("name",)
     ordering = ("name", "pk")
 
     def perform_create(self, serializer):

@@ -96,7 +96,7 @@ frontend/
     ├── components/
     │   ├── common/             # D*ラッパー（prefixなしで自動import）
     │   └── <domain>/           # 業務コンポーネント（例：run/RunCancelDialog.vue）
-    ├── composables/            # field, date, form, list, confirm, account, permission, manage, locale（実装済み）、stream, <domain>（未）
+    ├── composables/            # field, date, form, list, confirm, account, permission, manage, locale, llm（実装済み）、stream, <domain>（未）
     ├── layouts/                # default（社員）、anonymous（ログイン）、manage（管理）
     ├── middleware/             # auth.global.ts、permission.global.ts、manage.ts（/manage の入口）
     ├── pages/                  # 社員向けはルート直下、管理向けは manage/ 以下、dev/ は開発用

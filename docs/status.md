@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-21（design.md 0.19：標準のエージェント1つとSkillを中心とするモデル。`docs/skill-centric-model`、PR作成前）
+- 最終更新：2026-10-21（#19 のマージ後。design.md 0.19：標準のエージェント1つとSkillを中心とするモデル）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---

@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-20（#12）
+- 最終更新：2026-10-20（#12 のマージ後）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -22,6 +22,8 @@
 | #12 | `llm` アプリ：LLMConnection（種別はOpenAI・Anthropic・Gemini・ローカルLLM。API keyは `EncryptedSecretField` で暗号化してDBに保存。種別とbase URLは作成後は変えられない）、ModelProfile（中身を変えると不変の版 ModelProfileVersion が自動で増える）、Provider Adapter（各社のAPIクライアントでストリーミング・Tool呼出し・利用量・エラーを共通化）、管理API（`v1/llm_connections`（`check` で接続の確認）、`v1/model_profiles`、版の履歴）、Secretの暗号化（`utils/crypto.py`、`utils.fields.EncryptedSecretField`、`common` の `rotate_secret_encryption`）。各社のAgent SDKは使わず、自前のハーネスで動かす決定（design.md §4.8） |
 
 確認済みのこと：
+
+- #12 のLLMのAPIは、テストで各社の応答を差し替えて確かめた。実際のプロバイダのAPI（API keyが要る）ではまだ試していない。
 
 - 単一ホストの構成（`deploy/compose.yaml`）を手元とCIで起動し、ログイン画面の表示、API、静的ファイル、セキュリティのヘッダー、SSOの開始（リダイレクトURIが `https://`）まで動く。
 - 実際のIdP（Entra ID・Google Workspace）でのログインは、まだ試していない（client IDの発行が要る）。
@@ -90,6 +92,11 @@ cd api && uv sync && uv run python src/manage.py migrate
 cd frontend && pnpm install
 ```
 
+- `.envrc` に `YORIKI_SECRET_ENCRYPTION_KEYS` を設定する（`.envrc.example` の生成コマンドで作る）。設定がなくても起動はするが、LLMの接続のAPI keyを保存するときに入力エラーになる。
+- 基盤管理者は `cd api && uv run python src/manage.py createsuperuser` で作る。開発時はDjangoの管理画面（`/api/admin/`）のパスワードログインでセッションを作れる。
+
 - 環境変数はリポジトリルートの `.envrc`（direnv）。テストやmypyは、`.envrc` を読み込んだ状態で実行する。
 - 変更前に、AGENTS.md と、触る範囲の規約を読む。作業の進め方（ブランチ、コミット、Pull Request、CI、マージ）は development.md に従う。
 - 作業の区切りでは、本書の §1・§3・§4 を更新する。
+- Pull Requestの進め方：手元のブランチで作り、作る前にユーザーに確認してからpushとPRの作成をする。CIが通ったら `/codex:adversarial-review`（ユーザーが実行する）の指摘を直し、ユーザーの指示があってからマージする（squash merge。`[skip ci]` は development.md §4.1）。自分の判断でマージしない。PRのページは消せないので、試しのPRや取り消しのPRは作らない。
+- 設計の判断を変える話が出たら、コードを書く前に design.md と本書を直し、合意してから実装する。

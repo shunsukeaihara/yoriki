@@ -72,7 +72,7 @@ def require_permission(perm: AppPermission | str) -> OperandHolder:
 # user/roles.py（抜粋）。migrateのたびに同名のGroupを作り、permissionを追加する
 ROLES = {
     "業務管理者": [AppPermission.MANAGE_DESTINATIONS],
-    "Plugin公開者": [AppPermission.PUBLISH_COMPANY_SKILLS],
+    "Skill公開者": [AppPermission.PUBLISH_COMPANY_SKILLS],
 }
 ```
 
@@ -292,7 +292,9 @@ class Conversation(models.Model):
     uid = NanoidField(unique=True)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT,
                               related_name="conversations", verbose_name=_("所有者"))
-    agent = models.ForeignKey("agent.Agent", on_delete=models.PROTECT, verbose_name=_("エージェント"))
+    model_profile = models.ForeignKey("llm.ModelProfile", on_delete=models.PROTECT, verbose_name=_("モデル設定"))
+    # 個人情報や機密情報を扱う会話は、ローカルLLMのモデルだけを使う（design.md §4冒頭）
+    handles_sensitive_data = models.BooleanField(_("個人情報・機密情報を扱う"), default=False)
     title = models.CharField(_("タイトル"), max_length=200, blank=True, default="")
     last_posted = models.DateTimeField(_("最終投稿日時"), null=True, blank=True)
 
@@ -335,8 +337,8 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
-from agent.models import Agent
-from agent.serializers import MinimumAgentSerializer
+from llm.models import ModelProfile, ProviderKind
+from llm.serializers import MinimumModelProfileSerializer
 from artifact.models import Artifact
 from artifact.serializers import ArtifactSerializer
 from utils.fields import NormalizedTextField
@@ -345,22 +347,25 @@ from .models import Conversation, ConversationMessage, MessageRole
 
 class ConversationSerializer(serializers.ModelSerializer):
     id = serializers.CharField(source="uid", read_only=True)
-    agent = serializers.SlugRelatedField(slug_field="uid", queryset=Agent.objects.filter(deleted=False))
-    agent_info = MinimumAgentSerializer(source="agent", read_only=True)
+    model_profile = serializers.SlugRelatedField(
+        slug_field="uid", queryset=ModelProfile.objects.filter(deleted=False, is_active=True))
+    model_profile_info = MinimumModelProfileSerializer(source="model_profile", read_only=True)
     title = serializers.CharField(max_length=200, required=False, allow_blank=True)
 
     class Meta:
         model = Conversation
-        fields = ["id", "agent", "agent_info", "title", "last_posted", "created", "updated"]
+        fields = ["id", "model_profile", "model_profile_info", "handles_sensitive_data", "title", "last_posted",
+                  "created", "updated"]
         read_only_fields = ["last_posted", "created", "updated"]
 
-    def validate_agent(self, agent: Agent) -> Agent:
-        if self.instance is not None and agent != self.instance.agent:
-            raise serializers.ValidationError(_("会話のエージェントは変更できません"))
-        # 利用できるAgentかどうかの判定には利用者が必要なので、requestから読む
-        if not agent.is_available_for(self.context["request"].user):
-            raise serializers.ValidationError(_("このエージェントを利用する権限がありません"))
-        return agent
+    def validate(self, attrs):
+        # 部分更新（PATCH）では、送られなかった項目を今の値で補って検証する
+        profile = attrs.get("model_profile", getattr(self.instance, "model_profile", None))
+        sensitive = attrs.get("handles_sensitive_data", getattr(self.instance, "handles_sensitive_data", False))
+        if sensitive and profile and profile.current_version.connection.kind != ProviderKind.LOCAL:
+            raise serializers.ValidationError(
+                {"model_profile": _("個人情報や機密情報を扱う会話では、ローカルLLMのモデルを選んでください")})
+        return attrs
 
 
 class MessageSerializer(serializers.ModelSerializer):
@@ -433,7 +438,7 @@ class MyConversationMixin:
 class AppConversationViewSet(SoftDeleteMixin, ModelViewSet):
     permission_classes = [AppUser]
     lookup_field = "uid"
-    queryset = Conversation.objects.filter(deleted=False).select_related("agent")
+    queryset = Conversation.objects.filter(deleted=False).select_related("model_profile__current_version__connection")
     serializer_class = ConversationSerializer
     search_fields = ["title"]
     ordering = ("-last_posted", "-pk")
@@ -626,7 +631,7 @@ class ClarificationStatus(models.IntegerChoices):
 
 
 class ClarificationRequest(models.Model):
-    """Agentから利用者への質問"""
+    """エージェントから利用者への質問"""
 
     uid = NanoidField(unique=True)
     run = models.ForeignKey(Run, on_delete=models.CASCADE, related_name="clarifications")
@@ -866,7 +871,7 @@ class AppRunEventViewSet(MyRunMixin, ListModelMixin, GenericViewSet):
     ordering = "sequence"  # Runの中で一意
 
 
-@extend_schema(description="Agentからの確認質問", tags=["app/run/clarification"])
+@extend_schema(description="エージェントからの確認質問", tags=["app/run/clarification"])
 class AppClarificationViewSet(MyRunMixin, ListModelMixin, RetrieveModelMixin, GenericViewSet):
     permission_classes = [AppUser]
     lookup_field = "uid"
@@ -974,7 +979,7 @@ def test_answer_requeues_run(api_client, app_user):
 
 ## 例4 不変の版を公開する（SkillとSkillVersion）
 
-> この例は、楽観的な競合検出の書き方だけを示すために単純化している。実際の公開は、SkillDraftの内容から版を作り、公開先のPlugin・channelと、scopeに応じた権限を検証する（design.md §3.2・§3.6・§3.10）。
+> この例は、楽観的な競合検出の書き方だけを示すために単純化している。実際の公開は、SkillDraftの内容から版を作り、公開範囲（scope）に応じた権限を検証する（design.md §3.2・§3.6・§3.10）。
 
 Skillは可変の入れ物で、公開した本文はSkillVersionとして不変に残す。公開するときは、編集を始めた時点の版番号（`expected_version`）を送らせる。その間に他の人が公開していた場合は、409を返す。
 

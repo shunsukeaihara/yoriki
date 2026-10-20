@@ -1,6 +1,6 @@
 # リアルタイム通信の方針（SSE / WebSocket）
 
-チャット画面でのRunの進捗・Agentの応答の逐次表示、確認待ちや完了の通知を、ブラウザへリアルタイムに届ける方式を定める。
+チャット画面でのRunの進捗・エージェントの応答の逐次表示、確認待ちや完了の通知を、ブラウザへリアルタイムに届ける方式を定める。
 
 ## 1 結論
 
@@ -31,7 +31,7 @@ Yorikiの画面で双方向に必要なのは「利用者の送信」と「サ�
 | パス | 内容 | 再開 |
 |---|---|---|
 | `GET /api/app/v1/stream/` | ログインユーザー宛ての通知（確認待ち、Runの完了・失敗、配信失敗など） | 通知の `sequence` |
-| `GET /api/app/v1/runs/{id}/stream/` | 1つのRunの詳細イベント（状態変更、Agentのメッセージ、Tool実行、LLM出力の差分） | RunEventの `sequence` |
+| `GET /api/app/v1/runs/{id}/stream/` | 1つのRunの詳細イベント（状態変更、エージェントのメッセージ、Tool実行、LLM出力の差分） | RunEventの `sequence` |
 
 - フロントエンドでは、他のAPIと同じくapiEndpoint（`/api/`）からの相対パス（`app/v1/stream/`、`app/v1/runs/{id}/stream/`）で指定する。
 
@@ -43,9 +43,9 @@ Yorikiの画面で双方向に必要なのは「利用者の送信」と「サ�
 | `type` | 内容 |
 |---|---|
 | `run.status` | Runの状態の変更 |
-| `run.message` | Agentの確定したメッセージ、Tool実行 |
+| `run.message` | エージェントの確定したメッセージ、Tool実行 |
 | `run.delta` | LLM出力の差分（token単位の断片）。`id:` を付けない一時イベント |
-| `clarification.requested` | Agentからの質問（回答待ち） |
+| `clarification.requested` | エージェントからの質問（回答待ち） |
 | `notification` | ログインユーザー宛ての通知 |
 
 ### イベントの形式

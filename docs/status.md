@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-21（#18 のマージ後）
+- 最終更新：2026-10-21（design.md 0.19：標準のエージェント1つとSkillを中心とするモデル。`docs/skill-centric-model`、PR作成前）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -39,7 +39,7 @@
 
 設計書・規約に反映済み。経緯を知らずに変えないよう、要点だけを挙げる。
 
-- **権限**：「permissionを定義する → Groupに割り当てる → Groupをユーザーに割り当てる」で扱う。permissionは `utils.permissions.AppPermission` に1か所でまとめ（codenameは `can_<動詞>_<対象>`）、Modelの `Meta.permissions` で作る。役割（業務管理者・Plugin公開者）はGroupで、初期の中身は `user/roles.py`（`migrate` のたびに同期）。Userのフラグや役割の名前では判定しない。基盤管理者は `is_superuser`。フロントエンドも `allPermissions` だけで判定する（backend-conventions.md §6.3、frontend-conventions.md §6）。
+- **権限**：「permissionを定義する → Groupに割り当てる → Groupをユーザーに割り当てる」で扱う。permissionは `utils.permissions.AppPermission` に1か所でまとめ（codenameは `can_<動詞>_<対象>`）、Modelの `Meta.permissions` で作る。役割（業務管理者・Skill公開者）はGroupで、初期の中身は `user/roles.py`（`migrate` のたびに同期）。Userのフラグや役割の名前では判定しない。基盤管理者は `is_superuser`。フロントエンドも `allPermissions` だけで判定する（backend-conventions.md §6.3、frontend-conventions.md §6）。
 - **パスワードでのログイン**：基盤管理者だけ（`utils.backends.PlatformAdminPasswordBackend`）。社員はSSOだけ（`SOCIALACCOUNT_ONLY`）。
 - **SSOのアカウント確認**：許可したメールドメイン、Microsoftはテナントを固定、Googleは `hd` の一致が必須（未設定なら起動しない）。
 - **テスト**：ローカルでもCIでもPostgreSQLで実行する（SQLiteは使わない）。PostgreSQLが起動していなければ、pytestは起動のコマンドを案内して止まる。NOTIFY/LISTENも実際のPostgreSQLで確かめる。
@@ -55,7 +55,7 @@
 - CI：e2e、sandbox、本体のイメージのレジストリへのpush（使うレジストリが未決。design.md §13）。
 - Compose：channel-listener（Channelの受信を実装するとき）。
 - 管理コマンド：`drain_workers`・`resume_workers`（Workerの実行を実装するとき）。
-- 業務のアプリは `llm` だけ。`agent`、`conversation`、`run`、`stream`、`skill`、`plugin`、`artifact`、`runtime`、`task`、`delivery`、`connector`、`usage` 等（backend-conventions.md §1.2）は、まだない。
+- 業務のアプリは `llm` だけ。`conversation`、`run`、`stream`、`skill`、`plugin`、`artifact`、`runtime`、`task`、`delivery`、`connector`、`usage` 等（backend-conventions.md §1.2）は、まだない。
 - Provider Adapterは、実際のプロバイダのAPIではまだ試していない（API keyが要る）。テストは各社の応答を差し替えて確かめている。
 - 接続の同時実行数・1分あたりの要求数の上限は、項目があるだけで、まだ守らせていない（Runnerの段階）。
 - `sandbox/`（CONTRACT.md、イメージ、契約テスト）は、まだない。
@@ -66,8 +66,7 @@
 
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。提案する順番：
 
-1. **Agent（`agent`）**：Agent、AgentRevision（不変の版）、管理画面と、社員がAgentを選ぶ画面。
-2. **ハーネスの調査と設計（`docs/harness.md`）**：各社のAgent SDKやCLI製品は使わず、Provider Adapterの上にYoriki自身のRunnerを置く（design.md §4.8）。実装の前に、公開されているハーネスをリポジトリの外（例：`~/work/yoriki-reference/`。gitに入れない）にcloneして設計思想を読み、業務ツールとしてのハーネスをYoriki独自に設計する。読むもの：
+1. **ハーネスの調査と設計（`docs/harness.md`）**：各社のAgent SDKやCLI製品は使わず、Provider Adapterの上にYoriki自身のRunnerを置く（design.md §4.8）。実装の前に、公開されているハーネスをリポジトリの外（例：`~/work/yoriki-reference/`。gitに入れない）にcloneして設計思想を読み、業務ツールとしてのハーネスをYoriki独自に設計する。読むもの：
    - **DeepSeek Harness**（`deepseek-ai/deepseek-harness`）：追記専用のセッションログから毎回モデルへの入力を組み立てる規約（RunEventを正本にするYorikiの形と同じ）、常駐ターミナル・バックグラウンドジョブ・長い出力の退避、fsとsubprocessのproviderをリモートのsandboxへ向ける構成、compaction・guard、deliverables（成果物）。developer previewで互換性が変わるので依存はしない。
    - **OpenCode**（`anomalyco/opencode`）：Toolの一式（`bash`、`read`、`edit`、`write`、`apply_patch`、`grep`、`glob`、`skill`、`question`）と、Toolごとの `allow` / `ask` / `deny` の権限、`plan`（読み取り専用）と `build` のエージェントの分け方。
    - **Codex CLI**：system promptの構成、Toolの説明文、`apply_patch` 形式、Sandbox前提のコマンド実行。
@@ -75,14 +74,14 @@ design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにし
    - **OpenHands**：コンテナ内の実行サーバー（常駐bash、cwd・環境変数の保持）と、Action／Observationの型。Sandboxの契約（CONTRACT.md）の下敷き。
    - **SWE-agent / mini-swe-agent**：Tool（ACI）の設計原則と、最小のループ。
    - Claude Codeは非OSSなので、Agent SDKの文書と観察できる挙動（Toolの役割分担、Bashの説明文、質問の仕方）を参考にする。
-   設計では、土台のコーディングエージェント（ファイルの読み書き・編集・検索、常駐シェル、バックグラウンド実行、出力の退避、圧縮、エラーからの立て直し）と、業務の層（Skill、Connector、成果物、確認待ち、予算、権限）を分けて書き、最初の2つのAgent（請求書の照合、契約書レビュー）でどのToolとSkillをどう使うかを書き下して確かめる。GNU toolsやPythonを含む大量のコマンドがSandboxの中で確実に動くことを要件に入れる。
-3. **会話と実行（`conversation`、`run`、`stream`）**：Conversation・ConversationMessage、Runの状態遷移（遷移表と行ロック）、claim / lease、`cancel`・`answer`、SSE（`stream/notifier.py` のLISTEN/NOTIFY）。まずSandboxなしでLLMと会話できるところまで。会話を始めるときのウィザードで、個人情報や機密情報を扱うかを確かめ、扱う場合はローカルLLMのモデルだけに絞る（design.md §4冒頭、§11.3）。
-4. **Sandbox（`sandbox/`、`runtime`）**：CONTRACT.md、docsのイメージ、Launcher（`network_mode: none`、コンテナからの脱出への対策の1〜4。design.md §7）、Runnerからのshell実行。gVisorの評価もこの段階で行う。
-5. **成果物とファイル（`artifact`）**：Local・S3のStorage Backend、添付、成果物の取得（`/api/files/<token>/`、`X-Accel-Redirect`）。
-6. **Skill（`skill`、`plugin`）**：Draft・Version・公開、会話からのSkill更新。
-7. **Connector（`connector`）とタスク・配信（`task`、`delivery`）**：読取り専用のDB Connector、Webhook・Zapierの通知、Trigger。DB Connector（種別：PostgreSQL・MySQL・SQL Server、ホスト、DB名、ユーザー、パスワード等）とHTTP Connector（ホスト、ヘッダー、認証情報等）の設定は管理画面で登録し、資格情報は `utils/crypto.py` で暗号化してDBに保存する（backend-conventions.md §6.4）。個人情報を主な中身とする接続先には機密のフラグを付けられるようにし、フラグの付いたConnectorはローカルLLMのモデルを使うタスク・会話にだけ割り当てる（design.md §4冒頭、§4.9.1）。
-8. **最初の2つのAgent**（design.md §13）：請求書PDF → 社内DBと照合 → 取込用のCSV、契約書レビュー → Zapierへ結果。
-9. **Channel Plugin**（Teams・Slack・Discord）。
+   設計では、土台のコーディングエージェント（ファイルの読み書き・編集・検索、常駐シェル、バックグラウンド実行、出力の退避、圧縮、エラーからの立て直し）と、業務の層（Skill、Connector、成果物、確認待ち、予算、権限）を分けて書き、最初の2つの業務（請求書の照合、契約書レビュー）で、どのSkill・Tool・Connectorをどう使うかを書き下して確かめる。Skill・Connectorを `/`・`@` で明示した場合と、エージェントが利用者の権限で使えるものから探す場合の両方を扱う（design.md §3.1）。GNU toolsやPythonを含む大量のコマンドがSandboxの中で確実に動くことを要件に入れる。
+2. **会話と実行（`conversation`、`run`、`stream`）**：Conversation・ConversationMessage、Runの状態遷移（遷移表と行ロック）、claim / lease、`cancel`・`answer`、SSE（`stream/notifier.py` のLISTEN/NOTIFY）。まずSandboxなしでLLMと会話できるところまで。既定のモデル（主モデルと代替モデル。基盤管理者が設定する）と、会話ごとのモデルの選択（design.md §4.8）。会話を始めるときのウィザードで、個人情報や機密情報を扱うかを確かめ、扱う場合はローカルLLMのモデルだけに絞る（design.md §4冒頭、§11.3）。
+3. **Sandbox（`sandbox/`、`runtime`）**：CONTRACT.md、docsのイメージ、Launcher（`network_mode: none`、コンテナからの脱出への対策の1〜4。design.md §7）、Runnerからのshell実行。gVisorの評価もこの段階で行う。
+4. **成果物とファイル（`artifact`）**：Local・S3のStorage Backend、添付、成果物の取得（`/api/files/<token>/`、`X-Accel-Redirect`）。
+5. **Skill（`skill`、`resource`）**：Draft・Version・公開範囲と公開、Skillの資料（マスター・テンプレート）、会話からのSkill更新、入力欄の `/` での指定、エージェントに見せる一覧（利用者の権限で使えるものだけ）。役割「Plugin公開者」（`user/roles.py`）を「Skill公開者」に改める（design.md 0.19）。
+6. **Connector（`connector`）とタスク・配信（`task`、`delivery`）**：読取り専用のDB Connector、Connectorを使える利用者・役割と操作（ConnectorPermission。design.md §4.9.1）、入力欄の `@` での指定、Task Definition（使うSkill・モデル・許可する操作）、Webhook・Zapierの通知、Trigger。DB Connector（種別：PostgreSQL・MySQL・SQL Server、ホスト、DB名、ユーザー、パスワード等）とHTTP Connector（ホスト、ヘッダー、認証情報等）の設定は管理画面で登録し、資格情報は `utils/crypto.py` で暗号化してDBに保存する（backend-conventions.md §6.4）。個人情報を主な中身とする接続先には機密のフラグを付けられるようにし、フラグの付いたConnectorはローカルLLMのモデルを使うタスク・会話にだけ割り当てる（design.md §4冒頭、§4.9.1）。
+7. **最初の2つの業務**（design.md §13。Skillとタスクとして作る）：請求書PDF → 社内DBと照合 → 取込用のCSV、契約書レビュー → Zapierへ結果。
+8. **Channel Plugin**（Teams・Slack・Discord。`plugin` のRegistry）。
 
 並行してよいもの：実際のIdPでのログインの確認（client IDが用意でき次第）、CSPの改善。
 

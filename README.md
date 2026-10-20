@@ -2,8 +2,8 @@
 
 社員が業務用のAI Agentを、安全に・共通の社内Webサービスとして使うための基盤。
 
-- 社員はチャットで業務を依頼し、Agentは許可された範囲でファイル処理やコードの実行を行う。
-- 管理者はAgent、Skill（手順・判断基準・参照ファイル）、Plugin、外部接続、権限、利用量を一元管理する。
+- 社員はチャットで業務を依頼し、エージェントは許可された範囲でファイル処理やコードの実行を行う。業務ごとの手順や資料はSkillにまとめ、社員が指定するか、エージェントが使えるものから選ぶ。
+- 管理者はSkill（手順・判断基準・参照ファイル）、外部接続（Connector）、Plugin（サーバーの拡張）、権限、利用量を一元管理する。
 - 権限はLLMの判断ではなく、サーバーと実行環境（ネットワークのないSandbox）で強制する。
 
 > 現在は設計段階から実装を始めるところ（pre-alpha）。OSSとして公開する予定。
@@ -26,7 +26,7 @@
 |---|---|
 | `api/` | Django / DRF / Django Q2（API、Runner、Worker）※雛形はこれから作る |
 | `frontend/` | Nuxt 4 / Nuxt UI 4（社員向け画面と管理画面） |
-| `sandbox/` | Agentがコードを実行するSandboxのイメージ（Docker Hubで公開）※これから作る |
+| `sandbox/` | エージェントがコードを実行するSandboxのイメージ（Docker Hubで公開）※これから作る |
 | `deploy/` | Docker Compose、Nginxの設定 ※これから作る |
 | `.vscode/`、`ruff.toml`、`.editorconfig` | エディタと整形・lintの共通設定 |
 | `docs/` | 設計と規約 |

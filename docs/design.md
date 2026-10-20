@@ -2,12 +2,12 @@
 
 作成日：2026年10月2日  
 更新日：2026年10月21日  
-版：0.19 設計案  
+版：0.20 設計案  
 対象：サービス企画、開発、運用担当
 
 プロダクト名はYoriki（よりき）とする（0.16でYuhitsuから変更）。同名の製品・サービスがあることは承知の上で、検索での見つけやすさは重視しない。名称の商標・ドメイン等の確認は本設計の対象外とする。
 
-主な改訂内容は§15を参照。0.19では、業務ごとのAgent（業務の設定）とSkillを束ねる業務のPluginをやめ、標準のエージェント1つとSkillを中心とするモデルにした（§3.1）。
+主な改訂内容は§15を参照。0.19では、業務ごとのAgent（業務の設定）とSkillを束ねる業務のPluginをやめ、標準のエージェント1つとSkillを中心とするモデルにした（§3.1）。0.20では、Webhookのpayloadをそのまま渡し、必要な項目だけを取り出す受け取り方にした（§4.2）。
 
 ## 1 目的と基本方針
 
@@ -88,7 +88,7 @@ MVPは社内文書・表計算・PDF等の分析や作成、会話によるSkill
 | SkillAssetBinding | Skill内のファイル名・用途とResource Versionを結び付ける | customer-master、presentation-template |
 | Resource Collection | 複数のSkillで使う業務資料の集合を管理する | 社内共通用語集、料金基準 |
 | Runtime Profile | 承認済みの実行イメージと資源上限を定める | Pythonと文書処理ツールを含む環境 |
-| Task Definition | エージェントフローの定義。起動Binding、プロンプト、使うSkill、モデル、入力割当、対話Binding、結果通知Bindingを定める | 請求書チェックの自動実行設定 |
+| Task Definition | エージェントフローの定義。起動Binding、プロンプト、使うSkill、モデル、対話Binding、結果通知Bindingを定める | 請求書チェックの自動実行設定 |
 | Plugin | サーバーに配備する拡張。起動・通知・保存・退避・Channel・ConnectorのAdapterを登録する。基盤管理者が導入する | Webhook起動、Zapier通知、Teams、社内DBのConnector |
 | Channel Plugin / Interaction Binding | 受信・送信Adapterをまとめ、チャットツール・チャネル・スレッド方針を設定する | Teamsの経理チャネルで質問・回答 |
 | External Thread Binding | 一つのRun・Conversationと外部スレッドの対応を永続管理する | 請求書チェックRunとSlackの特定スレッド |
@@ -386,8 +386,8 @@ Task Definitionは「起動方法＋実行プロンプト＋使うSkillとモデ
 | 設定 | 内容 |
 |---|---|
 | task_idと名前 | 業務タスクの識別子 |
-| trigger | Plugin・Binding、接続設定、起動元の認証、入力割当 |
-| 実行内容 | 使うSkill（公開範囲の最新の公開版か固定の版）、モデル設定、プロンプトテンプレート、入力・業務結果Schema |
+| trigger | Plugin・Binding、接続設定、起動元の認証、項目の取り出し（任意）、重複のキー、ファイルの取り込み、上限（§4.2）。payloadは取り出しの有無によらず、そのままファイルとしても渡す |
+| 実行内容 | 使うSkill（公開範囲の最新の公開版か固定の版。payloadの読み方を書いたSkillを含む）、モデル設定とeffort、プロンプトテンプレート、業務結果Schema |
 | 実行条件 | 実行主体、権限、利用枠、回答待ちの期限 |
 | interaction | 任意の双方向Channel Plugin・Binding、チャネル、返信モード、スレッドの運用方針 |
 | notification | 任意の結果通知Plugin・Binding、通知Skill、対象イベント、通知内容、一つのDestination |
@@ -396,18 +396,35 @@ Task Definitionは「起動方法＋実行プロンプト＋使うSkillとモデ
 # 本基盤独自の設定案。参照版は公開時・Run受付時に解決して記録する。
 task_id: invoice-check
 name: 請求書チェック
-agent_id: document-agent
+skills:
+  - id: invoice-check          # 請求書の確認手順と基準
+  - id: expense-saas-webhook   # 経費精算SaaSのWebhookのpayloadの読み方
+model_profile: standard-model
+effort: auto
 trigger:
   binding_id: invoice-inbound
   plugin_id: trigger.webhook
   config:
     endpoint: /api/hooks/v1/tasks/invoice-check/
     credential_ref: accounting-hook-key
+    event_id: $.event.id         # 重複の判定に使う項目（省略時は本文のhash）
+    inputs:                      # 項目の取り出し（任意）。必須がない・型が合わない要求は受付時に400
+      - name: vendor
+        path: $.data.invoice.vendor_name
+        type: string
+        required: true
+      - name: amount
+        path: $.data.invoice.total_amount
+        type: number
+      - name: invoice_file
+        path: $.data.invoice.file_url
+        type: file                 # 受付時にArtifactとして取り込む
+        allowed_hosts: [files.example-saas.com]
+    max_payload_bytes: 1048576
 prompt_template: |
-  受け取った請求書をチェックしてください。
-  請求書確認Skillを使い、確認結果と修正版を作成してください。
-  追加条件：{{input.request}}
-input_schema_ref: invoice-check-input-v1
+  {{ inputs.vendor }} からの請求書（{{ inputs.amount }}円）をチェックしてください。
+  受け取ったデータの全体は webhook_payload.json にあります。
+  確認結果と修正版を作成してください。
 output_schema_ref: invoice-check-output-v1
 interaction:
   binding_id: invoice-discussion
@@ -432,7 +449,7 @@ notification:
 
 同じスレッドへ結果も載せる場合はinteraction側の完了イベントに含める。notificationで同じ対話スレッドを指定する場合も同じ配信へ統合し、完了報告と結果の重複投稿を避ける。結果通知のためだけに別スレッドを作らない。
 
-公開済みTask Definition RevisionにBinding Revisionを関連付け、RunにはSkill・資料・モデル設定・入力割当・生成した依頼文とともに固定する。通知Skill、通知Adapter、Interaction BindingとChannel Plugin、Destinationの版も対象に含める。設定変更は次のRunから反映し、再試行中のRunやDeliveryを新しい通知先へ暗黙に向けない。Secretは値を保存せず参照を持ち、資格情報の更新・失効は別に反映する。
+公開済みTask Definition RevisionにBinding Revisionを関連付け、RunにはSkill・資料・モデル設定・受け取ったpayloadとファイル・生成した依頼文とともに固定する。通知Skill、通知Adapter、Interaction BindingとChannel Plugin、Destinationの版も対象に含める。設定変更は次のRunから反映し、再試行中のRunやDeliveryを新しい通知先へ暗黙に向けない。Secretは値を保存せず参照を持ち、資格情報の更新・失効は別に反映する。
 
 通常チャットにはTask Definitionを必須にしない。既定のchat Triggerと画面内の結果表示を使い、必要に応じてタスクを指定して実行する。PipelineRunやTaskRunは追加せず、共通Runへ起動元とBindingを関連付ける。タスクの起動Pluginを増やしても、RunnerにPlugin別の業務分岐を増やさない。
 
@@ -453,7 +470,16 @@ Control Planeがタスクの有効性、権限、Schema、ファイルへのア�
 
 TriggerReceiptの重複キーは組織・安定したBinding ID・外部event ID等のscopeで定義し、同じキーと同じ入力なら既存Runを返す。同じキーで異なる入力は拒否する。設定版が更新されても同じ受信の再送で新しいRunを作らない。WebhookではIdempotency-Key、チャットではclient message ID、将来の定時実行ではschedule IDと予定時刻等を使う。キー保持期間、定時処理の取りこぼし・重複方針はAdapterの設定で明示する。
 
-Webhook AdapterはAPIキー・署名等で認証し、URLを知っているだけの呼出しを許可しない。入力はSchemaで許可した項目だけを割り当て、プロンプト変数の埋込みで式やコードを評価しない。payloadからSkill、モデル、Tool権限、公開scope、通知Bindingを上書きさせない。添付は認証済みアップロードのArtifact IDを使う。外部URLの取得が必要なら許可した取得処理で原本を保存し、URLを任意に辿る権限をSandboxへ与えない。
+Webhook AdapterはAPIキー・署名等で認証し、URLを知っているだけの呼出しを許可しない。payloadからSkill、モデル、Tool権限、公開scope、通知Bindingを上書きさせない。外部URLの取得が必要なら、Bindingで指定した場所のURLを、許可した取得先に限って受付時に取得して原本を保存し、URLを任意に辿る権限をSandboxへ与えない。
+
+**payloadの受け取り方**：Webhookのpayloadの形は送り元ごとに異なる（SaaSの決まった形のWebhook、Zapier等で組んだJSON、自社システム）。送り元ごとのPluginを作らず、受付時に必要な項目だけをBindingで取り出し、それ以外の読み方はSkillで吸収する。Yorikiには、Zapierのような処理の流れ（変換・条件分岐・つなぎ）を組む画面は作らない。条件による振る舞いの違いはプロンプトとSkillで書く。
+
+- **そのまま渡す（いつも）**：受け取ったpayload（JSON、フォームの値、本文のテキスト）を、そのまま入力のファイル（Artifact。例：`webhook_payload.json`）として保存し、Runの作業場所に置く。取り出さなかった項目の読み方は、Task Definitionで指定したSkillに書く（文章か、Skillに置いた読み取りのスクリプト）。payloadはデータとして扱い、プロンプトのテンプレートに丸ごと混ぜ込まない。中に指示のような文章があっても、設定や権限は変わらない。
+- **項目の取り出し（任意）**：Bindingに、取り出す項目を表で書く（名前、payloadの中の場所（JSONのpath）、必須か、型（文字・数値・日付・ファイル））。取り出した値はプロンプトのテンプレートに `{{ inputs.名前 }}` で埋め込める。値は文字として埋め込むだけで、式やコードとして評価しない。必須の項目がない要求と型の合わない要求は、受付時に400で断り、Runを作らない。型がファイルの項目は受付時にArtifactとして取り込む（URLは許可した取得先だけ）。設定画面では、サンプルのpayloadを貼ると、取り出した値と埋め込んだ後のプロンプトを表示して確かめられる。
+- **Bindingに置くもの**：Runを作る前にサーバーが決めることだけを置く。受け口と認証、重複の判定に使う項目（任意。省略時は本文のhash）、項目の取り出し（任意）、payload・ファイルの大きさと数の上限。画面は、これらを入れるふつうのフォームと項目の表にする（項目の場所はJSONのpathを文字で入れる）。
+- **推奨の形式**：送る形を決められる送り元（Zapier等）向けに、Yorikiの推奨の形式（`event_id`、`message`、`inputs`、`files`）を示す。この形式で送れば、重複のキーとファイルの取り込みはBindingの設定なしで行う。推奨であり、必須にはしない。
+
+取り出した項目の誤りは受付時に400で返せる。それ以外の形の誤りに気づくのはRunを始めた後になり、送り元には受付時に202を返しているので、読み取れなかった場合（Skillの読み取りのスクリプトで形を確かめて合わなかった場合を含む）は、Runの失敗としてタスクの通知設定でエラーを通知する。
 
 chat Adapterでは、新規依頼、既存Runへの追加指示、確認への回答を共通の会話処理へ渡し、全メッセージで新規Runを作らない。外部起動でも確認が必要ならWAITING_USERとし、設定した外部スレッドまたはWebの同じConversationで回答できる。外部スレッドではチャネル参加者なら誰でも対応できる。無人運用では入力不足で終了する設定も持たせる。人が回答しても元のRunの権限は増やさない。Channel Pluginからの返信は新規ExecutionRequestではなくConversationInputとして、既存Run・ClarificationRequest・UserInstructionへ振り分ける。
 
@@ -771,7 +797,7 @@ Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプ�
 | SkillChange / SkillEvaluation | 依頼元、編集Run、本文・ファイルの差分、理由、評価結果、公開結果、operation key |
 | RuntimeProfileVersion | image digest（index＝manifest listのdigestで固定。Workerは自分のplatformのmanifestを解決し、そのdigestをAttemptに記録する）、対応platform、Python版、既定依存、資源上限 |
 | EnvironmentRevision / PackageBundle | 完全な依存lock、wheelのhash、対応ABIとplatform、保管参照、元revision |
-| TaskDefinition / TaskDefinitionRevision | フローの起動・対話・結果通知Binding、使うSkill、モデル設定とeffort（固定か自動か）、許可したConnectorの操作、プロンプト、入力割当、公開版 |
+| TaskDefinition / TaskDefinitionRevision | フローの起動・対話・結果通知Binding、使うSkill、モデル設定とeffort（固定か自動か）、許可したConnectorの操作、プロンプト、公開版 |
 | PluginExtension | 拡張種別、Adapter実装版、契約版、設定Schema、対応能力、有効状態 |
 | TriggerBinding / TriggerBindingRevision | 安定ID、起動Plugin版、認証参照、実行主体、タスク、設定版 |
 | TriggerReceipt | 起動Binding、外部イベントID、入力hash、対応Run・会話操作、受付時刻 |
@@ -1426,7 +1452,7 @@ credential_refはサーバーのIAM role等またはSecret管理へ解決する�
 
 ### 11.9 タスクの起動方法と通知方法の管理
 
-フロー設定画面の中心項目は、起動方法、使うSkill、モデル、実行プロンプト、「質問・やり取りのチャネル」、必要なら「結果の連携先」とする。対話先はTeams・Slack・Discordとそのチャネルを選ぶだけで設定できる。参加者全員が対応できるため、回答者一覧やアカウント紐付けの設定欄は設けない。起動・通知Pluginを選ぶと、そのconfig_schemaに対応した設定欄を表示する。Webhookでは受け口と認証、通知では登録済みDestinationを選ぶ。利用者に複雑なフロー図の作成を求めず、請求書チェック、営業資料作成等のタスクを一覧から管理できるようにする。
+フロー設定画面の中心項目は、起動方法、使うSkill、モデル、実行プロンプト、「質問・やり取りのチャネル」、必要なら「結果の連携先」とする。対話先はTeams・Slack・Discordとそのチャネルを選ぶだけで設定できる。参加者全員が対応できるため、回答者一覧やアカウント紐付けの設定欄は設けない。起動・通知Pluginを選ぶと、そのconfig_schemaに対応した設定欄を表示する。Webhookでは受け口と認証、必要なら取り出す項目の表（サンプルのpayloadで試せる）、通知では登録済みDestinationを選ぶ。利用者に複雑なフロー図の作成を求めず（処理の流れを組む画面は作らない）、請求書チェック、営業資料作成等のタスクを一覧から管理できるようにする。
 
 通知内容は「完了状態」「作業結果」「完了状態と作業結果」から選び、必要なら通知Skillを指定する。対話チャネルと結果連携先は初期仕様ではそれぞれフローごとに最大一つとし、選択したPluginとDestinationの互換性を保存前に検証する。プレビューには通知先、対象イベント、送信する項目・成果物を示す。
 
@@ -1464,7 +1490,7 @@ SkillとPluginのRegistry、公開版固定、ファイル添付、QCluster実�
 
 Skill資料の一覧と原本保存、MD・CSV・PPTXの添付置換、本文とファイルの一括公開を実装する。MD編集とCSVの構造を保った編集を加え、PPTXは原本置換を先に対応した上で、検証・プレビューを備えた編集へ広げる。対応能力は画面とTool定義に明示する。
 
-拡張種別ごとのRegistryと共通契約を実装し、起動はChat・Webhook、通知は画面内・汎用Webhook・Zapierを初期Pluginとして提供する。タスク定義、Binding、入力割当、タスク別Destination、任意の通知Skill、標準通知へのフォールバック、完了時の配信Outboxを実装する。フローには一つの起動Binding、最大一つの対話Binding、最大一つの結果通知Bindingを持たせ、処理には既存Runを使う。新たなPipelineRun・TaskRunや複数Runの固定順実行は導入しない。
+拡張種別ごとのRegistryと共通契約を実装し、起動はChat・Webhook、通知は画面内・汎用Webhook・Zapierを初期Pluginとして提供する。タスク定義、Binding（payloadをファイルとして渡す受け取りと、任意の項目の取り出し）、タスク別Destination、任意の通知Skill、標準通知へのフォールバック、完了時の配信Outboxを実装する。フローには一つの起動Binding、最大一つの対話Binding、最大一つの結果通知Bindingを持たせ、処理には既存Runを使う。新たなPipelineRun・TaskRunや複数Runの固定順実行は導入しない。
 
 ファイル保存はArtifact Serviceを経由し、LocalとS3の両Backendを同じ契約で実装する。Workspaceのファイルsnapshot Adapterも接続し、作業ファイル・入力参照・Environment Revisionの保存と復元を可能にする。サーバーセットアップ時に保存先と退避方式を選択し、確定前の保存確認、Blob Location、版と参照の保持を初期段階から備える。
 
@@ -1656,3 +1682,4 @@ Sandboxイメージの定義は本体と同じリポジトリの `sandbox/` で�
 | 0.17 | 2026年10月20日 | LLMのAPI key・Connectorの資格情報を、管理画面で登録してDBに暗号化して保存する方式に変更（§4.8）。接続の種別とbase URLを作成後は変えられないようにした。「OpenAI互換」を「ローカルLLM」とし、モデルのデータ区分（社外送信可・社内のみ）をやめた。外部へ送ってよいデータはシステムでは判断できないので、Connectorの機密のフラグと、タスク・会話の開始時のモデルの制限だけを用意する（§4冒頭）。モデル設定の単価は100万tokenあたりの米ドル。Agentの実行ループには各社のAgent SDK・CLI製品を使わず、Provider Adapterの上にYoriki自身のハーネスを置くことを決定（§4.8。公開されている実装を読んで設計する） |
 | 0.18 | 2026年10月20日 | SSOの設定（種別、client ID、client secret、テナント・ドメイン、許可するメールドメイン）を環境変数から管理画面に移し、client secretをDBに暗号化して保存する方式にした。SSOのない導入先のために、Yorikiのアカウント（基盤管理者が招待のリンクを発行し、本人がパスワードを設定する。試行回数の制限）を追加。SSOを設定したら社員はSSOだけでログインし、同じメールアドレスの既存のアカウントに紐付ける。基盤管理者のパスワードでのログインは、SSOが有効な間も `/login?method=password` に残す（§10.0） |
 | 0.19 | 2026年10月21日 | 「エージェント」を標準のハーネス1つだけを指す名前にし、業務ごとのAgent（業務の設定）とAgent Revisionをやめた。業務ごとの手順・資料・使ってよいTool・Connector・実行環境・必要な能力はSkillの版が持ち、誰が使えるかはSkillの公開範囲で決める。SkillとConnectorは、社員が `/`・`@` で明示するか、エージェントが利用者の権限で使えるものから探して使う。Skillを束ねる業務のPlugin（Plugin Release、channelを追う参照）をやめ、Pluginはサーバーに配備する拡張だけを指す名前にした。モデルは会話・Task Definitionで直接選び、effortはモデルごとの値をそのまま使う。自動で変えるのはeffortだけとし、モデルの切り替えは利用者が明示したときだけにする。障害時は別のモデルへ自動では切り替えず、会話では利用者に切り替えを求め、タスクではエラーを通知する。切り替えには機密の制限とSkillの能力をかける。実行の途中で読み込んだSkillと、モデル・effortの切り替えはManifestへ追記し、利用者が明示したときだけSkillを最新の公開版へ切り替える。Connectorの利用の許可を、Agentごとから利用者（役割）ごとに変えた。役割「Plugin公開者」を「Skill公開者」とした（§3、§4.1、§4.8、§4.9、§5.1、§11） |
+| 0.20 | 2026年10月21日 | Webhookのpayloadは送り元ごとに形が違うので、送り元ごとのPluginを作らず、payloadをいつもそのままファイルとして渡し、読み方はSkillで吸収する。受付時に必要な項目だけをBindingの表で取り出せるようにし（JSONのpath、必須、型。必須がない・型が合わない要求は400）、取り出した値はプロンプトに埋め込める。サンプルのpayloadで取り出しを試せる。Bindingには受け口・認証・重複のキー・項目の取り出し・上限だけを置き、処理の流れを組む画面は作らない。送る形を決められる送り元向けに推奨の形式を示す。§4.1の例に残っていた `agent_id` を直した（§4.1、§4.2、§11.9） |

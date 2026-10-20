@@ -3,6 +3,8 @@ name = "yoriki-api"
 version = "0.1.0"
 requires-python = "==3.13.*"
 dependencies = [
+    "anthropic>=1.11.0",
+    "cryptography>=50.0.2",
     "django>=6.1.2",
     "django-allauth[socialaccount]>=65.20.0",
     "django-auditlog>=3.4.1",
@@ -11,7 +13,9 @@ dependencies = [
     "django-q2>=1.11.1",
     "djangorestframework>=3.18.3",
     "drf-spectacular>=0.30.0",
+    "google-genai>=2.28.0",
     "nanoid>=2.0.0",
+    "openai>=3.24.0",
     "psycopg[binary,pool]>=3.3.6",
     "uvicorn>=0.54.0",
 ]

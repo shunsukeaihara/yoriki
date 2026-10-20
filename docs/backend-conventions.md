@@ -615,7 +615,7 @@ DATABASES = {
 
 | モジュール | 内容 |
 |---|---|
-| `utils/fields.py` | `NanoidField`、`NormalizedTextField`（改行・行末空白の正規化）、ファイル・Base64系のSerializerフィールド |
+| `utils/fields.py` | `NanoidField`、`EncryptedSecretField`・`SecretValue`（Secretの暗号化保存。§6.4）、`NormalizedTextField`（改行・行末空白の正規化）、ファイル・Base64系のSerializerフィールド |
 | `utils/views.py` | `SoftDeleteMixin`、利用者範囲のMixin、`PingAPIView` |
 | `utils/serializers.py` | `CountSerializer`、`PingSerializer`、`ReadOnlyModelSerializer`、複数アプリで使う最小Serializer |
 | `utils/permissions.py` | `AppPermission`（Yorikiで定義するpermissionの一覧）、`AppUser`（ログインしている社員）、`PlatformAdmin`（基盤管理者）、`require_permission()` |
@@ -625,6 +625,8 @@ DATABASES = {
 | `utils/pagination.py` | `CursorPaginationWithPageSizeQuery`（`page_size` クエリ、上限200） |
 | `utils/handlers.py` | DRFの例外ハンドラ（500系だけ通知に流す） |
 | `utils/lock.py` | DBのadvisory lock |
+| `utils/crypto.py` | Secretの暗号化・復号（Fernet。鍵は `YORIKI_SECRET_ENCRYPTION_KEYS`）。通常は `EncryptedSecretField` を通して使う |
+| `common/management/commands/` | 複数アプリにまたがる管理コマンド（`rotate_secret_encryption`） |
 | `common/choices.py` | 複数アプリで使うChoices |
 
 - 権限はDjangoのpermissionで判定する。Userのフラグや役割の名前では判定しない。流れは「permissionを定義する → Groupに割り当てる → Groupをユーザーに割り当てる」とする。
@@ -636,6 +638,22 @@ DATABASES = {
 - ViewSetでは `require_permission(AppPermission.XXX)` で確認する。`require_permission` は、ログイン済みで `user.has_perm()` が真の場合に許可するpermissionクラスを返す。Django標準のpermissionは `"<app_label>.<codename>"` の文字列で渡す。
 - permissionを持つユーザーの一覧（通知の宛先等）は `User.objects.with_permission(AppPermission.XXX)` で取得する（直接・Group経由・基盤管理者を含む）。
 - `AppUser`・`PlatformAdmin` は `_Xxx(BasePermission)` を定義し、公開名を `Xxx = IsAuthenticated & _Xxx` にする。
+- 基盤管理者だけが使う管理画面（LLMの接続等）は、APIを `PlatformAdmin` で守り、画面のメニューはそのModelのDjango標準のpermission（`llm.change_llmconnection` 等）で出し分ける。基盤管理者はすべてのpermissionを持つので表示される。標準のpermissionを他の人に付けても、APIは403になる（frontend-conventions.md §6.2）。
+
+### 6.4 Secret
+
+- 管理画面で登録するSecret（LLMのAPI key、Connectorのパスワード・token、HTTP Connectorのヘッダー、SSOのclient secret等）は、Modelの `utils.fields.EncryptedSecretField` に持たせる。平文の列を作らない。
+
+```python
+class LLMConnection(models.Model):
+    api_key = EncryptedSecretField(_("API key"))  # blank=True、editable=False が既定
+```
+
+- フィールドの値は `SecretValue`。平文の文字列を代入するとその場で暗号化し、インスタンスに平文を残さない。`str()`・`repr()` は末尾の4文字だけ（`****abcd`）なので、ログやSerializerに紛れても平文は出ない。平文は `.reveal()` でだけ取り出し、外部へ接続する処理（Provider Adapter、Connector）の中でだけ呼ぶ。`bool()` でSecretの有無、`.hint` で末尾の4文字が分かる。
+- Serializerでは、Secretを `write_only=True` の `CharField` で受け、応答には `has_<名前>` と `<名前>_hint` だけを出す。送られなければ変更しない。暗号化の鍵が設定されていなければ、保存時ではなく検証で入力エラーにする（`utils.crypto.is_encryption_configured()`）。
+- 接続先（種別、ホスト、base URL等）は、作成した後は変えられないようにする。接続先ごとに接続を作り、Secretは差し替えられるようにする。登録済みのSecretを別のサーバーへ送らせないためと、接続を参照する版（`*Version`）の意味が後から変わらないようにするため。更新用のSerializer（`<名前>UpdateSerializer`）でその項目を `read_only_fields` にし、Django管理画面でも読み取り専用にする。
+- 監査ログ（auditlog）では、Secretの列を `exclude_fields` に入れる。Django管理画面には `editable=False` により出ない。
+- 鍵の交換は `rotate_secret_encryption` コマンド（`common`）で行う。`EncryptedSecretField` は自分を登録するので（`utils.fields.ENCRYPTED_SECRET_FIELDS`）、Secretを持つModelを追加してもコマンドの変更は要らない。
 
 ---
 

@@ -26,3 +26,6 @@ SOCIALACCOUNT_PROVIDERS = {
 YORIKI_SSO_PROVIDERS = ["microsoft", "google"]
 YORIKI_SSO_ALLOWED_EMAIL_DOMAINS = ["example.co.jp"]
 YORIKI_SSO_GOOGLE_HOSTED_DOMAIN = "example.co.jp"
+
+# テスト専用の鍵（本番では使わない）
+YORIKI_SECRET_ENCRYPTION_KEYS = ["xz4RJ4arr_XhdjE-oj2NJ7ElAq-K30kZvLHtZMOzIPY="]

@@ -48,7 +48,9 @@ INSTALLED_APPS = [
     "allauth.socialaccount",
     "allauth.socialaccount.providers.google",
     "allauth.socialaccount.providers.microsoft",
+    "common",
     "user",
+    "llm",
 ]
 
 MIDDLEWARE = [
@@ -175,6 +177,8 @@ SPECTACULAR_SETTINGS = {
     "SERVE_INCLUDE_SCHEMA": False,
     "SERVE_PERMISSIONS": ["utils.permissions.AppUser"],
     "SCHEMA_PATH_PREFIX": "/api/",
+    # choicesのenumの名前を固定する（項目名から付けると、別のアプリの kind 等と衝突する）
+    "ENUM_NAME_OVERRIDES": {"ProviderKindEnum": "llm.models.ProviderKind"},
 }
 
 # --- Django Q2 ---
@@ -241,6 +245,12 @@ if "google" in YORIKI_SSO_PROVIDERS:
         # hdは認証画面への指定だけなので、戻ったIDトークンのhdも user.adapters で確認する
         "AUTH_PARAMS": {"hd": YORIKI_SSO_GOOGLE_HOSTED_DOMAIN},
     }
+
+# --- Secretの暗号化（utils/crypto.py、utils.fields.EncryptedSecretField） ---
+# LLMのAPI key、Connectorのパスワード等を暗号化してDBに保存する鍵（Fernet。カンマ区切り）。
+# 先頭の鍵で暗号化し、すべての鍵で復号する。鍵を替えるときは新しい鍵を先頭に足し、
+# `rotate_secret_encryption` で暗号化し直してから古い鍵を外す（deployment.md §5）
+YORIKI_SECRET_ENCRYPTION_KEYS = _env_list("YORIKI_SECRET_ENCRYPTION_KEYS")
 
 LOGGING = {
     "version": 1,

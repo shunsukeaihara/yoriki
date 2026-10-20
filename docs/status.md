@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-21（ハーネスの設計を書いた後）
+- 最終更新：2026-10-21（#21 のマージ後）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -27,6 +27,7 @@
 | #18 | Yorikiのアカウント：`/manage/users`（`v1/users`、`v1/groups`。作成・役割・無効化・招待／再設定のリンクの発行）、`/invitation#<token>`（`app/v1/auth/invitations/verify`・`accept`）、パスワードでのログイン（`POST app/v1/auth/session/`、`utils.backends.PasswordBackend`。SSOが有効なら基盤管理者だけ。`/login?method=password`）、django-axesによる試行回数の制限（アカウントごと・送信元IPごと、10回で15分）。未ログインのPOSTでもCSRFを確かめる `utils.permissions.CsrfProtected`。`app/v1/auth/providers/` は `{providers, password_login}` を返す |
 | #19 | 設計（design.md 0.19）：「エージェント」を標準のハーネス1つだけにし、業務ごとのAgentとSkillを束ねる業務のPluginをやめた。業務の単位はSkill（Tool・資料・Connector・実行環境・必要な能力を版で持ち、公開範囲で誰が使えるかが決まる）。SkillとConnectorは `/`・`@` で明示するか、エージェントが利用者の権限で使えるものから探す。モデルは会話・タスクで直接選び、自動で変えるのはeffortだけ。障害時は会話なら利用者に切り替えを求め、タスクならエラーを通知する |
 | #20 | 設計（design.md 0.20）：Webhookのpayloadはそのままファイルとして渡し、読み方はSkillで吸収する。受付時に必要な項目だけをBindingの表で取り出せる（JSONのpath・必須・型、サンプルで試せる）。重複のキーは送り元のイベントIDか `Idempotency-Key` だけ。Webhookのタスクは失敗の通知先が必須。処理の流れを組む画面は作らない |
+| #21 | ハーネス（Runner）の設計（[harness.md](harness.md)、design.md 0.21）：RunEventを正本にしてモデルへの入力を組み立てる、Toolの定義・呼び出し方・見せ方、コマンドは呼出しごとの `docker exec` とバックグラウンドのジョブ（常駐のシェルは持たない）、形式ごとの `read`・文字列の置換の `edit`、出力の上限と退避、段階的な圧縮、確認待ち、障害からの再開（Workspaceとの突き合わせ、外部への書込みの重複のキー）、確認を必須にするConnectorの書込み、Provider Adapterへの追加（メッセージの部品、OpenAIのResponses API）。Web検索・取得はMVPの後にConnectorとして加え、プロバイダ組込みの検索は基盤管理者の許可制 |
 
 確認済みのこと：
 
@@ -68,14 +69,13 @@
 
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。提案する順番：
 
-1. **ハーネスの設計（`docs/harness.md`）**：書いた（ブランチ `docs/harness-design`。Pull Requestは未作成）。公開されているハーネス（DeepSeek Harness、OpenCode、Codex CLI、Gemini CLI、OpenHands、SWE-agent / mini-swe-agent）を `~/work/yoriki-reference/` にcloneして読み、RunEventを正本にした実行のループ、Toolの定義・呼び出し方・見せ方、コマンドを呼出しごとに `docker exec` で実行する方式（常駐のシェルは持たない）、形式ごとの `read`、文字列の置換の `edit`、出力の上限と退避、段階的な圧縮、確認待ち、障害からの再開、Provider Adapterへの追加（メッセージの部品、OpenAIのResponses API）を決めた。最初の2つの業務での使い方も書き下した（harness.md §13）。
-2. **会話と実行（`conversation`、`run`、`stream`、`harness`）**：harness.md に沿って実装する。Provider Adapterの拡張（メッセージを部品の並びにする、画像・文書等のファイルの入力、OpenAIの公式APIをResponses APIへ、effort、推論の途中経過の引き継ぎ、`tool_choice`。harness.md §12）も同じPull Requestで行う。Conversation・ConversationMessage、Runの状態遷移（遷移表と行ロック）、claim / lease、`cancel`・`answer`、SSE（`stream/notifier.py` のLISTEN/NOTIFY）。まずSandboxなしでLLMと会話できるところまで。既定のモデル設定（基盤管理者が設定する）と、会話ごとのモデルの直接の選択、モデルごとのeffort（受け付ける値と既定）、利用者が明示するモデル・effortの切り替え、障害時に利用者へ切り替えを求める確認（タスクはエラーの通知）、Manifestへの追記（design.md §4.8）。自動で変えるのはeffortだけで、その規則は利用量と費用を見てから決める。会話を始めるときのウィザードで、個人情報や機密情報を扱うかを確かめ、扱う場合はローカルLLMのモデルだけに絞る（design.md §4冒頭、§11.3）。
-3. **Sandbox（`sandbox/`、`runtime`）**：CONTRACT.md、docsのイメージ、Launcher（`network_mode: none`、コンテナからの脱出への対策の1〜4。design.md §7）、Runnerからのshell実行と、Sandboxの中の補助コマンド `yoriki-sandbox`（ジョブ、形式ごとの読取り、編集。harness.md §8）、多くのコマンドが制限の下で動くことの契約テスト（harness.md §8.5）。gVisorの評価もこの段階で行う。
-4. **成果物とファイル（`artifact`）**：Local・S3のStorage Backend、添付、成果物の取得（`/api/files/<token>/`、`X-Accel-Redirect`）。
-5. **Skill（`skill`、`resource`）**：Draft・Version・公開範囲と公開、Skillの資料（マスター・テンプレート）、会話からのSkill更新、入力欄の `/` での指定、エージェントに見せる一覧（利用者の権限で使えるものだけ）。役割「Plugin公開者」（`user/roles.py`）を「Skill公開者」に改める（design.md 0.19）。
-6. **Connector（`connector`）とタスク・配信（`task`、`delivery`）**：読取り専用のDB Connector、Connectorを使える利用者・役割と操作（ConnectorPermission。design.md §4.9.1）、入力欄の `@` での指定、Task Definition（使うSkill・モデル・許可する操作）、Webhook・Zapierの通知、Trigger。DB Connector（種別：PostgreSQL・MySQL・SQL Server、ホスト、DB名、ユーザー、パスワード等）とHTTP Connector（ホスト、ヘッダー、認証情報等）の設定は管理画面で登録し、資格情報は `utils/crypto.py` で暗号化してDBに保存する（backend-conventions.md §6.4）。個人情報を主な中身とする接続先には機密のフラグを付けられるようにし、フラグの付いたConnectorはローカルLLMのモデルを使うタスク・会話にだけ割り当てる（design.md §4冒頭、§4.9.1）。
-7. **最初の2つの業務**（design.md §13。Skillとタスクとして作る）：請求書PDF → 社内DBと照合 → 取込用のCSV、契約書レビュー → Zapierへ結果。
-8. **Channel Plugin**（Teams・Slack・Discord。`plugin` のRegistry）。
+1. **会話と実行（`conversation`、`run`、`stream`、`harness`）**：harness.md に沿って実装する。Provider Adapterの拡張（メッセージを部品の並びにする、画像・文書等のファイルの入力、OpenAIの公式APIをResponses APIへ、effort、推論の途中経過の引き継ぎ、`tool_choice`。harness.md §12）も同じPull Requestで行う。Conversation・ConversationMessage、Runの状態遷移（遷移表と行ロック）、claim / lease、`cancel`・`answer`、SSE（`stream/notifier.py` のLISTEN/NOTIFY）。まずSandboxなしでLLMと会話できるところまで。既定のモデル設定（基盤管理者が設定する）と、会話ごとのモデルの直接の選択、モデルごとのeffort（受け付ける値と既定）、利用者が明示するモデル・effortの切り替え、障害時に利用者へ切り替えを求める確認（タスクはエラーの通知）、Manifestへの追記（design.md §4.8）。自動で変えるのはeffortだけで、その規則は利用量と費用を見てから決める。会話を始めるときのウィザードで、個人情報や機密情報を扱うかを確かめ、扱う場合はローカルLLMのモデルだけに絞る（design.md §4冒頭、§11.3）。
+2. **Sandbox（`sandbox/`、`runtime`）**：CONTRACT.md、docsのイメージ、Launcher（`network_mode: none`、コンテナからの脱出への対策の1〜4。design.md §7）、Runnerからのshell実行と、Sandboxの中の補助コマンド `yoriki-sandbox`（ジョブ、形式ごとの読取り、編集。harness.md §8）、多くのコマンドが制限の下で動くことの契約テスト（harness.md §8.5）。gVisorの評価もこの段階で行う。
+3. **成果物とファイル（`artifact`）**：Local・S3のStorage Backend、添付、成果物の取得（`/api/files/<token>/`、`X-Accel-Redirect`）。
+4. **Skill（`skill`、`resource`）**：Draft・Version・公開範囲と公開、Skillの資料（マスター・テンプレート）、会話からのSkill更新、入力欄の `/` での指定、エージェントに見せる一覧（利用者の権限で使えるものだけ）。役割「Plugin公開者」（`user/roles.py`）を「Skill公開者」に改める（design.md 0.19）。
+5. **Connector（`connector`）とタスク・配信（`task`、`delivery`）**：読取り専用のDB Connector、Connectorを使える利用者・役割と操作（ConnectorPermission。design.md §4.9.1）、入力欄の `@` での指定、Task Definition（使うSkill・モデル・許可する操作）、Webhook・Zapierの通知、Trigger。DB Connector（種別：PostgreSQL・MySQL・SQL Server、ホスト、DB名、ユーザー、パスワード等）とHTTP Connector（ホスト、ヘッダー、認証情報等）の設定は管理画面で登録し、資格情報は `utils/crypto.py` で暗号化してDBに保存する（backend-conventions.md §6.4）。個人情報を主な中身とする接続先には機密のフラグを付けられるようにし、フラグの付いたConnectorはローカルLLMのモデルを使うタスク・会話にだけ割り当てる（design.md §4冒頭、§4.9.1）。
+6. **最初の2つの業務**（design.md §13。Skillとタスクとして作る）：請求書PDF → 社内DBと照合 → 取込用のCSV、契約書レビュー → Zapierへ結果。
+7. **Channel Plugin**（Teams・Slack・Discord。`plugin` のRegistry）。
 
 並行してよいもの：実際のIdPでのログインの確認（client IDが用意でき次第）、CSPの改善。
 

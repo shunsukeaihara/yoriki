@@ -71,7 +71,7 @@ Skillは指示文に加え、その業務で使うファイル一式を保持で
 | 運用 | 中間生成物を自動削除し、停止Workerや孤立コンテナを回収する |
 | 将来の拡張 | 共通の実行・保存契約を使ってWorkerサーバーを追加し、同じ私設ネットワーク内の別ホストでの実行を可能にする |
 
-MVPは社内文書・表計算・PDF等の分析や作成、会話によるSkillの改善、チャット／Webhookの起動Plugin、画面内／Webhook・Zapierの通知Plugin、Teams・Slack・Discordの双方向Channel Plugin、ローカル／S3のStorage Backend、ファイルsnapshotによる退避・復元、社内DB（PostgreSQL・MySQL・SQL Server）を読取り専用で照会するデータソースのConnectorを対象とする。SharePoint・Google Drive・MCPサーバーへのConnectorは初期段階の後に追加する。定時実行、メール等の別経路は同じ拡張契約へ追加できるようにするが、すべてのAdapterを初期実装する必要はない。実行コードを持つPluginは基盤管理者が配備時に導入する。利用者やエージェントによる管理サーバー上への任意コードの動的導入、Sandboxからの直接通信、未登録の相手への外部送信は対象外とする。エージェントがそのRunで使うスクリプトをSandbox内に生成することは許可する。
+MVPは社内文書・表計算・PDF等の分析や作成、会話によるSkillの改善、チャット／Webhookの起動Plugin、画面内／Webhook・Zapierの通知Plugin、Teams・Slack・Discordの双方向Channel Plugin、ローカル／S3のStorage Backend、ファイルsnapshotによる退避・復元、社内DB（PostgreSQL・MySQL・SQL Server）を読取り専用で照会するデータソースのConnectorを対象とする。SharePoint・Google Drive・MCPサーバー・Web検索とWeb取得へのConnectorは初期段階の後に追加する。定時実行、メール等の別経路は同じ拡張契約へ追加できるようにするが、すべてのAdapterを初期実装する必要はない。実行コードを持つPluginは基盤管理者が配備時に導入する。利用者やエージェントによる管理サーバー上への任意コードの動的導入、Sandboxからの直接通信、未登録の相手への外部送信は対象外とする。エージェントがそのRunで使うスクリプトをSandbox内に生成することは許可する。
 
 ## 3 エージェントとSkillのモデル
 
@@ -738,6 +738,8 @@ SharePoint・OneDrive（Microsoft Graph）、Google Driveは、検索、一覧�
 社内システムのREST APIは、APIごとにAdapterのコードを書かず、汎用のHTTP Connectorの設定で追加できるようにする。基盤管理者が、接続先のURL、認証（資格情報は暗号化して保存）、呼んでよい操作（メソッドとパスのパターン、読取り・書込みの分類、入出力の説明）を登録する。登録していないパスやホストへは送信しない。
 
 外部サービスが公式のMCP（Model Context Protocol）サーバーを提供している場合は、MCPサーバーに接続するConnectorとして取り込める。この場合もMCPサーバーへの接続はControl Planeだけが行い、許可したtoolだけをエージェントへ見せる。MCPのtoolも読取り・書込みに分類し、分類できないtoolは書込みとして扱う。
+
+Webの検索と取得も、初期段階の後にConnector（Web検索・Web取得）として加える（MVPには入れない）。任意のURLの取得や検索の文字列は、社内のデータを外へ持ち出す口にも、私設ネットワークの中への要求（SSRF）にもなるため、基盤管理者が有効にしたときだけ、使える利用者・役割を限って使えるようにする。取得は名前解決した公開のIPアドレスに限って接続し、許可したドメインだけに絞る設定も持つ。機密の会話・機密のConnectorを使ったRunでは使わせない。検索の先（検索API）は差し替えられるようにし、各社のLLMに組み込みの検索はローカルLLMで使えないので使わない（harness.md §7.4）。
 
 #### 4.9.4 Adapterの契約
 

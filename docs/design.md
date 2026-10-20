@@ -2,12 +2,12 @@
 
 作成日：2026年10月2日  
 更新日：2026年10月21日  
-版：0.20 設計案  
+版：0.21 設計案  
 対象：サービス企画、開発、運用担当
 
 プロダクト名はYoriki（よりき）とする（0.16でYuhitsuから変更）。同名の製品・サービスがあることは承知の上で、検索での見つけやすさは重視しない。名称の商標・ドメイン等の確認は本設計の対象外とする。
 
-主な改訂内容は§15を参照。0.19では、業務ごとのAgent（業務の設定）とSkillを束ねる業務のPluginをやめ、標準のエージェント1つとSkillを中心とするモデルにした（§3.1）。0.20では、Webhookのpayloadをそのまま渡し、必要な項目だけを取り出す受け取り方にした（§4.2）。
+主な改訂内容は§15を参照。0.19では、業務ごとのAgent（業務の設定）とSkillを束ねる業務のPluginをやめ、標準のエージェント1つとSkillを中心とするモデルにした（§3.1）。0.20では、Webhookのpayloadをそのまま渡し、必要な項目だけを取り出す受け取り方にした（§4.2）。0.21では、ハーネスの設計を [harness.md](harness.md) にまとめ、コマンドを常駐のシェルではなく呼出しごとに実行する方式にした（§4.8、§7.5）。
 
 ## 1 目的と基本方針
 
@@ -71,7 +71,7 @@ Skillは指示文に加え、その業務で使うファイル一式を保持で
 | 運用 | 中間生成物を自動削除し、停止Workerや孤立コンテナを回収する |
 | 将来の拡張 | 共通の実行・保存契約を使ってWorkerサーバーを追加し、同じ私設ネットワーク内の別ホストでの実行を可能にする |
 
-MVPは社内文書・表計算・PDF等の分析や作成、会話によるSkillの改善、チャット／Webhookの起動Plugin、画面内／Webhook・Zapierの通知Plugin、Teams・Slack・Discordの双方向Channel Plugin、ローカル／S3のStorage Backend、ファイルsnapshotによる退避・復元、社内DB（PostgreSQL・MySQL・SQL Server）を読取り専用で照会するデータソースのConnectorを対象とする。SharePoint・Google Drive・MCPサーバーへのConnectorは初期段階の後に追加する。定時実行、メール等の別経路は同じ拡張契約へ追加できるようにするが、すべてのAdapterを初期実装する必要はない。実行コードを持つPluginは基盤管理者が配備時に導入する。利用者やエージェントによる管理サーバー上への任意コードの動的導入、Sandboxからの直接通信、未登録の相手への外部送信は対象外とする。エージェントがそのRunで使うスクリプトをSandbox内に生成することは許可する。
+MVPは社内文書・表計算・PDF等の分析や作成、会話によるSkillの改善、チャット／Webhookの起動Plugin、画面内／Webhook・Zapierの通知Plugin、Teams・Slack・Discordの双方向Channel Plugin、ローカル／S3のStorage Backend、ファイルsnapshotによる退避・復元、社内DB（PostgreSQL・MySQL・SQL Server）を読取り専用で照会するデータソースのConnectorを対象とする。SharePoint・Google Drive・MCPサーバー・Web検索とWeb取得へのConnectorは初期段階の後に追加する。定時実行、メール等の別経路は同じ拡張契約へ追加できるようにするが、すべてのAdapterを初期実装する必要はない。実行コードを持つPluginは基盤管理者が配備時に導入する。利用者やエージェントによる管理サーバー上への任意コードの動的導入、Sandboxからの直接通信、未登録の相手への外部送信は対象外とする。エージェントがそのRunで使うスクリプトをSandbox内に生成することは許可する。
 
 ## 3 エージェントとSkillのモデル
 
@@ -674,7 +674,7 @@ sequenceDiagram
 
 Provider Adapterは、メッセージ・Tool定義・オプションを受け取り、テキストの差分、Tool呼出し、利用量、プロバイダの要求IDを共通のイベントとして返す。プロバイダ固有の機能（prompt caching等）は能力として宣言し、Runnerは能力がある場合だけ使う。実装は各社のAPIクライアント（`openai`・`anthropic`・`google-genai`）を直接使い、ローカルLLMはOpenAI互換のAPIとして `openai` クライアントで呼ぶ。SDKの自動再試行は切り、再試行とeffortの調整はRunnerが判断する。
 
-エージェントの実行ループ（Tool呼出し→実行→再送）には、各社のAgent SDK（OpenAI Agents SDK、Claude Agent SDK、Google ADK）や各社のCLI製品を使わず、Provider Adapterの上にYoriki自身のRunner（ハーネス）を置く。理由は、実行状態の正本をPostgreSQLに置く設計（§5・§6）、停止・回答待ち・再開と予算の制御、モデルの差し替えとeffortの調整、Sandboxに通信とSecretを持ち込まない原則（§7）を、SDKの流儀に縛られずに保つため。ハーネスは、公開されているコーディングエージェントの実装（Codex CLI、Gemini CLI、OpenCode、DeepSeek Harness、OpenHands、SWE-agent等）を読んで設計思想を学んだうえで、業務ツールとしてYoriki独自に設計する（`docs/harness.md`。会話と実行の実装の前に書く）。土台はコーディングエージェント（ファイルの読み書き・編集・検索、常駐のシェル、バックグラウンド実行、長い出力の退避、文脈の圧縮、エラーをモデルに返して直させる周回）で、その上にSkill・Connector・成果物・確認待ち・予算・権限などの業務の層を載せる。
+エージェントの実行ループ（Tool呼出し→実行→再送）には、各社のAgent SDK（OpenAI Agents SDK、Claude Agent SDK、Google ADK）や各社のCLI製品を使わず、Provider Adapterの上にYoriki自身のRunner（ハーネス）を置く。理由は、実行状態の正本をPostgreSQLに置く設計（§5・§6）、停止・回答待ち・再開と予算の制御、モデルの差し替えとeffortの調整、Sandboxに通信とSecretを持ち込まない原則（§7）を、SDKの流儀に縛られずに保つため。ハーネスは、公開されているコーディングエージェントの実装（Codex CLI、Gemini CLI、OpenCode、DeepSeek Harness、OpenHands、SWE-agent等）を読んで設計思想を学んだうえで、業務ツールとしてYoriki独自に設計する（[harness.md](harness.md)）。土台はコーディングエージェント（ファイルの読み書き・編集・検索、呼出しごとのコマンドの実行とバックグラウンドのジョブ、長い出力の退避、文脈の圧縮、エラーをモデルに返して直させる周回）で、その上にSkill・Connector・成果物・確認待ち・予算・権限などの業務の層を載せる。
 
 ### 4.9 外部データへの接続（Connector Plugin）
 
@@ -739,6 +739,8 @@ SharePoint・OneDrive（Microsoft Graph）、Google Driveは、検索、一覧�
 
 外部サービスが公式のMCP（Model Context Protocol）サーバーを提供している場合は、MCPサーバーに接続するConnectorとして取り込める。この場合もMCPサーバーへの接続はControl Planeだけが行い、許可したtoolだけをエージェントへ見せる。MCPのtoolも読取り・書込みに分類し、分類できないtoolは書込みとして扱う。
 
+Webの検索と取得も、初期段階の後にConnector（Web検索・Web取得）として加える（MVPには入れない）。任意のURLの取得や検索の文字列は、社内のデータを外へ持ち出す口にも、私設ネットワークの中への要求（SSRF）にもなるため、基盤管理者が有効にしたときだけ、使える利用者・役割を限って使えるようにする。取得は名前解決した公開のIPアドレスに限って接続し、許可したドメインだけに絞る設定も持つ。機密の会話・機密のConnectorを使ったRunでは使わせない。検索の先（検索API）は差し替えられるようにする。各社のLLMに組み込みのWeb検索（検索はプロバイダの中で行われ、Yorikiからは通信しない）は、既定では使わず、基盤管理者がモデル設定ごとに許可し、使える利用者・役割を限ったときだけ使えるようにする。ローカルLLMにはないため、機密の会話・機密のConnectorを使ったRunでは使えない（harness.md §7.4）。
+
 #### 4.9.4 Adapterの契約
 
 ConnectorのAdapterは `validate_config`、`describe`（提供する操作と入出力のSchema）、`execute`（操作の実行）を実装し、他のPluginと同じRegistryで管理する。接続のSecretとtokenはControl Planeの中だけで使い、Runner・Sandbox・ログへ出さない。QClusterだけのWorkerサーバー（§6.1）のRunnerも、社内DB・SaaSへ直接接続せず、Connector（同じプロセス内のConnectorの処理）を通す。HTTPを介さないだけで、Run開始時に固定した利用の許可の確認（そのRunで使える操作と対象）、利用者の権限のtoken、読取り専用の多層の強制（§4.9.2）、行数・サイズ・時間の上限、ToolInvocationへの記録はすべてこの処理の中で行う。接続情報はControl Planeと同じ信頼範囲のサーバーの中だけで使い、SandboxとLLMへは渡さない。
@@ -784,8 +786,8 @@ Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプ�
 | ClarificationRequest | 対象Run、質問ID・世代、本文・選択肢、期限、回答状態、採用した回答と外部message参照 |
 | Run | 共通実行要求、起動Binding版、タスク版、固定したModelProfileの版とSkill Version・Connectorの利用の許可、実行主体、状態、Manifest、予算、親Run、適用済み指示sequence |
 | ExecutionAttempt | Worker、試行番号、lease、fencing token、開始・終了、失敗理由 |
-| RunEvent | 単調なsequence、イベント種別、表示用内容、時刻 |
-| Checkpoint | メッセージ参照、Tool結果、再開状態、ファイルsnapshot参照、schema version |
+| RunEvent | 単調なsequence、イベント種別、表示用内容、モデル用の内容とモデルの履歴への効き方（harness.md §5）、時刻 |
+| Checkpoint | メッセージ参照（対応するRunEventのsequence）、Tool結果、再開状態、ファイルsnapshot参照、schema version |
 | Artifact | 論理ID、BlobObject参照、hash、サイズ、MIME、所有者、Run、保持期限 |
 | BlobObject / BlobLocation | 不変bytesのID・hash、backend_id・設定世代、object key、物理版、移行状態 |
 | WorkspaceSnapshot | Adapter・format版、ファイルManifest、環境参照、Checkpoint、保存・検証状態 |
@@ -813,7 +815,7 @@ Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプ�
 | LLMConnection | プロバイダ種別、API key（暗号化して保存）、base URL、timeout、同時実行数・rate limit（§4.8） |
 | ModelProfile / ModelProfileVersion | 接続、モデル名、token上限、単価、対応能力、受け付けるeffortの値と既定、使わせる役割を版付きで保持（§4.8） |
 | Connector / ConnectorRevision | Adapter実装版、接続先、認証方式、資格情報（暗号化して保存）、公開範囲、上限、宣言した操作（§4.9） |
-| ConnectorPermission | Connector、使える利用者・役割、許可した操作と対象、読取り・書込みの区分 |
+| ConnectorPermission | Connector、使える利用者・役割、許可した操作と対象、読取り・書込みの区分、実行前に利用者の確認を必須にするか（harness.md §10.7） |
 | UserOAuthToken | 社内ユーザー、provider、scope、暗号化したaccess token・refresh token、有効期限（§4.9.1） |
 
 Conversationは社員が見る履歴の単位、Runは実行要求の単位、Attemptは障害等による実行試行の単位とする。同じRunのリトライを別の会話や依頼として扱わない。
@@ -1012,7 +1014,7 @@ Artifact Storeへ保存後、hashとサイズを記録し、その参照をDBへ
 
 ### 7.5 コマンドとPythonの実行ループ
 
-エージェントへshell、read_file、write_file等のToolを提供し、LLMがコマンドを選択し、結果を読み、コードを修正して再実行できるようにする。社員は自然言語で依頼し、必要な操作はRunnerがSandboxへ渡す。この機能は特定の対話型CLI製品を内側で起動することを必須としない。
+エージェントへshell、read、write、edit等のToolを提供し（Toolの一覧と仕様は harness.md §7）、LLMがコマンドを選択し、結果を読み、コードを修正して再実行できるようにする。社員は自然言語で依頼し、必要な操作はRunnerがSandboxへ渡す。この機能は特定の対話型CLI製品を内側で起動することを必須としない。
 
 ```python
 # エージェントが呼ぶToolの概念例
@@ -1023,9 +1025,9 @@ shell(
 )
 ```
 
-サーバーはcwd、環境変数、timeout、出力サイズを検証し、上限を強制する。標準入力待ちで停止しないよう非対話実行を基本とする。戻り値はexit code、上限付きstdout・stderr、打切り有無、必要ならログArtifact参照とする。timeoutや取消では該当process groupを停止し、Run終了時はコンテナ全体を停止する。
+コマンドは常駐のシェルを持たず、呼出しごとに新しいbashを `docker exec` で起動して実行する（harness.md §8）。cwdはRunの状態に持って毎回渡し、コマンドの中の `cd`・`export` は次の呼出しへ残らない。サーバーはcwd、環境変数、timeout、出力サイズを検証し、上限を強制する。標準入力を閉じた非対話実行とする。戻り値はexit code、上限付きの出力、打切り有無、退避した全体の場所とする。取消では該当process groupを停止し、Run終了時はコンテナ全体を停止する。
 
-長時間コマンドを非同期Toolとして扱う場合はcommand IDを返して状態取得・停止を行う。セッションとprocessはAttemptに属し、別Workerへの再開で引き継がない。LLM呼出しの間も続けるprocessがある場合、Checkpoint保存前に停止または整合する状態へ移す。
+timeoutまでに終わらないコマンドは止めずにバックグラウンドのジョブへ移し、job IDを返して出力の取得・停止を行う（初めからバックグラウンドで始めることもできる）。終わったジョブは次のステップでエージェントに知らせる。セッションとprocessはAttemptに属し、別Workerへの再開で引き継がない。LLM呼出しの間も続けるprocessがある場合、Checkpoint保存前に停止または整合する状態へ移す。
 
 例えばExcelの名寄せでは、列確認、必要ライブラリの追加、スクリプト生成、実行、エラー修正、件数等の確認、outputへの保存を行う。生成スクリプトはRun内の作業ファイルとして扱い、他のRunの共通Toolへ自動登録しない。再利用したい手順はSkillとして明示的に保存する。
 
@@ -1686,3 +1688,4 @@ Sandboxイメージの定義は本体と同じリポジトリの `sandbox/` で�
 | 0.18 | 2026年10月20日 | SSOの設定（種別、client ID、client secret、テナント・ドメイン、許可するメールドメイン）を環境変数から管理画面に移し、client secretをDBに暗号化して保存する方式にした。SSOのない導入先のために、Yorikiのアカウント（基盤管理者が招待のリンクを発行し、本人がパスワードを設定する。試行回数の制限）を追加。SSOを設定したら社員はSSOだけでログインし、同じメールアドレスの既存のアカウントに紐付ける。基盤管理者のパスワードでのログインは、SSOが有効な間も `/login?method=password` に残す（§10.0） |
 | 0.19 | 2026年10月21日 | 「エージェント」を標準のハーネス1つだけを指す名前にし、業務ごとのAgent（業務の設定）とAgent Revisionをやめた。業務ごとの手順・資料・使ってよいTool・Connector・実行環境・必要な能力はSkillの版が持ち、誰が使えるかはSkillの公開範囲で決める。SkillとConnectorは、社員が `/`・`@` で明示するか、エージェントが利用者の権限で使えるものから探して使う。Skillを束ねる業務のPlugin（Plugin Release、channelを追う参照）をやめ、Pluginはサーバーに配備する拡張だけを指す名前にした。モデルは会話・Task Definitionで直接選び、effortはモデルごとの値をそのまま使う。自動で変えるのはeffortだけとし、モデルの切り替えは利用者が明示したときだけにする。障害時は別のモデルへ自動では切り替えず、会話では利用者に切り替えを求め、タスクではエラーを通知する。切り替えには機密の制限とSkillの能力をかける。実行の途中で読み込んだSkillと、モデル・effortの切り替えはManifestへ追記し、利用者が明示したときだけSkillを最新の公開版へ切り替える。Connectorの利用の許可を、Agentごとから利用者（役割）ごとに変えた。役割「Plugin公開者」を「Skill公開者」とした（§3、§4.1、§4.8、§4.9、§5.1、§11） |
 | 0.20 | 2026年10月21日 | Webhookのpayloadは送り元ごとに形が違うので、送り元ごとのPluginを作らず、payloadをいつもそのままファイルとして渡し、読み方はSkillで吸収する。受付時に必要な項目だけをBindingの表で取り出せるようにし（JSONのpath、必須、型。必須がない・型が合わない要求は400）、取り出した値はプロンプトに埋め込める。サンプルのpayloadで取り出しを試せる。Bindingには受け口・認証・重複のキー・項目の取り出し・上限だけを置き、処理の流れを組む画面は作らない。送る形を決められる送り元向けに推奨の形式を示す。重複のキーは送り元のイベントIDか `Idempotency-Key` だけとし（本文のhashは使わない）、Webhookで起動するタスクには失敗の通知先を必須にして、run_idで状態を確かめる口を設けた。§4.1の例に残っていた `agent_id` を直した（§4.1、§4.2、§11.9） |
+| 0.21 | 2026年10月21日 | ハーネス（Runner）の設計を [harness.md](harness.md) にまとめた。公開されているハーネス（DeepSeek Harness、OpenCode、Codex CLI、Gemini CLI、OpenHands、SWE-agent）を読んで決めた。コマンドは常駐のシェルを持たず、呼出しごとに `docker exec` で実行し、cwdはRunの状態に持つ。timeoutまでに終わらないコマンドはバックグラウンドのジョブへ移す。RunEventにモデル用の内容を持たせ、モデルへの入力をすべてRunEventから組み立てる。CheckpointにRunEventのsequenceを持たせ、Connectorの書込みの操作に実行前の確認を必須にする設定を加えた。Web検索・Web取得はMVPの後にConnectorとして加え、各社のLLMに組み込みのWeb検索は基盤管理者が許可したときだけ使う（§2、§4.8、§4.9.3、§5.1、§7.5） |

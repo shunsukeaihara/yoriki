@@ -126,6 +126,7 @@ design.md §5.1の永続オブジェクトを、次の単位で分ける。実�
 | `llm` | LLMConnection、ModelProfile、Provider Adapter（design.md §4.8） |
 | `connector` | Connector、ConnectorPermission（使える利用者・役割と操作）、操作のAdapter（社内DB、SharePoint、Google Drive、MCP。design.md §4.9） |
 | `stream` | SSEのストリームview、イベントのSerializer（realtime.md） |
+| `harness` | Modelなし。Runner（実行のループ）、Tool、RunEventからの文脈の組立、圧縮、Sandboxの操作（harness.md §3） |
 
 ---
 

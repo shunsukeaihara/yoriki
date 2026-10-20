@@ -14,6 +14,7 @@ Yoriki（よりき）は、社員が業務用AI Agentを安全に使うための
 - フロントエンドの実装規約：[docs/frontend-conventions.md](docs/frontend-conventions.md)
 - フロントエンドの実装例：[docs/frontend-examples.md](docs/frontend-examples.md)
 - リアルタイム通信（SSE）の方針：[docs/realtime.md](docs/realtime.md)
+- エージェントのハーネス（Runner、Tool、文脈の組立、Sandboxでの実行）：[docs/harness.md](docs/harness.md)
 - 配備・Compose・Nginx・イメージの方針：[docs/deployment.md](docs/deployment.md)
 - 開発の進め方（ブランチ、コミット、lint・テスト、CI、VS Code）：[docs/development.md](docs/development.md)
 

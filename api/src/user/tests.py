@@ -382,11 +382,31 @@ class TestSSOProviderAPI:
         assert "client_secret" in res.json()
 
     @pytest.mark.django_db
-    def test_django_admin_hides_secret_and_fixes_kind(self, api_client, platform_admin):
+    def test_django_admin_is_read_only(self, api_client, platform_admin):
+        # 管理画面のフォームには client secret が出ないので、作成・変更はYorikiの管理画面だけで行う
         sso = SSOProviderFactory.create()
         api_client.force_login(platform_admin)
+        assert api_client.get("/api/admin/user/ssoprovider/add/").status_code == 403
         res = api_client.get(f"/api/admin/user/ssoprovider/{sso.pk}/change/")
         assert res.status_code == 200
         html = res.content.decode()
         assert "test-secret" not in html
         assert 'name="kind"' not in html
+        assert 'name="_save"' not in html
+        res = api_client.post(f"/api/admin/user/ssoprovider/{sso.pk}/change/", {"kind": "google", "is_active": ""})
+        assert res.status_code == 403
+        sso.refresh_from_db()
+        assert sso.kind == SSOKind.MICROSOFT
+        assert sso.is_active
+
+
+class TestRemovedSSOEnvCheck:
+    def test_warns_when_old_env_remains(self, monkeypatch):
+        from .checks import check_removed_sso_env  # noqa: PLC0415
+
+        monkeypatch.delenv("YORIKI_SSO_PROVIDERS", raising=False)
+        assert check_removed_sso_env(None) == []
+        monkeypatch.setenv("YORIKI_SSO_PROVIDERS", "microsoft")
+        warnings = check_removed_sso_env(None)
+        assert [w.id for w in warnings] == ["user.W001"]
+        assert "YORIKI_SSO_PROVIDERS" in warnings[0].msg

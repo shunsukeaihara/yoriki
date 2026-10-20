@@ -30,18 +30,22 @@ class UserAdmin(BaseUserAdmin):
 
 @admin.register(SSOProvider)
 class SSOProviderAdmin(admin.ModelAdmin):
-    """client secretは管理画面に出さない（EncryptedSecretField は editable=False）。
+    """見るだけにする。登録・変更・削除はYorikiの管理画面（/manage/sso_providers）で行う。
 
-    登録と差し替えはYorikiの管理画面で行う
+    client secretは EncryptedSecretField（editable=False）なので管理画面のフォームに出ず、ここで作ると
+    client secretのない有効な設定ができてしまう。必須項目と種別ごとの検証も SSOProviderSerializer にある
     """
 
-    raw_id_fields = ("created_by",)
-    readonly_fields = ("uid", "created", "updated")
+    readonly_fields = ("uid", "created_by", "created", "updated")
     list_display = ("id", "uid", "kind", "client_id", "is_active", "deleted", "updated")
     list_filter = ("kind", "is_active", "deleted")
     search_fields = ("uid", "client_id")
 
-    def get_readonly_fields(self, request, obj=None):
-        # 種別は作成した後は変えない
-        fields = super().get_readonly_fields(request, obj)
-        return (*fields, "kind") if obj else fields
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

@@ -98,5 +98,5 @@ cd frontend && pnpm install
 - 環境変数はリポジトリルートの `.envrc`（direnv）。テストやmypyは、`.envrc` を読み込んだ状態で実行する。
 - 変更前に、AGENTS.md と、触る範囲の規約を読む。作業の進め方（ブランチ、コミット、Pull Request、CI、マージ）は development.md に従う。
 - 作業の区切りでは、本書の §1・§3・§4 を更新する。
-- Pull Requestの進め方：コードの変更は、手元のブランチで作り、作る前にユーザーに確認してからpushとPRの作成をする。本書の状況の更新や誤字の修正のように判断を含まない文書の変更は、PRを作らずに `main` へ直接コミットする。design.md や規約の判断を変える変更はPRにする（development.md §1）。CIが通ったら `/codex:adversarial-review`（ユーザーが実行する）の指摘を直し、ユーザーの指示があってからマージする（squash merge。`[skip ci]` は development.md §4.1）。自分の判断でマージしない。PRのページは消せないので、試しのPRや取り消しのPRは作らない。
+- Pull Requestの進め方（AGENTS.md）：コードの変更は手元のブランチで作り、PRはユーザーに依頼されてから作る。マージはユーザーが行う。本書の状況の更新や誤字の修正のように判断を含まない文書の変更は、PRを作らずに `main` へ直接コミットする。design.md や規約の判断を変える変更はPRにする（development.md §1）。CIが通ったら `/codex:adversarial-review`（ユーザーが実行する）の指摘を直して報告し、マージはユーザーに任せる（squash merge。`[skip ci]` は development.md §4.1）。PRのページは消せないので、試しのPRや取り消しのPRは作らない。
 - 設計の判断を変える話が出たら、コードを書く前に design.md と本書を直し、合意してから実装する。

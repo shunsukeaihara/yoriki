@@ -20,6 +20,7 @@ from .base import (
     ToolCallRequested,
     Usage,
     connection_error,
+    incomplete_stream_error,
     parse_arguments,
     status_error,
     timeout_error,
@@ -84,7 +85,7 @@ class OpenAIAdapter(ProviderAdapter):
             request_id = stream.response.headers.get("x-request-id", "")
             tool_calls: dict[int, dict[str, str]] = {}
             finish_reason = ""
-            usage = Usage(0, 0)
+            usage: Usage | None = None
             for chunk in stream:
                 if chunk.usage:
                     details = chunk.usage.prompt_tokens_details
@@ -105,9 +106,14 @@ class OpenAIAdapter(ProviderAdapter):
                             call["arguments"] += delta.function.arguments or ""
                     finish_reason = choice.finish_reason or finish_reason
 
+        # 終わりの合図がないまま切れた応答は完了にしない（途中までの文と0の利用量を返さない）。
+        # 利用量の塊は停止の理由の後に届く。ローカルLLMのサーバーには利用量を返さないものがあるので、そこだけは許す
+        if not finish_reason or (usage is None and self.connection.kind != ProviderKind.LOCAL):
+            raise incomplete_stream_error()
+
         for _index, call in sorted(tool_calls.items()):
             yield ToolCallRequested(ToolCall(call["id"], call["name"], parse_arguments(call["arguments"])))
-        yield usage
+        yield usage or Usage(0, 0)
         yield Completed(STOP_REASONS.get(finish_reason, StopReason.OTHER), request_id)
 
     def list_models(self) -> list[str]:

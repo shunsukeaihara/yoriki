@@ -34,6 +34,10 @@ class ModelProfileVersionAdmin(admin.ModelAdmin):
     readonly_fields = ("uid", "created")
     list_display = ("id", "profile", "number", "connection", "model_name", "created")
 
+    # 版は ModelProfile.revise() でだけ作る（管理画面から番号や作成者を自由に入れた版を履歴に混ぜない）
+    def has_add_permission(self, request):
+        return False
+
     def has_change_permission(self, request, obj=None):
         return False
 

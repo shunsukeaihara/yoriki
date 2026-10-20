@@ -22,6 +22,7 @@ from .base import (
     ToolCallRequested,
     Usage,
     connection_error,
+    incomplete_stream_error,
     status_error,
     timeout_error,
 )
@@ -78,7 +79,7 @@ class GeminiAdapter(ProviderAdapter):
         contents = [_content(m) for m in request.messages if m.role != "system"]
 
         tool_calls: list[ToolCall] = []
-        usage = Usage(0, 0)
+        usage: Usage | None = None
         finish_reason: Any = None
         request_id = ""
         with _errors():
@@ -104,6 +105,10 @@ class GeminiAdapter(ProviderAdapter):
                             )
                         elif part.text and not part.thought:
                             yield TextDelta(part.text)
+
+        # 終わりの合図（finishReason と usageMetadata）がないまま切れた応答は完了にしない
+        if finish_reason is None or usage is None:
+            raise incomplete_stream_error()
 
         for tool_call in tool_calls:
             yield ToolCallRequested(tool_call)

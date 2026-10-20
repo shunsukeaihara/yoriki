@@ -260,6 +260,12 @@ class TestModelProfile:
         assert profile.is_active is False
 
     @pytest.mark.django_db
+    def test_django_admin_cannot_add_versions(self, api_client, platform_admin):
+        # 版は revise() でだけ作る。管理画面から番号や作成者を自由に入れた版を履歴に混ぜない
+        api_client.force_login(platform_admin)
+        assert api_client.get("/api/admin/llm/modelprofileversion/add/").status_code == 403
+
+    @pytest.mark.django_db
     def test_filter_by_connection(self, admin_client):
         target = ModelProfileFactory.create()
         ModelProfileFactory.create()

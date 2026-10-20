@@ -1,6 +1,7 @@
 """Provider Adapterのテスト。各社のAPIの応答（SSE）を差し替えたHTTPクライアントで返し、共通の型への変換を確かめる"""
 
 import json
+from collections.abc import Sequence
 
 import httpx
 import httpx2
@@ -36,7 +37,7 @@ REQUEST = ChatRequest(
 )
 
 
-def _sse(events: list[tuple[str | None, dict | str]]) -> bytes:
+def _sse(events: Sequence[tuple[str | None, dict | str]]) -> bytes:
     lines = []
     for name, data in events:
         if name:
@@ -113,6 +114,29 @@ class TestOpenAI:
         assert sent["messages"][2]["tool_calls"][0]["function"]["arguments"] == '{"city": "大阪"}'
         assert sent["messages"][3] == {"role": "tool", "tool_call_id": "call_0", "content": "晴れ"}
         assert sent["tools"][0]["function"]["name"] == "get_weather"
+
+    @pytest.mark.django_db
+    def test_incomplete_stream_is_an_error(self):
+        # 停止の理由と利用量が届く前に切れた。途中までの文を完了として返さない
+        chunks = [json.loads(line[6:]) for line in self.BODY.decode().split("\n") if line.startswith("data: {")]
+        recorder = Recorder(body=_sse([(None, chunks[0])]))
+        connection = LLMConnectionFactory.create(kind=ProviderKind.OPENAI)
+        events = []
+        with pytest.raises(ProviderError) as info:
+            for event in get_adapter(connection, http_client=_httpx2(recorder)).stream(REQUEST):
+                events.append(event)
+        assert info.value.retryable
+        assert events == [TextDelta("東京は")]
+
+    @pytest.mark.django_db
+    def test_local_may_omit_usage(self):
+        # ローカルLLMのサーバーには利用量を返さないものがある。停止の理由があれば完了にする
+        chunks = [json.loads(line[6:]) for line in self.BODY.decode().split("\n") if line.startswith("data: {")]
+        body = _sse([(None, c) for c in chunks if "usage" not in c] + [(None, "[DONE]")])
+        recorder = Recorder(body=body)
+        connection = LLMConnectionFactory.create(kind=ProviderKind.LOCAL, base_url="http://llm.internal/v1", api_key="")
+        events = list(get_adapter(connection, http_client=_httpx2(recorder)).stream(REQUEST))
+        assert events[-2:] == [Usage(0, 0), Completed(StopReason.TOOL_USE, "")]
 
     @pytest.mark.django_db
     def test_local_uses_base_url_without_key(self):
@@ -200,6 +224,16 @@ class TestAnthropic:
         assert sent["tools"][0]["input_schema"] == WEATHER.parameters
 
     @pytest.mark.django_db
+    def test_incomplete_stream_is_an_error(self):
+        # message_delta と message_stop の前に切れた
+        truncated = self.BODY.decode().split("event: message_delta")[0].encode()
+        recorder = Recorder(body=truncated)
+        connection = LLMConnectionFactory.create(kind=ProviderKind.ANTHROPIC)
+        with pytest.raises(ProviderError) as info:
+            list(get_adapter(connection, http_client=_httpx2(recorder)).stream(REQUEST))
+        assert info.value.retryable
+
+    @pytest.mark.django_db
     def test_overloaded_is_retryable(self):
         recorder = Recorder(status=529, body={"type": "error", "error": {"type": "overloaded_error", "message": "x"}})
         connection = LLMConnectionFactory.create(kind=ProviderKind.ANTHROPIC)
@@ -244,6 +278,17 @@ class TestGemini:
         assert [c["role"] for c in sent["contents"]] == ["user", "model", "user"]
         assert sent["contents"][2]["parts"][0]["functionResponse"]["name"] == "get_weather"
         assert sent["generationConfig"]["maxOutputTokens"] == 100
+
+    @pytest.mark.django_db
+    def test_incomplete_stream_is_an_error(self):
+        # finishReason と usageMetadata を持つ最後の塊が届く前に切れた
+        truncated = self.BODY.decode().split("\n\n")[0].encode() + b"\n\n"
+        recorder = Recorder(body=truncated)
+        connection = LLMConnectionFactory.create(kind=ProviderKind.GEMINI)
+        client = httpx.Client(transport=httpx.MockTransport(recorder))
+        with pytest.raises(ProviderError) as info:
+            list(get_adapter(connection, http_client=client).stream(REQUEST))
+        assert info.value.retryable
 
     @pytest.mark.django_db
     def test_error(self):

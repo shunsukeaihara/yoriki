@@ -136,6 +136,11 @@ def timeout_error() -> ProviderError:
     return ProviderError(_("プロバイダの応答がタイムアウトしました。"), retryable=True)
 
 
+def incomplete_stream_error() -> ProviderError:
+    """応答が終わりの合図（停止の理由と利用量）なしに途切れた。途中までの文を完了として扱わない"""
+    return ProviderError(_("プロバイダの応答が途中で切れました。"), retryable=True)
+
+
 def connection_error() -> ProviderError:
     return ProviderError(
         _("プロバイダに接続できませんでした。接続先とネットワークを確認してください。"), retryable=True

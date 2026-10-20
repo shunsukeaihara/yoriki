@@ -18,6 +18,7 @@ from .base import (
     ToolCallRequested,
     Usage,
     connection_error,
+    incomplete_stream_error,
     parse_arguments,
     status_error,
     timeout_error,
@@ -83,6 +84,7 @@ class AnthropicAdapter(ProviderAdapter):
             tool_calls: dict[int, dict[str, str]] = {}
             input_tokens = cached_tokens = output_tokens = 0
             stop_reason = ""
+            stopped = False
             for event in stream:
                 match event.type:
                     case "message_start":
@@ -100,6 +102,12 @@ class AnthropicAdapter(ProviderAdapter):
                     case "message_delta":
                         stop_reason = event.delta.stop_reason or stop_reason
                         output_tokens = event.usage.output_tokens
+                    case "message_stop":
+                        stopped = True
+
+        # 終わりの合図（message_delta の停止の理由と message_stop）がないまま切れた応答は完了にしない
+        if not stopped or not stop_reason:
+            raise incomplete_stream_error()
 
         for _index, call in sorted(tool_calls.items()):
             yield ToolCallRequested(ToolCall(call["id"], call["name"], parse_arguments(call["arguments"])))

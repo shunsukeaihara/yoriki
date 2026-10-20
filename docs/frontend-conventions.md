@@ -273,16 +273,17 @@ if (error.value) throw createError(error.value)   // statusCode（404 / 403 等�
 
 ## 4 認証
 
-社内SSOのログインは、すべてバックエンドで処理する（backend-conventions.md §6.2）。ログインはdjango-allauthのsocialaccountで行い、初期はGoogle WorkspaceとMicrosoft 365（Entra ID）に対応し、Auth0とその他のOIDCは後から追加する。フロントエンドは認証基盤ごとのSDKを持たない。ログイン状態はDjangoのセッションCookieで保つ。前段に認証プロキシ（oauth2-proxy）がある環境でも、Yorikiのログイン画面とログインの流れは変えない（認証プロキシはバリアとして置くだけ。deployment.md §8.6）。
+ログインは、すべてバックエンドで処理する（backend-conventions.md §6.2）。方法は社内SSO（django-allauthのsocialaccount。初期はGoogle WorkspaceとMicrosoft 365（Entra ID））と、Yorikiのアカウント（メールアドレスとパスワード）の2つで、有効なSSOの設定があれば社員はSSOだけを使う（design.md §10.0）。フロントエンドは認証基盤ごとのSDKを持たない。ログイン状態はDjangoのセッションCookieで保つ。前段に認証プロキシ（oauth2-proxy）がある環境でも、Yorikiのログイン画面とログインの流れは変えない（認証プロキシはバリアとして置くだけ。deployment.md §8.6）。
 
 - 起動時に `plugins/auth.client.ts` で `await useAccountStore().init()` を実行する。この中で `app/v1/auth/session/` を呼んでCSRFのCookieを受け取り、`app/v1/my/` からログインユーザーを取得する。
 - `middleware/auth.global.ts` で、未ログインのユーザーを `/login?next=<元のパス>` に移動させる。ログインの要らないページ（`/login`、`dev/` の開発用ページ）には `definePageMeta({ auth: false })` を付ける。
 - APIに届かず起動時の確認に失敗した場合は、未ログインとして扱い、ログイン画面を表示する。
-- ログイン画面（`pages/login.vue`、`layouts/anonymous.vue`）は、`app/v1/auth/providers/` が返す有効な認証基盤のボタンを並べる。ボタンを押したら、バックエンドのログイン開始URLへ画面ごと移動する（POSTのフォームで送り、CSRFトークンを付ける）。認証基盤から戻った後は、バックエンドが `next` のパスへリダイレクトする。許可されていないアカウントや認証の失敗では、バックエンドが `/login?error=not_allowed`、`/login?error=failed` へ戻すので、ログイン画面でその旨を表示する。
+- ログイン画面（`pages/login.vue`、`layouts/anonymous.vue`）は、`app/v1/auth/providers/` の応答で表示を決める。有効な認証基盤があればそのボタンを並べ、パスワードの欄は出さない（`/login?method=password` を開いたときだけ、基盤管理者用に出す）。認証基盤がなければパスワードの欄を出す。パスワードでのログインは `app/v1/auth/session/` へのPOSTで行い、`createSubmit` でエラーを表示する。ボタンを押したら、バックエンドのログイン開始URLへ画面ごと移動する（POSTのフォームで送り、CSRFトークンを付ける）。認証基盤から戻った後は、バックエンドが `next` のパスへリダイレクトする。許可されていないアカウントや認証の失敗では、バックエンドが `/login?error=not_allowed`、`/login?error=failed` へ戻すので、ログイン画面でその旨を表示する。
 - ログアウトは `app/v1/auth/session/` へのDELETEで行い、ログイン画面へ移動する。
 - 前段の認証プロキシのセッションが切れた場合は、§3.1のとおり画面ごと再読み込みする。ログアウトで消すのはYorikiのセッションだけにし、認証プロキシのセッションは消さない（前段の基盤のものなので）。
-- 画面とAPIクライアントが使うのは、`useAccountStore` の `isAuthenticated`、`user`、`init()`、`logout()` だけにする。
-- 外部の認証SDK（Auth0等）、Django JWTとの交換、トークンのrefresh、メールアドレス・パスワードのログインは使わない。
+- 招待・再設定のリンク（`/invitation#<token>`。`auth: false`。tokenはアクセスログに残らないようURLのフラグメントに置き、APIへは本文で送る）では、本人がパスワードを設定し、そのままログインした状態にする。期限切れ・使用済みのリンクでは、基盤管理者に発行し直してもらうよう案内する。
+- 画面とAPIクライアントが使うのは、`useAccountStore` の `isAuthenticated`、`user`、`init()`、`login()`、`logout()` だけにする。
+- 外部の認証SDK（Auth0等）、Django JWTとの交換、トークンのrefreshは使わない。
 
 ---
 

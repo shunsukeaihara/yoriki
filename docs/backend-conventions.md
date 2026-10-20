@@ -48,6 +48,7 @@ Yorikiのバックエンド（Django、DRF、Django Q2）を実装するエー�
 - `django-extensions`：`runscript`、`shell_plus`、`show_urls` 等を使う。
 - `drf-spectacular`：OpenAPIスキーマの生成。全ViewSetとactionに `@extend_schema` を付ける。
 - `django-allauth`：社内SSOのログイン（§6.2）。
+- `django-axes`：パスワードでのログインの試行回数の制限（§6.2）。
 - `uvicorn`：ASGIサーバー。DjangoはASGIアプリとしてUvicornで起動する（`uvicorn app.asgi:application`）。SSEのストリームは接続を長く保つため、gunicornの同期ワーカーは使わない（[realtime.md](realtime.md)）。
 - このほか、`djangorestframework`、`django-filter`、`django-q2`、`nanoid`、`django-auditlog` を使う。
 - Python、uvのバージョンはリポジトリルートの `mise.toml` で固定する。
@@ -595,16 +596,21 @@ DATABASES = {
 - Djangoの非同期ORM（`aget`、`afilter` 等）は、内部では同期の接続をスレッドで使う。非同期のview（SSE）でイベントループを止めずにDBを読むために使い、非同期のviewから同期のORMを直接呼ばない。
 - Connector（design.md §4.9）のドライバ（pyodbc、psycopg 3、mysqlclient）は、Yoriki自身のDBとは別に、同期で使う。Connectorを呼ぶのはqclusterと同期のviewだけなので、非同期のドライバは使わない。
 
-### 6.2 認証（社内SSO）
+### 6.2 認証（社内SSOとYorikiのアカウント）
 
-- ログインはバックエンドで処理し、Djangoのセッションでログイン状態を保つ。フロントエンドにトークンを持たせない（frontend-conventions.md §4）。
-- SSOはdjango-allauthのsocialaccountで実装する。最初に対応するのはGoogle WorkspaceとMicrosoft 365（Entra ID）とする。Auth0やその他のOpenID Connectの認証基盤は、必要になったときに同じ仕組みで追加する。どの認証基盤を有効にするかと、client ID・secret・テナント等は環境変数で設定する。
-- 前段に認証プロキシ（oauth2-proxy等）を置く場合も、ログインは常にYoriki自身（django-allauth）で行う。認証プロキシはバリアとして扱い、プロキシが付けるヘッダーやIDトークンで利用者を決めない（前段の構成は deployment.md §8.6）。
-- 自社のアカウントだけを受け付ける。Entra IDはテナントID、Google Workspaceは `hd`（ドメイン。Googleを有効にするときは `YORIKI_SSO_GOOGLE_HOSTED_DOMAIN` を必須とし、未設定なら起動しない。IDトークンの `hd` が一致しないアカウントは、個人のGoogleアカウントとみなして拒否する）、後から追加する認証基盤はissuerと許可するメールドメインで確認する。どの認証基盤でも、メールアドレスのドメインが `YORIKI_SSO_ALLOWED_EMAIL_DOMAINS` にあることを確認する（`user/adapters.py`）。許可しないアカウントは `/login?error=not_allowed`、認証の失敗は `/login?error=failed` へ戻す。
-- ユーザーは、許可された認証基盤で初めてログインした時点で作成し、通常社員の役割から始める。業務管理者・Plugin公開者などの役割はGroupとして管理画面で割り当て、基盤管理者は `is_superuser` にする（§6.3。IdPのグループとの連携は必要になってから追加する）。
-- 最初の基盤管理者は `createsuperuser` で作る。SSOの設定前でも管理画面へ入れるようにするため、パスワードでのログインは基盤管理者だけに許可する（`utils.backends.PlatformAdminPasswordBackend`。allauthのメール・パスワードのログインは `SOCIALACCOUNT_ONLY` で使わない）。
+- ログインはバックエンドで処理し、Djangoのセッションでログイン状態を保つ。フロントエンドにトークンを持たせない（frontend-conventions.md §4）。ログインの方法は社内SSOとYorikiのアカウント（メールアドレスとパスワード）の2つで、どちらを使うかは有効なSSOの設定があるかで決まる（design.md §10.0）。
+- SSOはdjango-allauthのsocialaccountで実装する。最初に対応するのはGoogle WorkspaceとMicrosoft 365（Entra ID）とする。Auth0やその他のOpenID Connectの認証基盤は、必要になったときに同じ仕組みで追加する。
+- SSOの設定（種別、client ID、client secret、テナントID、Workspaceのドメイン、許可するメールドメイン、有効・無効）は、`user` アプリのModel（`SSOProvider`）に持たせ、基盤管理者が管理画面（`v1/sso_providers`、`PlatformAdmin`）で登録する。環境変数では設定しない。client secretは `EncryptedSecretField`（§6.4）にし、種別は作成した後は変えない（更新用のSerializerで読み取り専用）。
+- django-allauthへは、`SocialAccountAdapter.list_apps()` で有効な `SSOProvider` から保存しない `SocialApp` を作って渡し、client secretはその中でだけ復号する。allauthの `SocialApp` のテーブルとDjango管理画面のその画面は使わない（client secretが平文で保存されるため）。
+- 前段に認証プロキシ（oauth2-proxy等）を置く場合も、ログインは常にYoriki自身で行う。認証プロキシはバリアとして扱い、プロキシが付けるヘッダーやIDトークンで利用者を決めない（前段の構成は deployment.md §8.6）。
+- 自社のアカウントだけを受け付ける。Entra IDはテナントID、Google Workspaceは `hd`（ドメイン。Googleの設定では必須にする。IDトークンの `hd` が一致しないアカウントは、個人のGoogleアカウントとみなして拒否する）、後から追加する認証基盤はissuerで確認する。どの認証基盤でも、メールアドレスのドメインがその設定の許可するドメインにあることを確認する（`user/adapters.py`）。許可しないアカウントは `/login?error=not_allowed`、認証の失敗は `/login?error=failed` へ戻す。
+- SSOで初めてログインしたとき、同じメールアドレス（大文字・小文字を区別しない）のユーザーがいれば、そのユーザーに紐付ける（`pre_social_login` で `sociallogin.connect()`）。いなければ作成し、通常社員の役割から始める。業務管理者・Plugin公開者などの役割はGroupとして管理画面で割り当て、基盤管理者は `is_superuser` にする（§6.3。IdPのグループとの連携は必要になってから追加する）。
+- Yorikiのアカウントは、基盤管理者が管理画面（`v1/users`）で作る。作成と再設定では、期限付きで1回だけ使える招待のtoken（既定は7日。DBにはハッシュだけを保存する）を発行し、そのURLを応答に一度だけ含めて画面に表示する。tokenはアクセスログに残らないよう、URLのフラグメント（`/invitation#<token>`）に置く。本人の画面は本文でtokenを送り、`POST app/v1/auth/invitations/verify/`（宛先のメールアドレスと期限を返す）と `POST app/v1/auth/invitations/accept/`（パスワードを設定してログインする）を呼ぶ。Yorikiからメールは送らない。
+- パスワードでのログインは `POST app/v1/auth/session/`（メールアドレス、パスワード）で行う。判定は認証バックエンド（`utils.backends.PasswordBackend`）に置き、有効なSSOの設定があれば基盤管理者（`is_superuser`）だけに、なければ有効なユーザーすべてに許可する。パスワードは `AUTH_PASSWORD_VALIDATORS` で検証する。allauthのメール・パスワードのログインとアカウント作成は使わない（`SOCIALACCOUNT_ONLY`）。
+- ログインの試行回数の制限は django-axes で行う（記録はPostgreSQL。アカウントと送信元のIPアドレスの組で数える）。送信元のIPアドレスは `REMOTE_ADDR` を使う（nginxの `set_real_ip_from` とUvicornの `--proxy-headers`・`--forwarded-allow-ips` で利用者のIPアドレスになる。deployment.md §8）。Django管理画面のログインも同じ制限を受ける。
+- 最初の基盤管理者は `createsuperuser` で作る。SSOの設定の誤りや認証基盤の停止に備え、基盤管理者のパスワードでのログインはSSOの有無に関係なく残す。
 - `DEFAULT_AUTHENTICATION_CLASSES` は `utils.authentication.SessionAuthentication` だけにする。DRF標準の `SessionAuthentication` は未ログインを403で返すため、`authenticate_header` を実装したサブクラスにして401を返す。フロントエンドは401でログイン画面へ移動し、403（権限不足）とは区別する。JWT、Token、Basicの認証は使わない。
-- CSRFはDjango標準の仕組みを使う。`GET /api/app/v1/auth/session/`（`ensure_csrf_cookie`）でCSRFのCookieを渡し、書き込みの要求は `X-CSRFToken` ヘッダーで検証する。ログアウトは `DELETE /api/app/v1/auth/session/` で行う。有効なログイン方法の一覧は `GET /api/app/v1/auth/providers/` で返す。
+- CSRFはDjango標準の仕組みを使う。`GET /api/app/v1/auth/session/`（`ensure_csrf_cookie`）でCSRFのCookieを渡し、書き込みの要求は `X-CSRFToken` ヘッダーで検証する。パスワードでのログインは `POST /api/app/v1/auth/session/`、ログアウトは `DELETE /api/app/v1/auth/session/` で行う。有効なログイン方法の一覧（SSOの認証基盤と、パスワードの欄を出すか）は `GET /api/app/v1/auth/providers/` で返す。
 - セッションCookieは `Secure`、`HttpOnly`、`SameSite=Lax` にする。画面とAPIは同じオリジンに置くので、CORSは使わない。
 - APIのURLは `/api/` の下に置く（§5）。nginxと開発用のプロキシはパスを書き換えずに転送する（deployment.md §4.1）。
 - 別の認証を使う入口は、ViewSetで `authentication_classes` を指定して分ける（§4.2）。`Hook*`（`hooks/v1/`）は連携ごとの署名やtokenで認証し、セッションは使わない。
@@ -620,7 +626,7 @@ DATABASES = {
 | `utils/serializers.py` | `CountSerializer`、`PingSerializer`、`ReadOnlyModelSerializer`、複数アプリで使う最小Serializer |
 | `utils/permissions.py` | `AppPermission`（Yorikiで定義するpermissionの一覧）、`AppUser`（ログインしている社員）、`PlatformAdmin`（基盤管理者）、`require_permission()` |
 | `utils/authentication.py` | 401を返す `SessionAuthentication`（とそのOpenAPIの定義）、`Hook*` 用の認証クラス |
-| `utils/backends.py` | パスワードでのログインを基盤管理者だけに許可する認証バックエンド |
+| `utils/backends.py` | パスワードでのログインの認証バックエンド（有効なSSOの設定があれば基盤管理者だけに許可する） |
 | `utils/exceptions.py` | `Conflict`（409）等、DRFの `APIException` のサブクラス |
 | `utils/pagination.py` | `CursorPaginationWithPageSizeQuery`（`page_size` クエリ、上限200） |
 | `utils/handlers.py` | DRFの例外ハンドラ（500系だけ通知に流す） |

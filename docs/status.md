@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-21（Yorikiのアカウント。`feature/yoriki-accounts`、PR作成前）
+- 最終更新：2026-10-21（#18 のマージ後）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -24,7 +24,7 @@
 | #15 | 認証の方式の見直しの設計（design.md 0.18 §10.0）：SSOの設定を管理画面へ、SSOのない導入先のYorikiのアカウント（招待・パスワード・試行回数の制限）、SSOへの切り替え時のメールアドレスでの紐付け |
 | #16 | SSOの設定の管理画面：`user.SSOProvider`（client secretは暗号化）、`v1/sso_providers`、`/manage/sso_providers`（リダイレクトURIの表示）。allauthへは `list_apps()` で保存しない `SocialApp` を渡す。SSOの初回ログインで同じメールアドレスのユーザーに紐付ける。環境変数 `YORIKI_SSO_*` を廃止 |
 | #17 | Secretを持つModel・版を作るModel（LLMの接続、モデル設定、SSOの設定）を、Django管理画面では見るだけにする（`utils.admin.ReadOnlyAdmin`） |
-| （PR作成前） | Yorikiのアカウント：`/manage/users`（`v1/users`、`v1/groups`。作成・役割・無効化・招待／再設定のリンクの発行）、`/invitation#<token>`（`app/v1/auth/invitations/verify`・`accept`）、パスワードでのログイン（`POST app/v1/auth/session/`、`utils.backends.PasswordBackend`。SSOが有効なら基盤管理者だけ。`/login?method=password`）、django-axesによる試行回数の制限（アカウントごと・送信元IPごと、10回で15分）。未ログインのPOSTでもCSRFを確かめる `utils.permissions.CsrfProtected`。`app/v1/auth/providers/` は `{providers, password_login}` を返す |
+| #18 | Yorikiのアカウント：`/manage/users`（`v1/users`、`v1/groups`。作成・役割・無効化・招待／再設定のリンクの発行）、`/invitation#<token>`（`app/v1/auth/invitations/verify`・`accept`）、パスワードでのログイン（`POST app/v1/auth/session/`、`utils.backends.PasswordBackend`。SSOが有効なら基盤管理者だけ。`/login?method=password`）、django-axesによる試行回数の制限（アカウントごと・送信元IPごと、10回で15分）。未ログインのPOSTでもCSRFを確かめる `utils.permissions.CsrfProtected`。`app/v1/auth/providers/` は `{providers, password_login}` を返す |
 
 確認済みのこと：
 

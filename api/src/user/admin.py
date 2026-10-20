@@ -2,6 +2,8 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.utils.translation import gettext_lazy as _
 
+from utils.admin import ReadOnlyAdmin
+
 from .models import SSOProvider, User
 
 
@@ -29,7 +31,7 @@ class UserAdmin(BaseUserAdmin):
 
 
 @admin.register(SSOProvider)
-class SSOProviderAdmin(admin.ModelAdmin):
+class SSOProviderAdmin(ReadOnlyAdmin):
     """見るだけにする。登録・変更・削除はYorikiの管理画面（/manage/sso_providers）で行う。
 
     client secretは EncryptedSecretField（editable=False）なので管理画面のフォームに出ず、ここで作ると
@@ -40,12 +42,3 @@ class SSOProviderAdmin(admin.ModelAdmin):
     list_display = ("id", "uid", "kind", "client_id", "is_active", "deleted", "updated")
     list_filter = ("kind", "is_active", "deleted")
     search_fields = ("uid", "client_id")
-
-    def has_add_permission(self, request):
-        return False
-
-    def has_change_permission(self, request, obj=None):
-        return False
-
-    def has_delete_permission(self, request, obj=None):
-        return False

@@ -164,14 +164,20 @@ class TestLLMConnection:
         assert admin_client.post(url).json() == {"ok": False, "detail": "API keyが正しくありません。", "models": []}
 
     @pytest.mark.django_db
-    def test_django_admin_hides_api_key_and_fixes_target(self, api_client, platform_admin):
+    def test_django_admin_is_read_only(self, api_client, platform_admin):
+        # 管理画面のフォームには API key が出ないので、作成・変更はYorikiの管理画面だけで行う
         connection = LLMConnectionFactory.create(kind=ProviderKind.LOCAL, base_url="http://llm.internal/v1")
         api_client.force_login(platform_admin)
-        page = api_client.get(f"/api/admin/llm/llmconnection/{connection.pk}/change/").content.decode()
+        assert api_client.get("/api/admin/llm/llmconnection/add/").status_code == 403
+        url = f"/api/admin/llm/llmconnection/{connection.pk}/change/"
+        page = api_client.get(url).content.decode()
         assert "sk-test" not in page
         assert 'name="api_key"' not in page
         assert 'name="base_url"' not in page
         assert 'name="kind"' not in page
+        assert api_client.post(url, {"name": "変更", "base_url": "http://other/v1"}).status_code == 403
+        connection.refresh_from_db()
+        assert connection.base_url == "http://llm.internal/v1"
 
 
 def _profile(connection, **overrides):
@@ -267,10 +273,14 @@ class TestModelProfile:
         assert profile.is_active is False
 
     @pytest.mark.django_db
-    def test_django_admin_cannot_add_versions(self, api_client, platform_admin):
-        # 版は revise() でだけ作る。管理画面から番号や作成者を自由に入れた版を履歴に混ぜない
+    def test_django_admin_cannot_add_profiles_or_versions(self, api_client, platform_admin):
+        # 版は revise() でだけ作る。管理画面から、版のない設定や、番号・作成者を自由に入れた版を作らせない
+        profile = ModelProfileFactory.create()
         api_client.force_login(platform_admin)
+        assert api_client.get("/api/admin/llm/modelprofile/add/").status_code == 403
         assert api_client.get("/api/admin/llm/modelprofileversion/add/").status_code == 403
+        assert api_client.get(f"/api/admin/llm/modelprofile/{profile.pk}/change/").status_code == 200
+        assert api_client.post(f"/api/admin/llm/modelprofile/{profile.pk}/change/", {"name": "x"}).status_code == 403
 
     @pytest.mark.django_db
     def test_filter_by_connection(self, admin_client):

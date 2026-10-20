@@ -60,10 +60,11 @@
 
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。提案する順番：
 
-1. **認証の方式の見直し**（design.md §10.0 を直してから実装する）：
-   - SSOの設定（認証基盤の種別、client ID、client secret（暗号化）、テナント、許可するドメイン）を、環境変数ではなく管理画面で行う（django-allauthの `SocialApp` に合わせ、secretは復号して渡す）。
-   - SSOを設定したら、社員はSSOだけでログインする。SSOがなければ、Yoriki自身のアカウントとパスワードでログインする（基盤管理者がアカウントを作り、招待のリンクから本人がパスワードを設定する。試行回数の制限）。
-   - 基盤管理者のパスワードでのログインは、SSOの設定の誤りやIdPの停止に備えて残す。
+1. **認証の方式の見直し**（design.md §10.0、backend-conventions.md §6.2、frontend-conventions.md §4 の0.18の設計で実装する）：
+   - SSOの設定（`SSOProvider`。種別、client ID、client secret（`EncryptedSecretField`）、テナント、Workspaceのドメイン、許可するメールドメイン）を管理画面で登録する。allauthへは `list_apps()` で保存しない `SocialApp` として渡す。環境変数 `YORIKI_SSO_*` はやめる。
+   - SSOがなければ、Yorikiのアカウントでログインする（基盤管理者が `v1/users` で作り、招待のリンク（`/invitation#<token>`、7日、1回だけ）を画面でコピーして渡す。再設定も同じ。SSOが有効な間は基盤管理者以外のリンクを発行・使用させず、SSOを有効にしたら未使用のリンクを無効にする。試行回数の制限は django-axes で、アカウントごとと送信元IPごとに別々に数える）。
+   - SSOを設定したら社員はSSOだけ。SSOの初回ログインで、同じメールアドレスのアカウントに紐付ける。
+   - 基盤管理者のパスワードでのログインは残す（SSOが有効な間は `/login?method=password` だけに出す）。
 2. **Agent（`agent`）**：Agent、AgentRevision（不変の版）、管理画面と、社員がAgentを選ぶ画面。
 3. **ハーネスの調査と設計（`docs/harness.md`）**：各社のAgent SDKやCLI製品は使わず、Provider Adapterの上にYoriki自身のRunnerを置く（design.md §4.8）。実装の前に、公開されているハーネスをリポジトリの外（例：`~/work/yoriki-reference/`。gitに入れない）にcloneして設計思想を読み、業務ツールとしてのハーネスをYoriki独自に設計する。読むもの：
    - **DeepSeek Harness**（`deepseek-ai/deepseek-harness`）：追記専用のセッションログから毎回モデルへの入力を組み立てる規約（RunEventを正本にするYorikiの形と同じ）、常駐ターミナル・バックグラウンドジョブ・長い出力の退避、fsとsubprocessのproviderをリモートのsandboxへ向ける構成、compaction・guard、deliverables（成果物）。developer previewで互換性が変わるので依存はしない。

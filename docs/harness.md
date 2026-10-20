@@ -97,13 +97,19 @@ RunnerはQClusterのプロセスの中で動き、Provider Adapter・Connector�
 
 1. **区切りの確認**：leaseを更新し、取消要求と緊急停止を確かめる。届いている追加指示（UserInstruction）とジョブの終了を、RunEventとして取り込む（§10.4）。
 2. **文脈の組立**：RunEventから要求（system prompt、Toolの定義、メッセージ）を組み立てる（§5）。圧縮が必要なら、先に圧縮だけを行い、このステップを終える（§9）。
-3. **予算の予約**：最大出力token（推論の分を含む）とモデル設定の単価から見積もった額を予約する（§10.6）。
+3. **予算の予約**：このステップの入力token（cacheから読む分・書く分を分ける）と最大出力token（推論の分を含む）を、モデル設定の単価で見積もった額を予約する（§10.6）。
 4. **モデルの呼出し**：Provider Adapterで呼ぶ。テキストの差分は保存しない一時イベントとして画面へ送る（realtime.md）。
 5. **応答の確定**：応答の本文、Tool呼出し、推論の途中経過（プロバイダ固有の部分）、利用量、要求IDを1つのRunEventとして記録し、利用量を精算する。応答が途中で切れた・失敗した試みは別の種類のイベントとして記録し、モデルに見せる履歴には入れない（§11.2）。
-6. **Toolの実行**：各Tool呼出しをToolInvocationとして記録してから実行し、結果をRunEventとして記録する。並べ方は§7.6。
+6. **Toolの実行**：各Tool呼出しをToolInvocationとして記録してから実行し、結果をRunEventとして記録する。並べ方は§7.6。Toolの組（§7.6）と組の間、および外部の確定した変更・利用者とのやり取りを伴うTool（effectが `WRITE_EXTERNAL`・`INTERACT`）の直前にも、1と同じ確認をする。
 7. **次へ**：Tool呼出しがあれば1へ戻る。なければRunを終える（§4.3）。
 
-ステップの区切り（1と6の後）が「安全な区切り」（design.md §5.2の6）で、Checkpointの確定、追加指示の取込み、取消の受付はここで行う。
+ステップの区切り（1と6の後）と、6のToolの組の間が「安全な区切り」（design.md §5.2の6・§5.5）で、取消の受付と追加指示の取込みはここで行う。Checkpointの確定はステップの区切りで行う（§11.1）。
+
+1つの応答のToolを実行している途中で区切りの確認にかかったときは、残りの呼出しを次のように扱う。
+
+- **取消要求**：残りの呼出しを実行せず、「取消のため実行しませんでした」という結果で閉じて、取消の手順へ進む。
+- **現在の作業への追加指示**：残りの呼出しのうち、読むだけのもの（effectが `READ`）は実行し、それ以外は「新しい指示が届いたため実行しませんでした。指示を読んでから、必要なら呼び直してください」という結果で閉じる。そのうえで指示を取り込み（§10.4）、次のステップへ進む。
+- **leaseを失った**：何も実行せずにAttemptを終える（design.md §6.3）。
 
 ### 4.3 Runの終わり方
 
@@ -153,7 +159,7 @@ design.md §5.1のRunEvent（単調なsequence、イベント種別、表示用�
 
 | 種類 | 内容 | モデルの履歴 |
 |---|---|---|
-| `request.header` | system promptの版（hash）、Toolの定義の一覧（hash）、モデル設定の版、effort。変わったときだけ記録する | 要求の組立に使う |
+| `request.header` | system promptとToolの定義の一覧の版（内容のhash。中身は §6.1 のとおりDBに保存する）、モデル設定の版、effort。変わったときだけ記録する | 要求の組立に使う |
 | `context.snapshot` | 実行時の文脈（§6.2）。変わったときだけ記録する | 追加 |
 | `message.user` | 依頼、追加指示、Skillの明示（`/`）・Connectorの明示（`@`）の展開、添付の一覧 | 追加 |
 | `message.assistant` | 本文、Tool呼出し（ID・名前・引数の元の文字列）、推論の途中経過（プロバイダ固有。§5.5）、利用量、要求ID | 追加 |
@@ -167,6 +173,7 @@ design.md §5.1のRunEvent（単調なsequence、イベント種別、表示用�
 | `job.started`・`job.finished` | バックグラウンドのジョブ（§8.3） | 終了は `context.snapshot` で伝える |
 | `llm.retry` | プロバイダの再試行（待つ前に記録する） | 入れない |
 | `deliverable.presented` | 成果物の宣言（§10.5） | 入れない |
+| `run.status` | Runの状態の遷移（design.md §5.3）。状態の更新と同じtransactionで記録し、画面の `run.status`（realtime.md）はここから作る | 入れない |
 | `run.finished` | 終わり方（§4.3） | 入れない |
 
 読めない種類（新しい版で増えた種類）のRunEventに出会ったら、その種類が「無視してよい」印を持たない限り、要求を組み立てずに止める（DeepSeek Harnessの規則）。黙って捨てると、モデルが見るべき情報が欠けたまま進むため。
@@ -182,7 +189,7 @@ design.md §5.1のRunEvent（単調なsequence、イベント種別、表示用�
 
 Provider Adapterへ渡す前に、次を確かめて直す。直した内容はRunEventには書かない（毎回同じ規則で直るため）。
 
-- すべてのTool呼出しの直後に、その結果がある。結果がない呼出しには、§11.1の文で結果を補う（RunEventとして追記する）。
+- すべてのTool呼出しの直後に、その結果がある。結果がない呼出しには、§11.1の文で結果を補う（RunEventとして追記する）。ただし、未回答のClarificationRequestを持つ `ask_user` の呼出しは補わない（回答が届いてから結果を記録する。§10.3）。そのRunはWAITING_USERなので、回答の前に要求を組み立てることはない。
 - 呼出しのない結果は捨てる。
 - roleの並び（同じroleが続く、userで始まる等）の各社の制約は、Adapterが合わせる（今の `_messages()` の処理）。
 
@@ -200,7 +207,7 @@ Anthropicのthinkingブロック（署名付き）、OpenAIのreasoning（暗号
 
 ### 6.1 system promptの構成
 
-system promptはリポジトリの `harness/prompts/` に置き、DBでは編集しない（業務の手順はSkillで与える）。版（内容のhash）をManifestに記録する。モデル向けの文（system prompt、Toolの説明）は英語で書き、利用者への応答は利用者の言語（既定は日本語）で書かせる。参考のハーネスがいずれも英語で調整されていることと、ローカルLLMの多くが英語の指示のほうが安定するため。
+system promptはリポジトリの `harness/prompts/` に置き、DBでは編集しない（業務の手順はSkillで与える）。版（内容のhash）をManifestに記録する。Runが初めて使うsystem promptとToolの定義の一覧は、内容のhashをキーにした不変の行としてDBに保存し、`request.header` はそれを参照する。デプロイでファイルが変わっても、再開するRunは保存した中身から同じ要求を組み立てる。参照した中身が見つからなければ、要求を組み立てずに止める。モデル向けの文（system prompt、Toolの説明）は英語で書き、利用者への応答は利用者の言語（既定は日本語）で書かせる。参考のハーネスがいずれも英語で調整されていることと、ローカルLLMの多くが英語の指示のほうが安定するため。
 
 | 順 | 節 | 内容 |
 |---|---|---|
@@ -321,7 +328,11 @@ class ToolResult:
 
 用意しないTool：
 
-- **Webの検索・取得**：MVPには入れず、後でConnector（Web検索・Web取得）として加える（design.md §4.9.3）。任意のURLの取得はデータの持ち出し口（URLや検索の文字列に社内のデータを載せられる）と、社内への要求（SSRF）になるため、基盤管理者が有効にしたときだけ、使える利用者・役割を限って使えるようにする。取得は公開のIPアドレスに限り（名前解決した公開のアドレスに固定して接続する）、許可したドメインだけに絞る設定も持つ。機密の会話・機密のConnectorを使ったRunでは使わせない。結果は信頼しない内容として囲む（§6.3）。プロバイダ組込みの検索（OpenAIの `web_search`、GeminiのGoogle検索による根拠付け）は、ローカルLLMで使えず各社で形が違うので使わない。
+- **Webの検索・取得**：MVPには入れず、後でConnector（Web検索・Web取得）として加える（design.md §4.9.3）。任意のURLの取得はデータの持ち出し口（URLや検索の文字列に社内のデータを載せられる）と、社内への要求（SSRF）になるため、基盤管理者が有効にしたときだけ、使える利用者・役割を限って使えるようにする。取得は公開のIPアドレスに限り（名前解決した公開のアドレスに固定して接続する）、許可したドメインだけに絞る設定も持つ。機密の会話・機密のConnectorを使ったRunでは使わせない。結果は信頼しない内容として囲む（§6.3）。
+- **プロバイダ組込みのWeb検索**（OpenAIの `web_search`、AnthropicのWeb検索、GeminiのGoogle検索による根拠付け）：検索はプロバイダの中で行われ、Yorikiからは通信しない。既定では使わず、基盤管理者が許可したときだけ使えるようにする（MVPの後。Web検索のConnectorと同じ時期）。
+  - 許可はモデル設定ごと（ModelProfileの能力「組込みのWeb検索」と、許可の設定）と、使える利用者・役割で行う。ローカルLLMにはないので、機密の会話・機密のConnectorを使ったRunでは使えない。
+  - Toolとしてはプロバイダの組込みの形のまま渡し（Codexの方式）、Runnerは実行しない。検索の問い合わせと出典はプロバイダの応答から取り出し、RunEventに記録する。
+  - 問い合わせの文字列やプロバイダがページを開く動作も、社内のデータの持ち出し口になりうるので、各社の許可するドメインの絞り込み（OpenAI・Anthropicのドメインの指定等）を設定できるようにし、結果は信頼しない内容として扱う。
 - **サブエージェント**：MVPは1つの会話で1つの主たるRunを進める（design.md §5.1）。並列の調査が必要になったら、子のRunとして検討する。
 - **思考用のTool（`think`）**：推論の制御はeffortで行う。
 
@@ -443,7 +454,7 @@ Traceback (most recent call last):
 **`write` と `edit`**
 
 - 対象はテキストのファイルだけ。Excel・Word・PowerPointの編集は、shellでPythonのスクリプト（openpyxl・python-docx・python-pptx）を書いて行う。
-- **読んでから書く**：Runnerは、`read`・`write`・`edit` で見たファイルの版（内容のSHA-256）をRunの状態に記録する。既存のファイルへの `write`・`edit` は、記録した版と今の版が一致するときだけ行う。読んでいないなら「まだ読んでいません」、読んだ後に変わっていれば（shellで変えた等）「読んだ後に変わりました。読み直してください」と返す（DeepSeek Harnessの方式）。
+- **読んでから書く**：Runnerは、`read`・`write`・`edit` で見たファイルの版（内容のSHA-256）を、その `tool.result` に記録する（今の版の一覧はRunEventから求める。§11.1でWorkspaceを戻したら、戻した時点より後の記録は使わない）。既存のファイルへの `write`・`edit` は、記録した版と今の版が一致するときだけ行う。読んでいないなら「まだ読んでいません」、読んだ後に変わっていれば（shellで変えた等）「読んだ後に変わりました。読み直してください」と返す（DeepSeek Harnessの方式）。
 - `edit` の一致：完全一致 → 行末の空白の違いを無視、の2段まで。1か所に決まらなければ、一致した行番号を添えて「前後の文脈を足すか、`replace_all` を使う」と返す。あいまいな一致（Levenshtein等）はしない。
 - 改行（LF・CRLF）・BOM・encoding（UTF-8・Shift_JIS）は元のファイルに合わせて保つ。
 - 成功したら、変えた箇所の前後数行を返す。
@@ -480,7 +491,7 @@ Docker操作はLauncher（design.md §7.3）にまとめ、Runnerは決まった
 
 ### 8.3 バックグラウンドのジョブ
 
-- すべてのコマンドを、Sandboxの中の `yoriki-sandbox exec` で、独立したプロセスグループのジョブとして始める。出力はジョブのディレクトリ（`/workspace/work/.yoriki/jobs/{job_id}/`）のファイルへ書き、終わったら終了コードをファイルに書く。
+- すべてのコマンドを、LauncherがDockerのexecとして始め、Sandboxの中の `yoriki-sandbox exec` で独立したプロセスグループにする。ジョブの状態の正本は、Sandboxの外にあるものだけにする。終了と終了コードはDockerのexecの状態（inspect）から、出力はLauncherがexecの出力を受け取ってWorker側のファイル（Attemptの作業領域。Sandboxには見えない）へ書いたものから読む。Sandboxの中のファイル（エージェントのコマンドが書き換えられる）を、ジョブの状態として使わない。
 - `shell` は、ジョブの終了を `timeout_seconds` まで待つ。終わればその結果を返す。終わらなければ、それまでの出力と `job_id` を返し、ジョブは続ける（DeepSeek Harnessの方式）。`background: true` なら待たずに `job_id` を返す。
 - 終わったジョブは、次のステップの前に `job.finished` として記録し、`context.snapshot` でモデルに知らせる。モデルは `job_output` で出力を読む。待つだけのループ（`sleep` と確認の繰返し）をしないよう、説明文に書く。
 - 同時に動かせるジョブは4つまで。1つのジョブの実行時間の上限はRuntime Profileで決める（初期値30分）。
@@ -492,7 +503,8 @@ Docker操作はLauncher（design.md §7.3）にまとめ、Runnerは決まった
 Runnerは、shell以外のToolの処理もSandboxの中で行う。ファイルの解析を、DBの資格情報を持つWorkerのプロセスで行わないため（壊れたPDF等による不具合の影響をSandboxに閉じ込める）。
 
 - イメージの `/opt/yoriki/bin/yoriki-sandbox` に入れる（rootfsは読取り専用）。Python製で、イメージのPythonと同梱のライブラリ（pypdf・pdfplumber・pypdfium2・openpyxl・python-docx・python-pptx）を使う。
-- サブコマンド：`exec`（ジョブの開始）、`status`・`output`・`kill`（ジョブ）、`read`、`write`、`edit`、`glob`、`grep`、`stat`。
+- サブコマンド：`exec`（プロセスグループを作ってコマンドを始める。止めるときはLauncherがそのグループへsignalを送る）、`read`、`write`、`edit`、`glob`、`grep`、`stat`。
+- 補助コマンドの結果も、Sandboxの中で作られるものなので、権限や実行状態の正本にしない（design.md §7.1）。ファイルの中身の表示として扱う。
 - Runnerからの引数は、標準入力のJSONで渡す（shellの解釈を通さない）。結果は標準出力のJSONで返す。
 - 契約番号はイメージのラベル `org.yoriki.sandbox-contract` に記録する（design.md §13）。サブコマンドと入出力の形は `sandbox/CONTRACT.md` で定め、契約テストで確かめる。
 
@@ -580,7 +592,13 @@ gVisor（runsc）の評価（design.md §7.2の5）は、この契約テスト�
 </skill>
 ```
 
-資料はSandboxを起動するときに `/workspace/master` へ展開する（design.md §3.8）。同じRunでもう一度読み込んでも、追記した版を返す（途中で公開し直されても切り替えない）。
+資料はSandboxを起動するときに `/workspace/master` へ展開する（design.md §3.8）。Sandboxを起動した後に読み込んだSkillは、次のように扱う。
+
+- SkillのRuntime Profileが、起動済みのSandboxのものと違うときは、読み込まずに「このSkillは今の実行環境では使えない」と返す。利用者には、そのSkillを明示した新しい依頼を案内させる。
+- 同じなら、Launcherが固定した版の資料を、Sandboxの外から `/workspace/master/skills/{skill_id}/` へ置いて（Sandboxからは読取り専用のまま）、置けたことを確かめてから `skill` の結果を返す。置けなければ読込みを失敗にし、Manifestへの追記も取り消す（同じtransactionで扱う）。
+- Sandboxをまだ起動していないときは、起動するときに、Manifestに追記した全Skillの資料を展開する。
+
+同じRunでもう一度読み込んでも、追記した版を返す（途中で公開し直されても切り替えない）。
 
 **明示した場合**（`/` やTask Definition）：Run開始時にSkill Versionへ解決し、上と同じ内容を最初の `message.user` に入れる。モデルに `skill` を呼ばせない。
 
@@ -624,7 +642,8 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 
 ### 10.6 予算
 
-- 各ステップの前に、最大出力token（推論の分を含む）とモデル設定の単価から見積もった額を予約し、応答の利用量で精算する（design.md §4.8）。要約・ループの検出等の補助の呼出しも同じ。
+- 各ステップの前に、入力token（直前の要求の実際の入力token数に、増えた分の見積もりを足す。cacheから読む分・書く分は単価を分ける）と最大出力token（推論の分を含む）を、モデル設定の単価で見積もった額を予約し、応答の利用量で精算する（design.md §4.8）。履歴が長くなると入力の費用が大きくなるため、入力の分を必ず含める。要約等の補助の呼出しも同じ。
+- 予約は、利用者の予算の行をロックして行い、同じ利用者の複数のRunが同時に予約しても上限を超えないようにする（design.md §9）。
 - 残りが2割を切ったら、`context.snapshot` で残りの割合を伝え、作業を絞らせる（Codexの方式）。
 - 予約できなくなったら、まとめのための最後の1ステップ（§4.4）だけを行って `budget` で終える。
 
@@ -632,7 +651,9 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 
 - Toolの一覧（§7.5）と実行時の確かめ直しで、サーバーが決める。LLMの判断やSkillの本文に頼らない（AGENTS.md）。
 - コマンドごとの承認や、LLMに危険度を答えさせる仕組み（Codex・OpenHands）は入れない。Sandboxの制限が境界になる（design.md §1・§7.2）。
-- 外部の確定した変更（Connectorの書込みの操作、Skillの公開）は、許可した操作だけをToolにし、operation keyで重複を防ぐ。業務の判断が要る変更（「この内容で送ってよいか」）は、Skillの手順で `ask_user` を使わせる。
+- 外部の確定した変更（Connectorの書込みの操作、Skillの公開）は、許可した操作だけをToolにし、operation keyで重複を防ぐ。
+- 人の確認を必須にする変更は、モデルが `ask_user` を呼ぶことに頼らず、サーバーで強制する。基盤管理者がConnectorの書込みの操作に「実行前に確認する」を設定できるようにし、その操作が呼ばれたら、Runnerは実行せずに、操作と引数（のhash）を示すClarificationRequestを作ってWAITING_USERにする。利用者が承認したら、承認と同じ引数のときだけ実行する。引数が変われば承認は使わない。文書に仕込まれた指示でモデルが確認を飛ばしても、承認なしには実行されない。
+- Skillの編集・公開のToolは、利用者が編集を依頼して作られた関連Run（design.md §3.6）にだけ出す。業務のRunの中で、添付やTool出力の指示からSkillが変わることはない（design.md §3.5）。
 
 ### 10.8 モデルとeffort
 
@@ -650,6 +671,11 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 
 - モデルの呼出しの前に、要求の組立に使ったRunEventがすべて確定していることを確かめる。Toolの実行の前に `tool.call` を確定する（DeepSeek Harness・OpenHandsの方式）。すべての書込みでleaseとfencing tokenを照合する（design.md §6.3）。
 - 新しいAttemptでは、RunEventの最新の `compaction` とその後のイベントから文脈を組み立てる（Codexの方式）。WorkspaceはCheckpointのsnapshotから、cwdはRunの状態から戻す。
+- **Workspaceと記録の食い違い**：CheckpointにはWorkspace snapshotと、その時点のRunEventのsequenceを一緒に記録する（design.md §5.4）。CheckpointはSandboxのファイルを変えたToolを実行したステップの区切りで確定する（大きさの上限の中で。design.md §7.9）。障害で最後のCheckpointより後のRunEventが残っているときは、記録を消さずに、次の内容の `context.snapshot` を追記してから続ける。
+  - 作業ファイルを、sequence Nの時点（最後に保存した区切り）に戻したこと。
+  - それより後にSandboxのファイルを変えたTool呼出し（`shell`・`write`・`edit`・`install_python_packages` 等）の一覧と、その結果は今のファイルに反映されていないこと。必要なら確かめてやり直すこと。
+  - 読んだファイルの版の記録（§7.8）は、sequence Nまでのものだけを使う。
+- **外部への書込みとlease**：fencing tokenはYorikiのDBへの書込みは止められるが、外部のサービスへの送信は止められない。外部の確定した変更を伴うToolは、送る直前にleaseを確かめ、送る前にToolInvocationを `running` で確定する。送り先が受け付ける重複のキー（operation keyをIdempotency-Key等で渡す）を必須にし、送り先が重複のキーを持たない操作は、書込みの操作として登録できないようにする。送った後に結果が分からなければ `unknown` とし、自動でやり直さない（design.md §6.3）。
 - 結果のないTool呼出しは、次のように閉じる。
 
 | 状態 | 扱い |
@@ -773,7 +799,7 @@ Task Definition「契約書レビュー」：起動はWebhook（Zapier）、使�
 - 閾値と上限の値（ステップ数、出力の上限、圧縮の閾値、ジョブの数）は初期値で、実際のRunの利用量と費用を見て調整する。
 - モデル向けの文を英語で書く方針は、日本語の業務文書での結果を見て確かめる。
 - MCPのConnectorでToolが増えたときの、Toolの定義を後から読み込む仕組み（§7.5）。
-- Web検索・Web取得のConnector（§7.4）。検索の先（検索API）を差し替えられる形にし、結果はURL・タイトル・抜粋・日付の共通の形にそろえる。
+- Web検索・Web取得のConnectorと、プロバイダ組込みのWeb検索の許可（§7.4）。検索の先（検索API）を差し替えられる形にし、結果はURL・タイトル・抜粋・日付の共通の形にそろえる。
 - 子のRunによる並列の調査（サブエージェント）。
 - `sandbox/CONTRACT.md` の `yoriki-sandbox` の入出力の形と契約テスト（Sandboxの段階で書く。status.md §4の3）。
 - 日本語の文章のtoken数の見積もりの精度（§7.7）。

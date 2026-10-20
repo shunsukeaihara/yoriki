@@ -75,7 +75,7 @@ design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにし
    - **SWE-agent / mini-swe-agent**：Tool（ACI）の設計原則と、最小のループ。
    - Claude Codeは非OSSなので、Agent SDKの文書と観察できる挙動（Toolの役割分担、Bashの説明文、質問の仕方）を参考にする。
    設計では、土台のコーディングエージェント（ファイルの読み書き・編集・検索、常駐シェル、バックグラウンド実行、出力の退避、圧縮、エラーからの立て直し）と、業務の層（Skill、Connector、成果物、確認待ち、予算、権限）を分けて書き、最初の2つの業務（請求書の照合、契約書レビュー）で、どのSkill・Tool・Connectorをどう使うかを書き下して確かめる。Skill・Connectorを `/`・`@` で明示した場合と、エージェントが利用者の権限で使えるものから探す場合の両方を扱う（design.md §3.1）。GNU toolsやPythonを含む大量のコマンドがSandboxの中で確実に動くことを要件に入れる。
-2. **会話と実行（`conversation`、`run`、`stream`）**：Conversation・ConversationMessage、Runの状態遷移（遷移表と行ロック）、claim / lease、`cancel`・`answer`、SSE（`stream/notifier.py` のLISTEN/NOTIFY）。まずSandboxなしでLLMと会話できるところまで。既定のモデル（主モデルと代替モデル。基盤管理者が設定する）と、会話ごとのモデルの選択（design.md §4.8）。会話を始めるときのウィザードで、個人情報や機密情報を扱うかを確かめ、扱う場合はローカルLLMのモデルだけに絞る（design.md §4冒頭、§11.3）。
+2. **会話と実行（`conversation`、`run`、`stream`）**：Conversation・ConversationMessage、Runの状態遷移（遷移表と行ロック）、claim / lease、`cancel`・`answer`、SSE（`stream/notifier.py` のLISTEN/NOTIFY）。まずSandboxなしでLLMと会話できるところまで。モデルの段（プロバイダ接続ごとに軽量・標準・高性能等。基盤管理者が設定する）と既定、会話ごとのプロバイダ接続と段の選択、利用者が明示する段の上げ下げとプロバイダ接続の切り替え、障害時の切り替え、Manifestへの追記（design.md §4.8）。自動の段の上げ下げは、利用量と費用を見てから規則を決める。会話を始めるときのウィザードで、個人情報や機密情報を扱うかを確かめ、扱う場合はローカルLLMのモデルだけに絞る（design.md §4冒頭、§11.3）。
 3. **Sandbox（`sandbox/`、`runtime`）**：CONTRACT.md、docsのイメージ、Launcher（`network_mode: none`、コンテナからの脱出への対策の1〜4。design.md §7）、Runnerからのshell実行。gVisorの評価もこの段階で行う。
 4. **成果物とファイル（`artifact`）**：Local・S3のStorage Backend、添付、成果物の取得（`/api/files/<token>/`、`X-Accel-Redirect`）。
 5. **Skill（`skill`、`resource`）**：Draft・Version・公開範囲と公開、Skillの資料（マスター・テンプレート）、会話からのSkill更新、入力欄の `/` での指定、エージェントに見せる一覧（利用者の権限で使えるものだけ）。役割「Plugin公開者」（`user/roles.py`）を「Skill公開者」に改める（design.md 0.19）。

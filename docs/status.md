@@ -64,7 +64,7 @@ design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにし
    - SSOを設定したら、社員はSSOだけでログインする。SSOがなければ、Yoriki自身のアカウントとパスワードでログインする（基盤管理者がアカウントを作り、招待のリンクから本人がパスワードを設定する。試行回数の制限）。
    - 基盤管理者のパスワードでのログインは、SSOの設定の誤りやIdPの停止に備えて残す。
 3. **Agent（`agent`）**：Agent、AgentRevision（不変の版）、管理画面と、社員がAgentを選ぶ画面。
-4. **ハーネスの調査と設計（`docs/harness.md`）**：各社のAgent SDKやCLI製品は使わず、Provider Adapterの上にYoriki自身のRunnerを置く（design.md §4.8）。実装の前に、公開されているハーネスをリポジトリの外（例：`~/work/reference/`。gitに入れない）にcloneして設計思想を読み、業務ツールとしてのハーネスをYoriki独自に設計する。読むもの：
+4. **ハーネスの調査と設計（`docs/harness.md`）**：各社のAgent SDKやCLI製品は使わず、Provider Adapterの上にYoriki自身のRunnerを置く（design.md §4.8）。実装の前に、公開されているハーネスをリポジトリの外（例：`~/work/yoriki-reference/`。gitに入れない）にcloneして設計思想を読み、業務ツールとしてのハーネスをYoriki独自に設計する。読むもの：
    - **DeepSeek Harness**（`deepseek-ai/deepseek-harness`）：追記専用のセッションログから毎回モデルへの入力を組み立てる規約（RunEventを正本にするYorikiの形と同じ）、常駐ターミナル・バックグラウンドジョブ・長い出力の退避、fsとsubprocessのproviderをリモートのsandboxへ向ける構成、compaction・guard、deliverables（成果物）。developer previewで互換性が変わるので依存はしない。
    - **OpenCode**（`anomalyco/opencode`）：Toolの一式（`bash`、`read`、`edit`、`write`、`apply_patch`、`grep`、`glob`、`skill`、`question`）と、Toolごとの `allow` / `ask` / `deny` の権限、`plan`（読み取り専用）と `build` のエージェントの分け方。
    - **Codex CLI**：system promptの構成、Toolの説明文、`apply_patch` 形式、Sandbox前提のコマンド実行。

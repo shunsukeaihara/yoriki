@@ -24,25 +24,9 @@ export YORIKI_DATABASE_PORT=5432
 #   cd api && uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 # export YORIKI_SECRET_ENCRYPTION_KEYS=
 
-# --- 社内SSO（使う認証基盤だけ設定する。backend-conventions.md §6.2） ---
-# export YORIKI_SSO_PROVIDERS=microsoft          # microsoft / google（カンマ区切りで複数可）。auth0 / oidc は後から対応予定
-# export YORIKI_SSO_ALLOWED_EMAIL_DOMAINS=example.co.jp
-# Microsoft 365（Entra ID）
-# export YORIKI_SSO_MICROSOFT_CLIENT_ID=
-# export YORIKI_SSO_MICROSOFT_CLIENT_SECRET=
-# export YORIKI_SSO_MICROSOFT_TENANT_ID=
-# Google Workspace
-# export YORIKI_SSO_GOOGLE_CLIENT_ID=
-# export YORIKI_SSO_GOOGLE_CLIENT_SECRET=
-# export YORIKI_SSO_GOOGLE_HOSTED_DOMAIN=example.co.jp  # Googleを有効にするときは必須（未設定なら起動しない）
-# Auth0（後から対応予定）
-# export YORIKI_SSO_AUTH0_DOMAIN=
-# export YORIKI_SSO_AUTH0_CLIENT_ID=
-# export YORIKI_SSO_AUTH0_CLIENT_SECRET=
-# その他のOIDC（後から対応予定）
-# export YORIKI_SSO_OIDC_ISSUER=
-# export YORIKI_SSO_OIDC_CLIENT_ID=
-# export YORIKI_SSO_OIDC_CLIENT_SECRET=
+# --- 社内SSO ---
+# 認証基盤（Microsoft 365・Google Workspace）の設定は、環境変数ではなく管理画面（/manage/sso_providers）で登録する。
+# 開発時のリダイレクトURIは http://localhost:3000/api/accounts/<microsoft|google>/login/callback/ になる
 
 # --- Sandbox ---
 # 手元でビルドしたSandboxイメージに差し替える（開発時だけ有効。本番では無視する。deployment.md §3.3）

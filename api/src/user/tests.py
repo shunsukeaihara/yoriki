@@ -1,13 +1,13 @@
 import pytest
 from allauth.core.exceptions import ImmediateHttpResponse
 from allauth.socialaccount.models import SocialAccount, SocialLogin
-from django.contrib.auth.models import Group, Permission
+from django.contrib.auth.models import AnonymousUser, Group, Permission
 from django.test import RequestFactory
 from rest_framework.test import APIClient
 
 from .adapters import SocialAccountAdapter, is_allowed_account
-from .factories import UserFactory
-from .models import User
+from .factories import SSOProviderFactory, UserFactory
+from .models import SSOKind, SSOProvider, User, is_sso_enabled
 from .roles import ROLES, sync_role_groups
 
 
@@ -108,15 +108,36 @@ class TestWithPermission:
         assert inactive not in users
 
 
+@pytest.fixture(name="sso_providers")
+def fixture_sso_providers(db) -> list[SSOProvider]:
+    return [
+        SSOProviderFactory.create(kind=SSOKind.MICROSOFT),
+        SSOProviderFactory.create(kind=SSOKind.GOOGLE),
+    ]
+
+
 class TestAuthProviders:
     @pytest.mark.django_db
-    def test_list(self, api_client):
+    def test_list(self, api_client, sso_providers):
+        SSOProviderFactory.create(kind=SSOKind.GOOGLE, deleted=True)
         res = api_client.get("/api/app/v1/auth/providers/")
         assert res.status_code == 200
         assert res.json() == [
             {"id": "microsoft", "name": "Microsoft 365", "login_url": "/api/accounts/microsoft/login/"},
             {"id": "google", "name": "Google Workspace", "login_url": "/api/accounts/google/login/"},
         ]
+
+    @pytest.mark.django_db
+    def test_inactive_provider_is_hidden(self, api_client, sso_providers):
+        sso_providers[1].is_active = False
+        sso_providers[1].save()
+        assert [p["id"] for p in api_client.get("/api/app/v1/auth/providers/").json()] == ["microsoft"]
+        assert is_sso_enabled()
+
+    @pytest.mark.django_db
+    def test_no_provider(self, api_client):
+        assert api_client.get("/api/app/v1/auth/providers/").json() == []
+        assert not is_sso_enabled()
 
 
 def _sociallogin(provider: str, email: str, **extra_data) -> SocialLogin:
@@ -127,6 +148,7 @@ def _sociallogin(provider: str, email: str, **extra_data) -> SocialLogin:
 
 
 class TestAllowedAccount:
+    @pytest.mark.django_db
     @pytest.mark.parametrize(
         ("login", "allowed"),
         [
@@ -137,22 +159,254 @@ class TestAllowedAccount:
             (_sociallogin("google", "taro@example.co.jp", hd="example.co.jp", email_verified=True), True),
             # 個人のGoogleアカウント（hdがない）は受け付けない
             (_sociallogin("google", "taro@example.co.jp", email_verified=True), False),
+            (_sociallogin("google", "taro@example.co.jp", hd="other.co.jp", email_verified=True), False),
             (_sociallogin("google", "taro@example.co.jp", hd="example.co.jp", email_verified=False), False),
-            # 有効にしていない認証基盤
+            # 設定していない認証基盤
             (_sociallogin("github", "taro@example.co.jp"), False),
         ],
     )
-    def test_is_allowed_account(self, login, allowed):
+    def test_is_allowed_account(self, sso_providers, login, allowed):
         assert is_allowed_account(login) is allowed
 
-    def test_google_without_hosted_domain_setting_is_rejected(self, settings):
-        settings.YORIKI_SSO_GOOGLE_HOSTED_DOMAIN = ""
+    @pytest.mark.django_db
+    def test_inactive_or_deleted_provider_is_rejected(self, sso_providers):
+        microsoft, google = sso_providers
+        microsoft.is_active = False
+        microsoft.save()
+        google.deleted = True
+        google.save()
+        assert is_allowed_account(_sociallogin("microsoft", "taro@example.co.jp")) is False
         login = _sociallogin("google", "taro@example.co.jp", hd="example.co.jp", email_verified=True)
         assert is_allowed_account(login) is False
 
-    def test_pre_social_login_redirects_to_login_page(self):
+    @pytest.mark.django_db
+    def test_pre_social_login_redirects_to_login_page(self, sso_providers):
         request = RequestFactory().get("/")
         with pytest.raises(ImmediateHttpResponse) as e:
             SocialAccountAdapter().pre_social_login(request, _sociallogin("microsoft", "taro@other.co.jp"))
         assert e.value.response.status_code == 302
         assert e.value.response["Location"] == "/login?error=not_allowed"
+
+
+class TestConnectExistingUser:
+    """SSOで初めてログインしたとき、同じメールアドレスのユーザーに紐付ける（design.md §10.0）"""
+
+    def _login(self, email: str) -> SocialLogin:
+        request = RequestFactory().get("/")
+        request.user = AnonymousUser()
+        login = _sociallogin("microsoft", email)
+        SocialAccountAdapter().pre_social_login(request, login)
+        return login
+
+    @pytest.mark.django_db
+    def test_connects_by_email_ignoring_case(self, sso_providers, app_user):
+        app_user.email = "Taro@Example.co.jp"
+        app_user.save()
+        login = self._login("taro@example.co.jp")
+        assert login.user == app_user
+        assert SocialAccount.objects.get(provider="microsoft", uid="x").user == app_user
+
+    @pytest.mark.django_db
+    def test_new_user_when_no_match(self, sso_providers, app_user):
+        login = self._login("hanako@example.co.jp")
+        assert login.user.pk is None
+        assert not SocialAccount.objects.exists()
+
+    @pytest.mark.django_db
+    def test_inactive_user_is_not_connected(self, sso_providers, app_user):
+        app_user.is_active = False
+        app_user.save()
+        with pytest.raises(ImmediateHttpResponse):
+            self._login(app_user.email)
+        assert not SocialAccount.objects.exists()
+
+
+class TestListApps:
+    @pytest.mark.django_db
+    def test_builds_apps_from_active_providers(self, sso_providers):
+        google = sso_providers[1]
+        apps = {app.provider: app for app in SocialAccountAdapter().list_apps(RequestFactory().get("/"))}
+        assert set(apps) == {"microsoft", "google"}
+        assert apps["microsoft"].secret == "test-secret-0123456789"
+        assert apps["microsoft"].settings == {"tenant": "test-tenant"}
+        assert apps["google"].settings == {"auth_params": {"hd": "example.co.jp"}}
+        # 保存しない（allauthの SocialApp のテーブルに client secret を平文で残さない）
+        assert apps["microsoft"].pk is None
+
+        google.is_active = False
+        google.save()
+        apps_list = SocialAccountAdapter().list_apps(RequestFactory().get("/"), provider="google")
+        assert apps_list == []
+
+    @pytest.mark.django_db
+    def test_login_redirects_to_tenant(self, api_client, sso_providers):
+        res = api_client.post("/api/accounts/microsoft/login/")
+        assert res.status_code == 302
+        assert res["Location"].startswith("https://login.microsoftonline.com/test-tenant/oauth2/v2.0/authorize")
+        assert "client_id=test-client" in res["Location"]
+
+    @pytest.mark.django_db
+    def test_login_of_unconfigured_provider_returns_to_login_page(self, api_client, sso_providers):
+        sso_providers[0].is_active = False
+        sso_providers[0].save()
+        res = api_client.post("/api/accounts/microsoft/login/")
+        assert res.status_code == 302
+        assert res["Location"] == "/login?error=not_allowed"
+
+
+SSO_PROVIDERS = "/api/v1/sso_providers/"
+
+
+@pytest.fixture(name="admin_client")
+def fixture_admin_client(api_client, platform_admin):
+    api_client.force_login(platform_admin)
+    return api_client
+
+
+class TestSSOProviderAPI:
+    @pytest.mark.django_db
+    def test_only_platform_admin(self, api_client, app_user):
+        assert api_client.get(SSO_PROVIDERS).status_code == 401
+        api_client.force_login(app_user)
+        assert api_client.get(SSO_PROVIDERS).status_code == 403
+
+    @pytest.mark.django_db
+    def test_create_encrypts_secret_and_never_returns_it(self, admin_client, platform_admin):
+        res = admin_client.post(
+            SSO_PROVIDERS,
+            {
+                "kind": "microsoft",
+                "client_id": " client-1 ",
+                "client_secret": "secret-abcdefgh1234",
+                "tenant_id": "tenant-1",
+                "allowed_email_domains": ["Example.co.jp", "@sub.example.co.jp", "example.co.jp"],
+            },
+            format="json",
+        )
+        assert res.status_code == 201, res.json()
+        data = res.json()
+        assert data["client_id"] == "client-1"
+        assert data["has_client_secret"] is True
+        assert data["client_secret_hint"] == "1234"
+        assert "client_secret" not in data
+        assert "secret-abcdefgh1234" not in res.content.decode()
+        assert data["allowed_email_domains"] == ["example.co.jp", "sub.example.co.jp"]
+        assert data["callback_url"] == "http://testserver/api/accounts/microsoft/login/callback/"
+
+        sso = SSOProvider.objects.get(uid=data["id"])
+        assert sso.created_by == platform_admin
+        assert "secret-abcdefgh" not in sso.client_secret.ciphertext
+        assert sso.client_secret.reveal() == "secret-abcdefgh1234"
+
+    @pytest.mark.django_db
+    @pytest.mark.parametrize(
+        ("body", "field"),
+        [
+            # Microsoftはテナントを固定する
+            ({"kind": "microsoft", "client_secret": "s"}, "tenant_id"),
+            (
+                {"kind": "microsoft", "client_secret": "s", "tenant_id": "t", "hosted_domain": "example.co.jp"},
+                "hosted_domain",
+            ),
+            # Googleはhdを確かめる
+            ({"kind": "google", "client_secret": "s"}, "hosted_domain"),
+            ({"kind": "google", "client_secret": "s", "hosted_domain": "example.co.jp", "tenant_id": "t"}, "tenant_id"),
+            ({"kind": "google", "client_secret": "s", "hosted_domain": "https://example.co.jp"}, "hosted_domain"),
+            ({"kind": "microsoft", "tenant_id": "t"}, "client_secret"),
+        ],
+    )
+    def test_validation(self, admin_client, body, field):
+        body = {"client_id": "c", "allowed_email_domains": ["example.co.jp"], **body}
+        res = admin_client.post(SSO_PROVIDERS, body, format="json")
+        assert res.status_code == 400
+        assert field in res.json()
+
+    @pytest.mark.django_db
+    @pytest.mark.parametrize("domains", [[], [""], ["taro@example.co.jp"], ["example"]])
+    def test_allowed_email_domains_are_required_and_checked(self, admin_client, domains):
+        body = {"kind": "microsoft", "client_id": "c", "client_secret": "s", "tenant_id": "t"}
+        res = admin_client.post(SSO_PROVIDERS, {**body, "allowed_email_domains": domains}, format="json")
+        assert res.status_code == 400
+        assert "allowed_email_domains" in res.json()
+
+    @pytest.mark.django_db
+    def test_one_per_kind_among_not_deleted(self, admin_client):
+        existing = SSOProviderFactory.create(kind=SSOKind.MICROSOFT)
+        body = {
+            "kind": "microsoft",
+            "client_id": "c",
+            "client_secret": "s",
+            "tenant_id": "t",
+            "allowed_email_domains": ["example.co.jp"],
+        }
+        assert admin_client.post(SSO_PROVIDERS, body, format="json").status_code == 400
+        assert admin_client.delete(f"{SSO_PROVIDERS}{existing.uid}/").status_code == 204
+        assert admin_client.post(SSO_PROVIDERS, body, format="json").status_code == 201
+
+    @pytest.mark.django_db
+    def test_patch_keeps_secret_and_kind(self, admin_client):
+        sso = SSOProviderFactory.create(kind=SSOKind.MICROSOFT)
+        res = admin_client.patch(
+            f"{SSO_PROVIDERS}{sso.uid}/", {"kind": "google", "tenant_id": "tenant-2"}, format="json"
+        )
+        assert res.status_code == 200, res.json()
+        sso.refresh_from_db()
+        assert sso.kind == SSOKind.MICROSOFT
+        assert sso.tenant_id == "tenant-2"
+        assert sso.client_secret.reveal() == "test-secret-0123456789"
+
+        res = admin_client.patch(f"{SSO_PROVIDERS}{sso.uid}/", {"client_secret": "new-secret"}, format="json")
+        assert res.status_code == 200
+        sso.refresh_from_db()
+        assert sso.client_secret.reveal() == "new-secret"
+
+    @pytest.mark.django_db
+    def test_patch_cannot_clear_tenant(self, admin_client):
+        sso = SSOProviderFactory.create(kind=SSOKind.MICROSOFT)
+        res = admin_client.patch(f"{SSO_PROVIDERS}{sso.uid}/", {"tenant_id": ""}, format="json")
+        assert res.status_code == 400
+        assert "tenant_id" in res.json()
+
+    @pytest.mark.django_db
+    def test_secret_requires_encryption_key(self, admin_client, settings):
+        settings.YORIKI_SECRET_ENCRYPTION_KEYS = []
+        body = {
+            "kind": "microsoft",
+            "client_id": "c",
+            "client_secret": "s",
+            "tenant_id": "t",
+            "allowed_email_domains": ["example.co.jp"],
+        }
+        res = admin_client.post(SSO_PROVIDERS, body, format="json")
+        assert res.status_code == 400
+        assert "client_secret" in res.json()
+
+    @pytest.mark.django_db
+    def test_django_admin_is_read_only(self, api_client, platform_admin):
+        # 管理画面のフォームには client secret が出ないので、作成・変更はYorikiの管理画面だけで行う
+        sso = SSOProviderFactory.create()
+        api_client.force_login(platform_admin)
+        assert api_client.get("/api/admin/user/ssoprovider/add/").status_code == 403
+        res = api_client.get(f"/api/admin/user/ssoprovider/{sso.pk}/change/")
+        assert res.status_code == 200
+        html = res.content.decode()
+        assert "test-secret" not in html
+        assert 'name="kind"' not in html
+        assert 'name="_save"' not in html
+        res = api_client.post(f"/api/admin/user/ssoprovider/{sso.pk}/change/", {"kind": "google", "is_active": ""})
+        assert res.status_code == 403
+        sso.refresh_from_db()
+        assert sso.kind == SSOKind.MICROSOFT
+        assert sso.is_active
+
+
+class TestRemovedSSOEnvCheck:
+    def test_warns_when_old_env_remains(self, monkeypatch):
+        from .checks import check_removed_sso_env  # noqa: PLC0415
+
+        monkeypatch.delenv("YORIKI_SSO_PROVIDERS", raising=False)
+        assert check_removed_sso_env(None) == []
+        monkeypatch.setenv("YORIKI_SSO_PROVIDERS", "microsoft")
+        warnings = check_removed_sso_env(None)
+        assert [w.id for w in warnings] == ["user.W001"]
+        assert "YORIKI_SSO_PROVIDERS" in warnings[0].msg

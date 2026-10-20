@@ -15,17 +15,5 @@ STORAGES = {
 
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 
-SOCIALACCOUNT_PROVIDERS = {
-    "microsoft": {
-        "APPS": [{"client_id": "test-client", "secret": "test-secret", "settings": {"tenant": "test-tenant"}}],
-    },
-    "google": {
-        "APPS": [{"client_id": "test-client", "secret": "test-secret"}],
-    },
-}
-YORIKI_SSO_PROVIDERS = ["microsoft", "google"]
-YORIKI_SSO_ALLOWED_EMAIL_DOMAINS = ["example.co.jp"]
-YORIKI_SSO_GOOGLE_HOSTED_DOMAIN = "example.co.jp"
-
 # テスト専用の鍵（本番では使わない）
 YORIKI_SECRET_ENCRYPTION_KEYS = ["xz4RJ4arr_XhdjE-oj2NJ7ElAq-K30kZvLHtZMOzIPY="]

@@ -551,6 +551,187 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/sso_providers/:
+    get:
+      operationId: v1_sso_providers_list
+      description: 社内SSOの設定の管理API（基盤管理者だけ）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+      - in: query
+        name: kind
+        schema:
+          type: string
+          title: 種別
+          enum:
+          - google
+          - microsoft
+        description: |-
+          * `microsoft` - Microsoft 365
+          * `google` - Google Workspace
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - manage/sso_provider
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSSOProviderList'
+          description: ''
+    post:
+      operationId: v1_sso_providers_create
+      description: 社内SSOの設定の管理API（基盤管理者だけ）
+      tags:
+      - manage/sso_provider
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SSOProviderRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SSOProviderRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SSOProviderRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SSOProvider'
+          description: ''
+  /api/v1/sso_providers/{uid}/:
+    get:
+      operationId: v1_sso_providers_retrieve
+      description: 社内SSOの設定の管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/sso_provider
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SSOProvider'
+          description: ''
+    put:
+      operationId: v1_sso_providers_update
+      description: 社内SSOの設定の管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/sso_provider
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SSOProviderUpdateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SSOProviderUpdateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SSOProviderUpdateRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SSOProvider'
+          description: ''
+    patch:
+      operationId: v1_sso_providers_partial_update
+      description: 社内SSOの設定の管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/sso_provider
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedSSOProviderUpdateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedSSOProviderUpdateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedSSOProviderUpdateRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SSOProvider'
+          description: ''
+    delete:
+      operationId: v1_sso_providers_destroy
+      description: 社内SSOの設定の管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/sso_provider
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
 components:
   schemas:
     AuthProvider:
@@ -1136,6 +1317,25 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ModelProfileVersion'
+    PaginatedSSOProviderList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SSOProvider'
     PatchedLLMConnectionUpdateRequest:
       type: object
       description: プロバイダ接続の更新。種別とbase URL（接続先）は変えられないので、読み取り専用にする
@@ -1236,6 +1436,38 @@ components:
           type: string
           writeOnly: true
           maxLength: 500
+    PatchedSSOProviderUpdateRequest:
+      type: object
+      description: SSOの設定の更新。種別は変えられないので、読み取り専用にする
+      properties:
+        client_id:
+          type: string
+          minLength: 1
+          maxLength: 500
+        client_secret:
+          type: string
+          writeOnly: true
+          minLength: 1
+          description: 作成では必須。更新では、送らなければ変更しない
+          maxLength: 1000
+        tenant_id:
+          type: string
+          title: テナントID
+          maxLength: 200
+        hosted_domain:
+          type: string
+          title: Workspaceのドメイン
+          maxLength: 253
+        allowed_email_domains:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 253
+          description: 受け付けるメールアドレスのドメイン（例：example.co.jp）
+        is_active:
+          type: boolean
+          title: 有効
     Ping:
       type: object
       properties:
@@ -1256,6 +1488,156 @@ components:
         * `2` - Anthropic（Claude）
         * `3` - Google Gemini
         * `4` - ローカルLLM
+    SSOProvider:
+      type: object
+      description: SSOの設定の作成と表示。client secretは書き込み専用で、応答には末尾の4文字（client_secret_hint）だけを出す
+      properties:
+        id:
+          type: string
+          readOnly: true
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/SSOProviderKindEnum'
+          title: 種別
+        kind_display:
+          type: string
+          readOnly: true
+        client_id:
+          type: string
+          maxLength: 500
+        has_client_secret:
+          type: boolean
+          readOnly: true
+        client_secret_hint:
+          type: string
+          readOnly: true
+        tenant_id:
+          type: string
+          title: テナントID
+          maxLength: 200
+        hosted_domain:
+          type: string
+          title: Workspaceのドメイン
+          maxLength: 253
+        allowed_email_domains:
+          type: array
+          items:
+            type: string
+            maxLength: 253
+          description: 受け付けるメールアドレスのドメイン（例：example.co.jp）
+        callback_url:
+          type: string
+          readOnly: true
+          description: 認証基盤のアプリの登録に、リダイレクトURIとして登録するURL
+        is_active:
+          type: boolean
+          title: 有効
+        created_by:
+          type: string
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - allowed_email_domains
+      - callback_url
+      - client_id
+      - client_secret_hint
+      - created
+      - created_by
+      - has_client_secret
+      - id
+      - kind
+      - kind_display
+      - updated
+    SSOProviderKindEnum:
+      enum:
+      - microsoft
+      - google
+      type: string
+      description: |-
+        * `microsoft` - Microsoft 365
+        * `google` - Google Workspace
+    SSOProviderRequest:
+      type: object
+      description: SSOの設定の作成と表示。client secretは書き込み専用で、応答には末尾の4文字（client_secret_hint）だけを出す
+      properties:
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/SSOProviderKindEnum'
+          title: 種別
+        client_id:
+          type: string
+          minLength: 1
+          maxLength: 500
+        client_secret:
+          type: string
+          writeOnly: true
+          minLength: 1
+          description: 作成では必須。更新では、送らなければ変更しない
+          maxLength: 1000
+        tenant_id:
+          type: string
+          title: テナントID
+          maxLength: 200
+        hosted_domain:
+          type: string
+          title: Workspaceのドメイン
+          maxLength: 253
+        allowed_email_domains:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 253
+          description: 受け付けるメールアドレスのドメイン（例：example.co.jp）
+        is_active:
+          type: boolean
+          title: 有効
+      required:
+      - allowed_email_domains
+      - client_id
+      - kind
+    SSOProviderUpdateRequest:
+      type: object
+      description: SSOの設定の更新。種別は変えられないので、読み取り専用にする
+      properties:
+        client_id:
+          type: string
+          minLength: 1
+          maxLength: 500
+        client_secret:
+          type: string
+          writeOnly: true
+          minLength: 1
+          description: 作成では必須。更新では、送らなければ変更しない
+          maxLength: 1000
+        tenant_id:
+          type: string
+          title: テナントID
+          maxLength: 200
+        hosted_domain:
+          type: string
+          title: Workspaceのドメイン
+          maxLength: 253
+        allowed_email_domains:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 253
+          description: 受け付けるメールアドレスのドメイン（例：example.co.jp）
+        is_active:
+          type: boolean
+          title: 有効
+      required:
+      - allowed_email_domains
+      - client_id
     Session:
       type: object
       properties:

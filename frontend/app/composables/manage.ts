@@ -29,6 +29,12 @@ export const useManageMenu = () => {
       to: '/manage/model_profiles',
       permission: PermissionCode.CHANGE_MODEL_PROFILE,
     },
+    {
+      label: $i18n.t('SSOの設定'),
+      icon: 'i-lucide-key-round',
+      to: '/manage/sso_providers',
+      permission: PermissionCode.CHANGE_SSO_PROVIDER,
+    },
   ])
 
   const items = computed(() =>

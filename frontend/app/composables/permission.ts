@@ -3,7 +3,8 @@
  * 画面のコードに文字列を直接書かず、使うものをここに追加する。役割（Group）の名前では判定しない
  */
 export const PermissionCode = {
-  // LLMの接続とモデル設定は基盤管理者だけが使う。API は PlatformAdmin で守っている
+  // SSOの設定、LLMの接続とモデル設定は基盤管理者だけが使う。API は PlatformAdmin で守っている
+  CHANGE_SSO_PROVIDER: 'user.change_ssoprovider',
   CHANGE_LLM_CONNECTION: 'llm.change_llmconnection',
   CHANGE_MODEL_PROFILE: 'llm.change_modelprofile',
 } as const

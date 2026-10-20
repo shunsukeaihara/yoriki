@@ -23,3 +23,8 @@ export type ModelProfileVersion = Api<'ModelProfileVersion'>
 // 一覧の検索条件（バックエンドの FilterSet と合わせる）
 export type LLMConnectionListParams = ListParams & { name?: string; kind?: ProviderKindEnum; isActive?: boolean }
 export type ModelProfileListParams = ListParams & { name?: string; connection?: string; isActive?: boolean }
+
+export type SSOProviderKindEnum = Schemas['SSOProviderKindEnum']
+export type SSOProvider = Api<'SSOProvider'>
+export type SSOProviderWrite = Api<'SSOProviderRequest'>
+export type SSOProviderUpdate = Api<'SSOProviderUpdateRequest'>

@@ -281,7 +281,7 @@ if (error.value) throw createError(error.value)   // statusCode（404 / 403 等�
 - ログイン画面（`pages/login.vue`、`layouts/anonymous.vue`）は、`app/v1/auth/providers/` の応答で表示を決める。有効な認証基盤があればそのボタンを並べ、パスワードの欄は出さない（`/login?method=password` を開いたときだけ、基盤管理者用に出す）。認証基盤がなければパスワードの欄を出す。パスワードでのログインは `app/v1/auth/session/` へのPOSTで行い、`createSubmit` でエラーを表示する。ボタンを押したら、バックエンドのログイン開始URLへ画面ごと移動する（POSTのフォームで送り、CSRFトークンを付ける）。認証基盤から戻った後は、バックエンドが `next` のパスへリダイレクトする。許可されていないアカウントや認証の失敗では、バックエンドが `/login?error=not_allowed`、`/login?error=failed` へ戻すので、ログイン画面でその旨を表示する。
 - ログアウトは `app/v1/auth/session/` へのDELETEで行い、ログイン画面へ移動する。
 - 前段の認証プロキシのセッションが切れた場合は、§3.1のとおり画面ごと再読み込みする。ログアウトで消すのはYorikiのセッションだけにし、認証プロキシのセッションは消さない（前段の基盤のものなので）。
-- 招待・再設定のリンク（`/invitation#<token>`。`auth: false`。tokenはアクセスログに残らないようURLのフラグメントに置き、APIへは本文で送る）では、本人がパスワードを設定し、そのままログインした状態にする。期限切れ・使用済みのリンクでは、基盤管理者に発行し直してもらうよう案内する。
+- 招待・再設定のリンク（`/invitation#<token>`。`auth: false`。tokenはアクセスログに残らないようURLのフラグメントに置き、APIへは本文で送る）では、本人がパスワードを設定し、そのままログインした状態にする。期限切れ・使用済みのリンクや、SSOが有効になって使えなくなったリンクでは、その旨（SSOの場合はSSOでログインすること）を案内する。
 - 画面とAPIクライアントが使うのは、`useAccountStore` の `isAuthenticated`、`user`、`init()`、`login()`、`logout()` だけにする。
 - 外部の認証SDK（Auth0等）、Django JWTとの交換、トークンのrefreshは使わない。
 

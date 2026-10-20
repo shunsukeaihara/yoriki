@@ -62,7 +62,7 @@ design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにし
 
 1. **認証の方式の見直し**（design.md §10.0、backend-conventions.md §6.2、frontend-conventions.md §4 の0.18の設計で実装する）：
    - SSOの設定（`SSOProvider`。種別、client ID、client secret（`EncryptedSecretField`）、テナント、Workspaceのドメイン、許可するメールドメイン）を管理画面で登録する。allauthへは `list_apps()` で保存しない `SocialApp` として渡す。環境変数 `YORIKI_SSO_*` はやめる。
-   - SSOがなければ、Yorikiのアカウントでログインする（基盤管理者が `v1/users` で作り、招待のリンク（`/invitation#<token>`、7日、1回だけ）を画面でコピーして渡す。再設定も同じ。試行回数の制限は django-axes）。
+   - SSOがなければ、Yorikiのアカウントでログインする（基盤管理者が `v1/users` で作り、招待のリンク（`/invitation#<token>`、7日、1回だけ）を画面でコピーして渡す。再設定も同じ。SSOが有効な間は基盤管理者以外のリンクを発行・使用させず、SSOを有効にしたら未使用のリンクを無効にする。試行回数の制限は django-axes で、アカウントごとと送信元IPごとに別々に数える）。
    - SSOを設定したら社員はSSOだけ。SSOの初回ログインで、同じメールアドレスのアカウントに紐付ける。
    - 基盤管理者のパスワードでのログインは残す（SSOが有効な間は `/login?method=password` だけに出す）。
 2. **Agent（`agent`）**：Agent、AgentRevision（不変の版）、管理画面と、社員がAgentを選ぶ画面。

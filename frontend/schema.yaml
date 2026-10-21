@@ -126,6 +126,269 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/app/v1/conversations/:
+    get:
+      operationId: app_v1_conversations_list
+      description: 自分の会話に関するAPI
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - app/conversation
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedConversationList'
+          description: ''
+    post:
+      operationId: app_v1_conversations_create
+      description: 自分の会話に関するAPI
+      tags:
+      - app/conversation
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ConversationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ConversationRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+          description: ''
+  /api/app/v1/conversations/{conversation}/messages/:
+    get:
+      operationId: app_v1_conversations_messages_list
+      description: 会話のメッセージに関するAPI
+      parameters:
+      - in: path
+        name: conversation
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - app/conversation/message
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedMessageList'
+          description: ''
+    post:
+      operationId: app_v1_conversations_messages_create
+      description: 会話のメッセージに関するAPI
+      parameters:
+      - in: path
+        name: conversation
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/conversation/message
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MessageRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/MessageRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/MessageRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+          description: ''
+  /api/app/v1/conversations/{uid}/:
+    get:
+      operationId: app_v1_conversations_retrieve
+      description: 自分の会話に関するAPI
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/conversation
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+          description: ''
+    patch:
+      operationId: app_v1_conversations_partial_update
+      description: 自分の会話に関するAPI
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/conversation
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedConversationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedConversationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedConversationRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+          description: ''
+    delete:
+      operationId: app_v1_conversations_destroy
+      description: 自分の会話に関するAPI
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/conversation
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/app/v1/model_profiles/:
+    get:
+      operationId: app_v1_model_profiles_list
+      description: 会話で選べるモデル設定
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - app/model_profile
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AppModelProfile'
+          description: ''
+  /api/app/v1/model_profiles/{uid}/:
+    get:
+      operationId: app_v1_model_profiles_retrieve
+      description: 会話で選べるモデル設定
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/model_profile
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppModelProfile'
+          description: ''
   /api/app/v1/my/:
     get:
       operationId: app_v1_my_retrieve
@@ -141,6 +404,298 @@ paths:
               schema:
                 $ref: '#/components/schemas/MyUser'
           description: ''
+  /api/app/v1/runs/:
+    get:
+      operationId: app_v1_runs_list
+      description: 自分のRunに関するAPI
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: integer
+          title: 状態
+          enum:
+          - 1
+          - 10
+          - 2
+          - 20
+          - 3
+          - 30
+          - 4
+          - 5
+        description: |-
+          * `1` - 順番待ち
+          * `2` - 作業中
+          * `3` - 確認待ち
+          * `4` - 再試行待ち
+          * `5` - 停止中
+          * `10` - 完了
+          * `20` - 失敗
+          * `30` - 停止済み
+      tags:
+      - app/run
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedRunList'
+          description: ''
+  /api/app/v1/runs/{run}/clarifications/:
+    get:
+      operationId: app_v1_runs_clarifications_list
+      description: エージェントからの確認
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: path
+        name: run
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: integer
+          title: 状態
+          enum:
+          - 1
+          - 2
+          - 3
+          - 4
+        description: |-
+          * `1` - 回答待ち
+          * `2` - 回答済み
+          * `3` - 期限切れ
+          * `4` - 取消
+      tags:
+      - app/run/clarification
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedClarificationRequestList'
+          description: ''
+  /api/app/v1/runs/{run}/clarifications/{uid}/:
+    get:
+      operationId: app_v1_runs_clarifications_retrieve
+      description: エージェントからの確認
+      parameters:
+      - in: path
+        name: run
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/run/clarification
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClarificationRequest'
+          description: ''
+  /api/app/v1/runs/{run}/clarifications/{uid}/answer/:
+    post:
+      operationId: app_v1_runs_clarifications_answer_create
+      description: 確認に回答する。回答を受け付けるとRunが再開される
+      parameters:
+      - in: path
+        name: run
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/run/clarification
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClarificationAnswerRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ClarificationAnswerRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ClarificationAnswerRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClarificationRequest'
+          description: ''
+        '409':
+          description: すでに回答済み
+  /api/app/v1/runs/{run}/events/:
+    get:
+      operationId: app_v1_runs_events_list
+      description: Runのイベントの履歴
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: path
+        name: run
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - app/run/event
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedRunStreamEventList'
+          description: ''
+  /api/app/v1/runs/{uid}/:
+    get:
+      operationId: app_v1_runs_retrieve
+      description: 自分のRunに関するAPI
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/run
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Run'
+          description: ''
+  /api/app/v1/runs/{uid}/cancel/:
+    post:
+      operationId: app_v1_runs_cancel_create
+      description: 実行の停止を依頼する。実行中の場合は停止中になり、Workerが停止を確かめると停止済みになる
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/run
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunCancelRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RunCancelRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RunCancelRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Run'
+          description: ''
+        '409':
+          description: 他の処理と競合した
   /api/ping/:
     get:
       operationId: ping_retrieve
@@ -668,6 +1223,27 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/model_profiles/{uid}/make_default/:
+    post:
+      operationId: v1_model_profiles_make_default_create
+      description: 既定のモデル設定にする（これまでの既定は外れる）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/model_profile
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelProfile'
+          description: ''
   /api/v1/sso_providers/:
     get:
       operationId: v1_sso_providers_list
@@ -1032,8 +1608,102 @@ paths:
               schema:
                 $ref: '#/components/schemas/InvitationLink'
           description: ''
+  /api/app/v1/stream/:
+    get:
+      operationId: app_stream_stream
+      description: ログインユーザー宛ての通知のストリーム
+      tags:
+      - app/stream
+      parameters: []
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/UserStreamEvent'
+          description: SSE。`id:` はRunEventのsequence（Last-Event-IDで続きから受け取る）
+        '401':
+          description: 未ログイン
+        '404':
+          description: 自分のRunではない
+  /api/app/v1/runs/{run}/stream/:
+    get:
+      operationId: app_run_stream_stream
+      description: 1つのRunの詳細イベントのストリーム
+      tags:
+      - app/run/stream
+      parameters:
+      - name: run
+        in: path
+        required: true
+        schema:
+          type: string
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/RunStreamEvent'
+          description: SSE。`id:` はRunEventのsequence（Last-Event-IDで続きから受け取る）
+        '401':
+          description: 未ログイン
+        '404':
+          description: 自分のRunではない
 components:
   schemas:
+    AppModelProfile:
+      type: object
+      description: 社員が会話で選ぶためのモデル設定。接続先や単価は出さない
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+          title: 名前
+        is_default:
+          type: boolean
+          readOnly: true
+          title: 既定
+        is_local:
+          type: boolean
+          readOnly: true
+        supports_tools:
+          type: boolean
+          readOnly: true
+        supports_images:
+          type: boolean
+          readOnly: true
+        supports_documents:
+          type: boolean
+          readOnly: true
+        supports_reasoning:
+          type: boolean
+          readOnly: true
+        effort_values:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        default_effort:
+          type: string
+          readOnly: true
+      required:
+      - default_effort
+      - effort_values
+      - id
+      - is_default
+      - is_local
+      - name
+      - supports_documents
+      - supports_images
+      - supports_reasoning
+      - supports_tools
     AuthMethods:
       type: object
       description: ログイン画面に出すログインの方法
@@ -1068,6 +1738,260 @@ components:
       - id
       - login_url
       - name
+    ClarificationAnswerItem:
+      type: object
+      properties:
+        selected:
+          type: array
+          items:
+            type: string
+            maxLength: 200
+          maxItems: 10
+        text:
+          type: string
+          default: ''
+          maxLength: 5000
+    ClarificationAnswerItemRequest:
+      type: object
+      properties:
+        selected:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+          maxItems: 10
+        text:
+          type: string
+          default: ''
+          maxLength: 5000
+    ClarificationAnswerRequest:
+      type: object
+      description: 確認への回答。質問ごとの選択（と自由記述）を質問と同じ順に送る。補足だけでもよい
+      properties:
+        answers:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClarificationAnswerItemRequest'
+        comment:
+          type: string
+          default: ''
+          maxLength: 5000
+    ClarificationEvent:
+      type: object
+      description: エージェントからの確認（回答待ち）
+      properties:
+        type:
+          type: string
+          readOnly: true
+        run:
+          type: string
+          readOnly: true
+        sequence:
+          type: integer
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        clarification:
+          type: string
+          readOnly: true
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/ClarificationKindEnum'
+          readOnly: true
+      required:
+      - clarification
+      - created
+      - kind
+      - run
+      - sequence
+      - type
+    ClarificationKindEnum:
+      enum:
+      - 1
+      - 2
+      type: integer
+      description: |-
+        * `1` - エージェントからの質問
+        * `2` - モデルの切り替えの確認
+    ClarificationOption:
+      type: object
+      properties:
+        label:
+          type: string
+          readOnly: true
+        description:
+          type: string
+          readOnly: true
+      required:
+      - description
+      - label
+    ClarificationQuestion:
+      type: object
+      properties:
+        header:
+          type: string
+          readOnly: true
+        question:
+          type: string
+          readOnly: true
+        options:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClarificationOption'
+          readOnly: true
+        multi_select:
+          type: boolean
+          readOnly: true
+      required:
+      - header
+      - multi_select
+      - options
+      - question
+    ClarificationRequest:
+      type: object
+      properties:
+        id:
+          type: string
+          readOnly: true
+        run:
+          type: string
+          readOnly: true
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/ClarificationKindEnum'
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/ClarificationStatusEnum'
+          readOnly: true
+        questions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClarificationQuestion'
+          readOnly: true
+        answers:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClarificationAnswerItem'
+          readOnly: true
+        comment:
+          type: string
+          readOnly: true
+          title: 補足
+        answered_by:
+          type: string
+          readOnly: true
+        answered:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 回答日時
+        expires:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 回答期限
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - answered
+      - answered_by
+      - answers
+      - comment
+      - created
+      - expires
+      - id
+      - kind
+      - questions
+      - run
+      - status
+    ClarificationStatusEnum:
+      enum:
+      - 1
+      - 2
+      - 3
+      - 4
+      type: integer
+      description: |-
+        * `1` - 回答待ち
+        * `2` - 回答済み
+        * `3` - 期限切れ
+        * `4` - 取消
+    Conversation:
+      type: object
+      description: 自分の会話。モデル設定を省くと既定のモデル設定にする。実行中に変えると、次のステップから切り替わる
+      properties:
+        id:
+          type: string
+          readOnly: true
+        model_profile:
+          type: string
+        model_profile_info:
+          allOf:
+          - $ref: '#/components/schemas/AppModelProfile'
+          readOnly: true
+        effort:
+          type: string
+          description: 空ならモデルの既定。値を入れると固定する
+          maxLength: 50
+        handles_sensitive_data:
+          type: boolean
+          title: 個人情報・機密情報を扱う
+        title:
+          type: string
+          title: タイトル
+          maxLength: 200
+        last_posted:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 最終投稿日時
+        active_run:
+          allOf:
+          - $ref: '#/components/schemas/Run'
+          nullable: true
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - active_run
+      - created
+      - id
+      - last_posted
+      - model_profile_info
+      - updated
+    ConversationRequest:
+      type: object
+      description: 自分の会話。モデル設定を省くと既定のモデル設定にする。実行中に変えると、次のステップから切り替わる
+      properties:
+        model_profile:
+          type: string
+          minLength: 1
+        effort:
+          type: string
+          description: 空ならモデルの既定。値を入れると固定する
+          maxLength: 50
+        handles_sensitive_data:
+          type: boolean
+          title: 個人情報・機密情報を扱う
+        title:
+          type: string
+          title: タイトル
+          maxLength: 200
     Group:
       type: object
       description: 役割（Group）。ユーザーへの割り当てでは名前で指定する
@@ -1078,6 +2002,44 @@ components:
           title: 名前
       required:
       - name
+    InstructionInfo:
+      type: object
+      properties:
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/InstructionKindEnum'
+          readOnly: true
+        state:
+          allOf:
+          - $ref: '#/components/schemas/InstructionStateEnum'
+          readOnly: true
+        state_display:
+          type: string
+          readOnly: true
+      required:
+      - kind
+      - state
+      - state_display
+    InstructionKindEnum:
+      enum:
+      - 1
+      - 2
+      type: integer
+      description: |-
+        * `1` - 今の作業への追加指示
+        * `2` - 次の依頼
+    InstructionStateEnum:
+      enum:
+      - 1
+      - 2
+      - 3
+      - 9
+      type: integer
+      description: |-
+        * `1` - 受付済み
+        * `2` - 反映済み
+        * `3` - 開始済み
+        * `9` - 取消
     InvitationAcceptRequest:
       type: object
       description: パスワードを設定してリンクを使用済みにする。Viewのtransactionの中で、リンクを行ロックして確かめる
@@ -1525,6 +2487,77 @@ components:
           type: boolean
           title: 有効
           description: ユーザーがアクティブかどうかを示します。アカウントを削除する代わりに選択を解除してください。
+    Message:
+      type: object
+      description: 会話のメッセージ。投稿すると、新しい依頼・今の作業への追加指示・確認への回答・次の依頼のどれかになる
+      properties:
+        id:
+          type: string
+          readOnly: true
+        run:
+          type: string
+          readOnly: true
+        sender:
+          type: string
+          readOnly: true
+        role:
+          allOf:
+          - $ref: '#/components/schemas/MessageRoleEnum'
+          readOnly: true
+        body:
+          type: string
+          maxLength: 20000
+        instruction:
+          allOf:
+          - $ref: '#/components/schemas/InstructionInfo'
+          readOnly: true
+          nullable: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - body
+      - created
+      - id
+      - instruction
+      - role
+      - run
+      - sender
+    MessageRequest:
+      type: object
+      description: 会話のメッセージ。投稿すると、新しい依頼・今の作業への追加指示・確認への回答・次の依頼のどれかになる
+      properties:
+        body:
+          type: string
+          minLength: 1
+          maxLength: 20000
+        client_message_id:
+          type: string
+          writeOnly: true
+          maxLength: 64
+        mode:
+          allOf:
+          - $ref: '#/components/schemas/ModeEnum'
+          writeOnly: true
+          default: auto
+          description: |-
+            auto：実行中なら今の作業への追加指示、確認待ちなら回答。next：今の作業の後に始める
+
+            * `auto` - 自動
+            * `next` - 次の依頼
+      required:
+      - body
+    MessageRoleEnum:
+      enum:
+      - 1
+      - 2
+      - 3
+      type: integer
+      description: |-
+        * `1` - ユーザー
+        * `2` - エージェント
+        * `3` - システム
     MinimumLLMConnection:
       type: object
       properties:
@@ -1553,6 +2586,14 @@ components:
       - kind
       - kind_display
       - name
+    ModeEnum:
+      enum:
+      - auto
+      - next
+      type: string
+      description: |-
+        * `auto` - 自動
+        * `next` - 次の依頼
     ModelProfile:
       type: object
       description: |-
@@ -1571,6 +2612,10 @@ components:
         is_active:
           type: boolean
           title: 有効
+        is_default:
+          type: boolean
+          readOnly: true
+          title: 既定
         version:
           type: integer
           minimum: 0
@@ -1607,6 +2652,15 @@ components:
         supports_images:
           type: boolean
           default: false
+        supports_documents:
+          type: boolean
+          default: false
+        supports_audio:
+          type: boolean
+          default: false
+        supports_video:
+          type: boolean
+          default: false
         supports_structured_output:
           type: boolean
           default: false
@@ -1616,6 +2670,17 @@ components:
         supports_reasoning:
           type: boolean
           default: false
+        effort_values:
+          type: array
+          items:
+            type: string
+            maxLength: 50
+          description: モデルが受け付けるeffortの値（各社の指定そのまま）。推論の制御に対応するモデルだけ
+          maxItems: 20
+        default_effort:
+          type: string
+          default: ''
+          maxLength: 50
         connection_info:
           allOf:
           - $ref: '#/components/schemas/MinimumLLMConnection'
@@ -1637,6 +2702,7 @@ components:
       - created
       - created_by
       - id
+      - is_default
       - max_input_tokens
       - max_output_tokens
       - model_name
@@ -1696,6 +2762,15 @@ components:
         supports_images:
           type: boolean
           default: false
+        supports_documents:
+          type: boolean
+          default: false
+        supports_audio:
+          type: boolean
+          default: false
+        supports_video:
+          type: boolean
+          default: false
         supports_structured_output:
           type: boolean
           default: false
@@ -1705,6 +2780,18 @@ components:
         supports_reasoning:
           type: boolean
           default: false
+        effort_values:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 50
+          description: モデルが受け付けるeffortの値（各社の指定そのまま）。推論の制御に対応するモデルだけ
+          maxItems: 20
+        default_effort:
+          type: string
+          default: ''
+          maxLength: 50
         change_reason:
           type: string
           writeOnly: true
@@ -1767,6 +2854,18 @@ components:
           type: boolean
           readOnly: true
           title: 画像入力
+        supports_documents:
+          type: boolean
+          readOnly: true
+          title: 文書入力
+        supports_audio:
+          type: boolean
+          readOnly: true
+          title: 音声入力
+        supports_video:
+          type: boolean
+          readOnly: true
+          title: 動画入力
         supports_structured_output:
           type: boolean
           readOnly: true
@@ -1779,6 +2878,17 @@ components:
           type: boolean
           readOnly: true
           title: 推論の制御
+        effort_values:
+          type: array
+          items:
+            type: string
+            maxLength: 50
+          readOnly: true
+          title: Effortの値
+        default_effort:
+          type: string
+          readOnly: true
+          title: 既定のeffort
         connection_info:
           allOf:
           - $ref: '#/components/schemas/MinimumLLMConnection'
@@ -1801,6 +2911,8 @@ components:
       - connection_info
       - created
       - created_by
+      - default_effort
+      - effort_values
       - id
       - input_price
       - max_input_tokens
@@ -1808,11 +2920,14 @@ components:
       - model_name
       - number
       - output_price
+      - supports_audio
+      - supports_documents
       - supports_images
       - supports_prompt_caching
       - supports_reasoning
       - supports_structured_output
       - supports_tools
+      - supports_video
     MyUser:
       type: object
       description: ログイン中の利用者。画面の表示と権限の判定に使う
@@ -1856,6 +2971,47 @@ components:
       - id
       - is_platform_admin
       - username
+    NullEnum:
+      enum:
+      - null
+    PaginatedClarificationRequestList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ClarificationRequest'
+    PaginatedConversationList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Conversation'
     PaginatedLLMConnectionList:
       type: object
       required:
@@ -1894,6 +3050,25 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ManageUser'
+    PaginatedMessageList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
     PaginatedModelProfileList:
       type: object
       required:
@@ -1932,6 +3107,44 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ModelProfileVersion'
+    PaginatedRunList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Run'
+    PaginatedRunStreamEventList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunStreamEvent'
     PaginatedSSOProviderList:
       type: object
       required:
@@ -1951,6 +3164,24 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SSOProvider'
+    PatchedConversationRequest:
+      type: object
+      description: 自分の会話。モデル設定を省くと既定のモデル設定にする。実行中に変えると、次のステップから切り替わる
+      properties:
+        model_profile:
+          type: string
+          minLength: 1
+        effort:
+          type: string
+          description: 空ならモデルの既定。値を入れると固定する
+          maxLength: 50
+        handles_sensitive_data:
+          type: boolean
+          title: 個人情報・機密情報を扱う
+        title:
+          type: string
+          title: タイトル
+          maxLength: 200
     PatchedLLMConnectionUpdateRequest:
       type: object
       description: プロバイダ接続の更新。種別とbase URL（接続先）は変えられないので、読み取り専用にする
@@ -2057,6 +3288,15 @@ components:
         supports_images:
           type: boolean
           default: false
+        supports_documents:
+          type: boolean
+          default: false
+        supports_audio:
+          type: boolean
+          default: false
+        supports_video:
+          type: boolean
+          default: false
         supports_structured_output:
           type: boolean
           default: false
@@ -2066,6 +3306,18 @@ components:
         supports_reasoning:
           type: boolean
           default: false
+        effort_values:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 50
+          description: モデルが受け付けるeffortの値（各社の指定そのまま）。推論の制御に対応するモデルだけ
+          maxItems: 20
+        default_effort:
+          type: string
+          default: ''
+          maxLength: 50
         change_reason:
           type: string
           writeOnly: true
@@ -2122,6 +3374,321 @@ components:
         * `2` - Anthropic（Claude）
         * `3` - Google Gemini
         * `4` - ローカルLLM
+    Run:
+      type: object
+      properties:
+        id:
+          type: string
+          readOnly: true
+        conversation:
+          type: string
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/RunStatusEnum'
+          readOnly: true
+        status_display:
+          type: string
+          readOnly: true
+        end_reason:
+          readOnly: true
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/RunEndReasonEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        end_reason_display:
+          type: string
+          readOnly: true
+          nullable: true
+        error:
+          type: string
+          readOnly: true
+          title: 失敗の理由
+        model_profile_name:
+          type: string
+          readOnly: true
+        effort:
+          type: string
+          readOnly: true
+        step_count:
+          type: integer
+          readOnly: true
+          title: ステップ数
+        todos:
+          type: array
+          items:
+            type: object
+            additionalProperties:
+              type: string
+          readOnly: true
+          description: 作業の計画（todo_write の最新の内容）
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+        finished:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 終了日時
+      required:
+      - conversation
+      - created
+      - effort
+      - end_reason
+      - end_reason_display
+      - error
+      - finished
+      - id
+      - model_profile_name
+      - status
+      - status_display
+      - step_count
+      - todos
+      - updated
+    RunCancelRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          maxLength: 1000
+    RunDeltaEvent:
+      type: object
+      description: LLM出力の差分。保存しない一時イベントで、`id:` を付けない
+      properties:
+        type:
+          type: string
+          readOnly: true
+        run:
+          type: string
+          readOnly: true
+        step:
+          type: integer
+          readOnly: true
+        text:
+          type: string
+          readOnly: true
+      required:
+      - run
+      - step
+      - text
+      - type
+    RunEndReasonEnum:
+      enum:
+      - 1
+      - 2
+      - 10
+      - 11
+      - 12
+      - 13
+      - 14
+      - 15
+      - 16
+      - 17
+      - 99
+      type: integer
+      description: |-
+        * `1` - 完了
+        * `2` - 停止
+        * `10` - ステップ数の上限
+        * `11` - 予算の上限
+        * `12` - 文脈に収まらない
+        * `13` - モデルにつながらない
+        * `14` - 同じ誤りの繰返し
+        * `15` - 業務結果がない
+        * `16` - 再試行の上限
+        * `17` - 回答期限切れ
+        * `99` - 内部のエラー
+    RunEventKindEnum:
+      enum:
+      - 1
+      - 10
+      - 11
+      - 12
+      - 21
+      - 30
+      - 31
+      - 32
+      - 40
+      - 50
+      - 51
+      - 60
+      - 90
+      type: integer
+      description: |-
+        * `1` - 状態の遷移
+        * `10` - 利用者の発言
+        * `11` - エージェントの応答
+        * `12` - 失敗した応答
+        * `21` - Toolの結果
+        * `30` - 要求の中身
+        * `31` - 実行時の文脈
+        * `32` - 文脈の圧縮
+        * `40` - モデルの切り替え
+        * `50` - 確認の質問
+        * `51` - 確認への回答
+        * `60` - モデルの再試行
+        * `90` - 実行の終了
+    RunMessageEvent:
+      type: object
+      description: 確定したメッセージとTool実行（利用者の発言、エージェントの応答、Toolの結果）
+      properties:
+        type:
+          type: string
+          readOnly: true
+        run:
+          type: string
+          readOnly: true
+        sequence:
+          type: integer
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/RunEventKindEnum'
+          readOnly: true
+        text:
+          type: string
+          readOnly: true
+        tool_calls:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolCallInfo'
+          readOnly: true
+        tool_result:
+          allOf:
+          - $ref: '#/components/schemas/ToolResultInfo'
+          readOnly: true
+          nullable: true
+      required:
+      - created
+      - kind
+      - run
+      - sequence
+      - text
+      - tool_calls
+      - tool_result
+      - type
+    RunOtherEvent:
+      type: object
+      description: そのほかの記録（モデルの切り替え、再試行、圧縮等）。詳細のログに出す
+      properties:
+        type:
+          type: string
+          readOnly: true
+        run:
+          type: string
+          readOnly: true
+        sequence:
+          type: integer
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/RunEventKindEnum'
+          readOnly: true
+        kind_display:
+          type: string
+          readOnly: true
+        comment:
+          type: string
+          readOnly: true
+      required:
+      - comment
+      - created
+      - kind
+      - kind_display
+      - run
+      - sequence
+      - type
+    RunStatusEnum:
+      enum:
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 10
+      - 20
+      - 30
+      type: integer
+      description: |-
+        * `1` - 順番待ち
+        * `2` - 作業中
+        * `3` - 確認待ち
+        * `4` - 再試行待ち
+        * `5` - 停止中
+        * `10` - 完了
+        * `20` - 失敗
+        * `30` - 停止済み
+    RunStatusEvent:
+      type: object
+      description: Runの状態の変更
+      properties:
+        type:
+          type: string
+          readOnly: true
+        run:
+          type: string
+          readOnly: true
+        sequence:
+          type: integer
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/RunStatusEnum'
+          readOnly: true
+        status_display:
+          type: string
+          readOnly: true
+        end_reason:
+          readOnly: true
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/RunEndReasonEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        comment:
+          type: string
+          readOnly: true
+      required:
+      - comment
+      - created
+      - end_reason
+      - run
+      - sequence
+      - status
+      - status_display
+      - type
+    RunStreamEvent:
+      oneOf:
+      - $ref: '#/components/schemas/RunStatusEvent'
+      - $ref: '#/components/schemas/RunMessageEvent'
+      - $ref: '#/components/schemas/ClarificationEvent'
+      - $ref: '#/components/schemas/RunOtherEvent'
+      - $ref: '#/components/schemas/RunDeltaEvent'
+      discriminator:
+        propertyName: type
+        mapping:
+          run.status: '#/components/schemas/RunStatusEvent'
+          run.message: '#/components/schemas/RunMessageEvent'
+          clarification.requested: '#/components/schemas/ClarificationEvent'
+          run.event: '#/components/schemas/RunOtherEvent'
+          run.delta: '#/components/schemas/RunDeltaEvent'
     SSOProvider:
       type: object
       description: SSOの設定の作成と表示。client secretは書き込み専用で、応答には末尾の4文字（client_secret_hint）だけを出す
@@ -2280,6 +3847,65 @@ components:
           readOnly: true
       required:
       - is_authenticated
+    ToolCallInfo:
+      type: object
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        arguments:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+      required:
+      - arguments
+      - id
+      - name
+    ToolResultInfo:
+      type: object
+      properties:
+        call_id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        is_error:
+          type: boolean
+          readOnly: true
+        text:
+          type: string
+          readOnly: true
+      required:
+      - call_id
+      - is_error
+      - name
+      - text
+    UserStreamEvent:
+      type: object
+      description: ログインユーザー宛ての通知：自分のRunの状態の変更
+      properties:
+        type:
+          type: string
+          enum:
+          - run.status
+        run:
+          type: string
+        conversation:
+          type: string
+        status:
+          $ref: '#/components/schemas/RunStatusEnum'
+        sequence:
+          type: integer
+      required:
+      - type
+      - run
+      - conversation
+      - status
+      - sequence
   securitySchemes:
     cookieAuth:
       type: apiKey

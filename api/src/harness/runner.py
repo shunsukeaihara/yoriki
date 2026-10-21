@@ -253,7 +253,7 @@ class Runner:
         applied = False
         with self.run_obj.fenced(self.attempt) as run:
             instructions = (
-                UserInstruction.objects.select_for_update()
+                UserInstruction.objects.select_for_update(of=("self",))
                 .filter(run=run, kind=InstructionKind.CURRENT, state=InstructionState.RECEIVED)
                 .select_related("message")
                 .order_by("pk")
@@ -345,9 +345,11 @@ class Runner:
         return response
 
     def _wait(self, seconds: float) -> None:
-        end = time.monotonic() + seconds
-        while (remaining := end - time.monotonic()) > 0:
-            self.sleep(min(remaining, HEARTBEAT_INTERVAL))
+        remaining = seconds
+        while remaining > 0:
+            chunk = min(remaining, HEARTBEAT_INTERVAL)
+            self.sleep(chunk)
+            remaining -= chunk
             self.attempt.heartbeat()
 
     def _handle_provider_failure(self, error: ProviderError) -> None:

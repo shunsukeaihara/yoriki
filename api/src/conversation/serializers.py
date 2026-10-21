@@ -2,6 +2,7 @@ from typing import Any
 
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from llm.models import ModelProfile
@@ -54,9 +55,10 @@ class ConversationSerializer(serializers.ModelSerializer):
             fields["handles_sensitive_data"].read_only = True
         return fields
 
-    def get_active_run(self, obj: Conversation) -> RunSerializer | None:
+    @extend_schema_field(RunSerializer(allow_null=True))
+    def get_active_run(self, obj: Conversation) -> dict[str, Any] | None:
         run = obj.runs.filter(status__in=ACTIVE_STATUSES).select_related("model_version__profile").first()
-        return RunSerializer(run, context=self.context).data if run else None  # type: ignore[return-value]
+        return RunSerializer(run, context=self.context).data if run else None
 
     def validate(self, attrs):
         profile = attrs.get("model_profile") or getattr(self.instance, "model_profile", None)

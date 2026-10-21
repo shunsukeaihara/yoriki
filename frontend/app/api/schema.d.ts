@@ -74,6 +74,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/app/v1/conversations/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 自分の会話に関するAPI */
+        get: operations["app_v1_conversations_list"];
+        put?: never;
+        /** @description 自分の会話に関するAPI */
+        post: operations["app_v1_conversations_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/conversations/{conversation}/messages/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 会話のメッセージに関するAPI */
+        get: operations["app_v1_conversations_messages_list"];
+        put?: never;
+        /** @description 会話のメッセージに関するAPI */
+        post: operations["app_v1_conversations_messages_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/conversations/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 自分の会話に関するAPI */
+        get: operations["app_v1_conversations_retrieve"];
+        put?: never;
+        post?: never;
+        /** @description 自分の会話に関するAPI */
+        delete: operations["app_v1_conversations_destroy"];
+        options?: never;
+        head?: never;
+        /** @description 自分の会話に関するAPI */
+        patch: operations["app_v1_conversations_partial_update"];
+        trace?: never;
+    };
+    "/api/app/v1/model_profiles/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 会話で選べるモデル設定 */
+        get: operations["app_v1_model_profiles_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/model_profiles/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 会話で選べるモデル設定 */
+        get: operations["app_v1_model_profiles_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/app/v1/my/": {
         parameters: {
             query?: never;
@@ -85,6 +174,125 @@ export interface paths {
         get: operations["app_v1_my_retrieve"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/runs/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 自分のRunに関するAPI */
+        get: operations["app_v1_runs_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/runs/{run}/clarifications/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description エージェントからの確認 */
+        get: operations["app_v1_runs_clarifications_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/runs/{run}/clarifications/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description エージェントからの確認 */
+        get: operations["app_v1_runs_clarifications_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/runs/{run}/clarifications/{uid}/answer/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 確認に回答する。回答を受け付けるとRunが再開される */
+        post: operations["app_v1_runs_clarifications_answer_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/runs/{run}/events/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Runのイベントの履歴 */
+        get: operations["app_v1_runs_events_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/runs/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 自分のRunに関するAPI */
+        get: operations["app_v1_runs_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/runs/{uid}/cancel/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 実行の停止を依頼する。実行中の場合は停止中になり、Workerが停止を確かめると停止済みになる */
+        post: operations["app_v1_runs_cancel_create"];
         delete?: never;
         options?: never;
         head?: never;
@@ -269,6 +477,23 @@ export interface paths {
         patch: operations["v1_model_profiles_partial_update"];
         trace?: never;
     };
+    "/api/v1/model_profiles/{uid}/make_default/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 既定のモデル設定にする（これまでの既定は外れる） */
+        post: operations["v1_model_profiles_make_default_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sso_providers/": {
         parameters: {
             query?: never;
@@ -361,10 +586,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/app/v1/stream/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description ログインユーザー宛ての通知のストリーム */
+        get: operations["app_stream_stream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/runs/{run}/stream/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 1つのRunの詳細イベントのストリーム */
+        get: operations["app_run_stream_stream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description 社員が会話で選ぶためのモデル設定。接続先や単価は出さない */
+        AppModelProfile: {
+            readonly id: string;
+            /** 名前 */
+            readonly name: string;
+            /** 既定 */
+            readonly is_default: boolean;
+            readonly is_local: boolean;
+            readonly supports_tools: boolean;
+            readonly supports_images: boolean;
+            readonly supports_documents: boolean;
+            readonly supports_reasoning: boolean;
+            readonly effort_values: string[];
+            readonly default_effort: string;
+        };
         /** @description ログイン画面に出すログインの方法 */
         AuthMethods: {
             readonly providers: components["schemas"]["AuthProvider"][];
@@ -377,11 +651,139 @@ export interface components {
             readonly name: string;
             readonly login_url: string;
         };
+        ClarificationAnswerItem: {
+            selected?: string[];
+            /** @default  */
+            text: string;
+        };
+        ClarificationAnswerItemRequest: {
+            selected?: string[];
+            /** @default  */
+            text: string;
+        };
+        /** @description 確認への回答。質問ごとの選択（と自由記述）を質問と同じ順に送る。補足だけでもよい */
+        ClarificationAnswerRequest: {
+            answers?: components["schemas"]["ClarificationAnswerItemRequest"][];
+            /** @default  */
+            comment: string;
+        };
+        /** @description エージェントからの確認（回答待ち） */
+        ClarificationEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "clarification.requested";
+            readonly run: string;
+            readonly sequence: number;
+            /** Format: date-time */
+            readonly created: string;
+            readonly clarification: string;
+            readonly kind: components["schemas"]["ClarificationKindEnum"];
+        };
+        /**
+         * @description * `1` - エージェントからの質問
+         *     * `2` - モデルの切り替えの確認
+         * @enum {integer}
+         */
+        ClarificationKindEnum: 1 | 2;
+        ClarificationOption: {
+            readonly label: string;
+            readonly description: string;
+        };
+        ClarificationQuestion: {
+            readonly header: string;
+            readonly question: string;
+            readonly options: components["schemas"]["ClarificationOption"][];
+            readonly multi_select: boolean;
+        };
+        ClarificationRequest: {
+            readonly id: string;
+            readonly run: string;
+            readonly kind: components["schemas"]["ClarificationKindEnum"];
+            readonly status: components["schemas"]["ClarificationStatusEnum"];
+            readonly questions: components["schemas"]["ClarificationQuestion"][];
+            readonly answers: components["schemas"]["ClarificationAnswerItem"][];
+            /** 補足 */
+            readonly comment: string;
+            readonly answered_by: string;
+            /**
+             * 回答日時
+             * Format: date-time
+             */
+            readonly answered: string | null;
+            /**
+             * 回答期限
+             * Format: date-time
+             */
+            readonly expires: string | null;
+            /** Format: date-time */
+            readonly created: string;
+        };
+        /**
+         * @description * `1` - 回答待ち
+         *     * `2` - 回答済み
+         *     * `3` - 期限切れ
+         *     * `4` - 取消
+         * @enum {integer}
+         */
+        ClarificationStatusEnum: 1 | 2 | 3 | 4;
+        /** @description 自分の会話。モデル設定を省くと既定のモデル設定にする。実行中に変えると、次のステップから切り替わる */
+        Conversation: {
+            readonly id: string;
+            model_profile?: string;
+            readonly model_profile_info: components["schemas"]["AppModelProfile"];
+            /** @description 空ならモデルの既定。値を入れると固定する */
+            effort?: string;
+            /** 個人情報・機密情報を扱う */
+            handles_sensitive_data?: boolean;
+            /** タイトル */
+            title?: string;
+            /**
+             * 最終投稿日時
+             * Format: date-time
+             */
+            readonly last_posted: string | null;
+            readonly active_run: components["schemas"]["Run"] | null;
+            /** Format: date-time */
+            readonly created: string;
+            /** Format: date-time */
+            readonly updated: string;
+        };
+        /** @description 自分の会話。モデル設定を省くと既定のモデル設定にする。実行中に変えると、次のステップから切り替わる */
+        ConversationRequest: {
+            model_profile?: string;
+            /** @description 空ならモデルの既定。値を入れると固定する */
+            effort?: string;
+            /** 個人情報・機密情報を扱う */
+            handles_sensitive_data?: boolean;
+            /** タイトル */
+            title?: string;
+        };
         /** @description 役割（Group）。ユーザーへの割り当てでは名前で指定する */
         Group: {
             /** 名前 */
             readonly name: string;
         };
+        InstructionInfo: {
+            readonly kind: components["schemas"]["InstructionKindEnum"];
+            readonly state: components["schemas"]["InstructionStateEnum"];
+            readonly state_display: string;
+        };
+        /**
+         * @description * `1` - 今の作業への追加指示
+         *     * `2` - 次の依頼
+         * @enum {integer}
+         */
+        InstructionKindEnum: 1 | 2;
+        /**
+         * @description * `1` - 受付済み
+         *     * `2` - 反映済み
+         *     * `3` - 開始済み
+         *     * `9` - 取消
+         * @enum {integer}
+         */
+        InstructionStateEnum: 1 | 2 | 3 | 9;
         /** @description パスワードを設定してリンクを使用済みにする。Viewのtransactionの中で、リンクを行ロックして確かめる */
         InvitationAcceptRequest: {
             token: string;
@@ -567,6 +969,37 @@ export interface components {
              */
             is_active?: boolean;
         };
+        /** @description 会話のメッセージ。投稿すると、新しい依頼・今の作業への追加指示・確認への回答・次の依頼のどれかになる */
+        Message: {
+            readonly id: string;
+            readonly run: string;
+            readonly sender: string;
+            readonly role: components["schemas"]["MessageRoleEnum"];
+            body: string;
+            readonly instruction: components["schemas"]["InstructionInfo"] | null;
+            /** Format: date-time */
+            readonly created: string;
+        };
+        /** @description 会話のメッセージ。投稿すると、新しい依頼・今の作業への追加指示・確認への回答・次の依頼のどれかになる */
+        MessageRequest: {
+            body: string;
+            client_message_id?: string;
+            /**
+             * @description auto：実行中なら今の作業への追加指示、確認待ちなら回答。next：今の作業の後に始める
+             *
+             *     * `auto` - 自動
+             *     * `next` - 次の依頼
+             * @default auto
+             */
+            mode: components["schemas"]["ModeEnum"];
+        };
+        /**
+         * @description * `1` - ユーザー
+         *     * `2` - エージェント
+         *     * `3` - システム
+         * @enum {integer}
+         */
+        MessageRoleEnum: 1 | 2 | 3;
         MinimumLLMConnection: {
             readonly id: string;
             /** 名前 */
@@ -577,6 +1010,12 @@ export interface components {
             /** 有効 */
             readonly is_active: boolean;
         };
+        /**
+         * @description * `auto` - 自動
+         *     * `next` - 次の依頼
+         * @enum {string}
+         */
+        ModeEnum: "auto" | "next";
         /**
          * @description モデル設定。中身（接続、モデル名、上限、単価、能力）は現在の版の値を平らに出す。
          *
@@ -589,6 +1028,8 @@ export interface components {
             name: string;
             /** 有効 */
             is_active?: boolean;
+            /** 既定 */
+            readonly is_default: boolean;
             /** @description 現在の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
             version?: number;
             connection: string;
@@ -615,11 +1056,21 @@ export interface components {
             /** @default false */
             supports_images: boolean;
             /** @default false */
+            supports_documents: boolean;
+            /** @default false */
+            supports_audio: boolean;
+            /** @default false */
+            supports_video: boolean;
+            /** @default false */
             supports_structured_output: boolean;
             /** @default false */
             supports_prompt_caching: boolean;
             /** @default false */
             supports_reasoning: boolean;
+            /** @description モデルが受け付けるeffortの値（各社の指定そのまま）。推論の制御に対応するモデルだけ */
+            effort_values?: string[];
+            /** @default  */
+            default_effort: string;
             readonly connection_info: components["schemas"]["MinimumLLMConnection"];
             readonly created_by: string;
             /** Format: date-time */
@@ -664,11 +1115,21 @@ export interface components {
             /** @default false */
             supports_images: boolean;
             /** @default false */
+            supports_documents: boolean;
+            /** @default false */
+            supports_audio: boolean;
+            /** @default false */
+            supports_video: boolean;
+            /** @default false */
             supports_structured_output: boolean;
             /** @default false */
             supports_prompt_caching: boolean;
             /** @default false */
             supports_reasoning: boolean;
+            /** @description モデルが受け付けるeffortの値（各社の指定そのまま）。推論の制御に対応するモデルだけ */
+            effort_values?: string[];
+            /** @default  */
+            default_effort: string;
             change_reason?: string;
         };
         /** @description 版の表示（履歴） */
@@ -702,12 +1163,22 @@ export interface components {
             readonly supports_tools: boolean;
             /** 画像入力 */
             readonly supports_images: boolean;
+            /** 文書入力 */
+            readonly supports_documents: boolean;
+            /** 音声入力 */
+            readonly supports_audio: boolean;
+            /** 動画入力 */
+            readonly supports_video: boolean;
             /** 構造化出力 */
             readonly supports_structured_output: boolean;
             /** Prompt caching */
             readonly supports_prompt_caching: boolean;
             /** 推論の制御 */
             readonly supports_reasoning: boolean;
+            /** Effortの値 */
+            readonly effort_values: string[];
+            /** 既定のeffort */
+            readonly default_effort: string;
             readonly connection_info: components["schemas"]["MinimumLLMConnection"];
             /** 変更理由 */
             readonly change_reason: string;
@@ -729,6 +1200,34 @@ export interface components {
             readonly display_name: string;
             readonly is_platform_admin: boolean;
             readonly all_permissions: string[];
+        };
+        /** @enum {unknown} */
+        NullEnum: null;
+        PaginatedClarificationRequestList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["ClarificationRequest"][];
+        };
+        PaginatedConversationList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["Conversation"][];
         };
         PaginatedLLMConnectionList: {
             /**
@@ -756,6 +1255,19 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["ManageUser"][];
         };
+        PaginatedMessageList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["Message"][];
+        };
         PaginatedModelProfileList: {
             /**
              * Format: uri
@@ -782,6 +1294,32 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["ModelProfileVersion"][];
         };
+        PaginatedRunList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["Run"][];
+        };
+        PaginatedRunStreamEventList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["RunStreamEvent"][];
+        };
         PaginatedSSOProviderList: {
             /**
              * Format: uri
@@ -794,6 +1332,16 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["SSOProvider"][];
+        };
+        /** @description 自分の会話。モデル設定を省くと既定のモデル設定にする。実行中に変えると、次のステップから切り替わる */
+        PatchedConversationRequest: {
+            model_profile?: string;
+            /** @description 空ならモデルの既定。値を入れると固定する */
+            effort?: string;
+            /** 個人情報・機密情報を扱う */
+            handles_sensitive_data?: boolean;
+            /** タイトル */
+            title?: string;
         };
         /** @description プロバイダ接続の更新。種別とbase URL（接続先）は変えられないので、読み取り専用にする */
         PatchedLLMConnectionUpdateRequest: {
@@ -859,11 +1407,21 @@ export interface components {
             /** @default false */
             supports_images: boolean;
             /** @default false */
+            supports_documents: boolean;
+            /** @default false */
+            supports_audio: boolean;
+            /** @default false */
+            supports_video: boolean;
+            /** @default false */
             supports_structured_output: boolean;
             /** @default false */
             supports_prompt_caching: boolean;
             /** @default false */
             supports_reasoning: boolean;
+            /** @description モデルが受け付けるeffortの値（各社の指定そのまま）。推論の制御に対応するモデルだけ */
+            effort_values?: string[];
+            /** @default  */
+            default_effort: string;
             change_reason?: string;
         };
         /** @description SSOの設定の更新。種別は変えられないので、読み取り専用にする */
@@ -891,6 +1449,139 @@ export interface components {
          * @enum {integer}
          */
         ProviderKindEnum: 1 | 2 | 3 | 4;
+        Run: {
+            readonly id: string;
+            readonly conversation: string;
+            readonly status: components["schemas"]["RunStatusEnum"];
+            readonly status_display: string;
+            readonly end_reason: (components["schemas"]["RunEndReasonEnum"] | components["schemas"]["NullEnum"]) | null;
+            readonly end_reason_display: string | null;
+            /** 失敗の理由 */
+            readonly error: string;
+            readonly model_profile_name: string;
+            readonly effort: string;
+            /** ステップ数 */
+            readonly step_count: number;
+            /** @description 作業の計画（todo_write の最新の内容） */
+            readonly todos: {
+                [key: string]: string;
+            }[];
+            /** Format: date-time */
+            readonly created: string;
+            /** Format: date-time */
+            readonly updated: string;
+            /**
+             * 終了日時
+             * Format: date-time
+             */
+            readonly finished: string | null;
+        };
+        RunCancelRequest: {
+            reason?: string;
+        };
+        /** @description LLM出力の差分。保存しない一時イベントで、`id:` を付けない */
+        RunDeltaEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "run.delta";
+            readonly run: string;
+            readonly step: number;
+            readonly text: string;
+        };
+        /**
+         * @description * `1` - 完了
+         *     * `2` - 停止
+         *     * `10` - ステップ数の上限
+         *     * `11` - 予算の上限
+         *     * `12` - 文脈に収まらない
+         *     * `13` - モデルにつながらない
+         *     * `14` - 同じ誤りの繰返し
+         *     * `15` - 業務結果がない
+         *     * `16` - 再試行の上限
+         *     * `17` - 回答期限切れ
+         *     * `99` - 内部のエラー
+         * @enum {integer}
+         */
+        RunEndReasonEnum: 1 | 2 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 99;
+        /**
+         * @description * `1` - 状態の遷移
+         *     * `10` - 利用者の発言
+         *     * `11` - エージェントの応答
+         *     * `12` - 失敗した応答
+         *     * `21` - Toolの結果
+         *     * `30` - 要求の中身
+         *     * `31` - 実行時の文脈
+         *     * `32` - 文脈の圧縮
+         *     * `40` - モデルの切り替え
+         *     * `50` - 確認の質問
+         *     * `51` - 確認への回答
+         *     * `60` - モデルの再試行
+         *     * `90` - 実行の終了
+         * @enum {integer}
+         */
+        RunEventKindEnum: 1 | 10 | 11 | 12 | 21 | 30 | 31 | 32 | 40 | 50 | 51 | 60 | 90;
+        /** @description 確定したメッセージとTool実行（利用者の発言、エージェントの応答、Toolの結果） */
+        RunMessageEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "run.message";
+            readonly run: string;
+            readonly sequence: number;
+            /** Format: date-time */
+            readonly created: string;
+            readonly kind: components["schemas"]["RunEventKindEnum"];
+            readonly text: string;
+            readonly tool_calls: components["schemas"]["ToolCallInfo"][];
+            readonly tool_result: components["schemas"]["ToolResultInfo"] | null;
+        };
+        /** @description そのほかの記録（モデルの切り替え、再試行、圧縮等）。詳細のログに出す */
+        RunOtherEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "run.event";
+            readonly run: string;
+            readonly sequence: number;
+            /** Format: date-time */
+            readonly created: string;
+            readonly kind: components["schemas"]["RunEventKindEnum"];
+            readonly kind_display: string;
+            readonly comment: string;
+        };
+        /**
+         * @description * `1` - 順番待ち
+         *     * `2` - 作業中
+         *     * `3` - 確認待ち
+         *     * `4` - 再試行待ち
+         *     * `5` - 停止中
+         *     * `10` - 完了
+         *     * `20` - 失敗
+         *     * `30` - 停止済み
+         * @enum {integer}
+         */
+        RunStatusEnum: 1 | 2 | 3 | 4 | 5 | 10 | 20 | 30;
+        /** @description Runの状態の変更 */
+        RunStatusEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "run.status";
+            readonly run: string;
+            readonly sequence: number;
+            /** Format: date-time */
+            readonly created: string;
+            readonly status: components["schemas"]["RunStatusEnum"];
+            readonly status_display: string;
+            readonly end_reason: (components["schemas"]["RunEndReasonEnum"] | components["schemas"]["NullEnum"]) | null;
+            readonly comment: string;
+        };
+        RunStreamEvent: components["schemas"]["RunStatusEvent"] | components["schemas"]["RunMessageEvent"] | components["schemas"]["ClarificationEvent"] | components["schemas"]["RunOtherEvent"] | components["schemas"]["RunDeltaEvent"];
         /** @description SSOの設定の作成と表示。client secretは書き込み専用で、応答には末尾の4文字（client_secret_hint）だけを出す */
         SSOProvider: {
             readonly id: string;
@@ -954,6 +1645,28 @@ export interface components {
         };
         Session: {
             readonly is_authenticated: boolean;
+        };
+        ToolCallInfo: {
+            readonly id: string;
+            readonly name: string;
+            readonly arguments: {
+                [key: string]: unknown;
+            };
+        };
+        ToolResultInfo: {
+            readonly call_id: string;
+            readonly name: string;
+            readonly is_error: boolean;
+            readonly text: string;
+        };
+        /** @description ログインユーザー宛ての通知：自分のRunの状態の変更 */
+        UserStreamEvent: {
+            /** @enum {string} */
+            type: "run.status";
+            run: string;
+            conversation: string;
+            status: components["schemas"]["RunStatusEnum"];
+            sequence: number;
         };
     };
     responses: never;
@@ -1095,6 +1808,229 @@ export interface operations {
             };
         };
     };
+    app_v1_conversations_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedConversationList"];
+                };
+            };
+        };
+    };
+    app_v1_conversations_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ConversationRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["ConversationRequest"];
+                "multipart/form-data": components["schemas"]["ConversationRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Conversation"];
+                };
+            };
+        };
+    };
+    app_v1_conversations_messages_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                conversation: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedMessageList"];
+                };
+            };
+        };
+    };
+    app_v1_conversations_messages_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MessageRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["MessageRequest"];
+                "multipart/form-data": components["schemas"]["MessageRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+        };
+    };
+    app_v1_conversations_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Conversation"];
+                };
+            };
+        };
+    };
+    app_v1_conversations_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    app_v1_conversations_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedConversationRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedConversationRequest"];
+                "multipart/form-data": components["schemas"]["PatchedConversationRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Conversation"];
+                };
+            };
+        };
+    };
+    app_v1_model_profiles_list: {
+        parameters: {
+            query?: {
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppModelProfile"][];
+                };
+            };
+        };
+    };
+    app_v1_model_profiles_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppModelProfile"];
+                };
+            };
+        };
+    };
     app_v1_my_retrieve: {
         parameters: {
             query?: never;
@@ -1111,6 +2047,224 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["MyUser"];
                 };
+            };
+        };
+    };
+    app_v1_runs_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+                /**
+                 * @description * `1` - 順番待ち
+                 *     * `2` - 作業中
+                 *     * `3` - 確認待ち
+                 *     * `4` - 再試行待ち
+                 *     * `5` - 停止中
+                 *     * `10` - 完了
+                 *     * `20` - 失敗
+                 *     * `30` - 停止済み
+                 */
+                status?: 1 | 10 | 2 | 20 | 3 | 30 | 4 | 5;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedRunList"];
+                };
+            };
+        };
+    };
+    app_v1_runs_clarifications_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+                /**
+                 * @description * `1` - 回答待ち
+                 *     * `2` - 回答済み
+                 *     * `3` - 期限切れ
+                 *     * `4` - 取消
+                 */
+                status?: 1 | 2 | 3 | 4;
+            };
+            header?: never;
+            path: {
+                run: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedClarificationRequestList"];
+                };
+            };
+        };
+    };
+    app_v1_runs_clarifications_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClarificationRequest"];
+                };
+            };
+        };
+    };
+    app_v1_runs_clarifications_answer_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ClarificationAnswerRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["ClarificationAnswerRequest"];
+                "multipart/form-data": components["schemas"]["ClarificationAnswerRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClarificationRequest"];
+                };
+            };
+            /** @description すでに回答済み */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    app_v1_runs_events_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                run: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedRunStreamEventList"];
+                };
+            };
+        };
+    };
+    app_v1_runs_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+        };
+    };
+    app_v1_runs_cancel_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RunCancelRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["RunCancelRequest"];
+                "multipart/form-data": components["schemas"]["RunCancelRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            /** @description 他の処理と競合した */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -1573,6 +2727,27 @@ export interface operations {
             };
         };
     };
+    v1_model_profiles_make_default_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelProfile"];
+                };
+            };
+        };
+    };
     v1_sso_providers_list: {
         parameters: {
             query?: {
@@ -1877,6 +3052,76 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["InvitationLink"];
                 };
+            };
+        };
+    };
+    app_stream_stream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SSE。`id:` はRunEventのsequence（Last-Event-IDで続きから受け取る） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": components["schemas"]["UserStreamEvent"];
+                };
+            };
+            /** @description 未ログイン */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 自分のRunではない */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    app_run_stream_stream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description SSE。`id:` はRunEventのsequence（Last-Event-IDで続きから受け取る） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": components["schemas"]["RunStreamEvent"];
+                };
+            };
+            /** @description 未ログイン */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 自分のRunではない */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -906,7 +906,7 @@ Skill更新要求は管理用の関連Runへ渡す。進行中の業務Runへ直
 | 同じネットワーク内で増強 | QClusterだけを動かすWorkerサーバーを追加し、同じDBから仕事を取得する | 共有のS3等のStorage BackendとWorkerローカルWorkspace |
 | 用途別Worker | 文書処理、分析等の能力に応じて配分 | Runtime Profile別に配置 |
 
-初期はQCluster内でRunnerを動かせる。エージェントの実行を別のサーバーに出す場合は、QClusterだけを動かすWorkerサーバーを追加する（同じimage、同じDB、共有のStorage Backend。保存先はS3等とし、Localは使えない。deployment.md §3.2）。DBの認証情報を持つため、Control Planeと同じ信頼範囲のサーバーに限る。Django Q2のクラスタを分け、エージェントの実行（Runner・Sandbox）はWorkerサーバーのクラスタだけが受け取り、Control Plane側のQClusterは配信・Outbox・清掃等の軽い処理だけを受け持つ。こうするとControl Planeのサーバーには Dockerソケットが不要になる。
+初期はQCluster内でRunnerを動かせる。エージェントの実行を別のサーバーに出す場合は、QClusterだけを動かすWorkerサーバーを追加する（同じimage、同じDB、共有のStorage Backend。保存先はS3等とし、Localは使えない。deployment.md §3.2）。DBの認証情報を持つため、Control Planeと同じ信頼範囲のサーバーに限る。Django Q2のクラスタは1つにし、どのQClusterもエージェントの実行と配信・Outbox・清掃等の軽い処理を受け持つ。処理の量はQClusterの数で調整する。Runがworkerを占有して軽い処理を待たせないよう、1つのQClusterで同時に動かすRunの数に上限を設ける（deployment.md §3.2）。アプリサーバーでQClusterを動かさず、Workerサーバーだけで動かせば、アプリサーバーにはDockerソケットが要らない。
 
 すべてのサーバー（アプリ、Worker、DB、エッジ）は同じ私設ネットワークに置き、私設ネットワークの外のサーバーでの実行は想定しない。WorkerサーバーはDBとS3へ私設ネットワークの中で接続し、外からの接続を受けない。Workerに関するものは公開のホスト名に出さない。
 
@@ -995,10 +995,10 @@ Linuxコマンドの禁止リストを主要な防御にしない。ネットワ
 |---|---|---|
 | 1 | 本節の制限が必ず適用されていることを、Launcherの自動テストで確認する（特権モード、Dockerソケット・ホストのディレクトリのmount等の設定ミスを防ぐ） | MVP |
 | 2 | ホストのカーネル、Docker、runcを更新し続ける（自動更新と定期的な再起動） | MVP |
-| 3 | Sandboxを起動するWorkerサーバーと、利用者の要求を受けるアプリサーバーを分ける（§6.1の `runner` クラスタ） | MVP（複数台構成のとき） |
+| 3 | Sandboxを起動するWorkerサーバーと、利用者の要求を受けるアプリサーバーを分ける（アプリサーバーではQClusterを動かさない。§6.1） | 複数台構成のとき（任意） |
 | 4 | Dockerのuserns-remapまたはrootless Dockerで、コンテナ内のrootをホストのrootにしない | MVP |
 | 5 | Sandboxの実行環境をgVisor（runsc）にする。第1段階の早いうちに、文書処理（§7.6のPythonライブラリ）が問題なく、遅すぎずに動くかを確認し、問題がなければ既定にする | 第1段階で評価 |
-| 6 | `runner` クラスタ用に権限を絞ったDBロールを使う | 必要になった時点 |
+| 6 | Workerサーバー用に権限を絞ったDBロールを使う | 必要になった時点 |
 
 ### 7.3 Sandbox Launcher
 
@@ -1131,7 +1131,7 @@ Conversation内の続行は親Runの最終Checkpointを明示的に参照し、�
 
 ## 8 清掃と保持期間
 
-清掃はエージェントの指示に依存せず、管理側が実行する。定期実行はQ2のScheduleでQClusterに登録し（複数サーバーの構成では `default` クラスタ）、同じ処理を管理コマンドとしても実行できるようにして、QCluster停止中でも回収できるようにする（backend-conventions.md §8.1）。
+清掃はエージェントの指示に依存せず、管理側が実行する。定期実行はQ2のScheduleでQClusterに登録し、同じ処理を管理コマンドとしても実行できるようにして、QCluster停止中でも回収できるようにする（backend-conventions.md §8.1）。
 
 | 対象 | 初期案 | 条件 |
 |---|---|---|

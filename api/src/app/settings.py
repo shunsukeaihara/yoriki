@@ -202,24 +202,39 @@ SPECTACULAR_SETTINGS = {
     "SERVE_INCLUDE_SCHEMA": False,
     "SERVE_PERMISSIONS": ["utils.permissions.AppUser"],
     "SCHEMA_PATH_PREFIX": "/api/",
+    # SSEのストリーム（Djangoの非同期view）を、text/event-streamの応答としてスキーマに加える（realtime.md §4）
+    "POSTPROCESSING_HOOKS": [
+        "drf_spectacular.hooks.postprocess_schema_enums",
+        "stream.schema.add_stream_endpoints",
+    ],
     # choicesのenumの名前を固定する（項目名から付けると、別のアプリの kind 等と衝突する）
-    "ENUM_NAME_OVERRIDES": {"ProviderKindEnum": "llm.models.ProviderKind"},
+    "ENUM_NAME_OVERRIDES": {
+        "ProviderKindEnum": "llm.models.ProviderKind",
+        "RunStatusEnum": "run.models.RunStatus",
+        "RunEndReasonEnum": "run.models.RunEndReason",
+        "RunEventKindEnum": "run.models.RunEventKind",
+        "ClarificationKindEnum": "run.models.ClarificationKind",
+        "ClarificationStatusEnum": "run.models.ClarificationStatus",
+        "InstructionKindEnum": "conversation.models.InstructionKind",
+        "InstructionStateEnum": "conversation.models.InstructionState",
+        "MessageRoleEnum": "conversation.models.MessageRole",
+    },
 }
 
 # --- Django Q2 ---
-# 単一ホストでは1つのqclusterが両方を処理する。複数台構成では、Workerサーバーで Q_CLUSTER_NAME=runner を
-# 設定し、Agentの実行taskだけを受け取る（backend-conventions.md §8.4、deployment.md §3.2）
+# クラスタは1つで、エージェントの実行（Run）も配信・Outbox・清掃も受け持つ。増やすときはqclusterの数で調整する
+# （backend-conventions.md §8.4、deployment.md §3.2）。Runは確認待ちまで長く動くので、timeoutは長くする
+Q_CLUSTER_WORKERS = int(os.getenv("YORIKI_Q_WORKERS", "4"))
 Q_CLUSTER = {
     "name": "default",
     "orm": "default",
-    "workers": int(os.getenv("YORIKI_Q_WORKERS", "2")),
-    "timeout": 600,
-    "retry": 660,
+    "workers": Q_CLUSTER_WORKERS,
+    "timeout": 3600,
+    "retry": 3660,
     "max_attempts": 1,
-    "ALT_CLUSTERS": {
-        "runner": {"workers": int(os.getenv("YORIKI_Q_RUNNER_WORKERS", "2")), "timeout": 3600, "retry": 3660},
-    },
 }
+# 1つのqclusterで同時に動かすRunの数。workerを1つは配信等の軽い処理のために残す
+YORIKI_RUNS_PER_QCLUSTER = int(os.getenv("YORIKI_RUNS_PER_QCLUSTER", str(max(1, Q_CLUSTER_WORKERS - 1))))
 
 # --- 社内SSO（django-allauth） ---
 # パスワード・メールでのアカウント作成とログインは使わず、SSOだけにする（§6.2）

@@ -6,6 +6,7 @@ transactionで `pg_notify` を実行し（commitした時点で届く）、受�
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 from typing import TYPE_CHECKING, Any
@@ -96,6 +97,13 @@ class Listener:
             del self._subscribers[channel]
             await self._command(f"UNLISTEN {_quote(channel)}")
 
+    async def close(self) -> None:
+        if self._task is not None:
+            self._task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._task
+            self._task = None
+
     async def _command(self, sql: str) -> None:
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._run())
@@ -105,27 +113,34 @@ class Listener:
 
     async def _run(self) -> None:
         conn: psycopg.AsyncConnection | None = None
-        while True:
+        try:
+            while True:
+                try:
+                    if conn is None or conn.closed:
+                        conn = await psycopg.AsyncConnection.connect(**_conninfo(), autocommit=True)
+                        # 接続し直したら、購読中のチャネルをLISTENし直す（その間の通知はDBから読み直して補う）
+                        for channel in self._subscribers:
+                            await conn.execute(f"LISTEN {_quote(channel)}")
+                    await self._apply_commands(conn)
+                    async for notify_ in conn.notifies(timeout=0.2):
+                        for queue in list(self._subscribers.get(notify_.channel, ())):
+                            queue.put_nowait(json.loads(notify_.payload))
+                except (psycopg.OperationalError, OSError):
+                    logger.warning("LISTEN connection lost; reconnecting", exc_info=True)
+                    conn = None
+                    await asyncio.sleep(1)
+        finally:
+            if conn is not None:
+                await conn.close()
+
+    async def _apply_commands(self, conn: psycopg.AsyncConnection) -> None:
+        while not self._commands.empty():
+            sql, future = self._commands.get_nowait()
             try:
-                if conn is None or conn.closed:
-                    conn = await psycopg.AsyncConnection.connect(**_conninfo(), autocommit=True)
-                    # 接続し直したら、購読中のチャネルをLISTENし直す（その間の通知はDBから読み直して補う）
-                    for channel in self._subscribers:
-                        await conn.execute(f"LISTEN {_quote(channel)}")
-                while not self._commands.empty():
-                    sql, future = self._commands.get_nowait()
-                    try:
-                        await conn.execute(sql)
-                        future.set_result(None)
-                    except Exception as exc:
-                        future.set_exception(exc)
-                async for notify_ in conn.notifies(timeout=0.2):
-                    for queue in list(self._subscribers.get(notify_.channel, ())):
-                        queue.put_nowait(json.loads(notify_.payload))
-            except (psycopg.OperationalError, OSError):
-                logger.warning("LISTEN connection lost; reconnecting", exc_info=True)
-                conn = None
-                await asyncio.sleep(1)
+                await conn.execute(sql)
+                future.set_result(None)
+            except Exception as exc:  # 待っている購読者に失敗を返す
+                future.set_exception(exc)
 
 
 def _quote(channel: str) -> str:

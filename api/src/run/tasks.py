@@ -4,6 +4,7 @@ import logging
 import socket
 from datetime import timedelta
 
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
@@ -35,6 +36,10 @@ def execute_run(run_id: int) -> None:
 
 @transaction.atomic
 def claim_run(run_id: int) -> ExecutionAttempt | None:
+    worker = socket.gethostname()
+    if _running_here(worker) >= settings.YORIKI_RUNS_PER_QCLUSTER:
+        # workerを軽い処理のために残す。Runは順番待ちのままにし、Reconcilerが送り直す（deployment.md §3.2）
+        return None
     run = Run.objects.select_for_update(skip_locked=True).filter(pk=run_id, status=RunStatus.QUEUED).first()
     if run is None:
         return None
@@ -44,7 +49,11 @@ def claim_run(run_id: int) -> ExecutionAttempt | None:
         run.set_status(RunStatus.FAILED, end_reason=RunEndReason.ATTEMPTS, error=_("再開の回数が多すぎます。"))
         return None
     run.set_status(RunStatus.RUNNING)
-    return ExecutionAttempt.start(run, worker=socket.gethostname())
+    return ExecutionAttempt.start(run, worker=worker)
+
+
+def _running_here(worker: str) -> int:
+    return ExecutionAttempt.objects.filter(worker=worker, ended__isnull=True, lease_expires__gt=timezone.now()).count()
 
 
 def reconcile_runs() -> None:
@@ -54,6 +63,7 @@ def reconcile_runs() -> None:
     for attempt_id in list(stale[:100]):
         _recover(attempt_id)
     _expire_clarifications(now)
+    _redispatch_waiting(now)
     dispatch_pending()
 
 
@@ -79,6 +89,17 @@ def _recover(attempt_id: int) -> None:
         enqueue_run(run)
 
 
+def _redispatch_waiting(now) -> None:
+    """順番待ちのまま残ったRun（どのqclusterも上限で受け取れなかった等）の実行を、もう一度送る"""
+    threshold = now - REDISPATCH_AFTER
+    waiting = Run.objects.filter(status=RunStatus.QUEUED, updated__lt=threshold).exclude(
+        dispatches__dispatched__isnull=True
+    )
+    for run in waiting.exclude(dispatches__created__gte=threshold)[:100]:
+        with transaction.atomic():
+            enqueue_run(run)
+
+
 def _expire_clarifications(now) -> None:
     expired = ClarificationRequest.objects.filter(status=ClarificationStatus.OPEN, expires__lt=now).values_list(
         "pk", flat=True
@@ -97,3 +118,5 @@ def _expire_clarifications(now) -> None:
 
 # 回答期限の既定（design.md §5.3。タスクの設定で変えられるようにする）
 CLARIFICATION_TTL = timedelta(days=7)
+# 順番待ちのRunの実行を送り直すまでの時間
+REDISPATCH_AFTER = timedelta(minutes=1)

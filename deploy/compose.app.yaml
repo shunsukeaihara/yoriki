@@ -1,4 +1,4 @@
-# アプリサーバー（docs/deployment.md §3.1、§8.4）。nginx・frontend・api・qcluster（defaultクラスタ）。
+# アプリサーバー（docs/deployment.md §3.1、§8.4）。nginx・frontend・api・qcluster。
 # 複数台構成ではこのファイルだけで立てる（DBは別のサーバー、ファイルはS3）。単一ホストでは compose.yaml を使う。
 #   docker compose -f deploy/compose.app.yaml up -d
 # 前段（エッジのnginx、Cloudflare Tunnel、認証プロキシ）がTLSを終端し、このnginxは私設ネットワークの80番で受ける。
@@ -60,13 +60,19 @@ services:
       retries: 6
       start_period: 20s
 
-  # 配信・Outbox・清掃（defaultクラスタ）。Agentの実行は、単一ホストでは compose.yaml の qcluster、
-  # 複数台構成ではWorkerサーバー（compose.qcluster.yaml）が受け持つ
+  # エージェントの実行（Sandboxの起動）と、配信・Outbox・清掃を受け持つ。Sandboxを起動するので、Dockerソケットを渡す
+  # （ホストのrootと同等の権限なので、qcluster以外のサービスには渡さない）。アプリサーバーでqclusterを動かさない
+  # 構成にするなら、このサービスを起動せず、Workerサーバー（compose.qcluster.yaml）だけで動かす（docs/deployment.md §3.2）
   qcluster:
     <<: *api
     command: python manage.py qcluster
     networks: [backend, egress]
-    stop_grace_period: 2m
+    volumes:
+      # Sandboxはホストのdockerdが起動するので、ホストとコンテナで同じパスにする
+      - /var/lib/yoriki/workspaces:/var/lib/yoriki/workspaces
+      - /var/run/docker.sock:/var/run/docker.sock
+    group_add: ['${YORIKI_DOCKER_GID:-999}']
+    stop_grace_period: 10m # 実行中のRunがCheckpointを保存するまで待つ
 
   # apiのイメージに入れた静的ファイルを、nginxが読む共有ボリュームへコピーして終わる。
   # イメージを更新すると `up -d` のたびに作り直されてコピーし直す。古い版のファイルは消さない（開いたままの画面が使う）

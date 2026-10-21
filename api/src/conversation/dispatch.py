@@ -121,7 +121,7 @@ def start_next_request(conversation: Conversation) -> Run | None:
     if Run.objects.filter(conversation=conversation, status__in=ACTIVE_STATUSES).exists():
         return None
     instruction = (
-        UserInstruction.objects.select_for_update()
+        UserInstruction.objects.select_for_update(of=("self",))
         .filter(conversation=conversation, kind=InstructionKind.NEXT, state=InstructionState.RECEIVED)
         .select_related("message", "message__sender")
         .order_by("pk")

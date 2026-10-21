@@ -164,7 +164,7 @@ design.md §5.1のRunEvent（単調なsequence、イベント種別、表示用�
 | `message.user` | 依頼、追加指示、Skillの明示（`/`）・Connectorの明示（`@`）の展開、添付の一覧 | 追加 |
 | `message.assistant` | 本文、Tool呼出し（ID・名前・引数の元の文字列）、推論の途中経過（プロバイダ固有。§5.5）、利用量、要求ID | 追加 |
 | `message.assistant_attempt` | 失敗・中断・再試行した応答 | 入れない |
-| `tool.call` | ToolInvocationの作成。実行の前に記録する | 入れない（`message.assistant` に含まれる） |
+| `tool.call` | ToolInvocationの行として、実行の前に作る（RunEventには記録しない） | 入れない（`message.assistant` に含まれる） |
 | `tool.result` | モデル用の内容（部品の並び）、`is_error`、型のある値（ToolInvocationに保存）、画面用の情報、退避したファイルの場所 | 追加 |
 | `compaction` | 置き換える範囲（sequenceの始まりと終わり）、要約、要約に使ったモデル設定の版と利用量 | 範囲を置き換え |
 | `skill.loaded`・`model.switched`・`effort.changed` | Manifestへの追記（design.md §3.2、§4.8） | `context.snapshot` か `tool.result` で伝える |
@@ -290,7 +290,7 @@ class ToolResult:
 引数のSchemaは、全プロバイダで通る範囲に絞る。範囲の外の書き方は、Toolの登録時にエラーにする（DeepSeek Harnessの方式。黙って変換しない）。
 
 - ルートは `type: object`。`properties`、`required`、`additionalProperties: false`。
-- 値は `string`・`integer`・`number`・`boolean`・`array`（`items`）・`object`。`enum` は `type` と一緒に書く。
+- 値は `string`・`integer`・`number`・`boolean`・`array`（`items`）・`object`。`enum` は `type` と一緒に書く。文字列の長さと配列の数の制約（`minLength`・`maxLength`・`minItems`・`maxItems`）は使ってよい。
 - `$ref`、`oneOf`・`anyOf`・`allOf`、tupleの `items`、再帰は使わない。
 - OpenAIのstrict modeは、初期には使わない（全プロバイダで同じ検証をRunnerが行う）。
 - 各社の細かい違い（Geminiの `required` の扱い等）は、Provider Adapterの境界で変換する。

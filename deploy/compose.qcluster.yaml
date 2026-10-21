@@ -1,20 +1,13 @@
-# Agentの実行だけを受け持つWorkerサーバー（docs/deployment.md §3.2）。外からの接続は受けない。
+# qclusterだけを動かすWorkerサーバー（docs/deployment.md §3.2）。外からの接続は受けない。
 #   docker compose -f deploy/compose.qcluster.yaml up -d
 # アプリサーバーと同じ yoriki.env を使い、同じ私設ネットワークに置く（DB・S3へ直接接続する）。
+# クラスタは1つなので、アプリサーバーのqclusterと同じ仕事（エージェントの実行、配信・Outbox・清掃）を受け持つ。
 name: yoriki-worker
 
 services:
-  qcluster-runner:
+  qcluster:
     extends: { file: compose.app.yaml, service: qcluster }
-    environment:
-      Q_CLUSTER_NAME: runner # Agentの実行（runnerクラスタ）だけを受け取る
-    volumes:
-      # Sandboxはホストのdockerdが起動するので、ホストとコンテナで同じパスにする
-      - /var/lib/yoriki/workspaces:/var/lib/yoriki/workspaces
-      - /var/run/docker.sock:/var/run/docker.sock
-    group_add: ['${YORIKI_DOCKER_GID:-999}']
     networks: !override [egress]
-    stop_grace_period: 10m # 実行中のRunがCheckpointを保存するまで待つ
 
 networks:
   egress: {}

@@ -143,12 +143,10 @@ networks:
 ```yaml
 # deploy/compose.qcluster.yaml（抜粋）
 services:
-  qcluster-runner:
+  qcluster:
     image: ${YORIKI_API_IMAGE:?}
     command: python manage.py qcluster
     env_file: [/etc/yoriki/yoriki.env]
-    environment:
-      Q_CLUSTER_NAME: runner          # エージェントの実行だけを受け取るクラスタ
     volumes:
       - /var/lib/yoriki/workspaces:/var/lib/yoriki/workspaces
       - /var/run/docker.sock:/var/run/docker.sock
@@ -156,11 +154,11 @@ services:
     restart: unless-stopped
 ```
 
-- Django Q2のクラスタを2つに分ける。`runner`（エージェントの実行）はWorkerサーバーだけが受け取り、アプリサーバーのqcluster（`default`）は配信、Outbox、清掃などの軽い処理だけを受け取る。Runの実行taskは `runner` クラスタへ送る（Django Q2の複数クラスタの機能を使う）。
-- Sandboxを起動するのはWorkerサーバーだけになるので、アプリサーバーのqclusterにはDockerソケットとworkspacesのmountが不要になる。
+- Django Q2のクラスタは1つにする。どのqclusterも、エージェントの実行（Runner・Sandbox）と、配信・Outbox・清掃などの軽い処理の両方を受け持つ。処理の量は、qclusterを立てる数とworker数で調整する。
+- Runは確認待ちまで長く動き、その間workerを1つ占有する。軽い処理が待たされないよう、1つのqclusterで同時に動かすRunの数を `YORIKI_RUNS_PER_QCLUSTER`（既定は worker数 − 1）までにする。上限に達しているqclusterはRunをclaimせず、ReconcilerがRunの実行を送り直す。
+- qclusterはSandboxを起動するので、どこで動かす場合もDockerソケットとworkspacesのmountを渡す。アプリサーバーでqclusterを動かさず、Workerサーバーだけで動かしてもよい（その場合、アプリサーバーにはDockerソケットが要らない）。
 - WorkerサーバーはDB・S3に直接接続するので、アプリサーバーと同じ `yoriki.env` を使い、同じ私設ネットワークに置く。ファイルの保存先はS3等の共有のものにする（Localは使えない）。
 - 台数は実行枠に合わせて増減する。RunのclaimとleaseがDBで行われるので、何台あっても同じRunを二重に実行しない。
-- 単一ホストの構成（§3.1）では、これまでどおりqclusterが両方の処理を受け持つ（クラスタを分けない）。
 - Workerサーバーは外からの接続を受けないので、公開のホスト名やポートを用意しない。
 - WorkerサーバーのRunnerも、LLMはProvider Adapter、社内DB・SaaSはConnectorを、HTTPを介さず同じプロセスの中で通す。Bindingの確認や上限、記録はその処理の中で行い、SecretはSandboxに渡さない（design.md §4.8、§4.9、§6.2）。
 
@@ -379,15 +377,15 @@ Cの構成：
   - ファイルの保存先：Local Backendはサーバーをまたいで共有できないので、S3（または互換のストレージ）に切り替える（design.md §7.10の移行手順）。成果物のダウンロードは、`X-Accel-Redirect` ではなくS3の期限付きURLかapi経由で返す。
 - **増やしてよいもの・1つだけにするもの**：
   - frontend、api：何台でも増やせる（状態を持たない。セッションはDB、SSEの取りこぼしはDBから読み直す）。
-  - qcluster：何台でも増やせる（RunとDeliveryはDBのclaimで重複しない）。アプリサーバーのqclusterは `default` クラスタ（配信・Outbox・清掃）だけを受け持ち、エージェントの実行（`runner` クラスタ）はWorkerサーバーが受け持つ（§3.2）。Dockerソケットとworkspacesの領域を持つのはWorkerサーバーだけ。
+  - qcluster：何台でも増やせる（RunとDeliveryはDBのclaimで重複しない）。クラスタは1つで、どのqclusterもエージェントの実行と配信・Outbox・清掃を受け持つ（§3.2）。qclusterを動かすサーバーには、Dockerソケットとworkspacesの領域を用意する。
   - channel-listener：Slack Socket Mode等の接続ごとに、受信する担当を1つにする（design.md §10。複数台で動かす場合も、DBで担当を決めて重複して受信しない）。
   - migrate：更新のたびに1か所から1回だけ実行する（§6）。
 - **Composeでの立て方**：どのサーバーもDocker Composeで立てる。サーバーの役割ごとにComposeファイルを分け、1台に複数の役割を重ねてよい。
 
 | 役割 | Composeファイル | 台数 | 動かすサービス |
 |---|---|---|---|
-| アプリ | `compose.app.yaml` | 必要なだけ | nginx、frontend、api、qcluster（`default` クラスタ：配信・Outbox・清掃。必要なら channel-listener） |
-| Worker | `compose.qcluster.yaml` | 実行枠に合わせて | qclusterだけ（`runner` クラスタ：エージェントの実行、Sandbox）。§3.2 |
+| アプリ | `compose.app.yaml` | 必要なだけ | nginx、frontend、api、qcluster（動かさなくてもよい。必要なら channel-listener） |
+| Worker | `compose.qcluster.yaml` | 実行枠に合わせて | qclusterだけ（エージェントの実行、配信・Outbox・清掃）。§3.2 |
 | エッジ | `compose.edge.yaml` | 2（冗長化） | cloudflared、振り分け用のnginx |
 | DB | `compose.db.yaml` | 1 | postgres、バックアップ（マネージドのDBを使うなら不要） |
 

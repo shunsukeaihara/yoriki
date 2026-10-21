@@ -8,6 +8,7 @@ from typing import Any
 
 from auditlog.registry import auditlog
 from django.conf import settings
+from django.contrib.postgres.fields import ArrayField
 from django.db import models, transaction
 from django.utils.translation import gettext_lazy as _
 
@@ -90,9 +91,14 @@ VERSION_FIELDS = (
     "output_price",
     "supports_tools",
     "supports_images",
+    "supports_documents",
+    "supports_audio",
+    "supports_video",
     "supports_structured_output",
     "supports_prompt_caching",
     "supports_reasoning",
+    "effort_values",
+    "default_effort",
 )
 
 
@@ -114,6 +120,8 @@ class ModelProfile(models.Model):
         verbose_name=_("現在の版"),
     )
     is_active = models.BooleanField(_("有効"), default=True)
+    # 会話を始めるときに最初に選ばれているモデル設定。基盤管理者が1つだけ決める（design.md §4.8）
+    is_default = models.BooleanField(_("既定"), default=False)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+", verbose_name=_("作成者")
     )
@@ -127,6 +135,9 @@ class ModelProfile(models.Model):
         verbose_name_plural = verbose_name
         constraints = [
             models.UniqueConstraint(fields=["name"], condition=models.Q(deleted=False), name="uniq_model_profile_name"),
+            models.UniqueConstraint(
+                fields=["is_default"], condition=models.Q(is_default=True, deleted=False), name="uniq_default_model"
+            ),
         ]
 
     def __str__(self):
@@ -135,6 +146,13 @@ class ModelProfile(models.Model):
     @property
     def version_number(self) -> int:
         return self.current_version.number if self.current_version else 0
+
+    @transaction.atomic
+    def make_default(self) -> None:
+        """既定のモデル設定にする。これまでの既定は外す"""
+        ModelProfile.objects.select_for_update().filter(is_default=True).exclude(pk=self.pk).update(is_default=False)
+        self.is_default = True
+        self.save(update_fields=["is_default", "updated"])
 
     @classmethod
     @transaction.atomic
@@ -189,9 +207,16 @@ class ModelProfileVersion(models.Model):
     output_price = models.DecimalField(_("出力の単価"), max_digits=12, decimal_places=6, default=0)
     supports_tools = models.BooleanField(_("Tool呼出し"), default=False)
     supports_images = models.BooleanField(_("画像入力"), default=False)
+    supports_documents = models.BooleanField(_("文書入力"), default=False)  # PDFをそのまま渡せる
+    supports_audio = models.BooleanField(_("音声入力"), default=False)
+    supports_video = models.BooleanField(_("動画入力"), default=False)
     supports_structured_output = models.BooleanField(_("構造化出力"), default=False)
     supports_prompt_caching = models.BooleanField(_("prompt caching"), default=False)
     supports_reasoning = models.BooleanField(_("推論の制御"), default=False)
+    # 推論の制御に対応するモデルが受け付けるeffortの値。各社の指定そのまま（OpenAIの reasoning_effort の値、
+    # Anthropic・Geminiのthinkingのtoken予算の数字等）で、Yoriki独自の段階には読み替えない（design.md §4.8）
+    effort_values = ArrayField(models.CharField(max_length=50), verbose_name=_("effortの値"), default=list, blank=True)
+    default_effort = models.CharField(_("既定のeffort"), max_length=50, blank=True)
     change_reason = models.CharField(_("変更理由"), max_length=500, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+", verbose_name=_("作成者")
@@ -208,6 +233,10 @@ class ModelProfileVersion(models.Model):
 
     def __str__(self):
         return f"{self.profile} v{self.number}"
+
+    @property
+    def is_local(self) -> bool:
+        return self.connection.kind == ProviderKind.LOCAL
 
 
 # API keyは暗号化した値でも監査ログに残さない

@@ -7,13 +7,14 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
 from utils.exceptions import Conflict
-from utils.permissions import PlatformAdmin
+from utils.permissions import AppUser, PlatformAdmin
 from utils.views import SoftDeleteMixin
 
 from .models import LLMConnection, ModelProfile, ModelProfileVersion, ProviderKind
 from .providers import get_adapter
 from .providers.base import ProviderError
 from .serializers import (
+    AppModelProfileSerializer,
     LLMConnectionCheckSerializer,
     LLMConnectionSerializer,
     LLMConnectionUpdateSerializer,
@@ -112,6 +113,29 @@ class ModelProfileViewSet(SoftDeleteMixin, ModelViewSet):
     def perform_update(self, serializer):
         # 新しい版の作成は ModelProfile.revise() の transaction で行う
         serializer.save(actor=self.request.user)
+
+    @extend_schema(
+        description="既定のモデル設定にする（これまでの既定は外れる）", request=None, responses=ModelProfileSerializer
+    )
+    @action(detail=True, methods=["post"], serializer_class=ModelProfileSerializer)
+    def make_default(self, request, *args, **kwargs):
+        profile = self.get_object()
+        if not profile.is_active:
+            raise Conflict(_("無効なモデル設定は既定にできません"))
+        profile.make_default()
+        return Response(self.get_serializer(profile).data)
+
+
+@extend_schema(description="会話で選べるモデル設定", tags=["app/model_profile"])
+class AppModelProfileViewSet(ReadOnlyModelViewSet):
+    permission_classes = [AppUser]
+    lookup_field = "uid"
+    queryset = ModelProfile.objects.filter(
+        deleted=False, is_active=True, current_version__connection__is_active=True
+    ).select_related("current_version__connection")
+    serializer_class = AppModelProfileSerializer
+    pagination_class = None  # 選択肢として全部を返す（登録する数は少ない）
+    ordering = ("-is_default", "name", "pk")
 
 
 class ModelProfileMixin:

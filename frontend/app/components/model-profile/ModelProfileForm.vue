@@ -24,9 +24,15 @@ const emptyForm = () => ({
   outputPrice: '0' as string | null,
   supportsTools: false,
   supportsImages: false,
+  supportsDocuments: false,
+  supportsAudio: false,
+  supportsVideo: false,
   supportsStructuredOutput: false,
   supportsPromptCaching: false,
   supportsReasoning: false,
+  // モデルが受け付けるeffortの値（各社の指定そのまま）。画面ではカンマ区切りで入力する
+  effortValuesText: '',
+  defaultEffort: '' as string | null,
   changeReason: '',
 })
 const form = ref(emptyForm())
@@ -49,9 +55,14 @@ watch(
           outputPrice: value.outputPrice,
           supportsTools: value.supportsTools,
           supportsImages: value.supportsImages,
+          supportsDocuments: value.supportsDocuments,
+          supportsAudio: value.supportsAudio,
+          supportsVideo: value.supportsVideo,
           supportsStructuredOutput: value.supportsStructuredOutput,
           supportsPromptCaching: value.supportsPromptCaching,
           supportsReasoning: value.supportsReasoning,
+          effortValuesText: (value.effortValues ?? []).join(', '),
+          defaultEffort: value.defaultEffort ?? '',
           changeReason: '',
         }
       : emptyForm()
@@ -72,6 +83,8 @@ const { onSubmit, loading, errors } = createSubmit({
     inputPrice,
     cachedInputPrice,
     outputPrice,
+    effortValuesText,
+    defaultEffort,
     ...rest
   }) => {
     // 必須項目は canPost で確認済み。空欄はサーバーの検証でエラーになる
@@ -83,6 +96,9 @@ const { onSubmit, loading, errors } = createSubmit({
       inputPrice: inputPrice ?? '0',
       cachedInputPrice: cachedInputPrice ?? '0',
       outputPrice: outputPrice ?? '0',
+      // 推論の制御に対応しないモデルには、effortの値を持たせない
+      effortValues: rest.supportsReasoning ? splitEfforts(effortValuesText) : [],
+      defaultEffort: rest.supportsReasoning ? (defaultEffort ?? '') : '',
     }
     return id ? api.manage.modelProfiles(id).patch({ ...data, version }) : api.manage.modelProfiles().create(data)
   },
@@ -97,6 +113,13 @@ const { onSubmit, loading, errors } = createSubmit({
     toast.add({ title: t('エラー'), description: makeErrorMsg(err), color: 'error' })
   },
 })
+
+const splitEfforts = (text: string) =>
+  text
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean)
+const effortItems = computed(() => splitEfforts(form.value.effortValuesText).map((v) => ({ value: v, title: v })))
 
 // 必須項目が埋まっているかだけを確認する。形式の検証はサーバーに任せる
 const canPost = computed(() => {
@@ -231,6 +254,13 @@ defineExpose({ onSubmit, loading, canPost })
       <DCheckbox v-model="form.supportsTools" :label="$t('Tool呼出し')" :error-messages="errors.supportsTools" />
       <DCheckbox v-model="form.supportsImages" :label="$t('画像入力')" :error-messages="errors.supportsImages" />
       <DCheckbox
+        v-model="form.supportsDocuments"
+        :label="$t('文書入力（PDFをそのまま渡せる）')"
+        :error-messages="errors.supportsDocuments"
+      />
+      <DCheckbox v-model="form.supportsAudio" :label="$t('音声入力')" :error-messages="errors.supportsAudio" />
+      <DCheckbox v-model="form.supportsVideo" :label="$t('動画入力')" :error-messages="errors.supportsVideo" />
+      <DCheckbox
         v-model="form.supportsStructuredOutput"
         :label="$t('構造化出力')"
         :error-messages="errors.supportsStructuredOutput"
@@ -245,6 +275,21 @@ defineExpose({ onSubmit, loading, canPost })
         :label="$t('推論の制御')"
         :error-messages="errors.supportsReasoning"
       />
+      <template v-if="form.supportsReasoning">
+        <DTextField
+          v-model="form.effortValuesText"
+          :label="$t('effortの値')"
+          :hint="$t('モデルが受け付ける値をカンマ区切りで入力します（例：low, medium, high）。各社の指定そのままです')"
+          :error-messages="errors.effortValues"
+        />
+        <DSelect
+          v-model="form.defaultEffort"
+          :label="$t('既定のeffort')"
+          :items="effortItems"
+          clearable
+          :error-messages="errors.defaultEffort"
+        />
+      </template>
     </DFormSection>
 
     <DTextarea

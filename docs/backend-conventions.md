@@ -746,7 +746,7 @@ class Command(BaseCommand):
 - taskの引数にはIDだけを渡す（Runには `run_id`、配信には `delivery_id`）。本文、成果物、Secretをキューに載せない（design.md §10）。
 - 実行状態の正本はPostgreSQLのRun / Deliveryに置く。Q2の結果テーブルを履歴として使わない。
 - taskは再配送されても安全にする。最初にclaimし、claimできなければ何もせずに終わる。
-- 複数台構成では、Q2のクラスタを `runner`（エージェントの実行。Workerサーバーだけが受け取る）と `default`（配信、Outbox、清掃。アプリサーバーが受け取る）に分ける。Runの実行taskは `runner` クラスタへ送る。単一ホストでは1つのqclusterが両方を処理する（deployment.md §3.2）。
+- Q2のクラスタは1つにし、Runの実行taskも配信・Outbox・清掃のtaskも同じクラスタへ送る。増やすときはqclusterの数で調整する。Runは長くworkerを占有するので、1つのqclusterで同時に動かすRunの数を `YORIKI_RUNS_PER_QCLUSTER` までにし、上限に達していればclaimしない（deployment.md §3.2）。
 
 ---
 

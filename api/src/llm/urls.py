@@ -1,6 +1,6 @@
 from rest_framework.routers import DefaultRouter
 
-from .views import LLMConnectionViewSet, ModelProfileVersionViewSet, ModelProfileViewSet
+from .views import AppModelProfileViewSet, LLMConnectionViewSet, ModelProfileVersionViewSet, ModelProfileViewSet
 
 router = DefaultRouter()
 
@@ -11,5 +11,7 @@ router.register(
     ModelProfileVersionViewSet,
     basename="model_profile_version_viewset",
 )
+
+router.register("app/v1/model_profiles", AppModelProfileViewSet, basename="app_model_profile_viewset")
 
 urlpatterns = router.urls

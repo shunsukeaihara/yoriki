@@ -25,16 +25,8 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
 
-  # 単一ホストでは、1つのqclusterが配信等とAgentの実行の両方を受け持つ（クラスタを分けない。§3.2）
   qcluster:
     extends: { file: compose.app.yaml, service: qcluster }
-    volumes:
-      # Sandboxはホストのdockerdが起動するので、ホストとコンテナで同じパスにする
-      - /var/lib/yoriki/workspaces:/var/lib/yoriki/workspaces
-      # Dockerソケットはqclusterにだけ渡す（ホストのrootと同等の権限なので、他のサービスには渡さない）
-      - /var/run/docker.sock:/var/run/docker.sock
-    group_add: ['${YORIKI_DOCKER_GID:-999}']
-    stop_grace_period: 10m # 実行中のRunがCheckpointを保存するまで待つ
     depends_on:
       postgres: { condition: service_healthy }
 

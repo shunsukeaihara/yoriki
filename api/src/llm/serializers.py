@@ -179,11 +179,24 @@ class ModelProfileSerializer(serializers.ModelSerializer):
     )
     supports_tools = serializers.BooleanField(source="current_version.supports_tools", default=False)
     supports_images = serializers.BooleanField(source="current_version.supports_images", default=False)
+    supports_documents = serializers.BooleanField(source="current_version.supports_documents", default=False)
+    supports_audio = serializers.BooleanField(source="current_version.supports_audio", default=False)
+    supports_video = serializers.BooleanField(source="current_version.supports_video", default=False)
     supports_structured_output = serializers.BooleanField(
         source="current_version.supports_structured_output", default=False
     )
     supports_prompt_caching = serializers.BooleanField(source="current_version.supports_prompt_caching", default=False)
     supports_reasoning = serializers.BooleanField(source="current_version.supports_reasoning", default=False)
+    effort_values = serializers.ListField(
+        source="current_version.effort_values",
+        child=serializers.CharField(max_length=50),
+        max_length=20,
+        default=list,
+        help_text=_("モデルが受け付けるeffortの値（各社の指定そのまま）。推論の制御に対応するモデルだけ"),
+    )
+    default_effort = serializers.CharField(
+        source="current_version.default_effort", max_length=50, required=False, allow_blank=True, default=""
+    )
     change_reason = serializers.CharField(max_length=500, required=False, allow_blank=True, write_only=True)
     created_by: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(slug_field="uid", read_only=True)
 
@@ -193,6 +206,7 @@ class ModelProfileSerializer(serializers.ModelSerializer):
             "id",
             "name",
             "is_active",
+            "is_default",
             "version",
             *VERSION_FIELDS,
             "connection_info",
@@ -201,7 +215,7 @@ class ModelProfileSerializer(serializers.ModelSerializer):
             "created",
             "updated",
         ]
-        read_only_fields = ["created", "updated"]
+        read_only_fields = ["is_default", "created", "updated"]
 
     def validate_name(self, value: str) -> str:
         value = value.strip()
@@ -223,10 +237,24 @@ class ModelProfileSerializer(serializers.ModelSerializer):
         current = self.instance.current_version if self.instance else None
         max_input = content.get("max_input_tokens", getattr(current, "max_input_tokens", None))
         max_output = content.get("max_output_tokens", getattr(current, "max_output_tokens", None))
+        errors = defaultdict(list)
         if max_input is not None and max_output is not None and max_output > max_input:
-            raise serializers.ValidationError(
-                {"max_output_tokens": _("最大出力tokenは、最大入力token以下にしてください")}
-            )
+            errors["max_output_tokens"].append(_("最大出力tokenは、最大入力token以下にしてください"))
+        reasoning = content.get("supports_reasoning", getattr(current, "supports_reasoning", False))
+        efforts = [v.strip() for v in content.get("effort_values", getattr(current, "effort_values", []))]
+        default_effort = content.get("default_effort", getattr(current, "default_effort", "")).strip()
+        if efforts and not reasoning:
+            errors["effort_values"].append(_("effortの値は、推論の制御に対応するモデルだけに設定できます"))
+        if len(set(efforts)) != len(efforts) or "" in efforts:
+            errors["effort_values"].append(_("effortの値は、空でない別々の値にしてください"))
+        if default_effort and default_effort not in efforts:
+            errors["default_effort"].append(_("既定のeffortは、effortの値から選んでください"))
+        if errors:
+            raise serializers.ValidationError(errors)
+        if "current_version" in attrs:
+            for name, value in (("effort_values", efforts), ("default_effort", default_effort)):
+                if name in attrs["current_version"]:
+                    attrs["current_version"][name] = value
         return attrs
 
     def _content(self, validated_data, current: ModelProfileVersion | None) -> dict[str, Any]:
@@ -258,3 +286,34 @@ class ModelProfileSerializer(serializers.ModelSerializer):
                 setattr(instance, name, validated_data[name])
         instance.save(update_fields=["name", "is_active", "updated"])
         return instance
+
+
+class AppModelProfileSerializer(serializers.ModelSerializer):
+    """社員が会話で選ぶためのモデル設定。接続先や単価は出さない"""
+
+    id = serializers.CharField(source="uid", read_only=True)
+    is_local = serializers.BooleanField(source="current_version.is_local", read_only=True)
+    supports_tools = serializers.BooleanField(source="current_version.supports_tools", read_only=True)
+    supports_images = serializers.BooleanField(source="current_version.supports_images", read_only=True)
+    supports_documents = serializers.BooleanField(source="current_version.supports_documents", read_only=True)
+    supports_reasoning = serializers.BooleanField(source="current_version.supports_reasoning", read_only=True)
+    effort_values = serializers.ListField(
+        source="current_version.effort_values", child=serializers.CharField(), read_only=True
+    )
+    default_effort = serializers.CharField(source="current_version.default_effort", read_only=True)
+
+    class Meta:
+        model = ModelProfile
+        fields = [
+            "id",
+            "name",
+            "is_default",
+            "is_local",
+            "supports_tools",
+            "supports_images",
+            "supports_documents",
+            "supports_reasoning",
+            "effort_values",
+            "default_effort",
+        ]
+        read_only_fields = fields

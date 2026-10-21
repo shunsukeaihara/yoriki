@@ -53,6 +53,11 @@ INSTALLED_APPS = [
     "common",
     "user",
     "llm",
+    "conversation",
+    "run",
+    "usage",
+    "harness",
+    "stream",
 ]
 
 MIDDLEWARE = [

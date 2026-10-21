@@ -28,6 +28,7 @@
 | #19 | 設計（design.md 0.19）：「エージェント」を標準のハーネス1つだけにし、業務ごとのAgentとSkillを束ねる業務のPluginをやめた。業務の単位はSkill（Tool・資料・Connector・実行環境・必要な能力を版で持ち、公開範囲で誰が使えるかが決まる）。SkillとConnectorは `/`・`@` で明示するか、エージェントが利用者の権限で使えるものから探す。モデルは会話・タスクで直接選び、自動で変えるのはeffortだけ。障害時は会話なら利用者に切り替えを求め、タスクならエラーを通知する |
 | #20 | 設計（design.md 0.20）：Webhookのpayloadはそのままファイルとして渡し、読み方はSkillで吸収する。受付時に必要な項目だけをBindingの表で取り出せる（JSONのpath・必須・型、サンプルで試せる）。重複のキーは送り元のイベントIDか `Idempotency-Key` だけ。Webhookのタスクは失敗の通知先が必須。処理の流れを組む画面は作らない |
 | #21 | ハーネス（Runner）の設計（[harness.md](harness.md)、design.md 0.21）：RunEventを正本にしてモデルへの入力を組み立てる、Toolの定義・呼び出し方・見せ方、コマンドは呼出しごとの `docker exec` とバックグラウンドのジョブ（常駐のシェルは持たない）、形式ごとの `read`・文字列の置換の `edit`、出力の上限と退避、段階的な圧縮、確認待ち、障害からの再開（Workspaceとの突き合わせ、外部への書込みの重複のキー）、確認を必須にするConnectorの書込み、Provider Adapterへの追加（メッセージの部品、OpenAIのResponses API）。Web検索・取得はMVPの後にConnectorとして加え、プロバイダ組込みの検索は基盤管理者の許可制 |
+| #22 | 会話と実行のバックエンド：`conversation`（会話・メッセージ・実行中の依頼）、`run`（Run・Attempt（lease・fencing）・RunEvent・確認・ToolInvocation・Outbox・Reconciler）、`harness`（Runner、`ask_user`・`todo_write`、再試行とモデルの切り替えの確認、繰返しの検出、ステップ数の上限、要約の圧縮）、`usage`（利用量）、`stream`（LISTEN/NOTIFYとSSE）、Provider Adapterの拡張（メッセージの部品、OpenAIのResponses API、effort、推論の途中経過、`tool_choice`）、モデル設定の入力の種類・effort・既定。Q2のクラスタを1つにし、qclusterごとに同時に動かすRunの数を制限 |
 
 確認済みのこと：
 
@@ -71,9 +72,7 @@
 
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。提案する順番：
 
-1. **会話と実行（`conversation`、`run`、`stream`、`harness`）**：PRを2つに分ける。
-   - **バックエンド**：書いた（ブランチ `feature/conversation-run`。Pull Requestは未作成）。会話・メッセージ・実行中の依頼、Run・Attempt（lease・fencing）・RunEvent・確認・ToolInvocation・Outbox、Reconciler（leaseの切れたRunの復旧、回答期限、送り直し）、Runner（RunEventからの要求の組立、`ask_user`・`todo_write`、再試行とモデルの切り替えの確認、繰返しの検出、ステップ数の上限、LLMによる要約の圧縮）、利用量の記録（`usage`）、SSE（LISTEN/NOTIFY、`app/v1/stream/`・`app/v1/runs/{id}/stream/`、OpenAPIに `text/event-stream` として記載）、Provider Adapterの拡張（メッセージの部品、OpenAIのResponses API、effort、推論の途中経過、`tool_choice`）、モデル設定の項目（入力の種類、effortの値と既定、既定のモデル設定）。Q2はクラスタを1つにし、qclusterごとに同時に動かすRunの数を制限する。偽のOpenAI互換サーバーで、API → Q2 → Runner → SSEとWorkerが落ちた後の復旧までを手元で確かめた。
-   - **フロントエンド**：次に作る。会話の一覧と画面、会話を始めるウィザード（モデルと、個人情報・機密情報を扱うか）、逐次表示（SSE）、作業の計画（`todo_write`）の表示、停止、確認への回答（選択肢と自由記述）、モデルとeffortの切り替え、実行中の追加指示と次の依頼。
+1. **会話の画面（フロントエンド）**：会話の一覧と画面、会話を始めるウィザード（モデルと、個人情報・機密情報を扱うか）、逐次表示（SSE。`app/v1/runs/{id}/stream/`、`app/v1/stream/`）、作業の計画（`todo_write`）の表示、停止、確認への回答（選択肢と自由記述）、モデルとeffortの切り替え、実行中の追加指示と次の依頼。バックエンドは #22。
 2. **Sandbox（`sandbox/`、`runtime`）**：CONTRACT.md、docsのイメージ、Launcher（`network_mode: none`、コンテナからの脱出への対策の1〜4。design.md §7）、Runnerからのshell実行と、Sandboxの中の補助コマンド `yoriki-sandbox`（ジョブ、形式ごとの読取り、編集。harness.md §8）、多くのコマンドが制限の下で動くことの契約テスト（harness.md §8.5）。gVisorの評価もこの段階で行う。
 3. **成果物とファイル（`artifact`）**：Local・S3のStorage Backend、添付、成果物の取得（`/api/files/<token>/`、`X-Accel-Redirect`）。
 4. **Skill（`skill`、`resource`）**：Draft・Version・公開範囲と公開、Skillの資料（マスター・テンプレート）、会話からのSkill更新、入力欄の `/` での指定、エージェントに見せる一覧（利用者の権限で使えるものだけ）。役割「Plugin公開者」（`user/roles.py`）を「Skill公開者」に改める（design.md 0.19）。

@@ -63,13 +63,17 @@
 - 接続の同時実行数・1分あたりの要求数の上限は、項目があるだけで、まだ守らせていない（Runnerの段階）。
 - `sandbox/`（CONTRACT.md、イメージ、契約テスト）は、まだない。
 - 認証プロキシの裏に置く場合は、前段のnginxが利用者のIPアドレスを `CF-Connecting-IP` 等で解決して `X-Forwarded-For` を上書きしているかを、導入先で確かめる（deployment.md §8.6）。解決していないと、ログインの試行回数の制限で、多くの利用者が同じIPアドレスとして数えられる。
+- ハーネスで後回しにしたもの：予算の上限の強制（今は利用量を記録するだけ。クオータの設定とあわせて作る）、Toolの並列の実行（今は順に実行する。Sandboxの読取りのToolを加えるときに作る）、圧縮の1・2段（大きいTool結果の退避と置き換え。harness.md §9.1）、Checkpoint・Workspace snapshot（Sandboxの段階）、添付ファイル（Artifactの段階）。
+- フロントエンドのSPAを静的なファイルにして `yoriki-api` のイメージに入れ、`frontend` のコンテナをなくす（`ssr: false` なのでNode.jsのサーバーは要らない。アプリのイメージが1つになる）。
 - 招待のリンクはYorikiからメールで送らない（画面でコピーして渡す）。メールの送信は必要になった時点で追加する（design.md §10.0）。
 
 ## 4 次の作業
 
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。提案する順番：
 
-1. **会話と実行（`conversation`、`run`、`stream`、`harness`）**：harness.md に沿って実装する。Provider Adapterの拡張（メッセージを部品の並びにする、画像・文書等のファイルの入力、OpenAIの公式APIをResponses APIへ、effort、推論の途中経過の引き継ぎ、`tool_choice`。harness.md §12）も同じPull Requestで行う。Conversation・ConversationMessage、Runの状態遷移（遷移表と行ロック）、claim / lease、`cancel`・`answer`、SSE（`stream/notifier.py` のLISTEN/NOTIFY）。まずSandboxなしでLLMと会話できるところまで。既定のモデル設定（基盤管理者が設定する）と、会話ごとのモデルの直接の選択、モデルごとのeffort（受け付ける値と既定）、利用者が明示するモデル・effortの切り替え、障害時に利用者へ切り替えを求める確認（タスクはエラーの通知）、Manifestへの追記（design.md §4.8）。自動で変えるのはeffortだけで、その規則は利用量と費用を見てから決める。会話を始めるときのウィザードで、個人情報や機密情報を扱うかを確かめ、扱う場合はローカルLLMのモデルだけに絞る（design.md §4冒頭、§11.3）。
+1. **会話と実行（`conversation`、`run`、`stream`、`harness`）**：PRを2つに分ける。
+   - **バックエンド**：書いた（ブランチ `feature/conversation-run`。Pull Requestは未作成）。会話・メッセージ・実行中の依頼、Run・Attempt（lease・fencing）・RunEvent・確認・ToolInvocation・Outbox、Reconciler（leaseの切れたRunの復旧、回答期限、送り直し）、Runner（RunEventからの要求の組立、`ask_user`・`todo_write`、再試行とモデルの切り替えの確認、繰返しの検出、ステップ数の上限、LLMによる要約の圧縮）、利用量の記録（`usage`）、SSE（LISTEN/NOTIFY、`app/v1/stream/`・`app/v1/runs/{id}/stream/`、OpenAPIに `text/event-stream` として記載）、Provider Adapterの拡張（メッセージの部品、OpenAIのResponses API、effort、推論の途中経過、`tool_choice`）、モデル設定の項目（入力の種類、effortの値と既定、既定のモデル設定）。Q2はクラスタを1つにし、qclusterごとに同時に動かすRunの数を制限する。偽のOpenAI互換サーバーで、API → Q2 → Runner → SSEとWorkerが落ちた後の復旧までを手元で確かめた。
+   - **フロントエンド**：次に作る。会話の一覧と画面、会話を始めるウィザード（モデルと、個人情報・機密情報を扱うか）、逐次表示（SSE）、作業の計画（`todo_write`）の表示、停止、確認への回答（選択肢と自由記述）、モデルとeffortの切り替え、実行中の追加指示と次の依頼。
 2. **Sandbox（`sandbox/`、`runtime`）**：CONTRACT.md、docsのイメージ、Launcher（`network_mode: none`、コンテナからの脱出への対策の1〜4。design.md §7）、Runnerからのshell実行と、Sandboxの中の補助コマンド `yoriki-sandbox`（ジョブ、形式ごとの読取り、編集。harness.md §8）、多くのコマンドが制限の下で動くことの契約テスト（harness.md §8.5）。gVisorの評価もこの段階で行う。
 3. **成果物とファイル（`artifact`）**：Local・S3のStorage Backend、添付、成果物の取得（`/api/files/<token>/`、`X-Accel-Redirect`）。
 4. **Skill（`skill`、`resource`）**：Draft・Version・公開範囲と公開、Skillの資料（マスター・テンプレート）、会話からのSkill更新、入力欄の `/` での指定、エージェントに見せる一覧（利用者の権限で使えるものだけ）。役割「Plugin公開者」（`user/roles.py`）を「Skill公開者」に改める（design.md 0.19）。

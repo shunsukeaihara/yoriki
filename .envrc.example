@@ -24,6 +24,13 @@ export YORIKI_DATABASE_PORT=5432
 #   cd api && uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 # export YORIKI_SECRET_ENCRYPTION_KEYS=
 
+# --- Django Q2（qcluster） ---
+# qclusterのworker数と、1つのqclusterで同時に動かすRunの数（既定は worker数 − 1。deployment.md §3.2）
+# export YORIKI_Q_WORKERS=4
+# export YORIKI_RUNS_PER_QCLUSTER=3
+# macOSでは、forkしたworkerがHTTPの接続（システムのライブラリ）を使うと落ちるので、確認を止める（Linuxでは不要）
+export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
+
 # --- 社内SSO ---
 # 認証基盤（Microsoft 365・Google Workspace）の設定は、環境変数ではなく管理画面（/manage/sso_providers）で登録する。
 # 開発時のリダイレクトURIは http://localhost:3000/api/accounts/<microsoft|google>/login/callback/ になる

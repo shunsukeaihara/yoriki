@@ -4,7 +4,9 @@
 Runnerはこの型だけを使い、プロバイダごとのSDKを直接呼ばない（harness.md §12）。
 """
 
+import base64
 import json
+import re
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
@@ -156,7 +158,10 @@ class ToolCallRequested:
 
 @dataclass(frozen=True)
 class ProviderState:
-    """次の要求で assistant のメッセージに付けて戻す部分（thinkingブロック、暗号化されたreasoning、thought signature）"""
+    """次の要求で assistant のメッセージに付けて戻す部分。
+
+    thinkingブロック、暗号化されたreasoning、thought signature。中身はAdapterだけが解釈する
+    """
 
     data: dict[str, Any]
 
@@ -206,7 +211,10 @@ class ProviderAdapter(ABC):
 
     @abstractmethod
     def stream(self, request: ChatRequest) -> Iterator[ChatEvent]:
-        """応答を逐次返す。最後に（あれば ProviderState と）Usage と Completed を1つずつ返す。失敗したら ProviderError"""
+        """応答を逐次返す。最後に（あれば ProviderState と）Usage と Completed を1つずつ返す。
+
+        失敗したら ProviderError
+        """
 
     @abstractmethod
     def list_models(self) -> list[str]:
@@ -227,7 +235,55 @@ def status_error(status_code: int, *, request_id: str = "", provider_message: st
     else:
         message = _("プロバイダが要求を受け付けませんでした（HTTP %(status)s）。") % {"status": status_code}
         retryable = False
-    return ProviderError(message, retryable, status_code, request_id, details)
+    return ProviderError(message, retryable, status_code=status_code, request_id=request_id, details=details)
+
+
+# 各社が文脈の上限の超過を知らせる文（HTTP 400）。専用のエラーコードがない社もあるので、文で見分ける
+CONTEXT_OVERFLOW_PATTERN = re.compile(
+    r"context[ _-]?(length|window)|prompt is too long|input is too long|maximum number of tokens|too many tokens",
+    re.IGNORECASE,
+)
+
+
+def is_context_overflow(status_code: int, provider_message: str, code: str = "") -> bool:
+    if code == "context_length_exceeded":
+        return True
+    return status_code == 400 and bool(CONTEXT_OVERFLOW_PATTERN.search(provider_message))
+
+
+def context_overflow_error(
+    status_code: int | None, *, request_id: str = "", provider_message: str = ""
+) -> ProviderError:
+    """入力が文脈の上限を超えた。再試行しても通らないので、Runnerが圧縮してからやり直す（harness.md §9.2）"""
+    return ProviderError(
+        _("入力がモデルの文脈の上限を超えました。"),
+        context_overflow=True,
+        status_code=status_code,
+        request_id=request_id,
+        details={"provider_message": provider_message} if provider_message else {},
+    )
+
+
+def unsupported_part_error(part: Part, provider: str) -> ProviderError:
+    """このAPIで送れない種類の入力。Runnerは送る前に能力を確かめる（harness.md §12）ので、ここは安全網"""
+    labels = {
+        InputKind.IMAGE: _("画像"),
+        InputKind.DOCUMENT: _("文書"),
+        InputKind.AUDIO: _("音声"),
+        InputKind.VIDEO: _("動画"),
+    }
+    label = labels[PART_KINDS[type(part)]]
+    return ProviderError(
+        _("%(provider)sには%(kind)s（%(media_type)s）を送れません。")
+        % {"provider": provider, "kind": label, "media_type": getattr(part, "media_type", "")}
+    )
+
+
+def unsupported_budget_error(provider: str) -> ProviderError:
+    """effortに数字（thinkingのtoken予算）を指定したが、そのAPIは水準の名前だけを受け付ける"""
+    return ProviderError(
+        _("%(provider)sのeffortには、token数ではなく水準の名前を指定してください。") % {"provider": provider}
+    )
 
 
 def timeout_error() -> ProviderError:
@@ -243,6 +299,33 @@ def connection_error() -> ProviderError:
     return ProviderError(
         _("プロバイダに接続できませんでした。接続先とネットワークを確認してください。"), retryable=True
     )
+
+
+def thinking_budget(effort: str | None) -> int | None:
+    """effortが数字だけなら、thinkingのtoken予算として返す"""
+    return int(effort) if effort and effort.isdigit() else None
+
+
+def b64(data: bytes) -> str:
+    return base64.b64encode(data).decode("ascii")
+
+
+def data_url(media_type: str, data: bytes) -> str:
+    return f"data:{media_type};base64,{b64(data)}"
+
+
+def document_text(part: DocumentPart) -> str:
+    """テキストの文書（text/plain）の中身"""
+    return part.data.decode("utf-8", errors="replace")
+
+
+def object_schema(parameters: dict[str, Any]) -> dict[str, Any]:
+    """Toolの引数のSchemaのルートを、各社が求める形（`type: object` と `properties`）にそろえる"""
+    schema = dict(parameters)
+    schema["type"] = "object"
+    if not isinstance(schema.get("properties"), dict):
+        schema["properties"] = {}
+    return schema
 
 
 def parse_arguments(raw: str) -> dict[str, Any]:

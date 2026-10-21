@@ -6,11 +6,13 @@ from ..models import LLMConnection, ProviderKind
 from .anthropic import AnthropicAdapter
 from .base import ProviderAdapter
 from .gemini import GeminiAdapter
-from .openai import OpenAIAdapter
+from .openai import ChatCompletionsAdapter
+from .openai_responses import OpenAIResponsesAdapter
 
 ADAPTERS: dict[int, type[ProviderAdapter]] = {
-    ProviderKind.OPENAI: OpenAIAdapter,
-    ProviderKind.LOCAL: OpenAIAdapter,
+    # OpenAIの公式APIはResponses API、OpenAI互換のローカルLLMはChat Completionsで呼ぶ（harness.md §12）
+    ProviderKind.OPENAI: OpenAIResponsesAdapter,
+    ProviderKind.LOCAL: ChatCompletionsAdapter,
     ProviderKind.ANTHROPIC: AnthropicAdapter,
     ProviderKind.GEMINI: GeminiAdapter,
 }

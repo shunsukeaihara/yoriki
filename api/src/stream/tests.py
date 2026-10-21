@@ -101,3 +101,34 @@ def test_other_users_run_stream_is_not_found(app_user):
     request.auser = auser
     response = asyncio.run(run_stream(request, run.uid))
     assert response.status_code == 404
+
+
+@pytest.mark.django_db(transaction=True)
+def test_run_stream_reads_a_long_backlog_to_the_end():
+    run = RunFactory.create(conversation=ConversationFactory.create())
+    RunEvent.objects.bulk_create(
+        RunEvent(run=run, sequence=n, kind=RunEventKind.ASSISTANT_MESSAGE, data={"text": f"{n}", "tool_calls": []})
+        for n in range(1, 701)
+    )
+    request = RequestFactory().get(f"/api/app/v1/runs/{run.uid}/stream/")
+
+    async def auser():
+        return run.owner
+
+    request.auser = auser
+
+    async def last_id() -> str:
+        response = await run_stream(request, run.uid)
+        assert isinstance(response, StreamingHttpResponse)
+        stream: Any = response.streaming_content.__aiter__()  # type: ignore[union-attr]
+        try:
+            chunk = ""
+            for _ in range(701):
+                chunk = await asyncio.wait_for(stream.__anext__(), timeout=5)
+            text = chunk if isinstance(chunk, str) else chunk.decode()
+            return text.splitlines()[0]
+        finally:
+            await stream.aclose()
+            await get_listener().close()
+
+    assert asyncio.run(last_id()) == "id: 700"

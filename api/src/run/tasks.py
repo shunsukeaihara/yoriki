@@ -9,6 +9,9 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
+from conversation.models import Conversation
+from utils.lock import lock
+
 from .dispatch import dispatch_pending, enqueue_run
 from .models import (
     MAX_ATTEMPTS,
@@ -37,19 +40,26 @@ def execute_run(run_id: int) -> None:
 @transaction.atomic
 def claim_run(run_id: int) -> ExecutionAttempt | None:
     worker = socket.gethostname()
-    if _running_here(worker) >= settings.YORIKI_RUNS_PER_QCLUSTER:
-        # workerを軽い処理のために残す。Runは順番待ちのままにし、Reconcilerが送り直す（deployment.md §3.2）
-        return None
-    run = Run.objects.select_for_update(skip_locked=True).filter(pk=run_id, status=RunStatus.QUEUED).first()
-    if run is None:
-        return None
-    if run.attempts.count() >= MAX_ATTEMPTS * 10:
-        # 確認待ちからの再開もAttemptを作る。異常に多いRunは止める
+    # 同じqclusterのworkerが同時にclaimしても上限を超えないよう、数える前にqclusterごとに直列にする
+    with lock(f"run-claim:{worker}"):
+        if _running_here(worker) >= settings.YORIKI_RUNS_PER_QCLUSTER:
+            # workerを軽い処理のために残す。Runは順番待ちのままにし、Reconcilerが送り直す（deployment.md §3.2）
+            return None
+        conversation_id = Run.objects.filter(pk=run_id).values_list("conversation_id", flat=True).first()
+        if conversation_id is None:
+            return None
+        # ロックの順序（会話 → Run）を守る。Run.locked() を参照
+        list(Conversation.objects.select_for_update().filter(pk=conversation_id).values_list("pk", flat=True))
+        run = Run.objects.select_for_update(skip_locked=True).filter(pk=run_id, status=RunStatus.QUEUED).first()
+        if run is None:
+            return None
+        if run.attempts.count() >= MAX_ATTEMPTS * 10:
+            # 確認待ちからの再開もAttemptを作る。異常に多いRunは止める
+            run.set_status(RunStatus.RUNNING)
+            run.set_status(RunStatus.FAILED, end_reason=RunEndReason.ATTEMPTS, error=_("再開の回数が多すぎます。"))
+            return None
         run.set_status(RunStatus.RUNNING)
-        run.set_status(RunStatus.FAILED, end_reason=RunEndReason.ATTEMPTS, error=_("再開の回数が多すぎます。"))
-        return None
-    run.set_status(RunStatus.RUNNING)
-    return ExecutionAttempt.start(run, worker=worker)
+        return ExecutionAttempt.start(run, worker=worker)
 
 
 def _running_here(worker: str) -> int:
@@ -69,10 +79,12 @@ def reconcile_runs() -> None:
 
 @transaction.atomic
 def _recover(attempt_id: int) -> None:
+    # ロックの順序（会話 → Run → Attempt）を守る
+    run_id = ExecutionAttempt.objects.filter(pk=attempt_id).values_list("run_id", flat=True).get()
+    run = Run.locked(run_id)
     attempt = ExecutionAttempt.objects.select_for_update().get(pk=attempt_id)
-    if attempt.ended is not None:
-        return
-    run = Run.locked(attempt.run_id)
+    if attempt.ended is not None or attempt.lease_expires >= timezone.now():
+        return  # 先に終わった、またはその間にleaseが延びた
     attempt.end(failure="lease_expired")
     if run.status == RunStatus.CANCELLING:
         run.set_status(RunStatus.CANCELLED, comment=_("停止しました。"), end_reason=RunEndReason.CANCELLED)
@@ -106,12 +118,14 @@ def _expire_clarifications(now) -> None:
     )
     for pk in list(expired[:100]):
         with transaction.atomic():
+            # ロックの順序（会話 → Run → 確認）を守る。回答（accept_answer）と同じ順
+            run_id = ClarificationRequest.objects.filter(pk=pk).values_list("run_id", flat=True).get()
+            run = Run.locked(run_id)
             clarification = ClarificationRequest.objects.select_for_update().get(pk=pk)
             if clarification.status != ClarificationStatus.OPEN:
                 continue
             clarification.status = ClarificationStatus.EXPIRED
             clarification.save(update_fields=["status"])
-            run = Run.locked(clarification.run_id)
             if run.status == RunStatus.WAITING_USER:
                 run.set_status(RunStatus.FAILED, end_reason=RunEndReason.EXPIRED, error=_("回答の期限が過ぎました。"))
 

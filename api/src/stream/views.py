@@ -57,9 +57,13 @@ def _last_event_id(request: HttpRequest) -> int:
     return int(value) if value.isdigit() else 0
 
 
+# DBから一度に読むイベントの数。読み切るまで続けて読む
+PAGE_SIZE = 500
+
+
 @sync_to_async
 def _events_after(run_pk: int, run_uid: str, after: int) -> list[tuple[int, str, dict[str, Any]]]:
-    events = RunEvent.objects.filter(run_id=run_pk, sequence__gt=after).order_by("sequence")[:500]
+    events = RunEvent.objects.filter(run_id=run_pk, sequence__gt=after).order_by("sequence")[:PAGE_SIZE]
     return [(e.sequence, *_typed(serialize_event(e, run_uid))) for e in events]
 
 
@@ -76,19 +80,25 @@ async def _run_events(run_pk: int, run_uid: str, after: int) -> AsyncIterator[st
         yield f"retry: {RETRY_MILLISECONDS}\n\n"
         last = after
         while True:
-            for sequence, kind, data in await _events_after(run_pk, run_uid, last):
-                yield _format(kind, data, sequence)
-                last = sequence
+            # 読み切るまで続けて読む（再接続で多くのイベントが溜まっていても止まらない）
+            while page := await _events_after(run_pk, run_uid, last):
+                for sequence, kind, data in page:
+                    yield _format(kind, data, sequence)
+                    last = sequence
+                if len(page) < PAGE_SIZE:
+                    break
+            # 新しいイベントの通知か、LISTENの接続のやり直し（rescan）を待つ。しばらく何もなければ、
+            # 通知を取りこぼした場合に備えてDBを読み直す
             while True:
                 try:
                     payload = await asyncio.wait_for(queue.get(), timeout=KEEPALIVE_SECONDS)
                 except TimeoutError:
                     yield ": keepalive\n\n"
-                    continue
+                    break
                 if payload.get("type") == "run.delta":
                     yield _format("run.delta", payload)
                     continue
-                if payload.get("sequence", 0) > last:
+                if payload.get("rescan") or payload.get("sequence", 0) > last:
                     break
     finally:
         await listener.unsubscribe(channel, queue)
@@ -106,6 +116,8 @@ async def _user_events(user_uid: str) -> AsyncIterator[str]:
             except TimeoutError:
                 yield ": keepalive\n\n"
                 continue
+            if payload.get("rescan"):
+                continue  # この通知は保存していないので、読み直すものがない
             yield _format(payload.get("type", "notification"), payload)
     finally:
         await listener.unsubscribe(channel, queue)

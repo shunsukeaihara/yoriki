@@ -325,3 +325,46 @@ def test_lost_lease_writes_nothing(conversation):
     Runner(attempt, adapter_factory=FakeAdapter([reply("古い応答")]), sleep=lambda _s: None).run()
     assert not ConversationMessage.objects.filter(run=run, role=MessageRole.AGENT).exists()
     assert Run.objects.get(pk=run.pk).status == RunStatus.RUNNING
+
+
+@pytest.mark.django_db
+def test_instruction_during_the_final_reply_continues_the_run(conversation, app_user):
+    run = start(conversation)
+
+    class LateInstructionAdapter(FakeAdapter):
+        def stream(self, request):
+            if len(self.requests) == 0:
+                post_message(
+                    conversation, body="やっぱり支店別に", client_message_id="", mode=MessageMode.AUTO, actor=app_user
+                )
+            yield from super().stream(request)
+
+    adapter = LateInstructionAdapter([reply("完了しました。"), reply("支店別にしました。")])
+    run = execute(run, adapter)
+    assert run.status == RunStatus.COMPLETED
+    assert UserInstruction.objects.get(conversation=conversation).state == InstructionState.APPLIED
+    assert len(adapter.requests) == 2
+    assert any("やっぱり支店別に" in m.text for m in adapter.requests[1].messages)
+
+
+@pytest.mark.django_db
+def test_unapplied_instruction_becomes_the_next_request_when_the_run_ends(conversation, app_user):
+    run = start(conversation)
+    claim_run(run.pk)
+    post_message(conversation, body="追加でこれも", client_message_id="", mode=MessageMode.AUTO, actor=app_user)
+    Run.objects.get(pk=run.pk).request_cancel("", actor=app_user)
+    run.refresh_from_db()
+    run.set_status(RunStatus.CANCELLED)
+    instruction = UserInstruction.objects.get(conversation=conversation)
+    assert instruction.state == InstructionState.STARTED
+    assert instruction.run is not None and instruction.run != run
+
+
+@pytest.mark.django_db
+def test_orphaned_question_is_closed_on_resume(conversation):
+    run = start(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    ClarificationRequest.objects.create(run=run, kind=ClarificationKind.QUESTION, tool_call_id="old", questions=[])
+    Runner(attempt, adapter_factory=FakeAdapter([reply("完了")]), sleep=lambda _s: None).run()
+    assert ClarificationRequest.objects.get(run=run).status == ClarificationStatus.CANCELLED

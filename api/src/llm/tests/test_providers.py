@@ -199,7 +199,7 @@ class TestOpenAIResponses:
     @pytest.mark.django_db
     def test_stream(self):
         recorder = Recorder(body=self.BODY, headers={"x-request-id": "req_1"})
-        events = self._stream(REQUEST, recorder)
+        events = self._stream(replace(REQUEST, reasoning=True), recorder)
 
         assert events == [
             TextDelta("東京は"),
@@ -862,3 +862,12 @@ class TestGemini:
             self._stream(REQUEST, Recorder(status=400, body=body))
         assert info.value.context_overflow
         assert info.value.status_code == 400
+
+
+class TestOpenAIResponsesWithoutReasoning:
+    @pytest.mark.django_db
+    def test_encrypted_reasoning_is_not_requested_for_models_without_reasoning(self):
+        recorder = Recorder(body=TestOpenAIResponses.BODY)
+        connection = LLMConnectionFactory.create(kind=ProviderKind.OPENAI)
+        list(get_adapter(connection, http_client=_httpx2(recorder)).stream(REQUEST))
+        assert "include" not in recorder.sent

@@ -38,21 +38,29 @@ save context. Treat it as established background and continue the work from the 
 
 
 def threshold(version: ModelProfileVersion) -> int:
+    """圧縮を始めるtoken数。出力と余白の分を引くが、文脈の小さいモデルでも半分までは使えるようにする"""
     window = version.max_input_tokens
-    return int(min(window * 0.75, window - version.max_output_tokens - 16_000))
+    margin = min(16_000, window // 10)
+    return int(max(window * 0.5, min(window * 0.75, window - version.max_output_tokens - margin)))
 
 
-def estimate_tokens(events: list[RunEvent]) -> int:
-    """直前の要求の実際のtoken数に、その後に増えた分を文字数で足す（日本語は1文字を1 tokenとして数える）"""
-    base, start = 0, 0
-    for index in range(len(events) - 1, -1, -1):
-        event = events[index]
-        if event.kind == RunEventKind.ASSISTANT_MESSAGE and event.data.get("usage"):
-            usage = event.data["usage"]
-            base, start = usage["input_tokens"] + usage["output_tokens"], index + 1
-            break
-    added = sum(len(str(e.data.get("text", ""))) + len(str(e.data.get("content", ""))) for e in events[start:])
-    return base + added
+def estimate_tokens(events: list[RunEvent], items: list[Item]) -> int:
+    """次の要求のtoken数の見積もり。直前の要求の実際のtoken数に、その後に増えた分を文字数で足す
+    （日本語は1文字を1 tokenとして数える）。直前の要求より後に圧縮していれば、圧縮した後の履歴から数え直す"""
+    last_usage = next(
+        (e for e in reversed(events) if e.kind == RunEventKind.ASSISTANT_MESSAGE and e.data.get("usage")), None
+    )
+    last_compaction = next((e for e in reversed(events) if e.kind == RunEventKind.COMPACTION), None)
+    if last_usage is None or (last_compaction and last_compaction.sequence > last_usage.sequence):
+        return sum(_item_size(item) for item in items)
+    usage = last_usage.data["usage"]
+    added = sum(_item_size(item) for item in items if item.sequence > last_usage.sequence)
+    return usage["input_tokens"] + usage["output_tokens"] + added
+
+
+def _item_size(item: Item) -> int:
+    calls = sum(len(str(c.arguments)) + len(c.name) for c in item.message.tool_calls)
+    return len(item.message.text) + calls
 
 
 @dataclass(frozen=True)

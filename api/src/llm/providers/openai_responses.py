@@ -114,9 +114,10 @@ def _params(request: ChatRequest) -> dict[str, Any]:
         "input": _input([m for m in request.messages if m.role != "system"]),
         "stream": True,
         "store": False,
-        # store: false では、reasoningを暗号化した内容で受け取り、次の要求で戻す
-        "include": ["reasoning.encrypted_content"],
     }
+    if request.reasoning:
+        # store: false では、reasoningを暗号化した内容で受け取り、次の要求で戻す。推論のないモデルには送らない
+        params["include"] = ["reasoning.encrypted_content"]
     if instructions:
         params["instructions"] = instructions
     if request.tools:

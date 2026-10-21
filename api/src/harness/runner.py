@@ -39,6 +39,9 @@ from llm.providers.base import (
 )
 from run.errors import LeaseLost
 from run.models import (
+    ClarificationKind,
+    ClarificationRequest,
+    ClarificationStatus,
     ExecutionAttempt,
     Run,
     RunEndReason,
@@ -49,6 +52,7 @@ from run.models import (
     ToolInvocation,
     ToolStatus,
 )
+from run.tasks import CLARIFICATION_TTL
 from stream.notifier import notify_delta
 from usage.models import UsageLedger, UsagePurpose
 
@@ -166,6 +170,10 @@ class Runner:
     def _resume(self) -> None:
         """結果のないTool呼出しを閉じ、実行時の文脈が変わっていれば追記する（harness.md §11.1）"""
         events = self._events()
+        # 実行中のRunに回答待ちの確認が残っていれば、前のAttemptが待ちに移る前に止まったもの。答えられないので閉じる
+        ClarificationRequest.objects.filter(
+            run=self.run_obj, kind=ClarificationKind.QUESTION, status=ClarificationStatus.OPEN
+        ).update(status=ClarificationStatus.CANCELLED)
         for call in pending_tool_calls(events):
             text = (
                 "The previous attempt was interrupted while this tool call was running, and its result was not "
@@ -199,7 +207,7 @@ class Runner:
         self._record_header(prompt, events)
         items = build_items(run, events)
 
-        if compaction.estimate_tokens(events) > compaction.threshold(version):
+        if compaction.estimate_tokens(events, items) > compaction.threshold(version):
             return self._compact(system, items)
 
         result = self._ask_model(system, items, final=final)
@@ -225,6 +233,7 @@ class Runner:
             effort=run.effort or None,
             tool_choice=ToolChoice.NONE if final else ToolChoice.AUTO,
             use_cache=version.supports_prompt_caching,
+            reasoning=version.supports_reasoning,
         )
         try:
             response = self._call_model(request, run.step_count + 1)
@@ -398,8 +407,8 @@ class Runner:
             return self._nudge("Your previous response was cut off at the output limit. Continue in smaller pieces.")
         if not response.text.strip():
             return self._nudge("Your previous response was empty. Call a tool or write your reply to the user.")
-        self._finish_with_reply(response.text, RunStatus.COMPLETED, RunEndReason.COMPLETED)
-        return False
+        # 最後の応答の間に追加指示が届いていれば、終えずに取り込んで続ける（harness.md §10.4）
+        return self._finish_with_reply(response.text, RunStatus.COMPLETED, RunEndReason.COMPLETED)
 
     def _nudge(self, text: str) -> bool:
         self.nudges += 1
@@ -409,15 +418,22 @@ class Runner:
         self._record(RunEventKind.CONTEXT, {"text": text})
         return True
 
-    def _finish_with_reply(self, text: str, status: RunStatus, end_reason: RunEndReason) -> None:
+    def _finish_with_reply(self, text: str, status: RunStatus, end_reason: RunEndReason) -> bool:
+        """応答を会話に載せてRunを終える。完了の前に追加指示が届いていれば、終えずにTrue（続ける）を返す"""
         with self.run_obj.fenced(self.attempt) as run:
             if text.strip():
                 ConversationMessage.objects.create(
                     conversation_id=run.conversation_id, run=run, role=MessageRole.AGENT, body=text
                 )
                 type(run.conversation).objects.filter(pk=run.conversation_id).update(last_posted=timezone.now())
+            pending = UserInstruction.objects.filter(
+                run=run, kind=InstructionKind.CURRENT, state=InstructionState.RECEIVED
+            ).exists()
+            if status == RunStatus.COMPLETED and pending:
+                return True
             error = "" if status == RunStatus.COMPLETED else str(end_reason.label)
             run.set_status(status, end_reason=end_reason, error=error)
+        return False
 
     def _finish_cancelled(self) -> None:
         with self.run_obj.fenced(self.attempt) as run:
@@ -565,11 +581,17 @@ class Runner:
         """ask_user の結果は記録せずにWAITING_USERにし、Attemptを終える（harness.md §10.3）"""
         self._close_calls(rest, "Not executed: waiting for the user's answer. Call again after the answer if needed.")
         invocation = ToolInvocation.objects.get(run=self.run_obj, call_id=call.id)
-        clarification_uid = (invocation.value or {}).get("clarification")
         with self.run_obj.fenced(self.attempt) as run:
-            from run.models import ClarificationRequest  # noqa: PLC0415  ここでだけ使う
-
-            clarification = ClarificationRequest.objects.get(uid=clarification_uid)
+            # 確認の作成とWAITING_USERへの遷移を同じtransactionで行う。途中でleaseを失っても、
+            # 答えられない確認だけが残ることはない
+            clarification = ClarificationRequest.objects.create(
+                run=run,
+                kind=ClarificationKind.QUESTION,
+                tool_call_id=call.id,
+                questions=(invocation.value or {})["questions"],
+                expires=timezone.now() + CLARIFICATION_TTL,
+            )
+            ToolInvocation.objects.filter(pk=invocation.pk).update(value={"clarification": clarification.uid})
             RunEvent.record(
                 run,
                 RunEventKind.CLARIFICATION_REQUESTED,
@@ -595,6 +617,7 @@ class Runner:
             effort=self.run_obj.effort or None,
             tool_choice=ToolChoice.NONE,
             use_cache=version.supports_prompt_caching,
+            reasoning=version.supports_reasoning,
         )
         try:
             response = self._stream(self.adapter_factory(version.connection), request, self.run_obj.step_count)

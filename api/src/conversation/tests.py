@@ -81,6 +81,13 @@ class TestConversation:
         assert event.data["trigger"] == "user"
         assert run.manifest["appended"][0]["kind"] == "model"
 
+    def test_deleting_a_conversation_cancels_its_active_run(self, api_client, app_user):
+        conversation = ConversationFactory.create(owner=app_user)
+        run = RunFactory.create(conversation=conversation, status=RunStatus.QUEUED)
+        assert api_client.delete(f"/api/app/v1/conversations/{conversation.uid}/").status_code == 204
+        run.refresh_from_db()
+        assert run.status == RunStatus.CANCELLED
+
     def test_sensitivity_cannot_be_changed_later(self, api_client, app_user, local_profile):
         conversation = ConversationFactory.create(
             owner=app_user, model_profile=local_profile, handles_sensitive_data=True

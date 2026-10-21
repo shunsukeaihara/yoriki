@@ -1,8 +1,11 @@
+from django.db import transaction
+from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema
 from rest_framework.generics import get_object_or_404
 from rest_framework.mixins import CreateModelMixin, ListModelMixin
 from rest_framework.viewsets import GenericViewSet, ModelViewSet
 
+from run.models import CANCELLABLE_STATUSES, Run
 from utils.permissions import AppUser
 from utils.views import SoftDeleteMixin
 
@@ -47,6 +50,13 @@ class AppConversationViewSet(SoftDeleteMixin, ModelViewSet):
     def perform_update(self, serializer):
         # 実行中のRunへの切り替えは ConversationSerializer.update() の transaction で行う
         serializer.save(actor=self.request.user)
+
+    @transaction.atomic
+    def perform_destroy(self, instance: Conversation):
+        # 削除した会話のRunは画面から止められなくなるので、実行中のRunは先に止める
+        for run in Run.objects.filter(conversation=instance, status__in=CANCELLABLE_STATUSES):
+            run.request_cancel(str(_("会話を削除しました")), actor=self.request.user)
+        super().perform_destroy(instance)
 
 
 @extend_schema(description="会話のメッセージに関するAPI", tags=["app/conversation/message"])

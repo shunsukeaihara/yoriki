@@ -78,6 +78,7 @@ class Listener:
         self._subscribers: dict[str, set[asyncio.Queue]] = {}
         self._commands: asyncio.Queue[tuple[str, asyncio.Future]] = asyncio.Queue()
         self._task: asyncio.Task | None = None
+        self._connected_once = False
 
     async def subscribe(self, channel: str) -> asyncio.Queue:
         """LISTENが効いてから返す。返った後に保存されたイベントは、通知で必ず知らされる"""
@@ -117,10 +118,17 @@ class Listener:
             while True:
                 try:
                     if conn is None or conn.closed:
+                        reconnecting = conn is not None or self._connected_once
                         conn = await psycopg.AsyncConnection.connect(**_conninfo(), autocommit=True)
-                        # 接続し直したら、購読中のチャネルをLISTENし直す（その間の通知はDBから読み直して補う）
+                        self._connected_once = True
+                        # 接続し直したら、購読中のチャネルをLISTENし直し、その間の通知の取りこぼしを
+                        # 購読者にDBから読み直させる
                         for channel in self._subscribers:
                             await conn.execute(f"LISTEN {_quote(channel)}")
+                        if reconnecting:
+                            for queues in self._subscribers.values():
+                                for queue in queues:
+                                    queue.put_nowait({"rescan": True})
                     await self._apply_commands(conn)
                     async for notify_ in conn.notifies(timeout=0.2):
                         for queue in list(self._subscribers.get(notify_.channel, ())):

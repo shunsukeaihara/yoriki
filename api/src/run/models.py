@@ -129,6 +129,12 @@ class Run(models.Model):
 
     @classmethod
     def locked(cls, pk: int) -> "Run":
+        """行ロックを取って読む。ロックの順序はいつも 会話 → Run → そのほか（Attempt、確認、依頼）にし、
+        逆の順で取る経路を作らない（メッセージの投稿は会話から、Runnerの書込みはRunから入るため）"""
+        from conversation.models import Conversation  # noqa: PLC0415  conversationのModelがrunを参照するため
+
+        conversation_id = cls.objects.filter(pk=pk).values_list("conversation_id", flat=True).get()
+        list(Conversation.objects.select_for_update().filter(pk=conversation_id).values_list("pk", flat=True))
         return cls.objects.select_for_update().get(pk=pk)
 
     @transaction.atomic
@@ -163,9 +169,13 @@ class Run(models.Model):
             actor=actor,
         )
         if status in TERMINAL_STATUSES:
-            # 次の依頼が待っていれば、この会話で続けて始める（design.md §5.5）
+            # 終わる直前に届いて取り込めなかった追加指示は、次の依頼として続けて始める（design.md §5.5）
             from conversation.dispatch import start_next_request  # noqa: PLC0415  conversationがrunをimportするため
+            from conversation.models import InstructionKind, InstructionState, UserInstruction  # noqa: PLC0415
 
+            UserInstruction.objects.filter(
+                run=self, kind=InstructionKind.CURRENT, state=InstructionState.RECEIVED
+            ).update(kind=InstructionKind.NEXT, run=None, updated=timezone.now())
             start_next_request(self.conversation)
         return event
 

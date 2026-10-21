@@ -137,6 +137,8 @@ class ChatRequest:
     parallel_tool_calls: bool = True
     # prompt cachingに対応するモデルで、cacheの区切りを付ける
     use_cache: bool = False
+    # 推論の制御に対応するモデル。推論の途中経過を受け取って次の要求へ戻す（OpenAIの暗号化されたreasoning等）
+    reasoning: bool = False
 
 
 class StopReason(StrEnum):

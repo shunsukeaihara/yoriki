@@ -2,8 +2,6 @@
 
 from typing import TYPE_CHECKING, Any
 
-from django.utils import timezone
-
 from .base import Effect, Tool, ToolContext, ToolResult
 
 if TYPE_CHECKING:
@@ -64,9 +62,7 @@ PARAMETERS = {
 
 
 def execute(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
-    from run.models import ClarificationKind, ClarificationRequest  # noqa: PLC0415  run.modelsがこのモジュールを使うため
-    from run.tasks import CLARIFICATION_TTL  # noqa: PLC0415
-
+    """質問を整えて返すだけ。確認の作成とWAITING_USERへの遷移は、Runnerが同じtransactionで行う"""
     questions = [
         {
             "header": q["header"],
@@ -76,14 +72,7 @@ def execute(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         }
         for q in arguments["questions"]
     ]
-    clarification = ClarificationRequest.objects.create(
-        run=context.run,
-        kind=ClarificationKind.QUESTION,
-        tool_call_id=context.call.id,
-        questions=questions,
-        expires=timezone.now() + CLARIFICATION_TTL,
-    )
-    return ToolResult.text("", waits_for_user=True, value={"clarification": clarification.uid})
+    return ToolResult.text("", waits_for_user=True, value={"questions": questions})
 
 
 def answer_result(clarification: "ClarificationRequest", actor) -> dict[str, Any]:

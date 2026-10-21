@@ -41,3 +41,35 @@ export type ManageUserUpdate = Api<'ManageUserUpdateRequest'>
 export type Group = Api<'Group'>
 
 export type ManageUserListParams = ListParams & { isActive?: boolean; isSuperuser?: boolean; group?: string }
+
+export type AppModelProfile = Api<'AppModelProfile'>
+export type Conversation = Api<'Conversation'>
+export type ConversationWrite = Api<'ConversationRequest'>
+export type Message = Api<'Message'>
+export type MessageWrite = Api<'MessageRequest'>
+export type MessageRoleEnum = Schemas['MessageRoleEnum']
+export type InstructionKindEnum = Schemas['InstructionKindEnum']
+export type InstructionStateEnum = Schemas['InstructionStateEnum']
+
+export type RunStatusEnum = Schemas['RunStatusEnum']
+export type RunEventKindEnum = Schemas['RunEventKindEnum']
+export type Run = Api<'Run'>
+export type Todo = Api<'Todo'>
+export type RunCancel = Api<'RunCancelRequest'>
+// モデル名が ClarificationRequest なので、これは出力用の型（入力用は ClarificationAnswerRequest）
+export type Clarification = Api<'ClarificationRequest'>
+export type ClarificationKindEnum = Schemas['ClarificationKindEnum']
+export type ClarificationStatusEnum = Schemas['ClarificationStatusEnum']
+export type ClarificationAnswer = Api<'ClarificationAnswerRequest'>
+export type ClarificationAnswerItem = Api<'ClarificationAnswerItemRequest'>
+
+// SSE のイベント（realtime.md §3）。type で判別できる union 型
+export type RunStreamEvent = Api<'RunStreamEvent'>
+export type RunMessageEvent = Api<'RunMessageEvent'>
+export type UserStreamEvent = Api<'UserStreamEvent'>
+
+export type ConversationListParams = ListParams
+export type RunListParams = ListParams & { status?: RunStatusEnum; conversation?: string }
+export type ClarificationListParams = ListParams & { status?: ClarificationStatusEnum }
+export type ToolCallInfo = Api<'ToolCallInfo'>
+export type ToolResultInfo = Api<'ToolResultInfo'>

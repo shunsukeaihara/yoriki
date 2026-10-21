@@ -2,6 +2,7 @@ from collections import defaultdict
 from typing import Any
 
 from django.utils.translation import gettext_lazy as _
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from utils.exceptions import Conflict
@@ -17,6 +18,15 @@ from .models import (
     RunEventKind,
     RunStatus,
 )
+
+
+class TodoSerializer(serializers.Serializer):
+    """作業の計画の1項目（harness/tools/todo_write.py）"""
+
+    content = serializers.CharField(read_only=True)
+    status = serializers.ChoiceField(
+        choices=[("pending", _("未着手")), ("in_progress", _("作業中")), ("completed", _("完了"))], read_only=True
+    )
 
 
 class RunSerializer(serializers.ModelSerializer):
@@ -49,6 +59,7 @@ class RunSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    @extend_schema_field(TodoSerializer(many=True))
     def get_todos(self, obj: Run) -> list[dict[str, str]]:
         event = (
             RunEvent.objects.filter(
@@ -110,7 +121,9 @@ class ClarificationRequestSerializer(serializers.ModelSerializer):
     status = serializers.ChoiceField(choices=ClarificationStatus.choices, read_only=True)
     questions = ClarificationQuestionSerializer(many=True, read_only=True)
     answers = ClarificationAnswerItemSerializer(many=True, read_only=True)
-    answered_by: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(slug_field="uid", read_only=True)
+    answered_by: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(
+        slug_field="uid", read_only=True, allow_null=True
+    )
 
     class Meta:
         model = ClarificationRequest

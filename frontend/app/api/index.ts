@@ -34,6 +34,33 @@ const createAPI = () => {
     account: {
       get: () => http.get<MyUser, MyUser>('app/v1/my/'),
     },
+    // 会話で選べるモデル設定。選択肢として全件を返す（ページングしない）
+    modelProfiles: {
+      list: () => http.get<AppModelProfile[], AppModelProfile[]>('app/v1/model_profiles/'),
+    },
+    conversations: (id?: string) => ({
+      ...resource<Conversation, ConversationWrite, ConversationListParams>(http, 'app/v1/conversations', id),
+      // AppConversationMessageViewSet は list と create だけ
+      messages: () => ({
+        list: (params?: ListParams) =>
+          http.get<Paginated<Message>, Paginated<Message>>(`app/v1/conversations/${id}/messages/`, { params }),
+        create: (data: MessageWrite) => http.post<Message, Message>(`app/v1/conversations/${id}/messages/`, data),
+      }),
+    }),
+    runs: (id?: string) => ({
+      ...readOnlyResource<Run, RunListParams>(http, 'app/v1/runs', id),
+      cancel: (data: RunCancel) => http.post<Run, Run>(`app/v1/runs/${id}/cancel/`, data),
+      // AppRunEventViewSet は list だけ
+      events: () => ({
+        list: (params?: ListParams) =>
+          http.get<Paginated<RunStreamEvent>, Paginated<RunStreamEvent>>(`app/v1/runs/${id}/events/`, { params }),
+      }),
+      clarifications: (cid?: string) => ({
+        ...readOnlyResource<Clarification, ClarificationListParams>(http, `app/v1/runs/${id}/clarifications`, cid),
+        answer: (data: ClarificationAnswer) =>
+          http.post<Clarification, Clarification>(`app/v1/runs/${id}/clarifications/${cid}/answer/`, data),
+      }),
+    }),
     manage: {
       users: (id?: string) => ({
         ...readOnlyResource<ManageUser, ManageUserListParams>(http, 'v1/users', id),

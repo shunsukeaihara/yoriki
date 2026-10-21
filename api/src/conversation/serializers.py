@@ -116,8 +116,13 @@ class MessageSerializer(serializers.ModelSerializer):
     """会話のメッセージ。投稿すると、新しい依頼・今の作業への追加指示・確認への回答・次の依頼のどれかになる"""
 
     id = serializers.CharField(source="uid", read_only=True)
-    run: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(slug_field="uid", read_only=True)
-    sender: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(slug_field="uid", read_only=True)
+    run: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(
+        slug_field="uid", read_only=True, allow_null=True
+    )
+    # 外部スレッドからの投稿とエージェントの応答では空
+    sender: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(
+        slug_field="uid", read_only=True, allow_null=True
+    )
     role = serializers.ChoiceField(choices=MessageRole.choices, read_only=True)
     body = NormalizedTextField(max_length=20000)
     client_message_id = serializers.CharField(max_length=64, required=False, allow_blank=True, write_only=True)

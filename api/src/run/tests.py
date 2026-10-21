@@ -103,6 +103,14 @@ class TestClarification:
 
 
 @pytest.mark.django_db
+class TestList:
+    def test_filter_by_conversation(self, api_client, run, app_user):
+        RunFactory.create(conversation=ConversationFactory.create(owner=app_user))
+        res = api_client.get("/api/app/v1/runs/", {"conversation": run.conversation.uid})
+        assert [r["id"] for r in res.data["results"]] == [run.uid]
+
+
+@pytest.mark.django_db
 class TestEvents:
     def test_events_are_listed_in_order(self, api_client, run):
         run.set_status(RunStatus.RUNNING)

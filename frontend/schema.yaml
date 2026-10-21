@@ -409,6 +409,11 @@ paths:
       operationId: app_v1_runs_list
       description: 自分のRunに関するAPI
       parameters:
+      - in: query
+        name: conversation
+        schema:
+          type: string
+        description: 会話
       - name: cursor
         required: false
         in: query
@@ -1884,6 +1889,7 @@ components:
         answered_by:
           type: string
           readOnly: true
+          nullable: true
         answered:
           type: string
           format: date-time
@@ -2497,9 +2503,11 @@ components:
         run:
           type: string
           readOnly: true
+          nullable: true
         sender:
           type: string
           readOnly: true
+          nullable: true
         role:
           allOf:
           - $ref: '#/components/schemas/MessageRoleEnum'
@@ -3417,9 +3425,7 @@ components:
         todos:
           type: array
           items:
-            type: object
-            additionalProperties:
-              type: string
+            $ref: '#/components/schemas/Todo'
           readOnly: true
           description: 作業の計画（todo_write の最新の内容）
         created:
@@ -3847,6 +3853,30 @@ components:
           readOnly: true
       required:
       - is_authenticated
+    Todo:
+      type: object
+      description: 作業の計画の1項目（harness/tools/todo_write.py）
+      properties:
+        content:
+          type: string
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/TodoStatusEnum'
+          readOnly: true
+      required:
+      - content
+      - status
+    TodoStatusEnum:
+      enum:
+      - pending
+      - in_progress
+      - completed
+      type: string
+      description: |-
+        * `pending` - 未着手
+        * `in_progress` - 作業中
+        * `completed` - 完了
     ToolCallInfo:
       type: object
       properties:

@@ -1,4 +1,6 @@
 from django.utils.functional import cached_property
+from django.utils.translation import gettext_lazy as _
+from django_filters import rest_framework as filters
 from drf_spectacular.utils import OpenApiResponse, extend_schema, extend_schema_view
 from rest_framework.decorators import action
 from rest_framework.generics import get_object_or_404
@@ -38,13 +40,21 @@ class MyRunMixin:
         return super().get_queryset().filter(run=self.run)  # type: ignore[misc]
 
 
+class RunFilter(filters.FilterSet):
+    conversation = filters.CharFilter(label=_("会話"), field_name="conversation__uid")
+
+    class Meta:
+        model = Run
+        fields = ["status", "conversation"]
+
+
 @extend_schema(description="自分のRunに関するAPI", tags=["app/run"])
 class AppRunViewSet(ReadOnlyModelViewSet):
     permission_classes = [AppUser]
     lookup_field = "uid"
     queryset = Run.objects.select_related("conversation", "model_version__profile")
     serializer_class = RunSerializer
-    filterset_fields = ["status"]
+    filterset_class = RunFilter
     ordering = ("-created", "-pk")
 
     def get_queryset(self):

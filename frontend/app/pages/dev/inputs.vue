@@ -1,6 +1,8 @@
 <script setup lang="ts">
 // D*ラッパーの見た目とエラー表示を確認するための開発用ページ
 definePageMeta({
+  // ログインせずに開くので、会話の一覧（API を呼ぶ）を出す社員の layout は使わない
+  layout: 'anonymous',
   auth: false,
   middleware: () => {
     if (!import.meta.dev) return abortNavigation({ statusCode: 404 })
@@ -40,6 +42,8 @@ const form = ref({
   switch: true,
   radio: 1 as number | null,
   radioCard: 2 as number | null,
+  checkboxGroup: ['1'] as string[],
+  checkboxGroupCard: [] as string[],
   selectButton: 1 as number | null,
   date: '2026-10-16' as string | null,
   datetime: '2026-10-16T09:30:00+09:00' as string | null,
@@ -126,6 +130,19 @@ const openConfirm = async () => {
             variant="card"
             orientation="horizontal"
             :error-messages="errors.radioCard"
+          />
+          <DCheckboxGroup
+            v-model="form.checkboxGroup"
+            :label="$t('複数選択')"
+            :items="choices"
+            :error-messages="errors.checkboxGroup"
+          />
+          <DCheckboxGroup
+            v-model="form.checkboxGroupCard"
+            :label="$t('複数選択（カード）')"
+            :items="choices"
+            variant="card"
+            :error-messages="errors.checkboxGroupCard"
           />
           <DSelectButton
             v-model="form.selectButton"

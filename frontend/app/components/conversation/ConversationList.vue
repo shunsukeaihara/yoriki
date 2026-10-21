@@ -13,7 +13,10 @@ onMounted(async () => {
     toast.add({ title: t('会話の一覧を読めませんでした'), description: makeErrorMsg(err), color: 'error' })
   }
 })
-useUserEvents((event) => store.refreshOne(event.conversation))
+useUserEvents((event) => store.refreshOne(event.conversation), {
+  // 通知は保存しないので、切れていた間に変わった分は一覧ごと読み直す
+  onReconnect: () => store.reload().catch(() => {}),
+})
 
 const currentId = computed(() => route.params.conversationId as string | undefined)
 </script>

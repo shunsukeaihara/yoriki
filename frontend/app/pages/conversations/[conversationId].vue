@@ -31,35 +31,58 @@ await Promise.all([messages.refresh(), fetchRuns()])
 const activeRun = computed(() => conversation.value?.activeRun ?? null)
 const activeRunId = computed(() => activeRun.value?.id ?? null)
 
-const { items: clarifications, fetchAll: fetchClarifications } = useFetchAll(() =>
-  activeRunId.value
-    ? api.runs(activeRunId.value).clarifications().list({ status: ClarificationStatus.OPEN })
-    : Promise.resolve({ results: [], next: null, previous: null }),
-)
+// 回答待ちの確認（実行中の Run のもの。件数は少ないので1ページで読む）。読み直しが重なったり、読む間に Run が
+// 替わったりしたら、その応答は使わない（前の Run の確認を、新しい Run の作業に出さないように）
+const clarifications = ref<Clarification[]>([])
+let clarificationRequest = 0
+const fetchClarifications = async () => {
+  const request = ++clarificationRequest
+  const runId = activeRunId.value
+  const results = runId
+    ? (await api.runs(runId).clarifications().list({ status: ClarificationStatus.OPEN, pageSize: 50 })).results
+    : []
+  if (request === clarificationRequest && runId === activeRunId.value) clarifications.value = results
+}
 await fetchClarifications()
 const hasOpenQuestion = computed(() => clarifications.value.some((c) => c.kind === ClarificationKind.QUESTION))
 
-/** 会話・メッセージ・Run・確認を取得し直す。イベントが続けて届いても、まとめて1回にする */
-const sync = useDebounceFn(
-  async () => {
-    try {
-      await Promise.all([refreshConversation(), messages.refresh(), fetchRuns(), fetchClarifications()])
+/**
+ * 会話・メッセージ・Run・確認を取得し直す。イベントが続けて届いても、まとめて1回にする。
+ * 取得の途中で次の取得を頼まれたら、終わってからもう一度取得する（古い応答で新しい表示を上書きしないように）
+ */
+let syncing = false
+let syncAgain = false
+const syncNow = async () => {
+  if (syncing) {
+    syncAgain = true
+    return
+  }
+  syncing = true
+  try {
+    do {
+      syncAgain = false
+      await Promise.all([refreshConversation(), messages.refresh(), fetchRuns()])
+      // 確認は、読み直した会話の実行中の Run のものを読む
+      await fetchClarifications()
       if (conversation.value) listStore.upsert(conversation.value)
-    } catch {
-      // 裏の更新なので、失敗しても次のイベントか再表示で戻る
-    }
-  },
-  300,
-  { maxWait: 2000 },
-)
+    } while (syncAgain)
+  } catch {
+    // 裏の更新なので、失敗しても次のイベントか再表示で戻る
+  } finally {
+    syncing = false
+  }
+}
+const sync = useDebounceFn(syncNow, 300, { maxWait: 2000 })
 
-const live = useRunLive(activeRunId, { onEvent: () => sync() })
+// 接続し直したときは、切れていた間の変化（保存しない通知、LLM の出力の差分）を取得し直す
+const live = useRunLive(activeRunId, { onEvent: () => sync(), onReconnect: () => sync() })
 // 別のタブや外部のスレッドから、この会話で新しい Run が始まった場合
-useUserEvents((event) => {
-  if (event.conversation === conversationId && event.run !== activeRunId.value) sync()
-})
-// sync() の中で会話と同時に読んだ確認は、前の Run のものなので、Run が替わったら読み直す
-watch(activeRunId, () => fetchClarifications().catch(() => {}))
+useUserEvents(
+  (event) => {
+    if (event.conversation === conversationId && event.run !== activeRunId.value) sync()
+  },
+  { onReconnect: () => sync() },
+)
 
 // --- 表示 ---
 

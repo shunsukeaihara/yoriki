@@ -83,4 +83,40 @@ describe('useEventStream', () => {
     expect(FakeEventSource.instances).toHaveLength(1)
     scope.stop()
   })
+
+  it('ログイン状態を確かめる間に path が変わったら、古い path へ接続し直さない', async () => {
+    vi.useFakeTimers()
+    let resolve: (v: unknown) => void = () => {}
+    accountGet.mockReturnValue(new Promise((r) => (resolve = r)))
+    const path = ref<string | null>('app/v1/runs/a/stream/')
+    const scope = effectScope()
+    scope.run(() => useEventStream(path, { onEvent: () => {} }))
+    const a = latest()
+    a.readyState = FakeEventSource.CLOSED
+    const pending = a.onerror!()
+    path.value = 'app/v1/runs/b/stream/'
+    await nextTick()
+    resolve({})
+    await pending
+    await vi.advanceTimersByTimeAsync(60000)
+    expect(FakeEventSource.instances.map((i) => i.url.pathname)).toEqual([
+      '/api/app/v1/runs/a/stream/',
+      '/api/app/v1/runs/b/stream/',
+    ])
+    scope.stop()
+  })
+
+  it('切断の後に接続し直したら onReconnect を呼ぶ（最初の接続では呼ばない）', async () => {
+    const onReconnect = vi.fn()
+    const scope = effectScope()
+    scope.run(() => useEventStream('app/v1/stream/', { onEvent: () => {}, onReconnect }))
+    latest().onopen!()
+    expect(onReconnect).not.toHaveBeenCalled()
+    // ブラウザが自動で再接続する場合（readyState は CONNECTING のまま）
+    latest().readyState = 0
+    await latest().onerror!()
+    latest().onopen!()
+    expect(onReconnect).toHaveBeenCalledTimes(1)
+    scope.stop()
+  })
 })

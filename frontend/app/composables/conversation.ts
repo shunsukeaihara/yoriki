@@ -81,9 +81,14 @@ export function useConversationMessages(conversationId: string) {
     items.value = [...byId.values()].sort((a, b) => a.created.localeCompare(b.created))
   }
 
+  // 読み直しが重なったら、最後に始めたものの結果だけを使う（古い応答で、追加指示の反映状態を戻さないように）
+  let refreshing = 0
+
   /** 最新のページを読み直す（新しいメッセージと、追加指示の反映状態の変化を取り込む） */
   const refresh = async () => {
+    const request = ++refreshing
     const page = await api.conversations(conversationId).messages().list({ pageSize: MESSAGE_PAGE_SIZE })
+    if (request !== refreshing) return
     merge(page.results)
     if (!loaded.value) older.value = page.next
     loaded.value = true
@@ -114,13 +119,15 @@ export function useConversationMessages(conversationId: string) {
 
 export type RunLiveHandlers = {
   onEvent?: (event: RunStreamEvent) => void
+  /** 切断の後に接続し直したとき（切れていた間の LLM の出力の差分は送り直されない） */
+  onReconnect?: () => void
 }
 
 /**
  * 実行中の Run のイベントをストリームで受け取る。最初の接続で、それまでのイベントもすべて届く。
  * LLM の出力の差分（run.delta）は、確定したエージェントの応答が届くまで delta に貯める。
  */
-export function useRunLive(runId: Ref<string | null>, { onEvent }: RunLiveHandlers = {}) {
+export function useRunLive(runId: Ref<string | null>, { onEvent, onReconnect }: RunLiveHandlers = {}) {
   const events = ref([]) as Ref<RunStreamEvent[]>
   const delta = ref('')
 
@@ -131,7 +138,10 @@ export function useRunLive(runId: Ref<string | null>, { onEvent }: RunLiveHandle
   })
 
   useEventStream<RunStreamEvent>(() => (runId.value ? `app/v1/runs/${runId.value}/stream/` : null), {
+    onReconnect,
     onEvent: (event) => {
+      // 前の Run のストリームの残り（切り替えの途中に届いたもの）は使わない
+      if (event.run !== runId.value) return
       if (event.type === 'run.delta') {
         delta.value += event.text
         return

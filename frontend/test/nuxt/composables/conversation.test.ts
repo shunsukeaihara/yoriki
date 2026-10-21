@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { mockNuxtImport } from '@nuxt/test-utils/runtime'
+import { describe, expect, it, vi } from 'vitest'
+
+const { mockList } = vi.hoisted(() => ({ mockList: vi.fn() }))
+mockNuxtImport('useAPI', () => () => ({ conversations: () => ({ messages: () => ({ list: mockList }) }) }))
 
 const message = (id: string, role: MessageRoleEnum, run: string | null, instruction: Message['instruction'] = null) =>
   ({
@@ -47,5 +51,29 @@ describe('buildTimeline', () => {
       message('m4', MessageRole.AGENT, 'r2'),
     ])
     expect(ids(items)).toEqual(['m1', 'run-r1', 'm2', 'm3', 'run-r2', 'm4'])
+  })
+})
+
+describe('useConversationMessages', () => {
+  it('読み直しが重なったら、後に始めたものの結果だけを使う', async () => {
+    const pages: ((v: Paginated<Message>) => void)[] = []
+    const list = vi.fn(() => new Promise<Paginated<Message>>((r) => pages.push(r)))
+    mockList.mockImplementation(list)
+    const messages = useConversationMessages('c1')
+    const first = messages.refresh()
+    const second = messages.refresh()
+    const applied = {
+      ...message('m1', MessageRole.USER, 'r1'),
+      instruction: { kind: InstructionKind.CURRENT, state: InstructionState.APPLIED, stateDisplay: '反映済み' },
+    }
+    const received = {
+      ...applied,
+      instruction: { ...applied.instruction, state: InstructionState.RECEIVED, stateDisplay: '受付済み' },
+    }
+    pages[1]!({ results: [applied], next: null, previous: null })
+    await second
+    pages[0]!({ results: [received], next: null, previous: null })
+    await first
+    expect(messages.items.value[0]!.instruction?.state).toBe(InstructionState.APPLIED)
   })
 })

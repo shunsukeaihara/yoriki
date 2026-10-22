@@ -252,10 +252,12 @@ class Runner:
             and e.data.get("name") in WORKSPACE_WRITING_TOOLS
         ]
         if changed:
+            # Sandboxは最初のSandboxのToolで起動して戻すので、ここでは戻せたかがまだ分からない。
+            # 戻せなかったときは、その時点で知らせる（SandboxSession.notice）
             if own is not None:
-                state = "were restored to their state at an earlier point of this work"
+                state = "go back to the last saved state of this work"
             elif checkpoint is not None:
-                state = "were restored to their state at the start of this request"
+                state = "go back to their state at the start of this request"
             else:
                 state = "are empty again"
             text = (

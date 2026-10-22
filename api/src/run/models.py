@@ -54,8 +54,6 @@ TERMINAL_STATUSES = (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED)
 LEASE_SECONDS = 90
 # 障害でAttemptが終わったときに、やり直す回数の上限
 MAX_ATTEMPTS = 3
-# Checkpointを探すときにたどる親のRunの数の上限
-MAX_PARENT_DEPTH = 100
 
 
 class RunTrigger(models.IntegerChoices):
@@ -495,17 +493,14 @@ class Checkpoint(models.Model):
 
     @classmethod
     def latest_for(cls, run: Run) -> "Checkpoint | None":
-        """Runの最後のCheckpoint。なければ親のRun（同じ会話の前の依頼）をたどって、最初に見つかったもの。
-        Sandboxを使わなかった依頼にはCheckpointがないので、その前の依頼のものを使う"""
-        run_id: int | None = run.pk
-        for _depth in range(MAX_PARENT_DEPTH):
-            if run_id is None:
-                return None
-            checkpoint = cls.objects.filter(run_id=run_id).order_by("-sequence", "-pk").first()
-            if checkpoint is not None:
-                return checkpoint
-            run_id = Run.objects.filter(pk=run_id).values_list("parent_id", flat=True).first()
-        return None
+        """Runの最後のCheckpoint。なければ同じ会話の前の依頼（親をたどったRun）の最後のもの。
+        Sandboxを使わなかった依頼にはCheckpointがないので、さらに前の依頼のものを使う。
+        親は同じ会話の1つ前のRunなので、会話の中でこのRunまでのRunを新しい順に探す"""
+        return (
+            cls.objects.filter(run__conversation_id=run.conversation_id, run_id__lte=run.pk)
+            .order_by("-run_id", "-sequence", "-pk")
+            .first()
+        )
 
 
 class RunPrompt(models.Model):

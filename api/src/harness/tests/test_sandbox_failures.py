@@ -266,3 +266,21 @@ def test_job_without_a_process_group_is_not_reported_as_stopped(conversation, mo
     job = Job("job_1", "cmd", "説明", "/workspace/work", Exec("e1"), tmp_path / "job.log", 60)
     assert session.kill(job) is False
     assert not job.finished
+
+
+def test_checkpoint_is_found_past_requests_without_one(conversation, app_user):
+    first = post(conversation)
+    attempt = claim_run(first.pk)
+    assert attempt is not None
+    checkpoint = Checkpoint.objects.create(
+        run=first, attempt=attempt, sequence=1, storage="local:x", key="runs/a.tar", size=1, sha256="0" * 64
+    )
+    previous = first
+    for _n in range(3):
+        Run.objects.filter(pk=previous.pk).update(status=RunStatus.COMPLETED)
+        previous = post(conversation, "次")
+    assert previous.pk != first.pk
+    assert Checkpoint.latest_for(previous) == checkpoint
+    # 別の会話のCheckpointは使わない
+    other = post(ConversationFactory.create(owner=app_user))
+    assert Checkpoint.latest_for(other) is None

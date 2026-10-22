@@ -310,10 +310,11 @@ class TestEnv:
         sandbox.sh(MAKE_WHEEL)
         before = sandbox.sh("python -c 'import xlsxwriter; print(xlsxwriter.__version__)'").strip()
         assert before != "99.0"
-        sandbox.sh("pip install --no-index --no-deps /workspace/work/xlsxwriter-99.0-py3-none-any.whl")
+        # Runnerと同じく `python -m pip` で入れる（エージェントが呼ぶ pip は、入れる操作を断る）
+        sandbox.sh("python -m pip install --no-index --no-deps /workspace/work/xlsxwriter-99.0-py3-none-any.whl")
         location = sandbox.sh("python -c 'import xlsxwriter; print(xlsxwriter.__version__, xlsxwriter.__file__)'")
         assert location.split() == ["99.0", "/workspace/env/lib/python3.13/site-packages/xlsxwriter/__init__.py"]
         # 補助コマンドは、追加したpackageの影響を受けない（イメージのPythonを -I で動かす）
         assert sandbox.helper("version", {})["ok"]
-        sandbox.sh("pip uninstall -y xlsxwriter")
+        sandbox.sh("python -m pip uninstall -y xlsxwriter")
         assert sandbox.sh("python -c 'import xlsxwriter; print(xlsxwriter.__version__)'").strip() == before

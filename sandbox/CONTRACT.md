@@ -124,7 +124,7 @@ Runnerは、呼出しごとに次の環境変数だけを渡す（harness.md §8
 
 ### 4.7 `init-env`・`version`
 
-- `init-env`：空の `/workspace/env` に、イメージのPythonの上の薄い仮想環境（`--system-site-packages`、pipはイメージのものを使う）を作る。すでにあれば何もしない。Launcherが、Sandboxを起動した直後に呼ぶ。結果 `created`、`seconds`。
+- `init-env`：空の `/workspace/env` に、イメージのPythonの上の薄い仮想環境（`--system-site-packages`）を作る。`pip` には、入れる操作（`install`・`download`・`wheel`・`uninstall`）を断って `install_python_packages` へ案内する形を置く（Sandboxにはネットワークがないため。権限の境界ではない）。追加のpackageは、Runnerが `/workspace/env/bin/python -m pip install --no-index ...` で `/packages` から入れる。すでにあれば何もしない。Launcherが、Sandboxを起動した直後に呼ぶ。結果 `created`、`seconds`。
 - `version`：結果 `contract`（この契約番号）、`python`。
 
 ### 4.8 エラーの `code`

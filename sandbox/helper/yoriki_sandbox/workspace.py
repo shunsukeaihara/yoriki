@@ -12,9 +12,21 @@ from .read import SUFFIX_KIND
 
 ENV = Path("/workspace/env")
 
-# 仮想環境に pip を入れない代わりに置く。イメージの pip を、この環境に入れる形で動かす
+# 仮想環境に pip を入れない代わりに置く。Sandboxにはネットワークがないので、エージェントが呼ぶ pip は、
+# 入っているpackageを確かめる操作（list・show・freeze 等）だけを通し、入れる操作は install_python_packages へ
+# 案内する。追加のpackageは、Runnerが `python -m pip` で /packages から入れる（design.md §7.6）。
+# 権限の境界ではない（境界はネットワークとrootfs。エージェントは自分でファイルを書いてimportできる）
 PIP_SCRIPT = """#!/workspace/env/bin/python
 import sys
+
+BLOCKED = {"install", "download", "wheel", "uninstall"}
+command = next((a for a in sys.argv[1:] if not a.startswith("-")), None)
+if command in BLOCKED:
+    sys.stderr.write(
+        "pip cannot install packages here: the sandbox has no network.\\n"
+        "Use the install_python_packages tool to add packages.\\n"
+    )
+    sys.exit(1)
 from pip._internal.cli.main import main
 sys.exit(main())
 """

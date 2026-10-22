@@ -276,11 +276,16 @@ output = "python 3.13"
 run = "pip list --format=freeze | grep -c '^pandas=='"
 output = "1"
 [[command]]
-run = "pip install --no-index rapidfuzz 2>&1"
-output = "already satisfied"
+run = "pip show pandas"
+output = "Name: pandas"
 [[command]]
 run = "pip install requests 2>&1"
 exit = 1
+output = "install_python_packages"
+[[command]]
+run = "pip3 -q uninstall -y pandas 2>&1"
+exit = 1
+output = "install_python_packages"
 [[command]]
 run = "python -c 'import pandas as pd; print(pd.read_csv(\"c/名簿.csv\")[\"点数\"].sum())'"
 output = "75"

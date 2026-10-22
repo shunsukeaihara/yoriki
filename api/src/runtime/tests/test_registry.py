@@ -46,11 +46,17 @@ class FakeRegistry:
         self.documents[digest] = body
         return digest
 
+    def route(self, request: httpx.Request) -> httpx.Response:
+        # テストが handler を差し替えられるよう、呼ぶときに引く
+        return self.handler(request)
+
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
         if request.url.host == "auth.docker.io":
             return httpx.Response(200, json={"token": "anonymous"})
-        if request.headers.get("Authorization") != "Bearer anonymous":
+        # Docker Hub（と、認証先が別のホストにあるレジストリ）は、auth.docker.io の匿名のtokenを求める
+        needs_token = request.url.host in ("registry-1.docker.io", "registry.example.com")
+        if needs_token and request.headers.get("Authorization") != "Bearer anonymous":
             challenge = 'Bearer realm="https://auth.docker.io/token",service="registry.docker.io"'
             return httpx.Response(401, headers={"WWW-Authenticate": challenge})
         digest = request.url.path.rsplit("/", 1)[-1]
@@ -58,9 +64,12 @@ class FakeRegistry:
             return httpx.Response(404)
         return httpx.Response(200, content=self.documents[digest])
 
-    def inspect(self, image: str | None = None):
+    def inspect(self, image: str | None = None, resolver=lambda _host: ["93.184.216.34"]):
+        """名前解決は、渡さなければ公開のアドレスを返す（テストで実際のDNSを引かない）"""
         return inspect_image(
-            image or f"yoriki/yoriki-sandbox-docs@{self.top}", transport=httpx.MockTransport(self.handler)
+            image or f"yoriki/yoriki-sandbox-docs@{self.top}",
+            transport=httpx.MockTransport(self.route),
+            resolver=resolver,
         )
 
 
@@ -131,8 +140,58 @@ class TestInspect:
     def test_insecure_registry_only_when_configured(self):
         registry = FakeRegistry({"linux/amd64": LABELS})
         image = f"localhost:5001/sandbox@{registry.top}"
-        registry.inspect(image)
-        assert registry.requests[0].url.scheme == "https"
-        with override_settings(YORIKI_SANDBOX_INSECURE_REGISTRIES=["localhost:5001"]):
+        # 許可していないレジストリには、つながない
+        with pytest.raises(RegistryError, match="使えません"):
             registry.inspect(image)
+        assert registry.requests == []
+        with override_settings(YORIKI_SANDBOX_INSECURE_REGISTRIES=["localhost:5001"]):
+            registry.inspect(image, resolver=lambda _host: ["127.0.0.1"])
         assert registry.requests[-1].url.scheme == "http"
+
+    def test_refuses_internal_addresses_and_foreign_auth(self):
+        registry = FakeRegistry({"linux/amd64": LABELS})
+        # 許可したレジストリでも、名前解決した先が内部のアドレスなら断る（DNSの付け替え・リダイレクトの先も同じ）
+        with pytest.raises(RegistryError, match="内部のアドレス"):
+            registry.inspect(resolver=lambda _host: ["10.0.0.5"])
+        # 認証先（realm）は、レジストリ自身でなければ使わない
+        with (
+            override_settings(YORIKI_SANDBOX_REGISTRIES=["registry.example.com"]),
+            pytest.raises(RegistryError, match="認証"),
+        ):
+            registry.inspect(f"registry.example.com/sandbox@{registry.top}")
+
+    def test_redirects_are_checked(self):
+        registry = FakeRegistry({"linux/amd64": LABELS})
+        original = registry.handler
+
+        def redirect(request: httpx.Request) -> httpx.Response:
+            if request.url.path.startswith("/v2/") and "/blobs/" in request.url.path:
+                return httpx.Response(307, headers={"Location": "http://169.254.169.254/latest/meta-data"})
+            return original(request)
+
+        registry.handler = redirect  # type: ignore[method-assign]
+        with pytest.raises(RegistryError, match="HTTPS"):
+            registry.inspect()
+
+    def test_large_responses_are_cut(self):
+        registry = FakeRegistry({"linux/amd64": LABELS})
+        registry.documents[registry.top] = b"x" * (5 * 1024 * 1024)
+        with pytest.raises(RegistryError, match="大きすぎます"):
+            registry.inspect()
+
+    def test_index_platform_must_match_the_config(self):
+        registry = FakeRegistry({"linux/amd64": LABELS})
+        index = json.loads(registry.documents[registry.top])
+        index["manifests"][0]["platform"]["architecture"] = "arm64"
+        registry.top = registry.add(json.dumps(index).encode())
+        with pytest.raises(RegistryError, match="platformの表記"):
+            registry.inspect()
+
+    def test_python_must_be_the_same_on_every_platform(self):
+        amd = FakeRegistry({"linux/amd64": LABELS}, python="3.13.1")
+        arm = FakeRegistry({"linux/arm64": LABELS}, python="3.13.2")
+        amd.documents |= arm.documents
+        entries = json.loads(amd.documents[amd.top])["manifests"][:1] + json.loads(arm.documents[arm.top])["manifests"]
+        amd.top = amd.add(json.dumps({"mediaType": INDEX_TYPE, "manifests": entries}).encode())
+        with pytest.raises(RegistryError, match="Pythonの版"):
+            amd.inspect()

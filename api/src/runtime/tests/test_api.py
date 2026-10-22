@@ -1,4 +1,7 @@
+import threading
+
 import pytest
+from django.db import connection
 
 from conversation.dispatch import post_message
 from conversation.factories import ConversationFactory
@@ -104,6 +107,29 @@ class TestRuntimeProfile:
         first.refresh_from_db()
         assert first.is_default is False
         assert RuntimeProfile.default_version() == RuntimeProfile.objects.get(pk=second.pk).current_version
+
+    @pytest.mark.django_db(transaction=True)
+    def test_concurrent_make_default_does_not_break_the_constraint(self):
+        profiles = [RuntimeProfileFactory.create(), RuntimeProfileFactory.create()]
+        errors: list[Exception] = []
+        barrier = threading.Barrier(2)
+
+        def make(profile):
+            try:
+                barrier.wait()
+                RuntimeProfile.objects.get(pk=profile.pk).make_default()
+            except Exception as exc:  # どの例外も失敗として集める
+                errors.append(exc)
+            finally:
+                connection.close()
+
+        threads = [threading.Thread(target=make, args=(p,)) for p in profiles]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert errors == []
+        assert RuntimeProfile.objects.filter(is_default=True).count() == 1
 
     def test_inactive_cannot_be_default_and_is_not_used(self, admin_client):
         profile = RuntimeProfileFactory.create(is_active=False)

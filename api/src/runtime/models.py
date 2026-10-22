@@ -88,8 +88,12 @@ class RuntimeProfile(models.Model):
 
     @transaction.atomic
     def make_default(self) -> None:
-        """既定のRuntime Profileにする。これまでの既定は外す"""
-        RuntimeProfile.objects.select_for_update().filter(is_default=True).exclude(pk=self.pk).update(is_default=False)
+        """既定のRuntime Profileにする。これまでの既定は外す。
+
+        同時に別のProfileを既定にしても一意の制約に当たらないよう、すべての行をpkの順にロックして直列にする
+        """
+        list(RuntimeProfile.objects.select_for_update().order_by("pk").values_list("pk", flat=True))
+        RuntimeProfile.objects.filter(is_default=True).exclude(pk=self.pk).update(is_default=False)
         self.is_default = True
         self.save(update_fields=["is_default", "updated"])
 

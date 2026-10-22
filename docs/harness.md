@@ -502,8 +502,8 @@ Docker操作はLauncher（design.md §7.3）にまとめ、Runnerは決まった
 
 Runnerは、shell以外のToolの処理もSandboxの中で行う。ファイルの解析を、DBの資格情報を持つWorkerのプロセスで行わないため（壊れたPDF等による不具合の影響をSandboxに閉じ込める）。
 
-- イメージの `/opt/yoriki/bin/yoriki-sandbox` に入れる（rootfsは読取り専用）。Python製で、イメージのPythonと同梱のライブラリ（pypdf・pdfplumber・pypdfium2・openpyxl・python-docx・python-pptx）を使う。
-- サブコマンド：`exec`（プロセスグループを作ってコマンドを始める。止めるときはLauncherがそのグループへsignalを送る）、`read`、`write`、`edit`、`glob`、`grep`、`stat`。
+- イメージの `/opt/yoriki/bin/yoriki-sandbox` に入れる（rootfsは読取り専用）。Python製で、イメージの中の環境の雛形 `/opt/yoriki/env`（pypdf・pdfplumber・pypdfium2・openpyxl・python-docx・python-pptx等）で動く。エージェントが変えられる `/workspace/env` は使わない。
+- サブコマンド：`exec`（プロセスグループを作ってコマンドを始める）、`kill`（そのグループへsignalを送る）、`read`、`write`、`edit`、`glob`、`grep`、`stat`、`init-env`（`/workspace/env` を雛形から作る）、`version`。
 - 補助コマンドの結果も、Sandboxの中で作られるものなので、権限や実行状態の正本にしない（design.md §7.1）。ファイルの中身の表示として扱う。
 - Runnerからの引数は、標準入力のJSONで渡す（shellの解釈を通さない）。結果は標準出力のJSONで返す。
 - 契約番号はイメージのラベル `org.yoriki.sandbox-contract` に記録する（design.md §13）。サブコマンドと入出力の形は `sandbox/CONTRACT.md` で定め、契約テストで確かめる。
@@ -513,9 +513,9 @@ Runnerは、shell以外のToolの処理もSandboxの中で行う。ファイル�
 エージェントは多くの種類のコマンドを使う。Sandboxの制限（読取り専用のrootfs、`10001` のユーザー、ネットワークなし、tmpfs）の下で、次が確実に動くことを要件にし、契約テストで確かめる。
 
 - GNUのツール：coreutils、findutils、grep、sed、gawk、diffutils、file、tar、gzip・xz・zip・unzip、bc、jq、ripgrep。
-- Python（mise.tomlの版）と、頻出のライブラリ（pandas、openpyxl、pypdf、pdfplumber、pypdfium2、python-docx、python-pptx、rapidfuzz、chardet 等。design.md §7.6）。
+- Python（mise.tomlの版）と、頻出のライブラリ（pandas、openpyxl、xlsxwriter、pypdf、pdfplumber、pypdfium2、python-docx、python-pptx、rapidfuzz、charset-normalizer、matplotlib 等。design.md §7.6。一覧は `sandbox/images/docs/requirements.in`）。文字コードの判定は、LGPLの chardet ではなくMITの charset-normalizer を使う。
 - 日本語：UTF-8のファイル名、Shift_JISのCSVの読み書き、日本語のフォント（グラフ用。Noto CJK等、OFL）。
-- 契約テストは、代表的なコマンドの一覧（数百）を実際の制限の下で実行し、終了コードと出力を確かめる。一覧はSkillで使われたコマンドから増やす。
+- 契約テストは、代表的なコマンドの一覧（`sandbox/tests/commands.toml`。数百を目標に、Skillで使われたコマンドから増やす）を実際の制限の下で実行し、終了コードと出力を確かめる。
 
 gVisor（runsc）の評価（design.md §7.2の5）は、この契約テストと、文書処理の所要時間で行う。
 

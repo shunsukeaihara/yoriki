@@ -1,0 +1,14 @@
+# Sandboxの頻出ライブラリ（design.md §7.6、harness.md §8.5）。ライセンスはMIT・BSD・Apache等を優先する。
+# 変えたら requirements.lock を作り直す（sandbox/README.md）
+pandas
+openpyxl
+xlsxwriter
+pypdf
+pdfplumber
+pypdfium2
+python-docx
+python-pptx
+pillow
+rapidfuzz
+charset-normalizer
+matplotlib

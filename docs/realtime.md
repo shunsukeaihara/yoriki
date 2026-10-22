@@ -103,8 +103,11 @@ LLM出力の差分は頻度が高いので、Runnerで100〜200ミリ秒ごと�
 ## 5 フロントエンドの実装
 
 - `useEventStream(path, { onEvent })` を `composables/stream.ts` に用意する。標準の `EventSource` を使う（画面と同じオリジンなので、セッションCookieが自動で送られる）。切断時は `EventSource` が `Last-Event-ID` を付けて自動で再接続する。
-- イベントの型は、OpenAPIから生成した `StreamEvent`（`type` で判別できるunion型）を使い、`switch (event.type)` で処理を分ける。
+- イベントの型は、OpenAPIから生成した `RunStreamEvent`・`UserStreamEvent`（`type` で判別できるunion型）を使い、`switch (event.type)` で処理を分ける。
+- ログインユーザー宛ての通知は `useUserEvents(handler)` で受け取る。サイドバーの会話の一覧と会話の画面の両方で使っても、ストリームはタブに1本だけ開く。
+- Runのストリームは、最初の接続（`Last-Event-ID` なし）でそのRunのそれまでのイベントもすべて送る。会話の画面は、実行中のRunの作業の記録をこれで組み立てる。
 - サーバーは `retry:` で再接続までの間隔を指定する。
-- `EventSource` からはHTTPのステータス（401等）が見えない。`onerror` で `readyState === EventSource.CLOSED`（ブラウザが再接続をやめた状態）になったら、REST APIの `app/v1/my/` を呼んでログイン状態を確認する。未ログインなら401が返り、APIクライアント（axios）がログイン画面へ移動させる。確認の呼び出しがネットワークエラーやJSONでない応答になった場合（前段の認証プロキシのセッション切れ等）は、APIクライアントが画面ごと再読み込みする（frontend-conventions.md §3.1）。
-- タブが非表示の間は切断してもよい。再接続後、取りこぼしの可能性がある場合（Runが終了していた等）は、該当画面のデータをREST APIで取得し直す。
+- `EventSource` からはHTTPのステータス（401等）が見えない。`onerror` で `readyState === EventSource.CLOSED`（ブラウザが再接続をやめた状態）になったら、REST APIの `app/v1/my/` を呼んでログイン状態を確認する。未ログインなら401が返り、APIクライアント（axios）がログイン画面へ移動させる。確認の呼び出しがネットワークエラーやJSONでない応答になった場合（前段の認証プロキシのセッション切れ等）は、APIクライアントが画面ごと再読み込みする（frontend-conventions.md §3.1）。ログインしていれば、間をおいて（3秒から最大60秒）こちらから接続し直す。このときは、受け取った最後の `id` をクエリの `after` に付けて、続きから受け取る（新しく作った `EventSource` は `Last-Event-ID` を送らないため）。
+- タブが非表示の間は切断してもよい。再接続後、取りこぼしの可能性がある場合（Runが終了していた等）は、該当画面のデータをREST APIで取得し直す。`useEventStream` の `onReconnect`（`useUserEvents` にも同じもの）は、切断の後に接続し直したときに呼ばれる。ログインユーザー宛ての通知とLLMの出力の差分は保存せず送り直されないので、会話の一覧と会話の画面はこれで取得し直す。
+- ストリームを切り替えるとき（実行中のRunが替わった等）は、古い接続の後始末が新しい接続を上書きしないようにし、イベントの `run` が今のRunと違うものは捨てる。REST APIの取得が重なったときも、後に始めたものの結果だけを使う。
 - ストリームが使えない環境でも画面が壊れないよう、Runの詳細などは表示時にRESTで最新の状態を取得し、ストリームは差分の反映に使う。

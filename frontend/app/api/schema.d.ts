@@ -706,7 +706,7 @@ export interface components {
             readonly answers: components["schemas"]["ClarificationAnswerItem"][];
             /** 補足 */
             readonly comment: string;
-            readonly answered_by: string;
+            readonly answered_by: string | null;
             /**
              * 回答日時
              * Format: date-time
@@ -972,8 +972,8 @@ export interface components {
         /** @description 会話のメッセージ。投稿すると、新しい依頼・今の作業への追加指示・確認への回答・次の依頼のどれかになる */
         Message: {
             readonly id: string;
-            readonly run: string;
-            readonly sender: string;
+            readonly run: string | null;
+            readonly sender: string | null;
             readonly role: components["schemas"]["MessageRoleEnum"];
             body: string;
             readonly instruction: components["schemas"]["InstructionInfo"] | null;
@@ -1463,9 +1463,7 @@ export interface components {
             /** ステップ数 */
             readonly step_count: number;
             /** @description 作業の計画（todo_write の最新の内容） */
-            readonly todos: {
-                [key: string]: string;
-            }[];
+            readonly todos: components["schemas"]["Todo"][];
             /** Format: date-time */
             readonly created: string;
             /** Format: date-time */
@@ -1646,6 +1644,18 @@ export interface components {
         Session: {
             readonly is_authenticated: boolean;
         };
+        /** @description 作業の計画の1項目（harness/tools/todo_write.py） */
+        Todo: {
+            readonly content: string;
+            readonly status: components["schemas"]["TodoStatusEnum"];
+        };
+        /**
+         * @description * `pending` - 未着手
+         *     * `in_progress` - 作業中
+         *     * `completed` - 完了
+         * @enum {string}
+         */
+        TodoStatusEnum: "pending" | "in_progress" | "completed";
         ToolCallInfo: {
             readonly id: string;
             readonly name: string;
@@ -2053,6 +2063,8 @@ export interface operations {
     app_v1_runs_list: {
         parameters: {
             query?: {
+                /** @description 会話 */
+                conversation?: string;
                 /** @description The pagination cursor value. */
                 cursor?: string;
                 /** @description Which field to use when ordering the results. */

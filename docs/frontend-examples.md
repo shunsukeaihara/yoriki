@@ -32,16 +32,17 @@
 | `ListPageTitle`、`TableSearchForm` | `frontend/app/components/common/` |
 | `formatDatetime` | `frontend/app/composables/date.ts` |
 | 管理画面のCRUDの実装例（例1と同じ形） | `frontend/app/pages/manage/llm_connections.vue`、`model_profiles.vue`、`frontend/app/components/llm-connection/`、`model-profile/` |
+| `useEventStream`、`useUserEvents` | `frontend/app/composables/stream.ts`（[realtime.md](realtime.md) §5） |
+| `RunStatus`、`ClarificationStatus`、`ClarificationKind`、`isCancellable`、`isActiveRun` | `frontend/app/composables/run.ts` |
+| `RunStatusBadge`、`RunEventLog`（作業の記録）、`RunWork`（会話の中の作業）、`RunClarificationForm`（確認への回答） | `frontend/app/components/run/` |
+| `MarkdownContent`、`renderMarkdown` | `frontend/app/components/common/MarkdownContent.vue`、`frontend/app/composables/markdown.ts`（frontend-conventions.md §7.5） |
+| 会話の画面（REST で取得し、ストリームのイベントで取得し直す実装例） | `frontend/app/pages/conversations/[conversationId].vue`、`frontend/app/composables/conversation.ts`、`frontend/app/components/conversation/` |
 
 ### これから作るもの
 
-次の部品はまだ実装していない。例のコードは、作ったときの使い方を示している。
-
 | 部品 | 置く場所 |
 |---|---|
-| `useEventStream` | `frontend/app/composables/stream.ts`（[realtime.md](realtime.md) §5） |
-| `RunStatus`、`ClarificationStatus`、`runStatusItems`、`isCancellable` | `frontend/app/composables/run.ts` |
-| `RunStatusBadge`、`RunEventTimeline` | `frontend/app/components/run/` |
+| `runStatusItems`（実行履歴の検索条件） | `frontend/app/composables/run.ts` |
 
 ---
 
@@ -438,51 +439,9 @@ const { onSubmit, loading, errors } = createSubmit({
 </template>
 ```
 
-### components/run/ClarificationAnswerForm.vue
+### components/run/RunClarificationForm.vue
 
-```vue
-<script setup lang="ts">
-const props = defineProps<{ runId: string; clarification: Clarification }>()
-const emit = defineEmits<{ answered: [value: Clarification] }>()
-const api = useAPI()
-const toast = useToast()
-const { t } = useI18n()
-
-const form = ref<ClarificationAnswer>({ answer: '' })
-const optionItems = computed(() => props.clarification.options.map((o) => ({ value: o, title: o })))
-
-const { onSubmit, loading, errors } = createSubmit({
-  form,
-  fn: (data) => api.runs(props.runId).clarifications(props.clarification.id).answer(data),
-  onSuccess: (result) => {
-    emit('answered', result)
-    toast.add({ title: t('回答しました。実行を再開します'), color: 'success' })
-  },
-  // 409（Web画面と外部スレッドから同時に回答された場合）もDFormAlertに表示される
-  onError: () => {},
-})
-</script>
-
-<template>
-  <UCard>
-    <p class="whitespace-pre-wrap text-sm">{{ clarification.question }}</p>
-    <DFormStack class="mt-3">
-      <DFormAlert :errors="errors" />
-      <DRadioGroup
-        v-if="optionItems.length"
-        v-model="form.answer"
-        :label="$t('回答')"
-        :items="optionItems"
-        :error-messages="errors.answer"
-      />
-      <DTextarea v-else v-model="form.answer" :label="$t('回答')" :error-messages="errors.answer" />
-      <div class="flex justify-end">
-        <DBtn :disabled="!form.answer" :loading="loading" @click="onSubmit">{{ $t('回答する') }}</DBtn>
-      </div>
-    </DFormStack>
-  </UCard>
-</template>
-```
+確認への回答は、実装済みの `frontend/app/components/run/RunClarificationForm.vue` を使う。質問（`questions`）ごとに選択肢（1つ選ぶなら `DRadioGroup`、複数なら `DCheckboxGroup`）と自由記述を出し、質問と同じ順の `answers` と全体の補足（`comment`）を `createSubmit` で送る。409（Web画面と外部のスレッドから同時に回答された場合）も `DFormAlert` に表示する。
 
 ### pages/runs/[runId].vue
 
@@ -528,14 +487,14 @@ const onChanged = async () => {
     <template #content>
       <div v-if="run" class="grid gap-4">
         <RunStatusBadge :run="run" />
-        <ClarificationAnswerForm
+        <RunClarificationForm
           v-for="c in clarifications"
           :key="c.id"
           :run-id="runId"
           :clarification="c"
           @answered="onChanged"
         />
-        <RunEventTimeline :run-id="runId" />
+        <RunWork :run="run" />
       </div>
     </template>
     <template #footer>
@@ -551,7 +510,7 @@ const onChanged = async () => {
 
 要点：
 - 停止・回答は、ViewSetの `@action` に対応するAPIメソッド（`api.runs(id).cancel()`、`.clarifications(cid).answer()`）を、同じ `createSubmit` で呼ぶ。
-- 状態の表示はSerializerの `statusDisplay` を使う。停止ボタンを出すかどうかの判定（`isCancellable`）だけを、`composables/run.ts` に置く。このファイルには `RunStatus`、`ClarificationStatus`、`runStatusItems`、`isCancellable` をまとめる。
+- 状態の表示はSerializerの `statusDisplay` を使う。停止ボタンを出すかどうかの判定（`isCancellable`）だけを、`composables/run.ts` に置く。このファイルには `RunStatus`、`ClarificationStatus`、`isCancellable` 等をまとめる。
 - actionが返したRunで画面を更新し、一覧には `changed` で再読込を知らせる。
 - 進捗は `useEventStream` で `app/v1/runs/{id}/stream/` から受け取り、`run.status` イベントで `refresh()`、`clarification.requested` イベントで `fetchAll()` を呼ぶ（[realtime.md](realtime.md) §3、§5）。ストリームはapiEndpoint（`/api/`）からの相対パスで渡す。
 - 詳細の取得に失敗したら、`useAsyncData` の `error` を `createError` に渡してエラー画面にする（frontend-conventions.md §3.5）。

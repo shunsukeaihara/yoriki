@@ -1,5 +1,8 @@
+<script setup lang="ts">
+// 社員のホームは会話の画面
+definePageMeta({ redirect: '/conversations' })
+</script>
+
 <template>
-  <UContainer class="py-8">
-    <h1 class="text-xl font-bold">Yoriki</h1>
-  </UContainer>
+  <div />
 </template>

@@ -2,12 +2,12 @@
 
 作成日：2026年10月2日  
 更新日：2026年10月21日  
-版：0.22 設計案  
+版：0.23 設計案  
 対象：サービス企画、開発、運用担当
 
 プロダクト名はYoriki（よりき）とする（0.16でYuhitsuから変更）。同名の製品・サービスがあることは承知の上で、検索での見つけやすさは重視しない。名称の商標・ドメイン等の確認は本設計の対象外とする。
 
-主な改訂内容は§15を参照。0.19では、業務ごとのAgent（業務の設定）とSkillを束ねる業務のPluginをやめ、標準のエージェント1つとSkillを中心とするモデルにした（§3.1）。0.20では、Webhookのpayloadをそのまま渡し、必要な項目だけを取り出す受け取り方にした（§4.2）。0.21では、ハーネスの設計を [harness.md](harness.md) にまとめ、コマンドを常駐のシェルではなく呼出しごとに実行する方式にした（§4.8、§7.5）。0.22では、Sandboxの頻出ライブラリをイメージのPythonに入れ、Run専用の環境はその上の薄い環境にした（§7.6）。
+主な改訂内容は§15を参照。0.19では、業務ごとのAgent（業務の設定）とSkillを束ねる業務のPluginをやめ、標準のエージェント1つとSkillを中心とするモデルにした（§3.1）。0.20では、Webhookのpayloadをそのまま渡し、必要な項目だけを取り出す受け取り方にした（§4.2）。0.21では、ハーネスの設計を [harness.md](harness.md) にまとめ、コマンドを常駐のシェルではなく呼出しごとに実行する方式にした（§4.8、§7.5）。0.22では、Sandboxの頻出ライブラリをイメージのPythonに入れ、Run専用の環境はその上の薄い環境にした（§7.6）。0.23では、Runtime ProfileをSkillではなくRunの単位で決めることにした（§7.3）。
 
 ## 1 目的と基本方針
 
@@ -15,7 +15,7 @@
 
 初期構成はNuxt、Django/DRF、PostgreSQL、Django Q2のQCluster、Dockerによる実行環境とする。Docker Composeで単一ホストに展開する。実行件数が少ない前提で、Redis、専用Workflow基盤、Kubernetesは初期必須としない。
 
-エージェントはYorikiの標準のハーネス1つだけとし、業務ごとの手順・資料・使ってよいTool・Connector・実行環境はSkillにまとめる。誰が使えるかはSkillの公開範囲で決める。Pluginはサーバーに配備する拡張（起動・通知・保存・Channel・Connector等）とし、共通Registryへ登録して、契約に適合する実装を選択できるようにする（§3.1）。LLMによる判断やプロンプトの指示とは独立して、サーバーと実行環境が権限を強制する。
+エージェントはYorikiの標準のハーネス1つだけとし、業務ごとの手順・資料・使ってよいTool・Connectorは Skill にまとめる。誰が使えるかはSkillの公開範囲で決める。コマンドを動かす実行環境（Runtime Profile）はSkillではなくRunの単位で決める（§7.3）。Pluginはサーバーに配備する拡張（起動・通知・保存・Channel・Connector等）とし、共通Registryへ登録して、契約に適合する実装を選択できるようにする（§3.1）。LLMによる判断やプロンプトの指示とは独立して、サーバーと実行環境が権限を強制する。
 
 社員は会話で業務を依頼し、エージェントは必要に応じてLinuxコマンド、Pythonコード、文書処理CLIを使う。また「この手順をSkillにして」「今後はこの基準で処理して」と依頼することで、エージェントにSkill自体を作成・修正させる。Skillの編集と公開はユーザーの権限内で自動実行でき、毎回人の承認を必須にはしない。
 
@@ -82,12 +82,12 @@ MVPは社内文書・表計算・PDF等の分析や作成、会話によるSkill
 | 要素 | 責任 | 例 |
 |---|---|---|
 | エージェント | 標準のハーネス。依頼とSkillに従い、許可されたToolで作業を進める。1種類だけ | — |
-| Skill | 手順、判断基準、入出力の形、選ぶための説明、使ってよいTool、資料、Connector、実行環境、必要な能力をまとめる。公開範囲（個人・部門・全社）で誰が使えるかが決まる。エージェントによる編集も可能 | 書類確認手順と項目マスター、資料作成手順とPPTXテンプレート |
+| Skill | 手順、判断基準、入出力の形、選ぶための説明、使ってよいTool、資料、Connector、必要な能力をまとめる。公開範囲（個人・部門・全社）で誰が使えるかが決まる。エージェントによる編集も可能 | 書類確認手順と項目マスター、資料作成手順とPPTXテンプレート |
 | Tool | サーバー側で実行する操作と権限境界を定める | shell、install_python_packages、update_skill_draft |
 | Resource / ResourceVersion | ファイルの論理IDと不変の原本・hash・版を管理する | 顧客マスターCSVの第4版 |
 | SkillAssetBinding | Skill内のファイル名・用途とResource Versionを結び付ける | customer-master、presentation-template |
 | Resource Collection | 複数のSkillで使う業務資料の集合を管理する | 社内共通用語集、料金基準 |
-| Runtime Profile | 承認済みの実行イメージと資源上限を定める | Pythonと文書処理ツールを含む環境 |
+| Runtime Profile | 承認済みの実行イメージと資源上限を定める。Skillごとには持たず、Runの単位で決める（基盤管理者が既定を1つ決める。§7.3） | Pythonと文書処理ツールを含む環境 |
 | Task Definition | エージェントフローの定義。起動Binding、プロンプト、使うSkill、モデル、対話Binding、結果通知Bindingを定める | 請求書チェックの自動実行設定 |
 | Plugin | サーバーに配備する拡張。起動・通知・保存・退避・Channel・ConnectorのAdapterを登録する。基盤管理者が導入する | Webhook起動、Zapier通知、Teams、社内DBのConnector |
 | Channel Plugin / Interaction Binding | 受信・送信Adapterをまとめ、チャットツール・チャネル・スレッド方針を設定する | Teamsの経理チャネルで質問・回答 |
@@ -104,13 +104,13 @@ Skillの選択や読込み自体は権限を増やさない。Skillを通して�
 
 ### 3.2 バージョンと公開
 
-権限を持つユーザーと、そのユーザーの依頼を受けたエージェントはDB上のSkill Draftを編集できる。Publish時に不変のSkill Versionを作成する。Skill Versionは、本文、使ってよいTool、SkillAssetBinding（マスター・テンプレート等の資料の版）、Resource Collectionの版、使うConnectorの操作（明示する場合。要件の宣言で、使える範囲は利用者・タスクの権限で決まる）、Runtime Profile、入出力の形、必要な能力（Tool呼出し、画像入力等）を固定して持つ。公開済みの本文や参照先を直接書き換えない。
+権限を持つユーザーと、そのユーザーの依頼を受けたエージェントはDB上のSkill Draftを編集できる。Publish時に不変のSkill Versionを作成する。Skill Versionは、本文、使ってよいTool、SkillAssetBinding（マスター・テンプレート等の資料の版）、Resource Collectionの版、使うConnectorの操作（明示する場合。要件の宣言で、使える範囲は利用者・タスクの権限で決まる）、入出力の形、必要な能力（Tool呼出し、画像入力等）を固定して持つ。公開済みの本文や参照先を直接書き換えない。
 
 ファイルだけを更新する場合も、新しいResource Versionを参照するSkill Versionを発行する。Skill本文が同じでも、どのファイルを使う版かを一意に記録する。本文・複数ファイルをまとめて変更する場合は、一つのSkill Draftから整合した組合せとして公開する。
 
 Skillは公開範囲（個人・部門・全社）ごとに公開する（§3.6）。会話やタスクは、公開範囲の最新の公開版を使うか、特定の版に固定するかを選べる。Run開始時に、指定されたSkill（`/` やTask Definitionで指定したもの）を具体的なSkill Versionへ解決し、Skill Version、資料版、Connectorの利用の許可、モデル設定の版とeffort、image digestを実行Manifestへ固定する。
 
-指定がなく、エージェントが実行の途中でSkillを読み込む場合は、最初に使う前に、そのSkillをその時点の公開範囲の最新の公開版（Skill Version）へ解決し、資料版・Runtime Profile・必要な能力と合わせてRunのManifestへ追記する。追記は、能力と権限の確認と同じDB transactionで確定し、RunEventに記録してから読み込む。一度追記した版は変えず、同じRunの再試行・入力待ちからの再開では、追記済みの版と資料を使う（途中でSkillが公開し直されても切り替えない）。Manifestには、Run開始時に固定したものと実行中に追記したもの（追記の順序と時刻）を区別して残す。
+指定がなく、エージェントが実行の途中でSkillを読み込む場合は、最初に使う前に、そのSkillをその時点の公開範囲の最新の公開版（Skill Version）へ解決し、資料版・必要な能力と合わせてRunのManifestへ追記する。追記は、能力と権限の確認と同じDB transactionで確定し、RunEventに記録してから読み込む。一度追記した版は変えず、同じRunの再試行・入力待ちからの再開では、追記済みの版と資料を使う（途中でSkillが公開し直されても切り替えない）。Manifestには、Run開始時に固定したものと実行中に追記したもの（追記の順序と時刻）を区別して残す。
 
 実行中のRunで使っているSkillを最新の公開版へ切り替えたい場合は、利用者が明示して依頼する（例：「名寄せのSkillを最新にして続けて」。画面からの操作も用意する）。この依頼を受けたら、そのSkillをその時点の公開範囲の最新の公開版へ解決し直し、権限・必要な能力・機密の制限を確かめ直してから、新しい版をManifestへ追記する。前の版の記録は消さず、どの時点で切り替えたかをRunEventに残す。切り替えた後の手順から新しい版と資料を使い、それより前の作業結果はそのまま残す。エージェントが自分の判断で切り替えることはせず、再試行・再開では切り替えた時点までのManifestを使う。公開はDB transactionで確定し、最新の公開版を使う会話・タスクの次のRunへ反映する。特定の版に固定した参照は自動では変えない。
 
@@ -147,13 +147,12 @@ resource_collections:
 connectors:
   - id: core-db
     operations: [query]
-runtime_profile: document-python-v1
 requires: [tool_calling]
 input_schema_ref: bl-check-input-v1
 output_schema_ref: bl-check-result-v1
 ```
 
-Skillが要求する権限（Tool、Connector、資料）は、ユーザーの権限と管理者の組織ポリシーの範囲内でのみ有効にする。`connectors` は省略してよく、その場合はエージェントが利用者の使えるConnectorから探して使う。Skillから任意のホストパス、Dockerオプション、実行イメージ、接続先URLを指定できる仕組みにはしない。実行環境は承認済みのRuntime Profileから、接続先は登録済みのConnectorから選ぶだけにする。
+Skillが要求する権限（Tool、Connector、資料）は、ユーザーの権限と管理者の組織ポリシーの範囲内でのみ有効にする。`connectors` は省略してよく、その場合はエージェントが利用者の使えるConnectorから探して使う。Skillから任意のホストパス、Dockerオプション、実行イメージ、接続先URLを指定できる仕組みにはしない。実行環境はRunの単位で決まる承認済みのRuntime Profileを使い（Skillからは選ばない。§7.3）、接続先は登録済みのConnectorから選ぶだけにする。
 
 プロンプトと手順はDB編集を認める。管理Toolの実装コードとOSパッケージはレビュー済みソース・イメージで管理する。追加Pythonライブラリは7.6節の取得経路でRun専用環境に導入する。秘密情報はSkill本文に埋め込まず、管理側のSecret参照（Connectorの資格情報等）として扱う。
 
@@ -203,7 +202,7 @@ Skill編集はDjango側の管理Toolとして提供する。エージェント�
 
 自動公開の可否はscopeごとのポリシーで定める。権限がある操作に追加の承認を一律要求しない。公開権限がなければDraftとして保存し、未反映であることを明示する。必要なら閲覧可能な共通Skillから個人用を派生させるが、元Skillの公開範囲を拡大したり他者の資料を複製公開したりしない。
 
-本文・例示・入出力Schemaの編集権限と、Tool、Resource、Secret、Runtime Profile、共有範囲の変更権限を分離する。Skill管理Toolを持つエージェントでも自分の実行権限を増やせない。入出力Schemaの変更時は、そのSkillを使うTask Definition・通知設定との互換性を検証する。
+本文・例示・入出力Schemaの編集権限と、Tool、Resource、Secret、共有範囲の変更権限を分離する。Skill管理Toolを持つエージェントでも自分の実行権限を増やせない。入出力Schemaの変更時は、そのSkillを使うTask Definition・通知設定との互換性を検証する。
 
 Resourceの「内容を編集・置換する権限」と「他の資料を参照できるようにする権限・共有範囲を変更する権限」も区別する。Skill資料の編集を許可されたユーザーは、許可されたファイルを更新できるが、別部門の資料へのアクセスを追加できない。閲覧可能な個人ファイルであっても、部門・全社へ公開するには対象scopeへの登録・公開権限を必要とする。
 
@@ -794,12 +793,12 @@ Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプ�
 | ResultEnvelope | 確定済み業務結果、Schema版、成果物の論理参照 |
 | ToolInvocation | 引数、実行権限、operation key、状態、結果参照 |
 | UsageLedger | 利用量、予約額、確定額、プロバイダ要求ID |
-| Skill / SkillVersion / SkillDraft | scope、所有者、名前・説明、公開本文、Schema、使ってよいTool、固定ファイル一覧、Connectorの操作、Runtime Profile、必要な能力、編集revision、元の版、scopeの最新の公開版 |
+| Skill / SkillVersion / SkillDraft | scope、所有者、名前・説明、公開本文、Schema、使ってよいTool、固定ファイル一覧、Connectorの操作、必要な能力、編集revision、元の版、scopeの最新の公開版 |
 | Resource / ResourceVersion | 論理ファイルID、不変の原本Artifact参照、hash、形式、サイズ、検証結果、保持条件 |
 | SkillAssetBinding | Skill Version、asset ID、表示名、用途、Resource Version、期待Schema、参照方法 |
 | SkillAssetDraftChange | Draft、対象asset、元の版、候補Artifactまたは添付ID、差分、検証状態 |
 | SkillChange / SkillEvaluation | 依頼元、編集Run、本文・ファイルの差分、理由、評価結果、公開結果、operation key |
-| RuntimeProfileVersion | image digest（index＝manifest listのdigestで固定。Workerは自分のplatformのmanifestを解決し、そのdigestをAttemptに記録する）、対応platform、Python版、既定依存、資源上限 |
+| RuntimeProfile / RuntimeProfileVersion | 名前・説明、有効か、既定か（1つだけ）。版はimage（repositoryとindex＝manifest listのdigest。Workerは自分のplatformのmanifestを解決し、そのdigestをAttemptに記録する）、契約番号、対応platform、Python版、資源上限（メモリ、CPU、pids、tmpfsの大きさ、コマンド・ジョブの時間）。中身を変えると新しい版を作る（§7.3） |
 | EnvironmentRevision / PackageBundle | 完全な依存lock、wheelのhash、対応ABIとplatform、保管参照、元revision |
 | TaskDefinition / TaskDefinitionRevision | フローの起動・対話・結果通知Binding、使うSkill、モデル設定とeffort（固定か自動か）、許可したConnectorの操作、プロンプト、公開版 |
 | PluginExtension | 拡張種別、Adapter実装版、契約版、設定Schema、対応能力、有効状態 |
@@ -1005,6 +1004,17 @@ Linuxコマンドの禁止リストを主要な防御にしない。ネットワ
 Docker操作はLauncherへ集約する。MVPではRunnerの実装モジュールとして開始できるが、任意のDocker APIをエージェントへ公開しない。Control PlaneのAPIコンテナにはDockerソケットを渡さない。
 
 Launcherは承認済みimage digest、固定mount根、資源上限、container labelのみを受け付ける。Docker daemonへのアクセスは強いホスト権限を伴うため、将来はLauncherをWorkerホストの専用プロセスとして分離する。単純なDocker socket proxyだけで安全性を保証しない。
+
+**Runtime Profileの決め方**：Runtime Profileは、SkillではなくRunの単位で決める。1つのRunで複数のSkillを読み込み、Sandboxは1つのRunに1つなので、Skillごとに持つと、どれを使うか決まらず、Sandboxを起動した後に読み込んだSkillのために実行環境を替えることもできないため。
+
+- 基盤管理者がRuntime Profileを登録し、既定を1つ決める。Runは、始めるときに、既定のRuntime Profileのその時点の版をManifestに固定する。Sandboxは最初にSandboxのToolが呼ばれた時点で起動し、固定した版を使う（コマンドを使わない短い応答では、コンテナの起動を待たない）。
+- エージェントの作業（ファイルの読み書き・コマンド）はほとんどがSandboxの中で動くので、Sandboxを使わない会話は基本的にない。既定のRuntime Profileがなければ、Runを始めず、利用者に理由（基盤管理者に登録を頼むこと）を返す。コマンドの要らないSkill（§3.4）も、同じRunの中でSandboxのToolを呼ばないだけにする。
+- Runの途中やWAITING_USERからの再開・再試行でも、固定した版を使う。新しい版を登録したり既定を替えたりしても、始まっているRunは替わらない。
+- Skillは実行環境を指定しない。Sandboxが要るかどうかは、Skillの使ってよいTool（§3.4）で決まる。読み込むSkillがいくつあっても、使うSandboxは1つ。
+- 用途の違うイメージ（GPU、大きい分析ライブラリ等）が要るようになったら、Runを始めるときの指定（Task Definition等）で選べるようにする。Skillには持たせない。
+- 登録のときは、レジストリのAPI（HTTPS）でimage indexとplatformごとのmanifest・configを読み、digest、対応platform、契約番号のラベル（`org.yoriki.sandbox-contract`）を確かめる。読んだ内容はSHA-256がdigestと一致することを確かめ、indexに書かれたplatformとconfigのplatformが違うもの、platformごとに契約番号やPythonの版が違うものは断る。Runnerが対応しない契約番号のイメージは登録させない。apiのコンテナにDockerのソケットを渡さないので、登録の確認にDockerは使わない。実際にpullできるかは、Sandboxを起動するとき（WorkerのLauncher）に分かる。
+- 単一のmanifest（platformが1つ）のイメージも登録できる。そのplatformのWorkerでだけ使え、ほかのplatformのWorkerのLauncherは起動を断る。公開するイメージはmulti-platformのindexにする（§10.1）。
+- 登録の確認で接続するのは、許可したレジストリ（設定 `YORIKI_SANDBOX_REGISTRIES`。既定はDocker Hub）と、その認証先・配信先だけにする。管理画面から指定できる接続先なので、内部のネットワークへの要求に使わせないよう、どの要求（リダイレクトの先も）でもHTTPSと、名前解決した先が公開のアドレスであることを確かめ、確かめたアドレスに接続を固定する（TLSの証明書は元のホスト名で確かめる。確かめた後にDNSの応答が替わっても内部へつながない）。tokenを取る間は、リダイレクトの先も許可した認証先に限る。応答の大きさ、要求の数、platformの数、確認にかける時間にも上限を設ける。
 
 ### 7.4 成果物の回収
 
@@ -1267,7 +1277,7 @@ Webhook、Teams・Slack・Discordからの受信は、社員のセッション�
 
 ビルド結果にはリリースタグを付けるが、実行時はdigestで固定する。Dockerはdigest指定でのpullをサポートする。[Docker image pull](https://docs.docker.com/reference/cli/docker/image/pull/)を参照。`latest`を実行環境の識別子として使わない。
 
-更新は、Dockerfile・依存定義の変更、CIビルド（amd64とarm64のmulti-arch、provenanceとSBOMを付け、契約番号のラベル `org.yoriki.sandbox-contract` を付ける）、契約テスト等の検証、Hubへのpush、digest（index＝manifest listのdigest）取得、Runtime Profileの新バージョン登録、対象Skillへの適用の順とする。Runnerが対応しない契約番号のイメージは登録できない。SkillのPublishはこのフローから独立する。公開イメージにデータを書き込んだコンテナをcommitして再配布する運用は行わない。
+更新は、Dockerfile・依存定義の変更、CIビルド（amd64とarm64のmulti-arch、provenanceとSBOMを付け、契約番号のラベル `org.yoriki.sandbox-contract` を付ける）、契約テスト等の検証、Hubへのpush、digest（index＝manifest listのdigest）取得、Runtime Profileの新しい版の登録の順とする（既定のRuntime Profileなら、以後に始めるRunがその版を使う。§7.3）。Runnerが対応しない契約番号のイメージは登録できない。SkillのPublishはこのフローから独立する。公開イメージにデータを書き込んだコンテナをcommitして再配布する運用は行わない。
 
 Workerは承認済みrepositoryとdigestだけをpullする。Hub用資格情報が必要な場合もWorker側に保持し、SandboxやSkillへ渡さない。Runごとに必ずpullせず、事前取得とローカルcacheを使う。Hubが利用できない場合、必要なdigestがcacheにあれば実行し、なければ準備待ちとして再試行する。無関係な最新版へ自動的に切り替えない。
 
@@ -1691,3 +1701,4 @@ Sandboxイメージの定義は本体と同じリポジトリの `sandbox/` で�
 | 0.20 | 2026年10月21日 | Webhookのpayloadは送り元ごとに形が違うので、送り元ごとのPluginを作らず、payloadをいつもそのままファイルとして渡し、読み方はSkillで吸収する。受付時に必要な項目だけをBindingの表で取り出せるようにし（JSONのpath、必須、型。必須がない・型が合わない要求は400）、取り出した値はプロンプトに埋め込める。サンプルのpayloadで取り出しを試せる。Bindingには受け口・認証・重複のキー・項目の取り出し・上限だけを置き、処理の流れを組む画面は作らない。送る形を決められる送り元向けに推奨の形式を示す。重複のキーは送り元のイベントIDか `Idempotency-Key` だけとし（本文のhashは使わない）、Webhookで起動するタスクには失敗の通知先を必須にして、run_idで状態を確かめる口を設けた。§4.1の例に残っていた `agent_id` を直した（§4.1、§4.2、§11.9） |
 | 0.21 | 2026年10月21日 | ハーネス（Runner）の設計を [harness.md](harness.md) にまとめた。公開されているハーネス（DeepSeek Harness、OpenCode、Codex CLI、Gemini CLI、OpenHands、SWE-agent）を読んで決めた。コマンドは常駐のシェルを持たず、呼出しごとに `docker exec` で実行し、cwdはRunの状態に持つ。timeoutまでに終わらないコマンドはバックグラウンドのジョブへ移す。RunEventにモデル用の内容を持たせ、モデルへの入力をすべてRunEventから組み立てる。CheckpointにRunEventのsequenceを持たせ、Connectorの書込みの操作に実行前の確認を必須にする設定を加えた。Web検索・Web取得はMVPの後にConnectorとして加え、各社のLLMに組み込みのWeb検索は基盤管理者が許可したときだけ使う（§2、§4.8、§4.9.3、§5.1、§7.5） |
 | 0.22 | 2026年10月22日 | Sandboxの頻出ライブラリは、イメージのPythonにlockから入れ、Run専用の仮想環境 `/workspace/env` はその上に `--system-site-packages` で作る薄い環境（追加したpackageだけを持つ）にした。頻出ライブラリをRunごとにコピー・インストールしないので、起動が速く、tmpfsのメモリを使わない。基底のsite-packagesはimage digestとlockで固定されるので、Environment Revisionはimage digestと追加したpackageのlockで表す（§7.1、§7.6、§7.7、§7.9） |
+| 0.23 | 2026年10月22日 | Runtime ProfileをSkillごとに持たず、Runの単位で決めることにした。1つのRunで複数のSkillを読み込み、Sandboxは1つなので。基盤管理者が既定を1つ決め、SandboxのToolを使うRunはRunを始めるときにその版を固定する。用途の違うイメージは、必要になったらTask Definition等で選べるようにする。登録のときは、レジストリのAPIでdigest・platform・契約番号を確かめる（§3.1、§3.3、§5.1、§7.3、§10.1） |

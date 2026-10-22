@@ -38,6 +38,11 @@ export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
 # --- Sandbox ---
 # 手元でビルドしたSandboxイメージに差し替える（開発時だけ有効。本番では無視する。deployment.md §3.3）
 # export YORIKI_SANDBOX_IMAGE_OVERRIDE=yoriki-sandbox-docs:dev
+# Runtime Profileに登録できるイメージのレジストリ（既定は docker.io）。ghcr.io 等も使うときに足す
+# export YORIKI_SANDBOX_REGISTRIES=docker.io,ghcr.io
+# HTTPで読むレジストリ。手元に立てたレジストリ（docker run -p 5001:5000 registry:3）にpushしたイメージを、
+# Runtime Profileとして登録して試すときだけ使う（本番では設定しない）
+# export YORIKI_SANDBOX_INSECURE_REGISTRIES=localhost:5001
 
 # --- フロントエンド（Nuxt） ---
 # 開発サーバーが /api を転送する先（既定は http://localhost:8000）

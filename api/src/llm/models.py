@@ -149,8 +149,13 @@ class ModelProfile(models.Model):
 
     @transaction.atomic
     def make_default(self) -> None:
-        """既定のモデル設定にする。これまでの既定は外す"""
-        ModelProfile.objects.select_for_update().filter(is_default=True).exclude(pk=self.pk).update(is_default=False)
+        """既定のモデル設定にする。これまでの既定は外す。
+
+        同時に別のモデル設定を既定にしても一意の制約に当たらない（500にならない）よう、すべての行をpkの順にロックして
+        直列にする。既定の行だけをロックすると、既定がないときに2つの要求が両方とも進んでしまう
+        """
+        list(ModelProfile.objects.select_for_update().order_by("pk").values_list("pk", flat=True))
+        ModelProfile.objects.filter(is_default=True).exclude(pk=self.pk).update(is_default=False)
         self.is_default = True
         self.save(update_fields=["is_default", "updated"])
 

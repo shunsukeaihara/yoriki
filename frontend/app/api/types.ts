@@ -19,10 +19,14 @@ export type MinimumLLMConnection = Api<'MinimumLLMConnection'>
 export type ModelProfile = Api<'ModelProfile'>
 export type ModelProfileWrite = Api<'ModelProfileRequest'>
 export type ModelProfileVersion = Api<'ModelProfileVersion'>
+export type RuntimeProfile = Api<'RuntimeProfile'>
+export type RuntimeProfileWrite = Api<'RuntimeProfileRequest'>
+export type RuntimeProfileVersion = Api<'RuntimeProfileVersion'>
 
 // 一覧の検索条件（バックエンドの FilterSet と合わせる）
 export type LLMConnectionListParams = ListParams & { name?: string; kind?: ProviderKindEnum; isActive?: boolean }
 export type ModelProfileListParams = ListParams & { name?: string; connection?: string; isActive?: boolean }
+export type RuntimeProfileListParams = ListParams & { name?: string; isActive?: boolean }
 
 export type SSOProviderKindEnum = Schemas['SSOProviderKindEnum']
 export type SSOProvider = Api<'SSOProvider'>

@@ -243,6 +243,14 @@ const menuItems = computed(() => [
               </template>
               <template v-else-if="item?.kind === 'message'">
                 <MarkdownContent v-if="item.message.role === MessageRole.AGENT" :text="item.message.body" />
+                <!-- システムのメッセージ（次の依頼を始められなかった理由等） -->
+                <p
+                  v-else-if="item.message.role === MessageRole.SYSTEM"
+                  class="flex items-start gap-2 text-sm whitespace-pre-wrap text-muted"
+                >
+                  <UIcon name="i-lucide-info" class="mt-0.5 size-4 shrink-0" />
+                  <span>{{ item.message.body }}</span>
+                </p>
                 <p v-else class="whitespace-pre-wrap">{{ item.message.body }}</p>
                 <UBadge
                   v-if="item.message.instruction"

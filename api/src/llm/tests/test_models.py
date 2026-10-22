@@ -1,11 +1,14 @@
+import threading
+
 import pytest
 from cryptography.fernet import Fernet
 from django.core.management import call_command
+from django.db import connection
 from django.test import override_settings
 
 from llm.errors import VersionConflict
 from llm.factories import LLMConnectionFactory, ModelProfileFactory
-from llm.models import LLMConnection
+from llm.models import LLMConnection, ModelProfile
 
 
 class TestApiKeyField:
@@ -54,3 +57,36 @@ class TestRevise:
         profile.refresh_from_db()
         assert profile.version_number == 1
         assert profile.versions.count() == 1
+
+
+class TestMakeDefault:
+    @pytest.mark.django_db
+    def test_moves_the_default(self):
+        first, second = ModelProfileFactory.create(), ModelProfileFactory.create()
+        first.make_default()
+        second.make_default()
+        assert list(ModelProfile.objects.filter(is_default=True)) == [second]
+
+    @pytest.mark.django_db(transaction=True)
+    def test_concurrent_requests_do_not_break_the_constraint(self):
+        # 既定がない状態で、別々のモデル設定を同時に既定にしても、一意の制約に当たらない（500にならない）
+        profiles = [ModelProfileFactory.create(), ModelProfileFactory.create()]
+        errors: list[Exception] = []
+        barrier = threading.Barrier(2)
+
+        def make(profile):
+            try:
+                barrier.wait()
+                ModelProfile.objects.get(pk=profile.pk).make_default()
+            except Exception as exc:  # どの例外も失敗として集める
+                errors.append(exc)
+            finally:
+                connection.close()
+
+        threads = [threading.Thread(target=make, args=(p,)) for p in profiles]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert errors == []
+        assert ModelProfile.objects.filter(is_default=True).count() == 1

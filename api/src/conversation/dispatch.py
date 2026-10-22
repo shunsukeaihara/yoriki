@@ -15,6 +15,7 @@ from run.models import (
     RunEventKind,
     RunStatus,
 )
+from runtime.models import RuntimeProfile
 
 from .models import Conversation, ConversationMessage, InstructionKind, InstructionState, MessageRole, UserInstruction
 
@@ -92,17 +93,26 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
     if conversation.handles_sensitive_data and not version.is_local:
         raise CannotStart(_("個人情報や機密情報を扱う会話では、ローカルLLMのモデルを選んでください。"))
     effort = resolve_effort(conversation, version)
+    # 実行環境はRunの単位で決め、既定のRuntime Profileのその時点の版を固定する（design.md §7.3）。
+    # エージェントの作業はほとんどがSandboxの中で動くので、既定がなければRunを始めない
+    runtime_version = RuntimeProfile.default_version()
+    if runtime_version is None:
+        raise CannotStart(
+            _("コマンドを動かす環境（Runtime Profile）が登録されていません。基盤管理者に問い合わせてください。")
+        )
     run = Run.objects.create(
         conversation=conversation,
         parent=parent,
         owner=conversation.owner,
         model_version=version,
         effort=effort,
+        runtime_version=runtime_version,
         handles_sensitive_data=conversation.handles_sensitive_data,
         manifest={
             "fixed": {
                 "model_version": version.pk,
                 "effort": effort,
+                "runtime_version": runtime_version.pk,
                 "handles_sensitive_data": conversation.handles_sensitive_data,
             },
             "appended": [],
@@ -117,25 +127,33 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
 
 
 def start_next_request(conversation: Conversation) -> Run | None:
-    """先行Runが終わった後に、待っている次の依頼を1つ始める（Runの状態を変えるtransactionの中で呼ぶ）"""
+    """先行Runが終わった後に、待っている次の依頼を受け付けた順に始める（Runの状態を変えるtransactionの中で呼ぶ）。
+
+    始められない依頼（既定のRuntime Profileがなくなった等）は取り消し、理由を会話のシステムのメッセージとして残して、
+    次の依頼へ進む。投稿のときには受け付けを返しているので、黙って捨てない
+    """
     if Run.objects.filter(conversation=conversation, status__in=ACTIVE_STATUSES).exists():
         return None
-    instruction = (
+    instructions = (
         UserInstruction.objects.select_for_update(of=("self",))
         .filter(conversation=conversation, kind=InstructionKind.NEXT, state=InstructionState.RECEIVED)
         .select_related("message", "message__sender")
         .order_by("pk")
-        .first()
     )
-    if instruction is None:
-        return None
-    try:
-        run = start_run(conversation, instruction.message, instruction.message.sender)
-    except CannotStart:
-        instruction.state = InstructionState.DISCARDED
-        instruction.save(update_fields=["state", "updated"])
-        return None
-    instruction.state = InstructionState.STARTED
-    instruction.run = run
-    instruction.save(update_fields=["state", "run", "updated"])
-    return run
+    for instruction in instructions:
+        try:
+            run = start_run(conversation, instruction.message, instruction.message.sender)
+        except CannotStart as exc:
+            instruction.state = InstructionState.DISCARDED
+            instruction.save(update_fields=["state", "updated"])
+            ConversationMessage.objects.create(
+                conversation=conversation,
+                role=MessageRole.SYSTEM,
+                body=_("次の依頼を始められませんでした：%(reason)s") % {"reason": exc},
+            )
+            continue
+        instruction.state = InstructionState.STARTED
+        instruction.run = run
+        instruction.save(update_fields=["state", "run", "updated"])
+        return run
+    return None

@@ -700,21 +700,28 @@ class Runner:
     def _run_group(self, pairs: list[tuple[Tool, ToolCall]]) -> None:
         """並べて実行する。DBへの書込み（呼出しの記録・結果の記録・Sandboxの起動）はこのスレッドで行い、
         別のスレッドではToolの実行（Sandboxの補助コマンド）だけを行う。結果はモデルが返した順に記録する"""
-        prepared: list[tuple[Tool, ToolCall, ToolInvocation]] = []
+        # 引数の誤りもその位置のまま、モデルが返した順に記録する
+        prepared: list[tuple[Tool, ToolCall, ToolInvocation | None, ToolResult | None]] = []
         for tool, call in pairs:
             problem = tool.validate(call.arguments)
             if problem:
-                result = ToolResult.error(problem)
-                self._record_tool_result(call.id, call.name, self._with_repeat_notice(call, result), ToolStatus.FAILED)
-                continue
-            prepared.append((tool, call, self._start_invocation(call)))
-        if any(tool.needs_sandbox for tool, _call, _inv in prepared):
+                prepared.append((tool, call, None, ToolResult.error(problem)))
+            else:
+                prepared.append((tool, call, self._start_invocation(call), None))
+        if any(tool.needs_sandbox and invocation for tool, _call, invocation, _error in prepared):
             self.session.ensure()
         with ThreadPoolExecutor(max_workers=MAX_PARALLEL, thread_name_prefix="tool") as pool:
-            futures = [pool.submit(self._execute, tool, call, invocation) for tool, call, invocation in prepared]
-            results = [future.result() for future in futures]
-        for (tool, call, invocation), result in zip(prepared, results, strict=True):
-            self._finish_tool(tool, call, invocation, result)
+            futures = [
+                pool.submit(self._execute, tool, call, invocation) if invocation is not None else None
+                for tool, call, invocation, _error in prepared
+            ]
+            results = [future.result() if future is not None else None for future in futures]
+        for (tool, call, invocation, error), result in zip(prepared, results, strict=True):
+            if invocation is None or result is None:
+                assert error is not None
+                self._record_tool_result(call.id, call.name, self._with_repeat_notice(call, error), ToolStatus.FAILED)
+            else:
+                self._finish_tool(tool, call, invocation, result)
 
     def _between_calls(self, remaining: list[ToolCall]) -> bool | None:
         """取消・追加指示が届いていれば、残りの呼出しを閉じる。続けてよければNone"""

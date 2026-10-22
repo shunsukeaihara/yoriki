@@ -268,10 +268,12 @@ def test_independent_reads_run_together(conversation):
         [
             calls(("c1", "shell", shell("echo a > a.txt; echo b > b.txt"))),
             calls(
+                ("c0", "read", {"path": 1}),
                 ("c2", "read", {"path": "/workspace/work/a.txt"}),
                 ("c3", "read", {"path": "/workspace/work/b.txt"}),
                 ("c4", "grep", {"pattern": "b", "path": "/workspace/work"}),
                 ("c5", "read", {"path": "/workspace/work/none.txt"}),
+                ("c6", "read", {"path": 1}),
             ),
             reply("終わり"),
         ]
@@ -282,4 +284,6 @@ def test_independent_reads_run_together(conversation):
     assert "b.txt: 1" in text(r["c4"])
     assert r["c5"]["is_error"]
     sequences = [e["call_id"] for e in r.values()]
-    assert sequences == ["c1", "c2", "c3", "c4", "c5"]
+    # 引数の誤りも、モデルが返した順に記録する
+    assert sequences == ["c1", "c0", "c2", "c3", "c4", "c5", "c6"]
+    assert r["c6"]["is_error"] and "Invalid arguments" in text(r["c6"])

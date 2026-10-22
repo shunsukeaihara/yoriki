@@ -169,3 +169,25 @@ def test_long_sandbox_operations_keep_the_lease(conversation, monkeypatch, setti
     session = SandboxSession(run, attempt, heartbeat=lost)
     with pytest.raises(LeaseLost):
         session._keep_lease(lambda: time.sleep(0.3))
+
+
+def test_started_sandbox_is_removed_when_the_lease_is_lost(conversation, monkeypatch, settings, tmp_path):
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path)
+    monkeypatch.setattr("harness.sandbox.HEARTBEAT_INTERVAL", 0.05)
+    run = post(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+
+    def lost():
+        raise LeaseLost("x")
+
+    removed: list[str] = []
+
+    def start() -> str:
+        time.sleep(0.2)
+        return "sandbox"
+
+    session = SandboxSession(run, attempt, heartbeat=lost)
+    with pytest.raises(LeaseLost):
+        session._keep_lease(start, on_abandon=removed.append)
+    assert removed == ["sandbox"]

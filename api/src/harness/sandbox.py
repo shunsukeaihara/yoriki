@@ -177,7 +177,9 @@ class SandboxSession:
             ExecutionAttempt.objects.filter(pk=self.attempt.pk).update(
                 sandbox_platform=platform, sandbox_image=spec.image
             )
-        self.sandbox = launcher.start(spec, f"yoriki-sandbox-{self.run.uid}-{self.attempt.number}")
+        name = f"yoriki-sandbox-{self.run.uid}-{self.attempt.number}"
+        # イメージのpullで、Attemptのleaseより長くかかることがある
+        self.sandbox = self._keep_lease(lambda: launcher.start(spec, name), on_abandon=Sandbox.remove)
         self._restore(self.sandbox)
         return self.sandbox
 
@@ -321,16 +323,24 @@ class SandboxSession:
 
         return self._keep_lease(save), storage.storage_id, stopped
 
-    def _keep_lease(self, operation: Callable[[], T]) -> T:
+    def _keep_lease(self, operation: Callable[[], T], *, on_abandon: Callable[[T], object] | None = None) -> T:
         """時間のかかる操作を別のスレッドで行い、その間このスレッドでleaseを延ばす（DBに触るのはこのスレッドだけ）。
-        leaseを失ったら LeaseLost で抜ける"""
+
+        leaseを失ったら、操作の終わりを待ってから LeaseLost で抜ける。操作が結果を返していれば `on_abandon` に渡す
+        （起動し終えたSandboxを消す等）
+        """
         with ThreadPoolExecutor(max_workers=1, thread_name_prefix="sandbox-io") as pool:
             future = pool.submit(operation)
             while True:
                 try:
                     return future.result(timeout=HEARTBEAT_INTERVAL)
                 except FutureTimeout:
-                    self.heartbeat()
+                    try:
+                        self.heartbeat()
+                    except BaseException:
+                        if on_abandon is not None and future.exception() is None:
+                            on_abandon(future.result())
+                        raise
 
     def close(self) -> None:
         """Sandboxを消し、Attemptの作業領域を消す。どの終わり方でも呼ぶ"""

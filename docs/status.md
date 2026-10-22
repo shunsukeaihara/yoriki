@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-22（#27 のマージ前）
+- 最終更新：2026-10-22（#27 のマージ後）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -65,7 +65,8 @@
 - CI：e2e、本体のイメージのレジストリへのpush（使うレジストリが未決。design.md §13）、Sandboxのイメージのmulti-arch（arm64）のビルドとDocker Hubへのpush・脆弱性スキャン（公開先のorgが未決）。
 - Compose：channel-listener（Channelの受信を実装するとき）。
 - 管理コマンド：`drain_workers`・`resume_workers`（Workerの実行を実装するとき）。
-- 業務のアプリは `llm`、`conversation`、`run`、`harness`、`stream`、`usage` まで。`skill`、`plugin`、`artifact`、`runtime`、`task`、`delivery`、`connector` 等（backend-conventions.md §1.2）は、まだない。
+- 業務のアプリは `llm`、`conversation`、`run`、`harness`、`stream`、`usage`、`runtime`（Runtime Profileまで。Launcherはまだ）まで。`skill`、`plugin`、`artifact`、`task`、`delivery`、`connector` 等（backend-conventions.md §1.2）は、まだない。
+- Sandboxを使うToolはまだない。今のRunnerが使えるToolは `todo_write`・`ask_user` だけ（Runは既定のRuntime Profileの版を固定するが、Sandboxはまだ起動しない）。
 - 会話の画面で後回しにしたもの：添付と成果物の一覧（Artifactの段階）、入力欄の `/`・`@` での指定（Skill・Connectorの段階）、次の依頼の開始前の編集・取消（design.md §11.2。APIもまだない）、会話のタイトルの変更、実行履歴の画面（`/runs`）。
 - Provider Adapterは、実際のプロバイダのAPIではまだ試していない（API keyが要る）。テストは各社の応答を差し替えて確かめている。
 - 接続の同時実行数・1分あたりの要求数の上限は、項目があるだけで、まだ守らせていない（Runnerの段階）。
@@ -79,7 +80,12 @@
 
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。提案する順番：
 
-1. **LauncherとRunnerのTool（`runtime`）**：イメージ・契約は #26、Runtime Profileは #27。Launcher（CONTRACT.md §2の制限を必ずかけ、自動テストで確かめる。コンテナからの脱出への対策の1・2・4。design.md §7.2）、Workerのplatformに合うmanifestの選択とAttemptへの記録、RunnerのTool（`shell`・`read`・`write`・`edit`・`glob`・`grep`・`job_output`・`job_kill`、バックグラウンドのジョブ、出力の上限と退避。harness.md §7・§8）、Attemptを終えるときの `kill` の `all`。
+1. **LauncherとRunnerのTool（`runtime`）**：イメージ・契約は #26、Runtime Profileは #27。
+   - 読むもの：`sandbox/CONTRACT.md`（起動の制限 §2、コマンドの環境 §3、補助コマンドの入出力 §4）、harness.md §7（Toolの定義・出力の上限と退避・各Toolの仕様）・§8（Sandboxでの実行）、design.md §7.1〜§7.5、deployment.md §3（qclusterにだけDockerのソケットとworkspacesを渡す。workspacesはホストとコンテナで同じパス）。
+   - Launcher（`api/src/runtime/`）：CONTRACT.md §2の制限を必ずかけて起動する（`--init` は付けない。イメージの `init` がPID 1）。止めるのは `docker rm -f`。制限が効いていることを自動テストで確かめる（design.md §7.2の対策の1）。Runの `runtime_version` の版を使い、Workerのplatformに合うmanifestのdigestを選んでAttemptに記録する（`platform_digests`）。合うものがなければ起動を断る。起動したら `init-env` を呼ぶ。Dockerの操作はDockerのSDKかCLIかを、始めに決める。
+   - RunnerのTool：`shell`（`yoriki-sandbox exec`。timeoutで止めずにバックグラウンドのジョブへ）・`job_output`・`job_kill`、`read`・`write`・`edit`・`glob`・`grep`（補助コマンド。`write`・`edit` は読んだ版を `expected_sha256` で渡す）。出力の上限と退避（harness.md §7.7）。Sandboxは最初にSandboxのToolが呼ばれた時点で起動する。Attemptを終える・確認待ちになるときは、ジョブを止め、最後に `kill` の `all`。
+   - 開発時は `YORIKI_SANDBOX_IMAGE_OVERRIDE`（deployment.md §3.3）で手元のイメージに差し替えられるようにする。
+   - コンテナからの脱出への対策の2・4（ホストの更新、userns-remapかrootless Docker）は、deployment.md に手順として書く。
 2. **gVisorの評価**：契約テストと、文書処理の所要時間で確かめる（design.md §7.2の5）。
 3. **成果物とファイル（`artifact`）**：Local・S3のStorage Backend、添付、成果物の取得（`/api/files/<token>/`、`X-Accel-Redirect`）。
 4. **Skill（`skill`、`resource`）**：Draft・Version・公開範囲と公開、Skillの資料（マスター・テンプレート）、会話からのSkill更新、入力欄の `/` での指定、エージェントに見せる一覧（利用者の権限で使えるものだけ）。役割「Plugin公開者」（`user/roles.py`）を「Skill公開者」に改める（design.md 0.19）。
@@ -102,9 +108,11 @@ cd frontend && pnpm install
 - Runを手元で動かすときは、api（`uvicorn app.asgi:application --port 8000`）と `python src/manage.py qcluster` を起動する。macOSでは、qclusterに `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` が要る（`.envrc.example`。ないとforkしたworkerがHTTPの接続で落ちる）。
 - LLMのAPI keyがなくても、OpenAI互換の応答を返す小さな偽のサーバーを立て、ローカルLLMの接続として登録すれば、API → Q2 → Runner → SSEを一通り確かめられる（#22で確かめた方法）。開発用のDBには、そのときの確認用のユーザー（`e2e-check@example.co.jp`）と、接続「確認用の偽LLM」・モデル設定「確認用の偽モデル」「確認用の偽モデル（推論）」（effortは low・medium・high）が残っている。モデル設定「社内Qwen」の接続先はつながらないので、再試行の後のモデルの切り替えの確認に使える。
 - 基盤管理者は `cd api && uv run python src/manage.py createsuperuser` で作る。開発時はDjangoの管理画面（`/api/admin/`）のパスワードログインでセッションを作れる。
+- Sandboxのイメージは `docker build -f sandbox/images/docs/Dockerfile -t yoriki-sandbox-docs:dev sandbox` でビルドし、`cd sandbox && uv sync && uv run pytest` で契約テストを動かす（sandbox/README.md）。
+- Runtime Profileを手元で登録するときは、手元のレジストリにイメージをpushする：`docker run -d --name yoriki-dev-registry -p 127.0.0.1:5001:5000 registry:3`、`docker tag yoriki-sandbox-docs:dev localhost:5001/yoriki-sandbox-docs:dev && docker push localhost:5001/yoriki-sandbox-docs:dev`。apiは `YORIKI_SANDBOX_INSECURE_REGISTRIES=localhost:5001` を付けて起動し、管理画面で `localhost:5001/yoriki-sandbox-docs@<pushで表示されたdigest>` を登録する。開発用のDBには、この方法で登録した既定のRuntime Profile「文書処理」（linux/arm64）がある。既定のRuntime Profileがないと、会話のRunは始まらない。
 
 - 環境変数はリポジトリルートの `.envrc`（direnv）。テストやmypyは、`.envrc` を読み込んだ状態で実行する。
 - 変更前に、AGENTS.md と、触る範囲の規約を読む。作業の進め方（ブランチ、コミット、Pull Request、CI、マージ）は development.md に従う。
 - 作業の区切りでは、本書の §1・§3・§4 を更新する。Pull Requestで進めた作業は、マージの前にそのPull Requestの中で更新する（マージの後に `main` へ別にコミットしない）。
-- Pull Requestの進め方（AGENTS.md）：コードの変更は手元のブランチで作り、PRはユーザーに依頼されてから作る。マージはユーザーが指示したときに限り行う。本書の状況の更新や誤字の修正のように判断を含まない文書の変更は、PRを作らずに `main` へ直接コミットする。design.md や規約の判断を変える変更はPRにする（development.md §1）。CIが通ったらレビュー（`/codex:adversarial-review` 等）の指摘を直して報告し、マージの指示を待つ（squash merge。`[skip ci]` は development.md §4.1）。PRのページは消せないので、試しのPRや取り消しのPRは作らない。
+- Pull Requestの進め方（AGENTS.md）：コードの変更は手元のブランチで作り、PRはユーザーに依頼されてから作る。マージはユーザーが指示したときに限り行う。本書の状況の更新や誤字の修正のように判断を含まない文書の変更は、PRを作らずに `main` へ直接コミットする。design.md や規約の判断を変える変更はPRにする（development.md §1）。PRごとにCodexのレビューを受け、指摘をコードで確かめてから直す。CIが通ったら報告し、マージの指示を待つ（squash merge。`[skip ci]` は development.md §4.1）。作業の中で見つけた小さな問題は、別のPRにせず、今のPRで直す。PRのページは消せないので、試しのPRや取り消しのPRは作らない。
 - 設計の判断を変える話が出たら、コードを書く前に design.md と本書を直し、合意してから実装する。

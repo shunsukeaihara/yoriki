@@ -59,6 +59,7 @@ INSTALLED_APPS = [
     "usage",
     "harness",
     "stream",
+    "runtime",
 ]
 
 MIDDLEWARE = [
@@ -271,6 +272,10 @@ SOCIALACCOUNT_PROVIDERS: dict[str, dict] = {
 # 先頭の鍵で暗号化し、すべての鍵で復号する。鍵を替えるときは新しい鍵を先頭に足し、
 # `rotate_secret_encryption` で暗号化し直してから古い鍵を外す（deployment.md §5）
 YORIKI_SECRET_ENCRYPTION_KEYS = _env_list("YORIKI_SECRET_ENCRYPTION_KEYS")
+
+# --- Sandbox（design.md §7、sandbox/CONTRACT.md） ---
+# HTTPSでなくHTTPで読むレジストリ（`localhost:5001` 等）。手元に立てたレジストリでRuntime Profileを試すときだけ使う
+YORIKI_SANDBOX_INSECURE_REGISTRIES = _env_list("YORIKI_SANDBOX_INSECURE_REGISTRIES")
 
 LOGGING = {
     "version": 1,

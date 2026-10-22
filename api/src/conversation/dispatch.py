@@ -15,6 +15,7 @@ from run.models import (
     RunEventKind,
     RunStatus,
 )
+from runtime.models import RuntimeProfile
 
 from .models import Conversation, ConversationMessage, InstructionKind, InstructionState, MessageRole, UserInstruction
 
@@ -92,17 +93,21 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
     if conversation.handles_sensitive_data and not version.is_local:
         raise CannotStart(_("個人情報や機密情報を扱う会話では、ローカルLLMのモデルを選んでください。"))
     effort = resolve_effort(conversation, version)
+    # 実行環境はRunの単位で決め、既定のRuntime Profileのその時点の版を固定する（design.md §7.3）
+    runtime_version = RuntimeProfile.default_version()
     run = Run.objects.create(
         conversation=conversation,
         parent=parent,
         owner=conversation.owner,
         model_version=version,
         effort=effort,
+        runtime_version=runtime_version,
         handles_sensitive_data=conversation.handles_sensitive_data,
         manifest={
             "fixed": {
                 "model_version": version.pk,
                 "effort": effort,
+                "runtime_version": runtime_version.pk if runtime_version else None,
                 "handles_sensitive_data": conversation.handles_sensitive_data,
             },
             "appended": [],

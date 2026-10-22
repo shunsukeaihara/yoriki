@@ -1249,6 +1249,282 @@ paths:
               schema:
                 $ref: '#/components/schemas/ModelProfile'
           description: ''
+  /api/v1/runtime_profiles/:
+    get:
+      operationId: v1_runtime_profiles_list
+      description: Runtime Profileの管理API（基盤管理者だけ）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+      - in: query
+        name: name
+        schema:
+          type: string
+        description: 名前
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - manage/runtime_profile
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedRuntimeProfileList'
+          description: ''
+    post:
+      operationId: v1_runtime_profiles_create
+      description: Runtime Profileの管理API（基盤管理者だけ）
+      tags:
+      - manage/runtime_profile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeProfileRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RuntimeProfileRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RuntimeProfileRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeProfile'
+          description: ''
+  /api/v1/runtime_profiles/{runtime_profile}/versions/:
+    get:
+      operationId: v1_runtime_profiles_versions_list
+      description: Runtime Profileの版の履歴（基盤管理者だけ）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: path
+        name: runtime_profile
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - manage/runtime_profile/version
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedRuntimeProfileVersionList'
+          description: ''
+  /api/v1/runtime_profiles/{runtime_profile}/versions/{number}/:
+    get:
+      operationId: v1_runtime_profiles_versions_retrieve
+      description: Runtime Profileの版の履歴（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: number
+        schema:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          title: 版
+        required: true
+      - in: path
+        name: runtime_profile
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - manage/runtime_profile/version
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeProfileVersion'
+          description: ''
+  /api/v1/runtime_profiles/{uid}/:
+    get:
+      operationId: v1_runtime_profiles_retrieve
+      description: Runtime Profileの管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/runtime_profile
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeProfile'
+          description: ''
+    put:
+      operationId: v1_runtime_profiles_update
+      description: Runtime Profileの管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/runtime_profile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RuntimeProfileRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RuntimeProfileRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RuntimeProfileRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeProfile'
+          description: ''
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、別の版ができている）
+    patch:
+      operationId: v1_runtime_profiles_partial_update
+      description: Runtime Profileの管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/runtime_profile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedRuntimeProfileRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedRuntimeProfileRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedRuntimeProfileRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeProfile'
+          description: ''
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、別の版ができている）
+    delete:
+      operationId: v1_runtime_profiles_destroy
+      description: Runtime Profileの管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/runtime_profile
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/runtime_profiles/{uid}/make_default/:
+    post:
+      operationId: v1_runtime_profiles_make_default_create
+      description: 既定のRuntime Profileにする（これまでの既定は外れる）。以後に始めるRunが使う
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/runtime_profile
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RuntimeProfile'
+          description: ''
   /api/v1/sso_providers/:
     get:
       operationId: v1_sso_providers_list
@@ -3153,6 +3429,44 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/RunStreamEvent'
+    PaginatedRuntimeProfileList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/RuntimeProfile'
+    PaginatedRuntimeProfileVersionList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/RuntimeProfileVersion'
     PaginatedSSOProviderList:
       type: object
       required:
@@ -3326,6 +3640,71 @@ components:
           type: string
           default: ''
           maxLength: 50
+        change_reason:
+          type: string
+          writeOnly: true
+          maxLength: 500
+    PatchedRuntimeProfileRequest:
+      type: object
+      description: |-
+        Runtime Profile。中身（イメージ、資源の上限）は現在の版の値を平らに出す。
+
+        イメージは「名前@sha256:digest」で受け取り、レジストリのAPIで契約番号と対応platformを確かめてから版に入れる
+        （design.md §7.3）。中身を変えて保存すると新しい版を作る。更新では、編集を始めた時点の `version` を送る
+      properties:
+        name:
+          type: string
+          minLength: 1
+          title: 名前
+          maxLength: 100
+        is_active:
+          type: boolean
+          title: 有効
+        version:
+          type: integer
+          minimum: 0
+          description: 現在の版。更新では、編集を始めた時点の値を送る（作成では送らない）
+        image:
+          type: string
+          minLength: 1
+          description: 「名前@sha256:digest」（例：yoriki/yoriki-sandbox-docs@sha256:…）。タグだけの指定はできない
+          maxLength: 500
+        memory_mb:
+          type: integer
+          maximum: 65536
+          minimum: 512
+        cpus:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,2}(?:\.\d{0,2})?$
+        pids_limit:
+          type: integer
+          maximum: 4096
+          minimum: 64
+        tmp_mb:
+          type: integer
+          maximum: 8192
+          minimum: 16
+        work_mb:
+          type: integer
+          maximum: 32768
+          minimum: 64
+        output_mb:
+          type: integer
+          maximum: 32768
+          minimum: 16
+        env_mb:
+          type: integer
+          maximum: 32768
+          minimum: 16
+        command_timeout_seconds:
+          type: integer
+          maximum: 3600
+          minimum: 10
+        job_timeout_seconds:
+          type: integer
+          maximum: 86400
+          minimum: 60
         change_reason:
           type: string
           writeOnly: true
@@ -3695,6 +4074,283 @@ components:
           clarification.requested: '#/components/schemas/ClarificationEvent'
           run.event: '#/components/schemas/RunOtherEvent'
           run.delta: '#/components/schemas/RunDeltaEvent'
+    RuntimeProfile:
+      type: object
+      description: |-
+        Runtime Profile。中身（イメージ、資源の上限）は現在の版の値を平らに出す。
+
+        イメージは「名前@sha256:digest」で受け取り、レジストリのAPIで契約番号と対応platformを確かめてから版に入れる
+        （design.md §7.3）。中身を変えて保存すると新しい版を作る。更新では、編集を始めた時点の `version` を送る
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          title: 名前
+          maxLength: 100
+        is_active:
+          type: boolean
+          title: 有効
+        is_default:
+          type: boolean
+          readOnly: true
+          title: 既定
+        version:
+          type: integer
+          minimum: 0
+          description: 現在の版。更新では、編集を始めた時点の値を送る（作成では送らない）
+        image:
+          type: string
+          description: 「名前@sha256:digest」（例：yoriki/yoriki-sandbox-docs@sha256:…）。タグだけの指定はできない
+          maxLength: 500
+        contract:
+          type: integer
+          readOnly: true
+        platforms:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        python_version:
+          type: string
+          readOnly: true
+        memory_mb:
+          type: integer
+          maximum: 65536
+          minimum: 512
+        cpus:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,2}(?:\.\d{0,2})?$
+        pids_limit:
+          type: integer
+          maximum: 4096
+          minimum: 64
+        tmp_mb:
+          type: integer
+          maximum: 8192
+          minimum: 16
+        work_mb:
+          type: integer
+          maximum: 32768
+          minimum: 64
+        output_mb:
+          type: integer
+          maximum: 32768
+          minimum: 16
+        env_mb:
+          type: integer
+          maximum: 32768
+          minimum: 16
+        command_timeout_seconds:
+          type: integer
+          maximum: 3600
+          minimum: 10
+        job_timeout_seconds:
+          type: integer
+          maximum: 86400
+          minimum: 60
+        created_by:
+          type: string
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - contract
+      - created
+      - created_by
+      - id
+      - image
+      - is_default
+      - name
+      - platforms
+      - python_version
+      - updated
+    RuntimeProfileRequest:
+      type: object
+      description: |-
+        Runtime Profile。中身（イメージ、資源の上限）は現在の版の値を平らに出す。
+
+        イメージは「名前@sha256:digest」で受け取り、レジストリのAPIで契約番号と対応platformを確かめてから版に入れる
+        （design.md §7.3）。中身を変えて保存すると新しい版を作る。更新では、編集を始めた時点の `version` を送る
+      properties:
+        name:
+          type: string
+          minLength: 1
+          title: 名前
+          maxLength: 100
+        is_active:
+          type: boolean
+          title: 有効
+        version:
+          type: integer
+          minimum: 0
+          description: 現在の版。更新では、編集を始めた時点の値を送る（作成では送らない）
+        image:
+          type: string
+          minLength: 1
+          description: 「名前@sha256:digest」（例：yoriki/yoriki-sandbox-docs@sha256:…）。タグだけの指定はできない
+          maxLength: 500
+        memory_mb:
+          type: integer
+          maximum: 65536
+          minimum: 512
+        cpus:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,2}(?:\.\d{0,2})?$
+        pids_limit:
+          type: integer
+          maximum: 4096
+          minimum: 64
+        tmp_mb:
+          type: integer
+          maximum: 8192
+          minimum: 16
+        work_mb:
+          type: integer
+          maximum: 32768
+          minimum: 64
+        output_mb:
+          type: integer
+          maximum: 32768
+          minimum: 16
+        env_mb:
+          type: integer
+          maximum: 32768
+          minimum: 16
+        command_timeout_seconds:
+          type: integer
+          maximum: 3600
+          minimum: 10
+        job_timeout_seconds:
+          type: integer
+          maximum: 86400
+          minimum: 60
+        change_reason:
+          type: string
+          writeOnly: true
+          maxLength: 500
+      required:
+      - image
+      - name
+    RuntimeProfileVersion:
+      type: object
+      properties:
+        id:
+          type: string
+          readOnly: true
+        number:
+          type: integer
+          readOnly: true
+          title: 版
+        image:
+          type: string
+          readOnly: true
+        image_repository:
+          type: string
+          readOnly: true
+          title: イメージのrepository
+        image_digest:
+          type: string
+          readOnly: true
+          title: イメージのdigest
+        contract:
+          type: integer
+          readOnly: true
+          title: 契約番号
+        platforms:
+          type: array
+          items:
+            type: string
+            maxLength: 50
+          readOnly: true
+          title: 対応platform
+        platform_digests:
+          readOnly: true
+          title: Platformごとのdigest
+        python_version:
+          type: string
+          readOnly: true
+          title: Pythonの版
+        memory_mb:
+          type: integer
+          readOnly: true
+          title: メモリ（MB）
+        cpus:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,2}(?:\.\d{0,2})?$
+          readOnly: true
+          title: CPU
+        pids_limit:
+          type: integer
+          readOnly: true
+          title: プロセス数の上限
+        tmp_mb:
+          type: integer
+          readOnly: true
+          title: /tmp（MB）
+        work_mb:
+          type: integer
+          readOnly: true
+          title: Work（MB）
+        output_mb:
+          type: integer
+          readOnly: true
+          title: Output（MB）
+        env_mb:
+          type: integer
+          readOnly: true
+          title: Env（MB）
+        command_timeout_seconds:
+          type: integer
+          readOnly: true
+          title: コマンドの待ち時間の上限（秒）
+        job_timeout_seconds:
+          type: integer
+          readOnly: true
+          title: ジョブの実行時間の上限（秒）
+        change_reason:
+          type: string
+          readOnly: true
+          title: 変更理由
+        created_by:
+          type: string
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - change_reason
+      - command_timeout_seconds
+      - contract
+      - cpus
+      - created
+      - created_by
+      - env_mb
+      - id
+      - image
+      - image_digest
+      - image_repository
+      - job_timeout_seconds
+      - memory_mb
+      - number
+      - output_mb
+      - pids_limit
+      - platform_digests
+      - platforms
+      - python_version
+      - tmp_mb
+      - work_mb
     SSOProvider:
       type: object
       description: SSOの設定の作成と表示。client secretは書き込み専用で、応答には末尾の4文字（client_secret_hint）だけを出す

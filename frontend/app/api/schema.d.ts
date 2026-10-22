@@ -494,6 +494,95 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/runtime_profiles/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Runtime Profileの管理API（基盤管理者だけ） */
+        get: operations["v1_runtime_profiles_list"];
+        put?: never;
+        /** @description Runtime Profileの管理API（基盤管理者だけ） */
+        post: operations["v1_runtime_profiles_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runtime_profiles/{runtime_profile}/versions/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Runtime Profileの版の履歴（基盤管理者だけ） */
+        get: operations["v1_runtime_profiles_versions_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runtime_profiles/{runtime_profile}/versions/{number}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Runtime Profileの版の履歴（基盤管理者だけ） */
+        get: operations["v1_runtime_profiles_versions_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runtime_profiles/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Runtime Profileの管理API（基盤管理者だけ） */
+        get: operations["v1_runtime_profiles_retrieve"];
+        /** @description Runtime Profileの管理API（基盤管理者だけ） */
+        put: operations["v1_runtime_profiles_update"];
+        post?: never;
+        /** @description Runtime Profileの管理API（基盤管理者だけ） */
+        delete: operations["v1_runtime_profiles_destroy"];
+        options?: never;
+        head?: never;
+        /** @description Runtime Profileの管理API（基盤管理者だけ） */
+        patch: operations["v1_runtime_profiles_partial_update"];
+        trace?: never;
+    };
+    "/api/v1/runtime_profiles/{uid}/make_default/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 既定のRuntime Profileにする（これまでの既定は外れる）。以後に始めるRunが使う */
+        post: operations["v1_runtime_profiles_make_default_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/sso_providers/": {
         parameters: {
             query?: never;
@@ -1320,6 +1409,32 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["RunStreamEvent"][];
         };
+        PaginatedRuntimeProfileList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["RuntimeProfile"][];
+        };
+        PaginatedRuntimeProfileVersionList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["RuntimeProfileVersion"][];
+        };
         PaginatedSSOProviderList: {
             /**
              * Format: uri
@@ -1422,6 +1537,33 @@ export interface components {
             effort_values?: string[];
             /** @default  */
             default_effort: string;
+            change_reason?: string;
+        };
+        /**
+         * @description Runtime Profile。中身（イメージ、資源の上限）は現在の版の値を平らに出す。
+         *
+         *     イメージは「名前@sha256:digest」で受け取り、レジストリのAPIで契約番号と対応platformを確かめてから版に入れる
+         *     （design.md §7.3）。中身を変えて保存すると新しい版を作る。更新では、編集を始めた時点の `version` を送る
+         */
+        PatchedRuntimeProfileRequest: {
+            /** 名前 */
+            name?: string;
+            /** 有効 */
+            is_active?: boolean;
+            /** @description 現在の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
+            version?: number;
+            /** @description 「名前@sha256:digest」（例：yoriki/yoriki-sandbox-docs@sha256:…）。タグだけの指定はできない */
+            image?: string;
+            memory_mb?: number;
+            /** Format: decimal */
+            cpus?: string;
+            pids_limit?: number;
+            tmp_mb?: number;
+            work_mb?: number;
+            output_mb?: number;
+            env_mb?: number;
+            command_timeout_seconds?: number;
+            job_timeout_seconds?: number;
             change_reason?: string;
         };
         /** @description SSOの設定の更新。種別は変えられないので、読み取り専用にする */
@@ -1580,6 +1722,114 @@ export interface components {
             readonly comment: string;
         };
         RunStreamEvent: components["schemas"]["RunStatusEvent"] | components["schemas"]["RunMessageEvent"] | components["schemas"]["ClarificationEvent"] | components["schemas"]["RunOtherEvent"] | components["schemas"]["RunDeltaEvent"];
+        /**
+         * @description Runtime Profile。中身（イメージ、資源の上限）は現在の版の値を平らに出す。
+         *
+         *     イメージは「名前@sha256:digest」で受け取り、レジストリのAPIで契約番号と対応platformを確かめてから版に入れる
+         *     （design.md §7.3）。中身を変えて保存すると新しい版を作る。更新では、編集を始めた時点の `version` を送る
+         */
+        RuntimeProfile: {
+            readonly id: string;
+            /** 名前 */
+            name: string;
+            /** 有効 */
+            is_active?: boolean;
+            /** 既定 */
+            readonly is_default: boolean;
+            /** @description 現在の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
+            version?: number;
+            /** @description 「名前@sha256:digest」（例：yoriki/yoriki-sandbox-docs@sha256:…）。タグだけの指定はできない */
+            image: string;
+            readonly contract: number;
+            readonly platforms: string[];
+            readonly python_version: string;
+            memory_mb?: number;
+            /** Format: decimal */
+            cpus?: string;
+            pids_limit?: number;
+            tmp_mb?: number;
+            work_mb?: number;
+            output_mb?: number;
+            env_mb?: number;
+            command_timeout_seconds?: number;
+            job_timeout_seconds?: number;
+            readonly created_by: string;
+            /** Format: date-time */
+            readonly created: string;
+            /** Format: date-time */
+            readonly updated: string;
+        };
+        /**
+         * @description Runtime Profile。中身（イメージ、資源の上限）は現在の版の値を平らに出す。
+         *
+         *     イメージは「名前@sha256:digest」で受け取り、レジストリのAPIで契約番号と対応platformを確かめてから版に入れる
+         *     （design.md §7.3）。中身を変えて保存すると新しい版を作る。更新では、編集を始めた時点の `version` を送る
+         */
+        RuntimeProfileRequest: {
+            /** 名前 */
+            name: string;
+            /** 有効 */
+            is_active?: boolean;
+            /** @description 現在の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
+            version?: number;
+            /** @description 「名前@sha256:digest」（例：yoriki/yoriki-sandbox-docs@sha256:…）。タグだけの指定はできない */
+            image: string;
+            memory_mb?: number;
+            /** Format: decimal */
+            cpus?: string;
+            pids_limit?: number;
+            tmp_mb?: number;
+            work_mb?: number;
+            output_mb?: number;
+            env_mb?: number;
+            command_timeout_seconds?: number;
+            job_timeout_seconds?: number;
+            change_reason?: string;
+        };
+        RuntimeProfileVersion: {
+            readonly id: string;
+            /** 版 */
+            readonly number: number;
+            readonly image: string;
+            /** イメージのrepository */
+            readonly image_repository: string;
+            /** イメージのdigest */
+            readonly image_digest: string;
+            /** 契約番号 */
+            readonly contract: number;
+            /** 対応platform */
+            readonly platforms: string[];
+            /** Platformごとのdigest */
+            readonly platform_digests: unknown;
+            /** Pythonの版 */
+            readonly python_version: string;
+            /** メモリ（MB） */
+            readonly memory_mb: number;
+            /**
+             * CPU
+             * Format: decimal
+             */
+            readonly cpus: string;
+            /** プロセス数の上限 */
+            readonly pids_limit: number;
+            /** /tmp（MB） */
+            readonly tmp_mb: number;
+            /** Work（MB） */
+            readonly work_mb: number;
+            /** Output（MB） */
+            readonly output_mb: number;
+            /** Env（MB） */
+            readonly env_mb: number;
+            /** コマンドの待ち時間の上限（秒） */
+            readonly command_timeout_seconds: number;
+            /** ジョブの実行時間の上限（秒） */
+            readonly job_timeout_seconds: number;
+            /** 変更理由 */
+            readonly change_reason: string;
+            readonly created_by: string;
+            /** Format: date-time */
+            readonly created: string;
+        };
         /** @description SSOの設定の作成と表示。client secretは書き込み専用で、応答には末尾の4文字（client_secret_hint）だけを出す */
         SSOProvider: {
             readonly id: string;
@@ -2756,6 +3006,244 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelProfile"];
+                };
+            };
+        };
+    };
+    v1_runtime_profiles_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                is_active?: boolean;
+                /** @description 名前 */
+                name?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedRuntimeProfileList"];
+                };
+            };
+        };
+    };
+    v1_runtime_profiles_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuntimeProfileRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["RuntimeProfileRequest"];
+                "multipart/form-data": components["schemas"]["RuntimeProfileRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeProfile"];
+                };
+            };
+        };
+    };
+    v1_runtime_profiles_versions_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                runtime_profile: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedRuntimeProfileVersionList"];
+                };
+            };
+        };
+    };
+    v1_runtime_profiles_versions_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                number: number;
+                runtime_profile: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeProfileVersion"];
+                };
+            };
+        };
+    };
+    v1_runtime_profiles_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeProfile"];
+                };
+            };
+        };
+    };
+    v1_runtime_profiles_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RuntimeProfileRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["RuntimeProfileRequest"];
+                "multipart/form-data": components["schemas"]["RuntimeProfileRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeProfile"];
+                };
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、別の版ができている） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_runtime_profiles_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_runtime_profiles_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedRuntimeProfileRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedRuntimeProfileRequest"];
+                "multipart/form-data": components["schemas"]["PatchedRuntimeProfileRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeProfile"];
+                };
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、別の版ができている） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_runtime_profiles_make_default_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RuntimeProfile"];
                 };
             };
         };

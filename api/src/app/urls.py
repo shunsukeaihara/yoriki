@@ -21,6 +21,7 @@ urlpatterns: list[URLPattern | URLResolver] = [
                 path("", include("stream.urls")),
                 path("", include("conversation.urls")),
                 path("", include("run.urls")),
+                path("", include("runtime.urls")),
             ]
         ),
     ),

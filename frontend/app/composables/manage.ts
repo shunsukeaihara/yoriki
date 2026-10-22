@@ -30,6 +30,12 @@ export const useManageMenu = () => {
       permission: PermissionCode.CHANGE_MODEL_PROFILE,
     },
     {
+      label: $i18n.t('Runtime Profile'),
+      icon: 'i-lucide-box',
+      to: '/manage/runtime_profiles',
+      permission: PermissionCode.CHANGE_RUNTIME_PROFILE,
+    },
+    {
       label: $i18n.t('ユーザー'),
       icon: 'i-lucide-users',
       to: '/manage/users',

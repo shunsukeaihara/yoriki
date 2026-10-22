@@ -93,6 +93,12 @@ const createAPI = () => {
         versions: (number?: number) =>
           readOnlyResource<ModelProfileVersion>(http, `v1/model_profiles/${id}/versions`, number?.toString()),
       }),
+      runtimeProfiles: (id?: string) => ({
+        ...resource<RuntimeProfile, RuntimeProfileWrite, RuntimeProfileListParams>(http, 'v1/runtime_profiles', id),
+        makeDefault: () => http.post<RuntimeProfile, RuntimeProfile>(`v1/runtime_profiles/${id}/make_default/`),
+        versions: (number?: number) =>
+          readOnlyResource<RuntimeProfileVersion>(http, `v1/runtime_profiles/${id}/versions`, number?.toString()),
+      }),
     },
   }
 }

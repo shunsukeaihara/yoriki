@@ -97,6 +97,15 @@ class Run(models.Model):
         "llm.ModelProfileVersion", on_delete=models.PROTECT, related_name="+", verbose_name=_("モデル設定の版")
     )
     effort = models.CharField(_("effort"), max_length=50, blank=True)
+    # SandboxのToolを使うRunが、開始時に固定したRuntime Profileの版。なければSandboxのToolを出さない（design.md §7.3）
+    runtime_version = models.ForeignKey(
+        "runtime.RuntimeProfileVersion",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("Runtime Profileの版"),
+    )
     handles_sensitive_data = models.BooleanField(_("個人情報・機密情報を扱う"), default=False)
     # 開始時に固定したもの（fixed）と、実行中に追記したもの（appended。順序と時刻つき）。design.md §3.2
     manifest = models.JSONField(_("Manifest"), default=dict)

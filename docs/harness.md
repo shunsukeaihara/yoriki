@@ -345,7 +345,7 @@ class ToolResult:
 3. 利用者の権限と組織のポリシー：Connectorの操作は、ConnectorPermissionで使えるものだけ（design.md §4.9.1）。
 4. モデルの能力：Tool呼出しに対応しないモデルでは、Toolを出さない（Skillも、Toolが要るものは候補にしない。design.md §4.8）。
 5. 確認の相手：`ask_user` は、答える人がいるRun（会話、または対話Bindingのあるタスク）だけに出す。
-6. Sandbox：Runtime Profileのないコマンド不要のRun（design.md §3.4）では、Sandboxを使うToolを出さない。Sandboxを使うToolがあるRunでも、Sandboxは最初に呼ばれた時点で起動する（design.md §4）。
+6. Sandbox：既定のRuntime Profileがないとき、またはSkillかTask DefinitionがSandboxを使うToolを許さないコマンド不要のRun（design.md §3.4）では、Sandboxを使うToolを出さない。Runtime ProfileはRunの単位で決まる（design.md §7.3）。Sandboxを使うToolがあるRunでも、Sandboxは最初に呼ばれた時点で起動する（design.md §4）。
 
 途中で読み込んだSkillが、このRunに出していないToolやConnectorを要するときは、Toolの一覧を変えずに、`skill` の結果で「このSkillはこのRunでは使えないToolを要する」と返す。利用者には、そのSkillを明示した新しい依頼を案内させる。
 
@@ -594,8 +594,8 @@ gVisor（runsc）の評価（design.md §7.2の5）は、この契約テスト�
 
 資料はSandboxを起動するときに `/workspace/master` へ展開する（design.md §3.8）。Sandboxを起動した後に読み込んだSkillは、次のように扱う。
 
-- SkillのRuntime Profileが、起動済みのSandboxのものと違うときは、読み込まずに「このSkillは今の実行環境では使えない」と返す。利用者には、そのSkillを明示した新しい依頼を案内させる。
-- 同じなら、Launcherが固定した版の資料を、Sandboxの外から `/workspace/master/skills/{skill_id}/` へ置いて（Sandboxからは読取り専用のまま）、置けたことを確かめてから `skill` の結果を返す。置けなければ読込みを失敗にし、Manifestへの追記も取り消す（同じtransactionで扱う）。
+- Runtime ProfileはRunの単位で決まり、Skillは指定しない（design.md §7.3）。Skillを読み込んでもSandboxは替わらない。
+- Launcherが固定した版の資料を、Sandboxの外から `/workspace/master/skills/{skill_id}/` へ置いて（Sandboxからは読取り専用のまま）、置けたことを確かめてから `skill` の結果を返す。置けなければ読込みを失敗にし、Manifestへの追記も取り消す（同じtransactionで扱う）。
 - Sandboxをまだ起動していないときは、起動するときに、Manifestに追記した全Skillの資料を展開する。
 
 同じRunでもう一度読み込んでも、追記した版を返す（途中で公開し直されても切り替えない）。

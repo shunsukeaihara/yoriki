@@ -113,12 +113,12 @@ design.md §5.1の永続オブジェクトを、次の単位で分ける。実�
 |---|---|
 | `user` | User、役割と権限、SSOのログイン（django-allauth） |
 | `plugin` | PluginExtension（サーバーに配備する拡張のRegistry。design.md §3.11） |
-| `skill` | Skill、SkillVersion、SkillDraft、SkillChange、SkillEvaluation、SkillAssetBinding（Skillが使うTool・資料・Connector・実行環境・必要な能力も版で持つ。design.md §3.2） |
+| `skill` | Skill、SkillVersion、SkillDraft、SkillChange、SkillEvaluation、SkillAssetBinding（Skillが使うTool・資料・Connector・必要な能力も版で持つ。実行環境はRunの単位で決める。design.md §3.2、§7.3） |
 | `resource` | Resource、ResourceVersion |
 | `conversation` | Conversation、ConversationMessage、UserInstruction |
 | `run` | Run、ExecutionAttempt、RunEvent、ClarificationRequest、Checkpoint、ToolInvocation、ResultEnvelope、Outbox（`dispatch.py`） |
 | `artifact` | Artifact、BlobObject、BlobLocation、WorkspaceSnapshot |
-| `runtime` | RuntimeProfileVersion、EnvironmentRevision、PackageBundle |
+| `runtime` | RuntimeProfile、RuntimeProfileVersion、EnvironmentRevision、PackageBundle、Launcher |
 | `task` | TaskDefinition、TaskDefinitionRevision、TriggerBinding、TriggerBindingRevision、TriggerReceipt、InteractionBinding、InteractionBindingRevision、NotificationBinding、NotificationBindingRevision |
 | `delivery` | Destination、DestinationRevision、Delivery、DeliveryAttempt、ExternalThreadBinding、ChannelMessageReceipt |
 | `worker` | Workerの登録情報 |

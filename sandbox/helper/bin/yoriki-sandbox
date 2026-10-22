@@ -1,0 +1,8 @@
+#!/usr/local/bin/python3 -I
+"""Sandboxの中の補助コマンド。中身は /opt/yoriki/lib/yoriki_sandbox（sandbox/CONTRACT.md）"""
+
+import runpy
+import sys
+
+sys.path.insert(0, "/opt/yoriki/lib")
+runpy.run_module("yoriki_sandbox", run_name="__main__", alter_sys=True)

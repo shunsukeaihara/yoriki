@@ -1,0 +1,349 @@
+# 契約テストで実際の制限の下で動かす、代表的なコマンド（harness.md §8.5）。
+# エージェントがSkillで使ったコマンドを、ここに足していく。
+# run: /workspace/work で実行するコマンド。exit: 期待する終了コード（既定0）。
+# output: 出力に含まれるべき文字列。setup: 先に一度だけ作る見本（tests/test_commands.py の SETUP）を使う
+#
+# 見本: /workspace/work/c/ に a.txt（1〜100の行）、名簿.csv（UTF-8）、sjis.csv（Shift_JIS）、data.json、日本語のディレクトリ
+
+# --- coreutils ---
+[[command]]
+run = "echo hello"
+output = "hello"
+[[command]]
+run = "printf '%s-%s\\n' a b"
+output = "a-b"
+[[command]]
+run = "cat c/a.txt | wc -l"
+output = "100"
+[[command]]
+run = "head -n 3 c/a.txt"
+output = "3"
+[[command]]
+run = "tail -n 1 c/a.txt"
+output = "100"
+[[command]]
+run = "sort -n -r c/a.txt | head -1"
+output = "100"
+[[command]]
+run = "seq 1 5 | sort -R | sort -n | uniq | paste -sd+ | bc"
+output = "15"
+[[command]]
+run = "cut -d, -f2 c/名簿.csv | tail -n +2"
+output = "山田"
+[[command]]
+run = "tr 'a-z' 'A-Z' <<< yoriki"
+output = "YORIKI"
+[[command]]
+run = "basename /workspace/work/c/a.txt .txt"
+output = "a"
+[[command]]
+run = "dirname /workspace/work/c/a.txt"
+output = "/workspace/work/c"
+[[command]]
+run = "realpath c/../c/a.txt"
+output = "/workspace/work/c/a.txt"
+[[command]]
+run = "mkdir -p x/y/z && touch x/y/z/f && ls -R x | grep -c f"
+output = "1"
+[[command]]
+run = "cp c/a.txt b.txt && mv b.txt d.txt && rm d.txt && test ! -e d.txt"
+[[command]]
+run = "ln -s c/a.txt l.txt && readlink l.txt"
+output = "c/a.txt"
+[[command]]
+run = "stat -c '%s' c/a.txt"
+output = "292"
+[[command]]
+run = "du -sh c | cut -f1"
+output = "K"
+[[command]]
+run = "df -h /workspace/work | tail -1"
+output = "tmpfs"
+[[command]]
+run = "date -d '2026-10-01' +%Y/%m/%d"
+output = "2026/10/01"
+[[command]]
+run = "TZ=Asia/Tokyo date -d '2026-10-01T00:00:00Z' +%H"
+output = "09"
+[[command]]
+run = "sha256sum c/a.txt | cut -c1-8"
+[[command]]
+run = "md5sum c/a.txt | wc -c"
+output = "42"
+[[command]]
+run = "base64 <<< yoriki | base64 -d"
+output = "yoriki"
+[[command]]
+run = "nl c/a.txt | tail -1"
+output = "100"
+[[command]]
+run = "split -l 50 c/a.txt part_ && ls part_* | wc -l"
+output = "2"
+[[command]]
+run = "join <(printf '1 a\\n2 b\\n') <(printf '1 x\\n2 y\\n')"
+output = "2 b y"
+[[command]]
+run = "comm -12 <(printf 'a\\nb\\n') <(printf 'b\\nc\\n')"
+output = "b"
+[[command]]
+run = "tee t.txt <<< saved > /dev/null && cat t.txt"
+output = "saved"
+[[command]]
+run = "yes | head -3 | wc -l"
+output = "3"
+[[command]]
+run = "timeout 1 sleep 5"
+exit = 124
+[[command]]
+run = "env | grep -c '^HOME=/workspace/work/.home$'"
+output = "1"
+[[command]]
+run = "whoami"
+output = "sandbox"
+[[command]]
+run = "nproc"
+[[command]]
+run = "printenv LANG"
+output = "C.UTF-8"
+[[command]]
+run = "false"
+exit = 1
+[[command]]
+run = "exit 42"
+exit = 42
+[[command]]
+run = "no-such-command"
+exit = 127
+
+# --- findutils・grep・sed・gawk・diffutils ---
+[[command]]
+run = "find c -name '*.csv' | sort"
+output = "c/sjis.csv"
+[[command]]
+run = "find c -type f -newer c/a.txt -o -type f -name a.txt | wc -l"
+[[command]]
+run = "find . -maxdepth 2 -type d -name '日本語*'"
+output = "日本語のフォルダ"
+[[command]]
+run = "find c -type f -print0 | xargs -0 wc -l | tail -1"
+output = "total"
+[[command]]
+run = "grep -n '^5' c/a.txt | head -2"
+output = "5:5"
+[[command]]
+run = "grep -rl 山田 c"
+output = "c/名簿.csv"
+[[command]]
+run = "grep -E '^(10|20)$' c/a.txt | wc -l"
+output = "2"
+[[command]]
+run = "grep -P '\\d{3}' c/a.txt"
+output = "100"
+[[command]]
+run = "grep -c xyz c/a.txt"
+exit = 1
+output = "0"
+[[command]]
+run = "sed -n '10,12p' c/a.txt | paste -sd,"
+output = "10,11,12"
+[[command]]
+run = "sed 's/山田/田中/' c/名簿.csv | grep 田中"
+output = "田中"
+[[command]]
+run = "cp c/a.txt e.txt && sed -i '1d' e.txt && head -1 e.txt"
+output = "2"
+[[command]]
+run = "awk -F, 'NR>1 {s+=$3} END {print s}' c/名簿.csv"
+output = "75"
+[[command]]
+run = "gawk 'BEGIN {printf \"%.2f\\n\", 1/3}'"
+output = "0.33"
+[[command]]
+run = "diff <(echo a) <(echo b)"
+exit = 1
+output = "> b"
+[[command]]
+run = "diff -u c/a.txt c/a.txt && echo same"
+output = "same"
+[[command]]
+run = "cmp c/a.txt c/a.txt && echo same"
+output = "same"
+[[command]]
+run = "rg -c 山田 c"
+output = "c/名簿.csv:1"
+[[command]]
+run = "rg --files c | sort | head -1"
+output = "c/"
+
+# --- アーカイブ・圧縮 ---
+[[command]]
+run = "tar czf a.tgz c && tar tzf a.tgz | grep -c a.txt"
+output = "1"
+[[command]]
+run = "tar cJf a.txz c && tar tJf a.txz | wc -l"
+[[command]]
+run = "gzip -k c/a.txt -c > a.gz && zcat a.gz | wc -l"
+output = "100"
+[[command]]
+run = "bzip2 -c c/a.txt > a.bz2 && bzcat a.bz2 | tail -1"
+output = "100"
+[[command]]
+run = "xz -c c/a.txt > a.xz && xzcat a.xz | head -1"
+output = "1"
+[[command]]
+run = "rm -f z.zip && zip -qr z.zip c && unzip -l z.zip | grep -c 名簿"
+output = "1"
+[[command]]
+run = "rm -rf u && mkdir u && cd u && unzip -q ../z.zip && ls c | grep -c csv"
+output = "2"
+
+# --- そのほかのツール ---
+[[command]]
+run = "jq -r '.items[] | select(.price > 100) | .name' c/data.json"
+output = "みかん"
+[[command]]
+run = "jq '.items | length' c/data.json"
+output = "2"
+[[command]]
+run = "echo '2^10' | bc"
+output = "1024"
+[[command]]
+run = "echo 'scale=3; 10/3' | bc"
+output = "3.333"
+[[command]]
+run = "file c/名簿.csv"
+output = "text"
+[[command]]
+run = "file -b --mime-encoding c/sjis.csv"
+output = "unknown-8bit"
+[[command]]
+run = "iconv -f CP932 -t UTF-8 c/sjis.csv | head -1"
+output = "番号"
+[[command]]
+run = "tree -L 1 c | tail -1"
+output = "files"
+[[command]]
+run = "ps -o pid,cmd | head -1"
+output = "PID"
+[[command]]
+run = "less c/a.txt | head -1"
+output = "1"
+[[command]]
+run = "fc-list :lang=ja family | grep -c 'Noto Sans CJK'"
+[[command]]
+run = "locale"
+output = "LANG=C.UTF-8"
+
+# --- shell ---
+[[command]]
+run = "for i in 1 2 3; do echo $i; done | tail -1"
+output = "3"
+[[command]]
+run = "x=$(echo 日本語); echo ${#x}"
+output = "3"
+[[command]]
+run = "set -euo pipefail; false | true"
+exit = 1
+[[command]]
+run = "cat <<'EOS' > h.txt\nline1\nline2\nEOS\nwc -l < h.txt"
+output = "2"
+[[command]]
+run = "(sleep 0.1; echo bg) & wait; echo done"
+output = "done"
+[[command]]
+run = "trap 'echo trapped' EXIT; true"
+output = "trapped"
+[[command]]
+run = "[[ 'abc' =~ ^a ]] && echo match"
+output = "match"
+[[command]]
+run = "mkdir -p 'スペース 入り' && touch 'スペース 入り/ファイル 名.txt' && ls 'スペース 入り'"
+output = "ファイル 名.txt"
+[[command]]
+run = "ulimit -n"
+
+# --- Python ---
+[[command]]
+run = "python --version"
+output = "Python 3.13"
+[[command]]
+run = "python -c 'import sys; print(sys.prefix)'"
+output = "/workspace/env"
+[[command]]
+run = "pip --version"
+output = "python 3.13"
+[[command]]
+run = "pip list --format=freeze | grep -c '^pandas=='"
+output = "1"
+[[command]]
+run = "pip show pandas"
+output = "Name: pandas"
+[[command]]
+run = "pip install requests 2>&1"
+exit = 1
+output = "install_python_packages"
+[[command]]
+run = "pip3 -q uninstall -y pandas 2>&1"
+exit = 1
+output = "install_python_packages"
+[[command]]
+run = "python -c 'import pandas as pd; print(pd.read_csv(\"c/名簿.csv\")[\"点数\"].sum())'"
+output = "75"
+[[command]]
+run = "python -c 'import pandas as pd; print(pd.read_csv(\"c/sjis.csv\", encoding=\"cp932\").iloc[1, 1])'"
+output = "髙橋商店"
+[[command]]
+run = "python -c 'import pandas as pd; df = pd.DataFrame({\"a\": [1, 2]}); df.to_excel(\"o.xlsx\", index=False); print(pd.read_excel(\"o.xlsx\").a.sum())'"
+output = "3"
+[[command]]
+run = "python -c 'import pandas as pd; pd.DataFrame({\"名前\": [\"山田\"]}).to_csv(\"o.csv\", index=False, encoding=\"cp932\")' && iconv -f CP932 -t UTF-8 o.csv | tail -1"
+output = "山田"
+[[command]]
+run = "python -c 'import numpy as np; print(np.arange(10).sum())'"
+output = "45"
+[[command]]
+run = "python -c 'import xlsxwriter; w = xlsxwriter.Workbook(\"x.xlsx\"); w.add_worksheet().write(0, 0, \"表\"); w.close()' && test -s x.xlsx"
+[[command]]
+run = "python -c 'from rapidfuzz import fuzz; print(fuzz.ratio(\"株式会社テスト\", \"(株)テスト\") > 40)'"
+output = "True"
+[[command]]
+run = "python -c 'import charset_normalizer as c; print(c.from_path(\"c/sjis.csv\").best().encoding)'"
+output = "cp932"
+[[command]]
+run = "python -c 'import unicodedata; print(unicodedata.normalize(\"NFKC\", \"ｶﾌﾞｼｷｶﾞｲｼｬ\"))'"
+output = "カブシキガイシャ"
+[[command]]
+run = "python -c 'import matplotlib.pyplot as plt; plt.rcParams[\"font.family\"] = \"Noto Sans CJK JP\"; plt.title(\"売上\"); plt.savefig(\"g.png\")' 2>&1 && test -s g.png && echo ok"
+output = "ok"
+[[command]]
+run = "python -c 'import pypdf, pdfplumber, pypdfium2, docx, pptx, openpyxl, PIL, lxml; print(\"ok\")'"
+output = "ok"
+[[command]]
+run = "python -c 'import sqlite3; c = sqlite3.connect(\":memory:\"); print(c.execute(\"select 1+1\").fetchone()[0])'"
+output = "2"
+[[command]]
+run = "python -c 'import json, csv, re, zipfile, datetime, decimal, statistics; print(\"stdlib\")'"
+output = "stdlib"
+[[command]]
+run = "python -c 'import tempfile; f = tempfile.NamedTemporaryFile(); print(f.name.startswith(\"/tmp/\"))'"
+output = "True"
+[[command]]
+run = "python -c 'import multiprocessing as m; print(m.Pool(2).map(abs, [-1, -2]))'"
+output = "[1, 2]"
+[[command]]
+run = "python -c 'import urllib.request; urllib.request.urlopen(\"https://example.com\", timeout=3)' 2>&1"
+exit = 1
+output = "URLError"
+[[command]]
+run = "python - <<'PY'\nprint(sum(range(10)))\nPY"
+output = "45"
+[[command]]
+run = "printf 'print(1+1)\\n' > s.py && python s.py"
+output = "2"
+[[command]]
+run = "python -m venv /tmp/v 2>&1 && /tmp/v/bin/python -c 'print(1)'"
+output = "1"
+[[command]]
+run = "python -c 'input()'"
+exit = 1
+output = "EOFError"

@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-21（#24・#25 のマージ前）
+- 最終更新：2026-10-22（#26 のマージ前）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -31,6 +31,7 @@
 | #22 | 会話と実行のバックエンド：`conversation`（会話・メッセージ・実行中の依頼）、`run`（Run・Attempt（lease・fencing）・RunEvent・確認・ToolInvocation・Outbox・Reconciler）、`harness`（Runner、`ask_user`・`todo_write`、再試行とモデルの切り替えの確認、繰返しの検出、ステップ数の上限、要約の圧縮）、`usage`（利用量）、`stream`（LISTEN/NOTIFYとSSE）、Provider Adapterの拡張（メッセージの部品、OpenAIのResponses API、effort、推論の途中経過、`tool_choice`）、モデル設定の入力の種類・effort・既定。Q2のクラスタを1つにし、qclusterごとに同時に動かすRunの数を制限 |
 | #24 | qclusterでは接続プールを使わない（`settings.USE_DATABASE_POOL`）。Q2がworkerをforkで作り、プールの接続をforkした先と共有して、問い合わせの結果やtransactionが混ざっていた（#22 からの不具合） |
 | #25 | 会話の画面：会話を始めるウィザード（個人情報・機密情報を扱うならローカルLLMのモデルだけ）、サイドバーの会話の一覧（`app/v1/stream/` の通知で更新）、Runごとの作業の表示（状態、作業の計画、作業の記録、応答の逐次表示）、確認への回答（単一・複数の選択、自由記述、補足。モデルの切り替えの確認も）、実行中の追加の指示と次の依頼、停止、モデルとeffortの切り替え。`useEventStream`・`useUserEvents`（再接続時の取得し直し、古い接続・応答の破棄）、`DCheckboxGroup`、`MarkdownContent`（`markdown-it`。生のHTMLと画像は出さない。frontend-conventions.md §7.5）。API側はRunの一覧の会話での絞り込みと `todos` の型 |
+| #26 | Sandboxのイメージ：`sandbox/CONTRACT.md`（契約番号1。イメージの配置、起動の制限、コマンドの環境、補助コマンドの入出力）、docsのイメージ（Python 3.13、GNUのツール、日本語のフォント、文書処理のライブラリをlockからイメージのPythonへ）、補助コマンド `yoriki-sandbox`（exec・kill・形式ごとのread・write・edit・glob・grep・stat・init-env）、契約テスト（制限の確認、サブコマンド、代表的なコマンド111件）、CI（`sandbox.yml`）。design.md 0.22：`/workspace/env` はイメージのPythonの上の薄い環境（`--system-site-packages`）にした |
 
 確認済みのこと：
 
@@ -60,14 +61,14 @@
 
 - CSPのインラインのスクリプトを、ハッシュかnonceで絞る（deployment.md §4.1）。
 - フロントエンド：`app.config.ts`（テーマの色。primary / neutralを決める）、E2E（Playwright）。
-- CI：e2e、sandbox、本体のイメージのレジストリへのpush（使うレジストリが未決。design.md §13）。
+- CI：e2e、本体のイメージのレジストリへのpush（使うレジストリが未決。design.md §13）、Sandboxのイメージのmulti-arch（arm64）のビルドとDocker Hubへのpush・脆弱性スキャン（公開先のorgが未決）。
 - Compose：channel-listener（Channelの受信を実装するとき）。
 - 管理コマンド：`drain_workers`・`resume_workers`（Workerの実行を実装するとき）。
 - 業務のアプリは `llm`、`conversation`、`run`、`harness`、`stream`、`usage` まで。`skill`、`plugin`、`artifact`、`runtime`、`task`、`delivery`、`connector` 等（backend-conventions.md §1.2）は、まだない。
 - 会話の画面で後回しにしたもの：添付と成果物の一覧（Artifactの段階）、入力欄の `/`・`@` での指定（Skill・Connectorの段階）、次の依頼の開始前の編集・取消（design.md §11.2。APIもまだない）、会話のタイトルの変更、実行履歴の画面（`/runs`）。
 - Provider Adapterは、実際のプロバイダのAPIではまだ試していない（API keyが要る）。テストは各社の応答を差し替えて確かめている。
 - 接続の同時実行数・1分あたりの要求数の上限は、項目があるだけで、まだ守らせていない（Runnerの段階）。
-- `sandbox/`（CONTRACT.md、イメージ、契約テスト）は、まだない。
+- 契約テストの代表的なコマンドは111件。harness.md §8.5の目標（数百）へ、Skillで使われたコマンドから増やす。
 - 認証プロキシの裏に置く場合は、前段のnginxが利用者のIPアドレスを `CF-Connecting-IP` 等で解決して `X-Forwarded-For` を上書きしているかを、導入先で確かめる（deployment.md §8.6）。解決していないと、ログインの試行回数の制限で、多くの利用者が同じIPアドレスとして数えられる。
 - ハーネスで後回しにしたもの：予算の上限の強制（今は利用量を記録するだけ。クオータの設定とあわせて作る）、Toolの並列の実行（今は順に実行する。Sandboxの読取りのToolを加えるときに作る）、圧縮の1・2段（大きいTool結果の退避と置き換え。harness.md §9.1）、Checkpoint・Workspace snapshot（Sandboxの段階）、添付ファイル（Artifactの段階）。
 - フロントエンドのSPAを静的なファイルにして `yoriki-api` のイメージに入れ、`frontend` のコンテナをなくす（`ssr: false` なのでNode.jsのサーバーは要らない。アプリのイメージが1つになる）。
@@ -77,12 +78,15 @@
 
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。提案する順番：
 
-1. **Sandbox（`sandbox/`、`runtime`）**：CONTRACT.md、docsのイメージ、Launcher（`network_mode: none`、コンテナからの脱出への対策の1〜4。design.md §7）、Runnerからのshell実行と、Sandboxの中の補助コマンド `yoriki-sandbox`（ジョブ、形式ごとの読取り、編集。harness.md §8）、多くのコマンドが制限の下で動くことの契約テスト（harness.md §8.5）。gVisorの評価もこの段階で行う。
-2. **成果物とファイル（`artifact`）**：Local・S3のStorage Backend、添付、成果物の取得（`/api/files/<token>/`、`X-Accel-Redirect`）。
-3. **Skill（`skill`、`resource`）**：Draft・Version・公開範囲と公開、Skillの資料（マスター・テンプレート）、会話からのSkill更新、入力欄の `/` での指定、エージェントに見せる一覧（利用者の権限で使えるものだけ）。役割「Plugin公開者」（`user/roles.py`）を「Skill公開者」に改める（design.md 0.19）。
-4. **Connector（`connector`）とタスク・配信（`task`、`delivery`）**：読取り専用のDB Connector、Connectorを使える利用者・役割と操作（ConnectorPermission。design.md §4.9.1）、入力欄の `@` での指定、Task Definition（使うSkill・モデル・許可する操作）、Webhook・Zapierの通知、Trigger。DB Connector（種別：PostgreSQL・MySQL・SQL Server、ホスト、DB名、ユーザー、パスワード等）とHTTP Connector（ホスト、ヘッダー、認証情報等）の設定は管理画面で登録し、資格情報は `utils/crypto.py` で暗号化してDBに保存する（backend-conventions.md §6.4）。個人情報を主な中身とする接続先には機密のフラグを付けられるようにし、フラグの付いたConnectorはローカルLLMのモデルを使うタスク・会話にだけ割り当てる（design.md §4冒頭、§4.9.1）。
-5. **最初の2つの業務**（design.md §13。Skillとタスクとして作る）：請求書PDF → 社内DBと照合 → 取込用のCSV、契約書レビュー → Zapierへ結果。
-6. **Channel Plugin**（Teams・Slack・Discord。`plugin` のRegistry）。
+1. **Runtime ProfileとLauncher、RunnerのTool（`runtime`）**：イメージ・契約・契約テストは #26。残りは2つのPRに分ける。
+   - Runtime Profile（`RuntimeProfile`・`RuntimeProfileVersion`。モデル設定と同じく、中身を変えると版が増える）と管理画面。**Skillごとには持たず、Runの単位で決める**（1つのRunで複数のSkillを読み込み、Sandboxは1つなので）。基盤管理者が既定を1つ決め、SandboxのToolを使うRunはそれを使い、Runを始めるときに版を固定する。用途の違うイメージが要るようになったら、タスクの設定等で選べるようにする。登録のときは、レジストリのAPIでmanifestとconfigを読んで、digestと契約番号（ラベル）を確かめる（apiにDockerのソケットを渡さない）。始める前に design.md（§3.1、§3.3、§5.1、§10.1）を直す。
+   - Launcher（CONTRACT.md §2の制限を必ずかけ、自動テストで確かめる。コンテナからの脱出への対策の1・2・4。design.md §7.2）と、RunnerのTool（`shell`・`read`・`write`・`edit`・`glob`・`grep`・`job_output`・`job_kill`、バックグラウンドのジョブ、出力の上限と退避。harness.md §7・§8）。
+2. **gVisorの評価**：契約テストと、文書処理の所要時間で確かめる（design.md §7.2の5）。
+3. **成果物とファイル（`artifact`）**：Local・S3のStorage Backend、添付、成果物の取得（`/api/files/<token>/`、`X-Accel-Redirect`）。
+4. **Skill（`skill`、`resource`）**：Draft・Version・公開範囲と公開、Skillの資料（マスター・テンプレート）、会話からのSkill更新、入力欄の `/` での指定、エージェントに見せる一覧（利用者の権限で使えるものだけ）。役割「Plugin公開者」（`user/roles.py`）を「Skill公開者」に改める（design.md 0.19）。
+5. **Connector（`connector`）とタスク・配信（`task`、`delivery`）**：読取り専用のDB Connector、Connectorを使える利用者・役割と操作（ConnectorPermission。design.md §4.9.1）、入力欄の `@` での指定、Task Definition（使うSkill・モデル・許可する操作）、Webhook・Zapierの通知、Trigger。DB Connector（種別：PostgreSQL・MySQL・SQL Server、ホスト、DB名、ユーザー、パスワード等）とHTTP Connector（ホスト、ヘッダー、認証情報等）の設定は管理画面で登録し、資格情報は `utils/crypto.py` で暗号化してDBに保存する（backend-conventions.md §6.4）。個人情報を主な中身とする接続先には機密のフラグを付けられるようにし、フラグの付いたConnectorはローカルLLMのモデルを使うタスク・会話にだけ割り当てる（design.md §4冒頭、§4.9.1）。
+6. **最初の2つの業務**（design.md §13。Skillとタスクとして作る）：請求書PDF → 社内DBと照合 → 取込用のCSV、契約書レビュー → Zapierへ結果。
+7. **Channel Plugin**（Teams・Slack・Discord。`plugin` のRegistry）。
 
 並行してよいもの：実際のIdPでのログインの確認（client IDが用意でき次第）、CSPの改善。
 

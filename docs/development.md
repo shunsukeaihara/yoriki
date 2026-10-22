@@ -89,7 +89,7 @@ cd frontend && pnpm gen:api
 
 ### 3.4 Sandbox（`sandbox/`）
 
-- イメージのビルドと契約テスト（`sandbox/tests/`）を通す。
+- イメージのビルドと契約テスト（`sandbox/tests/`）、`ruff check`・`ruff format` を通す（`docker build -f sandbox/images/docs/Dockerfile -t yoriki-sandbox-docs:dev sandbox`、`cd sandbox && uv run pytest`。sandbox/README.md）。
 - 契約（`sandbox/CONTRACT.md`）を変えたら、イメージのラベル `org.yoriki.sandbox-contract` の番号と、Runnerの対応番号を同じPull Requestで上げる。
 
 ## 4 CI
@@ -107,7 +107,7 @@ GitHub Actionsで、Pull Requestと `main` へのpushごとに実行する。変
 | api-types（`api-types.yml`） | `api/**`、`frontend/**` | スキーマとフロントエンドの型を生成し、コミット済みのものと差分がないこと（`git diff --exit-code`） |
 | app-images（`app-images.yml`） | Dockerfile、依存のlock、`deploy/**` | 本体のイメージをビルドし、`deploy/compose.yaml` を起動して疎通を確認する（`/api/ping/`、画面、API、静的ファイル、セキュリティのヘッダー）。レジストリへのpushは、使うレジストリを決めてから追加する。コードだけの変更では動かさない |
 | e2e（未） | `api/**`、`frontend/**` | Composeでバックエンドとフロントエンドを起動し、Playwrightを実行（`main` へのpushと、ラベルを付けたPull Requestだけ） |
-| sandbox（未） | `sandbox/**`、毎週の定期実行 | イメージのビルド、契約テスト、脆弱性スキャン。`main` ではDocker Hubへ公開（deployment.md §2.1） |
+| sandbox | `sandbox/**`、毎週の定期実行 | lint、イメージのビルド、契約テスト。脆弱性スキャンと、`main` でのDocker Hubへの公開（deployment.md §2.1）は、公開先のorgを決めてから加える |
 
 - 依存の更新はDependabot（`.github/dependabot.yml`。GitHub Actions、uv、npm、Dockerfileのベースイメージ、Composeの公式イメージ）でPull Requestにし、CIを通してからマージする。公開から日の浅い版を避けるため、Dependabotは `cooldown` を14日にし、npmはpnpmの `minimumReleaseAge` も維持する。
 - CIのSecret（Docker Hubのtoken等）は、GitHubのEnvironmentに置き、`main` のjobだけが使えるようにする。

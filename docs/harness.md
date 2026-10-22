@@ -495,15 +495,15 @@ Docker操作はLauncher（design.md §7.3）にまとめ、Runnerは決まった
 - `shell` は、ジョブの終了を `timeout_seconds` まで待つ。終わればその結果を返す。終わらなければ、それまでの出力と `job_id` を返し、ジョブは続ける（DeepSeek Harnessの方式）。`background: true` なら待たずに `job_id` を返す。
 - 終わったジョブは、次のステップの前に `job.finished` として記録し、`context.snapshot` でモデルに知らせる。モデルは `job_output` で出力を読む。待つだけのループ（`sleep` と確認の繰返し）をしないよう、説明文に書く。
 - 同時に動かせるジョブは4つまで。1つのジョブの実行時間の上限はRuntime Profileで決める（初期値30分）。
-- 確認待ち・完了・取消でAttemptを終えるときは、動いているジョブを止めてから、Checkpointを確定する（design.md §7.5）。止めたことは、再開時に `context.snapshot` でモデルに知らせる。
+- 確認待ち・完了・取消でAttemptを終えるときは、動いているジョブを止めてから、Checkpointを確定する（design.md §7.5）。ジョブはプロセスグループで止めるが、コマンドが `setsid` 等でグループを離れると届かないので、最後に `yoriki-sandbox kill` の `all`（PID 1以外のすべて）で止める（sandbox/CONTRACT.md §4.2）。止めたことは、再開時に `context.snapshot` でモデルに知らせる。
 - 最後の応答の前に、動いているジョブがあれば、Runnerはその旨をモデルに返して、待つか止めるかを決めさせる（1回だけ）。
 
 ### 8.4 Sandboxの中の補助コマンド `yoriki-sandbox`
 
 Runnerは、shell以外のToolの処理もSandboxの中で行う。ファイルの解析を、DBの資格情報を持つWorkerのプロセスで行わないため（壊れたPDF等による不具合の影響をSandboxに閉じ込める）。
 
-- イメージの `/opt/yoriki/bin/yoriki-sandbox` に入れる（rootfsは読取り専用）。Python製で、イメージのPythonと同梱のライブラリ（pypdf・pdfplumber・pypdfium2・openpyxl・python-docx・python-pptx）を使う。
-- サブコマンド：`exec`（プロセスグループを作ってコマンドを始める。止めるときはLauncherがそのグループへsignalを送る）、`read`、`write`、`edit`、`glob`、`grep`、`stat`。
+- イメージの `/opt/yoriki/bin/yoriki-sandbox` に入れる（rootfsは読取り専用）。Python製で、イメージのPython（頻出ライブラリのpypdf・pdfplumber・pypdfium2・openpyxl・python-docx・python-pptx等が入っている）を `-I` で動かす。エージェントが変えられる `/workspace/env` の追加のpackageや環境変数の影響を受けない。
+- サブコマンド：`init`（コンテナのPID 1）、`exec`（プロセスグループを作ってコマンドを始める）、`kill`（そのグループか、PID 1以外のすべてへsignalを送る）、`read`、`write`、`edit`、`glob`、`grep`、`stat`、`init-env`（`/workspace/env` をイメージのPythonの上の薄い環境として作る）、`version`。
 - 補助コマンドの結果も、Sandboxの中で作られるものなので、権限や実行状態の正本にしない（design.md §7.1）。ファイルの中身の表示として扱う。
 - Runnerからの引数は、標準入力のJSONで渡す（shellの解釈を通さない）。結果は標準出力のJSONで返す。
 - 契約番号はイメージのラベル `org.yoriki.sandbox-contract` に記録する（design.md §13）。サブコマンドと入出力の形は `sandbox/CONTRACT.md` で定め、契約テストで確かめる。
@@ -513,9 +513,9 @@ Runnerは、shell以外のToolの処理もSandboxの中で行う。ファイル�
 エージェントは多くの種類のコマンドを使う。Sandboxの制限（読取り専用のrootfs、`10001` のユーザー、ネットワークなし、tmpfs）の下で、次が確実に動くことを要件にし、契約テストで確かめる。
 
 - GNUのツール：coreutils、findutils、grep、sed、gawk、diffutils、file、tar、gzip・xz・zip・unzip、bc、jq、ripgrep。
-- Python（mise.tomlの版）と、頻出のライブラリ（pandas、openpyxl、pypdf、pdfplumber、pypdfium2、python-docx、python-pptx、rapidfuzz、chardet 等。design.md §7.6）。
+- Python（mise.tomlの版）と、頻出のライブラリ（pandas、openpyxl、xlsxwriter、pypdf、pdfplumber、pypdfium2、python-docx、python-pptx、rapidfuzz、charset-normalizer、matplotlib 等。design.md §7.6。一覧は `sandbox/images/docs/requirements.in`）。文字コードの判定は、LGPLの chardet ではなくMITの charset-normalizer を使う。
 - 日本語：UTF-8のファイル名、Shift_JISのCSVの読み書き、日本語のフォント（グラフ用。Noto CJK等、OFL）。
-- 契約テストは、代表的なコマンドの一覧（数百）を実際の制限の下で実行し、終了コードと出力を確かめる。一覧はSkillで使われたコマンドから増やす。
+- 契約テストは、代表的なコマンドの一覧（`sandbox/tests/commands.toml`。数百を目標に、Skillで使われたコマンドから増やす）を実際の制限の下で実行し、終了コードと出力を確かめる。
 
 gVisor（runsc）の評価（design.md §7.2の5）は、この契約テストと、文書処理の所要時間で行う。
 

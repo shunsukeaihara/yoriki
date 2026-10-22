@@ -1,0 +1,43 @@
+# Sandboxイメージのビルドと契約テスト（docs/development.md §3.4、docs/deployment.md §2.1）。
+# 毎週も動かし、ベースイメージやDebianのパッケージの更新で壊れていないかを確かめる。
+# Docker Hubへのpush（amd64・arm64、provenance・SBOM）は、公開先のorgを決めてから追加する
+name: sandbox
+
+on:
+  pull_request:
+    paths: ['sandbox/**', 'mise.toml', 'ruff.toml', '.github/workflows/sandbox.yml']
+  push:
+    branches: [main]
+    paths: ['sandbox/**', 'mise.toml', 'ruff.toml', '.github/workflows/sandbox.yml']
+  schedule:
+    - cron: '0 18 * * 0' # 毎週月曜 3:00（日本時間）
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sandbox:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Pythonはmise.tomlの版を使い、uvにはダウンロードさせない
+      UV_PYTHON_DOWNLOADS: never
+      YORIKI_SANDBOX_TEST_IMAGE: yoriki-sandbox-docs:ci
+    defaults:
+      run:
+        working-directory: sandbox
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - name: イメージをビルドする
+        run: docker build -f images/docs/Dockerfile -t "$YORIKI_SANDBOX_TEST_IMAGE" .
+      - name: 契約テスト
+        run: uv run pytest

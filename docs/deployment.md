@@ -12,9 +12,10 @@ Docker Compose、Nginx、イメージの作り方と配り方、環境変数、�
 yoriki/
 ├── api/                    # Django（api / qcluster / channel-listener / worker / migrate で共用するイメージ）
 ├── frontend/               # Nuxt
-├── sandbox/                # Sandboxイメージ（Docker Hubで公開）
+├── sandbox/                # Sandboxイメージ（Docker Hubで公開。sandbox/README.md）
 │   ├── CONTRACT.md         # Runnerとイメージの取り決め（契約番号つき）
-│   ├── images/<profile>/Dockerfile   # 用途別（docs、analysis 等）
+│   ├── helper/             # Sandboxの中の補助コマンド yoriki-sandbox（イメージ共通）
+│   ├── images/<profile>/   # 用途別（docs、analysis 等）。Dockerfile、requirements.in・requirements.lock
 │   └── tests/              # 契約テスト
 ├── deploy/
 │   ├── compose.yaml            # 単一ホストの本番構成
@@ -27,7 +28,7 @@ yoriki/
 │   ├── nginx/                  # Nginxの設定（sites/：tls.conf・http.conf、snippets/、edge/）
 │   ├── env/                    # 本番の環境変数の一覧（yoriki.env・postgres.env・cloudflared.env の example）
 │   └── .env.example            # Composeファイル自体の変数（イメージ名等。秘密情報は書かない）
-├── .github/workflows/      # backend.yml、frontend.yml、api-types.yml、app-images.yml、sandbox.yml（未）
+├── .github/workflows/      # backend.yml、frontend.yml、api-types.yml、app-images.yml、sandbox.yml
 ├── mise.toml
 └── .envrc.example
 ```
@@ -55,7 +56,7 @@ yoriki/
 
 ### 2.1 Sandboxイメージの公開
 
-- `.github/workflows/sandbox.yml` は、`sandbox/**` の変更時と毎週の定期実行で動く。
+- `.github/workflows/sandbox.yml` は、`sandbox/**` の変更時と毎週の定期実行で動く。今はイメージのビルドと契約テストまでで、Docker Hubへのpushは公開先のorgを決めてから加える。
 - buildxでamd64とarm64をビルドし、provenanceとSBOMを付けてDocker Hubへpushする。イメージ名は `<org>/yoriki-sandbox-<profile>`、タグは日付（`YYYY.MM.DD`）とする（例：`<org>/yoriki-sandbox-docs:2026.10.16`）。
 - 公開したdigest（index＝manifest listのdigest）をworkflowの出力とリリースノートに残す。管理画面でRuntime Profileの新しい版としてdigestを登録すると、Skillで使えるようになる。
 - イメージにはラベル `org.yoriki.sandbox-contract=<契約番号>` を付ける。Runnerが対応しない契約番号のイメージは、管理画面で登録できない。契約を変えたらCONTRACT.mdとラベルの番号を同時に上げ、契約テストで検出できるようにする。
@@ -174,7 +175,7 @@ cd frontend && pnpm dev
 ```
 
 - 環境変数はリポジトリルートの `.envrc`（direnv）で設定する（`.envrc.example` をコピーする）。
-- Sandboxを動かす確認には、手元のDockerを使う。Sandboxイメージを手元で変更するときは `docker build -t yoriki-sandbox-docs:dev sandbox/images/docs` でビルドし、`YORIKI_SANDBOX_IMAGE_OVERRIDE=yoriki-sandbox-docs:dev` で差し替える（開発時だけ有効な設定にする。`.envrc.example` に例がある）。
+- Sandboxを動かす確認には、手元のDockerを使う。Sandboxイメージを手元で変更するときは `docker build -f sandbox/images/docs/Dockerfile -t yoriki-sandbox-docs:dev sandbox` でビルドし（contextは共通の補助コマンドを含む `sandbox/`）、`YORIKI_SANDBOX_IMAGE_OVERRIDE=yoriki-sandbox-docs:dev` で差し替える（開発時だけ有効な設定にする。`.envrc.example` に例がある）。
 - frontendの開発サーバー（3000番）は、`/api` をapi（8000番）へ転送する（Nuxtの `nitro.devProxy`）。画面とAPIが同じオリジンになるので、セッションCookieがそのまま使え、CORSの設定は不要。
 - devProxyは `xfwd: true` を付けて転送し、`changeOrigin` は付けない。ブラウザのHostヘッダー（`localhost:3000`）が保たれるので、DjangoのCSRFの確認が通り、開発時のSSOのリダイレクトURIは `http://localhost:3000/api/accounts/...` になる。認証基盤のアプリ登録にもこのURIを登録する。
 

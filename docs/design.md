@@ -2,12 +2,12 @@
 
 作成日：2026年10月2日  
 更新日：2026年10月21日  
-版：0.21 設計案  
+版：0.22 設計案  
 対象：サービス企画、開発、運用担当
 
 プロダクト名はYoriki（よりき）とする（0.16でYuhitsuから変更）。同名の製品・サービスがあることは承知の上で、検索での見つけやすさは重視しない。名称の商標・ドメイン等の確認は本設計の対象外とする。
 
-主な改訂内容は§15を参照。0.19では、業務ごとのAgent（業務の設定）とSkillを束ねる業務のPluginをやめ、標準のエージェント1つとSkillを中心とするモデルにした（§3.1）。0.20では、Webhookのpayloadをそのまま渡し、必要な項目だけを取り出す受け取り方にした（§4.2）。0.21では、ハーネスの設計を [harness.md](harness.md) にまとめ、コマンドを常駐のシェルではなく呼出しごとに実行する方式にした（§4.8、§7.5）。
+主な改訂内容は§15を参照。0.19では、業務ごとのAgent（業務の設定）とSkillを束ねる業務のPluginをやめ、標準のエージェント1つとSkillを中心とするモデルにした（§3.1）。0.20では、Webhookのpayloadをそのまま渡し、必要な項目だけを取り出す受け取り方にした（§4.2）。0.21では、ハーネスの設計を [harness.md](harness.md) にまとめ、コマンドを常駐のシェルではなく呼出しごとに実行する方式にした（§4.8、§7.5）。0.22では、Sandboxの頻出ライブラリをイメージのPythonに入れ、Run専用の環境はその上の薄い環境にした（§7.6）。
 
 ## 1 目的と基本方針
 
@@ -958,8 +958,8 @@ LLM呼出しが成功した直後に応答保存に失敗した場合も、呼�
 | /workspace/master | RO | 使うSkillに紐付いた資料、マスター、テンプレートの固定版 |
 | /workspace/work | RW | 中間ファイル。原則として実行終了後に破棄 |
 | /workspace/output | RW | 成果物候補。管理側が検証して永続化 |
-| /workspace/env | RW | Run専用Python仮想環境。lockとwheelから復元し、終了後に削除 |
-| /packages | RO | 管理側が用意した検証済みwheelと依存lock |
+| /workspace/env | RW | Run専用Python仮想環境。イメージのPythonの上の薄い環境（`--system-site-packages`）で、追加したpackageだけを持つ。終了後に削除 |
+| /packages | RO | 追加するpackageの検証済みwheelと依存lock（PackageBundle） |
 | /tmp | RW | サイズ制限付きtmpfs。コンテナ終了時に破棄 |
 
 Checkpointの管理情報はSandbox外に保存する。エージェントが書いたファイルを権限や実行状態の正本として使わない。HOMEと各種キャッシュはworkまたはtmp配下へ設定する。
@@ -1049,10 +1049,11 @@ install_python_packages(packages=[{"name": "rapidfuzz"}])
 
 取得環境にはRun本文を渡さず、サーバーで正規化したpackage識別子と実行環境条件だけを渡す。index等の接続設定はユーザーやLLMから上書きできない。依存関係の解析・インストールをWeb APIプロセス内で直接実行しない。
 
-以下は管理側が用意した、全依存の固定版とhashを含む`requirements.lock`から導入する例である。pipのローカル取得とhash検証を利用する。[pip install](https://pip.pypa.io/en/stable/cli/pip_install/)と[Secure installs](https://pip.pypa.io/en/stable/topics/secure-installs/)を参照。
+頻出ライブラリは、イメージのビルド時に、全依存の固定版とhashを含むlock（`requirements.lock`）からイメージのPythonへ入れる。rootfsは読取り専用なので、Sandboxの中からは変えられない。Run専用の仮想環境 `/workspace/env` は、このPythonの上に `--system-site-packages` で作る薄い環境で（数十KB、作るのは一瞬）、追加したpackageだけを持つ。追加したpackageはイメージの版より先に読まれる。頻出ライブラリをRunごとにコピー・インストールしないので、起動が速く、tmpfsのメモリも使わない。
+
+基底のsite-packagesはimage digestとlockで固定されているので、共有しても再現性は保てる。環境はimage digestと追加したpackageのlockで表す（§7.7のEnvironment Revision）。追加は、互換性を検証したbundleを、pipのローカル取得とhash検証で入れる。[pip install](https://pip.pypa.io/en/stable/cli/pip_install/)と[Secure installs](https://pip.pypa.io/en/stable/topics/secure-installs/)を参照。
 
 ```bash
-python -m venv /workspace/env
 /workspace/env/bin/python -m pip install \
   --no-index \
   --find-links=/packages/wheels \
@@ -1062,7 +1063,7 @@ python -m venv /workspace/env
   -r /packages/requirements.lock
 ```
 
-仮想環境は基底のsite-packagesを暗黙に共有せず、頻出ライブラリも含めた全依存lockから構築する。頻出ライブラリの復元用wheelをイメージに同梱し、初期環境もこのlockから作る。起動を高速化する場合は同じ実行パスで構築した環境テンプレートをコピーできるが、Run間でRW共有しない。変更時は互換性を検証した完全なbundleから再構築する。環境を切り替える間はコマンドを停止し、半端なインストール状態で業務処理を継続しない。
+Run間でRW共有しない。環境を切り替える間はコマンドを停止し、半端なインストール状態で業務処理を継続しない。
 
 対応wheelがない場合やOSライブラリが必要な場合は、理由を返してRuntime Profileの更新対象にする。OS側のCLIが必要な場合はイメージのビルド時に追加し、Sandbox内のaptやsudoを前提としない。
 
@@ -1072,7 +1073,7 @@ python -m venv /workspace/env
 
 ### 7.7 環境の保持と分散再開
 
-実行時に使ったimage digest、OS/architecture、Python ABI、全packageのversion・hash、wheelの保存参照をEnvironment Revisionへ残す。環境追加時は新しいrevisionを作り、Checkpointに対応するrevisionを記録する。
+実行時に使ったimage digest、OS/architecture、Python ABI、追加したpackageのversion・hash、wheelの保存参照をEnvironment Revisionへ残す（イメージの中のpackageはimage digestで決まる）。環境追加時は新しいrevisionを作り、Checkpointに対応するrevisionを記録する。
 
 別WorkerではWorkspace Persistence AdapterがManifestとCheckpointを読み、Storage Backendから作業ファイルを取得して同じ環境を復元する。未対応platformのWorkerへ無理に割り当てず、別architectureへの移行は新しい環境条件として検証する。Dockerのmulti-platform imageを使う場合も、image indexのdigestと選択したplatform manifestのdigestを記録する。
 
@@ -1109,7 +1110,7 @@ Local Backendは管理専用rootと永続volumeを使い、権限付きAPIを介
 
 Workspace Persistence Adapterの契約は、capture、verify、restore、releaseとする。captureは書込み停止・静止を確認したWorkspaceと固定Manifestからsnapshotを作り、Storage Backendに保存した不変ファイル参照を返す。restoreは対象Workerの新しいAttempt専用領域へ復元する。releaseは確定済みsnapshotを確認してローカル領域を解放する。永続snapshotの物理削除は保持管理側が行う。
 
-WorkspaceSnapshotにはsnapshot_id、schema_version、Adapter ID・実装版・設定版、Run／Attempt／Checkpoint、保存時刻、ファイル一覧・相対path・hash・Artifact参照、Environment Revisionを持たせる。通常はworkとoutputの必要内容を保存し、inputとmasterは固定Resource Versionから再取得する。envはimage digest・依存lock・保管wheelから再構築する。メモリ、実行中process、接続、開いたファイルハンドルは保存しない。
+WorkspaceSnapshotにはsnapshot_id、schema_version、Adapter ID・実装版・設定版、Run／Attempt／Checkpoint、保存時刻、ファイル一覧・相対path・hash・Artifact参照、Environment Revisionを持たせる。通常はworkとoutputの必要内容を保存し、inputとmasterは固定Resource Versionから再取得する。envはimage digestと、追加したpackageのlock・保管wheelから再構築する。メモリ、実行中process、接続、開いたファイルハンドルは保存しない。
 
 基本の退避タイミングは、再開可能なTool境界、WAITING_USERへの移行、正常完了時とする。正常完了時にも続行用の最終snapshotを保存し、成功Runの作業領域を消した後に実際の最終ファイルから続けられるようにする。頻度・容量・再開保持期限はセットアップの既定値と業務ポリシーで制限する。再開を提供しない業務を設ける場合はその状態を明示し、保存失敗を黙って省略しない。
 
@@ -1689,3 +1690,4 @@ Sandboxイメージの定義は本体と同じリポジトリの `sandbox/` で�
 | 0.19 | 2026年10月21日 | 「エージェント」を標準のハーネス1つだけを指す名前にし、業務ごとのAgent（業務の設定）とAgent Revisionをやめた。業務ごとの手順・資料・使ってよいTool・Connector・実行環境・必要な能力はSkillの版が持ち、誰が使えるかはSkillの公開範囲で決める。SkillとConnectorは、社員が `/`・`@` で明示するか、エージェントが利用者の権限で使えるものから探して使う。Skillを束ねる業務のPlugin（Plugin Release、channelを追う参照）をやめ、Pluginはサーバーに配備する拡張だけを指す名前にした。モデルは会話・Task Definitionで直接選び、effortはモデルごとの値をそのまま使う。自動で変えるのはeffortだけとし、モデルの切り替えは利用者が明示したときだけにする。障害時は別のモデルへ自動では切り替えず、会話では利用者に切り替えを求め、タスクではエラーを通知する。切り替えには機密の制限とSkillの能力をかける。実行の途中で読み込んだSkillと、モデル・effortの切り替えはManifestへ追記し、利用者が明示したときだけSkillを最新の公開版へ切り替える。Connectorの利用の許可を、Agentごとから利用者（役割）ごとに変えた。役割「Plugin公開者」を「Skill公開者」とした（§3、§4.1、§4.8、§4.9、§5.1、§11） |
 | 0.20 | 2026年10月21日 | Webhookのpayloadは送り元ごとに形が違うので、送り元ごとのPluginを作らず、payloadをいつもそのままファイルとして渡し、読み方はSkillで吸収する。受付時に必要な項目だけをBindingの表で取り出せるようにし（JSONのpath、必須、型。必須がない・型が合わない要求は400）、取り出した値はプロンプトに埋め込める。サンプルのpayloadで取り出しを試せる。Bindingには受け口・認証・重複のキー・項目の取り出し・上限だけを置き、処理の流れを組む画面は作らない。送る形を決められる送り元向けに推奨の形式を示す。重複のキーは送り元のイベントIDか `Idempotency-Key` だけとし（本文のhashは使わない）、Webhookで起動するタスクには失敗の通知先を必須にして、run_idで状態を確かめる口を設けた。§4.1の例に残っていた `agent_id` を直した（§4.1、§4.2、§11.9） |
 | 0.21 | 2026年10月21日 | ハーネス（Runner）の設計を [harness.md](harness.md) にまとめた。公開されているハーネス（DeepSeek Harness、OpenCode、Codex CLI、Gemini CLI、OpenHands、SWE-agent）を読んで決めた。コマンドは常駐のシェルを持たず、呼出しごとに `docker exec` で実行し、cwdはRunの状態に持つ。timeoutまでに終わらないコマンドはバックグラウンドのジョブへ移す。RunEventにモデル用の内容を持たせ、モデルへの入力をすべてRunEventから組み立てる。CheckpointにRunEventのsequenceを持たせ、Connectorの書込みの操作に実行前の確認を必須にする設定を加えた。Web検索・Web取得はMVPの後にConnectorとして加え、各社のLLMに組み込みのWeb検索は基盤管理者が許可したときだけ使う（§2、§4.8、§4.9.3、§5.1、§7.5） |
+| 0.22 | 2026年10月22日 | Sandboxの頻出ライブラリは、イメージのPythonにlockから入れ、Run専用の仮想環境 `/workspace/env` はその上に `--system-site-packages` で作る薄い環境（追加したpackageだけを持つ）にした。頻出ライブラリをRunごとにコピー・インストールしないので、起動が速く、tmpfsのメモリを使わない。基底のsite-packagesはimage digestとlockで固定されるので、Environment Revisionはimage digestと追加したpackageのlockで表す（§7.1、§7.6、§7.7、§7.9） |

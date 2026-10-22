@@ -1,0 +1,17 @@
+# Sandboxイメージの契約テスト（sandbox/tests/）。テストはホストで動かし、Dockerで制限付きのSandboxを起動して確かめる
+[project]
+name = "yoriki-sandbox"
+version = "0"
+requires-python = ">=3.13"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest", "ruff"]
+
+[tool.uv]
+package = false
+exclude-newer = "2026-10-08T00:00:00Z"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

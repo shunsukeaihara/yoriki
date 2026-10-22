@@ -495,7 +495,7 @@ Docker操作はLauncher（design.md §7.3）にまとめ、Runnerは決まった
 - `shell` は、ジョブの終了を `timeout_seconds` まで待つ。終わればその結果を返す。終わらなければ、それまでの出力と `job_id` を返し、ジョブは続ける（DeepSeek Harnessの方式）。`background: true` なら待たずに `job_id` を返す。
 - 終わったジョブは、次のステップの前に `job.finished` として記録し、`context.snapshot` でモデルに知らせる。モデルは `job_output` で出力を読む。待つだけのループ（`sleep` と確認の繰返し）をしないよう、説明文に書く。
 - 同時に動かせるジョブは4つまで。1つのジョブの実行時間の上限はRuntime Profileで決める（初期値30分）。
-- 確認待ち・完了・取消でAttemptを終えるときは、動いているジョブを止めてから、Checkpointを確定する（design.md §7.5）。止めたことは、再開時に `context.snapshot` でモデルに知らせる。
+- 確認待ち・完了・取消でAttemptを終えるときは、動いているジョブを止めてから、Checkpointを確定する（design.md §7.5）。ジョブはプロセスグループで止めるが、コマンドが `setsid` 等でグループを離れると届かないので、最後に `yoriki-sandbox kill` の `all`（PID 1以外のすべて）で止める（sandbox/CONTRACT.md §4.2）。止めたことは、再開時に `context.snapshot` でモデルに知らせる。
 - 最後の応答の前に、動いているジョブがあれば、Runnerはその旨をモデルに返して、待つか止めるかを決めさせる（1回だけ）。
 
 ### 8.4 Sandboxの中の補助コマンド `yoriki-sandbox`
@@ -503,7 +503,7 @@ Docker操作はLauncher（design.md §7.3）にまとめ、Runnerは決まった
 Runnerは、shell以外のToolの処理もSandboxの中で行う。ファイルの解析を、DBの資格情報を持つWorkerのプロセスで行わないため（壊れたPDF等による不具合の影響をSandboxに閉じ込める）。
 
 - イメージの `/opt/yoriki/bin/yoriki-sandbox` に入れる（rootfsは読取り専用）。Python製で、イメージのPython（頻出ライブラリのpypdf・pdfplumber・pypdfium2・openpyxl・python-docx・python-pptx等が入っている）を `-I` で動かす。エージェントが変えられる `/workspace/env` の追加のpackageや環境変数の影響を受けない。
-- サブコマンド：`exec`（プロセスグループを作ってコマンドを始める）、`kill`（そのグループへsignalを送る）、`read`、`write`、`edit`、`glob`、`grep`、`stat`、`init-env`（`/workspace/env` をイメージのPythonの上の薄い環境として作る）、`version`。
+- サブコマンド：`init`（コンテナのPID 1）、`exec`（プロセスグループを作ってコマンドを始める）、`kill`（そのグループか、PID 1以外のすべてへsignalを送る）、`read`、`write`、`edit`、`glob`、`grep`、`stat`、`init-env`（`/workspace/env` をイメージのPythonの上の薄い環境として作る）、`version`。
 - 補助コマンドの結果も、Sandboxの中で作られるものなので、権限や実行状態の正本にしない（design.md §7.1）。ファイルの中身の表示として扱う。
 - Runnerからの引数は、標準入力のJSONで渡す（shellの解釈を通さない）。結果は標準出力のJSONで返す。
 - 契約番号はイメージのラベル `org.yoriki.sandbox-contract` に記録する（design.md §13）。サブコマンドと入出力の形は `sandbox/CONTRACT.md` で定め、契約テストで確かめる。

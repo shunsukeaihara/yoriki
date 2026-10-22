@@ -100,6 +100,20 @@ class TestExec:
         assert result.exit_code == 125
         assert '"outside_workspace"' in result.output
 
+    def test_kill_all_stops_processes_that_left_their_group(self, sandbox):
+        sandbox.sh("setsid sleep 301 > /dev/null 2>&1 < /dev/null &")
+        assert sandbox.exec("pgrep -f '[s]leep 301'").exit_code == 0
+        assert sandbox.helper("kill", {"all": True, "signal": "KILL"}) == {"ok": True, "killed": True}
+        assert sandbox.exec("pgrep -f '[s]leep 301'").exit_code == 1
+        # PID 1（init）は止まらず、コンテナは動き続ける
+        assert sandbox.helper("version", {})["ok"]
+
+    def test_init_is_pid_1_reaps_orphans_and_ignores_signals(self, sandbox):
+        assert "yoriki-sandbox" in sandbox.sh("tr '\\0' ' ' < /proc/1/cmdline")
+        sandbox.sh("(sleep 0.2 &) ; kill -TERM 1; kill -INT 1; sleep 1")
+        assert sandbox.sh("ps -eo stat | grep -c '^Z' || true").strip() == "0"
+        assert sandbox.helper("version", {})["ok"]
+
 
 class TestRead:
     def test_text_with_line_numbers_and_paging(self, sandbox):
@@ -140,6 +154,10 @@ class TestRead:
         assert "⟨=B2*C2⟩" in cells["text"]
         missing = sandbox.helper("read", {"path": f"{samples}/見積.xlsx", "sheet": "なし"})
         assert missing["error"]["code"] == "not_found"
+
+    def test_xlsx_rejects_a_huge_range_before_reading(self, sandbox, samples):
+        result = sandbox.helper("read", {"path": f"{samples}/見積.xlsx", "sheet": "明細", "range": "A1:Z100000"})
+        assert result["error"]["code"] == "too_large"
 
     def test_docx_and_pptx(self, sandbox, samples):
         docx = sandbox.helper("read", {"path": f"{samples}/契約.docx"})
@@ -190,6 +208,31 @@ class TestWriteAndEdit:
         assert sandbox.helper("write", {"path": "/workspace/work/link.txt", "content": ""})["error"]["code"] == (
             "read_only"
         )
+
+    def test_mixed_newlines_are_reported_and_edit_refuses(self, sandbox):
+        sandbox.sh("printf 'a\\r\\nb\\nc\\n' > /workspace/work/mixed.txt")
+        read = sandbox.helper("read", {"path": "/workspace/work/mixed.txt"})
+        assert read["newline"] == "mixed"
+        edited = sandbox.helper(
+            "edit",
+            {
+                "path": "/workspace/work/mixed.txt",
+                "old_string": "b",
+                "new_string": "B",
+                "expected_sha256": read["sha256"],
+            },
+        )
+        assert edited["error"]["code"] == "mixed_newlines"
+
+    def test_write_replaces_atomically_and_keeps_the_mode(self, sandbox):
+        created = sandbox.helper("write", {"path": "/workspace/work/run.sh", "content": "echo 1\n"})
+        sandbox.sh("chmod 755 /workspace/work/run.sh")
+        sha = sandbox.helper("read", {"path": "/workspace/work/run.sh"})["sha256"]
+        assert sha == created["sha256"]
+        sandbox.helper("write", {"path": "/workspace/work/run.sh", "content": "echo 2\n", "expected_sha256": sha})
+        assert sandbox.sh("stat -c %a /workspace/work/run.sh; ./run.sh") == "755\n2\n"
+        # 一時ファイルを残さない
+        assert sandbox.sh("ls -A /workspace/work | grep -c yoriki- || true").strip() == "0"
 
     def test_edit_keeps_encoding_and_newlines(self, sandbox):
         sandbox.sh("cp /workspace/input/請求書一覧.csv /workspace/work/sjis.csv")
@@ -252,6 +295,11 @@ class TestSearch:
         result = sandbox.helper("glob", {"pattern": "**/*.csv", "path": "/workspace/work/g"})
         assert [e["path"] for e in result["entries"]] == ["/workspace/work/g/new.csv", "/workspace/work/g/old.csv"]
         assert sandbox.helper("glob", {"pattern": "../*"})["error"]["code"] == "invalid_argument"
+
+    def test_glob_does_not_follow_symlinks_out_of_the_workspace(self, sandbox):
+        sandbox.sh("mkdir -p gl && ln -sfn /etc gl/etc")
+        result = sandbox.helper("glob", {"pattern": "etc/*", "path": "/workspace/work/gl"})
+        assert result["entries"] == []
 
     def test_grep_modes(self, sandbox):
         sandbox.sh("mkdir -p /workspace/work/s && printf '請求\\nなし\\n請求書\\n' > /workspace/work/s/a.txt")

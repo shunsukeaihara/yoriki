@@ -15,8 +15,9 @@ DEFAULT_PDF_PAGES = 10
 MAX_IMAGES = 5
 # モデルへ渡す画像の長辺（これより大きい画像は縮小する）
 MAX_IMAGE_SIDE = 1568
-# Excelを1回で表に出すセルの数
+# Excelを1回で表に出すセルの数と、指定できる範囲の大きさ（読む前に確かめる）
 MAX_CELLS = 4000
+MAX_RANGE_CELLS = 50_000
 
 SUFFIX_KIND = {
     ".pdf": "pdf",
@@ -79,7 +80,7 @@ def run_read(request: dict[str, Any]) -> dict[str, Any]:
 
 
 def _newline(value: str) -> str:
-    return "crlf" if value == "\r\n" else "lf"
+    return {"\r\n": "crlf", "\n": "lf"}.get(value, "mixed")
 
 
 def _paged(text: str, request: dict[str, Any], kind: str) -> dict[str, Any]:
@@ -222,6 +223,24 @@ def read_image(path: Path, images: bool) -> dict[str, Any]:
 # --- Excel ---
 
 
+def _bounds(ws: Any, target: str) -> tuple[int, int, int, int]:
+    """範囲の端を求め、セルを読む前に大きさを確かめる（巨大な範囲でメモリを使い切らないように）"""
+    from openpyxl.utils import range_boundaries  # noqa: PLC0415
+
+    try:
+        min_col, min_row, max_col, max_row = range_boundaries(target)
+    except (ValueError, TypeError) as exc:
+        raise ToolError("invalid_argument", f'Invalid range "{target}". Use a form such as A1:F50.') from exc
+    min_col, min_row = min_col or 1, min_row or 1
+    max_col, max_row = max_col or ws.max_column, max_row or ws.max_row
+    if (max_col - min_col + 1) * (max_row - min_row + 1) > MAX_RANGE_CELLS:
+        raise ToolError(
+            "too_large",
+            f'Range "{target}" has more than {MAX_RANGE_CELLS} cells. Pass a smaller range, such as A1:F200.',
+        )
+    return min_col, min_row, max_col, max_row
+
+
 def read_xlsx(path: Path, sheet: Any, cell_range: Any) -> dict[str, Any]:
     from openpyxl import load_workbook  # noqa: PLC0415
 
@@ -241,18 +260,16 @@ def read_xlsx(path: Path, sheet: Any, cell_range: Any) -> dict[str, Any]:
         raise ToolError("not_found", f'Sheet "{sheet}" does not exist. Sheets: {", ".join(formulas.sheetnames)}')
     ws_f, ws_v = formulas[sheet], values[sheet]
     target = cell_range if isinstance(cell_range, str) and cell_range else ws_f.dimensions
-    try:
-        rows_f = ws_f[target]
-    except ValueError as exc:
-        raise ToolError("invalid_argument", f'Invalid range "{target}". Use a form such as A1:F50.') from exc
-    if not isinstance(rows_f, tuple) or not rows_f or not isinstance(rows_f[0], tuple):
-        rows_f = ((rows_f,),) if not isinstance(rows_f, tuple) else (rows_f,)
+    min_col, min_row, max_col, max_row = _bounds(ws_f, target)
     out, cells = [], 0
-    for row in rows_f:
+    rows = ws_f.iter_rows(min_row=min_row, max_row=max_row, min_col=min_col, max_col=max_col)
+    for row in rows:
         parts = []
         for cell in row:
             if cell.value is None:
                 continue
+            if cells >= MAX_CELLS:
+                break
             cells += 1
             value = ws_v[cell.coordinate].value
             if isinstance(cell.value, str) and cell.value.startswith("="):

@@ -1,11 +1,12 @@
 """ファイルを探す（harness.md §7.8 `glob`・`grep`）"""
 
 import json
+import os
 import subprocess
 from pathlib import Path
 from typing import Any
 
-from .common import ToolError, resolve
+from .common import ROOT, ToolError, resolve
 
 MAX_GLOB = 100
 MAX_GREP = 250
@@ -23,6 +24,10 @@ def run_glob(request: dict[str, Any]) -> dict[str, Any]:
         raise ToolError("not_a_directory", f"{base} is not a directory.")
     found = []
     for item in base.glob(pattern):
+        # パターンの途中の symlink を辿って /workspace の外に出たものは、結果に入れない
+        real = Path(os.path.realpath(item.parent)) / item.name
+        if not (real == ROOT or ROOT in real.parents):
+            continue
         try:
             stat = item.lstat()
         except OSError:

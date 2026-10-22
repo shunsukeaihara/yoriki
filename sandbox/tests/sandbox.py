@@ -8,7 +8,6 @@ from typing import Any
 
 # CONTRACT.md §2 の制限。Launcherはこれより緩めない（ネットワーク、rootfs、uid、capability、資源）
 RUN_OPTIONS = [
-    "--init",
     "--network=none",
     "--user=10001:10001",
     "--read-only",
@@ -19,7 +18,7 @@ RUN_OPTIONS = [
     "--memory-swap=2g",
     "--cpus=2",
     "--tmpfs=/tmp:size=256m,mode=1777",
-    "--tmpfs=/workspace/work:size=512m,uid=10001,gid=10001,mode=0700",
+    "--tmpfs=/workspace/work:size=512m,uid=10001,gid=10001,mode=0700,exec",
     "--tmpfs=/workspace/output:size=256m,uid=10001,gid=10001,mode=0700",
     "--tmpfs=/workspace/env:size=1g,uid=10001,gid=10001,mode=0700,exec",
 ]

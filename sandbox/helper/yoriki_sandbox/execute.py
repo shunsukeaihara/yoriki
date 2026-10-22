@@ -56,15 +56,50 @@ def run_exec() -> int:
 
 
 def run_kill() -> dict[str, Any]:
+    """`pgid` のプロセスグループか、`all` なら PID 1 と自分を除くすべてのプロセスへsignalを送る。
+
+    コマンドが `setsid` 等でグループから離れると、グループへのsignalでは止まらない。Attemptを終える・Checkpointを
+    確定する前は `all` で止め、Sandboxの中で動くものがないことを確かめる（harness.md §8.3）
+    """
     request = read_request()
-    pgid = request.get("pgid")
     name = request.get("signal", "TERM")
-    if not isinstance(pgid, int) or pgid <= 1:
-        raise ToolError("invalid_argument", "pgid must be an integer greater than 1.")
     if name not in SIGNALS:
         raise ToolError("invalid_argument", f"signal must be one of {', '.join(SIGNALS)}.")
+    if request.get("all") is True:
+        # Linuxでは kill(-1) は PID 1（run_init）と呼んだプロセス自身には届かない
+        try:
+            os.kill(-1, SIGNALS[name])
+        except ProcessLookupError:
+            return {"ok": True, "killed": False}
+        return {"ok": True, "killed": True}
+    pgid = request.get("pgid")
+    if not isinstance(pgid, int) or isinstance(pgid, bool) or pgid <= 1:
+        raise ToolError("invalid_argument", "pgid must be an integer greater than 1, or set all to true.")
     try:
         os.killpg(pgid, SIGNALS[name])
     except ProcessLookupError:
         return {"ok": True, "killed": False}
     return {"ok": True, "killed": True}
+
+
+def run_init() -> int:
+    """コンテナの PID 1。何もせず、親のいなくなったプロセスを回収する。
+
+    SIGTERM・SIGINT・SIGHUP は無視する（PID 1 には扱いを決めていないsignalも届かない）ので、Sandboxの中の
+    コマンドからは止められない。Launcherは `docker rm -f`（SIGKILL）でコンテナごと止める
+    """
+
+    def reap(_signum, _frame) -> None:
+        while True:
+            try:
+                pid, _ = os.waitpid(-1, os.WNOHANG)
+            except ChildProcessError:
+                return
+            if pid == 0:
+                return
+
+    signal.signal(signal.SIGCHLD, reap)
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, signal.SIG_IGN)
+    while True:
+        signal.pause()

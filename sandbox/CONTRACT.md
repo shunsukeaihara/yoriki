@@ -14,7 +14,7 @@ Runner（`api/` のLauncherとTool）とSandboxイメージの取り決め。イ
 |---|---|
 | ラベル | `org.yoriki.sandbox-contract`（この契約番号）、`org.yoriki.sandbox-profile`（`docs` 等） |
 | 利用者 | `10001:10001`（イメージの `USER`）。名前は `sandbox` |
-| 常駐するプロセス | `CMD` は何もしないプロセス（`sleep infinity`）。コマンドは呼出しごとに `docker exec` で始める（harness.md §8.1） |
+| PID 1 | `CMD` は補助コマンドの `init`。何もせず、親のいなくなったプロセスを回収する。SIGTERM・SIGINT・SIGHUPを無視するので、Sandboxの中のコマンドからは止められない。コマンドは呼出しごとに `docker exec` で始める（harness.md §8.1） |
 | 補助コマンド | `/opt/yoriki/bin/yoriki-sandbox`（§4） |
 | Python | `/usr/local/bin/python3`（mise.tomlの版）。頻出ライブラリは、全依存の版とSHA-256を固定したlockから、このPythonに入れてある（design.md §7.6）。補助コマンドもこれで動く |
 | lock | `/opt/yoriki/requirements.lock`（イメージに入れたpackageの全依存の版とSHA-256）。追加するpackageの依存を解くときに使う |
@@ -32,10 +32,12 @@ LauncherはSandboxを次の制限で起動する（design.md §7.2）。これ�
 | 利用者 | `--user=10001:10001` |
 | rootfs | `--read-only` |
 | 権限 | `--cap-drop=ALL`、`--security-opt=no-new-privileges:true`。標準のseccompを外さない |
-| PID 1 | `--init`（終わった子プロセスを回収する） |
+| PID 1 | `--init` を付けない（イメージの `init` をPID 1にする。§4.2の `all` がPID 1を止めないため） |
+| 止め方 | `docker rm -f`（SIGKILL）。`docker stop` のSIGTERMは `init` が無視する |
 | 資源 | `--pids-limit=256`、`--memory=2g`、`--memory-swap=2g`（swapなし）、`--cpus=2` |
 | `/tmp` | tmpfs（`size=256m,mode=1777`） |
-| `/workspace/work`・`/workspace/output` | 書ける。tmpfs（`uid=10001,gid=10001,mode=0700`）か、Workerの作業領域のbind mount |
+| `/workspace/work` | 書ける・実行できる。tmpfs（`uid=10001,gid=10001,mode=0700,exec`）か、Workerの作業領域のbind mount。エージェントが作ったスクリプトを `./run.sh` で動かせるようにする（Pythonで任意のコードを動かせるので、実行を止めても守れるものはない） |
+| `/workspace/output` | 書ける。tmpfs（`uid=10001,gid=10001,mode=0700`）か、Workerの作業領域のbind mount |
 | `/workspace/env` | 書ける・実行できる（tmpfsなら `exec` を付ける）。最初は空で、`init-env` で薄い仮想環境を作る |
 | `/packages` | 追加するpackageがあるときだけ、そのbundleを読取り専用のbind mountで |
 | `/workspace/input`・`/workspace/master` | 読取り専用のbind mount |
@@ -83,8 +85,10 @@ Runnerは、呼出しごとに次の環境変数だけを渡す（harness.md §8
 
 ### 4.2 `kill`
 
-- 入力：`pgid`（`exec` の `started` の値）、`signal`（`INT`・`TERM`・`KILL`。既定 `TERM`）。
-- 結果：`{"ok": true, "killed": true|false}`（`false` はすでに終わっていた）。
+- 入力：`pgid`（`exec` の `started` の値）か `all: true`、`signal`（`INT`・`TERM`・`KILL`。既定 `TERM`）。
+- `pgid`：そのプロセスグループへ送る。ジョブを止めるのに使う。コマンドが `setsid` 等で新しいグループを作ると、それには届かない。
+- `all`：PID 1（`init`）と呼んだプロセス自身を除く、すべてのプロセスへ送る。Attemptを終える・Checkpointを確定する前に `KILL` で送り、Sandboxの中で動き続けるものがないようにする（harness.md §8.3）。
+- 結果：`{"ok": true, "killed": true|false}`（`false` は送る先がなかった）。
 
 ### 4.3 `read`
 
@@ -93,9 +97,9 @@ Runnerは、呼出しごとに次の環境変数だけを渡す（harness.md §8
 - 入力：`path`、`offset`・`limit`（行。既定1・2000、`limit` は2000まで）、`pages`（PDF。`"1-5"`、`"3,7"`。既定は先頭10ページ）、`sheet`・`range`（Excel。`range` は `A1:F50`）、`images`（真なら画像を返す。使うモデルが画像の入力に対応するときだけ真にする）。
 - 共通の結果：`kind`（`text`・`csv`・`pdf`・`xlsx`・`docx`・`pptx`・`image`・`binary`）、`path`、`size`、`sha256`（読んだ内容の版。`write`・`edit` の `expected_sha256` に使う）、`text`（モデルに見せる本文）。
 - 行で区切る形式（`text`・`csv`・`docx`・`pptx`）：`text` は行番号つき（`     12│本文`。1行2000文字で切る）。`total_lines`、`first_line`、`last_line`、続きがあれば `next_offset`。
-- `text`・`csv`：`encoding`（`utf-8`・`cp932` 等）、`bom`、`newline`（`lf`・`crlf`）。`csv` は `csv`（`delimiter`、`columns`、`rows`）。
+- `text`・`csv`：`encoding`（`utf-8`・`cp932` 等）、`bom`、`newline`（`lf`・`crlf`、両方があれば `mixed`）。`csv` は `csv`（`delimiter`、`columns`、`rows`）。
 - `pdf`：`total_pages`、`pages`（読んだページ）、続きがあれば `next_pages`。テキストのないページは `pages_without_text`、`images` が真ならその画像（5ページまで）。
-- `xlsx`：`sheets`（`name`・`dimensions`・`rows`・`columns`）。`sheet` を指定すると、`text` にセルの番地つきの値（数式のセルは `⟨=式⟩` を添える）。4000セルまで。
+- `xlsx`：`sheets`（`name`・`dimensions`・`rows`・`columns`）。`sheet` を指定すると、`text` にセルの番地つきの値（数式のセルは `⟨=式⟩` を添える）。値のあるセルを4000まで出す。範囲（既定はシートの使われた範囲）が5万セルを超えるときは、読む前に断る（`too_large`）。
 - `image`：`format`・`width`・`height`。`images` が真なら画像。
 - `images` の要素：`mime`（`image/png`）、`width`、`height`、`data`（base64）。長辺は1568pxまでに縮小する。
 - 20MBより大きいファイルは読まない（`too_large`）。
@@ -105,7 +109,9 @@ Runnerは、呼出しごとに次の環境変数だけを渡す（harness.md §8
 テキストのファイルを作る・置き換える。
 
 - 入力：`path`、`content`、`expected_sha256`（既存のファイルを置き換えるときは、`read` 等で得た版。新しく作るときは省く）。
-- 既存のファイルは、`expected_sha256` が今の内容と一致するときだけ置き換える（読んでから書く。harness.md §7.8）。encoding・改行・BOMは元のファイルに合わせる。新しいファイルはUTF-8・LFで作り、親のディレクトリも作る。
+- 既存のファイルは、`expected_sha256` が今の内容と一致するときだけ置き換える（読んでから書く。harness.md §7.8）。encoding・改行・BOMは元のファイルに合わせる（改行がまじったファイルは、送られた内容の改行のまま）。新しいファイルはUTF-8・LFで作り、親のディレクトリも作る。
+- 同じディレクトリの一時ファイルに書いてから置き換える。置き換える直前に版を確かめ直し、変わっていれば `changed`。親のディレクトリはsymlinkを辿らずに開き、置き換える先が通常のファイルでなければ断る。ファイルのモードは保つ。
+- 版の確かめ直しと置き換えの間に、動いているジョブが同じファイルを変える可能性は残る。Runnerは、書込みと同じファイルを変えるジョブを並行させないよう、モデルに案内する。
 - 結果：`created`、`sha256`（書いた後の版）、`lines`、`encoding`。
 
 ### 4.5 `edit`
@@ -114,16 +120,19 @@ Runnerは、呼出しごとに次の環境変数だけを渡す（harness.md §8
 
 - 入力：`path`、`old_string`、`new_string`、`replace_all`（既定false）、`expected_sha256`（必須）。
 - 一致は、完全一致 → 行末の空白の違いを無視、の2段まで。1か所に決まらなければ `multiple_matches`（`detail.lines` に一致した行番号）。
+- 改行（CRLF・LF）がまじったファイルは、改行を保てないので断る（`mixed_newlines`）。
+- 書き方は `write` と同じ（一時ファイルから置き換え、直前に版を確かめ直す）。
 - 結果：`replacements`、`sha256`、`snippet`（変えた箇所の前後3行。行番号つき）。
 
 ### 4.6 `glob`・`grep`・`stat`
 
-- `glob`：入力 `pattern`（`path` からの相対。`**` を使える。`..` は断る）、`path`（既定 `/workspace`）。結果 `entries`（`path`・`type`・`size`。更新の新しい順に100件まで）、`total`、`truncated`。
+- `glob`：入力 `pattern`（`path` からの相対。`**` を使える。`..` は断る）、`path`（既定 `/workspace`）。パターンの途中のsymlinkを辿って `/workspace` の外に出たものは、結果に入れない。結果 `entries`（`path`・`type`・`size`。更新の新しい順に100件まで）、`total`、`truncated`。
 - `grep`：入力 `pattern`（正規表現。ripgrep）、`path`、`include`（`*.py` 等）、`output`（`files`・`lines`・`count`。既定 `files`）。結果 `total_matches`、`total_files`、`files`（`path`・`matches`）か `lines`（`path`・`line`・`text`）。250件まで、`truncated`。
 - `stat`：入力 `path`。結果 `exists`、`type`（`file`・`directory`・`other`）、`size`、`mtime`、ファイルなら `sha256`・`kind`。
 
-### 4.7 `init-env`・`version`
+### 4.7 `init`・`init-env`・`version`
 
+- `init`：コンテナのPID 1（§1）。標準入力・出力は使わない。
 - `init-env`：空の `/workspace/env` に、イメージのPythonの上の薄い仮想環境（`--system-site-packages`）を作る。`pip` には、入れる操作（`install`・`download`・`wheel`・`uninstall`）を断って `install_python_packages` へ案内する形を置く（Sandboxにはネットワークがないため。権限の境界ではない）。追加のpackageは、Runnerが `/workspace/env/bin/python -m pip install --no-index ...` で `/packages` から入れる。すでにあれば何もしない。Launcherが、Sandboxを起動した直後に呼ぶ。結果 `created`、`seconds`。
 - `version`：結果 `contract`（この契約番号）、`python`。
 
@@ -140,6 +149,7 @@ Runnerは、呼出しごとに次の環境変数だけを渡す（harness.md §8
 | `changed` | 読んだ後に内容が変わった |
 | `no_match`・`multiple_matches` | `edit` の `old_string` が見つからない・1か所に決まらない |
 | `not_text`・`unencodable` | テキストでない・元のencodingで書けない文字がある |
+| `mixed_newlines` | 改行がまじっていて、`edit` で保てない |
 | `unreadable` | 壊れたファイル等で読めない |
 | `too_large` | 大きすぎる |
 | `timeout` | 時間がかかりすぎた（`grep`） |

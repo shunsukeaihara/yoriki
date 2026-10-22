@@ -64,6 +64,6 @@ LABEL org.yoriki.sandbox-contract="1" \
 
 USER 10001:10001
 WORKDIR /workspace/work
-# 常駐するのは何もしないプロセスだけ。コマンドは呼出しごとに docker exec で始める（harness.md §8.1）。
-# 終わった子プロセスの回収は、Launcherが付ける --init（tini）が行う
-CMD ["sleep", "infinity"]
+# 常駐するのは補助コマンドの init（PID 1）だけ。コマンドは呼出しごとに docker exec で始める（harness.md §8.1）。
+# init は親のいなくなったプロセスを回収し、Sandboxの中のコマンドからは止められない。Launcherは --init を付けない
+CMD ["/opt/yoriki/bin/yoriki-sandbox", "init"]

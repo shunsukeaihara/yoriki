@@ -8,7 +8,7 @@ from typing import Any
 
 from charset_normalizer import from_bytes
 
-from .common import ToolError, check_size, resolve, sha256_of
+from .common import ToolError, check_size, replace_file, resolve, sha256_of
 
 MAX_LINES = 2000
 MAX_LINE_CHARS = 2000
@@ -21,7 +21,7 @@ class Decoded:
     text: str  # 改行は LF にそろえた本文
     encoding: str
     bom: bool
-    newline: str  # "\n" か "\r\n"
+    newline: str  # "\n"、"\r\n"、どちらもあれば "mixed"
 
 
 def is_binary(data: bytes) -> bool:
@@ -42,7 +42,9 @@ def decode(data: bytes) -> Decoded:
         # Shift_JIS は、Windowsの拡張文字も読めるcp932として扱う
         encoding = "cp932" if best.encoding in ("shift_jis", "cp932") else best.encoding
         text = raw.decode(encoding)
-    newline = "\r\n" if "\r\n" in text else "\n"
+    crlf = text.count("\r\n")
+    lf = text.count("\n") - crlf
+    newline = "mixed" if crlf and lf else "\r\n" if crlf else "\n"
     return Decoded(text.replace("\r\n", "\n"), encoding, bom, newline)
 
 
@@ -122,21 +124,24 @@ def run_write(request: dict[str, Any]) -> dict[str, Any]:
     content = request.get("content")
     if not isinstance(content, str):
         raise ToolError("invalid_argument", "content must be a string.")
-    check_version(path, request.get("expected_sha256"))
+    expected = request.get("expected_sha256")
+    check_version(path, expected)
     if path.exists():
         _, decoded = load(path)
         created = False
+        # 改行がまじったファイルは、送られた内容の改行のまま書く
+        if decoded.newline == "mixed":
+            decoded.newline = "\n"
     else:
         decoded = Decoded("", "utf-8", False, "\n")
         created = True
-        path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(encode(decoded, content))
+    sha256 = replace_file(path, encode(decoded, content), expected)
     lines = content.replace("\r\n", "\n").count("\n") + (0 if content.endswith("\n") or not content else 1)
     return {
         "ok": True,
         "path": str(path),
         "created": created,
-        "sha256": sha256_of(path),
+        "sha256": sha256,
         "lines": lines,
         "encoding": decoded.encoding,
     }
@@ -164,8 +169,14 @@ def run_edit(request: dict[str, Any]) -> dict[str, Any]:
     old, new = old.replace("\r\n", "\n"), new.replace("\r\n", "\n")
     if old == new:
         raise ToolError("invalid_argument", "old_string and new_string are the same.")
-    check_version(path, request.get("expected_sha256"))
+    expected = request.get("expected_sha256")
+    check_version(path, expected)
     _, decoded = load(path)
+    if decoded.newline == "mixed":
+        raise ToolError(
+            "mixed_newlines",
+            "The file mixes CRLF and LF line endings, so edit cannot keep them. Use shell (python) to change it.",
+        )
     text = decoded.text
 
     spans = [(m.start(), m.end()) for m in re.finditer(re.escape(old), text)]
@@ -195,11 +206,11 @@ def run_edit(request: dict[str, Any]) -> dict[str, Any]:
         shift += new.count("\n") - text.count("\n", start, end)
     result.append(text[last:])
     updated = "".join(result)
-    path.write_bytes(encode(decoded, updated))
+    sha256 = replace_file(path, encode(decoded, updated), expected)
     return {
         "ok": True,
         "path": str(path),
         "replacements": len(spans),
-        "sha256": sha256_of(path),
+        "sha256": sha256,
         "snippet": snippet(updated, first_line or 1, last_line),
     }

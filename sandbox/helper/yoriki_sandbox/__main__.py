@@ -5,7 +5,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .common import ToolError, read_request, respond
-from .execute import run_exec, run_kill
+from .execute import run_exec, run_init, run_kill
 from .read import run_read
 from .search import run_glob, run_grep
 from .text import run_edit, run_write
@@ -24,10 +24,13 @@ COMMANDS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 1 or argv[0] not in (*COMMANDS, "exec", "kill"):
-        sys.stderr.write(f"usage: yoriki-sandbox {{{','.join((*COMMANDS, 'exec', 'kill'))}}} < request.json\n")
+    names = (*COMMANDS, "exec", "kill", "init")
+    if len(argv) != 1 or argv[0] not in names:
+        sys.stderr.write(f"usage: yoriki-sandbox {{{','.join(names)}}} < request.json\n")
         return 2
     command = argv[0]
+    if command == "init":
+        return run_init()
     try:
         # exec はコマンドの終了コードで終わり、結果のJSONは返さない（出力はコマンドのもの）
         if command == "exec":

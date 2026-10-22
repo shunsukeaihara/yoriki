@@ -1,8 +1,12 @@
 """入出力と、パスの確認。結果は表示のためのもので、権限や実行状態の正本にしない（design.md §7.1）"""
 
+import contextlib
+import errno
 import hashlib
 import json
 import os
+import secrets
+import stat
 import sys
 from pathlib import Path
 from typing import Any
@@ -79,3 +83,72 @@ def check_size(path: Path) -> int:
             "Use shell (head, sed -n, python) to read part of it.",
         )
     return size
+
+
+def _open_dir(path: Path, *, create: bool) -> int:
+    """ディレクトリを、symlinkを辿らずに / から1つずつ開く（確かめた後にsymlinkへ差し替えられても外へ出ない）"""
+    fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for name in path.parts[1:]:
+            try:
+                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            except FileNotFoundError:
+                if not create:
+                    raise
+                os.mkdir(name, 0o755, dir_fd=fd)
+                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            except OSError as exc:
+                if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+                    raise ToolError("not_a_directory", f"{path} has a symlink or a file in its path.") from exc
+                raise
+            os.close(fd)
+            fd = child
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _hash_at(dir_fd: int, name: str) -> str | None:
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=dir_fd)
+    except FileNotFoundError:
+        return None
+    digest = hashlib.sha256()
+    with os.fdopen(fd, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def replace_file(path: Path, data: bytes, expected_sha256: str | None) -> str:
+    """一時ファイルに書いてから置き換える（途中で失敗しても、元のファイルを半端に残さない）。
+
+    置き換える直前に、今の内容が expected_sha256（None なら、まだないこと）と一致するかを確かめ直す。
+    親のディレクトリは symlink を辿らずに開き、置き換える先が通常のファイル以外なら断る。返すのは書いた内容のSHA-256
+    """
+    dir_fd = _open_dir(path.parent, create=True)
+    tmp = f".{path.name}.yoriki-{secrets.token_hex(4)}"
+    try:
+        try:
+            current = os.stat(path.name, dir_fd=dir_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            current = None
+        if current is not None and not stat.S_ISREG(current.st_mode):
+            raise ToolError("not_a_file", f"{path} is not a regular file.")
+        mode = stat.S_IMODE(current.st_mode) if current is not None else 0o644
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode, dir_fd=dir_fd)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        if _hash_at(dir_fd, path.name) != expected_sha256:
+            raise ToolError("changed", f"{path} changed while it was being written. Read it again and retry.")
+        os.replace(tmp, path.name, src_dir_fd=dir_fd, dst_dir_fd=dir_fd)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(tmp, dir_fd=dir_fd)
+        raise
+    finally:
+        os.close(dir_fd)
+    return hashlib.sha256(data).hexdigest()

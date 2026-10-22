@@ -1014,7 +1014,7 @@ Launcherは承認済みimage digest、固定mount根、資源上限、container 
 - 用途の違うイメージ（GPU、大きい分析ライブラリ等）が要るようになったら、Runを始めるときの指定（Task Definition等）で選べるようにする。Skillには持たせない。
 - 登録のときは、レジストリのAPI（HTTPS）でimage indexとplatformごとのmanifest・configを読み、digest、対応platform、契約番号のラベル（`org.yoriki.sandbox-contract`）を確かめる。読んだ内容はSHA-256がdigestと一致することを確かめ、indexに書かれたplatformとconfigのplatformが違うもの、platformごとに契約番号やPythonの版が違うものは断る。Runnerが対応しない契約番号のイメージは登録させない。apiのコンテナにDockerのソケットを渡さないので、登録の確認にDockerは使わない。実際にpullできるかは、Sandboxを起動するとき（WorkerのLauncher）に分かる。
 - 単一のmanifest（platformが1つ）のイメージも登録できる。そのplatformのWorkerでだけ使え、ほかのplatformのWorkerのLauncherは起動を断る。公開するイメージはmulti-platformのindexにする（§10.1）。
-- 登録の確認で接続するのは、許可したレジストリ（設定 `YORIKI_SANDBOX_REGISTRIES`。既定はDocker Hub）と、その認証先・配信先だけにする。管理画面から指定できる接続先なので、内部のネットワークへの要求に使わせないよう、どの要求（リダイレクトの先も）でもHTTPSと、名前解決した先が公開のアドレスであることを確かめ、応答の大きさにも上限を設ける。
+- 登録の確認で接続するのは、許可したレジストリ（設定 `YORIKI_SANDBOX_REGISTRIES`。既定はDocker Hub）と、その認証先・配信先だけにする。管理画面から指定できる接続先なので、内部のネットワークへの要求に使わせないよう、どの要求（リダイレクトの先も）でもHTTPSと、名前解決した先が公開のアドレスであることを確かめ、確かめたアドレスに接続を固定する（TLSの証明書は元のホスト名で確かめる。確かめた後にDNSの応答が替わっても内部へつながない）。tokenを取る間は、リダイレクトの先も許可した認証先に限る。応答の大きさ、要求の数、platformの数、確認にかける時間にも上限を設ける。
 
 ### 7.4 成果物の回収
 

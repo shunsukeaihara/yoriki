@@ -272,3 +272,48 @@ class TestSearch:
         }
         stat = sandbox.helper("stat", {"path": "/workspace/input/メモ.txt"})
         assert (stat["type"], stat["kind"]) == ("file", "text")
+
+
+# 追加するpackageの見本。中身は1つのモジュールだけのwheel（xlsxwriterの版を上書きする形で、先に読まれることも確かめる）
+MAKE_WHEEL = r"""
+python - <<'PY'
+import base64, hashlib, zipfile
+name, version = "xlsxwriter", "99.0"
+files = {
+    "xlsxwriter/__init__.py": b"__version__ = '99.0'\n",
+    f"{name}-{version}.dist-info/METADATA": f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n".encode(),
+    f"{name}-{version}.dist-info/WHEEL": (
+        b"Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n"
+    ),
+}
+record = []
+for path, data in files.items():
+    digest = base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode()
+    record.append(f"{path},sha256={digest},{len(data)}")
+record.append(f"{name}-{version}.dist-info/RECORD,,")
+files[f"{name}-{version}.dist-info/RECORD"] = ("\n".join(record) + "\n").encode()
+with zipfile.ZipFile(f"/workspace/work/{name}-{version}-py3-none-any.whl", "w") as z:
+    for path, data in files.items():
+        z.writestr(path, data)
+PY
+"""
+
+
+class TestEnv:
+    def test_env_is_a_thin_layer_over_the_image_python(self, sandbox):
+        assert sandbox.helper("init-env", {}) == {"ok": True, "created": False}
+        size_kb = int(sandbox.sh("du -sk /workspace/env | cut -f1"))
+        assert size_kb < 1024
+        assert sandbox.sh("python -c 'import pandas; print(pandas.__file__)'").startswith("/usr/local/lib/python3.13/")
+
+    def test_added_packages_go_to_the_env_and_are_read_first(self, sandbox):
+        sandbox.sh(MAKE_WHEEL)
+        before = sandbox.sh("python -c 'import xlsxwriter; print(xlsxwriter.__version__)'").strip()
+        assert before != "99.0"
+        sandbox.sh("pip install --no-index --no-deps /workspace/work/xlsxwriter-99.0-py3-none-any.whl")
+        location = sandbox.sh("python -c 'import xlsxwriter; print(xlsxwriter.__version__, xlsxwriter.__file__)'")
+        assert location.split() == ["99.0", "/workspace/env/lib/python3.13/site-packages/xlsxwriter/__init__.py"]
+        # 補助コマンドは、追加したpackageの影響を受けない（イメージのPythonを -I で動かす）
+        assert sandbox.helper("version", {})["ok"]
+        sandbox.sh("pip uninstall -y xlsxwriter")
+        assert sandbox.sh("python -c 'import xlsxwriter; print(xlsxwriter.__version__)'").strip() == before

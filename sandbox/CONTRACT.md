@@ -16,8 +16,9 @@ Runner（`api/` のLauncherとTool）とSandboxイメージの取り決め。イ
 | 利用者 | `10001:10001`（イメージの `USER`）。名前は `sandbox` |
 | 常駐するプロセス | `CMD` は何もしないプロセス（`sleep infinity`）。コマンドは呼出しごとに `docker exec` で始める（harness.md §8.1） |
 | 補助コマンド | `/opt/yoriki/bin/yoriki-sandbox`（§4） |
-| 環境の雛形 | `/opt/yoriki/env`。全依存のlockから作ったPythonの仮想環境で、`/workspace/env` と同じパスで作ってある。補助コマンドもこれで動く |
-| wheelとlock | `/packages/requirements.lock`（全依存の版とSHA-256）、`/packages/wheels/`（そのwheel）。Run専用の環境を作り直すときに使う（design.md §7.6） |
+| Python | `/usr/local/bin/python3`（mise.tomlの版）。頻出ライブラリは、全依存の版とSHA-256を固定したlockから、このPythonに入れてある（design.md §7.6）。補助コマンドもこれで動く |
+| lock | `/opt/yoriki/requirements.lock`（イメージに入れたpackageの全依存の版とSHA-256）。追加するpackageの依存を解くときに使う |
+| `/packages` | 空のディレクトリ。追加するpackageのbundle（wheelとlock）を、Launcherが読取り専用でmountする |
 | 入っているもの | harness.md §8.5のGNUのツールとPython、`images/<profile>/requirements.in` のライブラリ、日本語のフォント（Noto CJK） |
 | 入れないもの | 秘密情報、社内向けの設定、`sudo`。パッケージの追加（apt・ネットワークからのpip）はSandboxの中ではできない |
 
@@ -35,11 +36,12 @@ LauncherはSandboxを次の制限で起動する（design.md §7.2）。これ�
 | 資源 | `--pids-limit=256`、`--memory=2g`、`--memory-swap=2g`（swapなし）、`--cpus=2` |
 | `/tmp` | tmpfs（`size=256m,mode=1777`） |
 | `/workspace/work`・`/workspace/output` | 書ける。tmpfs（`uid=10001,gid=10001,mode=0700`）か、Workerの作業領域のbind mount |
-| `/workspace/env` | 書ける・実行できる（tmpfsなら `exec` を付ける）。最初は空で、`init-env` で雛形をコピーする |
+| `/workspace/env` | 書ける・実行できる（tmpfsなら `exec` を付ける）。最初は空で、`init-env` で薄い仮想環境を作る |
+| `/packages` | 追加するpackageがあるときだけ、そのbundleを読取り専用のbind mountで |
 | `/workspace/input`・`/workspace/master` | 読取り専用のbind mount |
 | 渡さないもの | privileged、host network・PID、デバイス、Dockerのソケット、ホストの任意のディレクトリ |
 
-- `/workspace/env` の雛形は、docsのイメージで約330MBある。tmpfsに置くとコンテナのメモリの上限に含まれるので、Runtime Profileのメモリの上限はこれを見込んで決める。
+- `/workspace/env` は、イメージのPythonの上に `--system-site-packages` で作る薄い仮想環境（数十KB）で、追加したpackageだけを持つ。追加したpackageは、イメージの版より先に読まれる。追加の量だけtmpfsのメモリを使う。
 - `/workspace/work`・`/workspace/output`・`/workspace/env` の大きさは、tmpfsの `size` か、作業領域のquotaで制限する（design.md §7.2）。
 
 ## 3 コマンドの環境
@@ -122,7 +124,7 @@ Runnerは、呼出しごとに次の環境変数だけを渡す（harness.md §8
 
 ### 4.7 `init-env`・`version`
 
-- `init-env`：空の `/workspace/env` に、環境の雛形（`/opt/yoriki/env`）をコピーする。すでにあれば何もしない。結果 `created`、`seconds`。
+- `init-env`：空の `/workspace/env` に、イメージのPythonの上の薄い仮想環境（`--system-site-packages`、pipはイメージのものを使う）を作る。すでにあれば何もしない。Launcherが、Sandboxを起動した直後に呼ぶ。結果 `created`、`seconds`。
 - `version`：結果 `contract`（この契約番号）、`python`。
 
 ### 4.8 エラーの `code`

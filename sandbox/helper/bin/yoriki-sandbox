@@ -1,4 +1,4 @@
-#!/opt/yoriki/env/bin/python -I
+#!/usr/local/bin/python3 -I
 """Sandboxの中の補助コマンド。中身は /opt/yoriki/lib/yoriki_sandbox（sandbox/CONTRACT.md）"""
 
 import runpy

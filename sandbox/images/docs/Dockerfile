@@ -30,19 +30,17 @@ RUN apt-get update \
         zip \
     && rm -rf /var/lib/apt/lists/*
 
-# 頻出ライブラリは、全依存の版とhashを固定したlockから入れる（design.md §7.6）。
-# wheelは /packages に残し、Run専用の環境の再構築（Environment Revision）にも使う。
-# 環境の雛形は /workspace/env と同じパスで作ってから /opt/yoriki/env へ移す。Sandboxの起動時に
-# `yoriki-sandbox init-env` が /workspace/env へコピーし直すので、スクリプトのパスがそのまま使える
-COPY images/docs/requirements.lock /packages/requirements.lock
+# 頻出ライブラリは、全依存の版とhashを固定したlockから、イメージのPythonへ入れる（design.md §7.6）。
+# rootfsは読取り専用なので、Sandboxの中からは変えられない。Run専用の環境 /workspace/env は、
+# `yoriki-sandbox init-env` がこのPythonの上に薄く作る（追加したpackageだけを持つ）。
+# lockは、追加するpackageの依存を解くときに使うので、イメージに残す
+COPY images/docs/requirements.lock /opt/yoriki/requirements.lock
 RUN pip download --no-cache-dir --disable-pip-version-check --no-deps --only-binary=:all: --require-hashes \
-        -r /packages/requirements.lock -d /packages/wheels \
-    && python -m venv /workspace/env \
-    && /workspace/env/bin/pip install --no-cache-dir --disable-pip-version-check --no-index \
-        --find-links=/packages/wheels --only-binary=:all: --require-hashes --no-deps -r /packages/requirements.lock \
-    && mkdir -p /opt/yoriki \
-    && mv /workspace/env /opt/yoriki/env \
-    && /opt/yoriki/env/bin/python -c "import matplotlib.font_manager as f; f.fontManager" \
+        -r /opt/yoriki/requirements.lock -d /tmp/wheels \
+    && pip install --no-cache-dir --disable-pip-version-check --no-index --find-links=/tmp/wheels \
+        --only-binary=:all: --require-hashes --no-deps -r /opt/yoriki/requirements.lock \
+    && rm -rf /tmp/wheels \
+    && python -c "import matplotlib.font_manager as f; f.fontManager" \
     && fc-cache -f
 
 COPY helper/yoriki_sandbox /opt/yoriki/lib/yoriki_sandbox
@@ -52,7 +50,7 @@ RUN python -m compileall -q /opt/yoriki/lib \
     && groupadd --gid 10001 sandbox \
     && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /workspace/work/.home --shell /bin/bash sandbox \
     # Launcherがmountする場所。中身はRunごとにmountするので、イメージには空のディレクトリだけを置く
-    && mkdir -p /workspace/input /workspace/master /workspace/work /workspace/output /workspace/env \
+    && mkdir -p /workspace/input /workspace/master /workspace/work /workspace/output /workspace/env /packages \
     && chown 10001:10001 /workspace/work /workspace/output /workspace/env
 
 ENV LANG=C.UTF-8 \

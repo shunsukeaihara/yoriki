@@ -9,7 +9,7 @@ sandbox/
 ├── images/<profile>/        # 用途別のイメージ（今は docs だけ）
 │   ├── Dockerfile
 │   ├── requirements.in      # 入れるPythonのライブラリ
-│   └── requirements.lock    # 全依存の版とSHA-256（requirements.in から作る）
+│   └── requirements.lock    # 全依存の版とSHA-256（requirements.in から作る。イメージのPythonに入れる）
 └── tests/                   # 契約テスト（ホストで動かし、制限付きのSandboxを起動して確かめる）
 ```
 
@@ -36,7 +36,7 @@ uv pip compile requirements.in --universal --python-version 3.13 --generate-hash
 ```
 
 - ライセンスは、MIT・BSD・Apache等のものを優先する。AGPL・GPL・LGPL等のものは、入れる前に相談する（design.md §7.6。例：文字コードの判定は、LGPLの chardet ではなく MIT の charset-normalizer を使う）。
-- 大きいライブラリを足すと `/workspace/env` の雛形が大きくなり、tmpfsに置くSandboxのメモリを使う（CONTRACT.md §2）。
+- ライブラリはイメージのPythonに入る。イメージは大きくなるが、Runごとの `/workspace/env` は大きくならない（CONTRACT.md §2）。
 
 ## コマンドを足す
 

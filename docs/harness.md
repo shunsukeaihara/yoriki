@@ -502,8 +502,8 @@ Docker操作はLauncher（design.md §7.3）にまとめ、Runnerは決まった
 
 Runnerは、shell以外のToolの処理もSandboxの中で行う。ファイルの解析を、DBの資格情報を持つWorkerのプロセスで行わないため（壊れたPDF等による不具合の影響をSandboxに閉じ込める）。
 
-- イメージの `/opt/yoriki/bin/yoriki-sandbox` に入れる（rootfsは読取り専用）。Python製で、イメージの中の環境の雛形 `/opt/yoriki/env`（pypdf・pdfplumber・pypdfium2・openpyxl・python-docx・python-pptx等）で動く。エージェントが変えられる `/workspace/env` は使わない。
-- サブコマンド：`exec`（プロセスグループを作ってコマンドを始める）、`kill`（そのグループへsignalを送る）、`read`、`write`、`edit`、`glob`、`grep`、`stat`、`init-env`（`/workspace/env` を雛形から作る）、`version`。
+- イメージの `/opt/yoriki/bin/yoriki-sandbox` に入れる（rootfsは読取り専用）。Python製で、イメージのPython（頻出ライブラリのpypdf・pdfplumber・pypdfium2・openpyxl・python-docx・python-pptx等が入っている）を `-I` で動かす。エージェントが変えられる `/workspace/env` の追加のpackageや環境変数の影響を受けない。
+- サブコマンド：`exec`（プロセスグループを作ってコマンドを始める）、`kill`（そのグループへsignalを送る）、`read`、`write`、`edit`、`glob`、`grep`、`stat`、`init-env`（`/workspace/env` をイメージのPythonの上の薄い環境として作る）、`version`。
 - 補助コマンドの結果も、Sandboxの中で作られるものなので、権限や実行状態の正本にしない（design.md §7.1）。ファイルの中身の表示として扱う。
 - Runnerからの引数は、標準入力のJSONで渡す（shellの解釈を通さない）。結果は標準出力のJSONで返す。
 - 契約番号はイメージのラベル `org.yoriki.sandbox-contract` に記録する（design.md §13）。サブコマンドと入出力の形は `sandbox/CONTRACT.md` で定め、契約テストで確かめる。

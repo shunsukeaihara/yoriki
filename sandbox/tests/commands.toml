@@ -271,7 +271,7 @@ run = "python -c 'import sys; print(sys.prefix)'"
 output = "/workspace/env"
 [[command]]
 run = "pip --version"
-output = "/workspace/env"
+output = "python 3.13"
 [[command]]
 run = "pip list --format=freeze | grep -c '^pandas=='"
 output = "1"

@@ -207,7 +207,8 @@ def execute_job_kill(arguments: dict[str, Any], context: ToolContext) -> ToolRes
         return job
     if job.finished:
         return ToolResult.text(f"Job {job.job_id} has already {_status(job)}.", value={"job_id": job.job_id})
-    session.kill(job)
+    if not session.kill(job):
+        return ToolResult.error(f"Job {job.job_id} did not stop yet. Call job_kill again in a moment.")
     job.reported = True
     text = "\n".join([f"Job {job.job_id}: stopped.", "Output since the last read:", _output(context, job)])
     return ToolResult.text(text, value={"job_id": job.job_id})

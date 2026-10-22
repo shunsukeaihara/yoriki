@@ -287,8 +287,7 @@ class SandboxSession:
             job.finished, job.exit_code = True, exit_code
             return True
         if job.elapsed > job.timeout_seconds:
-            self.kill(job, reason="timeout")
-            return True
+            return self.kill(job, reason="timeout")
         return False
 
     def finished_unreported(self) -> list[Job]:
@@ -299,20 +298,29 @@ class SandboxSession:
                 done.append(job)
         return done
 
-    def kill(self, job: Job, *, reason: str = "killed") -> None:
-        """プロセスグループへTERM、終わらなければKILLを送る"""
+    def kill(self, job: Job, *, reason: str = "killed") -> bool:
+        """プロセスグループへTERM、終わらなければKILLを送る。Dockerが終了を確かめたときだけ止めたことにし、Trueを返す。
+        プロセスグループがまだ分からない・止まらないジョブは、動いているままにする"""
         if job.finished:
-            return
+            return True
+        if job.execution.pgid is None:
+            job.execution.started.wait(timeout=KILL_GRACE)
         pgid = job.execution.pgid
-        sandbox = self._sandbox()
         if pgid is not None:
             self.helper("kill", {"pgid": pgid, "signal": "TERM"})
             if not job.execution.done.wait(timeout=KILL_GRACE):
                 self.helper("kill", {"pgid": pgid, "signal": "KILL"})
                 job.execution.done.wait(timeout=KILL_GRACE)
-        running, exit_code = sandbox.exec_state(job.execution.exec_id)
+        return self._mark_stopped(job, reason)
+
+    def _mark_stopped(self, job: Job, reason: str) -> bool:
+        running, exit_code = self._sandbox().exec_state(job.execution.exec_id)
+        if running:
+            return False
+        job.execution.done.wait(timeout=KILL_GRACE)
         job.stopped = reason
-        job.finished, job.exit_code = True, None if running else exit_code
+        job.finished, job.exit_code = True, exit_code
+        return True
 
     def _sandbox(self) -> Sandbox:
         if self.sandbox is None:
@@ -328,12 +336,15 @@ class SandboxSession:
         """
         if self.sandbox is None:
             return None
-        stopped = []
-        for job in self.running_jobs():
+        running = self.running_jobs()
+        for job in running:
             self.kill(job, reason="suspended")
-            stopped.append({"job_id": job.job_id, "command": job.command[:200]})
-        # setsid 等でグループを離れたものも残さない（CONTRACT.md §4.2）
+        # setsid 等でグループを離れたもの、プロセスグループの分からなかったジョブも残さない（CONTRACT.md §4.2）
         self.helper("kill", {"all": True, "signal": "KILL"})
+        for job in running:
+            if not job.finished and not self._mark_stopped(job, "suspended"):
+                raise SandboxUnavailable(f"job {job.job_id} did not stop")
+        stopped = [{"job_id": job.job_id, "command": job.command[:200]} for job in running]
         storage = self.storage_factory()
         self.dir.mkdir(parents=True, exist_ok=True)
         key = f"runs/{self.run.uid}/{self.attempt.number}-{generate(JOB_ID_ALPHABET, 8)}.tar"

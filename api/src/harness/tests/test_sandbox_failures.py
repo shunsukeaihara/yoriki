@@ -248,3 +248,21 @@ def test_running_jobs_reserve_their_output_limit(conversation, monkeypatch, sett
         session.start_job("sleep 10", "/workspace/work", "説明")
     # 動いているジョブの上限の合計が、Attemptの上限を超えない
     assert limits == [60, 40, 0]
+
+
+def test_job_without_a_process_group_is_not_reported_as_stopped(conversation, monkeypatch, settings, tmp_path):
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path)
+    monkeypatch.setattr("harness.sandbox.KILL_GRACE", 0.05)
+    run = post(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+
+    class _RunningSandbox:
+        def exec_state(self, exec_id):
+            return True, None
+
+    session = SandboxSession(run, attempt)
+    session.sandbox = _RunningSandbox()  # type: ignore[assignment]
+    job = Job("job_1", "cmd", "説明", "/workspace/work", Exec("e1"), tmp_path / "job.log", 60)
+    assert session.kill(job) is False
+    assert not job.finished

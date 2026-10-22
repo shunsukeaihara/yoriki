@@ -10,6 +10,7 @@ import ipaddress
 import json
 import re
 import socket
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -22,6 +23,10 @@ from .contract import CONTRACT_LABEL, PROFILE_LABEL, SUPPORTED_CONTRACTS
 from .errors import RegistryError
 
 TIMEOUT = 15
+# 1回の確認の全体の時間と、要求の数、platformの数の上限（大量のmanifestを持つindexで管理APIを長く占有させない）
+TOTAL_SECONDS = 60
+MAX_REQUESTS = 50
+MAX_PLATFORMS = 16
 # manifestとconfigの大きさの上限（通常は数KB）
 MAX_DOCUMENT_BYTES = 4 * 1024 * 1024
 
@@ -99,11 +104,45 @@ class Fetched:
     content: bytes
 
 
+class PinnedTransport(httpx.BaseTransport):
+    """要求ごとに（リダイレクトの先も）接続先を確かめ、確かめたIPアドレスに接続する。
+
+    名前解決の確認と接続の間にDNSの応答が内部のアドレスへ変わっても（DNS rebinding）、そこへはつながない。
+    URLのホストはIPアドレスに替えるが、Hostヘッダーと、TLSのSNI・証明書の確認は元のホスト名で行う
+    """
+
+    def __init__(self, inner: httpx.BaseTransport, choose: Callable[[httpx.Request], str | None]):
+        self.inner = inner
+        self.choose = choose
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        address = self.choose(request)
+        if address is None:
+            return self.inner.handle_request(request)
+        host = request.url.host
+        pinned = request.url.copy_with(host=address)
+        headers = request.headers.copy()
+        headers["Host"] = request.url.netloc.decode()
+        forwarded = httpx.Request(
+            request.method,
+            pinned,
+            headers=headers,
+            stream=request.stream,
+            extensions={**request.extensions, "sni_hostname": host},
+        )
+        return self.inner.handle_request(forwarded)
+
+    def close(self) -> None:
+        self.inner.close()
+
+
 class RegistryClient:
     """レジストリを読む。接続先は許可したレジストリ（YORIKI_SANDBOX_REGISTRIES）と、その認証先・配信先だけにする。
 
     管理画面から指定できる接続先なので、内部のネットワークへの要求に使われないよう、どの要求（リダイレクトの先も）
-    でもHTTPSと、名前解決した先が公開のアドレスであることを確かめる（手元で使うHTTPのレジストリだけは例外）
+    でもHTTPSと、名前解決した先が公開のアドレスであることを確かめ、そのアドレスに接続を固定する（手元で使うHTTPの
+    レジストリだけは例外）。tokenを取る間は、リダイレクトの先も許可した認証先に限る。
+    要求の数と時間にも上限を設ける
     """
 
     def __init__(
@@ -122,28 +161,42 @@ class RegistryClient:
         self.insecure = reference.registry in settings.YORIKI_SANDBOX_INSECURE_REGISTRIES
         self.host = DOCKER_HUB_API if reference.registry == DOCKER_HUB else reference.registry
         self.base = f"{'http' if self.insecure else 'https'}://{self.host}/v2/{reference.name}"
+        self.auth_hosts = {self.host, reference.registry.split(":")[0]} | (
+            {DOCKER_HUB_AUTH} if reference.registry == DOCKER_HUB else set()
+        )
         self.resolver = resolver
+        self.authenticating = False
+        self.requests = 0
+        self.deadline = time.monotonic() + TOTAL_SECONDS
         self.client = httpx.Client(
-            timeout=TIMEOUT, follow_redirects=True, transport=transport, event_hooks={"request": [self._check]}
+            timeout=TIMEOUT,
+            follow_redirects=True,
+            transport=PinnedTransport(transport or httpx.HTTPTransport(), self._choose),
         )
         self.token: str | None = None
 
     def close(self) -> None:
         self.client.close()
 
-    def _check(self, request: httpx.Request) -> None:
-        """要求の前に（リダイレクトの先も）、接続先を確かめる"""
+    def _choose(self, request: httpx.Request) -> str | None:
+        """要求の前に（リダイレクトの先も）接続先を確かめ、接続するIPアドレスを返す。HTTPのレジストリはNone"""
+        self.requests += 1
+        if self.requests > MAX_REQUESTS or time.monotonic() > self.deadline:
+            raise RegistryError(_("イメージの確認に時間がかかりすぎました"))
         host = request.url.host
         if self.insecure and request.url.netloc.decode() == self.reference.registry:
-            return
+            return None
         if request.url.scheme != "https":
             raise RegistryError(_("レジストリがHTTPSでない場所を指しました"))
+        if self.authenticating and host not in self.auth_hosts:
+            raise RegistryError(_("レジストリの認証の設定を読めませんでした"))
         try:
             addresses = self.resolver(host)
         except OSError as exc:
             raise RegistryError(_("レジストリの名前を解決できませんでした（%(host)s）") % {"host": host}) from exc
         if not addresses or not all(ipaddress.ip_address(a.split("%")[0]).is_global for a in addresses):
             raise RegistryError(_("レジストリが内部のアドレスを指しました（%(host)s）") % {"host": host})
+        return addresses[0]
 
     def _fetch(self, url: str, headers: dict[str, str], params: dict[str, str] | None = None) -> Fetched:
         """本文を上限まで読む（上限を超えたら、読み切る前に切る）"""
@@ -184,13 +237,14 @@ class RegistryClient:
             raise RegistryError(_("このイメージを読む権限がありません。公開されたイメージを指定してください"))
         params = dict(re.findall(r'(\w+)="([^"]*)"', challenge))
         realm = httpx.URL(params.pop("realm", ""))
-        allowed = {self.host, self.reference.registry} | (
-            {DOCKER_HUB_AUTH} if self.reference.registry == DOCKER_HUB else set()
-        )
-        if realm.netloc.decode() not in allowed and realm.host not in allowed:
+        if realm.host not in self.auth_hosts:
             raise RegistryError(_("レジストリの認証の設定を読めませんでした"))
         params.setdefault("scope", f"repository:{self.reference.name}:pull")
-        response = self._fetch(str(realm), {}, params)
+        self.authenticating = True
+        try:
+            response = self._fetch(str(realm), {}, params)
+        finally:
+            self.authenticating = False
         try:
             if response.status_code != 200:
                 raise ValueError(response.status_code)
@@ -252,6 +306,11 @@ def inspect_image(
             raise RegistryError(_("このイメージの形式には対応していません（%(type)s）") % {"type": media_type})
         if not manifests:
             raise RegistryError(_("イメージに、実行できるplatformがありません"))
+        if len(manifests) > MAX_PLATFORMS:
+            raise RegistryError(
+                _("イメージのplatformが多すぎます（%(count)s。%(max)sまで）")
+                % {"count": len(manifests), "max": MAX_PLATFORMS}
+            )
         platform_digests: dict[str, str] = {}
         contracts, profiles, pythons = set(), set(), set()
         for digest, listed in manifests:

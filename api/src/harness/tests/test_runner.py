@@ -21,6 +21,7 @@ from run.models import (
     ToolStatus,
 )
 from run.tasks import claim_run
+from runtime.models import RuntimeProfile
 from usage.models import UsageLedger
 
 from .fakes import FakeAdapter, calls, reply
@@ -184,6 +185,24 @@ def test_next_request_starts_after_completion(conversation, app_user):
     next_run = Run.objects.exclude(pk=run.pk).get(conversation=conversation)
     assert next_run.status == RunStatus.QUEUED
     assert UserInstruction.objects.get(conversation=conversation).state == InstructionState.STARTED
+
+
+@pytest.mark.django_db
+def test_next_requests_that_cannot_start_are_discarded_with_the_reason(conversation, app_user, default_runtime):
+    # 投稿の後に既定のRuntime Profileがなくなったら、次の依頼は始めず、理由を会話に残す（黙って捨てない）
+    run = start(conversation)
+    post_message(conversation, body="次はこれ", client_message_id="", mode=MessageMode.NEXT, actor=app_user)
+    post_message(conversation, body="その次はこれ", client_message_id="", mode=MessageMode.NEXT, actor=app_user)
+    RuntimeProfile.objects.filter(pk=default_runtime.pk).update(is_default=False)
+    run = execute(run, FakeAdapter([reply("完了")]))
+
+    assert run.status == RunStatus.COMPLETED
+    assert not Run.objects.exclude(pk=run.pk).filter(conversation=conversation).exists()
+    states = UserInstruction.objects.filter(conversation=conversation).values_list("state", flat=True)
+    assert list(states) == [InstructionState.DISCARDED, InstructionState.DISCARDED]
+    notices = ConversationMessage.objects.filter(conversation=conversation, role=MessageRole.SYSTEM)
+    assert notices.count() == 2
+    assert all("Runtime Profile" in n.body for n in notices)
 
 
 @pytest.mark.django_db

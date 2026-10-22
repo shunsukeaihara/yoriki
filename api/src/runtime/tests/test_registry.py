@@ -52,10 +52,12 @@ class FakeRegistry:
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         self.requests.append(request)
-        if request.url.host == "auth.docker.io":
+        # 接続はIPアドレスに固定されるので、元のホスト名は Host ヘッダーで見る
+        host = request.headers["host"].split(":")[0]
+        if host == "auth.docker.io":
             return httpx.Response(200, json={"token": "anonymous"})
         # Docker Hub（と、認証先が別のホストにあるレジストリ）は、auth.docker.io の匿名のtokenを求める
-        needs_token = request.url.host in ("registry-1.docker.io", "registry.example.com")
+        needs_token = host in ("registry-1.docker.io", "registry.example.com")
         if needs_token and request.headers.get("Authorization") != "Bearer anonymous":
             challenge = 'Bearer realm="https://auth.docker.io/token",service="registry.docker.io"'
             return httpx.Response(401, headers={"WWW-Authenticate": challenge})
@@ -106,9 +108,11 @@ class TestInspect:
         assert set(image.platform_digests) == {"linux/amd64", "linux/arm64"}
         assert image.python_version == "3.13.16"
         assert image.profile_label == "docs"
-        # Docker Hubは匿名のtokenで読む
-        assert registry.requests[0].url.host == "registry-1.docker.io"
-        assert any(r.url.host == "auth.docker.io" for r in registry.requests)
+        # Docker Hubは匿名のtokenで読む。接続は確かめたIPアドレスに固定し、TLSは元のホスト名で確かめる
+        first = registry.requests[0]
+        assert (first.headers["host"], first.url.host) == ("registry-1.docker.io", "93.184.216.34")
+        assert first.extensions["sni_hostname"] == "registry-1.docker.io"
+        assert any(r.headers["host"] == "auth.docker.io" for r in registry.requests)
 
     def test_single_manifest(self):
         image = FakeRegistry({"linux/amd64": LABELS}, index=False).inspect()
@@ -195,3 +199,30 @@ class TestInspect:
         amd.top = amd.add(json.dumps({"mediaType": INDEX_TYPE, "manifests": entries}).encode())
         with pytest.raises(RegistryError, match="Pythonの版"):
             amd.inspect()
+
+    def test_dns_rebinding_cannot_reach_internal_addresses(self):
+        # 確かめた後にDNSの応答が内部のアドレスへ変わっても、要求ごとに確かめ直し、確かめたアドレスにだけ接続する
+        registry = FakeRegistry({"linux/amd64": LABELS})
+        answers = iter([["93.184.216.34"], ["93.184.216.34"], ["10.0.0.5"]])
+        with pytest.raises(RegistryError, match="内部のアドレス"):
+            registry.inspect(resolver=lambda _host: next(answers, ["10.0.0.5"]))
+        assert all(r.url.host == "93.184.216.34" for r in registry.requests)
+
+    def test_auth_redirects_stay_on_the_auth_hosts(self):
+        registry = FakeRegistry({"linux/amd64": LABELS})
+        original = registry.handler
+
+        def redirect(request: httpx.Request) -> httpx.Response:
+            if request.headers["host"] == "auth.docker.io":
+                return httpx.Response(302, headers={"Location": "https://evil.example/token"})
+            return original(request)
+
+        registry.handler = redirect  # type: ignore[method-assign]
+        with pytest.raises(RegistryError, match="認証"):
+            registry.inspect()
+        assert not any(r.headers["host"] == "evil.example" for r in registry.requests)
+
+    def test_too_many_platforms(self):
+        registry = FakeRegistry({f"linux/arch{i}": LABELS for i in range(17)})
+        with pytest.raises(RegistryError, match="多すぎます"):
+            registry.inspect()

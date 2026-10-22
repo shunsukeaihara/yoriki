@@ -9,6 +9,9 @@ from run.models import ClarificationStatus, Run, RunEvent, RunEventKind, RunStat
 from .factories import ConversationFactory
 from .models import Conversation, InstructionKind, UserInstruction
 
+# Runを始めるには既定のRuntime Profileが要る
+pytestmark = pytest.mark.usefixtures("default_runtime")
+
 
 @pytest.fixture(name="api_client")
 def fixture_api_client(app_user):

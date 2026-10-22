@@ -80,7 +80,7 @@ class RuntimeProfile(models.Model):
 
     @classmethod
     def default_version(cls) -> "RuntimeProfileVersion | None":
-        """SandboxのToolを使うRunが、Runを始めるときに固定する版。既定がなければNone（SandboxのToolを出さない）"""
+        """Runを始めるときに固定する版。既定がなければNone（Runを始めない。design.md §7.3）"""
         profile = (
             cls.objects.filter(deleted=False, is_active=True, is_default=True).select_related("current_version").first()
         )

@@ -5,6 +5,8 @@ import pytest
 from django.conf import settings
 from rest_framework.test import APIClient
 
+from runtime.factories import RuntimeProfileFactory
+from runtime.models import RuntimeProfile
 from user.factories import UserFactory
 from user.models import User
 
@@ -27,6 +29,12 @@ def fixture_other_user(db) -> User:
 @pytest.fixture(name="platform_admin")
 def fixture_platform_admin(db) -> User:
     return UserFactory.create(is_superuser=True, is_staff=True)
+
+
+@pytest.fixture(name="default_runtime")
+def fixture_default_runtime(db) -> RuntimeProfile:
+    """既定のRuntime Profile。これがないとRunを始めない（design.md §7.3）"""
+    return RuntimeProfileFactory.create(is_default=True)
 
 
 def pytest_sessionstart(session):

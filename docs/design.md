@@ -1007,7 +1007,8 @@ Launcherは承認済みimage digest、固定mount根、資源上限、container 
 
 **Runtime Profileの決め方**：Runtime Profileは、SkillではなくRunの単位で決める。1つのRunで複数のSkillを読み込み、Sandboxは1つのRunに1つなので、Skillごとに持つと、どれを使うか決まらず、Sandboxを起動した後に読み込んだSkillのために実行環境を替えることもできないため。
 
-- 基盤管理者がRuntime Profileを登録し、既定を1つ決める。SandboxのToolを使うRunは、Runを始めるときに、既定のRuntime Profileのその時点の版をManifestに固定する。Sandboxは最初にSandboxのToolが呼ばれた時点で起動し、固定した版を使う。既定がなければ、SandboxのToolを出さない。
+- 基盤管理者がRuntime Profileを登録し、既定を1つ決める。Runは、始めるときに、既定のRuntime Profileのその時点の版をManifestに固定する。Sandboxは最初にSandboxのToolが呼ばれた時点で起動し、固定した版を使う（コマンドを使わない短い応答では、コンテナの起動を待たない）。
+- エージェントの作業（ファイルの読み書き・コマンド）はほとんどがSandboxの中で動くので、Sandboxを使わない会話は基本的にない。既定のRuntime Profileがなければ、Runを始めず、利用者に理由（基盤管理者に登録を頼むこと）を返す。コマンドの要らないSkill（§3.4）も、同じRunの中でSandboxのToolを呼ばないだけにする。
 - Runの途中やWAITING_USERからの再開・再試行でも、固定した版を使う。新しい版を登録したり既定を替えたりしても、始まっているRunは替わらない。
 - Skillは実行環境を指定しない。Sandboxが要るかどうかは、Skillの使ってよいTool（§3.4）で決まる。読み込むSkillがいくつあっても、使うSandboxは1つ。
 - 用途の違うイメージ（GPU、大きい分析ライブラリ等）が要るようになったら、Runを始めるときの指定（Task Definition等）で選べるようにする。Skillには持たせない。

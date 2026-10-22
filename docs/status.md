@@ -32,7 +32,7 @@
 | #24 | qclusterでは接続プールを使わない（`settings.USE_DATABASE_POOL`）。Q2がworkerをforkで作り、プールの接続をforkした先と共有して、問い合わせの結果やtransactionが混ざっていた（#22 からの不具合） |
 | #25 | 会話の画面：会話を始めるウィザード（個人情報・機密情報を扱うならローカルLLMのモデルだけ）、サイドバーの会話の一覧（`app/v1/stream/` の通知で更新）、Runごとの作業の表示（状態、作業の計画、作業の記録、応答の逐次表示）、確認への回答（単一・複数の選択、自由記述、補足。モデルの切り替えの確認も）、実行中の追加の指示と次の依頼、停止、モデルとeffortの切り替え。`useEventStream`・`useUserEvents`（再接続時の取得し直し、古い接続・応答の破棄）、`DCheckboxGroup`、`MarkdownContent`（`markdown-it`。生のHTMLと画像は出さない。frontend-conventions.md §7.5）。API側はRunの一覧の会話での絞り込みと `todos` の型 |
 | #26 | Sandboxのイメージ：`sandbox/CONTRACT.md`（契約番号1。イメージの配置、起動の制限、コマンドの環境、補助コマンドの入出力）、docsのイメージ（Python 3.13、GNUのツール、日本語のフォント、文書処理のライブラリをlockからイメージのPythonへ）、補助コマンド `yoriki-sandbox`（PID 1のinit、exec・kill（グループかPID 1以外のすべて）・形式ごとのread・write・edit（一時ファイルから置き換え、改行は行ごとに保つ）・glob・grep・stat・init-env）、契約テスト（制限の確認、サブコマンド、代表的なコマンド111件）、CI（`sandbox.yml`）。design.md 0.22：`/workspace/env` はイメージのPythonの上の薄い環境（`--system-site-packages`）にした |
-| #27 | Runtime Profile：`runtime` アプリ（`RuntimeProfile`・`RuntimeProfileVersion`。中身を変えると版が増える）、レジストリのAPIでのイメージの確認（digest、platform、契約番号のラベル。許可したレジストリだけ、HTTPSと公開のアドレスだけ）、`v1/runtime_profiles`、Runを始めるときに既定の版を固定（`Run.runtime_version`）、`/manage/runtime_profiles`。design.md 0.23：Runtime ProfileはSkillごとでなくRunの単位で決める。モデル設定の「既定にする」が同時の要求で500になる問題も直した |
+| #27 | Runtime Profile：`runtime` アプリ（`RuntimeProfile`・`RuntimeProfileVersion`。中身を変えると版が増える）、レジストリのAPIでのイメージの確認（digest、platform、契約番号のラベル。許可したレジストリだけ、HTTPSと公開のアドレスだけ）、`v1/runtime_profiles`、Runを始めるときに既定の版を固定（`Run.runtime_version`。既定がなければRunを始めない）、`/manage/runtime_profiles`。design.md 0.23：Runtime ProfileはSkillごとでなくRunの単位で決める。モデル設定の「既定にする」が同時の要求で500になる問題も直した |
 
 確認済みのこと：
 
@@ -79,7 +79,7 @@
 
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。提案する順番：
 
-1. **LauncherとRunnerのTool（`runtime`）**：イメージ・契約は #26、Runtime Profileは #27。Launcher（CONTRACT.md §2の制限を必ずかけ、自動テストで確かめる。コンテナからの脱出への対策の1・2・4。design.md §7.2）、Workerのplatformに合うmanifestの選択とAttemptへの記録、RunnerのTool（`shell`・`read`・`write`・`edit`・`glob`・`grep`・`job_output`・`job_kill`、バックグラウンドのジョブ、出力の上限と退避。harness.md §7・§8）、Attemptを終えるときの `kill` の `all`。Runの `runtime_version` がないときは、SandboxのToolを出さない。
+1. **LauncherとRunnerのTool（`runtime`）**：イメージ・契約は #26、Runtime Profileは #27。Launcher（CONTRACT.md §2の制限を必ずかけ、自動テストで確かめる。コンテナからの脱出への対策の1・2・4。design.md §7.2）、Workerのplatformに合うmanifestの選択とAttemptへの記録、RunnerのTool（`shell`・`read`・`write`・`edit`・`glob`・`grep`・`job_output`・`job_kill`、バックグラウンドのジョブ、出力の上限と退避。harness.md §7・§8）、Attemptを終えるときの `kill` の `all`。
 2. **gVisorの評価**：契約テストと、文書処理の所要時間で確かめる（design.md §7.2の5）。
 3. **成果物とファイル（`artifact`）**：Local・S3のStorage Backend、添付、成果物の取得（`/api/files/<token>/`、`X-Accel-Redirect`）。
 4. **Skill（`skill`、`resource`）**：Draft・Version・公開範囲と公開、Skillの資料（マスター・テンプレート）、会話からのSkill更新、入力欄の `/` での指定、エージェントに見せる一覧（利用者の権限で使えるものだけ）。役割「Plugin公開者」（`user/roles.py`）を「Skill公開者」に改める（design.md 0.19）。

@@ -5,6 +5,7 @@ from django.db import connection
 
 from conversation.dispatch import post_message
 from conversation.factories import ConversationFactory
+from run.models import Run
 from runtime.errors import RegistryError
 from runtime.factories import DIGEST, RuntimeProfileFactory, version_fields
 from runtime.models import RuntimeProfile
@@ -155,7 +156,13 @@ class TestRunPinsTheVersion:
         run.refresh_from_db()
         assert run.runtime_version is not None and run.runtime_version.number == 1
 
-    def test_without_a_default_the_run_has_no_sandbox(self, app_user):
+    def test_without_a_default_the_run_does_not_start(self, api_client, app_user):
+        # エージェントの作業はほとんどがSandboxの中で動くので、既定がなければRunを始めず、理由を返す
         conversation = ConversationFactory.create(owner=app_user)
-        message = post_message(conversation, body="要約して", client_message_id="", mode="auto", actor=app_user)
-        assert message.run is not None and message.run.runtime_version is None
+        api_client.force_login(app_user)
+        res = api_client.post(
+            f"/api/app/v1/conversations/{conversation.uid}/messages/", {"body": "要約して"}, format="json"
+        )
+        assert res.status_code == 400
+        assert "Runtime Profile" in str(res.data["non_field_errors"][0])
+        assert not Run.objects.filter(conversation=conversation).exists()

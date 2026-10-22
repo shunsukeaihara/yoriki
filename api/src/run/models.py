@@ -97,7 +97,8 @@ class Run(models.Model):
         "llm.ModelProfileVersion", on_delete=models.PROTECT, related_name="+", verbose_name=_("モデル設定の版")
     )
     effort = models.CharField(_("effort"), max_length=50, blank=True)
-    # SandboxのToolを使うRunが、開始時に固定したRuntime Profileの版。なければSandboxのToolを出さない（design.md §7.3）
+    # 開始時に固定したRuntime Profileの版（design.md §7.3）。既定がなければRunを始めないので、空なのは
+    # この項目を足す前のRunだけ
     runtime_version = models.ForeignKey(
         "runtime.RuntimeProfileVersion",
         on_delete=models.PROTECT,

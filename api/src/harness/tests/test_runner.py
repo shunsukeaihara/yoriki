@@ -25,6 +25,9 @@ from usage.models import UsageLedger
 
 from .fakes import FakeAdapter, calls, reply
 
+# Runを始めるには既定のRuntime Profileが要る
+pytestmark = pytest.mark.usefixtures("default_runtime")
+
 QUESTION = {
     "questions": [
         {

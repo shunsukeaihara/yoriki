@@ -93,8 +93,13 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
     if conversation.handles_sensitive_data and not version.is_local:
         raise CannotStart(_("個人情報や機密情報を扱う会話では、ローカルLLMのモデルを選んでください。"))
     effort = resolve_effort(conversation, version)
-    # 実行環境はRunの単位で決め、既定のRuntime Profileのその時点の版を固定する（design.md §7.3）
+    # 実行環境はRunの単位で決め、既定のRuntime Profileのその時点の版を固定する（design.md §7.3）。
+    # エージェントの作業はほとんどがSandboxの中で動くので、既定がなければRunを始めない
     runtime_version = RuntimeProfile.default_version()
+    if runtime_version is None:
+        raise CannotStart(
+            _("コマンドを動かす環境（Runtime Profile）が登録されていません。基盤管理者に問い合わせてください。")
+        )
     run = Run.objects.create(
         conversation=conversation,
         parent=parent,
@@ -107,7 +112,7 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
             "fixed": {
                 "model_version": version.pk,
                 "effort": effort,
-                "runtime_version": runtime_version.pk if runtime_version else None,
+                "runtime_version": runtime_version.pk,
                 "handles_sensitive_data": conversation.handles_sensitive_data,
             },
             "appended": [],

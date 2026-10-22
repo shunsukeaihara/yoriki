@@ -10,7 +10,7 @@ from runtime.launcher import WORK_DIR
 
 from ..sandbox import MAX_JOBS, Job, SandboxSession, workspace_path
 from .base import Effect, Tool, ToolContext, ToolResult
-from .output import SPILL_MAX_CHARS, limited
+from .output import limited
 
 DEFAULT_TIMEOUT = 120
 MAX_TIMEOUT = 600
@@ -57,24 +57,30 @@ SHELL_PARAMETERS = {
 }
 
 
-def _job_text(job: Job, start: int, end: int) -> tuple[str, str]:
-    """`start` から `end` までの（見せる部分、退避する全体）。大きい出力は先頭と末尾だけを読む。
+def _job_text(job: Job, start: int, end: int) -> str:
+    """`start` から `end` までの見せる部分。大きい出力は先頭と末尾だけを読む。
     動いているジョブは読む間も出力が増えるので、`end` より先は読まない（次の読み出しで返す）"""
     size = end - start
     if size <= WINDOW:
-        text = job.read_output(start, size)
-        return text, text
+        return job.read_output(start, size)
     head = job.read_output(start, HEAD_BYTES)
     tail = job.read_output(end - TAIL_BYTES, TAIL_BYTES)
-    return f"{head}\n…\n{tail}", job.read_output(start, min(size, SPILL_MAX_CHARS))
+    return f"{head}\n…\n{tail}"
 
 
 def _output(context: ToolContext, job: Job) -> str:
     """前回の続きからの出力。読んだ位置を進める"""
-    end = job.output_size()
-    shown, full = _job_text(job, job.read_offset, end)
+    start, end = job.read_offset, job.output_size()
+    shown = _job_text(job, start, end)
     job.read_offset = end
-    return limited(context, shown, head_ratio=HEAD_RATIO, full_text=full)
+    # 退避するのは、Worker側のログのその範囲そのもの（大きくても途中を落とさない）
+    session = context.sandbox_session()
+    return limited(
+        context,
+        shown,
+        head_ratio=HEAD_RATIO,
+        spill_to=lambda path: session.put_job_output(job, path, start, end),
+    )
 
 
 def _status(job: Job) -> str:

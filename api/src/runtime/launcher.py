@@ -272,6 +272,15 @@ class Sandbox:
         if exit_code != 0:
             raise SandboxUnavailable(f"cannot restore the workspace (exit {exit_code}): {stderr[-1000:]!r}")
 
+    def put_file(self, path: str, src: IO[bytes]) -> bool:
+        """`src` の内容を、Sandboxの利用者の権限でそのまま `path` に書く（親のディレクトリも作る）。
+        パスは引数で渡し、shellの解釈を通さない。書けなかった（tmpfsが一杯等）ならFalse"""
+        script = 'mkdir -p -- "$(dirname -- "$1")" && cat > "$1"'
+        _stdout, stderr, exit_code = self._run(["/bin/sh", "-c", script, "sh", path], src, timeout=ARCHIVE_TIMEOUT)
+        if exit_code != 0:
+            logger.warning("cannot write %s in the sandbox: %r", path, stderr[-500:])
+        return exit_code == 0
+
     def remove(self) -> None:
         """`docker rm -f`（SIGKILL）。`docker stop` のSIGTERMは init が無視する（CONTRACT.md §2）"""
         try:

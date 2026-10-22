@@ -221,6 +221,21 @@ class SandboxSession:
                 self.refresh(job)
         return [job for job in self.jobs.values() if not job.finished]
 
+    def put_job_output(self, job: Job, path: str, start: int, end: int) -> bool:
+        """ジョブの出力（Worker側のログの `start` から `end` まで）を、Sandboxの `path` へそのまま書く"""
+        sandbox = self.ensure()
+        with tempfile.TemporaryFile(dir=self.dir) as copy:
+            with job.output_path.open("rb") as log:
+                log.seek(start)
+                remaining = end - start
+                while remaining > 0 and (chunk := log.read(min(remaining, 1024 * 1024))):
+                    copy.write(chunk)
+                    remaining -= len(chunk)
+            copy.seek(0)
+            if threading.get_ident() == self.owner_thread:
+                return self._keep_lease(lambda: sandbox.put_file(path, copy))
+            return sandbox.put_file(path, copy)
+
     def helper(self, command: str, request: dict[str, Any]) -> dict[str, Any]:
         """補助コマンドを呼ぶ。Runnerのスレッドからなら、その間もleaseを延ばす（大きいPDFの read 等）。
         並べて実行するToolの別のスレッドからなら、Runnerのスレッドが結果を待つ間にleaseを延ばす"""
@@ -336,7 +351,8 @@ class SandboxSession:
         """
         if self.sandbox is None:
             return None
-        running = self.running_jobs()
+        # 直前に終わったジョブを、止めたジョブとして記録しない
+        running = self.running_jobs(refresh=True)
         for job in running:
             self.kill(job, reason="suspended")
         # setsid 等でグループを離れたもの、プロセスグループの分からなかったジョブも残さない（CONTRACT.md §4.2）

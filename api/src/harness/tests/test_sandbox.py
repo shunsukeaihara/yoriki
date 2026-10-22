@@ -297,3 +297,20 @@ def test_finished_jobs_do_not_count_against_the_limit(conversation):
     r = results(run)
     assert not r["c1"]["is_error"], text(r["c1"])
     assert text(r["c1"]).startswith("Exit code: 0")
+
+
+def test_large_job_output_is_saved_in_full(conversation):
+    """出力が大きくても、退避したファイルには全体がある（途中も末尾も読める）"""
+    run = post(conversation)
+    adapter = FakeAdapter(
+        [
+            calls(("c1", "shell", shell("seq 1 1500000"))),
+            calls(("c2", "shell", shell("wc -l .yoriki/outputs/*.txt; tail -n 1 .yoriki/outputs/*.txt"))),
+            reply("終わり"),
+        ]
+    )
+    run = execute(run, adapter)
+    r = results(run)
+    assert "[full output: /workspace/work/.yoriki/outputs/" in text(r["c1"])
+    assert "1500000 /workspace/work/.yoriki/outputs/" in text(r["c2"]) or "1500000 .yoriki/outputs/" in text(r["c2"])
+    assert text(r["c2"]).rstrip().endswith("1500000")

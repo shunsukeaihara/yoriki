@@ -199,9 +199,8 @@ def test_job_output_is_read_only_up_to_the_measured_end(tmp_path):
     path = tmp_path / "job.log"
     path.write_bytes(b"first\nsecond\n")
     job = Job("job_1", "cmd", "説明", "/workspace/work", Exec("e1"), path, 60)
-    shown, full = _job_text(job, 0, 6)
-    assert shown == full == "first\n"
-    assert _job_text(job, 6, path.stat().st_size)[0] == "second\n"
+    assert _job_text(job, 0, 6) == "first\n"
+    assert _job_text(job, 6, path.stat().st_size) == "second\n"
 
 
 class _ExitedSandbox:

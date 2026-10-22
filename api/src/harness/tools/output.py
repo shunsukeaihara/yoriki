@@ -4,6 +4,7 @@
 `/workspace/work/.yoriki/outputs/{invocation}.txt` へ退避する（`read`・`grep` で読める）。
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from .base import ToolContext
@@ -71,32 +72,48 @@ def clip(text: str, budget: int, *, head_ratio: float) -> Clipped:
     return Clipped(head + marker + tail, True, total, estimate_tokens(head), estimate_tokens(tail))
 
 
-def spill(context: ToolContext, text: str) -> str:
-    """全体をSandboxへ退避し、その場所を返す。退避できなければ空文字"""
-    path = f"{OUTPUTS_DIR}/{context.invocation or context.call.id}.txt"
+def spill_path(context: ToolContext) -> str:
+    return f"{OUTPUTS_DIR}/{context.invocation or context.call.id}.txt"
+
+
+def spill(context: ToolContext, text: str) -> tuple[str, bool]:
+    """全体をSandboxへ退避し、（場所、全体を退避できたか）を返す。退避できなければ場所は空文字"""
+    path = spill_path(context)
     content = text if len(text) <= SPILL_MAX_CHARS else text[:SPILL_MAX_CHARS]
     result = context.sandbox_session().helper("write", {"path": path, "content": content})
-    return path if result.get("ok") else ""
+    return (path if result.get("ok") else ""), content is text
 
 
 def limited(
-    context: ToolContext, text: str, *, head_ratio: float = 0.5, full_text: str | None = None, hint: str = ""
+    context: ToolContext,
+    text: str,
+    *,
+    head_ratio: float = 0.5,
+    full_text: str | None = None,
+    hint: str = "",
+    spill_to: Callable[[str], bool] | None = None,
 ) -> str:
     """上限を超えたら切って退避し、そのことを末尾に書く。`full_text` があれば、それを退避する
-    （表示用の見出しを除く等）"""
+    （表示用の見出しを除く等）。`spill_to` があれば、退避はそれに任せる（ジョブの出力をそのまま書く等）"""
     if not text.strip():
         return NO_OUTPUT
     clipped = clip(text, limit_for(context), head_ratio=head_ratio)
     if not clipped.truncated:
         return text
-    path = spill(context, full_text if full_text is not None else text)
+    if spill_to is not None:
+        path = spill_path(context)
+        path, complete = (path if spill_to(path) else ""), True
+    else:
+        path, complete = spill(context, full_text if full_text is not None else text)
     if head_ratio < 1:
         shown = f"the first {clipped.head_tokens:,} and last {clipped.tail_tokens:,}"
     else:
         shown = f"the first {clipped.head_tokens:,}"
     lines = [clipped.text, f"[output truncated: showing {shown} of about {clipped.total_tokens:,} tokens]"]
-    if path:
+    if path and complete:
         lines.append(f"[full output: {path} — use read with offset/limit, or grep, to look inside]")
+    elif path:
+        lines.append(f"[the first {SPILL_MAX_CHARS:,} characters of the output: {path}; the rest was not saved]")
     if hint:
         lines.append(hint)
     return "\n".join(lines)

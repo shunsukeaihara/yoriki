@@ -279,6 +279,16 @@ YORIKI_SECRET_ENCRYPTION_KEYS = _env_list("YORIKI_SECRET_ENCRYPTION_KEYS")
 YORIKI_SANDBOX_REGISTRIES = _env_list("YORIKI_SANDBOX_REGISTRIES", "docker.io")
 # HTTPSでなくHTTPで読むレジストリ（`localhost:5001` 等）。手元に立てたレジストリでRuntime Profileを試すときだけ使う
 YORIKI_SANDBOX_INSECURE_REGISTRIES = _env_list("YORIKI_SANDBOX_INSECURE_REGISTRIES")
+# Workerの作業領域（ジョブの出力、Workspaceのsnapshot）。qclusterのコンテナとホストで同じパスにする
+# （deployment.md §3.1）
+YORIKI_WORKSPACES_DIR = os.getenv("YORIKI_WORKSPACES_DIR", "/var/lib/yoriki/workspaces")
+# Workspaceのsnapshotの保存先（runtime/storage.py）。初期はWorkerのローカルディスクだけ
+YORIKI_SNAPSHOT_STORAGE = {
+    "BACKEND": os.getenv("YORIKI_SNAPSHOT_STORAGE_BACKEND", "runtime.storage.LocalSnapshotStorage"),
+    "OPTIONS": {"root": os.path.join(YORIKI_WORKSPACES_DIR, "snapshots")},
+}
+# 手元でビルドしたSandboxイメージ（`yoriki-sandbox-docs:dev`）に差し替える。開発時（DEBUG）だけ使い、本番では無視する
+YORIKI_SANDBOX_IMAGE_OVERRIDE = os.getenv("YORIKI_SANDBOX_IMAGE_OVERRIDE", "") if DEBUG else ""
 
 LOGGING = {
     "version": 1,

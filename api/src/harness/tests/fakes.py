@@ -51,3 +51,34 @@ class FakeAdapter(ProviderAdapter):
 
     def list_models(self) -> list[str]:
         return []
+
+
+class FakeSession:
+    """Dockerを使わないSandboxSession。ensure() で `error` を投げる"""
+
+    def __init__(self, run, attempt, *, heartbeat=None, error: Exception | None = None):
+        self.run = run
+        self.attempt = attempt
+        self.error = error
+        self.sandbox = None
+        self.restored = None
+        self.jobs: dict = {}
+
+    @property
+    def started(self) -> bool:
+        return False
+
+    def ensure(self):
+        raise self.error or AssertionError("the sandbox is not available in this test")
+
+    def running_jobs(self) -> list:
+        return []
+
+    def take_notice(self) -> str:
+        return ""
+
+    def suspend(self):
+        return None
+
+    def close(self) -> None:
+        pass

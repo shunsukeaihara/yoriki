@@ -32,3 +32,25 @@ describe('run', () => {
     expect(hasWorkToShow(run({ todos: [{ content: '読む', status: TodoStatus.COMPLETED }] }))).toBe(true)
   })
 })
+
+describe('toolLabel', () => {
+  const t = (key: string, params?: Record<string, unknown>) =>
+    key.replace(/\{(\w+)\}/g, (_m, name: string) => String(params?.[name] ?? ''))
+
+  it('shell はエージェントが書いた説明を出す', () => {
+    expect(toolLabel({ name: 'shell', arguments: { description: '表を抽出', command: 'python a.py' } }, t)).toBe(
+      '表を抽出',
+    )
+    expect(toolLabel({ name: 'shell', arguments: { command: 'ls' } }, t)).toBe('コマンドを実行')
+  })
+
+  it('ファイルの Tool は対象のパスを出す', () => {
+    expect(toolLabel({ name: 'read', arguments: { path: '/workspace/input/a.pdf' } }, t)).toBe(
+      'ファイルを読む：/workspace/input/a.pdf',
+    )
+  })
+
+  it('知らない Tool は名前をそのまま出す', () => {
+    expect(toolLabel({ name: 'other', arguments: {} }, t)).toBe('other')
+  })
+})

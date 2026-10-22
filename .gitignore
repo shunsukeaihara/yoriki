@@ -14,6 +14,9 @@ __pycache__/
 # OS / エディタ
 .DS_Store
 
+# Workerの作業領域（手元の開発。.envrc.example の YORIKI_WORKSPACES_DIR）
+.workspaces/
+
 # ツールのキャッシュ
 .ruff_cache/
 .mypy_cache/

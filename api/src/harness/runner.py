@@ -9,9 +9,11 @@ import json
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field, replace
 from typing import Any
 
+from django.db.models import Max
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
@@ -32,13 +34,17 @@ from llm.providers.base import (
     ProviderState,
     StopReason,
     TextDelta,
+    TextPart,
     ToolCall,
     ToolCallRequested,
     ToolChoice,
     Usage,
 )
+from run.dispatch import enqueue_run
 from run.errors import LeaseLost
 from run.models import (
+    MAX_ATTEMPTS,
+    Checkpoint,
     ClarificationKind,
     ClarificationRequest,
     ClarificationStatus,
@@ -53,15 +59,24 @@ from run.models import (
     ToolStatus,
 )
 from run.tasks import CLARIFICATION_TTL
+from runtime.launcher import SandboxUnavailable
 from stream.notifier import notify_delta
 from usage.models import UsageLedger, UsagePurpose
 
 from . import compaction
-from .context import ADDITIONAL_INSTRUCTION_PREFIX, build_items, parts_to_json, pending_tool_calls, provider_key
+from .context import (
+    ADDITIONAL_INSTRUCTION_PREFIX,
+    RUNTIME_CONTEXT_TAG,
+    build_items,
+    parts_to_json,
+    pending_tool_calls,
+    provider_key,
+)
 from .context import runtime_context as build_runtime_context
 from .prompts import system_prompt
 from .recovery import request_model_switch
-from .tools import ALL_TOOLS
+from .sandbox import SandboxSession
+from .tools import ALL_TOOLS, SANDBOX_TOOLS, WORKSPACE_WRITING_TOOLS
 from .tools.base import Effect, Tool, ToolContext, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -77,6 +92,8 @@ HEARTBEAT_INTERVAL = 20
 REPEAT_WARN, REPEAT_STOP = 3, 5
 # 応答の異常（空、出力の上限で切れた）を許す回数
 MAX_NUDGES = 3
+# 並べて実行するToolの数の上限（harness.md §7.6）
+MAX_PARALLEL = 4
 
 REPEAT_NOTICE = (
     "\n\n[You are repeating the same tool call with identical arguments. Check the previous result and try a "
@@ -84,6 +101,10 @@ REPEAT_NOTICE = (
 )
 SAME_ERROR_NOTICE = (
     "\n\n[Repeating the same call will not fix this error. Correct the arguments or change the approach.]"
+)
+RUNNING_JOBS_NOTICE = (
+    "Background jobs are still running: {jobs}. Before you finish, wait for them (job_output with wait) or stop "
+    "them (job_kill). Jobs are stopped when the work ends."
 )
 STEP_LIMIT_NOTICE = (
     "The maximum number of steps for this request has been reached. Tools are now disabled. Reply with text only: "
@@ -115,13 +136,18 @@ class Runner:
         *,
         adapter_factory: Callable[..., ProviderAdapter] = get_adapter,
         sleep: Callable[[float], None] = time.sleep,
+        session_factory: Callable[..., SandboxSession] = SandboxSession,
     ):
         self.attempt = attempt
         self.run_obj: Run = Run.objects.select_related(
-            "conversation", "owner", "model_version__connection", "model_version__profile"
+            "conversation", "owner", "model_version__connection", "model_version__profile", "runtime_version"
         ).get(pk=attempt.run_id)
         self.adapter_factory = adapter_factory
         self.sleep = sleep
+        self.session = session_factory(self.run_obj, attempt, heartbeat=attempt.heartbeat)
+        # このAttemptを始めたときのRunEventの最後のsequence。読んだファイルの版の記録を選ぶのに使う
+        self.start_sequence = 0
+        self.warned_running_jobs = False
         self.tools: tuple[Tool, ...] = ()
         self.nudges = 0
         self.compacted_for_overflow = False
@@ -141,11 +167,16 @@ class Runner:
             logger.info("run %s: attempt %s lost the lease", self.run_obj.uid, self.attempt.number)
         except RepeatedErrors:
             self._fail(RunEndReason.REPEATED_ERRORS, _("同じ操作を繰り返していて、作業が進みませんでした。"))
+        except SandboxUnavailable as exc:
+            logger.warning("run %s: sandbox unavailable: %s", self.run_obj.uid, exc)
+            with contextlib.suppress(LeaseLost):
+                self._sandbox_failure(exc)
         except Exception:
             logger.exception("run %s: unexpected error", self.run_obj.uid)
             with contextlib.suppress(LeaseLost):
                 self._fail(RunEndReason.INTERNAL, _("内部のエラーで実行を続けられませんでした。"))
         finally:
+            self.session.close()
             self.attempt.end()
 
     # --- 記録 ---
@@ -168,13 +199,21 @@ class Runner:
     # --- 再開 ---
 
     def _resume(self) -> None:
-        """結果のないTool呼出しを閉じ、実行時の文脈が変わっていれば追記する（harness.md §11.1）"""
+        """結果のないTool呼出しを閉じ、Workspaceの食い違いと実行時の文脈の変化を追記する（harness.md §11.1）"""
         events = self._events()
+        self.start_sequence = events[-1].sequence if events else 0
+        self.tools = self._exposed_tools()
+        tools = {t.name: t for t in self.tools}
         # 実行中のRunに回答待ちの確認が残っていれば、前のAttemptが待ちに移る前に止まったもの。答えられないので閉じる
         ClarificationRequest.objects.filter(
             run=self.run_obj, kind=ClarificationKind.QUESTION, status=ClarificationStatus.OPEN
         ).update(status=ClarificationStatus.CANCELLED)
         for call in pending_tool_calls(events):
+            tool = tools.get(call["name"])
+            if tool is not None and tool.replay_safe:
+                # 読むだけのToolは、同じ引数で実行し直す
+                self._run_tool(tool, ToolCall(call["id"], call["name"], call["arguments"]))
+                continue
             text = (
                 "The previous attempt was interrupted while this tool call was running, and its result was not "
                 "recorded. Its outcome is unknown. If the operation only reads data or is safe to repeat, call it "
@@ -182,11 +221,57 @@ class Runner:
                 "Do not retry blindly."
             )
             self._record_tool_result(call["id"], call["name"], ToolResult.error(text), ToolStatus.UNKNOWN)
+        self._workspace_notices(self._events())
         user = self.run_obj.owner
         context = build_runtime_context(self.run_obj, user_name=user.display_name or user.email)
-        last = next((e for e in reversed(events) if e.kind == RunEventKind.CONTEXT), None)
+        last = next(
+            (
+                e
+                for e in reversed(events)
+                if e.kind == RunEventKind.CONTEXT and e.data.get("text", "").startswith(RUNTIME_CONTEXT_TAG)
+            ),
+            None,
+        )
         if last is None or last.data.get("text") != context:
             self._record(RunEventKind.CONTEXT, {"text": context})
+
+    def _workspace_notices(self, events: list[RunEvent]) -> None:
+        """新しいAttemptのWorkspaceは最後のCheckpointから戻る。それより後にファイルを変えたTool呼出しと、
+        保存の前に止めたジョブを、モデルに知らせる（harness.md §8.3・§11.1）"""
+        if self.run_obj.runtime_version_id is None:
+            return
+        checkpoint = Checkpoint.latest_for(self.run_obj)
+        own = checkpoint if checkpoint is not None and checkpoint.run_id == self.run_obj.pk else None
+        notices = [e for e in events if e.kind == RunEventKind.CONTEXT and e.data.get("workspace")]
+        since = max([own.sequence if own else 0, *(e.sequence for e in notices if e.data["workspace"] == "reset")])
+        changed = [
+            f"{e.data['name']} ({e.data['call_id']})"
+            for e in events
+            if e.kind == RunEventKind.TOOL_RESULT
+            and e.sequence > since
+            and e.data.get("name") in WORKSPACE_WRITING_TOOLS
+        ]
+        if changed:
+            if own is not None:
+                state = "were restored to their state at an earlier point of this work"
+            elif checkpoint is not None:
+                state = "were restored to their state at the start of this request"
+            else:
+                state = "are empty again"
+            text = (
+                f"[The previous attempt was interrupted. The files in /workspace/work and /workspace/output {state}. "
+                f"These later tool calls changed files, and their effects are not in the current files: "
+                f"{', '.join(changed[:20])}. Check the current files and redo what is needed. Read a file again "
+                "before you edit it.]"
+            )
+            self._record(RunEventKind.CONTEXT, {"text": text, "workspace": "reset"})
+        if own is not None and own.stopped_jobs and not any(e.data.get("checkpoint") == own.uid for e in notices):
+            jobs = ", ".join(f"{j['job_id']} (`{j['command']}`)" for j in own.stopped_jobs)
+            text = (
+                f"[These background jobs were stopped when the work paused, and they are not running now: {jobs}. "
+                "Run them again if you still need them.]"
+            )
+            self._record(RunEventKind.CONTEXT, {"text": text, "workspace": "jobs_stopped", "checkpoint": own.uid})
 
     # --- ステップ ---
 
@@ -255,7 +340,32 @@ class Runner:
         if run.status != RunStatus.RUNNING:
             raise LeaseLost(f"run={run.uid} status={run.status}")
         self._apply_instructions()
+        self._record_finished_jobs()
         return True
+
+    def _record_finished_jobs(self) -> None:
+        """終わったバックグラウンドのジョブを job.finished として記録し、モデルに知らせる（harness.md §8.3）"""
+        if not self.session.started:
+            return
+        for job in self.session.finished_unreported():
+            job.reported = True
+            if job.stopped == "timeout":
+                status = f"was stopped because it exceeded the time limit of {job.timeout_seconds} seconds"
+            else:
+                status = f"finished with exit code {job.exit_code}"
+            text = f"[Background job {job.job_id} ({job.description}) {status}. Read its output with job_output.]"
+            if job.stopped == "timeout":
+                comment = _("%(description)s（実行時間の上限で停止）") % {"description": job.description}
+            else:
+                comment = _("%(description)s（終了コード %(code)s）") % {
+                    "description": job.description,
+                    "code": job.exit_code,
+                }
+            self._record(
+                RunEventKind.JOB_FINISHED,
+                {"job_id": job.job_id, "exit_code": job.exit_code, "stopped": job.stopped, "text": text},
+                comment=comment,
+            )
 
     def _apply_instructions(self) -> bool:
         """届いている追加指示を、受付順に利用者の発言として取り込む。取り込んだらTrue"""
@@ -281,6 +391,8 @@ class Runner:
         if not self.run_obj.model_version.supports_tools:
             return ()
         tools = ALL_TOOLS
+        if self.run_obj.runtime_version_id is None:
+            tools = tuple(t for t in tools if t not in SANDBOX_TOOLS)
         if not self.run_obj.is_interactive:
             tools = tuple(t for t in tools if t.name != "ask_user")
         return tools
@@ -365,6 +477,7 @@ class Runner:
         if not (error.retryable and self.run_obj.is_interactive):
             self._fail(RunEndReason.PROVIDER, error.message)
             return
+        self._checkpoint()
         with self.run_obj.fenced(self.attempt) as run:
             request_model_switch(run, error.message)
             run.set_status(RunStatus.WAITING_USER, comment=_("モデルの切り替えを確認しています。"))
@@ -407,6 +520,13 @@ class Runner:
             return self._nudge("Your previous response was cut off at the output limit. Continue in smaller pieces.")
         if not response.text.strip():
             return self._nudge("Your previous response was empty. Call a tool or write your reply to the user.")
+        running = self.session.running_jobs() if self.session.started else []
+        if running and not self.warned_running_jobs:
+            # 最後の応答の前に、動いているジョブを待つか止めるかを1回だけ決めさせる（harness.md §8.3）
+            self.warned_running_jobs = True
+            jobs = ", ".join(f"{j.job_id} ({j.description})" for j in running)
+            self._record(RunEventKind.CONTEXT, {"text": RUNNING_JOBS_NOTICE.format(jobs=jobs)})
+            return True
         # 最後の応答の間に追加指示が届いていれば、終えずに取り込んで続ける（harness.md §10.4）
         return self._finish_with_reply(response.text, RunStatus.COMPLETED, RunEndReason.COMPLETED)
 
@@ -420,6 +540,7 @@ class Runner:
 
     def _finish_with_reply(self, text: str, status: RunStatus, end_reason: RunEndReason) -> bool:
         """応答を会話に載せてRunを終える。完了の前に追加指示が届いていれば、終えずにTrue（続ける）を返す"""
+        self._checkpoint()
         with self.run_obj.fenced(self.attempt) as run:
             if text.strip():
                 ConversationMessage.objects.create(
@@ -436,6 +557,8 @@ class Runner:
         return False
 
     def _finish_cancelled(self) -> None:
+        # 停止を優先する。Workspaceを保存できなくても止める（design.md §7.9）
+        self._checkpoint(required=False)
         with self.run_obj.fenced(self.attempt) as run:
             ToolInvocation.objects.filter(run=run, status__in=(ToolStatus.REQUESTED, ToolStatus.RUNNING)).update(
                 status=ToolStatus.CANCELLED, ended=timezone.now()
@@ -443,18 +566,100 @@ class Runner:
             run.set_status(RunStatus.CANCELLED, comment=_("停止しました。"), end_reason=RunEndReason.CANCELLED)
 
     def _fail(self, end_reason: RunEndReason, message: str) -> None:
+        self._checkpoint(required=False)
         with self.run_obj.fenced(self.attempt) as run:
             if run.status == RunStatus.CANCELLING:
                 run.set_status(RunStatus.CANCELLED, end_reason=RunEndReason.CANCELLED)
             else:
                 run.set_status(RunStatus.FAILED, end_reason=end_reason, error=message)
 
+    # --- Sandbox ---
+
+    def _checkpoint(self, *, required: bool = True) -> None:
+        """Attemptを終える前に、ジョブを止めてWorkspaceを保存する（design.md §7.9）。Sandboxを使っていなければ
+        何もしない。
+
+        保存できなければ、待ち・完了にはせず、Sandboxの障害として別のAttemptでやり直す（required）
+        """
+        try:
+            saved = self.session.suspend()
+        except SandboxUnavailable:
+            if required:
+                raise
+            logger.warning("run %s: cannot save the workspace", self.run_obj.uid, exc_info=True)
+            return
+        if saved is None:
+            return
+        stored, storage_id, stopped = saved
+        with self.run_obj.fenced(self.attempt) as run:
+            sequence = RunEvent.objects.filter(run=run).aggregate(last=Max("sequence"))["last"] or 0
+            Checkpoint.objects.create(
+                run=run,
+                attempt=self.attempt,
+                sequence=sequence,
+                storage=storage_id,
+                key=stored.key,
+                size=stored.size,
+                sha256=stored.sha256,
+                stopped_jobs=stopped,
+            )
+
+    def _sandbox_failure(self, error: SandboxUnavailable) -> None:
+        """Sandboxを起動できない・失われた。やり直せるなら別のAttemptで（harness.md §4.3の retry_wait）"""
+        if not error.retryable:
+            self._fail(RunEndReason.SANDBOX, _("コマンドを動かす環境を使えません。基盤管理者に問い合わせてください。"))
+            return
+        with self.run_obj.fenced(self.attempt) as run:
+            ExecutionAttempt.objects.filter(pk=self.attempt.pk).update(
+                ended=timezone.now(), failure=f"sandbox: {error}"[:1000]
+            )
+            if run.status == RunStatus.CANCELLING:
+                run.set_status(RunStatus.CANCELLED, comment=_("停止しました。"), end_reason=RunEndReason.CANCELLED)
+                return
+            failures = run.attempts.exclude(failure="").exclude(failure="superseded").count()
+            if failures >= MAX_ATTEMPTS:
+                run.set_status(
+                    RunStatus.FAILED,
+                    end_reason=RunEndReason.SANDBOX,
+                    error=_("コマンドを動かす環境が繰り返し失われました。"),
+                )
+                return
+            run.set_status(RunStatus.RETRY_WAIT, comment=_("コマンドを動かす環境が使えなくなったので、やり直します。"))
+            run.set_status(RunStatus.QUEUED)
+            enqueue_run(run)
+
+    def _file_version(self, path: str) -> str | None:
+        """読んだ・書いたファイルの最後の版（harness.md §7.8）。今のWorkspaceに当てはまる記録だけを使う：
+        このAttemptの記録と、戻したCheckpoint（このRunのもの）の時点までの記録"""
+        restored = self.session.restored
+        limit = restored.sequence if restored is not None and restored.run_id == self.run_obj.pk else 0
+        results = RunEvent.objects.filter(run=self.run_obj, kind=RunEventKind.TOOL_RESULT).order_by("-sequence")
+        for sequence, data in results.values_list("sequence", "data").iterator():
+            if limit < sequence <= self.start_sequence:
+                continue
+            file = (data.get("value") or {}).get("file") if isinstance(data.get("value"), dict) else None
+            if file and file.get("path") == path and not data.get("is_error"):
+                return file["sha256"]
+        return None
+
+    def _interrupted(self) -> bool:
+        """取消・追加指示が届いた。長く待つTool（shell）は待つのをやめて、区切りへ戻る"""
+        status = Run.objects.filter(pk=self.run_obj.pk).values_list("status", flat=True).first()
+        if status == RunStatus.CANCELLING:
+            return True
+        return UserInstruction.objects.filter(
+            run=self.run_obj, kind=InstructionKind.CURRENT, state=InstructionState.RECEIVED
+        ).exists()
+
     # --- Tool ---
 
     def _execute_calls(self, calls: list[ToolCall]) -> bool:
-        """モデルが返した順に実行する。呼出しと呼出しの間も安全な区切りとして確かめる（harness.md §4.2）"""
+        """モデルが返した順に実行する。並べてよい呼出しが続く間は1つの組にして並べて実行し、組と組の間を
+        安全な区切りとして確かめる（harness.md §4.2・§7.6）"""
         tools = {t.name: t for t in self.tools}
-        for index, call in enumerate(calls):
+        index = 0
+        while index < len(calls):
+            call = calls[index]
             rest = calls[index + 1 :]
             if index > 0:
                 interrupted = self._between_calls(calls[index:])
@@ -463,6 +668,12 @@ class Runner:
             tool = tools.get(call.name)
             if tool is None:
                 self._record_tool_result(call.id, call.name, ToolResult.error(_unknown_tool(call.name, tools)))
+                index += 1
+                continue
+            group = self._concurrent_group(calls[index:], tools)
+            if len(group) > 1:
+                self._run_group([(tools[c.name], c) for c in group])
+                index += len(group)
                 continue
             if tool.alone and len(calls) > 1 and index < len(calls) - 1:
                 result = self._run_tool(tool, call)
@@ -473,7 +684,37 @@ class Runner:
             result = self._run_tool(tool, call)
             if result.waits_for_user:
                 return self._wait_for_user(call, rest)
+            index += 1
         return True
+
+    @staticmethod
+    def _concurrent_group(calls: list[ToolCall], tools: dict[str, Tool]) -> list[ToolCall]:
+        group: list[ToolCall] = []
+        for call in calls[:MAX_PARALLEL]:
+            tool = tools.get(call.name)
+            if tool is None or tool.alone or not tool.concurrent(call.arguments):
+                break
+            group.append(call)
+        return group or calls[:1]
+
+    def _run_group(self, pairs: list[tuple[Tool, ToolCall]]) -> None:
+        """並べて実行する。DBへの書込み（呼出しの記録・結果の記録・Sandboxの起動）はこのスレッドで行い、
+        別のスレッドではToolの実行（Sandboxの補助コマンド）だけを行う。結果はモデルが返した順に記録する"""
+        prepared: list[tuple[Tool, ToolCall, ToolInvocation]] = []
+        for tool, call in pairs:
+            problem = tool.validate(call.arguments)
+            if problem:
+                result = ToolResult.error(problem)
+                self._record_tool_result(call.id, call.name, self._with_repeat_notice(call, result), ToolStatus.FAILED)
+                continue
+            prepared.append((tool, call, self._start_invocation(call)))
+        if any(tool.needs_sandbox for tool, _call, _inv in prepared):
+            self.session.ensure()
+        with ThreadPoolExecutor(max_workers=MAX_PARALLEL, thread_name_prefix="tool") as pool:
+            futures = [pool.submit(self._execute, tool, call, invocation) for tool, call, invocation in prepared]
+            results = [future.result() for future in futures]
+        for (tool, call, invocation), result in zip(prepared, results, strict=True):
+            self._finish_tool(tool, call, invocation, result)
 
     def _between_calls(self, remaining: list[ToolCall]) -> bool | None:
         """取消・追加指示が届いていれば、残りの呼出しを閉じる。続けてよければNone"""
@@ -505,25 +746,49 @@ class Runner:
             result = ToolResult.error(problem)
             self._record_tool_result(call.id, call.name, self._with_repeat_notice(call, result), ToolStatus.FAILED)
             return result
+        invocation = self._start_invocation(call)
+        return self._finish_tool(tool, call, invocation, self._execute(tool, call, invocation))
+
+    def _start_invocation(self, call: ToolCall) -> ToolInvocation:
+        """実行の前に記録する。再開で同じ呼出しを実行し直すときは、同じ行を使う（harness.md §11.1）"""
         with self.run_obj.fenced(self.attempt) as run:
-            invocation = ToolInvocation.objects.create(
+            invocation, _created = ToolInvocation.objects.update_or_create(
                 run=run,
-                attempt=self.attempt,
                 call_id=call.id,
-                name=call.name,
-                arguments=call.arguments,
-                status=ToolStatus.RUNNING,
+                defaults={
+                    "attempt": self.attempt,
+                    "name": call.name,
+                    "arguments": call.arguments,
+                    "status": ToolStatus.RUNNING,
+                },
             )
+        return invocation
+
+    def _execute(self, tool: Tool, call: ToolCall, invocation: ToolInvocation) -> ToolResult:
+        """Toolを実行する。並べて実行するときは別のスレッドで呼ばれるので、ここではDBに書かない"""
+        context = ToolContext(
+            self.run_obj,
+            self.attempt,
+            call,
+            invocation=invocation.uid,
+            session=self.session,
+            file_version=self._file_version,
+            interrupted=self._interrupted,
+        )
         try:
-            result = tool.execute(call.arguments, ToolContext(self.run_obj, self.attempt, call))
-        except LeaseLost:
+            return tool.execute(call.arguments, context)
+        except (LeaseLost, SandboxUnavailable):
             raise
         except Exception as exc:
             logger.exception("run %s: tool %s failed", self.run_obj.uid, call.name)
-            result = ToolResult.error(f"The tool failed: {type(exc).__name__}. Try a different approach.")
+            return ToolResult.error(f"The tool failed: {type(exc).__name__}. Try a different approach.")
+
+    def _finish_tool(self, tool: Tool, call: ToolCall, invocation: ToolInvocation, result: ToolResult) -> ToolResult:
         if result.waits_for_user:
             ToolInvocation.objects.filter(pk=invocation.pk).update(value=result.value)
             return result
+        if tool.needs_sandbox and (notice := self.session.take_notice()):
+            result = replace(result, content=(TextPart(notice), *result.content))
         status = ToolStatus.FAILED if result.is_error else ToolStatus.SUCCEEDED
         self._record_tool_result(call.id, call.name, self._with_repeat_notice(call, result), status, invocation)
         return result
@@ -581,6 +846,7 @@ class Runner:
         """ask_user の結果は記録せずにWAITING_USERにし、Attemptを終える（harness.md §10.3）"""
         self._close_calls(rest, "Not executed: waiting for the user's answer. Call again after the answer if needed.")
         invocation = ToolInvocation.objects.get(run=self.run_obj, call_id=call.id)
+        self._checkpoint()
         with self.run_obj.fenced(self.attempt) as run:
             # 確認の作成とWAITING_USERへの遷移を同じtransactionで行う。途中でleaseを失っても、
             # 答えられない確認だけが残ることはない

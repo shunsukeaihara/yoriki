@@ -11,8 +11,10 @@ from django.utils import timezone
 
 from llm.providers.base import Message, Part, TextPart, ToolCall
 from run.models import Run, RunEvent, RunEventKind
+from runtime.launcher import WORK_DIR
 
 ADDITIONAL_INSTRUCTION_PREFIX = "[Additional instruction during the work]"
+RUNTIME_CONTEXT_TAG = "<runtime_context>"
 
 
 def parts_to_json(parts: Iterable[Part]) -> list[dict[str, Any]]:
@@ -51,7 +53,7 @@ def build_items(run: Run, events: Iterable[RunEvent]) -> list[Item]:
     for event in events:
         data = event.data
         match event.kind:
-            case RunEventKind.USER_MESSAGE | RunEventKind.CONTEXT:
+            case RunEventKind.USER_MESSAGE | RunEventKind.CONTEXT | RunEventKind.JOB_FINISHED:
                 items.append(Item(event.sequence, event.kind, Message("user", data["text"])))
             case RunEventKind.ASSISTANT_MESSAGE:
                 calls = tuple(ToolCall(c["id"], c["name"], c["arguments"]) for c in data.get("tool_calls", []))
@@ -94,12 +96,16 @@ def runtime_context(run: Run, *, user_name: str) -> str:
     version = run.model_version
     now = timezone.localtime().strftime("%Y-%m-%d %H:%M %Z")
     lines = [
-        "<runtime_context>",
+        RUNTIME_CONTEXT_TAG,
         f"  <now>{now}</now>",
         f'  <user name="{_escape(user_name)}" />',
         f"  <mode>{'conversation' if run.is_interactive else 'task'}</mode>",
         f'  <model profile="{_escape(version.profile.name)}" effort="{_escape(run.effort)}" />',
-        '  <sandbox available="false" />',
+        (
+            f'  <sandbox available="true" workdir="{WORK_DIR}" />'
+            if run.runtime_version_id
+            else '  <sandbox available="false" />'
+        ),
         f"  <confidential>{'true' if run.handles_sensitive_data else 'false'}</confidential>",
         "</runtime_context>",
     ]

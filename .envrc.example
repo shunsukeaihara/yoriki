@@ -36,6 +36,9 @@ export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
 # 開発時のリダイレクトURIは http://localhost:3000/api/accounts/<microsoft|google>/login/callback/ になる
 
 # --- Sandbox ---
+# Workerの作業領域（ジョブの出力、Workspaceのsnapshot）。既定の /var/lib/yoriki/workspaces は手元では書けないので、
+# リポジトリの中の .workspaces/（gitに入れない）にする
+export YORIKI_WORKSPACES_DIR="$PWD/.workspaces"
 # 手元でビルドしたSandboxイメージに差し替える（開発時だけ有効。本番では無視する。deployment.md §3.3）
 # export YORIKI_SANDBOX_IMAGE_OVERRIDE=yoriki-sandbox-docs:dev
 # Runtime Profileに登録できるイメージのレジストリ（既定は docker.io）。ghcr.io 等も使うときに足す

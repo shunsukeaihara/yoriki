@@ -43,6 +43,7 @@ export const RunEventKind = {
   USER_MESSAGE: 10,
   ASSISTANT_MESSAGE: 11,
   TOOL_RESULT: 21,
+  JOB_FINISHED: 22,
   COMPACTION: 32,
   MODEL_SWITCHED: 40,
   LLM_RETRY: 60,
@@ -51,6 +52,7 @@ export const RunEventKind = {
 // 作業の記録に出す、そのほかの記録（run.event）。要求の中身・実行時の文脈等はモデル向けの記録なので出さない。
 // 確認への回答は、Run の状態の変更の説明（run.status の comment）に出る
 export const NOTABLE_EVENT_KINDS: RunEventKindEnum[] = [
+  RunEventKind.JOB_FINISHED,
   RunEventKind.COMPACTION,
   RunEventKind.MODEL_SWITCHED,
   RunEventKind.LLM_RETRY,
@@ -76,13 +78,37 @@ export const TodoStatus = {
 } as const satisfies Record<string, Todo['status']>
 
 /** Tool の呼出しを、作業の記録に出す短い文にする。知らない Tool は名前をそのまま出す */
-export const toolLabel = (name: string, t: (key: string) => string) => {
-  switch (name) {
+export const toolLabel = (
+  call: Pick<ToolCallInfo, 'name' | 'arguments'>,
+  t: (key: string, params?: Record<string, unknown>) => string,
+) => {
+  const arg = (name: string) => {
+    const value = call.arguments[name]
+    return typeof value === 'string' ? value : ''
+  }
+  switch (call.name) {
     case 'todo_write':
       return t('作業の計画を更新')
     case 'ask_user':
       return t('確認の質問')
+    case 'shell':
+      // 画面に出す短い説明は、エージェントが description に書く
+      return arg('description') || t('コマンドを実行')
+    case 'read':
+      return t('ファイルを読む：{path}', { path: arg('path') })
+    case 'write':
+      return t('ファイルを書く：{path}', { path: arg('path') })
+    case 'edit':
+      return t('ファイルを直す：{path}', { path: arg('path') })
+    case 'glob':
+      return t('ファイルを探す：{pattern}', { pattern: arg('pattern') })
+    case 'grep':
+      return t('内容を検索：{pattern}', { pattern: arg('pattern') })
+    case 'job_output':
+      return t('ジョブの出力を確認')
+    case 'job_kill':
+      return t('ジョブを停止')
     default:
-      return name
+      return call.name
   }
 }

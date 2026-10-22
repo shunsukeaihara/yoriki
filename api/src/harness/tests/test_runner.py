@@ -79,7 +79,18 @@ def test_reply_completes_the_run(conversation):
     request = adapter.requests[0]
     assert request.messages[0].role == "system"
     assert any(m.role == "user" and m.text == "請求書を確認して" for m in request.messages)
-    assert {t.name for t in request.tools} == {"ask_user", "todo_write"}
+    assert {t.name for t in request.tools} == {
+        "ask_user",
+        "todo_write",
+        "read",
+        "write",
+        "edit",
+        "glob",
+        "grep",
+        "shell",
+        "job_output",
+        "job_kill",
+    }
 
 
 @pytest.mark.django_db

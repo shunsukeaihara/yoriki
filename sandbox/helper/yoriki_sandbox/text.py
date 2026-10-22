@@ -18,10 +18,11 @@ SNIPPET_CONTEXT = 3
 
 @dataclass
 class Decoded:
-    text: str  # 改行は LF にそろえた本文
+    text: str  # 改行は LF にそろえた本文（表示と行番号に使う）
     encoding: str
     bom: bool
     newline: str  # "\n"、"\r\n"、どちらもあれば "mixed"
+    raw: str = ""  # 改行をそろえる前の本文（edit はこれを直接変え、触らない行をそのまま残す）
 
 
 def is_binary(data: bytes) -> bool:
@@ -45,13 +46,17 @@ def decode(data: bytes) -> Decoded:
     crlf = text.count("\r\n")
     lf = text.count("\n") - crlf
     newline = "mixed" if crlf and lf else "\r\n" if crlf else "\n"
-    return Decoded(text.replace("\r\n", "\n"), encoding, bom, newline)
+    return Decoded(text.replace("\r\n", "\n"), encoding, bom, newline, text)
 
 
-def encode(decoded: Decoded, text: str) -> bytes:
-    body = text.replace("\r\n", "\n")
-    if decoded.newline == "\r\n":
-        body = body.replace("\n", "\r\n")
+def encode(decoded: Decoded, text: str, *, keep_newlines: bool = False) -> bytes:
+    """元のencoding・BOMで書く。keep_newlines なら改行をそのまま、でなければ元のファイルの改行に合わせる"""
+    if keep_newlines:
+        body = text
+    else:
+        body = text.replace("\r\n", "\n")
+        if decoded.newline == "\r\n":
+            body = body.replace("\n", "\r\n")
     try:
         data = body.encode(decoded.encoding)
     except UnicodeEncodeError as exc:
@@ -147,10 +152,25 @@ def run_write(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# old_string の改行（LF）は、ファイルのCRLFにもLFにも一致させる
+NEWLINE = r"\r?\n"
+
+
+def _exact_pattern(old: str) -> re.Pattern[str]:
+    return re.compile(NEWLINE.join(re.escape(line) for line in old.split("\n")))
+
+
 def _flexible_pattern(old: str) -> re.Pattern[str]:
     """行末の空白の違いを無視して探す（2段目の一致。あいまいな一致はしない）"""
-    parts = [re.escape(line.rstrip(" \t")) + r"[ \t]*" for line in old.split("\n")]
-    return re.compile("\n".join(parts))
+    return re.compile(NEWLINE.join(re.escape(line.rstrip(" \t")) + r"[ \t]*" for line in old.split("\n")))
+
+
+def _newline_for(raw: str, span: str) -> str:
+    """置き換える文字列の改行。一致した箇所の改行に合わせ、改行を含まなければファイルで多い方にする"""
+    if "\n" in span:
+        return "\r\n" if "\r\n" in span else "\n"
+    crlf = raw.count("\r\n")
+    return "\r\n" if crlf > raw.count("\n") - crlf else "\n"
 
 
 def _line_of(text: str, index: int) -> int:
@@ -172,14 +192,10 @@ def run_edit(request: dict[str, Any]) -> dict[str, Any]:
     expected = request.get("expected_sha256")
     check_version(path, expected)
     _, decoded = load(path)
-    if decoded.newline == "mixed":
-        raise ToolError(
-            "mixed_newlines",
-            "The file mixes CRLF and LF line endings, so edit cannot keep them. Use shell (python) to change it.",
-        )
-    text = decoded.text
+    # 改行をそろえずに、元の本文のまま探して置き換える。改行がまじったファイルでも、触らない行はそのまま残る
+    text = decoded.raw
 
-    spans = [(m.start(), m.end()) for m in re.finditer(re.escape(old), text)]
+    spans = [(m.start(), m.end()) for m in _exact_pattern(old).finditer(text)]
     if not spans:
         spans = [(m.start(), m.end()) for m in _flexible_pattern(old).finditer(text)]
     if not spans:
@@ -197,8 +213,9 @@ def run_edit(request: dict[str, Any]) -> dict[str, Any]:
     result, last, first_line, last_line = [], 0, None, 0
     shift = 0
     for start, end in spans:
+        replacement = new.replace("\n", _newline_for(text, text[start:end]))
         result.append(text[last:start])
-        result.append(new)
+        result.append(replacement)
         last = end
         line = _line_of(text, start) + shift
         first_line = line if first_line is None else first_line
@@ -206,11 +223,11 @@ def run_edit(request: dict[str, Any]) -> dict[str, Any]:
         shift += new.count("\n") - text.count("\n", start, end)
     result.append(text[last:])
     updated = "".join(result)
-    sha256 = replace_file(path, encode(decoded, updated), expected)
+    sha256 = replace_file(path, encode(decoded, updated, keep_newlines=True), expected)
     return {
         "ok": True,
         "path": str(path),
         "replacements": len(spans),
         "sha256": sha256,
-        "snippet": snippet(updated, first_line or 1, last_line),
+        "snippet": snippet(updated.replace("\r\n", "\n"), first_line or 1, last_line),
     }

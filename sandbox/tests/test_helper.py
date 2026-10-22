@@ -209,20 +209,35 @@ class TestWriteAndEdit:
             "read_only"
         )
 
-    def test_mixed_newlines_are_reported_and_edit_refuses(self, sandbox):
-        sandbox.sh("printf 'a\\r\\nb\\nc\\n' > /workspace/work/mixed.txt")
+    def test_edit_keeps_mixed_newlines_line_by_line(self, sandbox):
+        # CRLFの行とLFの行がまじったファイルでも、触らない行の改行はそのまま、置き換えた箇所はその場の改行に合わせる
+        sandbox.sh("printf 'a\\r\\nb\\r\\nc\\nd\\n' > /workspace/work/mixed.txt")
         read = sandbox.helper("read", {"path": "/workspace/work/mixed.txt"})
         assert read["newline"] == "mixed"
         edited = sandbox.helper(
             "edit",
             {
                 "path": "/workspace/work/mixed.txt",
-                "old_string": "b",
-                "new_string": "B",
+                "old_string": "a\nb",
+                "new_string": "A\nB\nX",
                 "expected_sha256": read["sha256"],
             },
         )
-        assert edited["error"]["code"] == "mixed_newlines"
+        assert edited["replacements"] == 1
+        assert "     3│X" in edited["snippet"]
+        again = sandbox.helper(
+            "edit",
+            {
+                "path": "/workspace/work/mixed.txt",
+                "old_string": "c\nd",
+                "new_string": "C\nD",
+                "expected_sha256": edited["sha256"],
+            },
+        )
+        assert again["replacements"] == 1
+        assert sandbox.sh("od -An -c /workspace/work/mixed.txt | tr -s ' '").split() == (
+            ["A", "\\r", "\\n", "B", "\\r", "\\n", "X", "\\r", "\\n", "C", "\\n", "D", "\\n"]
+        )
 
     def test_write_replaces_atomically_and_keeps_the_mode(self, sandbox):
         created = sandbox.helper("write", {"path": "/workspace/work/run.sh", "content": "echo 1\n"})

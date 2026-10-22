@@ -120,7 +120,7 @@ Runnerは、呼出しごとに次の環境変数だけを渡す（harness.md §8
 
 - 入力：`path`、`old_string`、`new_string`、`replace_all`（既定false）、`expected_sha256`（必須）。
 - 一致は、完全一致 → 行末の空白の違いを無視、の2段まで。1か所に決まらなければ `multiple_matches`（`detail.lines` に一致した行番号）。
-- 改行（CRLF・LF）がまじったファイルは、改行を保てないので断る（`mixed_newlines`）。
+- 改行をそろえずに、元の本文のまま探して置き換える。`old_string` の改行（LF）は、ファイルのCRLFにもLFにも一致する。置き換える `new_string` の改行は、一致した箇所の改行に合わせる（一致した箇所に改行がなければ、ファイルで多い方）。改行がまじったファイルでも、触らない行はバイト単位でそのまま残る。
 - 書き方は `write` と同じ（一時ファイルから置き換え、直前に版を確かめ直す）。
 - 結果：`replacements`、`sha256`、`snippet`（変えた箇所の前後3行。行番号つき）。
 
@@ -149,7 +149,6 @@ Runnerは、呼出しごとに次の環境変数だけを渡す（harness.md §8
 | `changed` | 読んだ後に内容が変わった |
 | `no_match`・`multiple_matches` | `edit` の `old_string` が見つからない・1か所に決まらない |
 | `not_text`・`unencodable` | テキストでない・元のencodingで書けない文字がある |
-| `mixed_newlines` | 改行がまじっていて、`edit` で保てない |
 | `unreadable` | 壊れたファイル等で読めない |
 | `too_large` | 大きすぎる |
 | `timeout` | 時間がかかりすぎた（`grep`） |

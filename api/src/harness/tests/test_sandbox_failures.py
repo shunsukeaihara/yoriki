@@ -8,11 +8,12 @@ import pytest
 from conversation.dispatch import MessageMode, post_message
 from conversation.factories import ConversationFactory
 from harness.runner import Runner
-from harness.sandbox import WORKSPACE_LOST, SandboxSession
+from harness.sandbox import WORKSPACE_LOST, Job, SandboxSession
+from harness.tools.shell import _job_text
 from run.errors import LeaseLost
 from run.models import Checkpoint, ExecutionAttempt, Run, RunEndReason, RunEvent, RunEventKind, RunStatus
 from run.tasks import claim_run
-from runtime.launcher import SandboxUnavailable
+from runtime.launcher import Exec, SandboxUnavailable
 from runtime.storage import LocalSnapshotStorage
 
 from .fakes import FakeAdapter, FakeSession, calls, reply
@@ -191,3 +192,13 @@ def test_started_sandbox_is_removed_when_the_lease_is_lost(conversation, monkeyp
     with pytest.raises(LeaseLost):
         session._keep_lease(start, on_abandon=removed.append)
     assert removed == ["sandbox"]
+
+
+def test_job_output_is_read_only_up_to_the_measured_end(tmp_path):
+    """動いているジョブの出力は読む間も増える。測った位置より先は、次の読み出しで返す"""
+    path = tmp_path / "job.log"
+    path.write_bytes(b"first\nsecond\n")
+    job = Job("job_1", "cmd", "説明", "/workspace/work", Exec("e1"), path, 60)
+    shown, full = _job_text(job, 0, 6)
+    assert shown == full == "first\n"
+    assert _job_text(job, 6, path.stat().st_size)[0] == "second\n"

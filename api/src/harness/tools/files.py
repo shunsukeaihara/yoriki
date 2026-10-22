@@ -19,7 +19,7 @@ def _always(_args: dict[str, Any]) -> bool:
 
 
 def call_helper(context: ToolContext, command: str, request: dict[str, Any]) -> dict[str, Any]:
-    return context.sandbox_session().ensure().helper(command, request)
+    return context.sandbox_session().helper(command, request)
 
 
 def helper_error(result: dict[str, Any]) -> ToolResult:

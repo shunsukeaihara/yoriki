@@ -10,13 +10,14 @@ import logging
 import posixpath
 import shutil
 import tempfile
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from django.conf import settings
 from django.utils import timezone
@@ -154,6 +155,8 @@ class SandboxSession:
         self.restored: Checkpoint | None = None
         # 最初のSandboxのToolの結果に添える知らせ
         self.notice = ""
+        # DBに触ってよいスレッド（Runner）
+        self.owner_thread = threading.get_ident()
 
     @property
     def started(self) -> bool:
@@ -206,8 +209,19 @@ class SandboxSession:
 
     # --- コマンド ---
 
-    def running_jobs(self) -> list[Job]:
+    def running_jobs(self, *, refresh: bool = False) -> list[Job]:
+        if refresh:
+            for job in list(self.jobs.values()):
+                self.refresh(job)
         return [job for job in self.jobs.values() if not job.finished]
+
+    def helper(self, command: str, request: dict[str, Any]) -> dict[str, Any]:
+        """補助コマンドを呼ぶ。Runnerのスレッドからなら、その間もleaseを延ばす（大きいPDFの read 等）。
+        並べて実行するToolの別のスレッドからなら、Runnerのスレッドが結果を待つ間にleaseを延ばす"""
+        sandbox = self.ensure()
+        if threading.get_ident() == self.owner_thread:
+            return self._keep_lease(lambda: sandbox.helper(command, request))
+        return sandbox.helper(command, request)
 
     def start_job(self, command: str, workdir: str, description: str) -> Job:
         """呼び出し側で、動いているジョブの数を確かめておくこと"""
@@ -279,9 +293,9 @@ class SandboxSession:
         pgid = job.execution.pgid
         sandbox = self._sandbox()
         if pgid is not None:
-            sandbox.helper("kill", {"pgid": pgid, "signal": "TERM"})
+            self.helper("kill", {"pgid": pgid, "signal": "TERM"})
             if not job.execution.done.wait(timeout=KILL_GRACE):
-                sandbox.helper("kill", {"pgid": pgid, "signal": "KILL"})
+                self.helper("kill", {"pgid": pgid, "signal": "KILL"})
                 job.execution.done.wait(timeout=KILL_GRACE)
         running, exit_code = sandbox.exec_state(job.execution.exec_id)
         job.stopped = reason
@@ -306,7 +320,7 @@ class SandboxSession:
             self.kill(job, reason="suspended")
             stopped.append({"job_id": job.job_id, "command": job.command[:200]})
         # setsid 等でグループを離れたものも残さない（CONTRACT.md §4.2）
-        self.sandbox.helper("kill", {"all": True, "signal": "KILL"})
+        self.helper("kill", {"all": True, "signal": "KILL"})
         storage = self.storage_factory()
         self.dir.mkdir(parents=True, exist_ok=True)
         key = f"runs/{self.run.uid}/{self.attempt.number}-{generate(JOB_ID_ALPHABET, 8)}.tar"

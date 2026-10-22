@@ -75,7 +75,7 @@ def spill(context: ToolContext, text: str) -> str:
     """全体をSandboxへ退避し、その場所を返す。退避できなければ空文字"""
     path = f"{OUTPUTS_DIR}/{context.invocation or context.call.id}.txt"
     content = text if len(text) <= SPILL_MAX_CHARS else text[:SPILL_MAX_CHARS]
-    result = context.sandbox_session().ensure().helper("write", {"path": path, "content": content})
+    result = context.sandbox_session().helper("write", {"path": path, "content": content})
     return path if result.get("ok") else ""
 
 

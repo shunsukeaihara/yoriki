@@ -57,21 +57,22 @@ SHELL_PARAMETERS = {
 }
 
 
-def _job_text(job: Job, start: int) -> tuple[str, str]:
-    """（見せる部分、退避する全体）。大きい出力は先頭と末尾だけを読む"""
-    size = job.output_size() - start
+def _job_text(job: Job, start: int, end: int) -> tuple[str, str]:
+    """`start` から `end` までの（見せる部分、退避する全体）。大きい出力は先頭と末尾だけを読む。
+    動いているジョブは読む間も出力が増えるので、`end` より先は読まない（次の読み出しで返す）"""
+    size = end - start
     if size <= WINDOW:
-        text = job.read_output(start)
+        text = job.read_output(start, size)
         return text, text
     head = job.read_output(start, HEAD_BYTES)
-    tail = job.read_output(job.output_size() - TAIL_BYTES)
-    return f"{head}\n…\n{tail}", job.read_output(start, SPILL_MAX_CHARS)
+    tail = job.read_output(end - TAIL_BYTES, TAIL_BYTES)
+    return f"{head}\n…\n{tail}", job.read_output(start, min(size, SPILL_MAX_CHARS))
 
 
 def _output(context: ToolContext, job: Job) -> str:
     """前回の続きからの出力。読んだ位置を進める"""
     end = job.output_size()
-    shown, full = _job_text(job, job.read_offset)
+    shown, full = _job_text(job, job.read_offset, end)
     job.read_offset = end
     return limited(context, shown, head_ratio=HEAD_RATIO, full_text=full)
 
@@ -97,7 +98,8 @@ def execute_shell(arguments: dict[str, Any], context: ToolContext) -> ToolResult
     if workdir is None:
         return ToolResult.error(f"workdir {arguments.get('workdir')} is outside /workspace.")
     session.ensure()
-    running = session.running_jobs()
+    # 終わったジョブを数えないよう、Dockerのexecの状態で確かめ直してから数える
+    running = session.running_jobs(refresh=True)
     if len(running) >= MAX_JOBS:
         ids = ", ".join(j.job_id for j in running)
         return ToolResult.error(

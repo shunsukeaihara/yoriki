@@ -287,3 +287,13 @@ def test_independent_reads_run_together(conversation):
     # 引数の誤りも、モデルが返した順に記録する
     assert sequences == ["c1", "c0", "c2", "c3", "c4", "c5", "c6"]
     assert r["c6"]["is_error"] and "Invalid arguments" in text(r["c6"])
+
+
+def test_finished_jobs_do_not_count_against_the_limit(conversation):
+    run = post(conversation)
+    quick = [(f"b{n}", "shell", shell("true", background=True)) for n in range(4)]
+    adapter = FakeAdapter([calls(*quick), calls(("c1", "shell", shell("sleep 1; echo ok"))), reply("終わり")])
+    run = execute(run, adapter)
+    r = results(run)
+    assert not r["c1"]["is_error"], text(r["c1"])
+    assert text(r["c1"]).startswith("Exit code: 0")

@@ -9,7 +9,7 @@ import json
 import logging
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -715,6 +715,12 @@ class Runner:
                 pool.submit(self._execute, tool, call, invocation) if invocation is not None else None
                 for tool, call, invocation, _error in prepared
             ]
+            # 待つ間もleaseを延ばす。別のスレッドはDBに触らないので、ここで延ばす
+            pending = {f for f in futures if f is not None}
+            while pending:
+                _done, pending = wait(pending, timeout=HEARTBEAT_INTERVAL)
+                if pending:
+                    self.attempt.heartbeat()
             results = [future.result() if future is not None else None for future in futures]
         for (tool, call, invocation, error), result in zip(prepared, results, strict=True):
             if invocation is None or result is None:

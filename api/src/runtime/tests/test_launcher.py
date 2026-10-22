@@ -205,3 +205,17 @@ class TestSandbox:
         time.sleep(0.2)
         with pytest.raises(SandboxUnavailable):
             sandbox.helper("version", {})
+
+
+@pytest.mark.sandbox
+def test_failed_startup_leaves_no_container(sandbox_image, monkeypatch):
+    launcher = Launcher()
+    name = f"yoriki-test-{uuid.uuid4().hex[:12]}"
+
+    def broken(self, command, request, **kwargs):
+        raise SandboxUnavailable("init-env failed")
+
+    monkeypatch.setattr("runtime.launcher.Sandbox.helper", broken)
+    with pytest.raises(SandboxUnavailable):
+        launcher.start(spec(image=sandbox_image, platform=launcher.platform()), name)
+    assert launcher.api.containers(all=True, filters={"name": name}) == []

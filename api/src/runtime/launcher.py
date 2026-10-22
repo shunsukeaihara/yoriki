@@ -419,21 +419,30 @@ class Launcher:
                 host_config=self.api.create_host_config(**spec.host_config()),
                 network_disabled=True,
             )
-            container_id = container["Id"]
-            sandbox = Sandbox(self.client, container_id, name)
-            problems = verify_container(self.api.inspect_container(container_id), spec)
+        except DockerException as exc:
+            raise SandboxUnavailable(f"cannot start the sandbox: {exc}") from exc
+        sandbox = Sandbox(self.client, container["Id"], name)
+        try:
+            self._prepare(sandbox, spec)
+        except BaseException:
+            # 作った後に失敗したら、どの失敗でも残さない（Runnerはまだこのコンテナを知らない）
+            sandbox.remove()
+            raise
+        return sandbox
+
+    def _prepare(self, sandbox: Sandbox, spec: SandboxSpec) -> None:
+        """制限を確かめ直してから始め、Run専用の環境を作る"""
+        try:
+            problems = verify_container(self.api.inspect_container(sandbox.container_id), spec)
             if problems:
-                sandbox.remove()
-                logger.error("sandbox %s: restrictions are not applied: %s", name, problems)
+                logger.error("sandbox %s: restrictions are not applied: %s", sandbox.name, problems)
                 raise SandboxUnavailable("the sandbox restrictions could not be applied", retryable=False)
-            self.api.start(container_id)
+            self.api.start(sandbox.container_id)
         except DockerException as exc:
             raise SandboxUnavailable(f"cannot start the sandbox: {exc}") from exc
         result = sandbox.helper("init-env", {})
         if not result.get("ok"):
-            sandbox.remove()
             raise SandboxUnavailable(f"cannot prepare the sandbox: {result.get('error')}")
-        return sandbox
 
     def containers(self) -> list[dict[str, Any]]:
         """Launcherが起動したコンテナ（止まったものも含む）"""

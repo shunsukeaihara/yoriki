@@ -9,7 +9,10 @@ from conversation.dispatch import MessageMode, post_message
 from conversation.factories import ConversationFactory
 from harness.runner import Runner
 from harness.sandbox import WORKSPACE_LOST, Job, SandboxSession
+from harness.tools import shell as shell_tool
+from harness.tools.base import ToolContext
 from harness.tools.shell import _job_text
+from llm.providers.base import ToolCall
 from run.errors import LeaseLost
 from run.models import Checkpoint, ExecutionAttempt, Run, RunEndReason, RunEvent, RunEventKind, RunStatus
 from run.tasks import claim_run
@@ -283,3 +286,23 @@ def test_checkpoint_is_found_past_requests_without_one(conversation, app_user):
     # 別の会話のCheckpointは使わない
     other = post(ConversationFactory.create(owner=app_user))
     assert Checkpoint.latest_for(other) is None
+
+
+def test_read_offset_is_kept_when_the_output_cannot_be_saved(conversation, settings, tmp_path):
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path)
+    run = post(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    path = tmp_path / "job.log"
+    path.write_text("x" * 200_000)
+    job = Job("job_1", "cmd", "説明", "/workspace/work", Exec("e1"), path, 60)
+
+    class _Session(SandboxSession):
+        def put_job_output(self, job, path, start, end):
+            return False
+
+    session = _Session(run, attempt)
+    context = ToolContext(run, attempt, ToolCall("c1", "shell", {}), invocation="i1", session=session)
+    text = shell_tool._output(context, job)
+    assert "could not be saved" in text
+    assert job.read_offset == 0

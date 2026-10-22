@@ -72,15 +72,24 @@ def _output(context: ToolContext, job: Job) -> str:
     """前回の続きからの出力。読んだ位置を進める"""
     start, end = job.read_offset, job.output_size()
     shown = _job_text(job, start, end)
-    job.read_offset = end
-    # 退避するのは、Worker側のログのその範囲そのもの（大きくても途中を落とさない）
     session = context.sandbox_session()
-    return limited(
-        context,
-        shown,
-        head_ratio=HEAD_RATIO,
-        spill_to=lambda path: session.put_job_output(job, path, start, end),
-    )
+    failed: list[bool] = []
+
+    def save(path: str) -> bool:
+        # 退避するのは、Worker側のログのその範囲そのもの（大きくても途中を落とさない）
+        ok = session.put_job_output(job, path, start, end)
+        failed.extend([] if ok else [True])
+        return ok
+
+    text = limited(context, shown, head_ratio=HEAD_RATIO, spill_to=save)
+    if failed:
+        # 切った部分を後で読めるよう、読んだ位置を進めない
+        return text + (
+            f"\n[the full output could not be saved in the sandbox (is /workspace/work full?). Free some space, then "
+            f"call job_output with job_id {job.job_id} to read this output again from the same point]"
+        )
+    job.read_offset = end
+    return text
 
 
 def _status(job: Job) -> str:

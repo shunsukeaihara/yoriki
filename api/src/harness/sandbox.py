@@ -49,6 +49,8 @@ KILL_GRACE = 5
 # Worker側に書くコマンドの出力の上限（バイト）。1つのジョブと、1つのAttemptの合計。超えた分は捨てる
 JOB_OUTPUT_LIMIT = 64 * 1024 * 1024
 ATTEMPT_OUTPUT_LIMIT = 512 * 1024 * 1024
+# コマンドが終わった後、出力を受け取り終えるのを待つ上限（秒）。受け取りが止まったときに、待ち続けないため
+OUTPUT_DRAIN_SECONDS = 60
 # 長いSandboxの操作（Workspaceの取り出し・戻し）の間に、leaseを延ばす間隔（秒）
 HEARTBEAT_INTERVAL = 15
 JOB_ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
@@ -110,6 +112,10 @@ class Job:
     reported: bool = False
     # 止めた理由（"timeout"・"killed"・"suspended"）
     stopped: str = ""
+    # Worker側に書いてよい出力の上限（バイト）。動いている間は、この分をAttemptの合計の上限から予約する
+    output_limit: int = 0
+    # Dockerがコマンドの終了を報告した時刻。出力を受け取り終えるまで、終わりにしない
+    exited_at: float | None = None
 
     @property
     def elapsed(self) -> float:
@@ -230,7 +236,8 @@ class SandboxSession:
         path = self.dir / "jobs" / f"{job_id}.log"
         path.parent.mkdir(parents=True, exist_ok=True)
         output = path.open("wb")
-        used = sum(job.output_size() for job in self.jobs.values())
+        # 終わったジョブは実際の大きさ、動いているジョブは割り当てた上限を数える（同時に動くジョブで上限を分け合う）
+        used = sum(job.output_size() if job.finished else job.output_limit for job in self.jobs.values())
         limit = max(0, min(JOB_OUTPUT_LIMIT, ATTEMPT_OUTPUT_LIMIT - used))
         request = {"command": command, "cwd": workdir, "env": command_env()}
         execution = sandbox.start_exec(request, output, output_limit=limit)
@@ -242,6 +249,7 @@ class SandboxSession:
             execution=execution,
             output_path=path,
             timeout_seconds=self.run.runtime_version.job_timeout_seconds if self.run.runtime_version else 1800,
+            output_limit=limit,
         )
         self.jobs[job_id] = job
         execution.started.wait(timeout=10)
@@ -269,8 +277,13 @@ class SandboxSession:
             raise SandboxUnavailable(f"lost the connection to the command: {job.execution.error}")
         running, exit_code = self._sandbox().exec_state(job.execution.exec_id)
         if not running:
-            # 出力を読み終えるまで待ってから終わりにする
-            job.execution.done.wait(timeout=5)
+            # 出力を受け取り終えてから終わりにする（途中までの出力を、終わった結果として返さない）
+            job.exited_at = job.exited_at or time.monotonic()
+            drained = job.execution.done.wait(timeout=1)
+            if not drained and time.monotonic() - job.exited_at < OUTPUT_DRAIN_SECONDS:
+                return False
+            if not drained:
+                logger.warning("run %s: output of %s did not finish draining", self.run.uid, job.job_id)
             job.finished, job.exit_code = True, exit_code
             return True
         if job.elapsed > job.timeout_seconds:

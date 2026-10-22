@@ -202,3 +202,49 @@ def test_job_output_is_read_only_up_to_the_measured_end(tmp_path):
     shown, full = _job_text(job, 0, 6)
     assert shown == full == "first\n"
     assert _job_text(job, 6, path.stat().st_size)[0] == "second\n"
+
+
+class _ExitedSandbox:
+    """コマンドは終わったが、出力をまだ受け取っている"""
+
+    def exec_state(self, exec_id):
+        return False, 0
+
+
+def test_job_is_finished_only_after_its_output_is_collected(conversation, monkeypatch, settings, tmp_path):
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path)
+    run = post(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    session = SandboxSession(run, attempt)
+    session.sandbox = _ExitedSandbox()  # type: ignore[assignment]
+    job = Job("job_1", "cmd", "説明", "/workspace/work", Exec("e1"), tmp_path / "job.log", 60)
+    assert session.refresh(job) is False
+    job.execution.done.set()
+    assert session.refresh(job) is True
+    assert (job.finished, job.exit_code) == (True, 0)
+
+
+def test_running_jobs_reserve_their_output_limit(conversation, monkeypatch, settings, tmp_path):
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path)
+    monkeypatch.setattr("harness.sandbox.JOB_OUTPUT_LIMIT", 60)
+    monkeypatch.setattr("harness.sandbox.ATTEMPT_OUTPUT_LIMIT", 100)
+    run = post(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    limits: list[int] = []
+
+    class _Sandbox:
+        def start_exec(self, request, output, *, output_limit):
+            limits.append(output_limit)
+            output.close()
+            execution = Exec(f"e{len(limits)}")
+            execution.started.set()
+            return execution
+
+    session = SandboxSession(run, attempt)
+    session.sandbox = _Sandbox()  # type: ignore[assignment]
+    for _n in range(3):
+        session.start_job("sleep 10", "/workspace/work", "説明")
+    # 動いているジョブの上限の合計が、Attemptの上限を超えない
+    assert limits == [60, 40, 0]

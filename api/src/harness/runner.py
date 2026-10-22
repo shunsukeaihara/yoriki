@@ -251,7 +251,14 @@ class Runner:
             and e.sequence > since
             and e.data.get("name") in WORKSPACE_WRITING_TOOLS
         ]
-        if changed:
+        # 退避した出力のファイルも、最後のCheckpointより後のものは消えている
+        spilled = [
+            path
+            for e in events
+            if e.kind == RunEventKind.TOOL_RESULT and e.sequence > since
+            for path in (e.data.get("meta") or {}).get("spilled", [])
+        ]
+        if changed or spilled:
             # Sandboxは最初のSandboxのToolで起動して戻すので、ここでは戻せたかがまだ分からない。
             # 戻せなかったときは、その時点で知らせる（SandboxSession.notice）
             if own is not None:
@@ -260,12 +267,21 @@ class Runner:
                 state = "go back to their state at the start of this request"
             else:
                 state = "are empty again"
-            text = (
-                f"[The previous attempt was interrupted. The files in /workspace/work and /workspace/output {state}. "
-                f"These later tool calls changed files, and their effects are not in the current files: "
-                f"{', '.join(changed[:20])}. Check the current files and redo what is needed. Read a file again "
-                "before you edit it.]"
-            )
+            parts = [
+                f"The previous attempt was interrupted. The files in /workspace/work and /workspace/output {state}."
+            ]
+            if changed:
+                parts.append(
+                    "These later tool calls changed files, and their effects are not in the current files: "
+                    f"{', '.join(changed[:20])}. Check the current files and redo what is needed. Read a file again "
+                    "before you edit it."
+                )
+            if spilled:
+                parts.append(
+                    f"The saved full outputs of earlier tool calls are gone: {', '.join(spilled[:20])}. Call the tool "
+                    "again if you need the full output."
+                )
+            text = "[" + " ".join(parts) + "]"
             self._record(RunEventKind.CONTEXT, {"text": text, "workspace": "reset"})
         if own is not None and own.stopped_jobs and not any(e.data.get("checkpoint") == own.uid for e in notices):
             jobs = ", ".join(f"{j['job_id']} (`{j['command']}`)" for j in own.stopped_jobs)
@@ -791,7 +807,10 @@ class Runner:
             interrupted=self._interrupted,
         )
         try:
-            return tool.execute(call.arguments, context)
+            result = tool.execute(call.arguments, context)
+            if context.spilled:
+                result = replace(result, meta={**result.meta, "spilled": context.spilled})
+            return result
         except (LeaseLost, SandboxUnavailable):
             raise
         except Exception as exc:

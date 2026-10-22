@@ -88,8 +88,22 @@ def test_interrupted_attempt_tells_the_model_what_was_not_kept(conversation):
             sha256="0" * 64,
             stopped_jobs=[{"job_id": "job_1", "command": "sleep 100"}],
         )
-        tool_calls = [{"id": "c1", "name": "shell", "arguments": SHELL}, {"id": "c2", "name": "write", "arguments": {}}]
+        tool_calls = [
+            {"id": "c0", "name": "read", "arguments": {"path": "/workspace/input/a.pdf"}},
+            {"id": "c1", "name": "shell", "arguments": SHELL},
+            {"id": "c2", "name": "write", "arguments": {}},
+        ]
         RunEvent.record(locked, RunEventKind.ASSISTANT_MESSAGE, {"text": "", "tool_calls": tool_calls})
+        RunEvent.record(
+            locked,
+            RunEventKind.TOOL_RESULT,
+            {
+                "call_id": "c0",
+                "name": "read",
+                "content": [{"type": "text", "text": "…"}],
+                "meta": {"spilled": ["/workspace/work/.yoriki/outputs/i0.txt"]},
+            },
+        )
         RunEvent.record(
             locked,
             RunEventKind.TOOL_RESULT,
@@ -104,6 +118,7 @@ def test_interrupted_attempt_tells_the_model_what_was_not_kept(conversation):
     reset = next(t for t in texts if "previous attempt was interrupted. The files" in t)
     # 結果のないまま閉じた write も含めて、反映されていない呼出しを挙げる
     assert "shell (c1)" in reset and "write (c2)" in reset
+    assert "/workspace/work/.yoriki/outputs/i0.txt" in reset
     assert any("job_1 (`sleep 100`)" in t for t in texts)
 
     # 次のAttemptでは同じ知らせを繰り返さない

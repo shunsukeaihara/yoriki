@@ -110,6 +110,8 @@ def limited(
     else:
         shown = f"the first {clipped.head_tokens:,}"
     lines = [clipped.text, f"[output truncated: showing {shown} of about {clipped.total_tokens:,} tokens]"]
+    if path:
+        context.spilled.append(path)
     if path and complete:
         lines.append(f"[full output: {path} — use read with offset/limit, or grep, to look inside]")
     elif path:

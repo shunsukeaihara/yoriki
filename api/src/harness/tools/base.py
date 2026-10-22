@@ -42,6 +42,8 @@ class ToolContext:
     file_version: Callable[[str], str | None] = _no_version
     # 取消・追加指示が届いた。長く待つToolは待つのをやめる
     interrupted: Callable[[], bool] = _not_interrupted
+    # 出力を退避したSandboxの中のファイル。Runnerが結果のmetaに記録し、障害で消えたときに知らせる
+    spilled: list[str] = field(default_factory=list)
 
     def sandbox_session(self) -> "SandboxSession":
         if self.session is None:

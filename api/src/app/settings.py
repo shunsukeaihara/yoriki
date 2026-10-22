@@ -5,6 +5,7 @@
 """
 
 import os
+import sys
 from datetime import timedelta
 from pathlib import Path
 
@@ -95,7 +96,10 @@ TEMPLATES = [
 ASGI_APPLICATION = "app.asgi.application"
 WSGI_APPLICATION = "app.wsgi.application"
 
-# Yoriki自身のDB。Uvicorn（ASGI）では同期のviewがスレッドごとに動くので、psycopg 3の接続プールを使う（§6.1）
+# Yoriki自身のDB。Uvicorn（ASGI）では同期のviewがスレッドごとに動くので、psycopg 3の接続プールを使う（§6.1）。
+# qclusterはworkerをforkで作り、プールが開いた接続をforkした先のプロセスと共有してしまうので、プールを使わない
+# （Q2がtaskの前後で古い接続を閉じ、taskごとに接続する）
+USE_DATABASE_POOL = "qcluster" not in sys.argv
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
@@ -111,7 +115,9 @@ DATABASES = {
                 "max_size": int(os.getenv("YORIKI_DATABASE_POOL_MAX", "10")),
                 "timeout": 10,
             },
-        },
+        }
+        if USE_DATABASE_POOL
+        else {},
     }
 }
 

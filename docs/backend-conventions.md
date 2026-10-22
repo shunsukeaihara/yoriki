@@ -569,6 +569,7 @@ REST_FRAMEWORK = {
 ```
 
 - Yoriki自身のDBはPostgreSQLで、ドライバはpsycopg 3（依存は `psycopg[binary,pool]`）を使う。DjangoはUvicorn（ASGI）で動かし、同期のviewはリクエストごとに別のスレッドで実行されるので、接続を持ち続ける `CONN_MAX_AGE` ではなく、psycopg 3の接続プールを使う。
+- qcluster（`manage.py qcluster`）ではプールを使わない（`settings.USE_DATABASE_POOL`）。Django Q2はworkerを `fork` で作り、Djangoはプールをクラス変数に持つので、forkの前に `close_all()` してもプールが開いた接続はforkした先のプロセスと共有される。共有した接続に複数のプロセスが同時に問い合わせると、別の問い合わせの結果を読んだり、transactionが混ざったりする。qclusterでは、Q2がtaskの前後で古い接続を閉じ、taskごとに接続する。
 
 ```python
 DATABASES = {

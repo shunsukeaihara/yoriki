@@ -501,6 +501,7 @@ Docker操作はLauncher（design.md §7.3、`runtime/launcher.py`）にまとめ
 - `shell` は、ジョブの終了を `timeout_seconds` まで待つ。終わればその結果を返す。終わらなければ、それまでの出力と `job_id` を返し、ジョブは続ける（DeepSeek Harnessの方式）。`background: true` なら待たずに `job_id` を返す。
 - 終わったジョブは、次のステップの前に `job.finished` として記録し、`context.snapshot` でモデルに知らせる。モデルは `job_output` で出力を読む。待つだけのループ（`sleep` と確認の繰返し）をしないよう、説明文に書く。
 - 同時に動かせるジョブは4つまで。1つのジョブの実行時間の上限はRuntime Profileで決める（初期値30分）。
+- Worker側に書く出力は、1つのジョブで64MB、1つのAttemptの合計で512MBまで。超えた分は捨て（コマンドは止めない）、捨てたことを出力に書く。Workerのディスクを埋めさせないため。
 - 確認待ち・完了・取消でAttemptを終えるときは、動いているジョブを止めてから、Checkpointを確定する（design.md §7.5）。ジョブはプロセスグループで止めるが、コマンドが `setsid` 等でグループを離れると届かないので、最後に `yoriki-sandbox kill` の `all`（PID 1以外のすべて）で止める（sandbox/CONTRACT.md §4.2）。止めたことは、再開時に `context.snapshot` でモデルに知らせる。
 - 最後の応答の前に、動いているジョブがあれば、Runnerはその旨をモデルに返して、待つか止めるかを決めさせる（1回だけ）。
 

@@ -12,8 +12,11 @@ import shutil
 import tempfile
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TypeVar
 
 from django.conf import settings
 from django.utils import timezone
@@ -33,6 +36,7 @@ from runtime.launcher import (
 from runtime.storage import SnapshotStorage, StorageError, StoredObject, get_snapshot_storage
 
 logger = logging.getLogger(__name__)
+T = TypeVar("T")
 
 WORKSPACE = "/workspace"
 # snapshotに入れるもの。input・masterは固定の版から、envはイメージと追加のpackageから作り直す（design.md §7.9）
@@ -41,6 +45,11 @@ SNAPSHOT_PATHS = ["work", "output"]
 MAX_JOBS = 4
 # ジョブを止めるときに、TERMの後でKILLを送るまで待つ時間（秒）
 KILL_GRACE = 5
+# Worker側に書くコマンドの出力の上限（バイト）。1つのジョブと、1つのAttemptの合計。超えた分は捨てる
+JOB_OUTPUT_LIMIT = 64 * 1024 * 1024
+ATTEMPT_OUTPUT_LIMIT = 512 * 1024 * 1024
+# 長いSandboxの操作（Workspaceの取り出し・戻し）の間に、leaseを延ばす間隔（秒）
+HEARTBEAT_INTERVAL = 15
 JOB_ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
 
 WORKSPACE_LOST = (
@@ -186,7 +195,7 @@ class SandboxSession:
             self.notice = WORKSPACE_LOST
             return
         with storage.open_read(checkpoint.key) as src:
-            sandbox.restore(src)
+            self._keep_lease(lambda: sandbox.restore(src))
         self.restored = checkpoint
 
     def take_notice(self) -> str:
@@ -205,7 +214,10 @@ class SandboxSession:
         path = self.dir / "jobs" / f"{job_id}.log"
         path.parent.mkdir(parents=True, exist_ok=True)
         output = path.open("wb")
-        execution = sandbox.start_exec({"command": command, "cwd": workdir, "env": command_env()}, output)
+        used = sum(job.output_size() for job in self.jobs.values())
+        limit = max(0, min(JOB_OUTPUT_LIMIT, ATTEMPT_OUTPUT_LIMIT - used))
+        request = {"command": command, "cwd": workdir, "env": command_env()}
+        execution = sandbox.start_exec(request, output, output_limit=limit)
         job = Job(
             job_id=job_id,
             command=command,
@@ -296,14 +308,29 @@ class SandboxSession:
         storage = self.storage_factory()
         self.dir.mkdir(parents=True, exist_ok=True)
         key = f"runs/{self.run.uid}/{self.attempt.number}-{generate(JOB_ID_ALPHABET, 8)}.tar"
-        with tempfile.TemporaryFile(dir=self.dir) as archive:
-            self.sandbox.archive(SNAPSHOT_PATHS, archive)
-            archive.seek(0)
-            try:
-                stored = storage.put_immutable(key, archive)
-            except (OSError, StorageError) as exc:
-                raise SandboxUnavailable(f"cannot save the workspace: {exc}") from exc
-        return stored, storage.storage_id, stopped
+        sandbox = self.sandbox
+
+        def save() -> StoredObject:
+            with tempfile.TemporaryFile(dir=self.dir) as archive:
+                sandbox.archive(SNAPSHOT_PATHS, archive)
+                archive.seek(0)
+                try:
+                    return storage.put_immutable(key, archive)
+                except (OSError, StorageError) as exc:
+                    raise SandboxUnavailable(f"cannot save the workspace: {exc}") from exc
+
+        return self._keep_lease(save), storage.storage_id, stopped
+
+    def _keep_lease(self, operation: Callable[[], T]) -> T:
+        """時間のかかる操作を別のスレッドで行い、その間このスレッドでleaseを延ばす（DBに触るのはこのスレッドだけ）。
+        leaseを失ったら LeaseLost で抜ける"""
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="sandbox-io") as pool:
+            future = pool.submit(operation)
+            while True:
+                try:
+                    return future.result(timeout=HEARTBEAT_INTERVAL)
+                except FutureTimeout:
+                    self.heartbeat()
 
     def close(self) -> None:
         """Sandboxを消し、Attemptの作業領域を消す。どの終わり方でも呼ぶ"""

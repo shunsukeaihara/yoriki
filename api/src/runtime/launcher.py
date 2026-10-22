@@ -36,6 +36,7 @@ HELPER_TIMEOUT = 120
 # Workspaceの取り出し・戻しを待つ時間（秒）
 ARCHIVE_TIMEOUT = 600
 CHUNK = 64 * 1024
+OUTPUT_DISCARDED = b"\n[output beyond %d bytes was discarded; write large output to a file instead]\n"
 
 
 class SandboxUnavailable(Exception):
@@ -163,6 +164,8 @@ class Exec:
     started: threading.Event = field(default_factory=threading.Event)
     done: threading.Event = field(default_factory=threading.Event)
     error: str = ""
+    # 出力の上限を超えて、残りを捨てた
+    truncated: bool = False
 
     @property
     def pgid(self) -> int | None:
@@ -191,19 +194,31 @@ class Sandbox:
             raise SandboxUnavailable(f"yoriki-sandbox {command} returned an unexpected value")
         return result
 
-    def start_exec(self, request: dict[str, Any], output: IO[bytes]) -> Exec:
-        """`yoriki-sandbox exec` を始め、出力を別のスレッドで `output` へ書く。終わりは `exec_state` で確かめる"""
+    def start_exec(self, request: dict[str, Any], output: IO[bytes], *, output_limit: int) -> Exec:
+        """`yoriki-sandbox exec` を始め、出力を別のスレッドで `output` へ書く。終わりは `exec_state` で確かめる。
+
+        Workerのディスクを埋めないよう、`output_limit` バイトを超えた出力は書かずに捨てる（コマンドは止めない）
+        """
         exec_id = self._create_exec([HELPER, "exec"])
         execution = Exec(exec_id)
 
         def pump() -> None:
             pending = b""
+            written = 0
             try:
                 with self._attach(exec_id, json.dumps(request).encode(), timeout=None) as frames:
                     for stream, chunk in frames:
                         if stream == STDOUT:
-                            output.write(chunk)
+                            if execution.truncated:
+                                continue
+                            room = output_limit - written
+                            data = chunk
+                            if len(data) > room:
+                                data = data[: max(room, 0)] + OUTPUT_DISCARDED % output_limit
+                                execution.truncated = True
+                            output.write(data)
                             output.flush()
+                            written += len(data)
                         elif stream == STDERR:
                             # 知らせは1行ずつのJSON。断片の境目で行が切れることがある
                             lines, _sep, pending = (pending + chunk).rpartition(b"\n")

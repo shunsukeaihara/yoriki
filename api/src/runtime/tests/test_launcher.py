@@ -155,15 +155,26 @@ class TestSandbox:
     def test_exec_writes_the_output_and_reports_the_exit_code(self, sandbox, tmp_path):
         path = tmp_path / "out.log"
         request = {"command": "echo out; echo err >&2; exit 3", "cwd": "/workspace/work", "env": {"PATH": "/bin"}}
-        execution = sandbox.start_exec(request, path.open("wb"))
+        execution = sandbox.start_exec(request, path.open("wb"), output_limit=1024)
         assert execution.done.wait(timeout=30)
         assert execution.pgid is not None
         assert sandbox.exec_state(execution.exec_id) == (False, 3)
         assert path.read_text() == "out\nerr\n"
 
+    def test_output_beyond_the_limit_is_discarded(self, sandbox, tmp_path):
+        path = tmp_path / "out.log"
+        request = {"command": "seq 1 100000", "cwd": "/workspace/work", "env": {"PATH": "/bin:/usr/bin"}}
+        execution = sandbox.start_exec(request, path.open("wb"), output_limit=100)
+        assert execution.done.wait(timeout=30)
+        assert execution.truncated
+        assert sandbox.exec_state(execution.exec_id) == (False, 0)
+        data = path.read_bytes()
+        assert data.startswith(b"1\n2\n") and b"[output beyond 100 bytes was discarded" in data
+        assert len(data) < 200
+
     def test_kill_stops_a_running_command(self, sandbox, tmp_path):
         request = {"command": "sleep 60", "cwd": "/workspace/work", "env": {"PATH": "/bin:/usr/bin"}}
-        execution = sandbox.start_exec(request, (tmp_path / "out.log").open("wb"))
+        execution = sandbox.start_exec(request, (tmp_path / "out.log").open("wb"), output_limit=1024)
         assert execution.started.wait(timeout=10)
         assert sandbox.exec_state(execution.exec_id)[0] is True
         assert sandbox.helper("kill", {"pgid": execution.pgid, "signal": "TERM"}) == {"ok": True, "killed": True}
@@ -173,7 +184,7 @@ class TestSandbox:
     def test_archive_and_restore(self, sandbox):
         command = "mkdir -p sub && printf 'é\\n' > sub/a.txt && echo r > /workspace/output/report.csv"
         request = {"command": command, "cwd": "/workspace/work", "env": {"PATH": "/bin:/usr/bin"}}
-        execution = sandbox.start_exec(request, io.BytesIO())
+        execution = sandbox.start_exec(request, io.BytesIO(), output_limit=1024)
         assert execution.done.wait(timeout=30)
         archive = io.BytesIO()
         sandbox.archive(["work", "output"], archive)

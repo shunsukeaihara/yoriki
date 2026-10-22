@@ -1,6 +1,7 @@
 """Sandboxの障害と、Attemptをまたいだ再開の知らせのテスト（harness.md §4.3・§11.1）。Dockerは使わない"""
 
 import functools
+import time
 
 import pytest
 
@@ -8,6 +9,7 @@ from conversation.dispatch import MessageMode, post_message
 from conversation.factories import ConversationFactory
 from harness.runner import Runner
 from harness.sandbox import WORKSPACE_LOST, SandboxSession
+from run.errors import LeaseLost
 from run.models import Checkpoint, ExecutionAttempt, Run, RunEndReason, RunEvent, RunEventKind, RunStatus
 from run.tasks import claim_run
 from runtime.launcher import SandboxUnavailable
@@ -142,3 +144,28 @@ def test_snapshot_on_another_worker_is_reported(conversation, settings, tmp_path
     assert session.restored is None
     assert session.take_notice() == WORKSPACE_LOST
     assert session.take_notice() == ""
+
+
+def test_long_sandbox_operations_keep_the_lease(conversation, monkeypatch, settings, tmp_path):
+    """Workspaceの取り出し等の間も、leaseを延ばし続ける（Attemptのleaseより長くかかってもよい）"""
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path)
+    monkeypatch.setattr("harness.sandbox.HEARTBEAT_INTERVAL", 0.05)
+    run = post(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    beats: list[int] = []
+    session = SandboxSession(run, attempt, heartbeat=lambda: beats.append(1))
+
+    def slow() -> str:
+        time.sleep(0.3)
+        return "done"
+
+    assert session._keep_lease(slow) == "done"
+    assert len(beats) >= 3
+
+    def lost():
+        raise LeaseLost("x")
+
+    session = SandboxSession(run, attempt, heartbeat=lost)
+    with pytest.raises(LeaseLost):
+        session._keep_lease(lambda: time.sleep(0.3))

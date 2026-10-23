@@ -64,15 +64,20 @@ def parts_from_json(data: list[dict[str, Any]]) -> tuple[Part, ...]:
     return tuple(parts)
 
 
-# 要求のたびにRunEventから組み立て直すので、読んだ画像をWorkerのプロセスに残す（BlobObjectは不変）
-@functools.lru_cache(maxsize=MAX_IMAGES_PER_REQUEST * 2)
 def _blob_bytes(uid: str) -> bytes | None:
     try:
-        with BlobObject.objects.get(uid=uid).open() as src:
-            return src.read()
+        return _read_blob(uid)
     except (BlobObject.DoesNotExist, StorageError, OSError):
         logger.warning("image blob %s is not available", uid)
         return None
+
+
+# 要求のたびにRunEventから組み立て直すので、読んだ画像をWorkerのプロセスに残す（BlobObjectは不変）。
+# 失敗は残さない（例外はcacheされない）ので、保存先の一時的な障害が直れば次の要求で読み直す
+@functools.lru_cache(maxsize=MAX_IMAGES_PER_REQUEST * 2)
+def _read_blob(uid: str) -> bytes:
+    with BlobObject.objects.get(uid=uid).open() as src:
+        return src.read()
 
 
 def fit_to_model(messages: list[Message], *, images: bool) -> list[Message]:

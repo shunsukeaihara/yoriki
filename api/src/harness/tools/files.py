@@ -111,7 +111,8 @@ def _scanned_notice(scanned: list[int], shown: list[int], images: bool) -> str:
             "that these pages need a model that accepts images."
         )
     rest = [page for page in scanned if page not in shown]
-    notice = f"The images of pages {shown} follow."
+    # 画像だけを別にまとめて送るAPI（Chat Completions、Gemini）もあるので、並びの順をここで示す
+    notice = f"The images of pages {shown} follow, in this order."
     if rest:
         notice += f" Pages {rest} are not shown; read them with pages (up to 5 images per call)."
     return notice

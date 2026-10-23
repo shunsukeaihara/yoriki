@@ -6,6 +6,7 @@ import io
 import pytest
 
 from artifact.models import BlobObject
+from artifact.storage import StorageError
 from conversation.dispatch import MessageMode, post_message
 from conversation.factories import ConversationFactory
 from harness import compaction
@@ -67,9 +68,9 @@ class HelperSession(FakeSession):
 
 @pytest.fixture(autouse=True)
 def fixture_clear_cache():
-    context_module._blob_bytes.cache_clear()
+    context_module._read_blob.cache_clear()
     yield
-    context_module._blob_bytes.cache_clear()
+    context_module._read_blob.cache_clear()
 
 
 def start(*, images: bool, owner) -> Run:
@@ -113,7 +114,7 @@ def test_scanned_pages_are_shown_as_images(app_user):
     assert data["value"] == {"file": {"path": "/workspace/input/scan.pdf", "sha256": "a" * 64}}
     assert [i["page"] for i in data["meta"]["images"]] == [1, 2, 3, 4, 5]
     text = "".join(p["text"] for p in data["content"] if p["type"] == "text")
-    assert "The images of pages [1, 2, 3, 4, 5] follow." in text
+    assert "The images of pages [1, 2, 3, 4, 5] follow, in this order." in text
     assert "Pages [6] are not shown" in text
     assert "[page 1]" in text
 
@@ -249,3 +250,16 @@ def test_estimate_adds_only_the_increase_in_images_sent(app_user):
     newer = Item(last.sequence + 1, RunEventKind.TOOL_RESULT, stored_images(2))
     items = build_items(run, [], [earlier, newer])
     assert compaction.estimate_tokens([last], items) == 50_000 + sum(len(i.message.text) for i in items[1:])
+
+
+def test_storage_failure_is_not_cached(monkeypatch):
+    message = stored_images(1)
+    original = BlobObject.open
+
+    def failing(self):
+        raise StorageError("temporarily unavailable")
+
+    monkeypatch.setattr(BlobObject, "open", failing)
+    assert fit_to_model([message], images=True)[0].parts == (TextPart(IMAGE_UNAVAILABLE),)
+    monkeypatch.setattr(BlobObject, "open", original)
+    assert isinstance(fit_to_model([message], images=True)[0].parts[0], ImagePart)

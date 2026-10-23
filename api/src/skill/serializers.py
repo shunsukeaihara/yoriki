@@ -398,13 +398,16 @@ class SkillDraftAssetSerializer(serializers.ModelSerializer):
     description = NormalizedTextField(max_length=500, required=False, allow_blank=True)
     file = serializers.FileField(write_only=True, help_text=_("資料のファイル。原本のまま保存する"))
     file_info = ResourceVersionSerializer(source="resource_version", read_only=True)
+    revision = serializers.IntegerField(
+        min_value=1, write_only=True, help_text=_("編集を始めた時点のDraftのrevision。その間に変わっていたら409")
+    )
     draft_revision = serializers.IntegerField(
         source="draft.revision", read_only=True, help_text=_("変更した後のDraftのrevision")
     )
 
     class Meta:
         model = SkillDraftAsset
-        fields = ["key", "role", "role_display", "description", "file", "file_info", "draft_revision"]
+        fields = ["key", "role", "role_display", "description", "file", "file_info", "revision", "draft_revision"]
 
     def validate_key(self, value: str) -> str:
         if not ASSET_KEY_RE.match(value):
@@ -428,20 +431,33 @@ class SkillDraftAssetSerializer(serializers.ModelSerializer):
                 src=file,
                 filename=file.name or validated_data["key"],
                 actor=validated_data["actor"],
+                expected_revision=validated_data["revision"],
             )
+        except VersionConflict as exc:
+            raise Conflict() from exc
         except InvalidDraft as exc:
             raise serializers.ValidationError({"key": [str(exc)]}) from exc
 
     def update(self, instance: SkillDraftAsset, validated_data) -> SkillDraftAsset:
         file = validated_data.get("file")
-        return instance.draft.change_asset(
-            instance,
-            actor=validated_data["actor"],
-            role=validated_data.get("role"),
-            description=validated_data.get("description"),
-            src=file,
-            filename=file.name if file else "",
-        )
+        try:
+            return instance.draft.change_asset(
+                instance,
+                actor=validated_data["actor"],
+                expected_revision=validated_data["revision"],
+                role=validated_data.get("role"),
+                description=validated_data.get("description"),
+                src=file,
+                filename=file.name if file else "",
+            )
+        except VersionConflict as exc:
+            raise Conflict() from exc
+
+
+class SkillDraftRevisionSerializer(serializers.Serializer):
+    """資料を外すときの、編集を始めた時点のDraftのrevision（クエリ文字列）"""
+
+    revision = serializers.IntegerField(min_value=1)
 
 
 class SkillDraftAssetUpdateSerializer(SkillDraftAssetSerializer):

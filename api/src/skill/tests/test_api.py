@@ -325,6 +325,7 @@ class TestAssets:
                 "role": 2,
                 "description": "取引先",
                 "file": _upload("vendors.csv", b"code,name\n"),
+                "revision": draft["revision"],
             },
             format="multipart",
         )
@@ -335,11 +336,18 @@ class TestAssets:
         first_file = res.json()["file_info"]["id"]
 
         # 同じkeyは足せない。keyの形も確かめる
+        revision = res.json()["draft_revision"]
         dup = api_client.post(
-            assets, {"key": "vendor-master", "role": 2, "file": _upload("a.csv", b"x")}, format="multipart"
+            assets,
+            {"key": "vendor-master", "role": 2, "file": _upload("a.csv", b"x"), "revision": revision},
+            format="multipart",
         )
         assert dup.status_code == 400
-        bad = api_client.post(assets, {"key": "../etc", "role": 2, "file": _upload("a.csv", b"x")}, format="multipart")
+        bad = api_client.post(
+            assets,
+            {"key": "../etc", "role": 2, "file": _upload("a.csv", b"x"), "revision": revision},
+            format="multipart",
+        )
         assert bad.status_code == 400
 
         draft = _draft(api_client, skill_id)
@@ -349,8 +357,12 @@ class TestAssets:
         draft = api_client.post(f"{SKILLS}{skill_id}/drafts/", {}, format="json").json()
         assert [a["key"] for a in draft["assets"]] == ["vendor-master"]
         asset_url = f"{SKILLS}{skill_id}/drafts/{draft['id']}/assets/vendor-master/"
-        res = api_client.patch(asset_url, {"file": _upload("vendors-v2.csv", b"code,name\n1,A\n")}, format="multipart")
+        replace = {"file": _upload("vendors-v2.csv", b"code,name\n1,A\n"), "revision": draft["revision"]}
+        res = api_client.patch(asset_url, replace, format="multipart")
         assert res.status_code == 200, res.json()
+        # 同じ資料を、同じ時点のDraftから別のファイルで置き換えようとすると409（先の置換を黙って上書きしない）
+        other = {"file": _upload("other.csv", b"x"), "revision": draft["revision"]}
+        assert api_client.patch(asset_url, other, format="multipart").status_code == 409
         assert res.json()["description"] == "取引先"
         assert res.json()["file_info"]["number"] == 2
         assert res.json()["file_info"]["resource"] == draft["assets"][0]["file_info"]["resource"]
@@ -374,9 +386,13 @@ class TestAssets:
         draft = _draft(api_client, skill_id)
         assets = f"{SKILLS}{skill_id}/drafts/{draft['id']}/assets/"
         api_client.post(
-            assets, {"key": "rules", "role": 1, "file": _upload("rules.md", b"# rules")}, format="multipart"
+            assets,
+            {"key": "rules", "role": 1, "file": _upload("rules.md", b"# rules"), "revision": draft["revision"]},
+            format="multipart",
         )
-        assert api_client.delete(f"{assets}rules/").status_code == 204
+        assert api_client.delete(f"{assets}rules/").status_code == 400
+        assert api_client.delete(f"{assets}rules/?revision={draft['revision']}").status_code == 409
+        assert api_client.delete(f"{assets}rules/?revision={draft['revision'] + 1}").status_code == 204
         assert api_client.get(assets).json() == []
         assert _draft(api_client, skill_id)["revision"] == draft["revision"] + 2
 
@@ -388,7 +404,7 @@ class TestAssets:
         draft = api_client.post(_url(skill, "drafts/"), {}, format="json").json()
         res = api_client.post(
             _url(skill, f"drafts/{draft['id']}/assets/"),
-            {"key": "secret", "role": 1, "file": _upload("draft.md", b"draft")},
+            {"key": "secret", "role": 1, "file": _upload("draft.md", b"draft"), "revision": draft["revision"]},
             format="multipart",
         )
         file_id = res.json()["file_info"]["id"]

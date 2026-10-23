@@ -14,9 +14,11 @@ from rest_framework.viewsets import GenericViewSet, ReadOnlyModelViewSet
 from artifact.download import file_response
 from artifact.views import FILE_RESPONSE
 from resources.models import ResourceVersion
+from utils.exceptions import Conflict
 from utils.permissions import AppUser
 from utils.views import SoftDeleteMixin
 
+from .errors import VersionConflict
 from .models import (
     Skill,
     SkillAccess,
@@ -35,6 +37,7 @@ from .serializers import (
     SkillDraftAssetSerializer,
     SkillDraftAssetUpdateSerializer,
     SkillDraftOpenSerializer,
+    SkillDraftRevisionSerializer,
     SkillDraftSerializer,
     SkillPublishSerializer,
     SkillRollbackSerializer,
@@ -263,8 +266,13 @@ class SkillDraftMixin(SkillMixin):
     description="SkillのDraftの資料（参照資料・マスター・テンプレート・スクリプト）", tags=["app/skill/draft/asset"]
 )
 @extend_schema_view(
-    update=extend_schema(request=SkillDraftAssetUpdateSerializer, responses=SkillDraftAssetSerializer),
-    partial_update=extend_schema(request=SkillDraftAssetUpdateSerializer, responses=SkillDraftAssetSerializer),
+    create=extend_schema(responses={201: SkillDraftAssetSerializer, 409: CONFLICT}),
+    update=extend_schema(
+        request=SkillDraftAssetUpdateSerializer, responses={200: SkillDraftAssetSerializer, 409: CONFLICT}
+    ),
+    partial_update=extend_schema(
+        request=SkillDraftAssetUpdateSerializer, responses={200: SkillDraftAssetSerializer, 409: CONFLICT}
+    ),
 )
 class AppSkillDraftAssetViewSet(
     SkillDraftMixin,
@@ -299,8 +307,22 @@ class AppSkillDraftAssetViewSet(
     def perform_update(self, serializer):
         serializer.save(actor=self.request.user)
 
-    def perform_destroy(self, instance: SkillDraftAsset):
-        self.draft.remove_asset(instance, actor=self.request.user)
+    @extend_schema(
+        description="資料をDraftから外す（原本は残る）",
+        parameters=[SkillDraftRevisionSerializer],
+        responses={204: None, 409: CONFLICT},
+    )
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = SkillDraftRevisionSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        try:
+            self.draft.remove_asset(
+                instance, actor=request.user, expected_revision=serializer.validated_data["revision"]
+            )
+        except VersionConflict as exc:
+            raise Conflict() from exc
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 @extend_schema(description="Skillの資料のファイル（版とDraftが使う原本）", tags=["app/skill/file"])

@@ -477,9 +477,12 @@ class SkillDraft(SkillContent):
             )
         return draft
 
-    def _lock(self, expected_revision: int | None = None) -> "SkillDraft":
-        current = SkillDraft.objects.select_for_update().get(pk=self.pk)
-        if expected_revision is not None and current.revision != expected_revision:
+    def _lock(self, expected_revision: int) -> "SkillDraft":
+        """行をロックし、編集を始めた後にDraftが変わっていない（公開で閉じてもいない）ことを確かめる"""
+        current = SkillDraft.objects.select_for_update().filter(pk=self.pk).first()
+        if current is None:
+            raise VersionConflict("the draft is already closed")
+        if current.revision != expected_revision:
             raise VersionConflict(f"expected revision={expected_revision} latest={current.revision}")
         return current
 
@@ -500,10 +503,18 @@ class SkillDraft(SkillContent):
 
     @transaction.atomic
     def add_asset(
-        self, *, key: str, role: SkillAssetRole, description: str, src: IO[bytes], filename: str, actor
+        self,
+        *,
+        key: str,
+        role: SkillAssetRole,
+        description: str,
+        src: IO[bytes],
+        filename: str,
+        actor,
+        expected_revision: int,
     ) -> "SkillDraftAsset":
         """アップロードしたファイルを新しい資料としてDraftに加える。原本のbytesをそのまま保存する"""
-        current = self._lock()
+        current = self._lock(expected_revision)
         if current.assets.filter(key=key).exists():
             raise InvalidDraft(_("同じkeyの資料があります"))
         resource_version = Resource.create_from_upload(src, filename, actor=actor)
@@ -519,29 +530,36 @@ class SkillDraft(SkillContent):
         asset: "SkillDraftAsset",
         *,
         actor,
+        expected_revision: int,
         role: SkillAssetRole | None = None,
         description: str | None = None,
         src: IO[bytes] | None = None,
         filename: str = "",
     ) -> "SkillDraftAsset":
         """資料の用途・説明を変える。ファイルを送れば、同じ資料の新しい版として置き換える（keyと資料のIDは保つ）"""
-        current = self._lock()
-        asset = SkillDraftAsset.objects.select_related("resource_version__resource").get(pk=asset.pk, draft=current)
+        current = self._lock(expected_revision)
+        locked = (
+            SkillDraftAsset.objects.select_related("resource_version__resource")
+            .filter(pk=asset.pk, draft=current)
+            .first()
+        )
+        if locked is None:
+            raise VersionConflict("the asset was removed")
         if role is not None:
-            asset.role = role
+            locked.role = role
         if description is not None:
-            asset.description = description
+            locked.description = description
         if src is not None:
-            asset.resource_version = asset.resource_version.resource.add_version(
-                src, filename or asset.resource_version.name, actor=actor
+            locked.resource_version = locked.resource_version.resource.add_version(
+                src, filename or locked.resource_version.name, actor=actor
             )
-        asset.save()
+        locked.save()
         self._bump(current, actor, [])
-        return asset
+        return locked
 
     @transaction.atomic
-    def remove_asset(self, asset: "SkillDraftAsset", *, actor) -> None:
-        current = self._lock()
+    def remove_asset(self, asset: "SkillDraftAsset", *, actor, expected_revision: int) -> None:
+        current = self._lock(expected_revision)
         SkillDraftAsset.objects.filter(pk=asset.pk, draft=current).delete()
         self._bump(current, actor, [])
 

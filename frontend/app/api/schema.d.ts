@@ -434,7 +434,7 @@ export interface paths {
         /** @description SkillのDraftの資料（参照資料・マスター・テンプレート・スクリプト） */
         put: operations["app_v1_skills_drafts_assets_update"];
         post?: never;
-        /** @description SkillのDraftの資料（参照資料・マスター・テンプレート・スクリプト） */
+        /** @description 資料をDraftから外す（原本は残る） */
         delete: operations["app_v1_skills_drafts_assets_destroy"];
         options?: never;
         head?: never;
@@ -2210,6 +2210,8 @@ export interface components {
              * @description 置き換えるファイル
              */
             file?: string;
+            /** @description 編集を始めた時点のDraftのrevision。その間に変わっていたら409 */
+            revision?: number;
         };
         /** @description 編集中のSkill。更新では、編集を始めた時点の `revision` を送り、その間に変わっていたら409になる */
         PatchedSkillDraftRequest: {
@@ -2685,6 +2687,8 @@ export interface components {
              * @description 資料のファイル。原本のまま保存する
              */
             file: string;
+            /** @description 編集を始めた時点のDraftのrevision。その間に変わっていたら409 */
+            revision: number;
         };
         /** @description keyは変えない。ファイルは置き換えるときだけ送る */
         SkillDraftAssetUpdateRequest: {
@@ -2696,6 +2700,8 @@ export interface components {
              * @description 置き換えるファイル
              */
             file?: string;
+            /** @description 編集を始めた時点のDraftのrevision。その間に変わっていたら409 */
+            revision: number;
         };
         SkillDraftOpenRequest: {
             /** @description 元にする版。省けば公開中の版（未公開ならDraftは空で開く） */
@@ -3742,6 +3748,13 @@ export interface operations {
                     "application/json": components["schemas"]["SkillDraftAsset"];
                 };
             };
+            /** @description 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     app_v1_skills_drafts_assets_retrieve: {
@@ -3792,11 +3805,20 @@ export interface operations {
                     "application/json": components["schemas"]["SkillDraftAsset"];
                 };
             };
+            /** @description 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     app_v1_skills_drafts_assets_destroy: {
         parameters: {
-            query?: never;
+            query: {
+                revision: number;
+            };
             header?: never;
             path: {
                 draft: string;
@@ -3809,6 +3831,13 @@ export interface operations {
         responses: {
             /** @description No response body */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった） */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3840,6 +3869,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SkillDraftAsset"];
                 };
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

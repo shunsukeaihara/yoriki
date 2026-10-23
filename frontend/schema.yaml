@@ -1130,6 +1130,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/SkillDraftAsset'
           description: ''
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった）
   /api/app/v1/skills/{skill}/drafts/{draft}/assets/{key}/:
     get:
       operationId: app_v1_skills_drafts_assets_retrieve
@@ -1203,6 +1205,8 @@ paths:
               schema:
                 $ref: '#/components/schemas/SkillDraftAsset'
           description: ''
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった）
     patch:
       operationId: app_v1_skills_drafts_assets_partial_update
       description: SkillのDraftの資料（参照資料・マスター・テンプレート・スクリプト）
@@ -1241,9 +1245,11 @@ paths:
               schema:
                 $ref: '#/components/schemas/SkillDraftAsset'
           description: ''
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった）
     delete:
       operationId: app_v1_skills_drafts_assets_destroy
-      description: SkillのDraftの資料（参照資料・マスター・テンプレート・スクリプト）
+      description: 資料をDraftから外す（原本は残る）
       parameters:
       - in: path
         name: draft
@@ -1256,6 +1262,12 @@ paths:
         schema:
           type: string
           title: 資料のkey
+        required: true
+      - in: query
+        name: revision
+        schema:
+          type: integer
+          minimum: 1
         required: true
       - in: path
         name: skill
@@ -1270,6 +1282,8 @@ paths:
       responses:
         '204':
           description: No response body
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった）
   /api/app/v1/skills/{skill}/drafts/{uid}/:
     get:
       operationId: app_v1_skills_drafts_retrieve
@@ -5661,6 +5675,11 @@ components:
           format: binary
           writeOnly: true
           description: 置き換えるファイル
+        revision:
+          type: integer
+          minimum: 1
+          writeOnly: true
+          description: 編集を始めた時点のDraftのrevision。その間に変わっていたら409
     PatchedSkillDraftRequest:
       type: object
       description: 編集中のSkill。更新では、編集を始めた時点の `revision` を送り、その間に変わっていたら409になる
@@ -6850,9 +6869,15 @@ components:
           format: binary
           writeOnly: true
           description: 資料のファイル。原本のまま保存する
+        revision:
+          type: integer
+          minimum: 1
+          writeOnly: true
+          description: 編集を始めた時点のDraftのrevision。その間に変わっていたら409
       required:
       - file
       - key
+      - revision
       - role
     SkillDraftAssetUpdateRequest:
       type: object
@@ -6872,7 +6897,13 @@ components:
           format: binary
           writeOnly: true
           description: 置き換えるファイル
+        revision:
+          type: integer
+          minimum: 1
+          writeOnly: true
+          description: 編集を始めた時点のDraftのrevision。その間に変わっていたら409
       required:
+      - revision
       - role
     SkillDraftOpenRequest:
       type: object

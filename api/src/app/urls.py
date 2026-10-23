@@ -23,6 +23,7 @@ urlpatterns: list[URLPattern | URLResolver] = [
                 path("", include("run.urls")),
                 path("", include("runtime.urls")),
                 path("", include("artifact.urls")),
+                path("", include("skill.urls")),
             ]
         ),
     ),

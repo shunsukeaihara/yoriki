@@ -20,8 +20,10 @@ ROLES: dict[str, list[AppPermission | str]] = {
     "業務管理者": [
         # 例：AppPermission.MANAGE_DESTINATIONS
     ],
-    "Plugin公開者": [
-        # 例：AppPermission.PUBLISH_COMPANY_SKILLS
+    # 全社の範囲のSkillを編集・公開する（design.md §3.6）。部門の範囲は部門の所属（Department）で決める
+    "Skill公開者": [
+        AppPermission.EDIT_COMPANY_SKILLS,
+        AppPermission.PUBLISH_COMPANY_SKILLS,
     ],
 }
 

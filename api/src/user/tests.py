@@ -6,8 +6,8 @@ from django.test import RequestFactory
 from rest_framework.test import APIClient
 
 from .adapters import SocialAccountAdapter, is_allowed_account
-from .factories import SSOProviderFactory, UserFactory
-from .models import SSOKind, SSOProvider, User, is_sso_enabled
+from .factories import DepartmentFactory, DepartmentMembershipFactory, SSOProviderFactory, UserFactory
+from .models import DepartmentMembership, DepartmentRole, SSOKind, SSOProvider, User, is_sso_enabled
 from .roles import ROLES, sync_role_groups
 
 
@@ -86,10 +86,19 @@ class TestRoleGroups:
     def test_sync_creates_missing_permissions_first(self, monkeypatch):
         # post_migrateの順番で、参照するアプリのpermissionがまだ作られていない場合
         Permission.objects.filter(content_type__app_label="user", codename="view_user").delete()
-        monkeypatch.setitem(ROLES, "Plugin公開者", ["user.view_user"])
+        monkeypatch.setitem(ROLES, "試験用の役割", ["user.view_user"])
         sync_role_groups()
-        group = Group.objects.get(name="Plugin公開者")
+        group = Group.objects.get(name="試験用の役割")
         assert list(group.permissions.values_list("codename", flat=True)) == ["view_user"]
+
+    @pytest.mark.django_db
+    def test_skill_publisher_can_edit_and_publish_company_skills(self, app_user):
+        # 役割「Plugin公開者」は「Skill公開者」に改めた（design.md 0.19）
+        assert not Group.objects.filter(name="Plugin公開者").exists()
+        app_user.groups.add(Group.objects.get(name="Skill公開者"))
+        app_user = User.objects.get(pk=app_user.pk)
+        assert app_user.has_perm("skill.can_edit_company_skills")
+        assert app_user.has_perm("skill.can_publish_company_skills")
 
 
 class TestWithPermission:
@@ -415,3 +424,48 @@ class TestRemovedSSOEnvCheck:
         warnings = check_removed_sso_env(None)
         assert [w.id for w in warnings] == ["user.W001"]
         assert "YORIKI_SSO_PROVIDERS" in warnings[0].msg
+
+
+class TestDepartmentAPI:
+    url = "/api/v1/departments/"
+
+    @pytest.mark.django_db
+    def test_only_platform_admin(self, api_client, app_user):
+        DepartmentMembershipFactory.create(user=app_user, role=DepartmentRole.PUBLISHER)
+        api_client.force_login(app_user)
+        assert api_client.get(self.url).status_code == 403
+        assert api_client.post(self.url, {"name": "経理部"}, format="json").status_code == 403
+
+    @pytest.mark.django_db
+    def test_create_and_assign(self, api_client, platform_admin, app_user):
+        api_client.force_login(platform_admin)
+        res = api_client.post(self.url, {"name": " 経理部 "}, format="json")
+        assert res.status_code == 201, res.json()
+        assert res.json()["name"] == "経理部"
+        assert res.json()["member_count"] == 0
+        assert api_client.post(self.url, {"name": "経理部"}, format="json").status_code == 400
+        members = f"{self.url}{res.json()['id']}/members/"
+
+        res = api_client.post(members, {"user": app_user.uid, "role": DepartmentRole.EDITOR}, format="json")
+        assert res.status_code == 201, res.json()
+        assert res.json()["user_info"]["email"] == app_user.email
+        assert api_client.post(members, {"user": app_user.uid, "role": 1}, format="json").status_code == 400
+        assert api_client.get(self.url).json()["results"][0]["member_count"] == 1
+
+        # 所属の社員は変えず、役割だけを変える
+        other = UserFactory.create()
+        res = api_client.patch(f"{members}{res.json()['id']}/", {"user": other.uid, "role": 3}, format="json")
+        assert res.status_code == 200
+        membership = DepartmentMembership.objects.get()
+        assert membership.user == app_user
+        assert membership.role == DepartmentRole.PUBLISHER
+
+    @pytest.mark.django_db
+    def test_my_departments(self, api_client, app_user):
+        DepartmentMembershipFactory.create(
+            user=app_user, department=DepartmentFactory.create(name="営業部"), role=DepartmentRole.EDITOR
+        )
+        DepartmentMembershipFactory.create(user=app_user, department=DepartmentFactory.create(deleted=True))
+        api_client.force_login(app_user)
+        departments = api_client.get("/api/app/v1/my/").json()["departments"]
+        assert [(d["name"], d["role"]) for d in departments] == [("営業部", DepartmentRole.EDITOR)]

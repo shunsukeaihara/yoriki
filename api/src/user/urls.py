@@ -5,6 +5,8 @@ from .views import (
     AuthInvitationViewSet,
     AuthMethodsAPIView,
     AuthSessionAPIView,
+    DepartmentMembershipViewSet,
+    DepartmentViewSet,
     GroupViewSet,
     ManageUserViewSet,
     MyUserAPIView,
@@ -17,6 +19,12 @@ router.register("app/v1/auth/invitations", AuthInvitationViewSet, basename="app_
 router.register("v1/users", ManageUserViewSet, basename="manage_user_viewset")
 router.register("v1/groups", GroupViewSet, basename="group_viewset")
 router.register("v1/sso_providers", SSOProviderViewSet, basename="sso_provider_viewset")
+router.register("v1/departments", DepartmentViewSet, basename="department_viewset")
+router.register(
+    "v1/departments/(?P<department>[^/]+)/members",
+    DepartmentMembershipViewSet,
+    basename="department_member_viewset",
+)
 
 urlpatterns = [
     path("app/v1/auth/session/", AuthSessionAPIView.as_view()),

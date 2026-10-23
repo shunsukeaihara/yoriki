@@ -63,6 +63,8 @@ INSTALLED_APPS = [
     "stream",
     "runtime",
     "artifact",
+    "resources",
+    "skill",
 ]
 
 MIDDLEWARE = [
@@ -228,6 +230,11 @@ SPECTACULAR_SETTINGS = {
         "InstructionKindEnum": "conversation.models.InstructionKind",
         "InstructionStateEnum": "conversation.models.InstructionState",
         "MessageRoleEnum": "conversation.models.MessageRole",
+        "DepartmentRoleEnum": "user.models.DepartmentRole",
+        "SkillScopeEnum": "skill.models.SkillScope",
+        "SkillRequirementEnum": "skill.models.SkillRequirement",
+        "SkillAssetRoleEnum": "skill.models.SkillAssetRole",
+        "SkillChangeKindEnum": "skill.models.SkillChangeKind",
     },
 }
 

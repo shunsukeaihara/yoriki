@@ -10,7 +10,7 @@ Djangoがファイル全体をメモリに読み込むため）。
 
 from collections.abc import AsyncIterator
 from datetime import timedelta
-from typing import IO
+from typing import IO, Protocol
 
 from asgiref.sync import sync_to_async
 from django.core import signing
@@ -18,13 +18,24 @@ from django.http import HttpResponse, StreamingHttpResponse
 from django.utils import timezone
 from django.utils.http import content_disposition_header
 
-from .models import Artifact
+from .models import Artifact, BlobObject
 from .storage import CHUNK, get_storage
 
 FILE_TOKEN_SALT = "yoriki.artifact.file"
 
 
-def file_response(artifact: Artifact) -> HttpResponse | StreamingHttpResponse:
+class StoredFile(Protocol):
+    """ファイルとして返せるもの（Artifact、Skillの資料の版）"""
+
+    blob: BlobObject
+    name: str
+    content_type: str
+
+    @property
+    def size(self) -> int: ...
+
+
+def file_response(artifact: StoredFile) -> HttpResponse | StreamingHttpResponse:
     location = artifact.blob.location()
     storage = get_storage(location.backend)
     response: HttpResponse | StreamingHttpResponse

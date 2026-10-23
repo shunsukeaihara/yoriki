@@ -13,6 +13,7 @@ describe('usePermission', () => {
       displayName: 'U1',
       isPlatformAdmin: false,
       allPermissions: ['skill.can_publish_company_skills'],
+      departments: [],
     }
     const { hasPermission, hasAny } = usePermission()
     expect(hasPermission(code('skill.can_publish_company_skills'))).toBe(true)

@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-23（#33）
+- 最終更新：2026-10-24（#34）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -37,6 +37,7 @@
 | #31 | gVisorの評価と既定化（design.md 0.25 §7.2）：設定 `YORIKI_SANDBOX_RUNTIME`（既定 `runsc`。Dockerに登録されていなければSandboxを起動しない、起動後のinspectで実行環境も確かめる）、gVisorではRuntime Profileのプロセス数の上限をホストのpidsへ換算（×2＋64）、メモリの超過でSandboxごと止まったときの知らせ（Attemptの失敗の理由に残し、次のAttemptでモデルに上限と減らし方を伝え、繰り返したら利用者にも理由を示す）、契約テストとLauncherのテストの実行環境の切替え（`YORIKI_SANDBOX_TEST_RUNTIME`）、所要時間の比較（`sandbox/benchmarks/docs.py`）、CI（`.github/actions/install-gvisor`、`sandbox-gvisor`（amd64・arm64、userns-remap）、`sandbox-runner` をgVisor＋userns-remapで）、deployment.md §7.1（gVisorの入れ方） |
 | #32 | `artifact` アプリ：Storage Backend（`artifact/storage.py`。Local・S3（boto3。上書きしないことを `If-None-Match: *` で守る）。`YORIKI_STORAGE_BACKEND` で選び、保存先のIDとkeyで記録する）、BlobObject・BlobLocation・Artifact、添付のアップロード（`app/v1/conversations/{id}/artifacts/`、multipart、`YORIKI_UPLOAD_MAX_MB`）とメッセージへの添付（`attachments`。送ったときに `/workspace/input` の中の名前を決め、同じ名前は「名前 (2)」）、ダウンロード（セッションの `download` と期限付きtokenの `/api/files/<token>/`。いつも添付として返し、`nosniff`・CSPの `sandbox`。Localはnginxの `X-Accel-Redirect`、それ以外はapiが非同期のiteratorで返す）。Sandbox：会話の添付すべてをAttemptごとのディレクトリに置き、`/workspace/input` に読取り専用でbind mount（起動後のinspectでも確かめる。実行中の追加指示の添付も足す）、Attemptを終えるたびに `/workspace/output` を成果物として回収（変わっていないファイル・隠しファイル・symlinkは回収しない）、Workspaceのsnapshotも同じ保存先へ（`runtime/storage.py` を移した。S3なら別のWorkerで再開できる）。モデルには添付の一覧と、新しい依頼ではそれまでの添付の一覧を渡す。同じ会話の次の依頼のRunは、前の依頼のRunの文脈を先頭に引き継ぐ（harness.md §5.6。結果のないTool呼出しは補い、圧縮では1つのまとまりにする）。画面：入力欄のクリップとドロップでの添付（会話を始めるフォームも）、メッセージの添付、「添付と成果物」の欄（広い画面は右の欄、狭い画面はドロワー）。nginx（アップロードの上限、`/_protected/` のヘッダー）、Compose（`/var/lib/yoriki/objects`）、deployment.md §7.2。design.md 0.26：同じ会話の中では依頼が変わっても文脈とWorkspaceを引き継ぐ（タスクはトリガーで起動してから終わるまで） |
 | #33 | `read` の画像：モデル設定が画像入力に対応するときだけ、補助コマンドに画像を求め、スキャンのPDFのページ（1回に5枚まで）と画像ファイルをTool結果の画像としてモデルに渡す（対応しないモデルには、画像に対応するモデルが要ることを伝える文）。画像のbytesは保存先にBlobObjectとして置き、RunEventには参照だけを残す（Artifactにはしない。Workerは読んだ画像をプロセスに残す）。送る前に今のモデルに合わせる（途中で画像に対応しないモデルに切り替えたら断りの文に、1回の要求で新しい側の20枚まで）。圧縮の見積もりで画像1枚を1,600 tokenと数える。繰返しの注意で画像が落ちていたのを直した。補助コマンド：PNGで1MBを超える画像はJPEGにする（CONTRACT.md §4.3。契約番号は変えない） |
+| #34 | `skill` アプリ：Skill（公開範囲は個人・部門・全社で作成時に固定、公開中の版、緊急停止）、SkillDraft（Skillごとに1つ、revisionで競合を検出、公開で閉じる）、不変のSkillVersion・SkillAssetBinding（説明・手順・Tool・必要な能力・入出力のSchema・資料の版）、SkillChange（公開・切戻し・停止の記録、operation keyで再送を重ねない）。`resources` アプリ：Resource・ResourceVersion（資料の原本の版。中身はBlobObject）。`user` アプリ：部門（Department）と所属（部門の中の役割：利用・編集・公開）と管理API（`v1/departments`）、`app/v1/my/` の所属する部門。permission `skill.can_edit_company_skills`・`can_publish_company_skills` と役割「Skill公開者」（「Plugin公開者」を改名）。API：`app/v1/skills`（作成・公開・切戻し・停止・再開・削除）と、その下の `versions`・`changes`・`drafts`・`drafts/{id}/assets`（資料のアップロード・置換）・`files`（原本の取得） |
 
 確認済みのこと：
 
@@ -64,6 +65,8 @@
 - **静的ファイル**：本番はnginxが `/api/static/` で返す（`static` サービスが共有ボリュームへコピー）。開発時はUvicornが返す。WhiteNoiseは使わない。
 - **CSP**：NuxtのSPAがインラインのスクリプトを含むため、`script-src 'unsafe-inline'` を許可している（課題。§3）。
 - **CI**：変更したディレクトリに関係するworkflowだけを動かす。Actionはコミットのsha、公式イメージはdigestで固定し、公開から2週間以内の版は使わない。
+- **Skillの権限**：個人は本人、部門は所属の役割（利用・編集・公開）、全社はpermission（`skill.can_edit_company_skills`・`can_publish_company_skills`）で決める。部門は役割（Group）と別のDepartmentで表す。Draftの変更は編集以上、公開・切戻し・停止・削除・名前とToolの変更は公開の役割。判定は `Skill.access_of()` と `Skill.objects.visible_to()`（design.md §3.6）。
+- **資料のアプリ名**：Pythonの標準ライブラリの `resource` と重なるので `resources` にした。
 - **マージ**：squash mergeを基本にし、コミットを残す価値があるときだけ通常のmerge。`main` に入るコミットには、条件を満たせば `[skip ci]` を付ける（development.md §1、§4.1）。
 
 ## 3 まだないもの・課題
@@ -73,7 +76,8 @@
 - CI：e2e、本体のイメージのレジストリへのpush（使うレジストリが未決。design.md §13）、Sandboxのイメージのmulti-arch（arm64）のビルドとDocker Hubへのpush・脆弱性スキャン（公開先のorgが未決）。
 - Compose：channel-listener（Channelの受信を実装するとき）。
 - 管理コマンド：`drain_workers`・`resume_workers`（Workerの実行を実装するとき）。
-- 業務のアプリは `llm`、`conversation`、`run`、`harness`、`stream`、`usage`、`runtime`（Runtime Profile、Launcher）、`artifact` まで。`skill`、`plugin`、`task`、`delivery`、`connector` 等（backend-conventions.md §1.2）は、まだない。
+- 業務のアプリは `llm`、`conversation`、`run`、`harness`、`stream`、`usage`、`runtime`（Runtime Profile、Launcher）、`artifact`、`skill`・`resources`（土台だけ）まで。`plugin`、`task`、`delivery`、`connector` 等（backend-conventions.md §1.2）は、まだない。
+- Skillで後回しにしたもの：管理画面（フロントエンド）、会話での利用（`<skills>` の一覧、`skill` Tool、`/` での指定、資料の `/workspace/master` への展開、`submit_result`）、会話からのSkill更新（編集のRunとSkill管理のTool）、Draftの評価（SkillEvaluation、`test_skill_draft`）、Resource Collection、Connectorの宣言、資料の形式ごとの検証（MD・CSV・PPTX。今は大きさだけを確かめる）、版の差分の表示（今はSkillChangeに変わった項目と資料のkeyだけを記録）、公開せずに捨てたDraftの資料の原本の回収、共通Skillから個人用を派生させる操作。
 - Sandboxで後回しにしたもの：`/workspace/master` のmount（Skillの段階）、`install_python_packages` と `/packages`（PackageBundle・EnvironmentRevision）、ステップごとのCheckpoint（今はAttemptを終えるときだけ。障害で落ちると、最後のCheckpointより後の変更は失われ、モデルに知らせる）、snapshotの保持期限と削除、非公開のレジストリからのpullの認証。
 - 引き継いだ文脈が、それだけでモデルの文脈に収まらないほど大きいとき（前の依頼が文脈の上限で失敗した等）は、要約の要求も収まらず、次の依頼も失敗する。前の依頼の中で圧縮が働くので通常は起きない。
 - 成果物とファイルで後回しにしたもの：Storage Backendの `validate_config`・`healthcheck`（セットアップ時の確認。design.md §7.8）、既存のファイルを新しい保存先へ移すコマンド（design.md §7.10。以前の保存先を読む設定 `YORIKI_STORAGE_PREVIOUS` はある）、WorkspaceSnapshotのModel（今はCheckpointが保存先・key・hashを持つ）、保持期限での清掃（`cleanup_artifacts`。期限 `expires` は記録している）と、DBに記録する前に失敗した参照のないobjectの回収、S3の期限付きURL（今はapiが読んで返す）、送らずに残った添付の削除、画像のプレビュー、エージェントの `present_files`（harness.md §10.5）。
@@ -93,9 +97,8 @@
 
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。上から順に着手する（利用者から別の指示がなければ、1から始める）。提案する順番：
 
-1. **Skill（`skill`、`resource`）**：Draft・Version・公開範囲と公開、Skillの資料（マスター・テンプレート）、会話からのSkill更新、入力欄の `/` での指定、エージェントに見せる一覧（利用者の権限で使えるものだけ）。役割「Plugin公開者」（`user/roles.py`）を「Skill公開者」に改める（design.md 0.19）。
+1. **Skill（`skill`、`resources`）**：利用者と合意したPRの分け方は「① 土台（backend。済み） → ② 管理画面（frontend） → ③ 会話での利用 → ④ 会話からのSkill更新 → ⑤ 評価とCSV・PPTXの検証・編集」。次は②：Skillの一覧・作成・Draftの編集（Toolの選択は公開の役割だけ）・資料のアップロードと置換・公開・版の履歴と切戻し・停止、部門と所属の管理画面（`v1/departments`。基盤管理者）。③は harness.md §10.1・§7.5 に従う。
    - 読む章：design.md §3（エージェントとSkillのモデル。§3.2 版、§3.3 定義例、§3.5 エージェントによる作成と修正、§3.8 参照ファイル）、§11.6（会話からのSkill更新）、§11.8（Skillの資料を会話で管理する）、§12（受入条件）、backend-conventions.md §1.2（`skill` アプリのModelの一覧）、harness.md（Skillの読込み・`/workspace/master`）。
-   - 大きいので、まず設計の要点と、1つのPRに収める範囲（例：Model・API・管理画面 → 会話での利用）を利用者に提案してから実装する。
 2. **Connector（`connector`）とタスク・配信（`task`、`delivery`）**：読取り専用のDB Connector、Connectorを使える利用者・役割と操作（ConnectorPermission。design.md §4.9.1）、入力欄の `@` での指定、Task Definition（使うSkill・モデル・許可する操作）、Webhook・Zapierの通知、Trigger。DB Connector（種別：PostgreSQL・MySQL・SQL Server、ホスト、DB名、ユーザー、パスワード等）とHTTP Connector（ホスト、ヘッダー、認証情報等）の設定は管理画面で登録し、資格情報は `utils/crypto.py` で暗号化してDBに保存する（backend-conventions.md §6.4）。個人情報を主な中身とする接続先には機密のフラグを付けられるようにし、フラグの付いたConnectorはローカルLLMのモデルを使うタスク・会話にだけ割り当てる（design.md §4冒頭、§4.9.1）。
 3. **最初の2つの業務**（design.md §13。Skillとタスクとして作る）：請求書PDF → 社内DBと照合 → 取込用のCSV、契約書レビュー → Zapierへ結果。
 4. **Channel Plugin**（Teams・Slack・Discord。`plugin` のRegistry）。

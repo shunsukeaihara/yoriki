@@ -351,6 +351,273 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/app/v1/skills/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Skillの一覧・作成・公開・切戻し・停止 */
+        get: operations["app_v1_skills_list"];
+        put?: never;
+        /** @description Skillの一覧・作成・公開・切戻し・停止 */
+        post: operations["app_v1_skills_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/skills/{skill}/changes/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Skillの公開・切戻し・停止の記録 */
+        get: operations["app_v1_skills_changes_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/skills/{skill}/drafts/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description SkillのDraft（編集中の中身）。Skillごとに1つ */
+        get: operations["app_v1_skills_drafts_list"];
+        put?: never;
+        /** @description SkillのDraft（編集中の中身）。Skillごとに1つ */
+        post: operations["app_v1_skills_drafts_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/skills/{skill}/drafts/{draft}/assets/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description SkillのDraftの資料（参照資料・マスター・テンプレート・スクリプト） */
+        get: operations["app_v1_skills_drafts_assets_list"];
+        put?: never;
+        /** @description SkillのDraftの資料（参照資料・マスター・テンプレート・スクリプト） */
+        post: operations["app_v1_skills_drafts_assets_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/skills/{skill}/drafts/{draft}/assets/{key}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description SkillのDraftの資料（参照資料・マスター・テンプレート・スクリプト） */
+        get: operations["app_v1_skills_drafts_assets_retrieve"];
+        /** @description SkillのDraftの資料（参照資料・マスター・テンプレート・スクリプト） */
+        put: operations["app_v1_skills_drafts_assets_update"];
+        post?: never;
+        /** @description 資料をDraftから外す（原本は残る） */
+        delete: operations["app_v1_skills_drafts_assets_destroy"];
+        options?: never;
+        head?: never;
+        /** @description SkillのDraftの資料（参照資料・マスター・テンプレート・スクリプト） */
+        patch: operations["app_v1_skills_drafts_assets_partial_update"];
+        trace?: never;
+    };
+    "/api/app/v1/skills/{skill}/drafts/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description SkillのDraft（編集中の中身）。Skillごとに1つ */
+        get: operations["app_v1_skills_drafts_retrieve"];
+        /** @description SkillのDraft（編集中の中身）。Skillごとに1つ */
+        put: operations["app_v1_skills_drafts_update"];
+        post?: never;
+        /** @description Draftを破棄する */
+        delete: operations["app_v1_skills_drafts_destroy"];
+        options?: never;
+        head?: never;
+        /** @description SkillのDraft（編集中の中身）。Skillごとに1つ */
+        patch: operations["app_v1_skills_drafts_partial_update"];
+        trace?: never;
+    };
+    "/api/app/v1/skills/{skill}/files/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Skillの資料のファイル（版とDraftが使う原本） */
+        get: operations["app_v1_skills_files_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/skills/{skill}/files/{uid}/download/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description ファイルを取得する（ダウンロードとして返す） */
+        get: operations["app_v1_skills_files_download_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/skills/{skill}/versions/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Skillの公開した版 */
+        get: operations["app_v1_skills_versions_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/skills/{skill}/versions/{number}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Skillの公開した版 */
+        get: operations["app_v1_skills_versions_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/skills/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Skillの一覧・作成・公開・切戻し・停止 */
+        get: operations["app_v1_skills_retrieve"];
+        /** @description 名前を変える（公開の権限が要る） */
+        put: operations["app_v1_skills_update"];
+        post?: never;
+        /** @description Skillを削除する（公開の権限が要る） */
+        delete: operations["app_v1_skills_destroy"];
+        options?: never;
+        head?: never;
+        /** @description 名前を変える（公開の権限が要る） */
+        patch: operations["app_v1_skills_partial_update"];
+        trace?: never;
+    };
+    "/api/app/v1/skills/{uid}/publish/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Draftを公開し、新しい版を公開中の版にする（公開の権限が要る）。Draftは閉じる */
+        post: operations["app_v1_skills_publish_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/skills/{uid}/resume/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 停止を解く（公開の権限が要る） */
+        post: operations["app_v1_skills_resume_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/skills/{uid}/rollback/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 選んだ過去の版と同じ中身・資料の版を新しく作り、公開中の版にする（公開の権限が要る） */
+        post: operations["app_v1_skills_rollback_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/skills/{uid}/suspend/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 緊急停止する。新しいRunでも進行中のRunでも使わせない（公開の権限が要る） */
+        post: operations["app_v1_skills_suspend_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/files/{token}/": {
         parameters: {
             query?: never;
@@ -383,6 +650,82 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/departments/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 部門の管理API（基盤管理者だけ） */
+        get: operations["v1_departments_list"];
+        put?: never;
+        /** @description 部門の管理API（基盤管理者だけ） */
+        post: operations["v1_departments_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/departments/{department}/members/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 部門の所属の管理API（基盤管理者だけ） */
+        get: operations["v1_departments_members_list"];
+        put?: never;
+        /** @description 部門の所属の管理API（基盤管理者だけ） */
+        post: operations["v1_departments_members_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/departments/{department}/members/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 部門の所属の管理API（基盤管理者だけ） */
+        get: operations["v1_departments_members_retrieve"];
+        /** @description 部門の所属の管理API（基盤管理者だけ） */
+        put: operations["v1_departments_members_update"];
+        post?: never;
+        /** @description 部門の所属の管理API（基盤管理者だけ） */
+        delete: operations["v1_departments_members_destroy"];
+        options?: never;
+        head?: never;
+        /** @description 部門の所属の管理API（基盤管理者だけ） */
+        patch: operations["v1_departments_members_partial_update"];
+        trace?: never;
+    };
+    "/api/v1/departments/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 部門の管理API（基盤管理者だけ） */
+        get: operations["v1_departments_retrieve"];
+        /** @description 部門の管理API（基盤管理者だけ） */
+        put: operations["v1_departments_update"];
+        post?: never;
+        /** @description 部門の管理API（基盤管理者だけ） */
+        delete: operations["v1_departments_destroy"];
+        options?: never;
+        head?: never;
+        /** @description 部門の管理API（基盤管理者だけ） */
+        patch: operations["v1_departments_partial_update"];
         trace?: never;
     };
     "/api/v1/groups/": {
@@ -953,6 +1296,52 @@ export interface components {
             /** タイトル */
             title?: string;
         };
+        Department: {
+            readonly id: string;
+            /** 名前 */
+            name: string;
+            /** @description 所属する人数 */
+            readonly member_count: number;
+            /** Format: date-time */
+            readonly created: string;
+            /** Format: date-time */
+            readonly updated: string;
+        };
+        /** @description 部門の所属。社員は作成時だけ指定し、後からは役割だけを変える */
+        DepartmentMembership: {
+            readonly id: string;
+            user: string;
+            readonly user_info: components["schemas"]["MinimumUser"];
+            /** 部門の中の役割 */
+            role: components["schemas"]["DepartmentRoleEnum"];
+            readonly role_display: string;
+            /** Format: date-time */
+            readonly created: string;
+            /** Format: date-time */
+            readonly updated: string;
+        };
+        /** @description 部門の所属。社員は作成時だけ指定し、後からは役割だけを変える */
+        DepartmentMembershipRequest: {
+            user: string;
+            /** 部門の中の役割 */
+            role: components["schemas"]["DepartmentRoleEnum"];
+        };
+        /** @description 部門の所属。社員は作成時だけ指定し、後からは役割だけを変える */
+        DepartmentMembershipUpdateRequest: {
+            /** 部門の中の役割 */
+            role: components["schemas"]["DepartmentRoleEnum"];
+        };
+        DepartmentRequest: {
+            /** 名前 */
+            name: string;
+        };
+        /**
+         * @description * `1` - 利用
+         *     * `2` - 編集
+         *     * `3` - 公開
+         * @enum {integer}
+         */
+        DepartmentRoleEnum: 1 | 2 | 3;
         /** @description 役割（Group）。ユーザーへの割り当てでは名前で指定する */
         Group: {
             /** 名前 */
@@ -1200,6 +1589,11 @@ export interface components {
          * @enum {integer}
          */
         MessageRoleEnum: 1 | 2 | 3;
+        MinimumDepartment: {
+            readonly id: string;
+            /** 名前 */
+            readonly name: string;
+        };
         MinimumLLMConnection: {
             readonly id: string;
             /** 名前 */
@@ -1209,6 +1603,26 @@ export interface components {
             readonly kind_display: string;
             /** 有効 */
             readonly is_active: boolean;
+        };
+        /** @description 版の一覧（中身は出さない） */
+        MinimumSkillVersion: {
+            readonly id: string;
+            /** 版 */
+            readonly number: number;
+            readonly rolled_back_from: number | null;
+            /** 変更理由 */
+            readonly change_reason: string;
+            readonly created_by_info: components["schemas"]["MinimumUser"];
+            /** Format: date-time */
+            readonly created: string;
+        };
+        /** @description 表示専用のModelSerializer。すべての項目を読み取り専用にする */
+        MinimumUser: {
+            readonly id: string;
+            /** メールアドレス */
+            readonly email: string;
+            /** 表示名 */
+            readonly display_name: string;
         };
         /**
          * @description * `auto` - 自動
@@ -1386,6 +1800,13 @@ export interface components {
             /** Format: date-time */
             readonly created: string;
         };
+        /** @description 所属する部門と、部門の中の役割 */
+        MyDepartment: {
+            readonly id: string;
+            readonly name: string;
+            readonly role: components["schemas"]["DepartmentRoleEnum"];
+            readonly role_display: string;
+        };
         /** @description ログイン中の利用者。画面の表示と権限の判定に使う */
         MyUser: {
             readonly id: string;
@@ -1400,6 +1821,7 @@ export interface components {
             readonly display_name: string;
             readonly is_platform_admin: boolean;
             readonly all_permissions: string[];
+            readonly departments: components["schemas"]["MyDepartment"][];
         };
         /** @enum {unknown} */
         NullEnum: null;
@@ -1442,6 +1864,32 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["Conversation"][];
         };
+        PaginatedDepartmentList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["Department"][];
+        };
+        PaginatedDepartmentMembershipList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["DepartmentMembership"][];
+        };
         PaginatedLLMConnectionList: {
             /**
              * Format: uri
@@ -1480,6 +1928,19 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["Message"][];
+        };
+        PaginatedMinimumSkillVersionList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["MinimumSkillVersion"][];
         };
         PaginatedModelProfileList: {
             /**
@@ -1572,6 +2033,32 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["SSOProvider"][];
         };
+        PaginatedSkillChangeList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["SkillChange"][];
+        };
+        PaginatedSkillList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["Skill"][];
+        };
         /** @description 自分の会話。モデル設定を省くと既定のモデル設定にする。実行中に変えると、次のステップから切り替わる */
         PatchedConversationRequest: {
             model_profile?: string;
@@ -1581,6 +2068,15 @@ export interface components {
             handles_sensitive_data?: boolean;
             /** タイトル */
             title?: string;
+        };
+        /** @description 部門の所属。社員は作成時だけ指定し、後からは役割だけを変える */
+        PatchedDepartmentMembershipUpdateRequest: {
+            /** 部門の中の役割 */
+            role?: components["schemas"]["DepartmentRoleEnum"];
+        };
+        PatchedDepartmentRequest: {
+            /** 名前 */
+            name?: string;
         };
         /** @description プロバイダ接続の更新。種別とbase URL（接続先）は変えられないので、読み取り専用にする */
         PatchedLLMConnectionUpdateRequest: {
@@ -1704,6 +2200,36 @@ export interface components {
             /** 有効 */
             is_active?: boolean;
         };
+        /** @description keyは変えない。ファイルは置き換えるときだけ送る */
+        PatchedSkillDraftAssetUpdateRequest: {
+            /** 用途 */
+            role?: components["schemas"]["SkillAssetRoleEnum"];
+            description?: string;
+            /**
+             * Format: binary
+             * @description 置き換えるファイル
+             */
+            file?: string;
+            /** @description 編集を始めた時点のDraftのrevision。その間に変わっていたら409 */
+            revision?: number;
+        };
+        /** @description 編集中のSkill。更新では、編集を始めた時点の `revision` を送り、その間に変わっていたら409になる */
+        PatchedSkillDraftRequest: {
+            /** @description 更新では、編集を始めた時点の値を送る */
+            revision?: number;
+            description?: string;
+            instructions?: string;
+            /** @description 使ってよいTool。空ならコマンド不要のSkill */
+            tools?: components["schemas"]["ToolsEnum"][];
+            requires?: components["schemas"]["SkillRequirementEnum"][];
+            input_schema?: unknown;
+            output_schema?: unknown;
+        };
+        /** @description Skillと公開中の版の概要。中身は版（versions）とDraft（drafts）で扱う */
+        PatchedSkillRequest: {
+            /** 名前 */
+            name?: string;
+        };
         Ping: {
             readonly status: string;
         };
@@ -1715,6 +2241,21 @@ export interface components {
          * @enum {integer}
          */
         ProviderKindEnum: 1 | 2 | 3 | 4;
+        ResourceVersion: {
+            readonly id: string;
+            readonly resource: string;
+            /** 版 */
+            readonly number: number;
+            /** ファイル名 */
+            readonly name: string;
+            /** 形式 */
+            readonly content_type: string;
+            readonly size: number;
+            readonly sha256: string;
+            readonly created_by: string;
+            /** Format: date-time */
+            readonly created: string;
+        };
         Run: {
             readonly id: string;
             readonly conversation: string;
@@ -2020,6 +2561,229 @@ export interface components {
         Session: {
             readonly is_authenticated: boolean;
         };
+        /** @description Skillと公開中の版の概要。中身は版（versions）とDraft（drafts）で扱う */
+        Skill: {
+            readonly id: string;
+            /** 公開範囲 */
+            readonly scope: components["schemas"]["SkillScopeEnum"];
+            readonly scope_display: string;
+            readonly owner_info: components["schemas"]["MinimumUser"] | null;
+            readonly department_info: components["schemas"]["MinimumDepartment"] | null;
+            /** 名前 */
+            name: string;
+            /** @description 公開中の版。未公開は0 */
+            readonly version: number;
+            readonly description: string | null;
+            /** 停止中 */
+            readonly suspended: boolean;
+            /** @description 開いているDraftのID。なければnull。Draftを編集できる人にだけ出す */
+            readonly draft: string | null;
+            /** @description 利用者ができること（1：使う、2：Draftを変更する、3：公開・切戻し・停止・削除・Toolの変更） */
+            readonly access: number;
+            /** Format: date-time */
+            readonly created: string;
+            /** Format: date-time */
+            readonly updated: string;
+        };
+        /** @description 版の資料（表示） */
+        SkillAsset: {
+            /** 資料のkey */
+            readonly key: string;
+            /** 用途 */
+            readonly role: components["schemas"]["SkillAssetRoleEnum"];
+            readonly role_display: string;
+            /** 説明 */
+            readonly description: string;
+            readonly file: components["schemas"]["ResourceVersion"];
+        };
+        /**
+         * @description * `1` - 参照資料
+         *     * `2` - マスターデータ
+         *     * `3` - テンプレート
+         *     * `4` - スクリプト
+         * @enum {integer}
+         */
+        SkillAssetRoleEnum: 1 | 2 | 3 | 4;
+        SkillChange: {
+            readonly id: string;
+            /** 種別 */
+            readonly kind: components["schemas"]["SkillChangeKindEnum"];
+            readonly kind_display: string;
+            readonly version: number | null;
+            readonly previous_version: number | null;
+            readonly actor_info: components["schemas"]["MinimumUser"];
+            /** 理由 */
+            readonly reason: string;
+            readonly summary: {
+                [key: string]: string[];
+            };
+            /** Format: date-time */
+            readonly created: string;
+        };
+        /**
+         * @description * `1` - 公開
+         *     * `2` - 切戻し
+         *     * `3` - 停止
+         *     * `4` - 再開
+         * @enum {integer}
+         */
+        SkillChangeKindEnum: 1 | 2 | 3 | 4;
+        /** @description Skillと最初のDraftを作る。公開するまで、誰も使えない */
+        SkillCreateRequest: {
+            scope: components["schemas"]["SkillScopeEnum"];
+            /** @description 部門の範囲では必須 */
+            department?: string | null;
+            name: string;
+            description?: string;
+            instructions?: string;
+            /** @description 使ってよいTool。空ならコマンド不要のSkill */
+            tools?: components["schemas"]["ToolsEnum"][];
+            requires?: components["schemas"]["SkillRequirementEnum"][];
+            input_schema?: unknown;
+            output_schema?: unknown;
+        };
+        /** @description 編集中のSkill。更新では、編集を始めた時点の `revision` を送り、その間に変わっていたら409になる */
+        SkillDraft: {
+            readonly id: string;
+            /** @description 開いたときの公開中の版。公開するときに、これが今も公開中の版でなければ409 */
+            readonly base_version: number | null;
+            /** @description 更新では、編集を始めた時点の値を送る */
+            revision: number;
+            description?: string;
+            instructions?: string;
+            /** @description 使ってよいTool。空ならコマンド不要のSkill */
+            tools?: components["schemas"]["ToolsEnum"][];
+            requires?: components["schemas"]["SkillRequirementEnum"][];
+            input_schema?: unknown;
+            output_schema?: unknown;
+            readonly assets: components["schemas"]["SkillDraftAsset"][];
+            readonly updated_by_info: components["schemas"]["MinimumUser"];
+            /** Format: date-time */
+            readonly created: string;
+            /** Format: date-time */
+            readonly updated: string;
+        };
+        /** @description Draftの資料。作成ではファイルを送る（multipart/form-data）。更新でファイルを送ると、同じ資料の新しい版で置き換える */
+        SkillDraftAsset: {
+            /** @description Skillの中で資料を指す名前（英小文字・数字・-・_） */
+            key: string;
+            /** 用途 */
+            role: components["schemas"]["SkillAssetRoleEnum"];
+            readonly role_display: string;
+            description?: string;
+            readonly file_info: components["schemas"]["ResourceVersion"];
+            /** @description 変更した後のDraftのrevision */
+            readonly draft_revision: number;
+        };
+        /** @description Draftの資料。作成ではファイルを送る（multipart/form-data）。更新でファイルを送ると、同じ資料の新しい版で置き換える */
+        SkillDraftAssetRequest: {
+            /** @description Skillの中で資料を指す名前（英小文字・数字・-・_） */
+            key: string;
+            /** 用途 */
+            role: components["schemas"]["SkillAssetRoleEnum"];
+            description?: string;
+            /**
+             * Format: binary
+             * @description 資料のファイル。原本のまま保存する
+             */
+            file: string;
+            /** @description 編集を始めた時点のDraftのrevision。その間に変わっていたら409 */
+            revision: number;
+        };
+        /** @description keyは変えない。ファイルは置き換えるときだけ送る */
+        SkillDraftAssetUpdateRequest: {
+            /** 用途 */
+            role: components["schemas"]["SkillAssetRoleEnum"];
+            description?: string;
+            /**
+             * Format: binary
+             * @description 置き換えるファイル
+             */
+            file?: string;
+            /** @description 編集を始めた時点のDraftのrevision。その間に変わっていたら409 */
+            revision: number;
+        };
+        SkillDraftOpenRequest: {
+            /** @description 元にする版。省けば公開中の版（未公開ならDraftは空で開く） */
+            base_version?: number;
+        };
+        /** @description 編集中のSkill。更新では、編集を始めた時点の `revision` を送り、その間に変わっていたら409になる */
+        SkillDraftRequest: {
+            /** @description 更新では、編集を始めた時点の値を送る */
+            revision: number;
+            description?: string;
+            instructions?: string;
+            /** @description 使ってよいTool。空ならコマンド不要のSkill */
+            tools?: components["schemas"]["ToolsEnum"][];
+            requires?: components["schemas"]["SkillRequirementEnum"][];
+            input_schema?: unknown;
+            output_schema?: unknown;
+        };
+        SkillPublishRequest: {
+            /** @description 公開するDraftのID */
+            draft: string;
+            /** @description 編集を始めた時点のDraftのrevision */
+            revision: number;
+            change_reason?: string;
+            /** @description 同じ操作の再送で版を重ねて作らないためのkey */
+            operation_key?: string;
+        };
+        /** @description Skillと公開中の版の概要。中身は版（versions）とDraft（drafts）で扱う */
+        SkillRequest: {
+            /** 名前 */
+            name: string;
+        };
+        /**
+         * @description * `1` - Tool呼出し
+         *     * `2` - 画像入力
+         *     * `3` - 文書入力
+         *     * `4` - 構造化出力
+         * @enum {integer}
+         */
+        SkillRequirementEnum: 1 | 2 | 3 | 4;
+        SkillRollbackRequest: {
+            /** @description 切り戻す版 */
+            number: number;
+            /** @description 操作を始めた時点の公開中の版 */
+            expected_version: number;
+            change_reason?: string;
+            operation_key?: string;
+        };
+        /**
+         * @description * `1` - 個人
+         *     * `2` - 部門
+         *     * `3` - 全社
+         * @enum {integer}
+         */
+        SkillScopeEnum: 1 | 2 | 3;
+        SkillSuspendRequest: {
+            reason?: string;
+        };
+        /** @description 表示専用のModelSerializer。すべての項目を読み取り専用にする */
+        SkillVersion: {
+            readonly id: string;
+            /** 版 */
+            readonly number: number;
+            /** 説明 */
+            readonly description: string;
+            /** 手順 */
+            readonly instructions: string;
+            /** 使ってよいTool */
+            readonly tools: string[];
+            /** 必要な能力 */
+            readonly requires: components["schemas"]["SkillRequirementEnum"][];
+            /** 入力のSchema */
+            readonly input_schema: unknown;
+            /** 業務結果のSchema */
+            readonly output_schema: unknown;
+            readonly assets: components["schemas"]["SkillAsset"][];
+            readonly rolled_back_from: number | null;
+            /** 変更理由 */
+            readonly change_reason: string;
+            readonly created_by_info: components["schemas"]["MinimumUser"];
+            /** Format: date-time */
+            readonly created: string;
+        };
         /** @description 作業の計画の1項目（harness/tools/todo_write.py） */
         Todo: {
             readonly content: string;
@@ -2045,6 +2809,20 @@ export interface components {
             readonly is_error: boolean;
             readonly text: string;
         };
+        /**
+         * @description * `read` - read
+         *     * `write` - write
+         *     * `edit` - edit
+         *     * `glob` - glob
+         *     * `grep` - grep
+         *     * `shell` - shell
+         *     * `job_output` - job_output
+         *     * `job_kill` - job_kill
+         *     * `ask_user` - ask_user
+         *     * `todo_write` - todo_write
+         * @enum {string}
+         */
+        ToolsEnum: "read" | "write" | "edit" | "glob" | "grep" | "shell" | "job_output" | "job_kill" | "ask_user" | "todo_write";
         /** @description ログインユーザー宛ての通知：自分のRunの状態の変更 */
         UserStreamEvent: {
             /** @enum {string} */
@@ -2761,6 +3539,782 @@ export interface operations {
             };
         };
     };
+    app_v1_skills_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description 部門 */
+                department?: string;
+                /** @description 名前 */
+                name?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description 公開済み */
+                published?: boolean;
+                /**
+                 * @description 公開範囲
+                 *
+                 *     * `1` - 個人
+                 *     * `2` - 部門
+                 *     * `3` - 全社
+                 */
+                scope?: 1 | 2 | 3;
+                /** @description A search term. */
+                search?: string;
+                suspended?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedSkillList"];
+                };
+            };
+        };
+    };
+    app_v1_skills_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillCreateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["SkillCreateRequest"];
+                "multipart/form-data": components["schemas"]["SkillCreateRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Skill"];
+                };
+            };
+        };
+    };
+    app_v1_skills_changes_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                skill: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedSkillChangeList"];
+                };
+            };
+        };
+    };
+    app_v1_skills_drafts_list: {
+        parameters: {
+            query?: {
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                skill: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDraft"][];
+                };
+            };
+        };
+    };
+    app_v1_skills_drafts_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SkillDraftOpenRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["SkillDraftOpenRequest"];
+                "multipart/form-data": components["schemas"]["SkillDraftOpenRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDraft"];
+                };
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    app_v1_skills_drafts_assets_list: {
+        parameters: {
+            query?: {
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                draft: string;
+                skill: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDraftAsset"][];
+                };
+            };
+        };
+    };
+    app_v1_skills_drafts_assets_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                draft: string;
+                skill: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["SkillDraftAssetRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDraftAsset"];
+                };
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    app_v1_skills_drafts_assets_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                draft: string;
+                key: string;
+                skill: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDraftAsset"];
+                };
+            };
+        };
+    };
+    app_v1_skills_drafts_assets_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                draft: string;
+                key: string;
+                skill: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["SkillDraftAssetUpdateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDraftAsset"];
+                };
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    app_v1_skills_drafts_assets_destroy: {
+        parameters: {
+            query: {
+                revision: number;
+            };
+            header?: never;
+            path: {
+                draft: string;
+                key: string;
+                skill: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    app_v1_skills_drafts_assets_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                draft: string;
+                key: string;
+                skill: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": components["schemas"]["PatchedSkillDraftAssetUpdateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDraftAsset"];
+                };
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    app_v1_skills_drafts_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDraft"];
+                };
+            };
+        };
+    };
+    app_v1_skills_drafts_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillDraftRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["SkillDraftRequest"];
+                "multipart/form-data": components["schemas"]["SkillDraftRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDraft"];
+                };
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    app_v1_skills_drafts_destroy: {
+        parameters: {
+            query: {
+                revision: number;
+            };
+            header?: never;
+            path: {
+                skill: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    app_v1_skills_drafts_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedSkillDraftRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedSkillDraftRequest"];
+                "multipart/form-data": components["schemas"]["PatchedSkillDraftRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDraft"];
+                };
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    app_v1_skills_files_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResourceVersion"];
+                };
+            };
+        };
+    };
+    app_v1_skills_files_download_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ファイル */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+        };
+    };
+    app_v1_skills_versions_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                skill: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedMinimumSkillVersionList"];
+                };
+            };
+        };
+    };
+    app_v1_skills_versions_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                number: number;
+                skill: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillVersion"];
+                };
+            };
+        };
+    };
+    app_v1_skills_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Skill"];
+                };
+            };
+        };
+    };
+    app_v1_skills_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["SkillRequest"];
+                "multipart/form-data": components["schemas"]["SkillRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Skill"];
+                };
+            };
+        };
+    };
+    app_v1_skills_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    app_v1_skills_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedSkillRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedSkillRequest"];
+                "multipart/form-data": components["schemas"]["PatchedSkillRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Skill"];
+                };
+            };
+        };
+    };
+    app_v1_skills_publish_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillPublishRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["SkillPublishRequest"];
+                "multipart/form-data": components["schemas"]["SkillPublishRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillVersion"];
+                };
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    app_v1_skills_resume_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SkillSuspendRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["SkillSuspendRequest"];
+                "multipart/form-data": components["schemas"]["SkillSuspendRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Skill"];
+                };
+            };
+        };
+    };
+    app_v1_skills_rollback_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillRollbackRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["SkillRollbackRequest"];
+                "multipart/form-data": components["schemas"]["SkillRollbackRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillVersion"];
+                };
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    app_v1_skills_suspend_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SkillSuspendRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["SkillSuspendRequest"];
+                "multipart/form-data": components["schemas"]["SkillSuspendRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Skill"];
+                };
+            };
+        };
+    };
     files_retrieve: {
         parameters: {
             query?: never;
@@ -2805,6 +4359,320 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Ping"];
+                };
+            };
+        };
+    };
+    v1_departments_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedDepartmentList"];
+                };
+            };
+        };
+    };
+    v1_departments_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DepartmentRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["DepartmentRequest"];
+                "multipart/form-data": components["schemas"]["DepartmentRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Department"];
+                };
+            };
+        };
+    };
+    v1_departments_members_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description 社員 */
+                q?: string;
+                /**
+                 * @description 部門の中の役割
+                 *
+                 *     * `1` - 利用
+                 *     * `2` - 編集
+                 *     * `3` - 公開
+                 */
+                role?: 1 | 2 | 3;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                department: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedDepartmentMembershipList"];
+                };
+            };
+        };
+    };
+    v1_departments_members_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                department: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DepartmentMembershipRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["DepartmentMembershipRequest"];
+                "multipart/form-data": components["schemas"]["DepartmentMembershipRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartmentMembership"];
+                };
+            };
+        };
+    };
+    v1_departments_members_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                department: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartmentMembership"];
+                };
+            };
+        };
+    };
+    v1_departments_members_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                department: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DepartmentMembershipUpdateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["DepartmentMembershipUpdateRequest"];
+                "multipart/form-data": components["schemas"]["DepartmentMembershipUpdateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartmentMembership"];
+                };
+            };
+        };
+    };
+    v1_departments_members_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                department: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_departments_members_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                department: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedDepartmentMembershipUpdateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedDepartmentMembershipUpdateRequest"];
+                "multipart/form-data": components["schemas"]["PatchedDepartmentMembershipUpdateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartmentMembership"];
+                };
+            };
+        };
+    };
+    v1_departments_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Department"];
+                };
+            };
+        };
+    };
+    v1_departments_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DepartmentRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["DepartmentRequest"];
+                "multipart/form-data": components["schemas"]["DepartmentRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Department"];
+                };
+            };
+        };
+    };
+    v1_departments_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_departments_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedDepartmentRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedDepartmentRequest"];
+                "multipart/form-data": components["schemas"]["PatchedDepartmentRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Department"];
                 };
             };
         };

@@ -23,6 +23,8 @@ from django.conf import settings
 from django.utils.module_loading import import_string
 
 CHUNK = 1024 * 1024
+# Storage Backendを入れる前のsnapshotの保存先のID（`local:<UUID>`）
+LEGACY_SNAPSHOT_PREFIX = "local:"
 KEY_PATTERN = re.compile(r"^[A-Za-z0-9_-]+(/[A-Za-z0-9_.-]+)*$")
 
 
@@ -69,6 +71,9 @@ def get_storage(backend_id: str | None = None) -> StorageBackend:
     """保存先のIDの保存先。省けば新しく保存するときの既定"""
     config: dict[str, Any] = settings.YORIKI_STORAGE
     backend_id = backend_id or config["DEFAULT"]
+    if backend_id.startswith(LEGACY_SNAPSHOT_PREFIX):
+        # Storage Backendを入れる前のCheckpoint。Workerの作業領域の snapshots/ に置いていた（読むだけ）
+        return LocalStorage(backend_id, root=str(Path(settings.YORIKI_WORKSPACES_DIR) / "snapshots"))
     backend = config["BACKENDS"].get(backend_id)
     if backend is None:
         raise StorageError(f"unknown storage backend: {backend_id}")

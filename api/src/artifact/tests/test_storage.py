@@ -5,7 +5,7 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from artifact.storage import LocalStorage, S3Storage, StorageBackend, StorageError, get_storage
+from artifact.storage import LocalStorage, S3Storage, StorageBackend, StorageError, StoredObject, get_storage
 
 BUCKET = "yoriki-test"
 
@@ -117,3 +117,12 @@ def test_backend_is_chosen_by_settings(settings, tmp_path):
     assert get_storage("old").root == tmp_path / "old"  # type: ignore[attr-defined]
     with pytest.raises(StorageError):
         get_storage("unknown")
+
+
+def test_snapshots_saved_before_the_storage_backend_are_readable(settings, tmp_path):
+    """Storage Backendを入れる前のCheckpoint（保存先のIDが `local:<UUID>`）は、作業領域の snapshots/ から読む"""
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path)
+    (tmp_path / "snapshots/runs/r1").mkdir(parents=True)
+    (tmp_path / "snapshots/runs/r1/1-abc.tar").write_bytes(b"tar")
+    storage = get_storage("local:0123abcd")
+    assert storage.stat("runs/r1/1-abc.tar") == StoredObject("runs/r1/1-abc.tar", 3, hashlib.sha256(b"tar").hexdigest())

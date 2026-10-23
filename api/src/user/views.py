@@ -1,6 +1,7 @@
 from django.contrib.auth import login, logout
 from django.contrib.auth.models import Group
 from django.db import transaction
+from django.db.models import Count, Q
 from django.middleware.csrf import get_token
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
@@ -8,6 +9,7 @@ from django_filters import rest_framework as filters
 from drf_spectacular.utils import extend_schema, extend_schema_view
 from rest_framework import mixins, status
 from rest_framework.decorators import action
+from rest_framework.generics import get_object_or_404
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -17,9 +19,12 @@ from rest_framework.viewsets import GenericViewSet, ModelViewSet, ReadOnlyModelV
 from utils.permissions import AppUser, CsrfProtected, PlatformAdmin
 from utils.views import SoftDeleteMixin
 
-from .models import Invitation, SSOProvider, User
+from .models import Department, DepartmentMembership, DepartmentRole, Invitation, SSOProvider, User
 from .serializers import (
     AuthMethodsSerializer,
+    DepartmentMembershipSerializer,
+    DepartmentMembershipUpdateSerializer,
+    DepartmentSerializer,
     GroupSerializer,
     InvitationAcceptSerializer,
     InvitationLinkSerializer,
@@ -240,3 +245,70 @@ class GroupViewSet(ReadOnlyModelViewSet):
 
     def get_queryset(self):
         return super().get_queryset().order_by("name")
+
+
+@extend_schema(description="部門の管理API（基盤管理者だけ）", tags=["manage/department"])
+class DepartmentViewSet(SoftDeleteMixin, ModelViewSet):
+    """部門はSkillの部門の範囲に使う（design.md §3.6）。削除しても所属は残り、その部門のSkillは使えなくなる"""
+
+    permission_classes = [PlatformAdmin]
+    lookup_field = "uid"
+    queryset = Department.objects.filter(deleted=False).annotate(member_count=Count("memberships"))
+    serializer_class = DepartmentSerializer
+    search_fields = ("name",)
+    ordering = ("name", "pk")
+
+
+class DepartmentMixin:
+    """URLのdepartmentを、削除されていない部門に限定して取得する"""
+
+    kwargs: dict[str, str]
+
+    @property
+    def department(self) -> Department:
+        if not hasattr(self, "_department"):
+            self._department = get_object_or_404(Department.objects.all(), uid=self.kwargs["department"], deleted=False)
+        return self._department
+
+    def get_queryset(self):
+        return super().get_queryset().filter(department=self.department)  # type: ignore[misc]
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), "department": self.department}  # type: ignore[misc]
+
+
+class DepartmentMembershipFilter(filters.FilterSet):
+    role = filters.ChoiceFilter(label=_("部門の中の役割"), choices=DepartmentRole.choices)
+    q = filters.CharFilter(label=_("社員"), method="filter_user")
+
+    class Meta:
+        model = DepartmentMembership
+        fields = ["role"]
+
+    def filter_user(self, queryset, name, value):
+        return queryset.filter(Q(user__email__icontains=value) | Q(user__display_name__icontains=value))
+
+
+@extend_schema(description="部門の所属の管理API（基盤管理者だけ）", tags=["manage/department/member"])
+@extend_schema_view(
+    update=extend_schema(request=DepartmentMembershipUpdateSerializer, responses=DepartmentMembershipSerializer),
+    partial_update=extend_schema(
+        request=DepartmentMembershipUpdateSerializer, responses=DepartmentMembershipSerializer
+    ),
+)
+class DepartmentMembershipViewSet(DepartmentMixin, ModelViewSet):
+    permission_classes = [PlatformAdmin]
+    lookup_field = "uid"
+    queryset = DepartmentMembership.objects.select_related("user")
+    serializer_class = DepartmentMembershipSerializer
+    filterset_class = DepartmentMembershipFilter
+    ordering = ("user__email", "pk")
+
+    def get_serializer_class(self):
+        # 所属の社員は変えられない（別の社員にするなら、所属を消して作り直す）
+        if self.action in ("update", "partial_update"):
+            return DepartmentMembershipUpdateSerializer
+        return super().get_serializer_class()
+
+    def perform_create(self, serializer):
+        serializer.save(department=self.department)

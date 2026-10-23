@@ -38,9 +38,9 @@ class User(AbstractUser):
     同じメールアドレスのユーザーがいれば、SSOのアカウントをそのユーザーに紐付ける（user/adapters.py）。
 
     基盤管理者は `is_superuser` で表す（最初の1人は `createsuperuser` で作る）。
-    業務管理者・Plugin公開者などの役割はDjangoのGroup（permissionの組）で表し、管理画面で割り当てる
+    業務管理者・Skill公開者などの役割はDjangoのGroup（permissionの組）で表し、管理画面で割り当てる
     （`user/roles.py`、design.md §10.0）。権限の判定は、役割ではなく個々のpermissionで行う
-    （`utils.permissions.AppPermission`）。
+    （`utils.permissions.AppPermission`）。部門（Skillの部門の範囲）は、役割とは別に Department の所属で表す
     """
 
     objects: ClassVar[YorikiUserManager] = YorikiUserManager()
@@ -249,7 +249,82 @@ class Invitation(models.Model):
         return user
 
 
+class DepartmentRole(models.IntegerChoices):
+    """部門の中の役割。上の役割は下の役割のできることを含む（design.md §3.6）"""
+
+    MEMBER = 1, _("利用")  # 部門のSkillを使う
+    EDITOR = 2, _("編集")  # 部門のSkillのDraftを変更する
+    PUBLISHER = 3, _("公開")  # 部門のSkillを公開・切戻し・停止する。Toolを変える
+
+
+class Department(models.Model):
+    """部門。Skillの部門の範囲（誰が使えて、誰が編集・公開できるか）に使う（design.md §3.6）。
+
+    役割（Group。permissionの組）とは別に管理する。基盤管理者が管理画面で登録し、所属を割り当てる
+    """
+
+    uid = NanoidField(unique=True)
+    name = models.CharField(_("名前"), max_length=100)
+    members = models.ManyToManyField(
+        settings.AUTH_USER_MODEL, through="DepartmentMembership", related_name="departments", verbose_name=_("所属")
+    )
+
+    created = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated = models.DateTimeField(auto_now=True)
+    deleted = models.BooleanField(default=False)
+
+    class Meta:
+        verbose_name = _("部門")
+        verbose_name_plural = verbose_name
+        constraints = [
+            models.UniqueConstraint(fields=["name"], condition=models.Q(deleted=False), name="uniq_department_name"),
+        ]
+
+    def __str__(self):
+        return self.name
+
+    def role_of(self, user) -> DepartmentRole | None:
+        """利用者の部門の中の役割。所属していなければNone。基盤管理者は公開の役割として扱う"""
+        if not user.is_active or self.deleted:
+            return None
+        if user.is_superuser:
+            return DepartmentRole.PUBLISHER
+        role = DepartmentMembership.objects.filter(department=self, user=user).values_list("role", flat=True).first()
+        return DepartmentRole(role) if role is not None else None
+
+
+class DepartmentMembership(models.Model):
+    """部門の所属と、部門の中の役割"""
+
+    uid = NanoidField(unique=True)
+    department = models.ForeignKey(
+        Department, on_delete=models.CASCADE, related_name="memberships", verbose_name=_("部門")
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="department_memberships",
+        verbose_name=_("社員"),
+    )
+    role = models.PositiveSmallIntegerField(_("部門の中の役割"), choices=DepartmentRole.choices)
+
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _("部門の所属")
+        verbose_name_plural = verbose_name
+        constraints = [
+            models.UniqueConstraint(fields=["department", "user"], name="uniq_department_membership"),
+        ]
+
+    def __str__(self):
+        return f"{self.department} {self.user}"
+
+
 auditlog.register(User, exclude_fields=["password", "last_login", "updated"])
 # client secretは暗号化した値でも監査ログに残さない
 auditlog.register(SSOProvider, exclude_fields=["client_secret", "updated"])
 auditlog.register(Invitation, exclude_fields=["token_hash"])
+auditlog.register(Department, exclude_fields=["updated"])
+auditlog.register(DepartmentMembership, exclude_fields=["updated"])

@@ -6,10 +6,14 @@ Modelの `Meta.permissions` で作り、Group（役割。`user/roles.py`）に�
 """
 
 from enum import Enum
+from typing import TYPE_CHECKING
 
-from django.utils.functional import Promise
+from django.utils.translation import gettext_lazy as _
 from rest_framework import authentication
 from rest_framework.permissions import BasePermission, IsAuthenticated, OperandHolder
+
+if TYPE_CHECKING:
+    from django_stubs_ext import StrPromise
 
 
 class AppPermission(Enum):
@@ -21,7 +25,11 @@ class AppPermission(Enum):
     例：PUBLISH_COMPANY_SKILLS = "skill", "can_publish_company_skills", _("全社向けのSkillを公開できる")
     """
 
-    def __init__(self, app_label: str, codename: str, label: str | Promise):
+    # 全社の範囲のSkill（design.md §3.6）
+    EDIT_COMPANY_SKILLS = "skill", "can_edit_company_skills", _("全社のSkillを編集できる")
+    PUBLISH_COMPANY_SKILLS = "skill", "can_publish_company_skills", _("全社のSkillを公開できる")
+
+    def __init__(self, app_label: str, codename: str, label: "str | StrPromise"):
         self.app_label = app_label
         self.codename = codename
         self.label = label
@@ -32,7 +40,7 @@ class AppPermission(Enum):
         return f"{self.app_label}.{self.codename}"
 
     @property
-    def meta(self) -> tuple[str, str | Promise]:
+    def meta(self) -> tuple[str, "str | StrPromise"]:
         """Modelの `Meta.permissions` に書く（codename、表示名）"""
         return (self.codename, self.label)
 

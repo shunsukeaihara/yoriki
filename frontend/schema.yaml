@@ -839,6 +839,930 @@ paths:
           description: ''
         '409':
           description: 他の処理と競合した
+  /api/app/v1/skills/:
+    get:
+      operationId: app_v1_skills_list
+      description: Skillの一覧・作成・公開・切戻し・停止
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - in: query
+        name: department
+        schema:
+          type: string
+        description: 部門
+      - in: query
+        name: name
+        schema:
+          type: string
+        description: 名前
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: published
+        schema:
+          type: boolean
+        description: 公開済み
+      - in: query
+        name: scope
+        schema:
+          type: integer
+          title: 公開範囲
+          enum:
+          - 1
+          - 2
+          - 3
+        description: |-
+          公開範囲
+
+          * `1` - 個人
+          * `2` - 部門
+          * `3` - 全社
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: suspended
+        schema:
+          type: boolean
+      tags:
+      - app/skill
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSkillList'
+          description: ''
+    post:
+      operationId: app_v1_skills_create
+      description: Skillの一覧・作成・公開・切戻し・停止
+      tags:
+      - app/skill
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SkillCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SkillCreateRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+          description: ''
+  /api/app/v1/skills/{skill}/changes/:
+    get:
+      operationId: app_v1_skills_changes_list
+      description: Skillの公開・切戻し・停止の記録
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/skill/change
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSkillChangeList'
+          description: ''
+  /api/app/v1/skills/{skill}/drafts/:
+    get:
+      operationId: app_v1_skills_drafts_list
+      description: SkillのDraft（編集中の中身）。Skillごとに1つ
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/skill/draft
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SkillDraft'
+          description: ''
+    post:
+      operationId: app_v1_skills_drafts_create
+      description: SkillのDraft（編集中の中身）。Skillごとに1つ
+      parameters:
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/skill/draft
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillDraftOpenRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SkillDraftOpenRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SkillDraftOpenRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillDraft'
+          description: ''
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった）
+  /api/app/v1/skills/{skill}/drafts/{draft}/assets/:
+    get:
+      operationId: app_v1_skills_drafts_assets_list
+      description: SkillのDraftの資料（参照資料・マスター・テンプレート・スクリプト）
+      parameters:
+      - in: path
+        name: draft
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/skill/draft/asset
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SkillDraftAsset'
+          description: ''
+    post:
+      operationId: app_v1_skills_drafts_assets_create
+      description: SkillのDraftの資料（参照資料・マスター・テンプレート・スクリプト）
+      parameters:
+      - in: path
+        name: draft
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/skill/draft/asset
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SkillDraftAssetRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillDraftAsset'
+          description: ''
+  /api/app/v1/skills/{skill}/drafts/{draft}/assets/{key}/:
+    get:
+      operationId: app_v1_skills_drafts_assets_retrieve
+      description: SkillのDraftの資料（参照資料・マスター・テンプレート・スクリプト）
+      parameters:
+      - in: path
+        name: draft
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: key
+        schema:
+          type: string
+          title: 資料のkey
+        required: true
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/skill/draft/asset
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillDraftAsset'
+          description: ''
+    put:
+      operationId: app_v1_skills_drafts_assets_update
+      description: SkillのDraftの資料（参照資料・マスター・テンプレート・スクリプト）
+      parameters:
+      - in: path
+        name: draft
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: key
+        schema:
+          type: string
+          title: 資料のkey
+        required: true
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/skill/draft/asset
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SkillDraftAssetUpdateRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillDraftAsset'
+          description: ''
+    patch:
+      operationId: app_v1_skills_drafts_assets_partial_update
+      description: SkillのDraftの資料（参照資料・マスター・テンプレート・スクリプト）
+      parameters:
+      - in: path
+        name: draft
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: key
+        schema:
+          type: string
+          title: 資料のkey
+        required: true
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/skill/draft/asset
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedSkillDraftAssetUpdateRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillDraftAsset'
+          description: ''
+    delete:
+      operationId: app_v1_skills_drafts_assets_destroy
+      description: SkillのDraftの資料（参照資料・マスター・テンプレート・スクリプト）
+      parameters:
+      - in: path
+        name: draft
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: key
+        schema:
+          type: string
+          title: 資料のkey
+        required: true
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/skill/draft/asset
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/app/v1/skills/{skill}/drafts/{uid}/:
+    get:
+      operationId: app_v1_skills_drafts_retrieve
+      description: SkillのDraft（編集中の中身）。Skillごとに1つ
+      parameters:
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/skill/draft
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillDraft'
+          description: ''
+    put:
+      operationId: app_v1_skills_drafts_update
+      description: SkillのDraft（編集中の中身）。Skillごとに1つ
+      parameters:
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/skill/draft
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillDraftRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SkillDraftRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SkillDraftRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillDraft'
+          description: ''
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった）
+    patch:
+      operationId: app_v1_skills_drafts_partial_update
+      description: SkillのDraft（編集中の中身）。Skillごとに1つ
+      parameters:
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/skill/draft
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedSkillDraftRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedSkillDraftRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedSkillDraftRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillDraft'
+          description: ''
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった）
+    delete:
+      operationId: app_v1_skills_drafts_destroy
+      description: Draftを破棄する
+      parameters:
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/skill/draft
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/app/v1/skills/{skill}/files/{uid}/:
+    get:
+      operationId: app_v1_skills_files_retrieve
+      description: Skillの資料のファイル（版とDraftが使う原本）
+      parameters:
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/skill/file
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResourceVersion'
+          description: ''
+  /api/app/v1/skills/{skill}/files/{uid}/download/:
+    get:
+      operationId: app_v1_skills_files_download_retrieve
+      description: ファイルを取得する（ダウンロードとして返す）
+      parameters:
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/skill/file
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+          description: ファイル
+  /api/app/v1/skills/{skill}/versions/:
+    get:
+      operationId: app_v1_skills_versions_list
+      description: Skillの公開した版
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/skill/version
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedMinimumSkillVersionList'
+          description: ''
+  /api/app/v1/skills/{skill}/versions/{number}/:
+    get:
+      operationId: app_v1_skills_versions_retrieve
+      description: Skillの公開した版
+      parameters:
+      - in: path
+        name: number
+        schema:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          title: 版
+        required: true
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/skill/version
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillVersion'
+          description: ''
+  /api/app/v1/skills/{uid}/:
+    get:
+      operationId: app_v1_skills_retrieve
+      description: Skillの一覧・作成・公開・切戻し・停止
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/skill
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+          description: ''
+    put:
+      operationId: app_v1_skills_update
+      description: 名前を変える（公開の権限が要る）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/skill
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SkillRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SkillRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+          description: ''
+    patch:
+      operationId: app_v1_skills_partial_update
+      description: 名前を変える（公開の権限が要る）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/skill
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedSkillRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedSkillRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedSkillRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+          description: ''
+    delete:
+      operationId: app_v1_skills_destroy
+      description: Skillを削除する（公開の権限が要る）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/skill
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/app/v1/skills/{uid}/publish/:
+    post:
+      operationId: app_v1_skills_publish_create
+      description: Draftを公開し、新しい版を公開中の版にする（公開の権限が要る）。Draftは閉じる
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/skill
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillPublishRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SkillPublishRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SkillPublishRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillVersion'
+          description: ''
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった）
+  /api/app/v1/skills/{uid}/resume/:
+    post:
+      operationId: app_v1_skills_resume_create
+      description: 停止を解く（公開の権限が要る）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/skill
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillSuspendRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SkillSuspendRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SkillSuspendRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+          description: ''
+  /api/app/v1/skills/{uid}/rollback/:
+    post:
+      operationId: app_v1_skills_rollback_create
+      description: 選んだ過去の版と同じ中身・資料の版を新しく作り、公開中の版にする（公開の権限が要る）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/skill
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillRollbackRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SkillRollbackRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SkillRollbackRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillVersion'
+          description: ''
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった）
+  /api/app/v1/skills/{uid}/suspend/:
+    post:
+      operationId: app_v1_skills_suspend_create
+      description: 緊急停止する。新しいRunでも進行中のRunでも使わせない（公開の権限が要る）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/skill
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillSuspendRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SkillSuspendRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SkillSuspendRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Skill'
+          description: ''
   /api/files/{token}/:
     get:
       operationId: files_retrieve
@@ -878,6 +1802,395 @@ paths:
               schema:
                 $ref: '#/components/schemas/Ping'
           description: ''
+  /api/v1/departments/:
+    get:
+      operationId: v1_departments_list
+      description: 部門の管理API（基盤管理者だけ）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - manage/department
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDepartmentList'
+          description: ''
+    post:
+      operationId: v1_departments_create
+      description: 部門の管理API（基盤管理者だけ）
+      tags:
+      - manage/department
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DepartmentRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DepartmentRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DepartmentRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Department'
+          description: ''
+  /api/v1/departments/{department}/members/:
+    get:
+      operationId: v1_departments_members_list
+      description: 部門の所属の管理API（基盤管理者だけ）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - in: path
+        name: department
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: q
+        schema:
+          type: string
+        description: 社員
+      - in: query
+        name: role
+        schema:
+          type: integer
+          title: 部門の中の役割
+          enum:
+          - 1
+          - 2
+          - 3
+        description: |-
+          部門の中の役割
+
+          * `1` - 利用
+          * `2` - 編集
+          * `3` - 公開
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - manage/department/member
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDepartmentMembershipList'
+          description: ''
+    post:
+      operationId: v1_departments_members_create
+      description: 部門の所属の管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: department
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - manage/department/member
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DepartmentMembershipRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DepartmentMembershipRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DepartmentMembershipRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentMembership'
+          description: ''
+  /api/v1/departments/{department}/members/{uid}/:
+    get:
+      operationId: v1_departments_members_retrieve
+      description: 部門の所属の管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: department
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/department/member
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentMembership'
+          description: ''
+    put:
+      operationId: v1_departments_members_update
+      description: 部門の所属の管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: department
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/department/member
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DepartmentMembershipUpdateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DepartmentMembershipUpdateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DepartmentMembershipUpdateRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentMembership'
+          description: ''
+    patch:
+      operationId: v1_departments_members_partial_update
+      description: 部門の所属の管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: department
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/department/member
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedDepartmentMembershipUpdateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedDepartmentMembershipUpdateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedDepartmentMembershipUpdateRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentMembership'
+          description: ''
+    delete:
+      operationId: v1_departments_members_destroy
+      description: 部門の所属の管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: department
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/department/member
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/departments/{uid}/:
+    get:
+      operationId: v1_departments_retrieve
+      description: 部門の管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/department
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Department'
+          description: ''
+    put:
+      operationId: v1_departments_update
+      description: 部門の管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/department
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DepartmentRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DepartmentRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DepartmentRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Department'
+          description: ''
+    patch:
+      operationId: v1_departments_partial_update
+      description: 部門の管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/department
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedDepartmentRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedDepartmentRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedDepartmentRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Department'
+          description: ''
+    delete:
+      operationId: v1_departments_destroy
+      description: 部門の管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/department
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
   /api/v1/groups/:
     get:
       operationId: v1_groups_list
@@ -2502,6 +3815,120 @@ components:
           type: string
           title: タイトル
           maxLength: 200
+    Department:
+      type: object
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          title: 名前
+          maxLength: 100
+        member_count:
+          type: integer
+          readOnly: true
+          description: 所属する人数
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created
+      - id
+      - member_count
+      - name
+      - updated
+    DepartmentMembership:
+      type: object
+      description: 部門の所属。社員は作成時だけ指定し、後からは役割だけを変える
+      properties:
+        id:
+          type: string
+          readOnly: true
+        user:
+          type: string
+        user_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+        role:
+          allOf:
+          - $ref: '#/components/schemas/DepartmentRoleEnum'
+          title: 部門の中の役割
+          minimum: 0
+          maximum: 32767
+        role_display:
+          type: string
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created
+      - id
+      - role
+      - role_display
+      - updated
+      - user
+      - user_info
+    DepartmentMembershipRequest:
+      type: object
+      description: 部門の所属。社員は作成時だけ指定し、後からは役割だけを変える
+      properties:
+        user:
+          type: string
+          minLength: 1
+        role:
+          allOf:
+          - $ref: '#/components/schemas/DepartmentRoleEnum'
+          title: 部門の中の役割
+          minimum: 0
+          maximum: 32767
+      required:
+      - role
+      - user
+    DepartmentMembershipUpdateRequest:
+      type: object
+      description: 部門の所属。社員は作成時だけ指定し、後からは役割だけを変える
+      properties:
+        role:
+          allOf:
+          - $ref: '#/components/schemas/DepartmentRoleEnum'
+          title: 部門の中の役割
+          minimum: 0
+          maximum: 32767
+      required:
+      - role
+    DepartmentRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          title: 名前
+          maxLength: 100
+      required:
+      - name
+    DepartmentRoleEnum:
+      enum:
+      - 1
+      - 2
+      - 3
+      type: integer
+      description: |-
+        * `1` - 利用
+        * `2` - 編集
+        * `3` - 公開
     Group:
       type: object
       description: 役割（Group）。ユーザーへの割り当てでは名前で指定する
@@ -3085,6 +4512,19 @@ components:
         * `1` - ユーザー
         * `2` - エージェント
         * `3` - システム
+    MinimumDepartment:
+      type: object
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+          title: 名前
+      required:
+      - id
+      - name
     MinimumLLMConnection:
       type: object
       properties:
@@ -3113,6 +4553,65 @@ components:
       - kind
       - kind_display
       - name
+    MinimumSkillVersion:
+      type: object
+      description: 版の一覧（中身は出さない）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        number:
+          type: integer
+          readOnly: true
+          title: 版
+        rolled_back_from:
+          type: integer
+          readOnly: true
+          nullable: true
+        change_reason:
+          type: string
+          readOnly: true
+          title: 変更理由
+        created_by_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - change_reason
+      - created
+      - created_by_info
+      - id
+      - number
+      - rolled_back_from
+    MinimumUser:
+      type: object
+      description: 表示専用のModelSerializer。すべての項目を読み取り専用にする
+      properties:
+        id:
+          type: string
+          readOnly: true
+        email:
+          readOnly: true
+          title: メールアドレス
+          oneOf:
+          - type: string
+            format: email
+            maxLength: 254
+          - type: string
+            maxLength: 0
+        display_name:
+          type: string
+          readOnly: true
+          title: 表示名
+          maxLength: 150
+      required:
+      - display_name
+      - email
+      - id
     ModeEnum:
       enum:
       - auto
@@ -3455,6 +4954,28 @@ components:
       - supports_structured_output
       - supports_tools
       - supports_video
+    MyDepartment:
+      type: object
+      description: 所属する部門と、部門の中の役割
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        role:
+          allOf:
+          - $ref: '#/components/schemas/DepartmentRoleEnum'
+          readOnly: true
+        role_display:
+          type: string
+          readOnly: true
+      required:
+      - id
+      - name
+      - role
+      - role_display
     MyUser:
       type: object
       description: ログイン中の利用者。画面の表示と権限の判定に使う
@@ -3491,8 +5012,14 @@ components:
           items:
             type: string
           readOnly: true
+        departments:
+          type: array
+          items:
+            $ref: '#/components/schemas/MyDepartment'
+          readOnly: true
       required:
       - all_permissions
+      - departments
       - display_name
       - email
       - id
@@ -3558,6 +5085,44 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Conversation'
+    PaginatedDepartmentList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Department'
+    PaginatedDepartmentMembershipList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/DepartmentMembership'
     PaginatedLLMConnectionList:
       type: object
       required:
@@ -3615,6 +5180,25 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Message'
+    PaginatedMinimumSkillVersionList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/MinimumSkillVersion'
     PaginatedModelProfileList:
       type: object
       required:
@@ -3748,6 +5332,44 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SSOProvider'
+    PaginatedSkillChangeList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkillChange'
+    PaginatedSkillList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Skill'
     PatchedConversationRequest:
       type: object
       description: 自分の会話。モデル設定を省くと既定のモデル設定にする。実行中に変えると、次のステップから切り替わる
@@ -3766,6 +5388,24 @@ components:
           type: string
           title: タイトル
           maxLength: 200
+    PatchedDepartmentMembershipUpdateRequest:
+      type: object
+      description: 部門の所属。社員は作成時だけ指定し、後からは役割だけを変える
+      properties:
+        role:
+          allOf:
+          - $ref: '#/components/schemas/DepartmentRoleEnum'
+          title: 部門の中の役割
+          minimum: 0
+          maximum: 32767
+    PatchedDepartmentRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          title: 名前
+          maxLength: 100
     PatchedLLMConnectionUpdateRequest:
       type: object
       description: プロバイダ接続の更新。種別とbase URL（接続先）は変えられないので、読み取り専用にする
@@ -4003,6 +5643,62 @@ components:
         is_active:
           type: boolean
           title: 有効
+    PatchedSkillDraftAssetUpdateRequest:
+      type: object
+      description: keyは変えない。ファイルは置き換えるときだけ送る
+      properties:
+        role:
+          allOf:
+          - $ref: '#/components/schemas/SkillAssetRoleEnum'
+          title: 用途
+          minimum: 0
+          maximum: 32767
+        description:
+          type: string
+          maxLength: 500
+        file:
+          type: string
+          format: binary
+          writeOnly: true
+          description: 置き換えるファイル
+    PatchedSkillDraftRequest:
+      type: object
+      description: 編集中のSkill。更新では、編集を始めた時点の `revision` を送り、その間に変わっていたら409になる
+      properties:
+        revision:
+          type: integer
+          minimum: 1
+          description: 更新では、編集を始めた時点の値を送る
+        description:
+          type: string
+          maxLength: 2000
+        instructions:
+          type: string
+          maxLength: 100000
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolsEnum'
+          description: 使ってよいTool。空ならコマンド不要のSkill
+          maxItems: 50
+        requires:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkillRequirementEnum'
+          maxItems: 10
+        input_schema:
+          nullable: true
+        output_schema:
+          nullable: true
+    PatchedSkillRequest:
+      type: object
+      description: Skillと公開中の版の概要。中身は版（versions）とDraft（drafts）で扱う
+      properties:
+        name:
+          type: string
+          minLength: 1
+          title: 名前
+          maxLength: 100
     Ping:
       type: object
       properties:
@@ -4023,6 +5719,50 @@ components:
         * `2` - Anthropic（Claude）
         * `3` - Google Gemini
         * `4` - ローカルLLM
+    ResourceVersion:
+      type: object
+      properties:
+        id:
+          type: string
+          readOnly: true
+        resource:
+          type: string
+          readOnly: true
+        number:
+          type: integer
+          readOnly: true
+          title: 版
+        name:
+          type: string
+          readOnly: true
+          title: ファイル名
+        content_type:
+          type: string
+          readOnly: true
+          title: 形式
+        size:
+          type: integer
+          readOnly: true
+        sha256:
+          type: string
+          readOnly: true
+        created_by:
+          type: string
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - content_type
+      - created
+      - created_by
+      - id
+      - name
+      - number
+      - resource
+      - sha256
+      - size
     Run:
       type: object
       properties:
@@ -4775,6 +6515,565 @@ components:
           readOnly: true
       required:
       - is_authenticated
+    Skill:
+      type: object
+      description: Skillと公開中の版の概要。中身は版（versions）とDraft（drafts）で扱う
+      properties:
+        id:
+          type: string
+          readOnly: true
+        scope:
+          allOf:
+          - $ref: '#/components/schemas/SkillScopeEnum'
+          readOnly: true
+          title: 公開範囲
+        scope_display:
+          type: string
+          readOnly: true
+        owner_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+          nullable: true
+        department_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumDepartment'
+          readOnly: true
+          nullable: true
+        name:
+          type: string
+          title: 名前
+          maxLength: 100
+        version:
+          type: integer
+          readOnly: true
+          description: 公開中の版。未公開は0
+        description:
+          type: string
+          readOnly: true
+          nullable: true
+        suspended:
+          type: boolean
+          readOnly: true
+          title: 停止中
+        draft:
+          type: string
+          nullable: true
+          description: 開いているDraftのID。なければnull
+          readOnly: true
+        access:
+          type: integer
+          description: 利用者ができること（1：使う、2：Draftを変更する、3：公開・切戻し・停止・削除・Toolの変更）
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - access
+      - created
+      - department_info
+      - description
+      - draft
+      - id
+      - name
+      - owner_info
+      - scope
+      - scope_display
+      - suspended
+      - updated
+      - version
+    SkillAsset:
+      type: object
+      description: 版の資料（表示）
+      properties:
+        key:
+          type: string
+          readOnly: true
+          title: 資料のkey
+        role:
+          allOf:
+          - $ref: '#/components/schemas/SkillAssetRoleEnum'
+          readOnly: true
+          title: 用途
+        role_display:
+          type: string
+          readOnly: true
+        description:
+          type: string
+          readOnly: true
+          title: 説明
+        file:
+          allOf:
+          - $ref: '#/components/schemas/ResourceVersion'
+          readOnly: true
+      required:
+      - description
+      - file
+      - key
+      - role
+      - role_display
+    SkillAssetRoleEnum:
+      enum:
+      - 1
+      - 2
+      - 3
+      - 4
+      type: integer
+      description: |-
+        * `1` - 参照資料
+        * `2` - マスターデータ
+        * `3` - テンプレート
+        * `4` - スクリプト
+    SkillChange:
+      type: object
+      properties:
+        id:
+          type: string
+          readOnly: true
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/SkillChangeKindEnum'
+          readOnly: true
+          title: 種別
+        kind_display:
+          type: string
+          readOnly: true
+        version:
+          type: integer
+          readOnly: true
+          nullable: true
+        previous_version:
+          type: integer
+          readOnly: true
+          nullable: true
+        actor_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+        reason:
+          type: string
+          readOnly: true
+          title: 理由
+        summary:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - actor_info
+      - created
+      - id
+      - kind
+      - kind_display
+      - previous_version
+      - reason
+      - summary
+      - version
+    SkillChangeKindEnum:
+      enum:
+      - 1
+      - 2
+      - 3
+      - 4
+      type: integer
+      description: |-
+        * `1` - 公開
+        * `2` - 切戻し
+        * `3` - 停止
+        * `4` - 再開
+    SkillCreateRequest:
+      type: object
+      description: Skillと最初のDraftを作る。公開するまで、誰も使えない
+      properties:
+        scope:
+          $ref: '#/components/schemas/SkillScopeEnum'
+        department:
+          type: string
+          minLength: 1
+          nullable: true
+          description: 部門の範囲では必須
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        description:
+          type: string
+          maxLength: 2000
+        instructions:
+          type: string
+          maxLength: 100000
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolsEnum'
+          description: 使ってよいTool。空ならコマンド不要のSkill
+          maxItems: 50
+        requires:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkillRequirementEnum'
+          maxItems: 10
+        input_schema:
+          nullable: true
+        output_schema:
+          nullable: true
+      required:
+      - name
+      - scope
+    SkillDraft:
+      type: object
+      description: 編集中のSkill。更新では、編集を始めた時点の `revision` を送り、その間に変わっていたら409になる
+      properties:
+        id:
+          type: string
+          readOnly: true
+        base_version:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: 開いたときの公開中の版。公開するときに、これが今も公開中の版でなければ409
+        revision:
+          type: integer
+          minimum: 1
+          description: 更新では、編集を始めた時点の値を送る
+        description:
+          type: string
+          maxLength: 2000
+        instructions:
+          type: string
+          maxLength: 100000
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolsEnum'
+          description: 使ってよいTool。空ならコマンド不要のSkill
+          maxItems: 50
+        requires:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkillRequirementEnum'
+          maxItems: 10
+        input_schema:
+          nullable: true
+        output_schema:
+          nullable: true
+        assets:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkillDraftAsset'
+          readOnly: true
+        updated_by_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - assets
+      - base_version
+      - created
+      - id
+      - revision
+      - updated
+      - updated_by_info
+    SkillDraftAsset:
+      type: object
+      description: Draftの資料。作成ではファイルを送る（multipart/form-data）。更新でファイルを送ると、同じ資料の新しい版で置き換える
+      properties:
+        key:
+          type: string
+          description: Skillの中で資料を指す名前（英小文字・数字・-・_）
+          maxLength: 63
+        role:
+          allOf:
+          - $ref: '#/components/schemas/SkillAssetRoleEnum'
+          title: 用途
+          minimum: 0
+          maximum: 32767
+        role_display:
+          type: string
+          readOnly: true
+        description:
+          type: string
+          maxLength: 500
+        file_info:
+          allOf:
+          - $ref: '#/components/schemas/ResourceVersion'
+          readOnly: true
+        draft_revision:
+          type: integer
+          readOnly: true
+          description: 変更した後のDraftのrevision
+      required:
+      - draft_revision
+      - file_info
+      - key
+      - role
+      - role_display
+    SkillDraftAssetRequest:
+      type: object
+      description: Draftの資料。作成ではファイルを送る（multipart/form-data）。更新でファイルを送ると、同じ資料の新しい版で置き換える
+      properties:
+        key:
+          type: string
+          minLength: 1
+          description: Skillの中で資料を指す名前（英小文字・数字・-・_）
+          maxLength: 63
+        role:
+          allOf:
+          - $ref: '#/components/schemas/SkillAssetRoleEnum'
+          title: 用途
+          minimum: 0
+          maximum: 32767
+        description:
+          type: string
+          maxLength: 500
+        file:
+          type: string
+          format: binary
+          writeOnly: true
+          description: 資料のファイル。原本のまま保存する
+      required:
+      - file
+      - key
+      - role
+    SkillDraftAssetUpdateRequest:
+      type: object
+      description: keyは変えない。ファイルは置き換えるときだけ送る
+      properties:
+        role:
+          allOf:
+          - $ref: '#/components/schemas/SkillAssetRoleEnum'
+          title: 用途
+          minimum: 0
+          maximum: 32767
+        description:
+          type: string
+          maxLength: 500
+        file:
+          type: string
+          format: binary
+          writeOnly: true
+          description: 置き換えるファイル
+      required:
+      - role
+    SkillDraftOpenRequest:
+      type: object
+      properties:
+        base_version:
+          type: integer
+          minimum: 1
+          description: 元にする版。省けば公開中の版（未公開ならDraftは空で開く）
+    SkillDraftRequest:
+      type: object
+      description: 編集中のSkill。更新では、編集を始めた時点の `revision` を送り、その間に変わっていたら409になる
+      properties:
+        revision:
+          type: integer
+          minimum: 1
+          description: 更新では、編集を始めた時点の値を送る
+        description:
+          type: string
+          maxLength: 2000
+        instructions:
+          type: string
+          maxLength: 100000
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolsEnum'
+          description: 使ってよいTool。空ならコマンド不要のSkill
+          maxItems: 50
+        requires:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkillRequirementEnum'
+          maxItems: 10
+        input_schema:
+          nullable: true
+        output_schema:
+          nullable: true
+      required:
+      - revision
+    SkillPublishRequest:
+      type: object
+      properties:
+        draft:
+          type: string
+          minLength: 1
+          description: 公開するDraftのID
+          maxLength: 30
+        revision:
+          type: integer
+          minimum: 1
+          description: 編集を始めた時点のDraftのrevision
+        change_reason:
+          type: string
+          maxLength: 500
+        operation_key:
+          type: string
+          description: 同じ操作の再送で版を重ねて作らないためのkey
+          maxLength: 100
+      required:
+      - draft
+      - revision
+    SkillRequest:
+      type: object
+      description: Skillと公開中の版の概要。中身は版（versions）とDraft（drafts）で扱う
+      properties:
+        name:
+          type: string
+          minLength: 1
+          title: 名前
+          maxLength: 100
+      required:
+      - name
+    SkillRequirementEnum:
+      enum:
+      - 1
+      - 2
+      - 3
+      - 4
+      type: integer
+      description: |-
+        * `1` - Tool呼出し
+        * `2` - 画像入力
+        * `3` - 文書入力
+        * `4` - 構造化出力
+    SkillRollbackRequest:
+      type: object
+      properties:
+        number:
+          type: integer
+          minimum: 1
+          description: 切り戻す版
+        expected_version:
+          type: integer
+          minimum: 1
+          description: 操作を始めた時点の公開中の版
+        change_reason:
+          type: string
+          maxLength: 500
+        operation_key:
+          type: string
+          maxLength: 100
+      required:
+      - expected_version
+      - number
+    SkillScopeEnum:
+      enum:
+      - 1
+      - 2
+      - 3
+      type: integer
+      description: |-
+        * `1` - 個人
+        * `2` - 部門
+        * `3` - 全社
+    SkillSuspendRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+          maxLength: 500
+    SkillVersion:
+      type: object
+      description: 表示専用のModelSerializer。すべての項目を読み取り専用にする
+      properties:
+        id:
+          type: string
+          readOnly: true
+        number:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          readOnly: true
+          title: 版
+        description:
+          type: string
+          readOnly: true
+          title: 説明
+        instructions:
+          type: string
+          readOnly: true
+          title: 手順
+        tools:
+          type: array
+          items:
+            type: string
+            maxLength: 100
+          readOnly: true
+          title: 使ってよいTool
+        requires:
+          type: array
+          items:
+            allOf:
+            - $ref: '#/components/schemas/SkillRequirementEnum'
+            minimum: 0
+            maximum: 32767
+          readOnly: true
+          title: 必要な能力
+        input_schema:
+          readOnly: true
+          nullable: true
+          title: 入力のSchema
+        output_schema:
+          readOnly: true
+          nullable: true
+          title: 業務結果のSchema
+        assets:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkillAsset'
+          readOnly: true
+        rolled_back_from:
+          type: integer
+          readOnly: true
+          nullable: true
+        change_reason:
+          type: string
+          readOnly: true
+          title: 変更理由
+          maxLength: 500
+        created_by_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - assets
+      - change_reason
+      - created
+      - created_by_info
+      - description
+      - id
+      - input_schema
+      - instructions
+      - number
+      - output_schema
+      - requires
+      - rolled_back_from
+      - tools
     Todo:
       type: object
       description: 作業の計画の1項目（harness/tools/todo_write.py）
@@ -4836,6 +7135,30 @@ components:
       - is_error
       - name
       - text
+    ToolsEnum:
+      enum:
+      - read
+      - write
+      - edit
+      - glob
+      - grep
+      - shell
+      - job_output
+      - job_kill
+      - ask_user
+      - todo_write
+      type: string
+      description: |-
+        * `read` - read
+        * `write` - write
+        * `edit` - edit
+        * `glob` - glob
+        * `grep` - grep
+        * `shell` - shell
+        * `job_output` - job_output
+        * `job_kill` - job_kill
+        * `ask_user` - ask_user
+        * `todo_write` - todo_write
     UserStreamEvent:
       type: object
       description: ログインユーザー宛ての通知：自分のRunの状態の変更

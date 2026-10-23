@@ -1,7 +1,7 @@
 import factory
 from factory.django import DjangoModelFactory
 
-from .models import SSOKind, SSOProvider, User
+from .models import Department, DepartmentMembership, DepartmentRole, SSOKind, SSOProvider, User
 
 
 class UserFactory(DjangoModelFactory[User]):
@@ -24,3 +24,19 @@ class SSOProviderFactory(DjangoModelFactory[SSOProvider]):
     hosted_domain = factory.LazyAttribute(lambda o: "example.co.jp" if o.kind == SSOKind.GOOGLE else "")
     allowed_email_domains = factory.LazyFunction(lambda: ["example.co.jp"])
     created_by = factory.SubFactory(UserFactory)
+
+
+class DepartmentFactory(DjangoModelFactory[Department]):
+    class Meta:
+        model = Department
+
+    name = factory.Sequence(lambda n: f"部門{n}")
+
+
+class DepartmentMembershipFactory(DjangoModelFactory[DepartmentMembership]):
+    class Meta:
+        model = DepartmentMembership
+
+    department = factory.SubFactory(DepartmentFactory)
+    user = factory.SubFactory(UserFactory)
+    role = DepartmentRole.MEMBER

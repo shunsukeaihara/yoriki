@@ -346,17 +346,17 @@ class TestManageUser:
 
     @pytest.mark.django_db
     def test_update_groups_and_keep_email(self, admin_client, password_user):
-        Group.objects.get_or_create(name="Plugin公開者")
+        Group.objects.get_or_create(name="Skill公開者")
         res = admin_client.patch(
             f"{USERS}{password_user.uid}/",
-            {"groups": ["Plugin公開者"], "email": "other@example.co.jp", "display_name": "太郎"},
+            {"groups": ["Skill公開者"], "email": "other@example.co.jp", "display_name": "太郎"},
             format="json",
         )
         assert res.status_code == 200, res.json()
         password_user.refresh_from_db()
         assert password_user.email == "taro@example.co.jp"
         assert password_user.display_name == "太郎"
-        assert list(password_user.groups.values_list("name", flat=True)) == ["Plugin公開者"]
+        assert list(password_user.groups.values_list("name", flat=True)) == ["Skill公開者"]
 
     @pytest.mark.django_db
     def test_deactivate_ends_session(self, admin_client, password_user):

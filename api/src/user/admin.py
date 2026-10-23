@@ -4,7 +4,7 @@ from django.utils.translation import gettext_lazy as _
 
 from utils.admin import ReadOnlyAdmin
 
-from .models import Invitation, SSOProvider, User
+from .models import Department, DepartmentMembership, Invitation, SSOProvider, User
 
 
 @admin.register(User)
@@ -53,3 +53,19 @@ class InvitationAdmin(ReadOnlyAdmin):
     list_display = ("id", "uid", "user", "purpose", "expires_at", "used_at", "revoked_at", "created")
     list_filter = ("purpose",)
     search_fields = ("uid", "user__email")
+
+
+class DepartmentMembershipInline(admin.TabularInline):
+    model = DepartmentMembership
+    raw_id_fields = ("user",)
+    readonly_fields = ("uid", "created", "updated")
+    extra = 0
+
+
+@admin.register(Department)
+class DepartmentAdmin(admin.ModelAdmin):
+    readonly_fields = ("uid", "created", "updated")
+    list_display = ("id", "uid", "name", "deleted", "updated")
+    list_filter = ("deleted",)
+    search_fields = ("uid", "name")
+    inlines = (DepartmentMembershipInline,)

@@ -16,10 +16,40 @@ from utils.backends import LOCKOUT_MESSAGE
 from utils.crypto import is_encryption_configured
 from utils.serializers import ReadOnlyModelSerializer
 
-from .models import Invitation, SSOKind, SSOProvider, User, can_use_password
+from .models import (
+    Department,
+    DepartmentMembership,
+    DepartmentRole,
+    Invitation,
+    SSOKind,
+    SSOProvider,
+    User,
+    can_use_password,
+)
 
 # ドメイン名（ラベルを . でつないだもの）。メールアドレスやURLを書いたものを入力エラーにするための簡単な確認
 DOMAIN_RE = re.compile(r"^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$")
+
+
+class MinimumUserSerializer(ReadOnlyModelSerializer):
+    id = serializers.CharField(source="uid", read_only=True)
+
+    class Meta:
+        model = User
+        fields = ["id", "email", "display_name"]
+
+
+class MyDepartmentSerializer(ReadOnlyModelSerializer):
+    """所属する部門と、部門の中の役割"""
+
+    id = serializers.CharField(source="department.uid", read_only=True)
+    name = serializers.CharField(source="department.name", read_only=True)
+    role = serializers.ChoiceField(choices=DepartmentRole.choices, read_only=True)
+    role_display = serializers.CharField(source="get_role_display", read_only=True)
+
+    class Meta:
+        model = DepartmentMembership
+        fields = ["id", "name", "role", "role_display"]
 
 
 class MyUserSerializer(ReadOnlyModelSerializer):
@@ -28,6 +58,7 @@ class MyUserSerializer(ReadOnlyModelSerializer):
     id = serializers.CharField(source="uid", read_only=True)
     is_platform_admin = serializers.BooleanField(read_only=True)
     all_permissions = serializers.SerializerMethodField()
+    departments = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -38,7 +69,18 @@ class MyUserSerializer(ReadOnlyModelSerializer):
             "display_name",
             "is_platform_admin",
             "all_permissions",
+            "departments",
         )
+
+    @extend_schema_field(MyDepartmentSerializer(many=True))
+    def get_departments(self, obj: User) -> list[Any]:
+        """所属する部門（Skillの部門の範囲。design.md §3.6）"""
+        memberships = (
+            obj.department_memberships.filter(department__deleted=False)
+            .select_related("department")
+            .order_by("department__name", "pk")
+        )
+        return [MyDepartmentSerializer(m).data for m in memberships]
 
     @extend_schema_field(serializers.ListField(child=serializers.CharField()))
     def get_all_permissions(self, obj: User) -> list[str]:
@@ -400,3 +442,52 @@ class SSOProviderUpdateSerializer(SSOProviderSerializer):
 
     class Meta(SSOProviderSerializer.Meta):
         read_only_fields = ["kind", "created", "updated"]
+
+
+# --- 部門 ---
+
+
+class DepartmentSerializer(serializers.ModelSerializer):
+    id = serializers.CharField(source="uid", read_only=True)
+    member_count = serializers.IntegerField(read_only=True, help_text=_("所属する人数"))
+
+    class Meta:
+        model = Department
+        fields = ["id", "name", "member_count", "created", "updated"]
+        read_only_fields = ["created", "updated"]
+
+    def validate_name(self, value: str) -> str:
+        value = value.strip()
+        others = Department.objects.filter(deleted=False, name=value)
+        if self.instance:
+            others = others.exclude(pk=self.instance.pk)
+        if others.exists():
+            raise serializers.ValidationError(_("同じ名前の部門があります"))
+        return value
+
+
+class DepartmentMembershipSerializer(serializers.ModelSerializer):
+    """部門の所属。社員は作成時だけ指定し、後からは役割だけを変える"""
+
+    id = serializers.CharField(source="uid", read_only=True)
+    user: "serializers.SlugRelatedField[User]" = serializers.SlugRelatedField(
+        slug_field="uid", queryset=User.objects.filter(is_active=True)
+    )
+    user_info = MinimumUserSerializer(source="user", read_only=True)
+    role_display = serializers.CharField(source="get_role_display", read_only=True)
+
+    class Meta:
+        model = DepartmentMembership
+        fields = ["id", "user", "user_info", "role", "role_display", "created", "updated"]
+        read_only_fields = ["created", "updated"]
+
+    def validate_user(self, value: User) -> User:
+        department = self.context["department"]
+        if DepartmentMembership.objects.filter(department=department, user=value).exists():
+            raise serializers.ValidationError(_("この社員は既に部門に所属しています"))
+        return value
+
+
+class DepartmentMembershipUpdateSerializer(DepartmentMembershipSerializer):
+    # 宣言した項目には read_only_fields が効かないので、宣言し直す
+    user: "serializers.SlugRelatedField[User]" = serializers.SlugRelatedField(slug_field="uid", read_only=True)

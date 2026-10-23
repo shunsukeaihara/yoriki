@@ -37,7 +37,7 @@ dev = [
     "ruff>=0.17.1",
     "types-boto3[s3]>=1.43.110",
     "types-docker>=7.2.0.20261006",
-    "types-jsonschema>=4.26.0.20260518",
+    "types-jsonschema>=4.26.0.20261006",
 ]
 
 [tool.uv]

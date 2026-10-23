@@ -1,14 +1,25 @@
 """`read` の画像（harness.md §7.8、§12）。補助コマンドは偽のSandboxで差し替え、保存とモデルへの入力を確かめる"""
 
 import base64
+import io
 
 import pytest
 
 from artifact.models import BlobObject
 from conversation.dispatch import MessageMode, post_message
 from conversation.factories import ConversationFactory
+from harness import compaction
 from harness import context as context_module
-from harness.context import IMAGE_OMITTED, IMAGE_UNAVAILABLE, IMAGE_UNSUPPORTED, fit_to_model, parts_from_json
+from harness.context import (
+    IMAGE_OMITTED,
+    IMAGE_UNAVAILABLE,
+    IMAGE_UNSUPPORTED,
+    MAX_IMAGES_PER_REQUEST,
+    Item,
+    build_items,
+    fit_to_model,
+    parts_from_json,
+)
 from harness.runner import Runner
 from llm.providers.base import ImagePart, Message, TextPart
 from run.models import Run, RunEvent, RunEventKind, RunStatus
@@ -155,7 +166,42 @@ def test_only_the_newest_images_are_sent():
 
 def test_missing_blob_becomes_a_notice():
     parts = parts_from_json([{"type": "image", "media_type": "image/png", "blob": "missing"}])
-    assert parts == (TextPart(IMAGE_UNAVAILABLE),)
+    assert fit_to_model([Message("tool", parts)], images=True)[0].parts == (TextPart(IMAGE_UNAVAILABLE),)
+
+
+def stored_images(count: int) -> Message:
+    blobs = [BlobObject.put(io.BytesIO(PNG + bytes([n]))) for n in range(count)]
+    data = [{"type": "image", "media_type": "image/png", "blob": b.uid} for b in blobs]
+    return Message("tool", parts_from_json(data))
+
+
+def test_only_the_images_to_send_are_read(monkeypatch):
+    opened = []
+    original = BlobObject.open
+
+    def counted(self):
+        opened.append(self.uid)
+        return original(self)
+
+    monkeypatch.setattr(BlobObject, "open", counted)
+    message = stored_images(25)
+    fitted = fit_to_model([message], images=True)[0]
+    assert len(opened) == MAX_IMAGES_PER_REQUEST
+    assert [p.data[-1] for p in fitted.parts if isinstance(p, ImagePart)] == list(range(5, 25))
+    assert fit_to_model([message], images=False)[0].parts == (TextPart(IMAGE_UNSUPPORTED),) * 25
+    assert len(opened) == MAX_IMAGES_PER_REQUEST
+
+
+def test_estimate_counts_only_the_images_to_send(app_user):
+    run = start(images=False, owner=app_user)
+    event = RunEvent.record(
+        run, RunEventKind.TOOL_RESULT, {"call_id": "c1", "name": "read", "content": [], "is_error": False}
+    )
+    with_images = start(images=True, owner=app_user)
+    message = stored_images(3)
+    for target, expected in ((run, 0), (with_images, 3 * compaction.IMAGE_TOKENS)):
+        items = build_items(target, [], [Item(1, RunEventKind.TOOL_RESULT, message)])
+        assert compaction.estimate_tokens([event], items) - len(items[0].message.text) == expected
 
 
 def test_repeat_notice_keeps_the_images(app_user, monkeypatch):

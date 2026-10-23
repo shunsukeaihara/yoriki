@@ -47,14 +47,20 @@ def parts_to_json(parts: Iterable[Part]) -> list[dict[str, Any]]:
     return result
 
 
+@dataclass(frozen=True)
+class StoredImagePart(ImagePart):
+    """RunEventから読んだ画像の参照。bytesはまだ読まず、送る画像を決めてから fit_to_model() が読む"""
+
+    blob: str = ""
+
+
 def parts_from_json(data: list[dict[str, Any]]) -> tuple[Part, ...]:
     parts: list[Part] = []
     for item in data:
         if item.get("type") == "text":
             parts.append(TextPart(item["text"]))
         elif item.get("type") == "image":
-            content = _blob_bytes(item["blob"])
-            parts.append(ImagePart(item["media_type"], content) if content else TextPart(IMAGE_UNAVAILABLE))
+            parts.append(StoredImagePart(item["media_type"], b"", item["blob"]))
     return tuple(parts)
 
 
@@ -70,8 +76,9 @@ def _blob_bytes(uid: str) -> bytes | None:
 
 
 def fit_to_model(messages: list[Message], *, images: bool) -> list[Message]:
-    """送る前に、モデルの能力と上限に合わせる（harness.md §12）。画像に対応しないモデル（途中で切り替えた等）
-    には画像の代わりに断りの文を、対応するモデルには新しい側の MAX_IMAGES_PER_REQUEST 枚までを送る"""
+    """モデルの能力と上限に合わせる（harness.md §5.4、§12）。画像に対応しないモデル（途中で切り替えた等）には
+    画像の代わりに断りの文を、対応するモデルには新しい側の MAX_IMAGES_PER_REQUEST 枚までを送る。
+    保存した画像のbytesは、送ると決めたものだけを読む"""
     keep = MAX_IMAGES_PER_REQUEST if images else 0
     result: list[Message] = []
     for message in reversed(messages):
@@ -84,6 +91,10 @@ def fit_to_model(messages: list[Message], *, images: bool) -> list[Message]:
                 keep -= 1
                 if keep < 0:
                     parts.append(TextPart(IMAGE_OMITTED if images else IMAGE_UNSUPPORTED))
+                    continue
+                if isinstance(part, StoredImagePart):
+                    content = _blob_bytes(part.blob)
+                    parts.append(ImagePart(part.media_type, content) if content else TextPart(IMAGE_UNAVAILABLE))
                     continue
             parts.append(part)
         result.append(replace(message, content=tuple(reversed(parts))))
@@ -114,8 +125,11 @@ UNFINISHED_CALL = (
 
 def build_items(run: Run, events: Iterable[RunEvent], inherited: Iterable[Item] = ()) -> list[Item]:
     """モデルに見せる履歴。`inherited`（inherited_items()）を先頭に置く。
-    推論の途中経過は、同じ接続・同じモデルの応答のものだけを戻す（harness.md §5.5）"""
-    return _build(provider_key(run), events, list(inherited))
+    推論の途中経過は、同じ接続・同じモデルの応答のものだけを戻す（harness.md §5.5）。画像は今のモデルに合わせる
+    （圧縮の見積もりも、実際に送る画像で数える）"""
+    items = _build(provider_key(run), events, list(inherited))
+    messages = fit_to_model([i.message for i in items], images=run.model_version.supports_images)
+    return [replace(item, message=message) for item, message in zip(items, messages, strict=True)]
 
 
 def inherited_items(run: Run) -> list[Item]:

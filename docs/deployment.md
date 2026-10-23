@@ -349,7 +349,7 @@ Launcherは、Dockerがuserns-remapでもrootlessでもなければ、qcluster�
   ```
 
 - **S3**（Workerを別のサーバーに置くとき）：非公開のbucketと、Yorikiのprefixだけに `s3:PutObject`・`s3:GetObject`・`s3:DeleteObject`（と、存在の確認のための `s3:ListBucket`）を許したIAM roleを使う。資格情報はインスタンスプロファイル等で渡し、`yoriki.env` に書かない（どうしても書くときは `AWS_ACCESS_KEY_ID`・`AWS_SECRET_ACCESS_KEY`）。上書きしないことを条件付きの書込み（`If-None-Match: *`）で守るので、S3互換のストレージは、これに対応しているかを確かめてから使う。ダウンロードはapiが保存先から読んで返す。保存先のライフサイクルの設定で、Yorikiの保持期限より先に消さない（design.md §8）。
-- 保存したファイルは、保存先のID（`YORIKI_STORAGE_ID`）とkeyで記録する。rootやbucketを変えるときは、同じIDのまま付け替えず、新しいIDにする（design.md §7.10）。今のところ、記録した保存先を読み続けるための古い保存先の設定と、移行のコマンドはない（docs/status.md §3）。
+- 保存したファイルは、保存先のID（`YORIKI_STORAGE_ID`）とkeyで記録する。rootやbucketを変えるときは、同じIDのまま付け替えず、新しいIDにする（design.md §7.10）。既定の保存先を変えた後も以前の保存先のファイルを読めるよう、以前の保存先を `YORIKI_STORAGE_PREVIOUS`（JSON。読むだけ）に残す。既存のファイルを新しい保存先へ移すコマンドはまだない（docs/status.md §3）。
 
 ## 8 公開の方法
 

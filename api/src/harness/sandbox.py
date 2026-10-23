@@ -177,7 +177,7 @@ class SandboxSession:
         attempt: ExecutionAttempt,
         *,
         launcher_factory: Callable[[], Launcher] = Launcher,
-        storage_factory: Callable[[], StorageBackend] = get_storage,
+        storage_factory: Callable[..., StorageBackend] = get_storage,
         heartbeat: Callable[[], None] = lambda: None,
     ):
         self.run = run
@@ -267,10 +267,13 @@ class SandboxSession:
         checkpoint = Checkpoint.latest_for(self.run)
         if checkpoint is None:
             return
-        storage = self.storage_factory()
+        # 記録した保存先から読む（既定の保存先を変えた後も、以前の保存先の設定があれば読める）
         stored = None
-        if checkpoint.storage == storage.backend_id:
+        try:
+            storage = self.storage_factory(checkpoint.storage)
             stored = storage.stat(checkpoint.key)
+        except StorageError:
+            logger.warning("run %s: cannot read checkpoint %s", self.run.uid, checkpoint.uid, exc_info=True)
         if stored is None or stored.sha256 != checkpoint.sha256:
             # 別のWorkerのローカルディスクに保存した等。空のWorkspaceで続け、モデルに知らせる
             logger.warning("run %s: checkpoint %s is not available here", self.run.uid, checkpoint.uid)

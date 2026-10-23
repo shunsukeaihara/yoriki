@@ -164,7 +164,8 @@ class MessageSerializer(serializers.ModelSerializer):
 
     def get_fields(self):
         fields = super().get_fields()
-        # 添付に指定できるのは、ログインユーザーがこの会話にアップロードして、まだ送っていないファイルだけ
+        # 添付に指定できるのは、ログインユーザーがこの会話にアップロードしたファイルだけ。送信済みのものも受け付け、
+        # 同じ client_message_id の再送なら post_message() が前のメッセージを返し、別のメッセージなら断る
         request, view = self.context.get("request"), self.context.get("view")
         attachments = fields["attachments"]
         # スキーマの生成（swagger_fake_view）では、URLの会話がないので絞り込まない（選べるものはない）
@@ -176,7 +177,7 @@ class MessageSerializer(serializers.ModelSerializer):
         ):
             relation: Any = attachments.child_relation
             relation.queryset = Artifact.objects.owned_by(request.user).filter(
-                conversation=view.conversation, kind=ArtifactKind.ATTACHMENT, path=""
+                conversation=view.conversation, kind=ArtifactKind.ATTACHMENT
             )
         return fields
 

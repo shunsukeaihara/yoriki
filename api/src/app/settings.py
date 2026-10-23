@@ -4,6 +4,7 @@
 ローカル開発ではリポジトリルートの `.envrc`（direnv）、本番では実行環境から渡す（backend-conventions.md §6.1）。
 """
 
+import json
 import os
 import sys
 from datetime import timedelta
@@ -318,7 +319,16 @@ _storage_backends = {
 }
 if YORIKI_STORAGE_BACKEND not in _storage_backends:
     raise ImproperlyConfigured(f"YORIKI_STORAGE_BACKEND must be one of {list(_storage_backends)}")
-YORIKI_STORAGE = {"DEFAULT": _storage_id, "BACKENDS": {_storage_id: _storage_backends[YORIKI_STORAGE_BACKEND]}}
+_storage_configs: dict[str, dict] = {_storage_id: _storage_backends[YORIKI_STORAGE_BACKEND]}
+# 以前の保存先（読むだけ）。既定を変えても、そこに保存したファイルとsnapshotは記録した保存先から読む
+# （design.md §7.10）。JSONで保存先のIDごとに書く。
+# 例：{"local-main": {"backend": "local", "root": "/var/lib/yoriki/objects"}}
+for _previous_id, _previous in json.loads(os.getenv("YORIKI_STORAGE_PREVIOUS", "{}")).items():
+    _kind = _previous.pop("backend", "")
+    if _kind not in _storage_backends or _previous_id == _storage_id:
+        raise ImproperlyConfigured(f"YORIKI_STORAGE_PREVIOUS: invalid backend {_previous_id!r}")
+    _storage_configs[_previous_id] = {"BACKEND": _storage_backends[_kind]["BACKEND"], "OPTIONS": _previous}
+YORIKI_STORAGE = {"DEFAULT": _storage_id, "BACKENDS": _storage_configs}
 # 添付の大きさの上限（MB）。nginxの `client_max_body_size` と、前段（Cloudflareは100MB）の上限より小さくする
 YORIKI_UPLOAD_MAX_MB = int(os.getenv("YORIKI_UPLOAD_MAX_MB", "50"))
 # 1つのメッセージに付けられる添付の数

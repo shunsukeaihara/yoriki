@@ -1,6 +1,7 @@
 """Sandboxの障害と、Attemptをまたいだ再開の知らせのテスト（harness.md §4.3・§11.1）。Dockerは使わない"""
 
 import functools
+import io
 import time
 
 import pytest
@@ -155,18 +156,9 @@ def test_interrupted_attempt_tells_the_model_what_was_not_kept(conversation):
     assert sum("job_1" in t for t in texts) == 1
 
 
-class _Storage(LocalStorage):
-    """どのkeyも見つからない、このWorkerの保存先"""
-
-    def __init__(self):
-        super().__init__("here", root="/nonexistent")
-
-    def stat(self, key):
-        return None
-
-
 def test_snapshot_on_another_worker_is_reported(conversation, settings, tmp_path):
-    """別のWorkerのローカルディスクに保存したsnapshotは戻せない。空のWorkspaceで続けて、そのことを伝える"""
+    """このWorkerから読めない保存先（設定にない保存先、別のWorkerのローカルディスク）のsnapshotは戻せない。
+    空のWorkspaceで続けて、そのことを伝える"""
     settings.YORIKI_WORKSPACES_DIR = str(tmp_path)
     first = post(conversation)
     attempt = claim_run(first.pk)
@@ -174,7 +166,7 @@ def test_snapshot_on_another_worker_is_reported(conversation, settings, tmp_path
     Checkpoint.objects.create(
         run=first, attempt=attempt, sequence=1, storage="elsewhere", key="runs/x.tar", size=1, sha256="0" * 64
     )
-    session = SandboxSession(first, attempt, storage_factory=_Storage)
+    session = SandboxSession(first, attempt)
 
     class Sandbox:
         def restore(self, src):
@@ -183,6 +175,33 @@ def test_snapshot_on_another_worker_is_reported(conversation, settings, tmp_path
     session._restore(Sandbox())  # type: ignore[arg-type]
     assert session.restored is None
     assert session.take_notice() == WORKSPACE_LOST
+    assert session.take_notice() == ""
+
+
+def test_snapshot_is_read_from_the_recorded_backend(conversation, settings, tmp_path):
+    """既定の保存先を変えた後も、以前の保存先に置いたsnapshotから戻す（design.md §7.10）"""
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path)
+    settings.YORIKI_STORAGE["BACKENDS"]["old"] = {
+        "BACKEND": "artifact.storage.LocalStorage",
+        "OPTIONS": {"root": str(tmp_path / "old")},
+    }
+    stored = LocalStorage("old", root=str(tmp_path / "old")).put_immutable("snapshots/x.tar", io.BytesIO(b"tar"))
+    first = post(conversation)
+    attempt = claim_run(first.pk)
+    assert attempt is not None
+    checkpoint = Checkpoint.objects.create(
+        run=first, attempt=attempt, sequence=1, storage="old", key=stored.key, size=stored.size, sha256=stored.sha256
+    )
+    restored: list[bytes] = []
+
+    class Sandbox:
+        def restore(self, src):
+            restored.append(src.read())
+
+    session = SandboxSession(first, attempt)
+    session._restore(Sandbox())  # type: ignore[arg-type]
+    assert restored == [b"tar"]
+    assert session.restored == checkpoint
     assert session.take_notice() == ""
 
 

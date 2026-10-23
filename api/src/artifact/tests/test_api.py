@@ -7,6 +7,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIClient
 
 from conversation.factories import ConversationFactory
+from conversation.models import ConversationMessage
 from run.factories import RunFactory
 from run.models import ClarificationKind, ClarificationRequest, RunEvent, RunEventKind, RunStatus
 
@@ -123,10 +124,17 @@ class TestUpload:
 
     def test_cannot_send_an_attachment_twice(self, api_client, conversation):
         artifact_id = upload(api_client, conversation).data["id"]
-        assert send(api_client, conversation, "1", [artifact_id]).status_code == 201
-        res = send(api_client, conversation, "2", [artifact_id], mode="next")
+        first = send(api_client, conversation, "1", [artifact_id], client_message_id="m1")
+        assert first.status_code == 201
+        # 応答を受け取れずに送り直したものは、前のメッセージを返す
+        retry = send(api_client, conversation, "1", [artifact_id], client_message_id="m1")
+        assert retry.status_code == 201
+        assert retry.data["id"] == first.data["id"]
+        # 別のメッセージには付けられない
+        res = send(api_client, conversation, "2", [artifact_id], mode="next", client_message_id="m2")
         assert res.status_code == 400
-        assert "attachments" in res.data
+        assert "non_field_errors" in res.data
+        assert ConversationMessage.objects.count() == 1
 
     def test_cannot_send_others_or_other_conversations_files(self, api_client, conversation, app_user, other_user):
         others = ArtifactFactory.create(conversation=ConversationFactory.create(owner=other_user))

@@ -25,3 +25,4 @@ __pycache__/
 
 # 手元だけの参考情報（公開しない）
 AGENTS.local.md
+CLAUDE.local.md

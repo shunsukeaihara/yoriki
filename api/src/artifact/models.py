@@ -113,6 +113,18 @@ class ArtifactQuerySet(models.QuerySet):
     def owned_by(self, user) -> Self:
         return self.filter(owner=user, deleted=False)
 
+    def sent_inputs(self, conversation_id: int) -> Self:
+        """会話で送り、Runが取り込んだ添付（/workspace/input に置くもの）。まだ取り込んでいない依頼（受付済みの
+        追加指示・次の依頼）と取り消した依頼のメッセージの添付は、その依頼が始まるまで見せない"""
+        from conversation.models import InstructionState  # noqa: PLC0415  conversationがartifactを参照するため
+
+        pending = (InstructionState.RECEIVED, InstructionState.DISCARDED)
+        return (
+            self.filter(conversation_id=conversation_id, kind=ArtifactKind.ATTACHMENT, deleted=False)
+            .exclude(path="")
+            .exclude(messages__instruction__state__in=pending)
+        )
+
 
 class Artifact(models.Model):
     """利用者に見せるファイル。中身（blob）は変えず、変わったファイルは新しいArtifactにする"""

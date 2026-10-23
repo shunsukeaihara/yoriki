@@ -235,13 +235,10 @@ class SandboxSession:
         return self.dir / "input"
 
     def sync_inputs(self) -> None:
-        """会話の添付を、Workerのディレクトリ（Sandboxの /workspace/input に読取り専用でmountする）に置く。
-        まだ置いていないものだけを足す。bind mountなので、動いているSandboxにもそのまま見える"""
+        """会話の添付（取り込んだ依頼のもの）を、Workerのディレクトリ（Sandboxの /workspace/input に読取り専用で
+        mountする）に置く。まだ置いていないものだけを足す。bind mountなので、動いているSandboxにもそのまま見える"""
         attachments = (
-            Artifact.objects.filter(
-                conversation_id=self.run.conversation_id, kind=ArtifactKind.ATTACHMENT, deleted=False
-            )
-            .exclude(path="")
+            Artifact.objects.sent_inputs(self.run.conversation_id)
             .exclude(pk__in=self.inputs)
             .select_related("blob")
             .order_by("pk")

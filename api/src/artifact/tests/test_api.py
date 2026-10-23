@@ -7,7 +7,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIClient
 
 from conversation.factories import ConversationFactory
-from conversation.models import ConversationMessage
+from conversation.models import ConversationMessage, InstructionKind, InstructionState, UserInstruction
 from run.factories import RunFactory
 from run.models import ClarificationKind, ClarificationRequest, RunEvent, RunEventKind, RunStatus
 
@@ -102,6 +102,26 @@ class TestUpload:
         event = RunEvent.objects.filter(kind=RunEventKind.USER_MESSAGE).latest("pk")
         assert [a["id"] for a in event.data["attachments"]] == [second]
         assert [a["path"] for a in event.data["earlier_attachments"]] == ["/workspace/input/請求書.pdf"]
+
+    def test_attachments_of_requests_not_started_are_not_inputs_yet(self, api_client, conversation):
+        """実行中に送った次の依頼・追加指示の添付は、その依頼を取り込むまで /workspace/input に置かない"""
+        first = upload(api_client, conversation).data["id"]
+        assert send(api_client, conversation, "1", [first]).status_code == 201
+        run = conversation.runs.get()
+        run.set_status(RunStatus.RUNNING)
+        later = upload(api_client, conversation, name="次.csv").data["id"]
+        current = upload(api_client, conversation, name="追加.csv").data["id"]
+        assert send(api_client, conversation, "2", [later], mode="next").status_code == 201
+        assert send(api_client, conversation, "3", [current]).status_code == 201
+
+        def inputs():
+            return set(Artifact.objects.sent_inputs(conversation.pk).values_list("uid", flat=True))
+
+        assert inputs() == {first}
+        UserInstruction.objects.filter(kind=InstructionKind.CURRENT).update(state=InstructionState.APPLIED)
+        assert inputs() == {first, current}
+        run.set_status(RunStatus.COMPLETED)  # 次の依頼が始まる
+        assert inputs() == {first, current, later}
 
     def test_files_only_message(self, api_client, app_user):
         conversation = ConversationFactory.create(owner=app_user, title="")

@@ -45,8 +45,7 @@ def user_message_data(message: ConversationMessage, text: str, *, first: bool = 
         data["attachments"] = attachments
     if first:
         earlier = (
-            Artifact.objects.filter(conversation_id=message.conversation_id, kind=ArtifactKind.ATTACHMENT)
-            .exclude(path="")
+            Artifact.objects.sent_inputs(message.conversation_id)
             .exclude(messages=message)
             .select_related("blob")
             .order_by("-pk")[:EARLIER_ATTACHMENTS_LIMIT]

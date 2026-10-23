@@ -15,7 +15,7 @@ import uuid
 from pathlib import Path
 
 from tests.conftest import IMAGE
-from tests.sandbox import RUN_OPTIONS, Sandbox
+from tests.sandbox import Sandbox, run_options
 
 # 日本語の文字の入った20ページのPDFを作る（matplotlib）
 MAKE_PDF = r"""python - <<'PY'
@@ -97,9 +97,10 @@ CASES = [
 def start(runtime: str) -> tuple[Sandbox, float]:
     """添付（/workspace/input）はmountしない"""
     box = Sandbox(IMAGE, f"yoriki-sandbox-bench-{runtime}-{uuid.uuid4().hex[:8]}", Path())
-    options = [*RUN_OPTIONS, f"--runtime={runtime}"]
     began = time.perf_counter()
-    subprocess.run(["docker", "run", "-d", "--name", box.name, *options, IMAGE], check=True, capture_output=True)
+    subprocess.run(
+        ["docker", "run", "-d", "--name", box.name, *run_options(runtime), IMAGE], check=True, capture_output=True
+    )
     assert box.helper("init-env", {})["ok"]
     return box, time.perf_counter() - began
 

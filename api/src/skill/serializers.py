@@ -197,7 +197,9 @@ class SkillSerializer(serializers.ModelSerializer):
         read_only_fields = ["scope", "suspended", "created", "updated"]
 
     def get_draft(self, obj: Skill) -> str | None:
-        """開いているDraftのID。なければnull"""
+        """開いているDraftのID。なければnull。Draftを編集できる人にだけ出す"""
+        if _access(obj, self.context) < SkillAccess.EDIT:
+            return None
         drafts = getattr(obj, "open_drafts", None)
         if drafts is None:
             drafts = list(obj.drafts.all())
@@ -265,7 +267,7 @@ class SkillCreateSerializer(SkillContentSerializer):
         _check_unique_name(scope, user, department, name)
         # 作る人がその範囲で持つ権限。未保存のSkillで判定する（design.md §3.6）
         access = Skill(scope=scope, owner=user if scope == SkillScope.PERSONAL else None, department=department)
-        level = access.access_of(user)
+        level = access.scope_access_of(user)
         if level < SkillAccess.EDIT:
             raise PermissionDenied(_("この範囲にSkillを作る権限がありません"))
         if attrs.get("tools") and level < SkillAccess.PUBLISH:

@@ -103,16 +103,31 @@ class SkillContent(models.Model):
 
 class SkillQuerySet(models.QuerySet):
     def visible_to(self, user) -> "SkillQuerySet":
-        """利用者が使える（見える）Skill。個人は本人、部門は所属する人、全社は全社員（design.md §3.6）"""
+        """利用者が使える（見える）Skill。個人は本人、部門は所属する人、全社は全社員（design.md §3.6）。
+
+        使うだけの人には公開中の版があるものだけを見せ、編集できる人には未公開のものも見せる（`Skill.access_of()`）
+        """
         if not user.is_active:
             return self.none()
+        published = Q(current_version__isnull=False)
         departments = Department.objects.filter(deleted=False)
-        if not user.is_superuser:
+        if user.is_superuser:
+            editable_departments = departments
+        else:
             departments = departments.filter(memberships__user=user)
+            editable_departments = departments.filter(
+                memberships__user=user, memberships__role__gte=DepartmentRole.EDITOR
+            )
+        company = Q(scope=SkillScope.COMPANY)
+        if not user.has_perm(AppPermission.EDIT_COMPANY_SKILLS.perm) and not user.has_perm(
+            AppPermission.PUBLISH_COMPANY_SKILLS.perm
+        ):
+            company &= published
         return self.filter(
             Q(scope=SkillScope.PERSONAL, owner=user)
-            | Q(scope=SkillScope.DEPARTMENT, department__in=departments)
-            | Q(scope=SkillScope.COMPANY),
+            | Q(scope=SkillScope.DEPARTMENT, department__in=editable_departments)
+            | Q(published, scope=SkillScope.DEPARTMENT, department__in=departments)
+            | company,
             deleted=False,
         )
 
@@ -189,7 +204,14 @@ class Skill(models.Model):
         return self.name
 
     def access_of(self, user) -> SkillAccess:
-        """利用者がこのSkillに対してできること（design.md §3.6）"""
+        """利用者がこのSkillに対してできること（design.md §3.6）。まだ公開していなければ、使うだけの人には見えない"""
+        access = self.scope_access_of(user)
+        if access == SkillAccess.USE and self.current_version_id is None:
+            return SkillAccess.NONE
+        return access
+
+    def scope_access_of(self, user) -> SkillAccess:
+        """公開範囲から決まる、利用者ができること（公開済みかは見ない。作る前の権限の判定にも使う）"""
         if not user.is_active or self.deleted:
             return SkillAccess.NONE
         if self.scope == SkillScope.PERSONAL:

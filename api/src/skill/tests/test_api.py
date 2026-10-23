@@ -60,6 +60,8 @@ class TestVisibility:
             scope=SkillScope.DEPARTMENT, department=DepartmentFactory.create(), created_by=other_user
         )
         company = SkillFactory.create(scope=SkillScope.COMPANY, created_by=other_user)
+        for skill in (in_department, other_department, company):
+            SkillVersionFactory.create(skill=skill)
         SkillFactory.create(created_by=app_user, deleted=True)
 
         api_client.force_login(app_user)
@@ -68,6 +70,30 @@ class TestVisibility:
         assert api_client.get(_url(others)).status_code == 404
         assert api_client.get(_url(other_department)).status_code == 404
         assert api_client.get(_url(other_department, "versions/")).status_code == 404
+
+    @pytest.mark.django_db
+    def test_unpublished_skill_is_only_for_editors(self, api_client, app_user, other_user):
+        department = DepartmentFactory.create()
+        membership = DepartmentMembershipFactory.create(department=department, user=app_user)
+        in_department = SkillFactory.create(scope=SkillScope.DEPARTMENT, department=department, created_by=other_user)
+        company = SkillFactory.create(scope=SkillScope.COMPANY, created_by=other_user)
+        api_client.force_login(app_user)
+        assert api_client.get(SKILLS).json()["results"] == []
+        assert api_client.get(_url(company)).status_code == 404
+
+        membership.role = DepartmentRole.EDITOR
+        membership.save()
+        _skill_publisher(app_user)
+        results = api_client.get(SKILLS).json()["results"]
+        assert {s["id"] for s in results} == {in_department.uid, company.uid}
+
+        # 公開すれば、使うだけの人にも見える。Draftは見えない
+        SkillVersionFactory.create(skill=company)
+        SkillDraftFactory.create(skill=company)
+        api_client.force_login(other_user)
+        res = api_client.get(_url(company))
+        assert res.json()["access"] == 1
+        assert res.json()["draft"] is None
 
     @pytest.mark.django_db
     def test_deleted_department_hides_its_skills(self, api_client, app_user):

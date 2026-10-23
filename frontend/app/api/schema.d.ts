@@ -2576,7 +2576,7 @@ export interface components {
             readonly description: string | null;
             /** 停止中 */
             readonly suspended: boolean;
-            /** @description 開いているDraftのID。なければnull */
+            /** @description 開いているDraftのID。なければnull。Draftを編集できる人にだけ出す */
             readonly draft: string | null;
             /** @description 利用者ができること（1：使う、2：Draftを変更する、3：公開・切戻し・停止・削除・Toolの変更） */
             readonly access: number;

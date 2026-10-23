@@ -6586,7 +6586,7 @@ components:
         draft:
           type: string
           nullable: true
-          description: 開いているDraftのID。なければnull
+          description: 開いているDraftのID。なければnull。Draftを編集できる人にだけ出す
           readOnly: true
         access:
           type: integer

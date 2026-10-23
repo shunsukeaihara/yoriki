@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-23（`read` の画像）
+- 最終更新：2026-10-23（#33）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -36,7 +36,7 @@
 | #30 | LauncherとSandboxのTool：`runtime/launcher.py`（Docker SDK（docker-py）。CONTRACT.md §2の制限で起動し、起動後にinspectで確かめ直す。Workerのplatformのdigestを選んでAttemptに記録。補助コマンド、コマンドのexec、tarでのWorkspaceの取り出し・戻し、`docker rm -f`。終わったAttemptのコンテナの掃除。userns-remap・rootlessでなければ警告）、Workspaceのsnapshotの保存先の抽象（`runtime/storage.py`。design.md §7.8の契約。初期はWorkerのローカルディスク）、`run.Checkpoint`（Attemptを終えるときに保存。新しいAttemptと同じ会話の次の依頼は、最後のCheckpointから戻す。戻せないWorkerでは空で続けて知らせる。design.md 0.24）、RunnerのTool（`shell`・`job_output`・`job_kill`・`read`・`write`・`edit`・`glob`・`grep`。読んでから書く版の確認、出力の上限と退避、読取りのToolの並列の実行、バックグラウンドのジョブとその終了の知らせ、障害の後の知らせ、Sandboxの喪失での別のAttemptでのやり直し）、画面の作業の記録のToolの表示名、CIの `sandbox-runner`（Sandboxのイメージをビルドして実際のDockerでテスト）、deployment.md §7.1（ホストの更新、userns-remap・rootless Docker） |
 | #31 | gVisorの評価と既定化（design.md 0.25 §7.2）：設定 `YORIKI_SANDBOX_RUNTIME`（既定 `runsc`。Dockerに登録されていなければSandboxを起動しない、起動後のinspectで実行環境も確かめる）、gVisorではRuntime Profileのプロセス数の上限をホストのpidsへ換算（×2＋64）、メモリの超過でSandboxごと止まったときの知らせ（Attemptの失敗の理由に残し、次のAttemptでモデルに上限と減らし方を伝え、繰り返したら利用者にも理由を示す）、契約テストとLauncherのテストの実行環境の切替え（`YORIKI_SANDBOX_TEST_RUNTIME`）、所要時間の比較（`sandbox/benchmarks/docs.py`）、CI（`.github/actions/install-gvisor`、`sandbox-gvisor`（amd64・arm64、userns-remap）、`sandbox-runner` をgVisor＋userns-remapで）、deployment.md §7.1（gVisorの入れ方） |
 | #32 | `artifact` アプリ：Storage Backend（`artifact/storage.py`。Local・S3（boto3。上書きしないことを `If-None-Match: *` で守る）。`YORIKI_STORAGE_BACKEND` で選び、保存先のIDとkeyで記録する）、BlobObject・BlobLocation・Artifact、添付のアップロード（`app/v1/conversations/{id}/artifacts/`、multipart、`YORIKI_UPLOAD_MAX_MB`）とメッセージへの添付（`attachments`。送ったときに `/workspace/input` の中の名前を決め、同じ名前は「名前 (2)」）、ダウンロード（セッションの `download` と期限付きtokenの `/api/files/<token>/`。いつも添付として返し、`nosniff`・CSPの `sandbox`。Localはnginxの `X-Accel-Redirect`、それ以外はapiが非同期のiteratorで返す）。Sandbox：会話の添付すべてをAttemptごとのディレクトリに置き、`/workspace/input` に読取り専用でbind mount（起動後のinspectでも確かめる。実行中の追加指示の添付も足す）、Attemptを終えるたびに `/workspace/output` を成果物として回収（変わっていないファイル・隠しファイル・symlinkは回収しない）、Workspaceのsnapshotも同じ保存先へ（`runtime/storage.py` を移した。S3なら別のWorkerで再開できる）。モデルには添付の一覧と、新しい依頼ではそれまでの添付の一覧を渡す。同じ会話の次の依頼のRunは、前の依頼のRunの文脈を先頭に引き継ぐ（harness.md §5.6。結果のないTool呼出しは補い、圧縮では1つのまとまりにする）。画面：入力欄のクリップとドロップでの添付（会話を始めるフォームも）、メッセージの添付、「添付と成果物」の欄（広い画面は右の欄、狭い画面はドロワー）。nginx（アップロードの上限、`/_protected/` のヘッダー）、Compose（`/var/lib/yoriki/objects`）、deployment.md §7.2。design.md 0.26：同じ会話の中では依頼が変わっても文脈とWorkspaceを引き継ぐ（タスクはトリガーで起動してから終わるまで） |
-| （作業中） | `read` の画像：モデル設定が画像入力に対応するときだけ、補助コマンドに画像を求め、スキャンのPDFのページ（1回に5枚まで）と画像ファイルをTool結果の画像としてモデルに渡す（対応しないモデルには、画像に対応するモデルが要ることを伝える文）。画像のbytesは保存先にBlobObjectとして置き、RunEventには参照だけを残す（Artifactにはしない。Workerは読んだ画像をプロセスに残す）。送る前に今のモデルに合わせる（途中で画像に対応しないモデルに切り替えたら断りの文に、1回の要求で新しい側の20枚まで）。圧縮の見積もりで画像1枚を1,600 tokenと数える。繰返しの注意で画像が落ちていたのを直した。補助コマンド：PNGで1MBを超える画像はJPEGにする（CONTRACT.md §4.3。契約番号は変えない） |
+| #33 | `read` の画像：モデル設定が画像入力に対応するときだけ、補助コマンドに画像を求め、スキャンのPDFのページ（1回に5枚まで）と画像ファイルをTool結果の画像としてモデルに渡す（対応しないモデルには、画像に対応するモデルが要ることを伝える文）。画像のbytesは保存先にBlobObjectとして置き、RunEventには参照だけを残す（Artifactにはしない。Workerは読んだ画像をプロセスに残す）。送る前に今のモデルに合わせる（途中で画像に対応しないモデルに切り替えたら断りの文に、1回の要求で新しい側の20枚まで）。圧縮の見積もりで画像1枚を1,600 tokenと数える。繰返しの注意で画像が落ちていたのを直した。補助コマンド：PNGで1MBを超える画像はJPEGにする（CONTRACT.md §4.3。契約番号は変えない） |
 
 確認済みのこと：
 

@@ -43,7 +43,7 @@ jobs:
         run: uv run pytest
 
   # gVisor（runsc）での契約テストと、runcとの所要時間の比較（design.md §7.2の5、docs/deployment.md §7.1）。
-  # 本番のWorkerと同じく、amd64とarm64の両方で確かめる。比較の結果はjobのsummaryに出す
+  # 本番のWorkerと同じく、amd64とarm64の両方で、userns-remapと併せて確かめる。比較の結果はjobのsummaryに出す
   sandbox-gvisor:
     strategy:
       fail-fast: false
@@ -62,6 +62,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
       - uses: ./.github/actions/install-gvisor
+        with:
+          userns-remap: 'true'
       - run: uv sync --locked
       - name: イメージをビルドする
         run: docker build -f images/docs/Dockerfile -t "$YORIKI_SANDBOX_TEST_IMAGE" .

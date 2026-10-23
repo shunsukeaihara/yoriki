@@ -5,12 +5,12 @@ import io
 import time
 import uuid
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
 from runtime.factories import RuntimeProfileFactory
-from runtime.launcher import Launcher, SandboxSpec, SandboxUnavailable, verify_container
+from runtime.launcher import Launcher, Sandbox, SandboxSpec, SandboxUnavailable, verify_container
 
 
 def spec(**overrides: Any) -> SandboxSpec:
@@ -34,10 +34,11 @@ def good_inspect(s: SandboxSpec) -> dict:
     return {
         "Config": {"User": "10001:10001"},
         "HostConfig": {
+            "Runtime": s.runtime or "runc",
             "NetworkMode": "none",
             "Privileged": False,
             "ReadonlyRootfs": True,
-            "PidsLimit": s.pids_limit,
+            "PidsLimit": s.host_pids_limit,
             "Memory": memory,
             "MemorySwap": memory,
             "NanoCpus": 2_000_000_000,
@@ -56,12 +57,14 @@ def good_inspect(s: SandboxSpec) -> dict:
 
 class TestSpec:
     @pytest.mark.django_db
-    def test_uses_the_digest_for_the_worker_platform(self):
+    def test_uses_the_digest_for_the_worker_platform(self, settings):
+        settings.YORIKI_SANDBOX_RUNTIME = "runsc"
         version = RuntimeProfileFactory.create().current_version
         assert version is not None
         s = SandboxSpec.for_version(version, "linux/arm64", labels={"org.yoriki.run": "r1"})
         assert s.image == f"{version.image_repository}@{version.platform_digests['linux/arm64']}"
         assert s.labels == {"org.yoriki.sandbox": "1", "org.yoriki.run": "r1"}
+        assert s.runtime == "runsc"
 
     @pytest.mark.django_db
     def test_refuses_an_unsupported_platform(self):
@@ -94,6 +97,16 @@ class TestSpec:
         assert set(config["tmpfs"]) == {"/tmp", "/workspace/work", "/workspace/output", "/workspace/env"}
         assert "exec" in config["tmpfs"]["/workspace/work"]
         assert "exec" not in config["tmpfs"]["/workspace/output"]
+        assert "runtime" not in config
+
+    def test_gvisor_converts_the_process_limit(self):
+        """gVisorでは、Sandboxの中のプロセスごとにホストのプロセスが増えるので、Dockerの上限を換算する"""
+        config = spec(runtime="runsc").host_config()
+        assert config["runtime"] == "runsc"
+        assert config["pids_limit"] == 256 * 2 + 64
+        assert spec(runtime="runsc-debug").gvisor
+        assert not spec(runtime="runc").gvisor
+        assert spec(runtime="runc").host_config()["pids_limit"] == 256
 
 
 class TestVerify:
@@ -128,6 +141,13 @@ class TestVerify:
         info[section][key] = value
         assert verify_container(info, s)
 
+    def test_rejects_another_runtime(self):
+        s = spec(runtime="runsc")
+        assert verify_container(good_inspect(s), s) == []
+        info = good_inspect(s)
+        info["HostConfig"]["Runtime"] = "runc"
+        assert verify_container(info, s)
+
     def test_rejects_host_mounts(self):
         s = spec()
         info = good_inspect(s)
@@ -136,9 +156,14 @@ class TestVerify:
 
 
 @pytest.fixture(name="sandbox")
-def fixture_sandbox(sandbox_image):
+def fixture_sandbox(sandbox_image, settings):
     launcher = Launcher()
-    s = spec(image=sandbox_image, platform=launcher.platform(), labels={"org.yoriki.sandbox": "1"})
+    s = spec(
+        image=sandbox_image,
+        platform=launcher.platform(),
+        runtime=settings.YORIKI_SANDBOX_RUNTIME,
+        labels={"org.yoriki.sandbox": "1"},
+    )
     sandbox = launcher.start(s, f"yoriki-test-{uuid.uuid4().hex[:12]}")
     yield sandbox
     sandbox.remove()
@@ -146,9 +171,9 @@ def fixture_sandbox(sandbox_image):
 
 @pytest.mark.sandbox
 class TestSandbox:
-    def test_restrictions_are_applied(self, sandbox):
+    def test_restrictions_are_applied(self, sandbox, settings):
         info = sandbox.api.inspect_container(sandbox.container_id)
-        s = spec(image=info["Config"]["Image"])
+        s = spec(image=info["Config"]["Image"], runtime=settings.YORIKI_SANDBOX_RUNTIME)
         assert verify_container(info, s) == []
         assert sandbox.helper("version", {}) | {"python": ""} == {"ok": True, "contract": 1, "python": ""}
 
@@ -219,3 +244,37 @@ def test_failed_startup_leaves_no_container(sandbox_image, monkeypatch):
     with pytest.raises(SandboxUnavailable):
         launcher.start(spec(image=sandbox_image, platform=launcher.platform()), name)
     assert launcher.api.containers(all=True, filters={"name": name}) == []
+
+
+def test_refuses_a_runtime_missing_on_the_worker():
+    """登録されていない実行環境なら、Dockerの既定で動かさずに断る"""
+
+    class Api:
+        def info(self):
+            return {"Runtimes": {"runc": {}}, "SecurityOptions": ["name=userns"]}
+
+    launcher = Launcher.__new__(Launcher)
+    launcher.api = cast(Any, Api())
+    with pytest.raises(SandboxUnavailable) as exc:
+        launcher.start(spec(runtime="runsc"), "yoriki-test")
+    assert not exc.value.retryable
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        ({"OOMKilled": True, "Running": False}, True),
+        # gVisorで超えたコマンドだけが止まったとき・runc。Sandboxは使い続けられる
+        ({"OOMKilled": True, "Running": True}, False),
+        ({"OOMKilled": False, "Running": False}, False),
+    ],
+)
+def test_out_of_memory(state, expected):
+    class Api:
+        def inspect_container(self, container_id):
+            return {"State": state}
+
+    class Client:
+        api = Api()
+
+    assert Sandbox(cast(Any, Client()), "c1", "yoriki-test").out_of_memory() is expected

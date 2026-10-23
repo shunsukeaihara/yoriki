@@ -2,8 +2,10 @@
 
 import json
 import subprocess
+import uuid
 
 from .conftest import IMAGE
+from .sandbox import GVISOR, HOST_PIDS_LIMIT, Sandbox
 
 
 def test_runs_as_the_sandbox_user(sandbox):
@@ -43,9 +45,31 @@ def test_has_no_capabilities_and_cannot_gain_privileges(sandbox):
 
 
 def test_resource_limits(sandbox):
-    assert sandbox.sh("cat /sys/fs/cgroup/pids.max").strip() == "256"
-    assert sandbox.sh("cat /sys/fs/cgroup/memory.max").strip() == str(2 * 1024**3)
-    assert sandbox.sh("cat /sys/fs/cgroup/cpu.max").split()[0] == "200000"
+    host = json.loads(sandbox.inspect("{{json .HostConfig}}"))
+    assert (host["PidsLimit"], host["Memory"], host["NanoCpus"]) == (HOST_PIDS_LIMIT, 2 * 1024**3, 2 * 10**9)
+    if GVISOR:
+        # gVisorでは、中からcgroupは見えず、CPUの数とメモリの量が上限のとおりに見える
+        assert sandbox.sh("nproc").strip() == "2"
+        assert sandbox.sh("head -1 /proc/meminfo").split()[1] == str(2 * 1024**2)
+    else:
+        assert sandbox.sh("cat /sys/fs/cgroup/pids.max").strip() == str(HOST_PIDS_LIMIT)
+        assert sandbox.sh("cat /sys/fs/cgroup/memory.max").strip() == str(2 * 1024**3)
+        assert sandbox.sh("cat /sys/fs/cgroup/cpu.max").split()[0] == "200000"
+
+
+def test_memory_limit(tmp_path):
+    """メモリの上限を超えたコマンドは止まり、DockerはOOMを記録する（Launcherはこれでモデルに知らせる）。
+    runcではそのコマンドだけが止まる。gVisorでは、ホストのOOM killerがgVisor自体を選ぶと、Sandboxごと止まる"""
+    box = Sandbox(IMAGE, f"yoriki-sandbox-test-{uuid.uuid4().hex[:8]}", tmp_path)
+    box.start()
+    try:
+        result = box.exec("python -c 'b = [bytearray(256 * 1024**2) for _ in range(12)]'")
+        assert result.exit_code != 0
+        assert box.inspect("{{.State.OOMKilled}}") == "true"
+        if not GVISOR:
+            assert box.sh("echo alive").strip() == "alive"
+    finally:
+        box.stop()
 
 
 def test_docker_socket_is_not_visible(sandbox):

@@ -42,8 +42,10 @@ LauncherはSandboxを次の制限で起動する（design.md §7.2）。これ�
 | `/packages` | 追加するpackageがあるときだけ、そのbundleを読取り専用のbind mountで |
 | `/workspace/input`・`/workspace/master` | 読取り専用のbind mount |
 | 渡さないもの | privileged、host network・PID、デバイス、Dockerのソケット、ホストの任意のディレクトリ |
+| 実行環境 | 既定はgVisor（`--runtime=runsc`。design.md §7.2の5）。イメージはruncでもgVisorでも同じ契約で動く（契約テストは両方で行う） |
 
 - `/workspace/env` は、イメージのPythonの上に `--system-site-packages` で作る薄い仮想環境（数十KB）で、追加したpackageだけを持つ。追加したpackageは、イメージの版より先に読まれる。追加の量だけtmpfsのメモリを使う。
+- gVisorでは、Sandboxの中のプロセスごとにホストのプロセスが増えるので、`--pids-limit` にはSandboxの中のプロセス数の上限を換算した値（×2＋64）を渡す。上限を超えると、forkが失敗するのでなくSandboxごと止まる。メモリの上限を超えたときも、Sandboxごと止まることがある（runcでは、超えたコマンドだけが止まる）。
 - `/workspace/work`・`/workspace/output`・`/workspace/env` の大きさは、tmpfsの `size` か、作業領域のquotaで制限する（design.md §7.2）。
 
 ## 3 コマンドの環境

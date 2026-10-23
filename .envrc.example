@@ -41,6 +41,8 @@ export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
 export YORIKI_WORKSPACES_DIR="$PWD/.workspaces"
 # 手元でビルドしたSandboxイメージに差し替える（開発時だけ有効。本番では無視する。deployment.md §3.3）
 # export YORIKI_SANDBOX_IMAGE_OVERRIDE=yoriki-sandbox-docs:dev
+# Sandboxのコンテナの実行環境。既定はgVisor（runsc）だが、Docker DesktopにはgVisorがないので、手元では runc にする
+export YORIKI_SANDBOX_RUNTIME=runc
 # Runtime Profileに登録できるイメージのレジストリ（既定は docker.io）。ghcr.io 等も使うときに足す
 # export YORIKI_SANDBOX_REGISTRIES=docker.io,ghcr.io
 # HTTPで読むレジストリ。手元に立てたレジストリ（docker run -p 5001:5000 registry:3）にpushしたイメージを、

@@ -55,6 +55,13 @@ OUTPUT_DRAIN_SECONDS = 60
 HEARTBEAT_INTERVAL = 15
 JOB_ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
 
+# Sandboxがメモリの上限を超えて止まったAttemptの失敗の理由（ExecutionAttempt.failure の先頭）
+OUT_OF_MEMORY_FAILURE = "sandbox: out of memory"
+OUT_OF_MEMORY_NOTICE = (
+    "[The sandbox was stopped because the commands in it used more memory than its limit ({memory_mb} MB), so the "
+    "previous attempt was interrupted. Use less memory: process large files in parts or stream them instead of "
+    "loading everything at once, and run fewer processes at the same time.]"
+)
 WORKSPACE_LOST = (
     "[The files saved from the previous work could not be restored on this worker, so /workspace/work and "
     "/workspace/output are empty. Check which files you need and recreate them before continuing.]"
@@ -336,6 +343,10 @@ class SandboxSession:
         job.stopped = reason
         job.finished, job.exit_code = True, exit_code
         return True
+
+    def out_of_memory(self) -> bool:
+        """Sandboxがメモリの上限を超えて止まったか"""
+        return self.sandbox is not None and self.sandbox.out_of_memory()
 
     def _sandbox(self) -> Sandbox:
         if self.sandbox is None:

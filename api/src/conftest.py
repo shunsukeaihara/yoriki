@@ -44,7 +44,8 @@ def fixture_default_runtime(db) -> RuntimeProfile:
 def fixture_sandbox_image(settings, tmp_path) -> str:
     """実際のDockerで動かすSandboxのイメージ（sandbox/README.md の手順でビルドしたもの）。
 
-    イメージがなければテストを飛ばす。CIのSandboxのjobでは `YORIKI_SANDBOX_TEST_REQUIRED` を付けて、飛ばさずに失敗させる
+    イメージがなければテストを飛ばす。CIのSandboxのjobでは `YORIKI_SANDBOX_TEST_REQUIRED` を付けて、飛ばさずに
+    失敗させる。Sandboxの実行環境は `YORIKI_SANDBOX_TEST_RUNTIME`（契約テストと同じ。空ならDockerの既定）
     """
     image = os.getenv("YORIKI_SANDBOX_TEST_IMAGE", "yoriki-sandbox-docs:dev")
     try:
@@ -54,6 +55,7 @@ def fixture_sandbox_image(settings, tmp_path) -> str:
             raise
         pytest.skip(f"the sandbox image {image} is not available: {exc}")
     settings.YORIKI_SANDBOX_IMAGE_OVERRIDE = image
+    settings.YORIKI_SANDBOX_RUNTIME = os.getenv("YORIKI_SANDBOX_TEST_RUNTIME", "")
     settings.YORIKI_WORKSPACES_DIR = str(tmp_path / "workspaces")
     settings.YORIKI_SNAPSHOT_STORAGE = {
         "BACKEND": "runtime.storage.LocalSnapshotStorage",

@@ -524,7 +524,7 @@ Runnerは、shell以外のToolの処理もSandboxの中で行う。ファイル�
 - 日本語：UTF-8のファイル名、Shift_JISのCSVの読み書き、日本語のフォント（グラフ用。Noto CJK等、OFL）。
 - 契約テストは、代表的なコマンドの一覧（`sandbox/tests/commands.toml`。数百を目標に、Skillで使われたコマンドから増やす）を実際の制限の下で実行し、終了コードと出力を確かめる。
 
-gVisor（runsc）の評価（design.md §7.2の5）は、この契約テストと、文書処理の所要時間で行う。
+契約テストは、runcとgVisor（runsc。既定。design.md §7.2の5）の両方で動かす（CIの `sandbox`・`sandbox-gvisor`）。文書処理の所要時間は `sandbox/benchmarks/docs.py` で比べる（`sandbox-gvisor` のsummaryに出る）。
 
 ---
 
@@ -696,6 +696,8 @@ The previous attempt was interrupted while this tool call was running, and its r
 Its outcome is unknown. If the operation only reads data or is safe to repeat, call it again.
 If it may have changed files or external systems, check the current state first. Do not retry blindly.
 ```
+
+- **メモリの上限を超えたSandbox**：gVisorでは、メモリの上限を超えると、ホストのOOM killerがgVisor自体を選び、Sandboxごと止まることがある（design.md §7.2）。Sandboxを失ったとき、Launcherがコンテナの状態（`OOMKilled` で止まっている）を確かめ、Attemptの失敗の理由に残す。次のAttemptは、結果のないTool呼出しを閉じた後に、メモリの上限（MB）を超えて止まったことと、減らし方（大きいファイルを分けて・流して処理する、同時に動かすプロセスを減らす）を `context` で知らせる。同じ理由で上限の回数まで失敗したら、利用者にもメモリの超過と分かる理由で失敗にする。
 
 ### 11.2 モデルの応答の異常
 

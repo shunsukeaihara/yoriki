@@ -58,7 +58,8 @@ run = "du -sh c | cut -f1"
 output = "K"
 [[command]]
 run = "df -h /workspace/work | tail -1"
-output = "tmpfs"
+# ファイルシステムの名前は、runcでは tmpfs、gVisorでは none になる
+output = "512M"
 [[command]]
 run = "date -d '2026-10-01' +%Y/%m/%d"
 output = "2026/10/01"

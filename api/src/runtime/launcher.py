@@ -36,6 +36,11 @@ HELPER_TIMEOUT = 120
 # Workspaceの取り出し・戻しを待つ時間（秒）
 ARCHIVE_TIMEOUT = 600
 CHUNK = 64 * 1024
+# gVisor（runsc）では、Sandboxの中のプロセスごとに、ホストのプロセス（systrapのstub）が1〜2個増え、gVisor自体も
+# 30個ほど使う。Dockerの `--pids-limit` はホストのプロセスを数えるので、Runtime Profileの上限（Sandboxの中の
+# プロセス数）から換算する。上限を超えると、gVisorではforkが失敗するのでなくSandboxごと落ちる（design.md §7.2）
+GVISOR_PIDS_PER_PROCESS = 2
+GVISOR_PIDS_OVERHEAD = 64
 OUTPUT_DISCARDED = b"\n[output beyond %d bytes was discarded; write large output to a file instead]\n"
 
 
@@ -60,6 +65,8 @@ class SandboxSpec:
     work_mb: int
     output_mb: int
     env_mb: int
+    # Dockerに登録したコンテナの実行環境（`runsc` 等）。空ならDockerの既定（runc）
+    runtime: str = ""
     labels: dict[str, str] = field(default_factory=dict)
 
     @classmethod
@@ -83,8 +90,21 @@ class SandboxSpec:
             work_mb=version.work_mb,
             output_mb=version.output_mb,
             env_mb=version.env_mb,
+            runtime=settings.YORIKI_SANDBOX_RUNTIME,
             labels={SANDBOX_LABEL: "1", **labels},
         )
+
+    @property
+    def gvisor(self) -> bool:
+        """gVisorの実行環境はDockerに `runsc`（か `runsc-` で始まる名前）で登録する（deployment.md §7.1）"""
+        return self.runtime == "runsc" or self.runtime.startswith("runsc-")
+
+    @property
+    def host_pids_limit(self) -> int:
+        """Dockerに渡すプロセス数の上限"""
+        if self.gvisor:
+            return self.pids_limit * GVISOR_PIDS_PER_PROCESS + GVISOR_PIDS_OVERHEAD
+        return self.pids_limit
 
     def tmpfs(self) -> dict[str, str]:
         """書ける場所はすべて大きさを決めたtmpfsにする（CONTRACT.md §2）。workとenvはスクリプトを実行できる"""
@@ -99,18 +119,21 @@ class SandboxSpec:
     def host_config(self) -> dict[str, Any]:
         """`create_host_config` に渡す制限。`--init` は付けない（イメージの init がPID 1。CONTRACT.md §2）"""
         memory = f"{self.memory_mb}m"
-        return {
+        config: dict[str, Any] = {
             "network_mode": "none",
             "read_only": True,
             "cap_drop": ["ALL"],
             "security_opt": ["no-new-privileges:true"],
-            "pids_limit": self.pids_limit,
+            "pids_limit": self.host_pids_limit,
             "mem_limit": memory,
             "memswap_limit": memory,
             "nano_cpus": int(self.cpus * 1_000_000_000),
             "tmpfs": self.tmpfs(),
             "privileged": False,
         }
+        if self.runtime:
+            config["runtime"] = self.runtime
+        return config
 
 
 def verify_container(info: dict[str, Any], spec: SandboxSpec) -> list[str]:
@@ -123,10 +146,12 @@ def verify_container(info: dict[str, Any], spec: SandboxSpec) -> list[str]:
         "NetworkMode": "none",
         "Privileged": False,
         "ReadonlyRootfs": True,
-        "PidsLimit": spec.pids_limit,
+        "PidsLimit": spec.host_pids_limit,
         "Memory": memory,
         "MemorySwap": memory,
         "NanoCpus": int(spec.cpus * 1_000_000_000),
+        # 実行環境を指定しなければ、Dockerの既定のまま
+        **({"Runtime": spec.runtime} if spec.runtime else {}),
     }
     for key, value in expected.items():
         if host.get(key) != value:
@@ -281,6 +306,15 @@ class Sandbox:
             logger.warning("cannot write %s in the sandbox: %r", path, stderr[-500:])
         return exit_code == 0
 
+    def out_of_memory(self) -> bool:
+        """メモリの上限を超えて止まったか。gVisorでは、ホストのOOM killerがgVisor自体を選ぶと、Sandboxごと止まる
+        （runcでは、超えたコマンドだけが止まる）"""
+        try:
+            state = self.api.inspect_container(self.container_id).get("State") or {}
+        except DockerException:
+            return False
+        return bool(state.get("OOMKilled")) and not state.get("Running")
+
     def remove(self) -> None:
         """`docker rm -f`（SIGKILL）。`docker stop` のSIGTERMは init が無視する（CONTRACT.md §2）"""
         try:
@@ -400,13 +434,15 @@ class Launcher:
             raise SandboxUnavailable(f"cannot connect to Docker: {exc}") from exc
         return f"{version['Os']}/{version['Arch']}"
 
-    def check_isolation(self) -> None:
-        """コンテナの中のrootがホストのrootにならない構成か（design.md §7.2の対策の4、deployment.md §7.1）。
-        起動は止めずに警告する"""
+    def check_isolation(self, spec: SandboxSpec) -> None:
+        """コンテナの中のrootがホストのrootにならない構成か、gVisorで動かすか（design.md §7.2の対策の4・5、
+        deployment.md §7.1）。起動は止めずに警告する"""
         global _isolation_checked  # noqa: PLW0603  プロセスごとに1回だけ確かめる
         if _isolation_checked:
             return
         _isolation_checked = True
+        if not spec.gvisor:
+            logger.warning("Sandboxes run without gVisor (YORIKI_SANDBOX_RUNTIME); see docs/deployment.md §7.1")
         try:
             options = self.api.info().get("SecurityOptions") or []
         except DockerException:
@@ -415,8 +451,9 @@ class Launcher:
             logger.warning("Docker runs without userns-remap or rootless mode; see docs/deployment.md §7.1")
 
     def start(self, spec: SandboxSpec, name: str) -> Sandbox:
-        self.check_isolation()
+        self.check_isolation(spec)
         try:
+            self._check_runtime(spec.runtime)
             self._ensure_image(spec.image)
             self._check_contract(spec.image)
             self._remove_by_name(name)
@@ -463,6 +500,13 @@ class Launcher:
 
     def remove(self, container_id: str) -> None:
         Sandbox(self.client, container_id, container_id).remove()
+
+    def _check_runtime(self, runtime: str) -> None:
+        """指定した実行環境がWorkerのDockerに登録されているか。なければ、Dockerの既定で動かさずに断る"""
+        if runtime and runtime not in (self.api.info().get("Runtimes") or {}):
+            raise SandboxUnavailable(
+                f"Docker on this worker has no runtime {runtime!r}; see docs/deployment.md §7.1", retryable=False
+            )
 
     def _ensure_image(self, image: str) -> None:
         try:

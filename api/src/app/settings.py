@@ -287,6 +287,9 @@ YORIKI_SNAPSHOT_STORAGE = {
     "BACKEND": os.getenv("YORIKI_SNAPSHOT_STORAGE_BACKEND", "runtime.storage.LocalSnapshotStorage"),
     "OPTIONS": {"root": os.path.join(YORIKI_WORKSPACES_DIR, "snapshots")},
 }
+# Sandboxのコンテナの実行環境（Dockerに登録した名前）。既定はgVisor（design.md §7.2の5、deployment.md §7.1）。
+# 空にするとDockerの既定（runc）で動かす
+YORIKI_SANDBOX_RUNTIME = os.getenv("YORIKI_SANDBOX_RUNTIME", "runsc")
 # 手元でビルドしたSandboxイメージ（`yoriki-sandbox-docs:dev`）に差し替える。開発時（DEBUG）だけ使い、本番では無視する
 YORIKI_SANDBOX_IMAGE_OVERRIDE = os.getenv("YORIKI_SANDBOX_IMAGE_OVERRIDE", "") if DEBUG else ""
 

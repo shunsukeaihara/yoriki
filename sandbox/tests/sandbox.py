@@ -1,27 +1,50 @@
 """契約テストで使う、制限付きのSandbox（sandbox/CONTRACT.md §2）。Launcher（api の runtime）と同じ制限で起動する"""
 
 import json
+import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-# CONTRACT.md §2 の制限。Launcherはこれより緩めない（ネットワーク、rootfs、uid、capability、資源）
-RUN_OPTIONS = [
-    "--network=none",
-    "--user=10001:10001",
-    "--read-only",
-    "--cap-drop=ALL",
-    "--security-opt=no-new-privileges:true",
-    "--pids-limit=256",
-    "--memory=2g",
-    "--memory-swap=2g",
-    "--cpus=2",
-    "--tmpfs=/tmp:size=256m,mode=1777",
-    "--tmpfs=/workspace/work:size=512m,uid=10001,gid=10001,mode=0700,exec",
-    "--tmpfs=/workspace/output:size=256m,uid=10001,gid=10001,mode=0700",
-    "--tmpfs=/workspace/env:size=1g,uid=10001,gid=10001,mode=0700,exec",
-]
+# コンテナの実行環境（`docker run --runtime`）。gVisorなら `runsc`（design.md §7.2の5）。空ならDockerの既定
+RUNTIME = os.environ.get("YORIKI_SANDBOX_TEST_RUNTIME", "")
+# Sandboxの中のプロセス数の上限
+PIDS_LIMIT = 256
+
+
+def is_gvisor(runtime: str) -> bool:
+    return runtime == "runsc" or runtime.startswith("runsc-")
+
+
+def host_pids_limit(runtime: str) -> int:
+    """gVisorでは、中のプロセスごとにホストのプロセスが増えるので、Launcherと同じくDockerに渡す値を換算する
+    （api の runtime/launcher.py の GVISOR_PIDS_*）"""
+    return PIDS_LIMIT * 2 + 64 if is_gvisor(runtime) else PIDS_LIMIT
+
+
+def run_options(runtime: str) -> list[str]:
+    """CONTRACT.md §2 の制限。Launcherはこれより緩めない（ネットワーク、rootfs、uid、capability、資源）"""
+    return [
+        "--network=none",
+        "--user=10001:10001",
+        "--read-only",
+        "--cap-drop=ALL",
+        "--security-opt=no-new-privileges:true",
+        f"--pids-limit={host_pids_limit(runtime)}",
+        "--memory=2g",
+        "--memory-swap=2g",
+        "--cpus=2",
+        "--tmpfs=/tmp:size=256m,mode=1777",
+        "--tmpfs=/workspace/work:size=512m,uid=10001,gid=10001,mode=0700,exec",
+        "--tmpfs=/workspace/output:size=256m,uid=10001,gid=10001,mode=0700",
+        "--tmpfs=/workspace/env:size=1g,uid=10001,gid=10001,mode=0700,exec",
+        *([f"--runtime={runtime}"] if runtime else []),
+    ]
+
+
+GVISOR = is_gvisor(RUNTIME)
+HOST_PIDS_LIMIT = host_pids_limit(RUNTIME)
 
 # 呼出しごとに渡す環境変数（harness.md §8.2）
 COMMAND_ENV = {
@@ -62,7 +85,7 @@ class Sandbox:
                 "-d",
                 "--name",
                 self.name,
-                *RUN_OPTIONS,
+                *run_options(RUNTIME),
                 f"--mount=type=bind,src={self.input_dir},dst=/workspace/input,readonly",
                 self.image,
             ],
@@ -70,6 +93,12 @@ class Sandbox:
             capture_output=True,
         )
         assert self.helper("init-env", {})["ok"]
+
+    def inspect(self, template: str) -> str:
+        """`docker inspect --format` の結果"""
+        return subprocess.run(
+            ["docker", "inspect", "--format", template, self.name], capture_output=True, text=True, check=True
+        ).stdout.strip()
 
     def stop(self) -> None:
         subprocess.run(["docker", "rm", "-f", self.name], check=False, capture_output=True)

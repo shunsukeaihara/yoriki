@@ -10,7 +10,8 @@ sandbox/
 │   ├── Dockerfile
 │   ├── requirements.in      # 入れるPythonのライブラリ
 │   └── requirements.lock    # 全依存の版とSHA-256（requirements.in から作る。イメージのPythonに入れる）
-└── tests/                   # 契約テスト（ホストで動かし、制限付きのSandboxを起動して確かめる）
+├── tests/                   # 契約テスト（ホストで動かし、制限付きのSandboxを起動して確かめる）
+└── benchmarks/              # 実行環境（runc・gVisor）ごとの文書処理の所要時間の比較
 ```
 
 ## ビルドと契約テスト
@@ -24,6 +25,18 @@ cd sandbox && uv sync && uv run pytest
 
 - 契約テストは `YORIKI_SANDBOX_TEST_IMAGE`（既定 `yoriki-sandbox-docs:dev`）のイメージを使う。
 - 本体で手元のイメージを使うときは、`YORIKI_SANDBOX_IMAGE_OVERRIDE=yoriki-sandbox-docs:dev` を設定する（deployment.md の開発時の手順）。
+
+## gVisor
+
+本番のSandboxはgVisor（runsc）で動かす（design.md §7.2の5）。契約テストの実行環境は `YORIKI_SANDBOX_TEST_RUNTIME`（空ならDockerの既定のrunc）で選ぶ。
+
+```bash
+YORIKI_SANDBOX_TEST_RUNTIME=runsc uv run pytest
+uv run python -m benchmarks.docs --runtime runc --runtime runsc   # 所要時間の比較（Markdownの表）
+```
+
+- CIの `sandbox-gvisor` が、amd64とarm64でrunscの契約テストと所要時間の比較を行う（結果はjobのsummary）。
+- Docker DesktopにはgVisorがない。手元で試すときは、privilegedのdind（`docker:<版>-dind`）にgVisorのリリースの `runsc` と `gvisor-bin/` を入れ、`daemon.json` の `runtimes` に登録して、`DOCKER_HOST` でそのdockerdを使う。テストの一時ディレクトリ（`--basetemp`）は、dindにも同じパスでmountする（`/workspace/input` のbind mountのため）。
 
 ## ライブラリを変える
 

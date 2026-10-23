@@ -306,6 +306,15 @@ class Sandbox:
             logger.warning("cannot write %s in the sandbox: %r", path, stderr[-500:])
         return exit_code == 0
 
+    def out_of_memory(self) -> bool:
+        """メモリの上限を超えて止まったか。gVisorでは、ホストのOOM killerがgVisor自体を選ぶと、Sandboxごと止まる
+        （runcでは、超えたコマンドだけが止まる）"""
+        try:
+            state = self.api.inspect_container(self.container_id).get("State") or {}
+        except DockerException:
+            return False
+        return bool(state.get("OOMKilled")) and not state.get("Running")
+
     def remove(self) -> None:
         """`docker rm -f`（SIGKILL）。`docker stop` のSIGTERMは init が無視する（CONTRACT.md §2）"""
         try:

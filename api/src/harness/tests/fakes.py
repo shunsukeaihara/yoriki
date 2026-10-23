@@ -56,10 +56,11 @@ class FakeAdapter(ProviderAdapter):
 class FakeSession:
     """Dockerを使わないSandboxSession。ensure() で `error` を投げる"""
 
-    def __init__(self, run, attempt, *, heartbeat=None, error: Exception | None = None):
+    def __init__(self, run, attempt, *, heartbeat=None, error: Exception | None = None, oom: bool = False):
         self.run = run
         self.attempt = attempt
         self.error = error
+        self.oom = oom
         self.sandbox = None
         self.restored = None
         self.jobs: dict = {}
@@ -76,6 +77,9 @@ class FakeSession:
 
     def take_notice(self) -> str:
         return ""
+
+    def out_of_memory(self) -> bool:
+        return self.oom
 
     def suspend(self):
         return None

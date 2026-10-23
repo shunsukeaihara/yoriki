@@ -75,7 +75,7 @@ from .context import (
 from .context import runtime_context as build_runtime_context
 from .prompts import system_prompt
 from .recovery import request_model_switch
-from .sandbox import SandboxSession
+from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, SandboxSession
 from .tools import ALL_TOOLS, SANDBOX_TOOLS, WORKSPACE_WRITING_TOOLS
 from .tools.base import Effect, Tool, ToolContext, ToolResult
 
@@ -221,6 +221,7 @@ class Runner:
                 "Do not retry blindly."
             )
             self._record_tool_result(call["id"], call["name"], ToolResult.error(text), ToolStatus.UNKNOWN)
+        self._out_of_memory_notice()
         self._workspace_notices(self._events())
         user = self.run_obj.owner
         context = build_runtime_context(self.run_obj, user_name=user.display_name or user.email)
@@ -234,6 +235,15 @@ class Runner:
         )
         if last is None or last.data.get("text") != context:
             self._record(RunEventKind.CONTEXT, {"text": context})
+
+    def _out_of_memory_notice(self) -> None:
+        """前のAttemptのSandboxがメモリの上限を超えて止まったなら、モデルに知らせる（同じことを繰り返させない）"""
+        previous = self.run_obj.attempts.filter(number__lt=self.attempt.number).order_by("-number").first()
+        version = self.run_obj.runtime_version
+        if previous is None or version is None or not previous.failure.startswith(OUT_OF_MEMORY_FAILURE):
+            return
+        text = OUT_OF_MEMORY_NOTICE.format(memory_mb=version.memory_mb)
+        self._record(RunEventKind.CONTEXT, {"text": text, "sandbox": "out_of_memory"})
 
     def _workspace_notices(self, events: list[RunEvent]) -> None:
         """新しいAttemptのWorkspaceは最後のCheckpointから戻る。それより後にファイルを変えたTool呼出しと、
@@ -627,20 +637,20 @@ class Runner:
         if not error.retryable:
             self._fail(RunEndReason.SANDBOX, _("コマンドを動かす環境を使えません。基盤管理者に問い合わせてください。"))
             return
+        out_of_memory = self.session.out_of_memory()
+        failure = f"{OUT_OF_MEMORY_FAILURE}: {error}" if out_of_memory else f"sandbox: {error}"
         with self.run_obj.fenced(self.attempt) as run:
-            ExecutionAttempt.objects.filter(pk=self.attempt.pk).update(
-                ended=timezone.now(), failure=f"sandbox: {error}"[:1000]
-            )
+            ExecutionAttempt.objects.filter(pk=self.attempt.pk).update(ended=timezone.now(), failure=failure[:1000])
             if run.status == RunStatus.CANCELLING:
                 run.set_status(RunStatus.CANCELLED, comment=_("停止しました。"), end_reason=RunEndReason.CANCELLED)
                 return
             failures = run.attempts.exclude(failure="").exclude(failure="superseded").count()
             if failures >= MAX_ATTEMPTS:
-                run.set_status(
-                    RunStatus.FAILED,
-                    end_reason=RunEndReason.SANDBOX,
-                    error=_("コマンドを動かす環境が繰り返し失われました。"),
-                )
+                if out_of_memory:
+                    error_text = _("コマンドがメモリの上限を超えて、コマンドを動かす環境が繰り返し止まりました。")
+                else:
+                    error_text = _("コマンドを動かす環境が繰り返し失われました。")
+                run.set_status(RunStatus.FAILED, end_reason=RunEndReason.SANDBOX, error=error_text)
                 return
             run.set_status(RunStatus.RETRY_WAIT, comment=_("コマンドを動かす環境が使えなくなったので、やり直します。"))
             run.set_status(RunStatus.QUEUED)

@@ -63,6 +63,31 @@ def test_lost_sandbox_is_retried_in_a_new_attempt(conversation, monkeypatch):
     assert run.end_reason == RunEndReason.SANDBOX
 
 
+def test_out_of_memory_is_told_to_the_model(conversation, monkeypatch):
+    """メモリの上限を超えてSandboxごと止まったら（gVisor）、次のAttemptでモデルに知らせる"""
+    monkeypatch.setattr("harness.runner.enqueue_run", lambda _run: None)
+    run = post(conversation)
+    oom = functools.partial(FakeSession, error=SandboxUnavailable("lost"), oom=True)
+    run = execute(run, FakeAdapter([calls(("c1", "shell", SHELL))]), oom)
+    assert run.status == RunStatus.QUEUED
+    assert ExecutionAttempt.objects.get(run=run).failure == "sandbox: out of memory: lost"
+
+    adapter = FakeAdapter([reply("小さく分けて処理します")])
+    run = execute(run, adapter)
+    assert run.status == RunStatus.COMPLETED
+    assert run.runtime_version is not None
+    memory_mb = run.runtime_version.memory_mb
+    texts = [m.text for m in adapter.requests[0].messages]
+    assert any(f"more memory than its limit ({memory_mb} MB)" in t for t in texts)
+
+    # 繰り返して上限に達したら、メモリの超過と分かる理由で失敗にする
+    run = post(conversation, "もう一度")
+    for number in range(3):
+        run = execute(run, FakeAdapter([calls((f"d{number}", "shell", SHELL))]), oom)
+    assert run.status == RunStatus.FAILED
+    assert "メモリの上限" in run.error
+
+
 def test_refused_sandbox_fails_the_run(conversation):
     run = post(conversation)
     refused = functools.partial(FakeSession, error=SandboxUnavailable("no image", retryable=False))

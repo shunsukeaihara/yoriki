@@ -175,7 +175,7 @@ cd frontend && pnpm dev
 ```
 
 - 環境変数はリポジトリルートの `.envrc`（direnv）で設定する（`.envrc.example` をコピーする）。
-- Sandboxを動かす確認には、手元のDockerを使う。Sandboxイメージを手元で変更するときは `docker build -f sandbox/images/docs/Dockerfile -t yoriki-sandbox-docs:dev sandbox` でビルドし（contextは共通の補助コマンドを含む `sandbox/`）、`YORIKI_SANDBOX_IMAGE_OVERRIDE=yoriki-sandbox-docs:dev` で差し替える（開発時だけ有効な設定にする。`.envrc.example` に例がある）。
+- Sandboxを動かす確認には、手元のDockerを使う。Docker DesktopにはgVisorがないので、`YORIKI_SANDBOX_RUNTIME=runc` にする（`.envrc.example` に設定済み）。gVisorでの動きはCI（`sandbox-gvisor`、`sandbox-runner`）で確かめる。Sandboxイメージを手元で変更するときは `docker build -f sandbox/images/docs/Dockerfile -t yoriki-sandbox-docs:dev sandbox` でビルドし（contextは共通の補助コマンドを含む `sandbox/`）、`YORIKI_SANDBOX_IMAGE_OVERRIDE=yoriki-sandbox-docs:dev` で差し替える（開発時だけ有効な設定にする。`.envrc.example` に例がある）。
 - frontendの開発サーバー（3000番）は、`/api` をapi（8000番）へ転送する（Nuxtの `nitro.devProxy`）。画面とAPIが同じオリジンになるので、セッションCookieがそのまま使え、CORSの設定は不要。
 - devProxyは `xfwd: true` を付けて転送し、`changeOrigin` は付けない。ブラウザのHostヘッダー（`localhost:3000`）が保たれるので、DjangoのCSRFの確認が通り、開発時のSSOのリダイレクトURIは `http://localhost:3000/api/accounts/...` になる。認証基盤のアプリ登録にもこのURIを登録する。
 
@@ -289,7 +289,7 @@ docker compose -f deploy/compose.yaml exec api python manage.py resume_workers
 
 ### 7.1 Sandboxを動かすホスト
 
-Sandboxから脱出されたときの影響を小さくするための手順（design.md §7.2の対策の2・4）。qclusterを動かすサーバー（単一ホストならそのホスト、分けるならWorkerサーバー）で行う。
+Sandboxから脱出されたときの影響を小さくするための手順（design.md §7.2の対策の2・4・5）。qclusterを動かすサーバー（単一ホストならそのホスト、分けるならWorkerサーバー）で行う。
 
 **作業領域**：qclusterのコンテナの利用者（uid 10001）が書けるディレクトリを、ホストとコンテナで同じパスに用意する（§3.1）。ジョブの出力とWorkspaceのsnapshotを置く。Sandboxにはmountしない（Sandboxの書ける場所はすべて大きさを決めたtmpfs）。
 
@@ -313,6 +313,24 @@ sudo install -d -o 10001 -g 10001 -m 0700 /var/lib/yoriki/workspaces
 - 有効にした後は、Dockerの保存先が変わるので、イメージを取り直す（以前のイメージ・コンテナ・named volumeは見えなくなる）。
 - qclusterは `userns_mode: host` で動かす（`compose.app.yaml` に指定済み）。Dockerソケットはホストのroot権限と同等なので、再マップしても守れるものがなく、作業領域のbind mountの所有者もそのままにできるため。LauncherはSandboxに `userns_mode: host` を付けさせない（起動後の確認で断る）。
 - 単一ホストの構成では、ほかのサービス（postgres、nginx等）も再マップされ、bind mount（`/var/lib/yoriki/backups`、証明書等）の所有者を合わせ直す必要がある。Workerサーバーを分ける構成（§3.2）なら、そのサーバーのqclusterとSandboxだけが対象になる。
+
+**gVisor（対策の5）**：Sandboxは既定でgVisor（runsc）で動かす（設定 `YORIKI_SANDBOX_RUNTIME`、既定 `runsc`）。Sandboxの中のコマンドのシステムコールをgVisorが受け、ホストのカーネルに直接届かない。gVisorの公式のaptリポジトリから入れ、Dockerに `runsc` の名前で登録する（aptなら `unattended-upgrades` で更新できる。対策の2）。
+
+```bash
+curl -fsSL https://gvisor.dev/archive.key | sudo gpg --dearmor -o /usr/share/keyrings/gvisor-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/gvisor-archive-keyring.gpg] https://storage.googleapis.com/gvisor/releases release main" \
+  | sudo tee /etc/apt/sources.list.d/gvisor.list
+sudo apt-get update && sudo apt-get install -y runsc
+sudo runsc install            # /etc/docker/daemon.json の runtimes に runsc を足す
+sudo systemctl restart docker
+docker run --rm --runtime=runsc <Sandboxのイメージ> dmesg | head -1   # "Starting gVisor..." と出る
+```
+
+- `unattended-upgrades` の `Origins-Pattern` に gVisor のリポジトリを足す（`origin=` の値は `apt-cache policy runsc` で確かめる）。runscの更新は、次に起動するSandboxから効く。
+- userns-remapと併せて使える（gVisor自体も、再マップしたuidで動く）。rootless Dockerとの組み合わせは確かめていないので、gVisorを使うときはuserns-remapにする。
+- Dockerに `runsc` が登録されていないWorkerでは、Launcherは既定のruncで動かさず、Sandboxを起動しない（Runは失敗し、ログに理由が出る）。gVisorを入れられない環境だけ `YORIKI_SANDBOX_RUNTIME=runc` にする（Launcherがログに警告を出す）。
+- CI（`.github/actions/install-gvisor`）は、版を固定したリリースのtarを、SHA-512を確かめて入れる。
+- runcとの違い（design.md §7.2）：Sandboxの中からcgroupのファイルは見えず、CPUの数とメモリの量が上限のとおりに見える。Runtime Profileの「プロセス数の上限」は、Launcherがホストの上限に換算して渡す（gVisorでは中のプロセスごとにホストのプロセスが増えるため）。メモリの上限を超えると、Sandboxごと止まることがある。
 
 **rootless Docker**：Dockerのデーモン自体を権限のない利用者で動かす方法もある。dockerdが乗っ取られてもホストのrootにならない。qclusterにはその利用者のソケット（`$XDG_RUNTIME_DIR/docker.sock`）を `/var/run/docker.sock` としてmountする。cgroup v2とsystemdの委譲が要り、資源の上限（`--memory`・`--cpus`・`--pids-limit`）が効くことを確かめてから使う。
 

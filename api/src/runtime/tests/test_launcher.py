@@ -10,7 +10,7 @@ from typing import Any, cast
 import pytest
 
 from runtime.factories import RuntimeProfileFactory
-from runtime.launcher import Launcher, SandboxSpec, SandboxUnavailable, verify_container
+from runtime.launcher import Launcher, Sandbox, SandboxSpec, SandboxUnavailable, verify_container
 
 
 def spec(**overrides: Any) -> SandboxSpec:
@@ -258,3 +258,23 @@ def test_refuses_a_runtime_missing_on_the_worker():
     with pytest.raises(SandboxUnavailable) as exc:
         launcher.start(spec(runtime="runsc"), "yoriki-test")
     assert not exc.value.retryable
+
+
+@pytest.mark.parametrize(
+    ("state", "expected"),
+    [
+        ({"OOMKilled": True, "Running": False}, True),
+        # gVisorで超えたコマンドだけが止まったとき・runc。Sandboxは使い続けられる
+        ({"OOMKilled": True, "Running": True}, False),
+        ({"OOMKilled": False, "Running": False}, False),
+    ],
+)
+def test_out_of_memory(state, expected):
+    class Api:
+        def inspect_container(self, container_id):
+            return {"State": state}
+
+    class Client:
+        api = Api()
+
+    assert Sandbox(cast(Any, Client()), "c1", "yoriki-test").out_of_memory() is expected

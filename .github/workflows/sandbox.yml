@@ -73,4 +73,4 @@ jobs:
             echo "### 文書処理の所要時間（$(uname -m)、$(nproc) CPU）"
             echo
             uv run python -m benchmarks.docs --runtime runc --runtime runsc --repeat 5
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"

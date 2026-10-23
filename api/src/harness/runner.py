@@ -17,6 +17,8 @@ from django.db.models import Max
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
+from artifact.models import Artifact, BlobObject
+from conversation.dispatch import user_message_data
 from conversation.models import (
     ConversationMessage,
     InstructionKind,
@@ -407,11 +409,14 @@ class Runner:
             )
             for instruction in instructions:
                 text = f"{ADDITIONAL_INSTRUCTION_PREFIX}\n{instruction.message.body}"
-                RunEvent.record(run, RunEventKind.USER_MESSAGE, {"text": text, "message": instruction.message.uid})
+                RunEvent.record(run, RunEventKind.USER_MESSAGE, user_message_data(instruction.message, text))
                 instruction.state = InstructionState.APPLIED
                 instruction.applied = timezone.now()
                 instruction.save(update_fields=["state", "applied", "updated"])
                 applied = True
+        if applied and self.session.started:
+            # 追加指示に付いた添付を、動いているSandboxの /workspace/input にも置く
+            self.session.sync_inputs()
         return applied
 
     def _exposed_tools(self) -> tuple[Tool, ...]:
@@ -618,19 +623,21 @@ class Runner:
             return
         if saved is None:
             return
-        stored, storage_id, stopped = saved
         with self.run_obj.fenced(self.attempt) as run:
             sequence = RunEvent.objects.filter(run=run).aggregate(last=Max("sequence"))["last"] or 0
             Checkpoint.objects.create(
                 run=run,
                 attempt=self.attempt,
                 sequence=sequence,
-                storage=storage_id,
-                key=stored.key,
-                size=stored.size,
-                sha256=stored.sha256,
-                stopped_jobs=stopped,
+                storage=saved.backend_id,
+                key=saved.snapshot.key,
+                size=saved.snapshot.size,
+                sha256=saved.snapshot.sha256,
+                stopped_jobs=saved.stopped,
             )
+            # /workspace/output のファイルは、利用者が会話の画面から取得できる成果物にする（design.md §7.4）
+            for output in saved.outputs:
+                Artifact.create_output(run, output.path, BlobObject.register(output.stored, saved.backend_id))
 
     def _sandbox_failure(self, error: SandboxUnavailable) -> None:
         """Sandboxを起動できない・失われた。やり直せるなら別のAttemptで（harness.md §4.3の retry_wait）"""

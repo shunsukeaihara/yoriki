@@ -2,12 +2,12 @@
 
 作成日：2026年10月2日  
 更新日：2026年10月23日  
-版：0.25 設計案  
+版：0.26 設計案  
 対象：サービス企画、開発、運用担当
 
 プロダクト名はYoriki（よりき）とする（0.16でYuhitsuから変更）。同名の製品・サービスがあることは承知の上で、検索での見つけやすさは重視しない。名称の商標・ドメイン等の確認は本設計の対象外とする。
 
-主な改訂内容は§15を参照。0.19では、業務ごとのAgent（業務の設定）とSkillを束ねる業務のPluginをやめ、標準のエージェント1つとSkillを中心とするモデルにした（§3.1）。0.20では、Webhookのpayloadをそのまま渡し、必要な項目だけを取り出す受け取り方にした（§4.2）。0.21では、ハーネスの設計を [harness.md](harness.md) にまとめ、コマンドを常駐のシェルではなく呼出しごとに実行する方式にした（§4.8、§7.5）。0.22では、Sandboxの頻出ライブラリをイメージのPythonに入れ、Run専用の環境はその上の薄い環境にした（§7.6）。0.23では、Runtime ProfileをSkillではなくRunの単位で決めることにした（§7.3）。0.24では、snapshotを戻せないWorkerでの再開を、空のWorkspaceで続けてエージェントに知らせる扱いにした（§7.9）。0.25では、Sandboxの実行環境の既定をgVisor（runsc）にした（§7.2）。
+主な改訂内容は§15を参照。0.19では、業務ごとのAgent（業務の設定）とSkillを束ねる業務のPluginをやめ、標準のエージェント1つとSkillを中心とするモデルにした（§3.1）。0.20では、Webhookのpayloadをそのまま渡し、必要な項目だけを取り出す受け取り方にした（§4.2）。0.21では、ハーネスの設計を [harness.md](harness.md) にまとめ、コマンドを常駐のシェルではなく呼出しごとに実行する方式にした（§4.8、§7.5）。0.22では、Sandboxの頻出ライブラリをイメージのPythonに入れ、Run専用の環境はその上の薄い環境にした（§7.6）。0.23では、Runtime ProfileをSkillではなくRunの単位で決めることにした（§7.3）。0.24では、snapshotを戻せないWorkerでの再開を、空のWorkspaceで続けてエージェントに知らせる扱いにした（§7.9）。0.25では、Sandboxの実行環境の既定をgVisor（runsc）にした（§7.2）。0.26では、同じ会話の中で前の依頼の添付・作業ファイルを使えるようにした（§7.1）。
 
 ## 1 目的と基本方針
 
@@ -952,7 +952,7 @@ LLM呼出しが成功した直後に応答保存に失敗した場合も、呼�
 
 | パス | 権限 | 用途と保持 |
 |---|---|---|
-| /workspace/input | RO | 当該Runの添付。原本はArtifact Storeに保存 |
+| /workspace/input | RO | 同じ会話でそれまでに送った添付すべて（前の依頼の添付も残る）。原本はArtifact Storeに保存し、Attemptごとに置き直す。同じ名前の添付は「名前 (2).拡張子」のように分ける |
 | /workspace/input/connectors/{invocation_id}/ | RO | Connector操作の結果（CSV、ダウンロードしたファイル等）。Artifactから展開する（§4.9） |
 | /workspace/master | RO | 使うSkillに紐付いた資料、マスター、テンプレートの固定版 |
 | /workspace/work | RW | 中間ファイル。原則として実行終了後に破棄 |
@@ -960,6 +960,8 @@ LLM呼出しが成功した直後に応答保存に失敗した場合も、呼�
 | /workspace/env | RW | Run専用Python仮想環境。イメージのPythonの上の薄い環境（`--system-site-packages`）で、追加したpackageだけを持つ。終了後に削除 |
 | /packages | RO | 追加するpackageの検証済みwheelと依存lock（PackageBundle） |
 | /tmp | RW | サイズ制限付きtmpfs。コンテナ終了時に破棄 |
+
+同じ会話の中では、前の依頼の作業ファイルを使えるようにする。添付は会話のものをすべて `/workspace/input` に置き、`/workspace/work`・`/workspace/output` は前の依頼の最後のCheckpointから引き継ぐ（§7.9）。新しい依頼の最初の発言には、それまでの添付の一覧を添えてエージェントに知らせる。
 
 Checkpointの管理情報はSandbox外に保存する。エージェントが書いたファイルを権限や実行状態の正本として使わない。HOMEと各種キャッシュはworkまたはtmp配下へ設定する。
 
@@ -1027,7 +1029,7 @@ Launcherは承認済みimage digest、固定mount根、資源上限、container 
 
 回収はコンテナ内の書込みを停止した後に実施する。通常ファイルだけを対象にし、symlink、特殊ファイル、許可外パス、過大なファイル数・総量を拒否する。外部から取得したsnapshotやarchiveを復元するときもパストラバーサルと展開量を検証する。
 
-Artifact Storeへ保存後、hashとサイズを記録し、その参照をDBへ確定する。保存に失敗したRunはCOMPLETEDにしない。成果物の取得権限はRunの所有者または明示的な共有権限に基づき、HTML等の生成物をアプリと同じoriginで無条件に実行しない。
+Artifact Storeへ保存後、hashとサイズを記録し、その参照をDBへ確定する。保存に失敗したRunはCOMPLETEDにしない。回収はAttemptを終えるたび（確認待ち・完了・停止・失敗）に、Workspace snapshotと同じtarから行う。隠しファイルと、会話の同じパスの最新の成果物と中身が同じファイルは回収し直さない。作り直したファイルは新しいArtifactにし、前の版も残す。成果物の取得権限はRunの所有者または明示的な共有権限に基づき、HTML等の生成物をアプリと同じoriginで無条件に実行しない。
 
 ### 7.5 コマンドとPythonの実行ループ
 
@@ -1132,6 +1134,8 @@ WorkspaceSnapshotにはsnapshot_id、schema_version、Adapter ID・実装版・�
 基本の退避タイミングは、再開可能なTool境界、WAITING_USERへの移行、正常完了時とする。正常完了時にも続行用の最終snapshotを保存し、成功Runの作業領域を消した後に実際の最終ファイルから続けられるようにする。同じ会話の次の依頼（子のRun）は、親のRunの最後のCheckpointから始める。Sandboxを使わずに終わった依頼にはCheckpointがないので、さらに前の依頼をたどる。頻度・容量・再開保持期限はセットアップの既定値と業務ポリシーで制限する。再開を提供しない業務を設ける場合はその状態を明示し、保存失敗を黙って省略しない。
 
 snapshot本体・Manifest・環境参照が利用可能であることをverifyした後、対応CheckpointをDBで確定する。通常の待機・完了では、必要なsnapshotを保存する前にWorkspaceを解放しない。保存障害は上限付きで再試行し、必須の永続化ができなければ完了扱いにしない。取消要求やWorker障害では最新の退避ができない場合があるため、停止を優先し、最後に確定したCheckpointと未保存範囲を記録する。
+
+snapshotは添付・成果物と同じStorage Backend（§7.8）に置く。S3等の共有の保存先なら、別のWorkerでも同じsnapshotから戻せる。
 
 再開は元snapshotを変更せず、新しいAttempt専用領域への復元から始める。対応するformat・Adapter・image・platformを検証する。snapshotがこのWorkerから読めない場合（Workerのローカルディスクに保存したsnapshotを、別のWorkerで再開した等）は、再開を止めずに空のWorkspaceで続け、そのことと、作り直す必要があることをエージェントに知らせる。会話を止めるより、利用者とエージェントが状況を見て続けられる方がよいため。snapshotやarchiveの相対path、ファイル数、展開量、hashを検証し、外部から埋め込まれた絶対path、symlink、特殊ファイルを展開しない。
 
@@ -1711,3 +1715,4 @@ Sandboxイメージの定義は本体と同じリポジトリの `sandbox/` で�
 | 0.23 | 2026年10月22日 | Runtime ProfileをSkillごとに持たず、Runの単位で決めることにした。1つのRunで複数のSkillを読み込み、Sandboxは1つなので。基盤管理者が既定を1つ決め、SandboxのToolを使うRunはRunを始めるときにその版を固定する。用途の違うイメージは、必要になったらTask Definition等で選べるようにする。登録のときは、レジストリのAPIでdigest・platform・契約番号を確かめる（§3.1、§3.3、§5.1、§7.3、§10.1） |
 | 0.24 | 2026年10月22日 | Workspace snapshotを戻せないWorkerでの再開（Workerのローカルディスクに保存したsnapshotを別のWorkerで再開した等）は、再開不可とせず、空のWorkspaceで続けてエージェントに知らせることにした。同じ会話の次の依頼は、親のRun（Sandboxを使わなかった依頼は、さらに前の依頼）の最後のCheckpointから始める。snapshotの保存先は Storage Backend と同じ契約の抽象にし、初期はWorkerのローカルディスクに置く（§7.9） |
 | 0.25 | 2026年10月23日 | Sandboxの実行環境の既定をgVisor（runsc）にした。評価の結果（契約テスト、所要時間、プロセス数とメモリの上限での違い）と、その対応（プロセス数の上限の換算、メモリの超過でSandboxが止まったときのエージェントへの知らせ）を記した（§7.2） |
+| 0.26 | 2026年10月23日 | 同じ会話の中では前の依頼の作業ファイルを使えるようにし、`/workspace/input` には当該Runの添付ではなく、会話でそれまでに送った添付をすべて置くことにした（新しい依頼の最初の発言に、それまでの添付の一覧を添える）。`/workspace/output` の成果物はAttemptを終えるたびに回収し、変わっていないファイルは回収し直さない。Workspace snapshotは添付・成果物と同じStorage Backendに置き、S3を選べば別のWorkerで再開できる（§7.1、§7.4、§7.9） |

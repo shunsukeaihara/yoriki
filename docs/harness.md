@@ -483,7 +483,9 @@ Docker操作はLauncher（design.md §7.3、`runtime/launcher.py`）にまとめ
 - 起動したら、inspectの結果でsandbox/CONTRACT.md §2の制限がかかっていることを確かめ直し、違えば使わずに消す（design.md §7.2の対策の1）。イメージの契約番号のラベルもWorkerで確かめる。
 - SandboxはAttemptごとに1つで、最初にSandboxのToolが呼ばれた時点で起動し、最後のCheckpointからWorkspaceを戻す（Runに自分のCheckpointがなければ、同じ会話の前の依頼のもの。design.md §7.9）。
 - Attemptを終えるとき（確認待ち・完了・停止・失敗）は、ジョブを止め、`kill` の `all` の後に `/workspace/work`・`/workspace/output` をSandboxの中のtarで取り出して保存し（tmpfsは `docker cp` で読めない）、Checkpointを記録してから状態を変え、最後に `docker rm -f` で消す。確認待ち・完了で保存できなければ、Sandboxの障害として別のAttemptでやり直す。
-- 保存先は `runtime/storage.py` の抽象（design.md §7.8のStorage Backendと同じ契約）で、初期はWorkerのローカルディスク。
+- 同じtarから `/workspace/output` の通常のファイルを取り出し、成果物（Artifact）として保存する（design.md §7.4）。symlink・特殊なファイル・隠しファイルは回収せず、会話の同じパスの最新の成果物と中身が同じファイルも回収し直さない。1回に200個まで。
+- 保存先はArtifactと同じStorage Backend（`artifact/storage.py`。design.md §7.8）。S3にすれば、別のWorkerでも最後のCheckpointから戻せる。
+- 会話の添付は、Workerの作業領域のAttemptごとのディレクトリに置き、`/workspace/input` に読取り専用のbind mountで見せる。実行中に届いた追加指示の添付も、同じディレクトリに足せばそのまま見える。
 
 ### 8.2 コマンドの環境
 

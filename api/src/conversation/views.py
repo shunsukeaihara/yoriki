@@ -1,10 +1,12 @@
 from django.db import transaction
+from django.db.models import Prefetch
 from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema
 from rest_framework.generics import get_object_or_404
 from rest_framework.mixins import CreateModelMixin, ListModelMixin
 from rest_framework.viewsets import GenericViewSet, ModelViewSet
 
+from artifact.models import Artifact
 from run.models import CANCELLABLE_STATUSES, Run
 from utils.permissions import AppUser
 from utils.views import SoftDeleteMixin
@@ -62,7 +64,9 @@ class AppConversationViewSet(SoftDeleteMixin, ModelViewSet):
 @extend_schema(description="会話のメッセージに関するAPI", tags=["app/conversation/message"])
 class AppConversationMessageViewSet(MyConversationMixin, ListModelMixin, CreateModelMixin, GenericViewSet):
     permission_classes = [AppUser]
-    queryset = ConversationMessage.objects.select_related("run", "sender", "instruction")
+    queryset = ConversationMessage.objects.select_related("run", "sender", "instruction").prefetch_related(
+        Prefetch("attachments", queryset=Artifact.objects.select_related("blob", "run").order_by("pk"))
+    )
     serializer_class = MessageSerializer
     ordering = "-pk"
 

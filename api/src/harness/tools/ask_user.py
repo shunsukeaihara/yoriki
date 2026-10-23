@@ -2,6 +2,8 @@
 
 from typing import TYPE_CHECKING, Any
 
+from harness.context import attachments_text
+
 from .base import Effect, Tool, ToolContext, ToolResult
 
 if TYPE_CHECKING:
@@ -75,7 +77,9 @@ def execute(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     return ToolResult.text("", waits_for_user=True, value={"questions": questions})
 
 
-def answer_result(clarification: "ClarificationRequest", actor) -> dict[str, Any]:
+def answer_result(
+    clarification: "ClarificationRequest", actor, attachments: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
     """回答を、ask_user の呼出しへの結果（RunEventの内容）にする"""
     lines = []
     for question, answer in zip(clarification.questions, clarification.answers, strict=False):
@@ -86,6 +90,8 @@ def answer_result(clarification: "ClarificationRequest", actor) -> dict[str, Any
     if clarification.comment:
         lines.append(f"Additional comment from the user: {clarification.comment}")
     name = getattr(actor, "display_name", "") or getattr(actor, "email", "") or "the user"
+    if attachments:
+        lines.append(attachments_text(attachments))
     text = f"{name} answered:\n" + "\n".join(lines) + "\nContinue with these answers in mind."
     return {
         "call_id": clarification.tool_call_id,

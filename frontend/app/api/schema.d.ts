@@ -92,6 +92,58 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/app/v1/conversations/{conversation}/artifacts/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 会話の添付と成果物に関するAPI */
+        get: operations["app_v1_conversations_artifacts_list"];
+        put?: never;
+        /** @description 会話の添付と成果物に関するAPI */
+        post: operations["app_v1_conversations_artifacts_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/conversations/{conversation}/artifacts/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 会話の添付と成果物に関するAPI */
+        get: operations["app_v1_conversations_artifacts_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/conversations/{conversation}/artifacts/{uid}/download/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description ファイルを取得する（ダウンロードとして返す） */
+        get: operations["app_v1_conversations_artifacts_download_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/app/v1/conversations/{conversation}/messages/": {
         parameters: {
             query?: never;
@@ -293,6 +345,23 @@ export interface paths {
         put?: never;
         /** @description 実行の停止を依頼する。実行中の場合は停止中になり、Workerが停止を確かめると停止済みになる */
         post: operations["app_v1_runs_cancel_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/files/{token}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 期限付きのtokenで成果物を取得する（ログインなし。Zapier等の外部へ渡すURL） */
+        get: operations["files_retrieve"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -728,6 +797,41 @@ export interface components {
             readonly effort_values: string[];
             readonly default_effort: string;
         };
+        /**
+         * @description 会話の添付と成果物。添付は `file` を送って作る（multipart/form-data）。メッセージに付けて送るまでは、
+         *     一覧に出ない
+         */
+        Artifact: {
+            readonly id: string;
+            readonly kind: components["schemas"]["ArtifactKindEnum"];
+            /** ファイル名 */
+            readonly name: string;
+            /** パス */
+            readonly path: string;
+            /** 形式 */
+            readonly content_type: string;
+            readonly size: number;
+            readonly run: string | null;
+            /** Format: date-time */
+            readonly created: string;
+        };
+        /**
+         * @description * `1` - 添付
+         *     * `2` - 成果物
+         * @enum {integer}
+         */
+        ArtifactKindEnum: 1 | 2;
+        /**
+         * @description 会話の添付と成果物。添付は `file` を送って作る（multipart/form-data）。メッセージに付けて送るまでは、
+         *     一覧に出ない
+         */
+        ArtifactRequest: {
+            /**
+             * Format: binary
+             * @description 添付するファイル
+             */
+            file: string;
+        };
         /** @description ログイン画面に出すログインの方法 */
         AuthMethods: {
             readonly providers: components["schemas"]["AuthProvider"][];
@@ -1064,14 +1168,21 @@ export interface components {
             readonly run: string | null;
             readonly sender: string | null;
             readonly role: components["schemas"]["MessageRoleEnum"];
+            /** @default  */
             body: string;
+            /** @description 送る添付（この会話にアップロードして、まだ送っていないもの） */
+            attachments?: string[];
+            readonly attachments_info: components["schemas"]["Artifact"][];
             readonly instruction: components["schemas"]["InstructionInfo"] | null;
             /** Format: date-time */
             readonly created: string;
         };
         /** @description 会話のメッセージ。投稿すると、新しい依頼・今の作業への追加指示・確認への回答・次の依頼のどれかになる */
         MessageRequest: {
+            /** @default  */
             body: string;
+            /** @description 送る添付（この会話にアップロードして、まだ送っていないもの） */
+            attachments?: string[];
             client_message_id?: string;
             /**
              * @description auto：実行中なら今の作業への追加指示、確認待ちなら回答。next：今の作業の後に始める
@@ -1292,6 +1403,19 @@ export interface components {
         };
         /** @enum {unknown} */
         NullEnum: null;
+        PaginatedArtifactList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["Artifact"][];
+        };
         PaginatedClarificationRequestList: {
             /**
              * Format: uri
@@ -2123,6 +2247,111 @@ export interface operations {
             };
         };
     };
+    app_v1_conversations_artifacts_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /**
+                 * @description * `1` - 添付
+                 *     * `2` - 成果物
+                 */
+                kind?: 1 | 2;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                conversation: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedArtifactList"];
+                };
+            };
+        };
+    };
+    app_v1_conversations_artifacts_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["ArtifactRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Artifact"];
+                };
+            };
+        };
+    };
+    app_v1_conversations_artifacts_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Artifact"];
+                };
+            };
+        };
+    };
+    app_v1_conversations_artifacts_download_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ファイル */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+        };
+    };
     app_v1_conversations_messages_list: {
         parameters: {
             query?: {
@@ -2162,7 +2391,7 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
+        requestBody?: {
             content: {
                 "application/json": components["schemas"]["MessageRequest"];
                 "application/x-www-form-urlencoded": components["schemas"]["MessageRequest"];
@@ -2525,6 +2754,35 @@ export interface operations {
             };
             /** @description 他の処理と競合した */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    files_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ファイル */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
+            /** @description No response body */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

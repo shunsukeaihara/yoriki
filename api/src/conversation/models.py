@@ -69,6 +69,10 @@ class ConversationMessage(models.Model):
     )
     role = models.PositiveSmallIntegerField(_("送信元の種別"), choices=MessageRole.choices)
     body = models.TextField(_("本文"), blank=True)
+    # 利用者が送った添付。送ったときに /workspace/input の中の名前を決める（Artifact.attach()）
+    attachments = models.ManyToManyField(
+        "artifact.Artifact", blank=True, related_name="messages", verbose_name=_("添付")
+    )
     # 画面が送るID。再送されたメッセージを二重に受け付けない（design.md §5.5）
     client_message_id = models.CharField(_("クライアントのメッセージID"), max_length=64, blank=True)
 

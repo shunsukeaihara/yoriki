@@ -51,7 +51,11 @@ def good_inspect(s: SandboxSpec) -> dict:
             "Init": None,
             "PidMode": "",
         },
-        "Mounts": [],
+        "Mounts": (
+            [{"Type": "bind", "Source": s.input_dir, "Destination": "/workspace/input", "RW": False}]
+            if s.input_dir
+            else []
+        ),
     }
 
 
@@ -153,6 +157,18 @@ class TestVerify:
         info = good_inspect(s)
         info["Mounts"] = [{"Type": "bind", "Source": "/", "Destination": "/host"}]
         assert verify_container(info, s)
+
+    def test_attachments_are_mounted_read_only(self):
+        s = spec(input_dir="/var/lib/yoriki/workspaces/attempts/r-1/input")
+        [mount] = s.host_config()["mounts"]
+        assert (mount["Target"], mount["Source"], mount["ReadOnly"]) == ("/workspace/input", s.input_dir, True)
+        assert verify_container(good_inspect(s), s) == []
+        writable = good_inspect(s)
+        writable["Mounts"][0]["RW"] = True
+        assert verify_container(writable, s)
+        extra = good_inspect(s)
+        extra["Mounts"].append({"Type": "bind", "Source": "/", "Destination": "/workspace/master", "RW": False})
+        assert verify_container(extra, s)
 
 
 @pytest.fixture(name="sandbox")

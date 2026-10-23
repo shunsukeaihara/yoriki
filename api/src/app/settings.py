@@ -9,6 +9,7 @@ import sys
 from datetime import timedelta
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
 from django.utils.translation import gettext_lazy as _
 
 
@@ -60,6 +61,7 @@ INSTALLED_APPS = [
     "harness",
     "stream",
     "runtime",
+    "artifact",
 ]
 
 MIDDLEWARE = [
@@ -279,19 +281,50 @@ YORIKI_SECRET_ENCRYPTION_KEYS = _env_list("YORIKI_SECRET_ENCRYPTION_KEYS")
 YORIKI_SANDBOX_REGISTRIES = _env_list("YORIKI_SANDBOX_REGISTRIES", "docker.io")
 # HTTPSでなくHTTPで読むレジストリ（`localhost:5001` 等）。手元に立てたレジストリでRuntime Profileを試すときだけ使う
 YORIKI_SANDBOX_INSECURE_REGISTRIES = _env_list("YORIKI_SANDBOX_INSECURE_REGISTRIES")
-# Workerの作業領域（ジョブの出力、Workspaceのsnapshot）。qclusterのコンテナとホストで同じパスにする
+# Workerの作業領域（ジョブの出力、Sandboxに見せる添付）。qclusterのコンテナとホストで同じパスにする
 # （deployment.md §3.1）
 YORIKI_WORKSPACES_DIR = os.getenv("YORIKI_WORKSPACES_DIR", "/var/lib/yoriki/workspaces")
-# Workspaceのsnapshotの保存先（runtime/storage.py）。初期はWorkerのローカルディスクだけ
-YORIKI_SNAPSHOT_STORAGE = {
-    "BACKEND": os.getenv("YORIKI_SNAPSHOT_STORAGE_BACKEND", "runtime.storage.LocalSnapshotStorage"),
-    "OPTIONS": {"root": os.path.join(YORIKI_WORKSPACES_DIR, "snapshots")},
-}
 # Sandboxのコンテナの実行環境（Dockerに登録した名前）。既定はgVisor（design.md §7.2の5、deployment.md §7.1）。
 # 空にするとDockerの既定（runc）で動かす
 YORIKI_SANDBOX_RUNTIME = os.getenv("YORIKI_SANDBOX_RUNTIME", "runsc")
 # 手元でビルドしたSandboxイメージ（`yoriki-sandbox-docs:dev`）に差し替える。開発時（DEBUG）だけ使い、本番では無視する
 YORIKI_SANDBOX_IMAGE_OVERRIDE = os.getenv("YORIKI_SANDBOX_IMAGE_OVERRIDE", "") if DEBUG else ""
+
+# --- ファイルの保存先（artifact/storage.py、design.md §7.8） ---
+# 添付・成果物・Workspaceのsnapshotを置く。`local`（サーバーのディスク）か `s3`。Workerを別のサーバーに置くときは
+# S3にする（Localは別のサーバーから読めない。deployment.md §6）
+YORIKI_STORAGE_BACKEND = os.getenv("YORIKI_STORAGE_BACKEND", "local")
+# 保存先のID。保存したものの記録に残るので、物理的な保存先（rootやbucket）を変えるときは別のIDにする（design.md §7.10）
+_storage_id = os.getenv("YORIKI_STORAGE_ID", f"{YORIKI_STORAGE_BACKEND}-main")
+_storage_backends = {
+    "local": {
+        "BACKEND": "artifact.storage.LocalStorage",
+        "OPTIONS": {
+            "root": os.getenv("YORIKI_STORAGE_LOCAL_ROOT", "/var/lib/yoriki/objects"),
+            # nginxの内部location（`/_protected/`）。設定すると、ダウンロードをnginxに返させる（deployment.md §4.1）
+            "accel_redirect": os.getenv("YORIKI_STORAGE_ACCEL_REDIRECT", ""),
+        },
+    },
+    "s3": {
+        "BACKEND": "artifact.storage.S3Storage",
+        # 資格情報はIAM roleか、boto3の標準の環境変数（AWS_ACCESS_KEY_ID等）で渡す
+        "OPTIONS": {
+            "bucket": os.getenv("YORIKI_STORAGE_S3_BUCKET", ""),
+            "prefix": os.getenv("YORIKI_STORAGE_S3_PREFIX", ""),
+            "region": os.getenv("YORIKI_STORAGE_S3_REGION", ""),
+            "endpoint_url": os.getenv("YORIKI_STORAGE_S3_ENDPOINT_URL", ""),
+        },
+    },
+}
+if YORIKI_STORAGE_BACKEND not in _storage_backends:
+    raise ImproperlyConfigured(f"YORIKI_STORAGE_BACKEND must be one of {list(_storage_backends)}")
+YORIKI_STORAGE = {"DEFAULT": _storage_id, "BACKENDS": {_storage_id: _storage_backends[YORIKI_STORAGE_BACKEND]}}
+# 添付の大きさの上限（MB）。nginxの `client_max_body_size` と、前段（Cloudflareは100MB）の上限より小さくする
+YORIKI_UPLOAD_MAX_MB = int(os.getenv("YORIKI_UPLOAD_MAX_MB", "50"))
+# 1つのメッセージに付けられる添付の数
+YORIKI_ATTACHMENTS_PER_MESSAGE = int(os.getenv("YORIKI_ATTACHMENTS_PER_MESSAGE", "20"))
+# 添付と成果物の保持期間（日。design.md §8の初期案）
+YORIKI_ARTIFACT_RETENTION_DAYS = int(os.getenv("YORIKI_ARTIFACT_RETENTION_DAYS", "90"))
 
 LOGGING = {
     "version": 1,

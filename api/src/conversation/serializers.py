@@ -1,10 +1,13 @@
 from typing import Any
 
+from django.conf import settings
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
+from artifact.models import Artifact, ArtifactKind
+from artifact.serializers import ArtifactSerializer
 from llm.models import ModelProfile
 from llm.serializers import AppModelProfileSerializer
 from run.models import ACTIVE_STATUSES, Run
@@ -124,7 +127,15 @@ class MessageSerializer(serializers.ModelSerializer):
         slug_field="uid", read_only=True, allow_null=True
     )
     role = serializers.ChoiceField(choices=MessageRole.choices, read_only=True)
-    body = NormalizedTextField(max_length=20000)
+    body = NormalizedTextField(max_length=20000, allow_blank=True, required=False, default="")
+    attachments: "serializers.SlugRelatedField[Artifact]" = serializers.SlugRelatedField(
+        slug_field="uid",
+        many=True,
+        required=False,
+        queryset=Artifact.objects.none(),
+        help_text=_("送る添付（この会話にアップロードして、まだ送っていないもの）"),
+    )
+    attachments_info = ArtifactSerializer(source="attachments", many=True, read_only=True)
     client_message_id = serializers.CharField(max_length=64, required=False, allow_blank=True, write_only=True)
     mode = serializers.ChoiceField(
         choices=[(MessageMode.AUTO, _("自動")), (MessageMode.NEXT, _("次の依頼"))],
@@ -136,8 +147,38 @@ class MessageSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ConversationMessage
-        fields = ["id", "run", "sender", "role", "body", "client_message_id", "mode", "instruction", "created"]
+        fields = [
+            "id",
+            "run",
+            "sender",
+            "role",
+            "body",
+            "attachments",
+            "attachments_info",
+            "client_message_id",
+            "mode",
+            "instruction",
+            "created",
+        ]
         read_only_fields = ["created"]
+
+    def get_fields(self):
+        fields = super().get_fields()
+        # 添付に指定できるのは、ログインユーザーがこの会話にアップロードして、まだ送っていないファイルだけ
+        request, view = self.context.get("request"), self.context.get("view")
+        attachments = fields["attachments"]
+        # スキーマの生成（swagger_fake_view）では、URLの会話がないので絞り込まない（選べるものはない）
+        if (
+            request is not None
+            and view is not None
+            and not getattr(view, "swagger_fake_view", False)
+            and isinstance(attachments, serializers.ManyRelatedField)
+        ):
+            relation: Any = attachments.child_relation
+            relation.queryset = Artifact.objects.owned_by(request.user).filter(
+                conversation=view.conversation, kind=ArtifactKind.ATTACHMENT, path=""
+            )
+        return fields
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -145,10 +186,16 @@ class MessageSerializer(serializers.ModelSerializer):
             data["instruction"] = None
         return data
 
-    def validate_body(self, value: str) -> str:
-        if not value.strip():
-            raise serializers.ValidationError(_("本文を入力してください"))
-        return value
+    def validate_attachments(self, value: list[Artifact]) -> list[Artifact]:
+        limit = settings.YORIKI_ATTACHMENTS_PER_MESSAGE
+        if len(value) > limit:
+            raise serializers.ValidationError(_("添付は%(limit)s個までです") % {"limit": limit})
+        return list(dict.fromkeys(value))
+
+    def validate(self, attrs):
+        if not attrs.get("body", "").strip() and not attrs.get("attachments"):
+            raise serializers.ValidationError({"body": _("本文を入力してください")})
+        return attrs
 
     def create(self, validated_data) -> ConversationMessage:
         try:
@@ -158,6 +205,7 @@ class MessageSerializer(serializers.ModelSerializer):
                 client_message_id=validated_data.get("client_message_id", ""),
                 mode=validated_data["mode"],
                 actor=validated_data["sender"],
+                attachments=validated_data.get("attachments", []),
             )
         except CannotStart as exc:
             raise serializers.ValidationError({"non_field_errors": [str(exc)]}) from exc

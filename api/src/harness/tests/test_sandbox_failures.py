@@ -5,6 +5,7 @@ import time
 
 import pytest
 
+from artifact.storage import LocalStorage
 from conversation.dispatch import MessageMode, post_message
 from conversation.factories import ConversationFactory
 from harness.runner import Runner
@@ -17,7 +18,6 @@ from run.errors import LeaseLost
 from run.models import Checkpoint, ExecutionAttempt, Run, RunEndReason, RunEvent, RunEventKind, RunStatus
 from run.tasks import claim_run
 from runtime.launcher import Exec, SandboxUnavailable
-from runtime.storage import LocalSnapshotStorage
 
 from .fakes import FakeAdapter, FakeSession, calls, reply
 
@@ -155,15 +155,11 @@ def test_interrupted_attempt_tells_the_model_what_was_not_kept(conversation):
     assert sum("job_1" in t for t in texts) == 1
 
 
-class _Storage(LocalSnapshotStorage):
+class _Storage(LocalStorage):
     """どのkeyも見つからない、このWorkerの保存先"""
 
     def __init__(self):
-        super().__init__("/nonexistent")
-
-    @property
-    def storage_id(self) -> str:
-        return "local:here"
+        super().__init__("here", root="/nonexistent")
 
     def stat(self, key):
         return None
@@ -176,7 +172,7 @@ def test_snapshot_on_another_worker_is_reported(conversation, settings, tmp_path
     attempt = claim_run(first.pk)
     assert attempt is not None
     Checkpoint.objects.create(
-        run=first, attempt=attempt, sequence=1, storage="local:elsewhere", key="runs/x.tar", size=1, sha256="0" * 64
+        run=first, attempt=attempt, sequence=1, storage="elsewhere", key="runs/x.tar", size=1, sha256="0" * 64
     )
     session = SandboxSession(first, attempt, storage_factory=_Storage)
 

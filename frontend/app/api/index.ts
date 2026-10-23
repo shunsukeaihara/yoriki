@@ -46,6 +46,19 @@ const createAPI = () => {
           http.get<Paginated<Message>, Paginated<Message>>(`app/v1/conversations/${id}/messages/`, { params }),
         create: (data: MessageWrite) => http.post<Message, Message>(`app/v1/conversations/${id}/messages/`, data),
       }),
+      // 添付と成果物。添付は multipart で送る（メッセージで送るまでは一覧に出ない）
+      artifacts: (aid?: string) => ({
+        ...readOnlyResource<Artifact, ArtifactListParams>(http, `app/v1/conversations/${id}/artifacts`, aid),
+        upload: (file: File) => {
+          const form = new FormData()
+          form.append('file', file)
+          return http.post<Artifact, Artifact>(`app/v1/conversations/${id}/artifacts/`, form, {
+            timeout: UPLOAD_TIMEOUT,
+          })
+        },
+        // ブラウザのリンクで開く（ダウンロードとして返る）
+        downloadUrl: () => `${config.public.apiEndpoint}app/v1/conversations/${id}/artifacts/${aid}/download/`,
+      }),
     }),
     runs: (id?: string) => ({
       ...readOnlyResource<Run, RunListParams>(http, 'app/v1/runs', id),

@@ -6,9 +6,12 @@ SandboxはAttemptごとに1つで、最初にSandboxのToolが呼ばれた時点
 止めてからWorkspaceを取り出して保存し（Checkpoint）、Sandboxを消す。
 """
 
+import hashlib
 import logging
+import os
 import posixpath
 import shutil
+import tarfile
 import tempfile
 import threading
 import time
@@ -17,12 +20,14 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import IO, Any, TypeVar
 
 from django.conf import settings
 from django.utils import timezone
 from nanoid import generate
 
+from artifact.models import Artifact, ArtifactKind, BlobObject
+from artifact.storage import StorageBackend, StorageError, StoredObject, get_storage
 from run.models import Checkpoint, ExecutionAttempt, Run
 from runtime.launcher import (
     ATTEMPT_LABEL,
@@ -34,7 +39,6 @@ from runtime.launcher import (
     SandboxSpec,
     SandboxUnavailable,
 )
-from runtime.storage import SnapshotStorage, StorageError, StoredObject, get_snapshot_storage
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -42,6 +46,8 @@ T = TypeVar("T")
 WORKSPACE = "/workspace"
 # snapshotに入れるもの。input・masterは固定の版から、envはイメージと追加のpackageから作り直す（design.md §7.9）
 SNAPSHOT_PATHS = ["work", "output"]
+# 1回に回収する成果物（/workspace/output のファイル）の数の上限（design.md §7.4）
+MAX_OUTPUT_FILES = 200
 # 同時に動かせるジョブの数（harness.md §8.3）
 MAX_JOBS = 4
 # ジョブを止めるときに、TERMの後でKILLを送るまで待つ時間（秒）
@@ -101,6 +107,25 @@ def workspace_path(path: str, base: str = WORK_DIR) -> str | None:
     return joined
 
 
+@dataclass(frozen=True)
+class CollectedOutput:
+    """/workspace/output から回収して保存したファイル。Artifactの行はRunnerがleaseの確認の中で作る"""
+
+    path: str
+    stored: StoredObject
+
+
+@dataclass(frozen=True)
+class Suspended:
+    """Attemptを終えるときに保存したもの"""
+
+    snapshot: StoredObject
+    backend_id: str
+    # 保存の前に止めたジョブ（[{"job_id", "command"}]）
+    stopped: list[dict[str, str]]
+    outputs: list[CollectedOutput]
+
+
 @dataclass
 class Job:
     job_id: str
@@ -152,7 +177,7 @@ class SandboxSession:
         attempt: ExecutionAttempt,
         *,
         launcher_factory: Callable[[], Launcher] = Launcher,
-        storage_factory: Callable[[], SnapshotStorage] = get_snapshot_storage,
+        storage_factory: Callable[[], StorageBackend] = get_storage,
         heartbeat: Callable[[], None] = lambda: None,
     ):
         self.run = run
@@ -166,6 +191,8 @@ class SandboxSession:
         self.dir = Path(settings.YORIKI_WORKSPACES_DIR) / "attempts" / f"{run.uid}-{attempt.number}"
         # 戻したCheckpoint。このRunのものなら、その時点までの読んだファイルの版の記録を使える（harness.md §11.1）
         self.restored: Checkpoint | None = None
+        # /workspace/input に置いた添付（ArtifactのID）
+        self.inputs: set[int] = set()
         # 最初のSandboxのToolの結果に添える知らせ
         self.notice = ""
         # DBに触ってよいスレッド（Runner）
@@ -186,8 +213,12 @@ class SandboxSession:
         launcher = self.launcher_factory()
         remove_stale_sandboxes(launcher)
         platform = launcher.platform()
+        self.sync_inputs()
         spec = SandboxSpec.for_version(
-            version, platform, labels={RUN_LABEL: self.run.uid, ATTEMPT_LABEL: str(self.attempt.pk)}
+            version,
+            platform,
+            labels={RUN_LABEL: self.run.uid, ATTEMPT_LABEL: str(self.attempt.pk)},
+            input_dir=str(self.input_dir),
         )
         with self.run.fenced(self.attempt):
             ExecutionAttempt.objects.filter(pk=self.attempt.pk).update(
@@ -199,13 +230,46 @@ class SandboxSession:
         self._restore(self.sandbox)
         return self.sandbox
 
+    @property
+    def input_dir(self) -> Path:
+        return self.dir / "input"
+
+    def sync_inputs(self) -> None:
+        """会話の添付を、Workerのディレクトリ（Sandboxの /workspace/input に読取り専用でmountする）に置く。
+        まだ置いていないものだけを足す。bind mountなので、動いているSandboxにもそのまま見える"""
+        attachments = (
+            Artifact.objects.filter(
+                conversation_id=self.run.conversation_id, kind=ArtifactKind.ATTACHMENT, deleted=False
+            )
+            .exclude(path="")
+            .exclude(pk__in=self.inputs)
+            .select_related("blob")
+            .order_by("pk")
+        )
+        self.input_dir.mkdir(parents=True, exist_ok=True)
+        # userns-remap・gVisorのSandboxの利用者からも読めるようにする（書けるのはWorkerだけ）
+        self.input_dir.chmod(0o755)
+        for artifact in attachments:
+            path = self.input_dir / artifact.path
+            if path.parent != self.input_dir:
+                logger.warning("run %s: skipping attachment %s with a bad name", self.run.uid, artifact.uid)
+                continue
+            try:
+                with artifact.blob.open() as src, tempfile.NamedTemporaryFile(dir=self.dir, delete=False) as tmp:
+                    shutil.copyfileobj(src, tmp, 1024 * 1024)
+                os.chmod(tmp.name, 0o644)
+                os.replace(tmp.name, path)
+            except (OSError, StorageError) as exc:
+                raise SandboxUnavailable(f"cannot prepare the attachment {artifact.uid}: {exc}") from exc
+            self.inputs.add(artifact.pk)
+
     def _restore(self, sandbox: Sandbox) -> None:
         checkpoint = Checkpoint.latest_for(self.run)
         if checkpoint is None:
             return
         storage = self.storage_factory()
         stored = None
-        if checkpoint.storage == storage.storage_id:
+        if checkpoint.storage == storage.backend_id:
             stored = storage.stat(checkpoint.key)
         if stored is None or stored.sha256 != checkpoint.sha256:
             # 別のWorkerのローカルディスクに保存した等。空のWorkspaceで続け、モデルに知らせる
@@ -355,10 +419,9 @@ class SandboxSession:
 
     # --- Attemptの終わり ---
 
-    def suspend(self) -> tuple[StoredObject, str, list[dict[str, str]]] | None:
-        """動いているものを止め、Workspaceを取り出して保存する。Sandboxを起動していなければNone。
-
-        返すのは（保存したもの、保存先のID、止めたジョブ）。Checkpointの行はRunnerがleaseの確認の中で作る
+    def suspend(self) -> Suspended | None:
+        """動いているものを止め、Workspaceを取り出して保存し、/workspace/output のファイルを成果物として回収する。
+        Sandboxを起動していなければNone。Checkpoint・Artifactの行はRunnerがleaseの確認の中で作る
         """
         if self.sandbox is None:
             return None
@@ -374,19 +437,35 @@ class SandboxSession:
         stopped = [{"job_id": job.job_id, "command": job.command[:200]} for job in running]
         storage = self.storage_factory()
         self.dir.mkdir(parents=True, exist_ok=True)
-        key = f"runs/{self.run.uid}/{self.attempt.number}-{generate(JOB_ID_ALPHABET, 8)}.tar"
+        key = f"snapshots/runs/{self.run.uid}/{self.attempt.number}-{generate(JOB_ID_ALPHABET, 8)}.tar"
         sandbox = self.sandbox
+        known = self._known_outputs()
 
-        def save() -> StoredObject:
+        def save() -> tuple[StoredObject, list[CollectedOutput]]:
             with tempfile.TemporaryFile(dir=self.dir) as archive:
                 sandbox.archive(SNAPSHOT_PATHS, archive)
                 archive.seek(0)
                 try:
-                    return storage.put_immutable(key, archive)
-                except (OSError, StorageError) as exc:
+                    snapshot = storage.put_immutable(key, archive)
+                    archive.seek(0)
+                    return snapshot, collect_outputs(archive, storage, known)
+                except (OSError, StorageError, tarfile.TarError) as exc:
                     raise SandboxUnavailable(f"cannot save the workspace: {exc}") from exc
 
-        return self._keep_lease(save), storage.storage_id, stopped
+        snapshot, outputs = self._keep_lease(save)
+        return Suspended(snapshot, storage.backend_id, stopped, outputs)
+
+    def _known_outputs(self) -> dict[str, str]:
+        """会話の成果物の、パスごとの最新の中身（SHA-256）。変わっていないファイルは回収し直さない"""
+        known = {}
+        rows = (
+            Artifact.objects.filter(conversation_id=self.run.conversation_id, kind=ArtifactKind.OUTPUT)
+            .order_by("created", "pk")
+            .values_list("path", "blob__sha256")
+        )
+        for path, sha256 in rows:
+            known[path] = sha256
+        return known
 
     def _keep_lease(self, operation: Callable[[], T], *, on_abandon: Callable[[T], object] | None = None) -> T:
         """時間のかかる操作を別のスレッドで行い、その間このスレッドでleaseを延ばす（DBに触るのはこのスレッドだけ）。
@@ -413,6 +492,33 @@ class SandboxSession:
             self.sandbox.remove()
             self.sandbox = None
         shutil.rmtree(self.dir, ignore_errors=True)
+
+
+def collect_outputs(archive: IO[bytes], storage: StorageBackend, known: dict[str, str]) -> list[CollectedOutput]:
+    """Workspaceのtarから /workspace/output の通常のファイルを取り出して保存する（design.md §7.4）。
+    symlink・特殊なファイル・隠しファイル・変わっていないファイルは回収しない。数が多すぎれば、先頭から上限まで"""
+    collected: list[CollectedOutput] = []
+    with tarfile.open(fileobj=archive, mode="r:") as tar:
+        for member in tar:
+            if not member.isfile() or not member.name.startswith("output/"):
+                continue
+            path = posixpath.normpath(member.name.removeprefix("output/"))
+            if path.startswith(("/", "..")) or any(part.startswith(".") for part in path.split("/")):
+                continue
+            if len(collected) >= MAX_OUTPUT_FILES:
+                logger.warning("too many files in /workspace/output; collected the first %d", MAX_OUTPUT_FILES)
+                break
+            src = tar.extractfile(member)
+            if src is None:
+                continue
+            digest = hashlib.sha256()
+            while chunk := src.read(1024 * 1024):
+                digest.update(chunk)
+            if known.get(path) == digest.hexdigest():
+                continue
+            src.seek(0)
+            collected.append(CollectedOutput(path, storage.put_immutable(BlobObject.new_key(), src)))
+    return collected
 
 
 def remove_stale_sandboxes(launcher: Launcher) -> None:

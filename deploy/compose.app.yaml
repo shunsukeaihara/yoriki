@@ -25,6 +25,8 @@ services:
       - ./nginx/sites/http.conf:/etc/nginx/conf.d/default.conf:ro
       - ./nginx/snippets:/etc/nginx/snippets:ro
       - static:/var/lib/yoriki/static:ro
+      # Local保存のファイル。apiが確認した後、X-Accel-Redirectで返す（docs/deployment.md §4.1）
+      - /var/lib/yoriki/objects:/var/lib/yoriki/objects:ro
     networks: [edge]
     depends_on:
       static: { condition: service_completed_successfully }
@@ -53,6 +55,9 @@ services:
       uvicorn app.asgi:application --host 0.0.0.0 --port 8000 --workers ${YORIKI_API_WORKERS:-4}
       --proxy-headers --forwarded-allow-ips=* --timeout-graceful-shutdown 30
     networks: [edge, backend, egress]
+    volumes:
+      # Local保存のファイル（添付・成果物・snapshot。YORIKI_STORAGE_BACKEND=local）。S3なら使わない
+      - /var/lib/yoriki/objects:/var/lib/yoriki/objects
     healthcheck:
       test: ['CMD', 'python', '-c', "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/ping/')"]
       interval: 10s
@@ -70,6 +75,7 @@ services:
     volumes:
       # Sandboxはホストのdockerdが起動するので、ホストとコンテナで同じパスにする
       - /var/lib/yoriki/workspaces:/var/lib/yoriki/workspaces
+      - /var/lib/yoriki/objects:/var/lib/yoriki/objects
       - /var/run/docker.sock:/var/run/docker.sock
     group_add: ['${YORIKI_DOCKER_GID:-999}']
     # Dockerをuserns-remapで動かしても、qclusterは再マップしない（Dockerソケットと作業領域を使うため。deployment.md §7.1）

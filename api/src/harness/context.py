@@ -53,7 +53,14 @@ def build_items(run: Run, events: Iterable[RunEvent]) -> list[Item]:
     for event in events:
         data = event.data
         match event.kind:
-            case RunEventKind.USER_MESSAGE | RunEventKind.CONTEXT | RunEventKind.JOB_FINISHED:
+            case RunEventKind.USER_MESSAGE:
+                text = data["text"]
+                if data.get("attachments"):
+                    text = f"{text}\n\n{attachments_text(data['attachments'])}".strip()
+                if data.get("earlier_attachments"):
+                    text = f"{text}\n\n{attachments_text(data['earlier_attachments'], earlier=True)}".strip()
+                items.append(Item(event.sequence, event.kind, Message("user", text)))
+            case RunEventKind.CONTEXT | RunEventKind.JOB_FINISHED:
                 items.append(Item(event.sequence, event.kind, Message("user", data["text"])))
             case RunEventKind.ASSISTANT_MESSAGE:
                 calls = tuple(ToolCall(c["id"], c["name"], c["arguments"]) for c in data.get("tool_calls", []))
@@ -89,6 +96,28 @@ def pending_tool_calls(events: list[RunEvent]) -> list[dict[str, Any]]:
         if event.kind == RunEventKind.ASSISTANT_MESSAGE:
             calls += [c for c in event.data.get("tool_calls", []) if c["id"] not in answered]
     return calls
+
+
+def attachments_text(attachments: list[dict[str, Any]], *, earlier: bool = False) -> str:
+    """利用者が添付したファイルの一覧。中身はSandboxの /workspace/input に読取り専用で置く。
+    `earlier` は同じ会話の前の依頼で添付したもの"""
+    lines = [f"- {a['path']} ({a.get('content_type', '')}, {_size(a.get('size', 0))})" for a in attachments]
+    if earlier:
+        head = (
+            '<attachments scope="earlier">\nFiles attached earlier in this conversation (read-only). Files you made in '
+            "earlier requests are still in /workspace/work and /workspace/output:\n"
+        )
+    else:
+        head = "<attachments>\nThe user attached these files (read-only):\n"
+    return head + "\n".join(lines) + "\n</attachments>"
+
+
+def _size(size: int) -> str:
+    if size < 1024:
+        return f"{size} bytes"
+    if size < 1024 * 1024:
+        return f"{size / 1024:.1f} KB"
+    return f"{size / 1024 / 1024:.1f} MB"
 
 
 def runtime_context(run: Run, *, user_name: str) -> str:

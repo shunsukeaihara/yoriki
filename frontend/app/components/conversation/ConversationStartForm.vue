@@ -33,6 +33,16 @@ watch(
   },
 )
 
+// 添付は会話を作った後にアップロードする（アップロード先は会話ごと）
+const attachments = useAttachmentUploads()
+const prompt = useTemplateRef<{ $el: HTMLElement }>('prompt')
+const picker = useFilePicker(
+  () => prompt.value?.$el,
+  (files) => {
+    if (answered.value) attachments.add(files)
+  },
+)
+
 const { onSubmit, loading, errors } = createSubmit({
   form,
   fn: async ({ handlesSensitiveData, modelProfile, body }) => {
@@ -42,10 +52,14 @@ const { onSubmit, loading, errors } = createSubmit({
     })
     // 会話は作れて最初の依頼だけ失敗した場合は、会話の画面へ移ってから知らせる
     try {
-      const message = await api
-        .conversations(conversation.id)
-        .messages()
-        .create({ body, clientMessageId: crypto.randomUUID(), mode: MessageMode.AUTO })
+      await attachments.upload(conversation.id)
+      if (attachments.failed.value) throw new Error(t('添付をアップロードできませんでした'))
+      const message = await api.conversations(conversation.id).messages().create({
+        body,
+        attachments: attachments.ids.value,
+        clientMessageId: crypto.randomUUID(),
+        mode: MessageMode.AUTO,
+      })
       return { conversation, message, error: null }
     } catch (error) {
       return { conversation, message: null, error }
@@ -55,7 +69,8 @@ const { onSubmit, loading, errors } = createSubmit({
 })
 
 const answered = computed(() => form.value.handlesSensitiveData !== null)
-const canPost = computed(() => answered.value && Boolean(form.value.modelProfile && form.value.body.trim()))
+const hasContent = computed(() => Boolean(form.value.body.trim()) || attachments.items.value.length > 0)
+const canPost = computed(() => answered.value && Boolean(form.value.modelProfile) && hasContent.value)
 const submit = () => {
   if (canPost.value && !loading.value) onSubmit()
 }
@@ -90,15 +105,28 @@ const submit = () => {
       :error-messages="errors.modelProfile"
     />
     <UChatPrompt
+      ref="prompt"
       v-model="form.body"
       :placeholder="answered ? $t('依頼を入力してください') : $t('先に、扱う内容を選んでください')"
       :disabled="!answered"
       variant="subtle"
+      :class="{ 'ring-2 ring-primary': picker.isOverDropZone.value && answered }"
       autofocus
       @submit="submit"
     >
+      <template v-if="attachments.items.value.length" #header>
+        <ConversationAttachmentChips :items="attachments.items.value" @remove="attachments.remove" />
+      </template>
       <template #footer>
-        <div />
+        <DBtn
+          icon="i-lucide-paperclip"
+          variant="ghost"
+          color="neutral"
+          size="sm"
+          :disabled="!answered"
+          :aria-label="$t('ファイルを添付')"
+          @click="picker.open()"
+        />
         <UChatPromptSubmit :status="loading ? 'submitted' : 'ready'" :disabled="!canPost" />
       </template>
     </UChatPrompt>

@@ -192,10 +192,12 @@ class TestDraftAndPublish:
         assert SkillVersion.objects.filter(skill=skill).count() == 1
         # operation keyのない再送は、閉じたDraftなので409
         assert _publish(api_client, skill_id, draft).status_code == 409
-        # 公開のkeyを、別のDraftの公開や切戻しに使い回せない
+        # 公開のkeyを、別のDraftの公開や切戻しに使い回せない（別のDraftが閉じた後でも）
         draft = api_client.post(f"{SKILLS}{skill_id}/drafts/", {}, format="json").json()
         assert _publish(api_client, skill_id, draft, operation_key="op-1").status_code == 409
-        rollback = {"number": 1, "expected_version": 1, "operation_key": "op-1"}
+        assert _publish(api_client, skill_id, draft, operation_key="op-2").status_code == 201
+        assert _publish(api_client, skill_id, draft, operation_key="op-1").status_code == 409
+        rollback = {"number": 1, "expected_version": 2, "operation_key": "op-1"}
         assert api_client.post(f"{SKILLS}{skill_id}/rollback/", rollback, format="json").status_code == 409
 
     @pytest.mark.django_db

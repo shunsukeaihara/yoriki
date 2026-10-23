@@ -262,11 +262,8 @@ class Skill(models.Model):
         （design.md §3.10）
         """
         current = self._lock()
-        # 公開したDraftは閉じている。まだあるなら、このkeyは別のDraftの公開に使われた
         if done := current._recorded(
-            operation_key,
-            SkillChangeKind.PUBLISH,
-            lambda _change: not SkillDraft.objects.filter(skill=current, uid=draft_uid).exists(),
+            operation_key, SkillChangeKind.PUBLISH, lambda change: change.draft_uid == draft_uid
         ):
             return done
         draft = (
@@ -311,6 +308,7 @@ class Skill(models.Model):
             actor=actor,
             reason=change_reason,
             summary=summary,
+            draft_uid=draft.uid,
             operation_key=operation_key,
         )
         draft.delete()
@@ -641,6 +639,8 @@ class SkillChange(models.Model):
     reason = models.CharField(_("理由"), max_length=500, blank=True)
     # 変わった項目と資料（summarize_changes()）
     summary = models.JSONField(_("変更点"), default=dict, blank=True)
+    # 公開したDraftのID（Draftは公開で消える）。同じkeyの再送が同じDraftの公開かを確かめる
+    draft_uid = models.CharField(_("公開したDraft"), max_length=22, blank=True)
     # 画面・エージェントが操作ごとに付けるkey。同じkeyの再送では、前の結果を返す
     operation_key = models.CharField(_("operation key"), max_length=100, blank=True)
 

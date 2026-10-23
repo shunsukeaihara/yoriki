@@ -449,12 +449,17 @@ class SSOProviderUpdateSerializer(SSOProviderSerializer):
 
 class DepartmentSerializer(serializers.ModelSerializer):
     id = serializers.CharField(source="uid", read_only=True)
-    member_count = serializers.IntegerField(read_only=True, help_text=_("所属する人数"))
+    member_count = serializers.SerializerMethodField(help_text=_("所属する人数"))
 
     class Meta:
         model = Department
         fields = ["id", "name", "member_count", "created", "updated"]
         read_only_fields = ["created", "updated"]
+
+    def get_member_count(self, obj: Department) -> int:
+        # 一覧・詳細は件数を注釈で付けて読む（DepartmentViewSet）。作成・更新の応答では数える
+        count = getattr(obj, "member_count", None)
+        return count if count is not None else obj.memberships.count()
 
     def validate_name(self, value: str) -> str:
         value = value.strip()

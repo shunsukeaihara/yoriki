@@ -442,6 +442,7 @@ class TestDepartmentAPI:
         res = api_client.post(self.url, {"name": " 経理部 "}, format="json")
         assert res.status_code == 201, res.json()
         assert res.json()["name"] == "経理部"
+        assert res.json()["member_count"] == 0
         assert api_client.post(self.url, {"name": "経理部"}, format="json").status_code == 400
         members = f"{self.url}{res.json()['id']}/members/"
 

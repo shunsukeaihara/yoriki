@@ -62,7 +62,7 @@ const formatArguments = (call: ToolCallInfo) => JSON.stringify(call.arguments, n
       <MarkdownContent v-if="entry.kind === 'text'" :text="entry.text" class="text-sm text-muted" />
       <UChatTool
         v-else-if="entry.kind === 'tool'"
-        :text="toolLabel(entry.call.name, t)"
+        :text="toolLabel(entry.call, t)"
         :icon="entry.result?.isError ? 'i-lucide-triangle-alert' : 'i-lucide-wrench'"
         :suffix="entry.result?.isError ? $t('エラー') : undefined"
         :loading="active && !entry.result"

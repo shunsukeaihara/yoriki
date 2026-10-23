@@ -3,10 +3,10 @@ name: backend
 
 on:
   pull_request:
-    paths: ['api/**', 'mise.toml', 'ruff.toml', '.github/workflows/backend.yml']
+    paths: ['api/**', 'sandbox/**', 'mise.toml', 'ruff.toml', '.github/workflows/backend.yml']
   push:
     branches: [main]
-    paths: ['api/**', 'mise.toml', 'ruff.toml', '.github/workflows/backend.yml']
+    paths: ['api/**', 'sandbox/**', 'mise.toml', 'ruff.toml', '.github/workflows/backend.yml']
 
 permissions:
   contents: read
@@ -57,3 +57,47 @@ jobs:
       - run: uv run pytest
       - run: uv run python src/manage.py makemigrations --check --dry-run
       - run: uv run python src/manage.py spectacular --file /tmp/schema.yaml --validate --fail-on-warn
+
+  # LauncherとSandboxのTool（runtime、harness）を、実際のDockerとSandboxのイメージで確かめる
+  # （design.md §7.2の対策の1）。イメージがないと飛ばすテストを、ここでは必ず動かす
+  sandbox-runner:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: yoriki
+          POSTGRES_USER: yoriki
+          POSTGRES_PASSWORD: yoriki
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U yoriki -d yoriki"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DJANGO_SETTINGS_MODULE: app.settings
+      YORIKI_SECRET_KEY: ci-only-not-secret
+      YORIKI_DATABASE_NAME: yoriki
+      YORIKI_DATABASE_USER: yoriki
+      YORIKI_DATABASE_PASSWORD: yoriki
+      YORIKI_DATABASE_HOST: localhost
+      YORIKI_DATABASE_PORT: '5432'
+      # Pythonはmise.tomlの版を使い、uvにはダウンロードさせない
+      UV_PYTHON_DOWNLOADS: never
+      YORIKI_SANDBOX_TEST_IMAGE: yoriki-sandbox-docs:ci
+      YORIKI_SANDBOX_TEST_REQUIRED: '1'
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('api/uv.lock') }}
+      - run: uv sync --locked
+      - name: Sandboxのイメージをビルドする
+        run: docker build -f images/docs/Dockerfile -t "$YORIKI_SANDBOX_TEST_IMAGE" .
+        working-directory: sandbox
+      - run: uv run pytest -m sandbox

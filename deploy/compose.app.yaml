@@ -72,6 +72,8 @@ services:
       - /var/lib/yoriki/workspaces:/var/lib/yoriki/workspaces
       - /var/run/docker.sock:/var/run/docker.sock
     group_add: ['${YORIKI_DOCKER_GID:-999}']
+    # Dockerをuserns-remapで動かしても、qclusterは再マップしない（Dockerソケットと作業領域を使うため。deployment.md §7.1）
+    userns_mode: host
     stop_grace_period: 10m # 実行中のRunがCheckpointを保存するまで待つ
 
   # apiのイメージに入れた静的ファイルを、nginxが読む共有ボリュームへコピーして終わる。

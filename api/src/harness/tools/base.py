@@ -12,6 +12,8 @@ from llm.providers.base import Part, TextPart, ToolCall, ToolDefinition
 if TYPE_CHECKING:
     from run.models import ExecutionAttempt, Run
 
+    from ..sandbox import SandboxSession
+
 
 class Effect(IntEnum):
     READ = 1  # 読むだけ
@@ -20,11 +22,33 @@ class Effect(IntEnum):
     INTERACT = 4  # 利用者とのやり取り
 
 
+def _no_version(_path: str) -> str | None:
+    return None
+
+
+def _not_interrupted() -> bool:
+    return False
+
+
 @dataclass(frozen=True)
 class ToolContext:
     run: "Run"
     attempt: "ExecutionAttempt"
     call: ToolCall
+    # ToolInvocationのuid。出力を退避するファイルの名前に使う（harness.md §7.7）
+    invocation: str = ""
+    session: "SandboxSession | None" = None
+    # 読んだファイルの版（内容のSHA-256）。write・edit が読んでから書くために使う（harness.md §7.8）
+    file_version: Callable[[str], str | None] = _no_version
+    # 取消・追加指示が届いた。長く待つToolは待つのをやめる
+    interrupted: Callable[[], bool] = _not_interrupted
+    # 出力を退避したSandboxの中のファイル。Runnerが結果のmetaに記録し、障害で消えたときに知らせる
+    spilled: list[str] = field(default_factory=list)
+
+    def sandbox_session(self) -> "SandboxSession":
+        if self.session is None:
+            raise RuntimeError("this tool needs a sandbox")
+        return self.session
 
 
 @dataclass(frozen=True)
@@ -62,6 +86,8 @@ class Tool:
     replay_safe: bool = False
     # 同じ応答の中で、ほかのToolと一緒に呼ばせない（ask_user、submit_result）
     alone: bool = False
+    # Sandboxを使う。呼ばれた時点でSandboxを起動する（design.md §7.3）
+    needs_sandbox: bool = False
 
     def definition(self) -> ToolDefinition:
         return ToolDefinition(self.name, self.description, self.parameters)

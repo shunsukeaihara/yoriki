@@ -1,13 +1,13 @@
 # Yoriki — 社内AI Agent基盤 設計企画書
 
 作成日：2026年10月2日  
-更新日：2026年10月21日  
-版：0.23 設計案  
+更新日：2026年10月22日  
+版：0.24 設計案  
 対象：サービス企画、開発、運用担当
 
 プロダクト名はYoriki（よりき）とする（0.16でYuhitsuから変更）。同名の製品・サービスがあることは承知の上で、検索での見つけやすさは重視しない。名称の商標・ドメイン等の確認は本設計の対象外とする。
 
-主な改訂内容は§15を参照。0.19では、業務ごとのAgent（業務の設定）とSkillを束ねる業務のPluginをやめ、標準のエージェント1つとSkillを中心とするモデルにした（§3.1）。0.20では、Webhookのpayloadをそのまま渡し、必要な項目だけを取り出す受け取り方にした（§4.2）。0.21では、ハーネスの設計を [harness.md](harness.md) にまとめ、コマンドを常駐のシェルではなく呼出しごとに実行する方式にした（§4.8、§7.5）。0.22では、Sandboxの頻出ライブラリをイメージのPythonに入れ、Run専用の環境はその上の薄い環境にした（§7.6）。0.23では、Runtime ProfileをSkillではなくRunの単位で決めることにした（§7.3）。
+主な改訂内容は§15を参照。0.19では、業務ごとのAgent（業務の設定）とSkillを束ねる業務のPluginをやめ、標準のエージェント1つとSkillを中心とするモデルにした（§3.1）。0.20では、Webhookのpayloadをそのまま渡し、必要な項目だけを取り出す受け取り方にした（§4.2）。0.21では、ハーネスの設計を [harness.md](harness.md) にまとめ、コマンドを常駐のシェルではなく呼出しごとに実行する方式にした（§4.8、§7.5）。0.22では、Sandboxの頻出ライブラリをイメージのPythonに入れ、Run専用の環境はその上の薄い環境にした（§7.6）。0.23では、Runtime ProfileをSkillではなくRunの単位で決めることにした（§7.3）。0.24では、snapshotを戻せないWorkerでの再開を、空のWorkspaceで続けてエージェントに知らせる扱いにした（§7.9）。
 
 ## 1 目的と基本方針
 
@@ -1122,11 +1122,11 @@ Workspace Persistence Adapterの契約は、capture、verify、restore、release
 
 WorkspaceSnapshotにはsnapshot_id、schema_version、Adapter ID・実装版・設定版、Run／Attempt／Checkpoint、保存時刻、ファイル一覧・相対path・hash・Artifact参照、Environment Revisionを持たせる。通常はworkとoutputの必要内容を保存し、inputとmasterは固定Resource Versionから再取得する。envはimage digestと、追加したpackageのlock・保管wheelから再構築する。メモリ、実行中process、接続、開いたファイルハンドルは保存しない。
 
-基本の退避タイミングは、再開可能なTool境界、WAITING_USERへの移行、正常完了時とする。正常完了時にも続行用の最終snapshotを保存し、成功Runの作業領域を消した後に実際の最終ファイルから続けられるようにする。頻度・容量・再開保持期限はセットアップの既定値と業務ポリシーで制限する。再開を提供しない業務を設ける場合はその状態を明示し、保存失敗を黙って省略しない。
+基本の退避タイミングは、再開可能なTool境界、WAITING_USERへの移行、正常完了時とする。正常完了時にも続行用の最終snapshotを保存し、成功Runの作業領域を消した後に実際の最終ファイルから続けられるようにする。同じ会話の次の依頼（子のRun）は、親のRunの最後のCheckpointから始める。Sandboxを使わずに終わった依頼にはCheckpointがないので、さらに前の依頼をたどる。頻度・容量・再開保持期限はセットアップの既定値と業務ポリシーで制限する。再開を提供しない業務を設ける場合はその状態を明示し、保存失敗を黙って省略しない。
 
 snapshot本体・Manifest・環境参照が利用可能であることをverifyした後、対応CheckpointをDBで確定する。通常の待機・完了では、必要なsnapshotを保存する前にWorkspaceを解放しない。保存障害は上限付きで再試行し、必須の永続化ができなければ完了扱いにしない。取消要求やWorker障害では最新の退避ができない場合があるため、停止を優先し、最後に確定したCheckpointと未保存範囲を記録する。
 
-再開は元snapshotを変更せず、新しいAttempt専用領域への復元から始める。対応するformat・Adapter・image・platformを検証し、利用できない場合は再開不可または準備待ちと表示する。snapshotやarchiveの相対path、ファイル数、展開量、hashを検証し、外部から埋め込まれた絶対path、symlink、特殊ファイルを展開しない。
+再開は元snapshotを変更せず、新しいAttempt専用領域への復元から始める。対応するformat・Adapter・image・platformを検証する。snapshotがこのWorkerから読めない場合（Workerのローカルディスクに保存したsnapshotを、別のWorkerで再開した等）は、再開を止めずに空のWorkspaceで続け、そのことと、作り直す必要があることをエージェントに知らせる。会話を止めるより、利用者とエージェントが状況を見て続けられる方がよいため。snapshotやarchiveの相対path、ファイル数、展開量、hashを検証し、外部から埋め込まれた絶対path、symlink、特殊ファイルを展開しない。
 
 Conversation内の続行は親Runの最終Checkpointを明示的に参照し、複数Runで一つの可変Workspaceを共有しない。別タスクへの暗黙の状態持越しを避け、継続的に共有する知識やファイルはSkill／Resourceの公開操作で管理する。Workerが失われても、確定済みsnapshotと環境定義から他Workerへ復元できる。
 
@@ -1702,3 +1702,4 @@ Sandboxイメージの定義は本体と同じリポジトリの `sandbox/` で�
 | 0.21 | 2026年10月21日 | ハーネス（Runner）の設計を [harness.md](harness.md) にまとめた。公開されているハーネス（DeepSeek Harness、OpenCode、Codex CLI、Gemini CLI、OpenHands、SWE-agent）を読んで決めた。コマンドは常駐のシェルを持たず、呼出しごとに `docker exec` で実行し、cwdはRunの状態に持つ。timeoutまでに終わらないコマンドはバックグラウンドのジョブへ移す。RunEventにモデル用の内容を持たせ、モデルへの入力をすべてRunEventから組み立てる。CheckpointにRunEventのsequenceを持たせ、Connectorの書込みの操作に実行前の確認を必須にする設定を加えた。Web検索・Web取得はMVPの後にConnectorとして加え、各社のLLMに組み込みのWeb検索は基盤管理者が許可したときだけ使う（§2、§4.8、§4.9.3、§5.1、§7.5） |
 | 0.22 | 2026年10月22日 | Sandboxの頻出ライブラリは、イメージのPythonにlockから入れ、Run専用の仮想環境 `/workspace/env` はその上に `--system-site-packages` で作る薄い環境（追加したpackageだけを持つ）にした。頻出ライブラリをRunごとにコピー・インストールしないので、起動が速く、tmpfsのメモリを使わない。基底のsite-packagesはimage digestとlockで固定されるので、Environment Revisionはimage digestと追加したpackageのlockで表す（§7.1、§7.6、§7.7、§7.9） |
 | 0.23 | 2026年10月22日 | Runtime ProfileをSkillごとに持たず、Runの単位で決めることにした。1つのRunで複数のSkillを読み込み、Sandboxは1つなので。基盤管理者が既定を1つ決め、SandboxのToolを使うRunはRunを始めるときにその版を固定する。用途の違うイメージは、必要になったらTask Definition等で選べるようにする。登録のときは、レジストリのAPIでdigest・platform・契約番号を確かめる（§3.1、§3.3、§5.1、§7.3、§10.1） |
+| 0.24 | 2026年10月22日 | Workspace snapshotを戻せないWorkerでの再開（Workerのローカルディスクに保存したsnapshotを別のWorkerで再開した等）は、再開不可とせず、空のWorkspaceで続けてエージェントに知らせることにした。同じ会話の次の依頼は、親のRun（Sandboxを使わなかった依頼は、さらに前の依頼）の最後のCheckpointから始める。snapshotの保存先は Storage Backend と同じ契約の抽象にし、初期はWorkerのローカルディスクに置く（§7.9） |

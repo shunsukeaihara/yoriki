@@ -130,7 +130,7 @@ networks:
 
 - **公開するポートはnginxの443（と80のリダイレクト）だけ。** api、postgres等のポートはホストへpublishしない。
 - **Dockerソケットはqclusterにだけ渡す。** apiやfrontendには渡さない（design.md §7.3）。Dockerソケットはホストのroot権限と同等なので、qclusterのコンテナには必要なもの以外をmountしない。将来は、Launcherをホスト上の専用プロセスに分けるか、rootless Dockerにする。
-- **workspacesはホストとコンテナで同じパスにする。** qclusterの中から見たパスで、ホストのdockerdにbind mountを指示するため。パスがずれると、Sandboxに空のディレクトリがmountされる。
+- **workspacesはホストとコンテナで同じパスにする。** qclusterの中から見たパスで、ホストのdockerdにbind mountを指示するため。パスがずれると、Sandboxに空のディレクトリがmountされる。ディレクトリは、qclusterのコンテナの利用者（uid 10001）が書けるように前もって作る（§7.1。ないとDockerがrootの持ち物として作り、Workspaceを保存できない）。
 - **Sandboxはcomposeのサービスにしない。** LauncherがRunごとに `network_mode: none` 等の制限付きで起動する（design.md §7.2）。
 - **外へ通信するサービス**：api（LLM、Connector、外部連携）、qcluster（LLM、配信、イメージのpull）、channel-listener（Slack等への常時接続）は、`backend` に加えて外へ出られる `egress` ネットワークにも参加させる。postgresは参加させない。
 - **migrateは自動で実行しない。** apiの起動時に実行すると、複数のプロセスが同時にmigrationを走らせるため。更新手順（§6）で明示的に実行する。
@@ -284,6 +284,39 @@ docker compose -f deploy/compose.yaml exec api python manage.py resume_workers
 - **ログ**：すべてのサービスはstdoutにJSONで出力する。Dockerのlogging driverでローテーションを設定する（`max-size`、`max-file`）。Sandboxの出力はRunの記録として保存し、ホストのログには流さない。
 - **バックアップ**：`pg_dump` と、Local保存のobjectsのディレクトリを同じ時点で取得する（design.md §10）。復元手順を定期的に試す。
 - **掃除**：使わなくなったSandboxイメージは、RunやCheckpointが参照していないことを確認してから削除する（design.md §10.1）。`docker image prune` を無条件に実行しない。
+- **Sandboxのコンテナ**：LauncherはAttemptを終えるときにSandboxを `docker rm -f` で消す。Workerが落ちて残ったものは、次にSandboxを起動するときに、終わったAttemptのもの（ラベル `org.yoriki.attempt`）を探して消す。
+- **Workspaceのsnapshot**：`/var/lib/yoriki/workspaces/snapshots` に、Runごとのsnapshot（tar）がたまる。保持期限での削除はまだない（docs/status.md §3）。
+
+### 7.1 Sandboxを動かすホスト
+
+Sandboxから脱出されたときの影響を小さくするための手順（design.md §7.2の対策の2・4）。qclusterを動かすサーバー（単一ホストならそのホスト、分けるならWorkerサーバー）で行う。
+
+**作業領域**：qclusterのコンテナの利用者（uid 10001）が書けるディレクトリを、ホストとコンテナで同じパスに用意する（§3.1）。ジョブの出力とWorkspaceのsnapshotを置く。Sandboxにはmountしない（Sandboxの書ける場所はすべて大きさを決めたtmpfs）。
+
+```bash
+sudo install -d -o 10001 -g 10001 -m 0700 /var/lib/yoriki/workspaces
+```
+
+**ホストの更新（対策の2）**：カーネル、Docker Engine、containerd、runcの脆弱性がそのままSandboxからの脱出につながるので、更新を止めない。
+
+- Dockerは公式のaptリポジトリから入れ、`unattended-upgrades` の対象に `docker-ce`、`containerd.io` とカーネルを含める（Ubuntuの例：`/etc/apt/apt.conf.d/50unattended-upgrades` の `Origins-Pattern` に `origin=Docker` を足す）。
+- カーネルの更新は再起動するまで効かない。`/var/run/reboot-required` を見て、月に1回など決まった時間に再起動する。再起動の前にWorkerをdrainする（§6の2）。
+- Dockerを更新すると動いているコンテナが止まる（`live-restore` を使わない場合）。実行中のRunは中断され、Reconcilerが別のAttemptでやり直す。
+
+**userns-remap（対策の4）**：コンテナの中のroot（uid 0）を、ホストの権限のないuidに対応させる。Sandboxの利用者（uid 10001）も、ホストでは別のuidになる。
+
+```json
+// /etc/docker/daemon.json
+{ "userns-remap": "default" }
+```
+
+- 有効にした後は、Dockerの保存先が変わるので、イメージを取り直す（以前のイメージ・コンテナ・named volumeは見えなくなる）。
+- qclusterは `userns_mode: host` で動かす（`compose.app.yaml` に指定済み）。Dockerソケットはホストのroot権限と同等なので、再マップしても守れるものがなく、作業領域のbind mountの所有者もそのままにできるため。LauncherはSandboxに `userns_mode: host` を付けさせない（起動後の確認で断る）。
+- 単一ホストの構成では、ほかのサービス（postgres、nginx等）も再マップされ、bind mount（`/var/lib/yoriki/backups`、証明書等）の所有者を合わせ直す必要がある。Workerサーバーを分ける構成（§3.2）なら、そのサーバーのqclusterとSandboxだけが対象になる。
+
+**rootless Docker**：Dockerのデーモン自体を権限のない利用者で動かす方法もある。dockerdが乗っ取られてもホストのrootにならない。qclusterにはその利用者のソケット（`$XDG_RUNTIME_DIR/docker.sock`）を `/var/run/docker.sock` としてmountする。cgroup v2とsystemdの委譲が要り、資源の上限（`--memory`・`--cpus`・`--pids-limit`）が効くことを確かめてから使う。
+
+Launcherは、Dockerがuserns-remapでもrootlessでもなければ、qclusterのログに警告を出す（起動は止めない）。
 
 ---
 

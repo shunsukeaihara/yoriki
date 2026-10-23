@@ -1,8 +1,11 @@
+import os
 from typing import Any
 
+import docker
 import psycopg
 import pytest
 from django.conf import settings
+from docker.errors import DockerException, ImageNotFound
 from rest_framework.test import APIClient
 
 from runtime.factories import RuntimeProfileFactory
@@ -35,6 +38,28 @@ def fixture_platform_admin(db) -> User:
 def fixture_default_runtime(db) -> RuntimeProfile:
     """既定のRuntime Profile。これがないとRunを始めない（design.md §7.3）"""
     return RuntimeProfileFactory.create(is_default=True)
+
+
+@pytest.fixture(name="sandbox_image")
+def fixture_sandbox_image(settings, tmp_path) -> str:
+    """実際のDockerで動かすSandboxのイメージ（sandbox/README.md の手順でビルドしたもの）。
+
+    イメージがなければテストを飛ばす。CIのSandboxのjobでは `YORIKI_SANDBOX_TEST_REQUIRED` を付けて、飛ばさずに失敗させる
+    """
+    image = os.getenv("YORIKI_SANDBOX_TEST_IMAGE", "yoriki-sandbox-docs:dev")
+    try:
+        docker.from_env().images.get(image)
+    except (DockerException, ImageNotFound) as exc:
+        if os.getenv("YORIKI_SANDBOX_TEST_REQUIRED"):
+            raise
+        pytest.skip(f"the sandbox image {image} is not available: {exc}")
+    settings.YORIKI_SANDBOX_IMAGE_OVERRIDE = image
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path / "workspaces")
+    settings.YORIKI_SNAPSHOT_STORAGE = {
+        "BACKEND": "runtime.storage.LocalSnapshotStorage",
+        "OPTIONS": {"root": str(tmp_path / "workspaces" / "snapshots")},
+    }
+    return image
 
 
 def pytest_sessionstart(session):

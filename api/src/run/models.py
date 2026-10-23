@@ -74,6 +74,7 @@ class RunEndReason(models.IntegerChoices):
     NO_RESULT = 15, _("業務結果がない")
     ATTEMPTS = 16, _("再試行の上限")
     EXPIRED = 17, _("回答期限切れ")
+    SANDBOX = 18, _("実行環境を使えない")
     INTERNAL = 99, _("内部のエラー")
 
 
@@ -245,6 +246,9 @@ class ExecutionAttempt(models.Model):
     started = models.DateTimeField(auto_now_add=True)
     ended = models.DateTimeField(_("終了日時"), null=True, blank=True)
     failure = models.TextField(_("失敗の理由"), blank=True)
+    # Sandboxを起動したときのWorkerのplatformと、使ったイメージ（platformのmanifestのdigest。design.md §7.7）
+    sandbox_platform = models.CharField(_("Sandboxのplatform"), max_length=50, blank=True)
+    sandbox_image = models.CharField(_("Sandboxのイメージ"), max_length=400, blank=True)
 
     class Meta:
         verbose_name = _("実行の試み")
@@ -296,6 +300,7 @@ class RunEventKind(models.IntegerChoices):
     ASSISTANT_MESSAGE = 11, _("エージェントの応答")
     ASSISTANT_ATTEMPT = 12, _("失敗した応答")
     TOOL_RESULT = 21, _("Toolの結果")
+    JOB_FINISHED = 22, _("ジョブの終了")
     REQUEST_HEADER = 30, _("要求の中身")
     CONTEXT = 31, _("実行時の文脈")
     COMPACTION = 32, _("文脈の圧縮")
@@ -455,6 +460,47 @@ class ToolInvocation(models.Model):
 
     def __str__(self):
         return f"{self.name}({self.call_id})"
+
+
+class Checkpoint(models.Model):
+    """Workspaceのsnapshotを確定した区切り（design.md §5.4・§7.9、harness.md §11.1）。作成後に変更・削除しない。
+
+    新しいAttemptは、そのRunの最後のCheckpointからWorkspaceを戻す。同じ会話の次の依頼（子のRun）は、親のRunの最後の
+    Checkpointから始める。snapshotの中身は保存先（runtime/storage.py）にあり、ここには場所と版だけを持つ
+    """
+
+    uid = NanoidField(unique=True)
+    run = models.ForeignKey(Run, on_delete=models.CASCADE, related_name="checkpoints")
+    attempt = models.ForeignKey(ExecutionAttempt, on_delete=models.PROTECT, related_name="+")
+    # このsnapshotに反映されているRunEventの最後のsequence
+    sequence = models.PositiveIntegerField(_("RunEventの順序"))
+    storage = models.CharField(_("保存先"), max_length=100)
+    key = models.CharField(_("保存先のkey"), max_length=300)
+    size = models.PositiveBigIntegerField(_("大きさ"))
+    sha256 = models.CharField(_("SHA-256"), max_length=64)
+    # 保存の前に止めたバックグラウンドのジョブ（[{"job_id", "command"}]）。再開のときにモデルに知らせる
+    stopped_jobs = models.JSONField(_("止めたジョブ"), default=list, blank=True)
+
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("Checkpoint")
+        verbose_name_plural = verbose_name
+        indexes = [models.Index(fields=["run", "-sequence"])]
+
+    def __str__(self):
+        return f"{self.run_id}@{self.sequence}"
+
+    @classmethod
+    def latest_for(cls, run: Run) -> "Checkpoint | None":
+        """Runの最後のCheckpoint。なければ同じ会話の前の依頼（親をたどったRun）の最後のもの。
+        Sandboxを使わなかった依頼にはCheckpointがないので、さらに前の依頼のものを使う。
+        親は同じ会話の1つ前のRunなので、会話の中でこのRunまでのRunを新しい順に探す"""
+        return (
+            cls.objects.filter(run__conversation_id=run.conversation_id, run_id__lte=run.pk)
+            .order_by("-run_id", "-sequence", "-pk")
+            .first()
+        )
 
 
 class RunPrompt(models.Model):

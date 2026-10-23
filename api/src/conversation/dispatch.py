@@ -100,6 +100,9 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
         raise CannotStart(
             _("コマンドを動かす環境（Runtime Profile）が登録されていません。基盤管理者に問い合わせてください。")
         )
+    if parent is None:
+        # 同じ会話の前の依頼。作業ファイルはその最後のCheckpointから引き継ぐ（design.md §7.9）
+        parent = Run.objects.filter(conversation=conversation).order_by("-created", "-pk").first()
     run = Run.objects.create(
         conversation=conversation,
         parent=parent,

@@ -477,13 +477,19 @@ Traceback (most recent call last):
 - 時間切れ・取消では、そのコマンドのプロセスグループだけを止めればよく、壊れたシェルを作り直す処理が要らない。
 - Attemptが変わってもシェルの状態を引き継ぐ必要がない。Workspaceはsnapshotから戻し、cwdはRunの状態から戻す（design.md §7.5「セッションとprocessはAttemptに属し、別Workerへの再開で引き継がない」）。
 
-Docker操作はLauncher（design.md §7.3）にまとめ、Runnerは決まった操作だけを呼ぶ。
+Docker操作はLauncher（design.md §7.3、`runtime/launcher.py`）にまとめ、Runnerは決まった操作だけを呼ぶ。
+
+- DockerはSDK（docker-py）でソケットを通して操作し、apiのイメージにdocker CLIを入れない。execのIDを持てるので、終了と終了コードをexecの状態（inspect）から読める。
+- 起動したら、inspectの結果でsandbox/CONTRACT.md §2の制限がかかっていることを確かめ直し、違えば使わずに消す（design.md §7.2の対策の1）。イメージの契約番号のラベルもWorkerで確かめる。
+- SandboxはAttemptごとに1つで、最初にSandboxのToolが呼ばれた時点で起動し、最後のCheckpointからWorkspaceを戻す（Runに自分のCheckpointがなければ、同じ会話の前の依頼のもの。design.md §7.9）。
+- Attemptを終えるとき（確認待ち・完了・停止・失敗）は、ジョブを止め、`kill` の `all` の後に `/workspace/work`・`/workspace/output` をSandboxの中のtarで取り出して保存し（tmpfsは `docker cp` で読めない）、Checkpointを記録してから状態を変え、最後に `docker rm -f` で消す。確認待ち・完了で保存できなければ、Sandboxの障害として別のAttemptでやり直す。
+- 保存先は `runtime/storage.py` の抽象（design.md §7.8のStorage Backendと同じ契約）で、初期はWorkerのローカルディスク。
 
 ### 8.2 コマンドの環境
 
 | 項目 | 扱い |
 |---|---|
-| cwd | Runの状態に持つ（初期値 `/workspace/work`）。`shell` の `workdir` で変えられ、`/workspace` の外は断る。コマンドの中の `cd` は次へ残らない |
+| cwd | `/workspace/work`。`shell` の `workdir` で呼出しごとに変えられ、`/workspace` の外は断る。コマンドの中の `cd` は次へ残らない（Runの状態として持ち越すcwdは、要るとわかったら加える） |
 | 環境変数 | 毎回同じ値を渡す：`HOME=/workspace/work/.home`、`PATH`（先頭に `/workspace/env/bin`）、`LANG=C.UTF-8`、`TZ`（導入先の設定）、`PAGER=cat`、`GIT_PAGER=cat`、`TERM=dumb`、`NO_COLOR=1`、`PYTHONUNBUFFERED=1`、`MPLBACKEND=Agg`、各種キャッシュの場所（`/workspace/work/.cache`）。コマンドの中の `export` は次へ残らない |
 | Pythonの環境 | `PATH` の先頭がRun専用の仮想環境なので、`python`・`pip list` はいつもそれを指す（`activate` は要らない） |
 | 標準入力 | 閉じる（`/dev/null`）。入力を待つコマンドはすぐ終わる |
@@ -495,6 +501,7 @@ Docker操作はLauncher（design.md §7.3）にまとめ、Runnerは決まった
 - `shell` は、ジョブの終了を `timeout_seconds` まで待つ。終わればその結果を返す。終わらなければ、それまでの出力と `job_id` を返し、ジョブは続ける（DeepSeek Harnessの方式）。`background: true` なら待たずに `job_id` を返す。
 - 終わったジョブは、次のステップの前に `job.finished` として記録し、`context.snapshot` でモデルに知らせる。モデルは `job_output` で出力を読む。待つだけのループ（`sleep` と確認の繰返し）をしないよう、説明文に書く。
 - 同時に動かせるジョブは4つまで。1つのジョブの実行時間の上限はRuntime Profileで決める（初期値30分）。
+- Worker側に書く出力は、1つのジョブで64MB、1つのAttemptの合計で512MBまで。超えた分は捨て（コマンドは止めない）、捨てたことを出力に書く。Workerのディスクを埋めさせないため。
 - 確認待ち・完了・取消でAttemptを終えるときは、動いているジョブを止めてから、Checkpointを確定する（design.md §7.5）。ジョブはプロセスグループで止めるが、コマンドが `setsid` 等でグループを離れると届かないので、最後に `yoriki-sandbox kill` の `all`（PID 1以外のすべて）で止める（sandbox/CONTRACT.md §4.2）。止めたことは、再開時に `context.snapshot` でモデルに知らせる。
 - 最後の応答の前に、動いているジョブがあれば、Runnerはその旨をモデルに返して、待つか止めるかを決めさせる（1回だけ）。
 
@@ -671,7 +678,7 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 
 - モデルの呼出しの前に、要求の組立に使ったRunEventがすべて確定していることを確かめる。Toolの実行の前に `tool.call` を確定する（DeepSeek Harness・OpenHandsの方式）。すべての書込みでleaseとfencing tokenを照合する（design.md §6.3）。
 - 新しいAttemptでは、RunEventの最新の `compaction` とその後のイベントから文脈を組み立てる（Codexの方式）。WorkspaceはCheckpointのsnapshotから、cwdはRunの状態から戻す。
-- **Workspaceと記録の食い違い**：CheckpointにはWorkspace snapshotと、その時点のRunEventのsequenceを一緒に記録する（design.md §5.4）。CheckpointはSandboxのファイルを変えたToolを実行したステップの区切りで確定する（大きさの上限の中で。design.md §7.9）。障害で最後のCheckpointより後のRunEventが残っているときは、記録を消さずに、次の内容の `context.snapshot` を追記してから続ける。
+- **Workspaceと記録の食い違い**：CheckpointにはWorkspace snapshotと、その時点のRunEventのsequenceを一緒に記録する（design.md §5.4）。CheckpointはSandboxのファイルを変えたToolを実行したステップの区切りで確定する（大きさの上限の中で。design.md §7.9）。初期は、Attemptを終えるとき（確認待ち・完了・停止・失敗）だけ確定する（§8.1）。障害で最後のCheckpointより後のRunEventが残っているときは、記録を消さずに、次の内容の `context.snapshot` を追記してから続ける。
   - 作業ファイルを、sequence Nの時点（最後に保存した区切り）に戻したこと。
   - それより後にSandboxのファイルを変えたTool呼出し（`shell`・`write`・`edit`・`install_python_packages` 等）の一覧と、その結果は今のファイルに反映されていないこと。必要なら確かめてやり直すこと。
   - 読んだファイルの版の記録（§7.8）は、sequence Nまでのものだけを使う。

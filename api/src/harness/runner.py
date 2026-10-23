@@ -69,7 +69,9 @@ from . import compaction
 from .context import (
     ADDITIONAL_INSTRUCTION_PREFIX,
     RUNTIME_CONTEXT_TAG,
+    Item,
     build_items,
+    inherited_items,
     parts_to_json,
     pending_tool_calls,
     provider_key,
@@ -157,6 +159,8 @@ class Runner:
         self.last_call_key = ""
         self.last_error_key = ""
         self.error_repeats = 0
+        # 同じ会話の前の依頼から引き継ぐ文脈（親のRunは終わっていて変わらないので、最初に1回だけ読む）
+        self.inherited: list[Item] = []
 
     # --- 入口 ---
 
@@ -204,6 +208,7 @@ class Runner:
         """結果のないTool呼出しを閉じ、Workspaceの食い違いと実行時の文脈の変化を追記する（harness.md §11.1）"""
         events = self._events()
         self.start_sequence = events[-1].sequence if events else 0
+        self.inherited = inherited_items(self.run_obj)
         self.tools = self._exposed_tools()
         tools = {t.name: t for t in self.tools}
         # 実行中のRunに回答待ちの確認が残っていれば、前のAttemptが待ちに移る前に止まったもの。答えられないので閉じる
@@ -320,7 +325,7 @@ class Runner:
         prompt = RunPrompt.store(system, [self._tool_json(t) for t in self.tools])
         events = self._events()
         self._record_header(prompt, events)
-        items = build_items(run, events)
+        items = build_items(run, events, self.inherited)
 
         if compaction.estimate_tokens(events, items) > compaction.threshold(version):
             return self._compact(system, items)

@@ -1,6 +1,7 @@
 """RunEventからモデルへの要求を組み立てる（harness.md §5）。
 
 同じRunEventの並びとモデル設定の版からは、どのWorkerでも同じ要求になる。圧縮は範囲の置き換えとして読む。
+同じ会話の次の依頼（子のRun）は、親のRunの文脈をそのまま先頭に引き継ぐ（design.md §5.1、harness.md §5.6）。
 """
 
 from collections.abc import Iterable
@@ -46,10 +47,61 @@ class Item:
     message: Message
 
 
-def build_items(run: Run, events: Iterable[RunEvent]) -> list[Item]:
-    """モデルに見せる履歴。推論の途中経過は、同じ接続・同じモデルの応答のものだけを戻す（harness.md §5.5）"""
-    key = provider_key(run)
-    items: list[Item] = []
+# 引き継いだ文脈の項目の sequence。このRunの記録（1から）より前に並び、圧縮では1つのまとまりとして扱う
+INHERITED_SEQUENCE = 0
+UNFINISHED_CALL = (
+    "[The earlier request ended before this tool call finished, so its result is unknown. Check the current state "
+    "before relying on it.]"
+)
+
+
+def build_items(run: Run, events: Iterable[RunEvent], inherited: Iterable[Item] = ()) -> list[Item]:
+    """モデルに見せる履歴。`inherited`（inherited_items()）を先頭に置く。
+    推論の途中経過は、同じ接続・同じモデルの応答のものだけを戻す（harness.md §5.5）"""
+    return _build(provider_key(run), events, list(inherited))
+
+
+def inherited_items(run: Run) -> list[Item]:
+    """親のRun（同じ会話の前の依頼）の、最後にモデルへ送った文脈と同じ履歴。親のさらに前も、親が引き継いだものとして
+    含む。親は終わっていて記録は変わらないので、Runnerは1回だけ読む。結果のないまま終わったTool呼出しには、
+    結果が分からないことを結果として添える（プロバイダは呼出しと結果の対応を求める）"""
+    return [Item(INHERITED_SEQUENCE, item.kind, item.message) for item in _ancestor_items(run, provider_key(run))]
+
+
+def _ancestor_items(run: Run, key: dict[str, str]) -> list[Item]:
+    parent = run.parent
+    if parent is None:
+        return []
+    events = list(RunEvent.objects.filter(run=parent).order_by("sequence"))
+    # 親が引き継いだ部分をまるごと圧縮していれば、さらに前は読まなくてよい
+    covered = any(e.kind == RunEventKind.COMPACTION and e.data["from"] <= INHERITED_SEQUENCE for e in events)
+    above = [] if covered else [Item(INHERITED_SEQUENCE, i.kind, i.message) for i in _ancestor_items(parent, key)]
+    return _close_unfinished_calls(_build(key, events, above))
+
+
+def _close_unfinished_calls(items: list[Item]) -> list[Item]:
+    result: list[Item] = []
+    pending: dict[str, tuple[Item, str]] = {}
+
+    def flush() -> None:
+        for call_id, (owner, name) in pending.items():
+            message = Message("tool", UNFINISHED_CALL, tool_call_id=call_id, tool_name=name, is_error=True)
+            result.append(Item(owner.sequence, RunEventKind.TOOL_RESULT, message))
+        pending.clear()
+
+    for item in items:
+        if item.message.role == "tool":
+            pending.pop(item.message.tool_call_id, None)
+        else:
+            flush()
+        result.append(item)
+        for call in item.message.tool_calls:
+            pending[call.id] = (item, call.name)
+    flush()
+    return result
+
+
+def _build(key: dict[str, str], events: Iterable[RunEvent], items: list[Item]) -> list[Item]:
     for event in events:
         data = event.data
         match event.kind:

@@ -72,7 +72,7 @@ class CompactionRange:
 
 def choose_range(items: list[Item]) -> CompactionRange | None:
     """今見えている履歴のうち、新しい側の約2割を残し、その手前までを置き換える。
-    Tool呼出しとその結果の間では切らない"""
+    Tool呼出しとその結果の間と、前の依頼から引き継いだ文脈の途中では切らない"""
     if len(items) < 4:
         return None
     weights = [len(item.message.text) + 200 * len(item.message.tool_calls) + 50 for item in items]
@@ -84,6 +84,11 @@ def choose_range(items: list[Item]) -> CompactionRange | None:
     while cut > 1 and items[cut].kind not in (RunEventKind.USER_MESSAGE, RunEventKind.ASSISTANT_MESSAGE):
         cut -= 1
     if cut <= 1:
+        return None
+    # 引き継いだ文脈（同じ sequence の並び）の途中では切らず、まるごと要約に入れる
+    while cut < len(items) and items[cut].sequence == items[cut - 1].sequence:
+        cut += 1
+    if cut >= len(items):
         return None
     covered = items[:cut]
     user_texts, total = [], 0

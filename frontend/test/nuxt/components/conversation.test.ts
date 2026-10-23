@@ -1,7 +1,7 @@
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ConversationStartForm, RunClarificationForm } from '#components'
+import { ConversationAttachmentChips, ConversationStartForm, RunClarificationForm } from '#components'
 
 const { createConversation, createMessage, answer } = vi.hoisted(() => ({
   createConversation: vi.fn(),
@@ -117,5 +117,27 @@ describe('RunClarificationForm', () => {
       comment: '',
     })
     expect(wrapper.emitted('answered')).toHaveLength(1)
+  })
+})
+
+describe('ConversationAttachmentChips', () => {
+  const item = (key: string, error = ''): PendingAttachment => ({
+    key,
+    file: new File(['x'], `${key}.csv`),
+    artifact: null,
+    uploading: false,
+    error,
+  })
+
+  it('アップロードに失敗した添付だけ、送り直せる', async () => {
+    const wrapper = await mountSuspended(ConversationAttachmentChips, {
+      props: { items: [item('ok'), item('ng', 'ファイルが大きすぎます')] },
+    })
+    const retry = wrapper.findAll('button[aria-label="アップロードし直す"]')
+    expect(retry).toHaveLength(1)
+    await retry[0]!.trigger('click')
+    expect(wrapper.emitted('retry')).toHaveLength(1)
+    await wrapper.findAll('button[aria-label="添付を外す"]')[1]!.trigger('click')
+    expect(wrapper.emitted('remove')).toEqual([['ng']])
   })
 })

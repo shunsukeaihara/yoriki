@@ -15,7 +15,13 @@ const props = defineProps<{
 }>()
 const text = defineModel<string>({ required: true })
 const mode = defineModel<string>('mode', { default: MessageMode.AUTO })
-const emit = defineEmits<{ submit: []; stop: []; attach: [files: File[]]; removeAttachment: [key: string] }>()
+const emit = defineEmits<{
+  submit: []
+  stop: []
+  attach: [files: File[]]
+  removeAttachment: [key: string]
+  retryAttachments: []
+}>()
 const { t } = useI18n()
 
 const prompt = useTemplateRef<{ $el: HTMLElement }>('prompt')
@@ -58,7 +64,11 @@ const onSubmit = () => {
     @submit="onSubmit"
   >
     <template v-if="attachments?.length" #header>
-      <ConversationAttachmentChips :items="attachments" @remove="emit('removeAttachment', $event)" />
+      <ConversationAttachmentChips
+        :items="attachments"
+        @remove="emit('removeAttachment', $event)"
+        @retry="emit('retryAttachments')"
+      />
     </template>
     <template #footer>
       <div class="flex items-center gap-2">

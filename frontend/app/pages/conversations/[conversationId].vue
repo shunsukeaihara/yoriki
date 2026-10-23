@@ -321,6 +321,7 @@ const menuItems = computed(() => [
             @stop="stop"
             @attach="attach"
             @remove-attachment="attachments.remove"
+            @retry-attachments="attachments.upload(conversationId)"
           />
         </UContainer>
       </template>

@@ -1,0 +1,41 @@
+# gVisor（runsc）を入れて、Dockerに `runsc` の実行環境として登録する（docs/deployment.md §7.1）。
+# 版は公開から2週間より前のリリースに固定し、tarのSHA-512を確かめる。版を上げるときは、両方のhashを替える
+name: install-gvisor
+description: Install gVisor (runsc) and register it with Docker
+inputs:
+  userns-remap:
+    description: Dockerのuserns-remapも有効にする（本番のWorkerと同じ構成）
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GVISOR_RELEASE: '20261005.0'
+        SHA512_X86_64: 27fed731b432d6a39d908956623fd273979fda66b3ccf4b9c12413ea417c516e18a9dc3cced403fb28efe495d64dce4251f51cf8c4d9f4a72f9833bd96b6bb35
+        SHA512_AARCH64: cb1c1ac7616f1f0e2287d39660aa9a65f1d81b866c7fa29457f78da62373baadda2d55aa96a200743dfe56193e43d2b6256af23a23d41d0b49a49b4971982435
+        USERNS_REMAP: ${{ inputs.userns-remap }}
+      run: |
+        set -euo pipefail
+        arch=$(uname -m)
+        case "$arch" in
+          x86_64) sha512=$SHA512_X86_64 ;;
+          aarch64) sha512=$SHA512_AARCH64 ;;
+          *) echo "unsupported architecture: $arch" >&2; exit 1 ;;
+        esac
+        command -v zstd >/dev/null || sudo apt-get install -y --no-install-recommends zstd
+        tmp=$(mktemp -d)
+        curl -fsSL -o "$tmp/gvisor.tar.zstd" \
+          "https://storage.googleapis.com/gvisor/releases/release/$GVISOR_RELEASE/$arch/gvisor.tar.zstd"
+        echo "$sha512  $tmp/gvisor.tar.zstd" | sha512sum -c -
+        # runsc は隣の gvisor-bin/ にある補助のプログラムも使う
+        sudo tar --zstd -xf "$tmp/gvisor.tar.zstd" -C /usr/local/bin runsc gvisor-bin
+        rm -rf "$tmp"
+        config=/etc/docker/daemon.json
+        current=$(sudo cat "$config" 2>/dev/null || echo '{}')
+        echo "$current" \
+          | jq --argjson userns "$USERNS_REMAP" \
+              '.runtimes.runsc = {path: "/usr/local/bin/runsc"} | if $userns then .["userns-remap"] = "default" else . end' \
+          | sudo tee "$config" >/dev/null
+        sudo systemctl restart docker
+        docker info --format '{{range $name, $_ := .Runtimes}}{{$name}} {{end}}{{.SecurityOptions}}'

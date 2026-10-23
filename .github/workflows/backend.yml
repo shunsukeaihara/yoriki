@@ -3,10 +3,11 @@ name: backend
 
 on:
   pull_request:
-    paths: ['api/**', 'sandbox/**', 'mise.toml', 'ruff.toml', '.github/workflows/backend.yml']
+    paths: ['api/**', 'sandbox/**', 'mise.toml', 'ruff.toml', '.github/workflows/backend.yml', '.github/actions/install-gvisor/**']
   push:
     branches: [main]
-    paths: ['api/**', 'sandbox/**', 'mise.toml', 'ruff.toml', '.github/workflows/backend.yml']
+    paths: ['api/**', 'sandbox/**', 'mise.toml', 'ruff.toml', '.github/workflows/backend.yml', '.github/actions/install-gvisor/**']
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -59,21 +60,12 @@ jobs:
       - run: uv run python src/manage.py spectacular --file /tmp/schema.yaml --validate --fail-on-warn
 
   # LauncherとSandboxのTool（runtime、harness）を、実際のDockerとSandboxのイメージで確かめる
-  # （design.md §7.2の対策の1）。イメージがないと飛ばすテストを、ここでは必ず動かす
+  # （design.md §7.2の対策の1）。イメージがないと飛ばすテストを、ここでは必ず動かす。
+  # 本番のWorkerと同じく、gVisor（runsc）とuserns-remapで動かす（design.md §7.2の対策の4・5）
+  # PostgreSQLはservicesにしない（gVisorを入れるときにDockerを再起動するので、その後にstepで起動する）
   sandbox-runner:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    services:
-      postgres:
-        image: postgres:18
-        env:
-          POSTGRES_DB: yoriki
-          POSTGRES_USER: yoriki
-          POSTGRES_PASSWORD: yoriki
-        ports: ['5432:5432']
-        options: >-
-          --health-cmd "pg_isready -U yoriki -d yoriki"
-          --health-interval 5s --health-timeout 3s --health-retries 10
     env:
       DJANGO_SETTINGS_MODULE: app.settings
       YORIKI_SECRET_KEY: ci-only-not-secret
@@ -86,6 +78,7 @@ jobs:
       UV_PYTHON_DOWNLOADS: never
       YORIKI_SANDBOX_TEST_IMAGE: yoriki-sandbox-docs:ci
       YORIKI_SANDBOX_TEST_REQUIRED: '1'
+      YORIKI_SANDBOX_TEST_RUNTIME: runsc
     defaults:
       run:
         working-directory: api
@@ -96,6 +89,15 @@ jobs:
         with:
           path: ~/.cache/uv
           key: uv-${{ runner.os }}-${{ hashFiles('api/uv.lock') }}
+      - uses: ./.github/actions/install-gvisor
+        with:
+          userns-remap: 'true'
+      - name: PostgreSQLを起動する
+        run: |
+          docker run -d --name postgres -p 5432:5432 \
+            -e POSTGRES_DB=yoriki -e POSTGRES_USER=yoriki -e POSTGRES_PASSWORD=yoriki \
+            --health-cmd "pg_isready -U yoriki -d yoriki" --health-interval 2s postgres:18
+          timeout 60 sh -c 'until [ "$(docker inspect -f {{.State.Health.Status}} postgres)" = healthy ]; do sleep 2; done'
       - run: uv sync --locked
       - name: Sandboxのイメージをビルドする
         run: docker build -f images/docs/Dockerfile -t "$YORIKI_SANDBOX_TEST_IMAGE" .

@@ -4,7 +4,7 @@ Toolを加える段階で足す）。置き換えは COMPACTION のRunEventと�
 from dataclasses import dataclass
 
 from llm.models import ModelProfileVersion
-from llm.providers.base import Message
+from llm.providers.base import ImagePart, Message
 from run.models import RunEvent, RunEventKind
 
 from .context import Item
@@ -13,6 +13,8 @@ from .context import Item
 KEEP_RATIO = 0.2
 # 利用者の発言を要約せずに残す上限（文字数）
 KEEP_USER_CHARS = 20_000
+# 画像1枚のtoken数の見積もり（長辺1568pxまでに縮小した画像。各社は1枚で千数百token）
+IMAGE_TOKENS = 1_600
 
 SUMMARY_INSTRUCTION = """You are now acting as a context compaction engine. Condense the conversation ABOVE into a \
 structured checkpoint that lets another model resume the work without losing essential context.
@@ -60,7 +62,11 @@ def estimate_tokens(events: list[RunEvent], items: list[Item]) -> int:
 
 def _item_size(item: Item) -> int:
     calls = sum(len(str(c.arguments)) + len(c.name) for c in item.message.tool_calls)
-    return len(item.message.text) + calls
+    return len(item.message.text) + calls + _image_tokens(item.message)
+
+
+def _image_tokens(message: Message) -> int:
+    return IMAGE_TOKENS * sum(1 for p in message.parts if isinstance(p, ImagePart))
 
 
 @dataclass(frozen=True)
@@ -75,7 +81,9 @@ def choose_range(items: list[Item]) -> CompactionRange | None:
     Tool呼出しとその結果の間と、前の依頼から引き継いだ文脈の途中では切らない"""
     if len(items) < 4:
         return None
-    weights = [len(item.message.text) + 200 * len(item.message.tool_calls) + 50 for item in items]
+    weights = [
+        len(item.message.text) + 200 * len(item.message.tool_calls) + _image_tokens(item.message) + 50 for item in items
+    ]
     keep, cut = sum(weights) * KEEP_RATIO, len(items)
     while cut > 1 and keep > 0:
         cut -= 1

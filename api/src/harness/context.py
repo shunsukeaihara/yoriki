@@ -4,33 +4,90 @@
 同じ会話の次の依頼（子のRun）は、親のRunの文脈をそのまま先頭に引き継ぐ（design.md §5.1、harness.md §5.6）。
 """
 
+import functools
+import io
+import logging
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from django.utils import timezone
 
-from llm.providers.base import Message, Part, TextPart, ToolCall
+from artifact.models import BlobObject
+from artifact.storage import StorageError
+from llm.providers.base import ImagePart, Message, Part, TextPart, ToolCall
 from run.models import Run, RunEvent, RunEventKind
 from runtime.launcher import WORK_DIR
+
+logger = logging.getLogger(__name__)
 
 ADDITIONAL_INSTRUCTION_PREFIX = "[Additional instruction during the work]"
 RUNTIME_CONTEXT_TAG = "<runtime_context>"
 
 
+# 1回の要求でモデルに見せる画像の数。古いものから文に置き換える（各社の1回の上限より十分に小さくする）
+MAX_IMAGES_PER_REQUEST = 20
+IMAGE_UNAVAILABLE = "[An image was here, but it is no longer available. Read the file again if you need it.]"
+IMAGE_OMITTED = "[An older image was omitted to save context. Read the file again if you need it.]"
+IMAGE_UNSUPPORTED = "[An image was here, but the current model does not accept images.]"
+
+
 def parts_to_json(parts: Iterable[Part]) -> list[dict[str, Any]]:
-    """RunEventに保存する形。画像等のbytesはArtifactの段階でArtifactの参照として保存する"""
-    result = []
+    """RunEventに保存する形。画像のbytesは保存先に書き、BlobObjectの参照だけを残す（RunEventに大きなbytesを
+    入れない）。書いてからRunEventを記録するまでに失敗したものは、参照のないobjectとして清掃で消す"""
+    result: list[dict[str, Any]] = []
     for part in parts:
         if isinstance(part, TextPart):
             result.append({"type": "text", "text": part.text})
+        elif isinstance(part, ImagePart):
+            blob = BlobObject.put(io.BytesIO(part.data))
+            result.append({"type": "image", "media_type": part.media_type, "blob": blob.uid, "size": blob.size})
         else:
             raise ValueError(f"unsupported part for storage: {type(part).__name__}")
     return result
 
 
 def parts_from_json(data: list[dict[str, Any]]) -> tuple[Part, ...]:
-    return tuple(TextPart(p["text"]) for p in data if p.get("type") == "text")
+    parts: list[Part] = []
+    for item in data:
+        if item.get("type") == "text":
+            parts.append(TextPart(item["text"]))
+        elif item.get("type") == "image":
+            content = _blob_bytes(item["blob"])
+            parts.append(ImagePart(item["media_type"], content) if content else TextPart(IMAGE_UNAVAILABLE))
+    return tuple(parts)
+
+
+# 要求のたびにRunEventから組み立て直すので、読んだ画像をWorkerのプロセスに残す（BlobObjectは不変）
+@functools.lru_cache(maxsize=MAX_IMAGES_PER_REQUEST * 2)
+def _blob_bytes(uid: str) -> bytes | None:
+    try:
+        with BlobObject.objects.get(uid=uid).open() as src:
+            return src.read()
+    except (BlobObject.DoesNotExist, StorageError, OSError):
+        logger.warning("image blob %s is not available", uid)
+        return None
+
+
+def fit_to_model(messages: list[Message], *, images: bool) -> list[Message]:
+    """送る前に、モデルの能力と上限に合わせる（harness.md §12）。画像に対応しないモデル（途中で切り替えた等）
+    には画像の代わりに断りの文を、対応するモデルには新しい側の MAX_IMAGES_PER_REQUEST 枚までを送る"""
+    keep = MAX_IMAGES_PER_REQUEST if images else 0
+    result: list[Message] = []
+    for message in reversed(messages):
+        if not any(isinstance(p, ImagePart) for p in message.parts):
+            result.append(message)
+            continue
+        parts: list[Part] = []
+        for part in reversed(message.parts):
+            if isinstance(part, ImagePart):
+                keep -= 1
+                if keep < 0:
+                    parts.append(TextPart(IMAGE_OMITTED if images else IMAGE_UNSUPPORTED))
+                    continue
+            parts.append(part)
+        result.append(replace(message, content=tuple(reversed(parts))))
+    return list(reversed(result))
 
 
 def provider_key(run: Run) -> dict[str, str]:

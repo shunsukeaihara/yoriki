@@ -12,6 +12,7 @@ from conversation.dispatch import MessageMode, post_message
 from conversation.factories import ConversationFactory
 from conversation.models import ConversationMessage
 from harness.runner import Runner
+from llm.providers.base import ImagePart
 from run.models import (
     Checkpoint,
     ClarificationRequest,
@@ -292,6 +293,27 @@ def test_independent_reads_run_together(conversation):
     # 引数の誤りも、モデルが返した順に記録する
     assert sequences == ["c1", "c0", "c2", "c3", "c4", "c5", "c6"]
     assert r["c6"]["is_error"] and "Invalid arguments" in text(r["c6"])
+
+
+def test_scanned_pdf_pages_are_sent_as_images(app_user):
+    conversation = ConversationFactory.create(owner=app_user, model_profile__version__supports_images=True)
+    run = post(conversation)
+    make = "python -c \"from PIL import Image; Image.new('RGB', (2000, 1000), 'white').save('scan.pdf')\""
+    adapter = FakeAdapter(
+        [
+            calls(("c1", "shell", shell(make))),
+            calls(("c2", "read", {"path": "/workspace/work/scan.pdf"})),
+            reply("白紙でした。"),
+        ]
+    )
+    run = execute(run, adapter)
+    assert run.status == RunStatus.COMPLETED
+    content = results(run)["c2"]["content"]
+    assert [p["type"] for p in content] == ["text", "text", "image"]
+    sent = adapter.requests[2].messages[-1]
+    image = next(p for p in sent.parts if isinstance(p, ImagePart))
+    assert image.media_type == "image/png"
+    assert image.data.startswith(b"\x89PNG")
 
 
 def test_finished_jobs_do_not_count_against_the_limit(conversation):

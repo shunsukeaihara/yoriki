@@ -8,7 +8,7 @@ import contextlib
 import json
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -71,6 +71,7 @@ from .context import (
     RUNTIME_CONTEXT_TAG,
     Item,
     build_items,
+    fit_to_model,
     inherited_items,
     parts_to_json,
     pending_tool_calls,
@@ -347,7 +348,7 @@ class Runner:
         version = run.model_version
         request = ChatRequest(
             model=version.model_name,
-            messages=[Message("system", system), *(i.message for i in items)],
+            messages=[Message("system", system), *self._fit(i.message for i in items)],
             tools=[t.definition() for t in self.tools],
             max_output_tokens=version.max_output_tokens,
             effort=run.effort or None,
@@ -364,6 +365,9 @@ class Runner:
             self.compacted_for_overflow = True
             return self._compact(system, items)
         return False if response is None else response
+
+    def _fit(self, messages: Iterable[Message]) -> list[Message]:
+        return fit_to_model(list(messages), images=self.run_obj.model_version.supports_images)
 
     def _boundary(self) -> bool:
         """安全な区切り：leaseを延ばし、停止の依頼を確かめ、追加指示を取り込む（harness.md §4.2）"""
@@ -866,8 +870,9 @@ class Runner:
             notice = SAME_ERROR_NOTICE
         if not notice:
             return result
-        text = "".join(getattr(p, "text", "") for p in result.content) + notice
-        return ToolResult.text(text, is_error=result.is_error, value=result.value, meta=result.meta)
+        text = "".join(p.text for p in result.content if isinstance(p, TextPart)) + notice
+        media = tuple(p for p in result.content if not isinstance(p, TextPart))
+        return replace(result, content=(TextPart(text), *media))
 
     def _record_tool_result(
         self,
@@ -933,7 +938,7 @@ class Runner:
         version = self.run_obj.model_version
         request = ChatRequest(
             model=version.model_name,
-            messages=compaction.summary_request_messages(system, history),
+            messages=compaction.summary_request_messages(system, self._fit(history)),
             tools=[t.definition() for t in self.tools],
             max_output_tokens=min(version.max_output_tokens, 8_000),
             effort=self.run_obj.effort or None,

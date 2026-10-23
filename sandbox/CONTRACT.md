@@ -103,7 +103,7 @@ Runnerは、呼出しごとに次の環境変数だけを渡す（harness.md §8
 - `pdf`：`total_pages`、`pages`（読んだページ）、続きがあれば `next_pages`。テキストのないページは `pages_without_text`、`images` が真ならその画像（5ページまで）。
 - `xlsx`：`sheets`（`name`・`dimensions`・`rows`・`columns`）。`sheet` を指定すると、`text` にセルの番地つきの値（数式のセルは `⟨=式⟩` を添える）。値のあるセルを4000まで出す。範囲（既定はシートの使われた範囲）が5万セルを超えるときは、読む前に断る（`too_large`）。
 - `image`：`format`・`width`・`height`。`images` が真なら画像。
-- `images` の要素：`mime`（`image/png`）、`width`、`height`、`data`（base64）。長辺は1568pxまでに縮小する。
+- `images` の要素：`mime`（`image/png`。PNGで1MBを超える写真等は `image/jpeg`）、`width`、`height`、`data`（base64）。長辺は1568pxまでに縮小する。PDFの `images` の要素には `page` も付く。
 - 20MBより大きいファイルは読まない（`too_large`）。
 
 ### 4.4 `write`

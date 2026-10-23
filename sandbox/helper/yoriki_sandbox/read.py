@@ -15,6 +15,9 @@ DEFAULT_PDF_PAGES = 10
 MAX_IMAGES = 5
 # モデルへ渡す画像の長辺（これより大きい画像は縮小する）
 MAX_IMAGE_SIDE = 1568
+# PNGがこれより大きければJPEGにする（写真・ノイズの多いスキャン。各社の1枚の上限（Anthropicは5MB）に収める）
+MAX_PNG_BYTES = 1024 * 1024
+JPEG_QUALITY = 85
 # Excelを1回で表に出すセルの数と、指定できる範囲の大きさ（読む前に確かめる）
 MAX_CELLS = 4000
 MAX_RANGE_CELLS = 50_000
@@ -188,12 +191,17 @@ def _render_pdf_pages(path: Path, pages: list[int]) -> list[dict[str, Any]]:
 
 def _encode_image(image: Any) -> dict[str, Any]:
     image.thumbnail((MAX_IMAGE_SIDE, MAX_IMAGE_SIDE))
-    buffer = io.BytesIO()
     if image.mode not in ("RGB", "L"):
         image = image.convert("RGB")
+    buffer = io.BytesIO()
     image.save(buffer, format="PNG", optimize=True)
+    mime = "image/png"
+    if buffer.tell() > MAX_PNG_BYTES:
+        buffer = io.BytesIO()
+        image.save(buffer, format="JPEG", quality=JPEG_QUALITY)
+        mime = "image/jpeg"
     return {
-        "mime": "image/png",
+        "mime": mime,
         "width": image.width,
         "height": image.height,
         "data": base64.b64encode(buffer.getvalue()).decode(),

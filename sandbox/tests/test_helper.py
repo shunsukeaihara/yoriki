@@ -1,5 +1,6 @@
 """補助コマンド `yoriki-sandbox` のサブコマンドと入出力（CONTRACT.md §4）"""
 
+import base64
 import json
 import subprocess
 import time
@@ -37,6 +38,7 @@ prs.save("/workspace/work/samples/報告.pptx")
 fig = plt.figure(); fig.text(0.1, 0.5, "Invoice total 12345"); fig.savefig("/workspace/work/samples/text.pdf")
 Image.new("RGB", (2000, 1000), "white").save("/workspace/work/samples/scan.pdf")
 Image.new("RGB", (3000, 1500), "red").save("/workspace/work/samples/写真.png")
+Image.effect_noise((1200, 1200), 64).convert("RGB").save("/workspace/work/samples/noise.png")
 PY
 """
 
@@ -174,6 +176,12 @@ class TestRead:
         assert "images" not in meta
         image = sandbox.helper("read", {"path": f"{samples}/写真.png", "images": True})["images"][0]
         assert (image["width"], image["height"]) == (1568, 784)
+        assert image["mime"] == "image/png"
+
+    def test_large_png_becomes_jpeg(self, sandbox, samples):
+        image = sandbox.helper("read", {"path": f"{samples}/noise.png", "images": True})["images"][0]
+        assert image["mime"] == "image/jpeg"
+        assert len(base64.b64decode(image["data"])) <= 1024 * 1024
 
     def test_errors(self, sandbox):
         assert sandbox.helper("read", {"path": "/workspace/work/none.txt"})["error"]["code"] == "not_found"

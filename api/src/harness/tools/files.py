@@ -4,7 +4,11 @@
 ファイルの中身の表示として扱い、権限や実行状態の正本にしない。
 """
 
+import base64
+import binascii
 from typing import Any
+
+from llm.providers.base import ImagePart, Part, TextPart
 
 from ..sandbox import WORKSPACE, workspace_path
 from .base import Effect, Tool, ToolContext, ToolResult
@@ -46,11 +50,13 @@ READ_DESCRIPTION = """Read a file in the sandbox, formatted for its type.
 
 - Text, CSV, JSON, Markdown: numbered lines (`  12│text`). Up to 2000 lines per call; continue with `offset`.
 - PDF: text per page (default: the first 10 pages; choose with `pages`, e.g. "1-5" or "3,7"). Pages without \
-text are scanned images.
+text are scanned; their images are shown (up to 5 per call) when you can see images.
 - Excel (.xlsx): without `sheet`, the list of sheets and their sizes. With `sheet` (and optionally `range` such as \
 "A1:F50"), cell values with addresses; formulas are shown next to their values.
 - Word (.docx), PowerPoint (.pptx): headings, text, tables (and slide notes and layouts for .pptx).
-- Images and other binary files: format and size only. Process them with Python in `shell`.
+- Images (PNG, JPEG, GIF, WebP, BMP): the image itself, resized to at most 1568px, when you can see images; \
+otherwise format and size only.
+- Other binary files: format and size only. Process them with Python in `shell`.
 
 Use this tool, not `cat`, `head` or `sed` in the shell: the output is limited and formatted consistently. For a \
 large file, read its structure first, then the part you need. Read independent files together in one response. \
@@ -71,7 +77,7 @@ READ_PARAMETERS = {
 }
 
 
-def _read_header(result: dict[str, Any]) -> list[str]:
+def _read_header(result: dict[str, Any], images: bool) -> list[str]:
     kind = result.get("kind")
     lines = [f"File: {result['path']} ({kind}, {result.get('size', 0):,} bytes)"]
     if kind in ("text", "csv", "docx", "pptx") and result.get("total_lines") is not None:
@@ -86,12 +92,44 @@ def _read_header(result: dict[str, Any]) -> list[str]:
         )
     if kind == "pdf":
         lines.append(f"PDF: {result.get('total_pages')} pages; showing pages {result.get('pages')}.")
-        if result.get("pages_without_text"):
-            lines.append(
-                f"Pages without text (scanned images): {result['pages_without_text']}. Their content cannot be read "
-                "as text."
-            )
+        if scanned := result.get("pages_without_text"):
+            lines.append(f"Pages without text (scanned images): {scanned}.")
+            lines.append(_scanned_notice(scanned, [i.get("page") for i in result.get("images", [])], images))
+    if kind == "image":
+        if images:
+            shown = result.get("images") or [{}]
+            lines.append(f"The image follows (shown at {shown[0].get('width')}x{shown[0].get('height')}).")
+        else:
+            lines.append("The current model does not accept images, so only the format and size are shown.")
     return lines
+
+
+def _scanned_notice(scanned: list[int], shown: list[int], images: bool) -> str:
+    if not images:
+        return (
+            "Their content cannot be read as text, and the current model does not accept images. Tell the user "
+            "that these pages need a model that accepts images."
+        )
+    rest = [page for page in scanned if page not in shown]
+    # 画像だけを別にまとめて送るAPI（Chat Completions、Gemini）もあるので、並びの順をここで示す
+    notice = f"The images of pages {shown} follow, in this order."
+    if rest:
+        notice += f" Pages {rest} are not shown; read them with pages (up to 5 images per call)."
+    return notice
+
+
+def _images(result: dict[str, Any]) -> list[Part]:
+    """補助コマンドが返した画像（base64）。PDFのページには、どのページかの文を前に置く"""
+    parts: list[Part] = []
+    for image in result.get("images", []):
+        try:
+            data = base64.b64decode(image["data"], validate=True)
+        except (KeyError, binascii.Error):
+            continue
+        if image.get("page"):
+            parts.append(TextPart(f"[page {image['page']}]"))
+        parts.append(ImagePart(image.get("mime", "image/png"), data))
+    return parts
 
 
 def _read_footer(result: dict[str, Any]) -> list[str]:
@@ -106,19 +144,24 @@ def execute_read(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     path = resolve(arguments["path"])
     if path is None:
         return outside(arguments["path"])
-    request: dict[str, Any] = {"path": path, "images": False}
+    # 画像は、使うモデルが画像の入力に対応するときだけ求める（harness.md §7.8、§12）
+    images = context.run.model_version.supports_images
+    request: dict[str, Any] = {"path": path, "images": images}
     for name in ("offset", "limit", "pages", "sheet", "range"):
         if name in arguments:
             request[name] = arguments[name]
     result = call_helper(context, "read", request)
     if not result.get("ok"):
         return helper_error(result)
-    text = "\n".join([*_read_header(result), "", result.get("text", ""), *_read_footer(result)])
+    text = "\n".join([*_read_header(result, images), "", result.get("text", ""), *_read_footer(result)])
     hint = "Read a smaller part with offset/limit (or pages, or sheet and range)."
-    return ToolResult.text(
-        limited(context, text, head_ratio=1, full_text=result.get("text", ""), hint=hint),
+    meta: dict[str, Any] = {"path": result["path"], "kind": result.get("kind")}
+    if shown := result.get("images"):
+        meta["images"] = [{k: i.get(k) for k in ("page", "mime", "width", "height") if i.get(k)} for i in shown]
+    return ToolResult(
+        (TextPart(limited(context, text, head_ratio=1, full_text=result.get("text", ""), hint=hint)), *_images(result)),
         value=file_value(result),
-        meta={"path": result["path"], "kind": result.get("kind")},
+        meta=meta,
     )
 
 

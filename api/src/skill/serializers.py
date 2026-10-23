@@ -414,6 +414,12 @@ class SkillDraftAssetSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(_("英小文字・数字・-・_ で、英小文字か数字から始めてください"))
         return value
 
+    def validate(self, attrs):
+        if "revision" not in attrs:
+            # 部分更新（PATCH）では必須の項目も省けるので、ここで確かめる
+            raise serializers.ValidationError({"revision": _("編集を始めた時点のrevisionを送ってください")})
+        return attrs
+
     def validate_file(self, value):
         limit = settings.YORIKI_UPLOAD_MAX_MB
         if value.size > limit * 1024 * 1024:
@@ -504,6 +510,9 @@ class SkillDraftSerializer(SkillContentSerializer):
     def validate(self, attrs):
         draft = self.instance
         assert draft is not None
+        if "revision" not in attrs:
+            # 部分更新（PATCH）では必須の項目も省けるので、ここで確かめる
+            raise serializers.ValidationError({"revision": _("編集を始めた時点のrevisionを送ってください")})
         if (
             "tools" in attrs
             and attrs["tools"] != draft.tools

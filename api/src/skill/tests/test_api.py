@@ -165,6 +165,7 @@ class TestDraftAndPublish:
         assert res.status_code == 200, res.json()
         assert res.json()["instructions"] == "1. 読む\n2. 照合する"
         assert res.json()["revision"] == draft["revision"] + 1
+        assert api_client.patch(url, {"instructions": "revisionなし"}, format="json").status_code == 400
         # 編集を始めた時点のrevisionが古ければ409
         stale = api_client.patch(url, {"revision": draft["revision"], "instructions": "古い"}, format="json")
         assert stale.status_code == 409
@@ -357,6 +358,7 @@ class TestAssets:
         draft = api_client.post(f"{SKILLS}{skill_id}/drafts/", {}, format="json").json()
         assert [a["key"] for a in draft["assets"]] == ["vendor-master"]
         asset_url = f"{SKILLS}{skill_id}/drafts/{draft['id']}/assets/vendor-master/"
+        assert api_client.patch(asset_url, {"description": "revisionなし"}, format="multipart").status_code == 400
         replace = {"file": _upload("vendors-v2.csv", b"code,name\n1,A\n"), "revision": draft["revision"]}
         res = api_client.patch(asset_url, replace, format="multipart")
         assert res.status_code == 200, res.json()

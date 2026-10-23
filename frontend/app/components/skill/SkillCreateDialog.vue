@@ -1,0 +1,37 @@
+<script setup lang="ts">
+import SkillCreateForm from './SkillCreateForm.vue'
+import DDialog from '../common/DDialog.vue'
+
+const emit = defineEmits<{ created: [value: Skill] }>()
+
+const dialog = ref<InstanceType<typeof DDialog> | null>(null)
+const formRef = ref<InstanceType<typeof SkillCreateForm> | null>(null)
+// 開くたびにフォームを作り直し、前回の入力やエラーを残さない
+const formKey = ref(0)
+const onOpen = (open: boolean) => {
+  if (open) formKey.value += 1
+}
+
+const created = (value: Skill) => {
+  emit('created', value)
+  dialog.value?.closeDialog()
+}
+</script>
+
+<template>
+  <DDialog ref="dialog" @update:open="onOpen">
+    <template #trigger="{ on }">
+      <slot name="trigger" :on="on" />
+    </template>
+    <template #header>{{ $t('Skillを作る') }}</template>
+    <template #content>
+      <SkillCreateForm :key="formKey" ref="formRef" @created="created" />
+    </template>
+    <template #footer="{ closeDialog }">
+      <DBtn color="neutral" variant="ghost" @click="closeDialog()">{{ $t('キャンセル') }}</DBtn>
+      <DBtn :disabled="!formRef?.canPost" :loading="formRef?.loading" @click="formRef?.onSubmit()">
+        {{ $t('作る') }}
+      </DBtn>
+    </template>
+  </DDialog>
+</template>

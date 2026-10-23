@@ -42,6 +42,12 @@ export const useManageMenu = () => {
       permission: PermissionCode.CHANGE_USER,
     },
     {
+      label: $i18n.t('部門'),
+      icon: 'i-lucide-building-2',
+      to: '/manage/departments',
+      permission: PermissionCode.CHANGE_DEPARTMENT,
+    },
+    {
       label: $i18n.t('SSOの設定'),
       icon: 'i-lucide-key-round',
       to: '/manage/sso_providers',

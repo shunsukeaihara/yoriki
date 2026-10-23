@@ -689,7 +689,8 @@ def summarize_changes(
     before: SkillVersion | None, content: dict[str, Any], assets: dict[str, tuple[int, str, int]]
 ) -> dict[str, Any]:
     """前の版から変わった項目と資料のkey（SkillChangeの記録と画面の表示に使う）"""
-    before_content = before.content() if before else {}
+    # 最初の版は、空のDraftからの変更として数える（空のToolや未指定のSchemaを変わった項目にしない）
+    before_content = before.content() if before else SkillDraft().content()
     before_assets = _asset_map(before.assets.all()) if before else {}
     fields = [name for name in CONTENT_FIELDS if before_content.get(name) != content[name]]
     replaced = sorted(k for k in before_assets.keys() & assets.keys() if before_assets[k][2] != assets[k][2])

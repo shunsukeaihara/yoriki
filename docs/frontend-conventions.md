@@ -96,7 +96,7 @@ frontend/
     ├── components/
     │   ├── common/             # D*ラッパー（prefixなしで自動import）
     │   └── <domain>/           # 業務コンポーネント（例：run/RunCancelDialog.vue）
-    ├── composables/            # field, date, form, list, confirm, account, permission, manage, locale, markdown, stream, llm, sso, user, conversation, run
+    ├── composables/            # field, date, form, list, confirm, account, permission, manage, locale, markdown, stream, llm, sso, user, conversation, run, artifact, skill
     ├── layouts/                # default（社員。サイドバーに会話の一覧）、anonymous（ログイン・開発用）、manage（管理）
     ├── middleware/             # auth.global.ts、permission.global.ts、manage.ts（/manage の入口）
     ├── pages/                  # 社員向けはルート直下、管理向けは manage/ 以下、dev/ は開発用
@@ -460,12 +460,18 @@ pages/
 ├── conversations/[conversationId].vue
 ├── runs.vue
 ├── runs/[runId].vue              # 詳細ドロワー
+├── skills/index.vue              # Skillの一覧と作成
+├── skills/[skillId].vue          # 公開中の版・Draftの編集と公開・版の履歴・変更の記録（ページ全体）
 ├── manage.vue                    # definePageMeta({ layout: 'manage', middleware: 'manage' })＋<NuxtPage />
 └── manage/
     ├── destinations.vue
     ├── destinations/[destinationId].vue
-    └── skills/...
+    ├── departments.vue
+    └── departments/[departmentId].vue
 ```
+
+- Skillの画面は、管理画面（`/manage`）ではなく社員向けのルート直下に置く。個人のSkillは全社員が作り、何ができるかはSkillごとの `access`（範囲と部門の中の役割。design.md §3.6）で決まるため、`/manage` に入る権限とは関係がない。APIも社員向けの `app/v1/skills` にある。
+- Skillの詳細は、編集する項目が多いので、一覧の子ルートのドロワー（§8.2）ではなくページ全体にする。
 
 - URLのパス、ディレクトリ名、パラメータ名は、APIのリソース名に合わせる（`/runs/[runId]` ↔ `app/v1/runs/{uid}`）。パラメータの値はAPIの `id`（uid）をそのまま使う。
 

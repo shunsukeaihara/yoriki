@@ -213,6 +213,9 @@ def test_repeat_notice_keeps_the_images(app_user, monkeypatch):
     execute(run, adapter)
     content = tool_result(run)["content"]
     assert sum(1 for p in content if p["type"] == "image") == 5
+    # ページの見出しと画像の並びを保ち、注意は末尾に足す
+    assert [p.get("text") for p in content[1:3]] == ["[page 1]", None]
+    assert content[-1]["text"].startswith("[You are repeating")
 
 
 def test_blob_bytes_are_read_once(app_user, monkeypatch):
@@ -235,3 +238,14 @@ def test_blob_bytes_are_read_once(app_user, monkeypatch):
     monkeypatch.setattr(BlobObject, "open", counted)
     execute(run, adapter)
     assert len(opened) == len(set(opened)) == 5
+
+
+def test_estimate_adds_only_the_increase_in_images_sent(app_user):
+    """直前の要求で上限まで画像を送っていれば、新しい画像を読んでも送る枚数は増えない"""
+    run = start(images=True, owner=app_user)
+    usage = {"input_tokens": 50_000, "output_tokens": 0}
+    last = RunEvent.record(run, RunEventKind.ASSISTANT_MESSAGE, {"text": "", "tool_calls": [], "usage": usage})
+    earlier = Item(last.sequence - 1, RunEventKind.TOOL_RESULT, stored_images(MAX_IMAGES_PER_REQUEST))
+    newer = Item(last.sequence + 1, RunEventKind.TOOL_RESULT, stored_images(2))
+    items = build_items(run, [], [earlier, newer])
+    assert compaction.estimate_tokens([last], items) == 50_000 + sum(len(i.message.text) for i in items[1:])

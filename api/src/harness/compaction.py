@@ -4,10 +4,10 @@ Toolを加える段階で足す）。置き換えは COMPACTION のRunEventと�
 from dataclasses import dataclass
 
 from llm.models import ModelProfileVersion
-from llm.providers.base import ImagePart, Message
+from llm.providers.base import ImagePart, Message, TextPart
 from run.models import RunEvent, RunEventKind
 
-from .context import Item
+from .context import IMAGE_OMITTED, MAX_IMAGES_PER_REQUEST, Item
 
 # 新しい側に、そのまま残す割合
 KEEP_RATIO = 0.2
@@ -56,17 +56,31 @@ def estimate_tokens(events: list[RunEvent], items: list[Item]) -> int:
     if last_usage is None or (last_compaction and last_compaction.sequence > last_usage.sequence):
         return sum(_item_size(item) for item in items)
     usage = last_usage.data["usage"]
-    added = sum(_item_size(item) for item in items if item.sequence > last_usage.sequence)
-    return usage["input_tokens"] + usage["output_tokens"] + added
+    last = last_usage.sequence
+    added = sum(_item_size(item, images=False) for item in items if item.sequence > last)
+    # 画像は送る枚数に上限があり、新しい画像を足すと古い画像を省く（context.fit_to_model()）。直前の要求で送った
+    # 枚数（その時点までに読んだ画像のうち上限まで）から増えた分だけを足す
+    sent_before = min(sum(_images_read(i.message) for i in items if i.sequence <= last), MAX_IMAGES_PER_REQUEST)
+    sent_now = sum(_image_count(i.message) for i in items)
+    return usage["input_tokens"] + usage["output_tokens"] + added + IMAGE_TOKENS * max(0, sent_now - sent_before)
 
 
-def _item_size(item: Item) -> int:
+def _item_size(item: Item, *, images: bool = True) -> int:
     calls = sum(len(str(c.arguments)) + len(c.name) for c in item.message.tool_calls)
-    return len(item.message.text) + calls + _image_tokens(item.message)
+    return len(item.message.text) + calls + (_image_tokens(item.message) if images else 0)
+
+
+def _image_count(message: Message) -> int:
+    return sum(1 for p in message.parts if isinstance(p, ImagePart))
+
+
+def _images_read(message: Message) -> int:
+    """送る画像と、上限で省いた画像（画像に対応しないモデルの断りの文は数えない）"""
+    return _image_count(message) + sum(1 for p in message.parts if isinstance(p, TextPart) and p.text == IMAGE_OMITTED)
 
 
 def _image_tokens(message: Message) -> int:
-    return IMAGE_TOKENS * sum(1 for p in message.parts if isinstance(p, ImagePart))
+    return IMAGE_TOKENS * _image_count(message)
 
 
 @dataclass(frozen=True)

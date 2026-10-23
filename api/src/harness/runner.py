@@ -866,9 +866,11 @@ class Runner:
             notice = SAME_ERROR_NOTICE
         if not notice:
             return result
+        if any(not isinstance(p, TextPart) for p in result.content):
+            # 画像等があれば、部品の並び（PDFのページの見出しと画像の対応）を保ったまま末尾に足す
+            return replace(result, content=(*result.content, TextPart(notice.lstrip())))
         text = "".join(p.text for p in result.content if isinstance(p, TextPart)) + notice
-        media = tuple(p for p in result.content if not isinstance(p, TextPart))
-        return replace(result, content=(TextPart(text), *media))
+        return replace(result, content=(TextPart(text),))
 
     def _record_tool_result(
         self,

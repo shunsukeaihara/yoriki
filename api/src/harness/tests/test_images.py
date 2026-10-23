@@ -245,7 +245,8 @@ def test_estimate_adds_only_the_increase_in_images_sent(app_user):
     """直前の要求で上限まで画像を送っていれば、新しい画像を読んでも送る枚数は増えない"""
     run = start(images=True, owner=app_user)
     usage = {"input_tokens": 50_000, "output_tokens": 0}
-    last = RunEvent.record(run, RunEventKind.ASSISTANT_MESSAGE, {"text": "", "tool_calls": [], "usage": usage})
+    data = {"text": "", "tool_calls": [], "usage": usage, "images_sent": MAX_IMAGES_PER_REQUEST}
+    last = RunEvent.record(run, RunEventKind.ASSISTANT_MESSAGE, data)
     earlier = Item(last.sequence - 1, RunEventKind.TOOL_RESULT, stored_images(MAX_IMAGES_PER_REQUEST))
     newer = Item(last.sequence + 1, RunEventKind.TOOL_RESULT, stored_images(2))
     items = build_items(run, [], [earlier, newer])
@@ -263,3 +264,20 @@ def test_storage_failure_is_not_cached(monkeypatch):
     assert fit_to_model([message], images=True)[0].parts == (TextPart(IMAGE_UNAVAILABLE),)
     monkeypatch.setattr(BlobObject, "open", original)
     assert isinstance(fit_to_model([message], images=True)[0].parts[0], ImagePart)
+
+
+def test_estimate_follows_a_switch_to_a_model_with_images(app_user):
+    """画像を送らなかった要求の後に画像に対応するモデルへ切り替えたら、履歴の画像の分を足す"""
+    run = start(images=True, owner=app_user)
+    data = {"text": "", "tool_calls": [], "usage": {"input_tokens": 1_000, "output_tokens": 0}, "images_sent": 0}
+    last = RunEvent.record(run, RunEventKind.ASSISTANT_MESSAGE, data)
+    items = build_items(run, [], [Item(last.sequence - 1, RunEventKind.TOOL_RESULT, stored_images(3))])
+    assert compaction.estimate_tokens([last], items) == 1_000 + 3 * compaction.IMAGE_TOKENS
+
+
+def test_sent_images_are_recorded(app_user):
+    run = start(images=True, owner=app_user)
+    adapter = FakeAdapter([calls(("c1", "read", {"path": "/workspace/input/scan.pdf"})), reply("読みました。")])
+    execute(run, adapter)
+    replies = RunEvent.objects.filter(run=run, kind=RunEventKind.ASSISTANT_MESSAGE).order_by("sequence")
+    assert [e.data["images_sent"] for e in replies] == [0, 5]

@@ -58,11 +58,18 @@ def estimate_tokens(events: list[RunEvent], items: list[Item]) -> int:
     usage = last_usage.data["usage"]
     last = last_usage.sequence
     added = sum(_item_size(item, images=False) for item in items if item.sequence > last)
-    # 画像は送る枚数に上限があり、新しい画像を足すと古い画像を省く（context.fit_to_model()）。直前の要求で送った
-    # 枚数（その時点までに読んだ画像のうち上限まで）から増えた分だけを足す
-    sent_before = min(sum(_images_read(i.message) for i in items if i.sequence <= last), MAX_IMAGES_PER_REQUEST)
-    sent_now = sum(_image_count(i.message) for i in items)
-    return usage["input_tokens"] + usage["output_tokens"] + added + IMAGE_TOKENS * max(0, sent_now - sent_before)
+    # 画像は送る枚数に上限があり、新しい画像を足すと古い画像を省く（context.fit_to_model()）。モデルの切り替えで
+    # 送るかどうかも変わる。直前の要求で送った枚数との差を足し引きする
+    sent_before = last_usage.data.get("images_sent")
+    if sent_before is None:  # 枚数を記録する前の応答
+        sent_before = min(sum(_images_read(i.message) for i in items if i.sequence <= last), MAX_IMAGES_PER_REQUEST)
+    difference = IMAGE_TOKENS * (images_sent(items) - sent_before)
+    return max(0, usage["input_tokens"] + usage["output_tokens"] + added + difference)
+
+
+def images_sent(items: list[Item]) -> int:
+    """モデルに送る画像の数（build_items() で今のモデルに合わせた後の履歴）"""
+    return sum(_image_count(i.message) for i in items)
 
 
 def _item_size(item: Item, *, images: bool = True) -> int:

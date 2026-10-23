@@ -333,7 +333,7 @@ class Runner:
         result = self._ask_model(system, items, final=final)
         if isinstance(result, bool):
             return result
-        self._record_response(result, UsagePurpose.STEP)
+        self._record_response(result, UsagePurpose.STEP, images_sent=compaction.images_sent(items))
         if final:
             self._finish_with_reply(result.text, RunStatus.FAILED, RunEndReason.STEP_LIMIT)
             return False
@@ -520,7 +520,7 @@ class Runner:
             request_model_switch(run, error.message)
             run.set_status(RunStatus.WAITING_USER, comment=_("モデルの切り替えを確認しています。"))
 
-    def _record_response(self, response: ModelResponse, purpose: UsagePurpose) -> None:
+    def _record_response(self, response: ModelResponse, purpose: UsagePurpose, *, images_sent: int = 0) -> None:
         completed = response.completed or Completed(StopReason.OTHER)
         usage = response.usage or Usage(0, 0)
         data = {
@@ -537,6 +537,8 @@ class Runner:
             },
             "stop_reason": completed.stop_reason,
             "request_id": completed.request_id,
+            # 要求で送った画像の数。次の要求のtoken数の見積もりに使う（compaction.estimate_tokens()）
+            "images_sent": images_sent,
         }
         with self.run_obj.fenced(self.attempt) as run:
             RunEvent.record(run, RunEventKind.ASSISTANT_MESSAGE, data)

@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-23（#31）
+- 最終更新：2026-10-23（成果物とファイル）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -35,6 +35,7 @@
 | #27 | Runtime Profile：`runtime` アプリ（`RuntimeProfile`・`RuntimeProfileVersion`。中身を変えると版が増える）、レジストリのAPIでのイメージの確認（digest、platform、契約番号のラベル。許可したレジストリだけ、HTTPSと公開のアドレスだけ）、`v1/runtime_profiles`、Runを始めるときに既定の版を固定（`Run.runtime_version`。既定がなければRunを始めない）、`/manage/runtime_profiles`。design.md 0.23：Runtime ProfileはSkillごとでなくRunの単位で決める。モデル設定の「既定にする」が同時の要求で500になる問題も直した |
 | #30 | LauncherとSandboxのTool：`runtime/launcher.py`（Docker SDK（docker-py）。CONTRACT.md §2の制限で起動し、起動後にinspectで確かめ直す。Workerのplatformのdigestを選んでAttemptに記録。補助コマンド、コマンドのexec、tarでのWorkspaceの取り出し・戻し、`docker rm -f`。終わったAttemptのコンテナの掃除。userns-remap・rootlessでなければ警告）、Workspaceのsnapshotの保存先の抽象（`runtime/storage.py`。design.md §7.8の契約。初期はWorkerのローカルディスク）、`run.Checkpoint`（Attemptを終えるときに保存。新しいAttemptと同じ会話の次の依頼は、最後のCheckpointから戻す。戻せないWorkerでは空で続けて知らせる。design.md 0.24）、RunnerのTool（`shell`・`job_output`・`job_kill`・`read`・`write`・`edit`・`glob`・`grep`。読んでから書く版の確認、出力の上限と退避、読取りのToolの並列の実行、バックグラウンドのジョブとその終了の知らせ、障害の後の知らせ、Sandboxの喪失での別のAttemptでのやり直し）、画面の作業の記録のToolの表示名、CIの `sandbox-runner`（Sandboxのイメージをビルドして実際のDockerでテスト）、deployment.md §7.1（ホストの更新、userns-remap・rootless Docker） |
 | #31 | gVisorの評価と既定化（design.md 0.25 §7.2）：設定 `YORIKI_SANDBOX_RUNTIME`（既定 `runsc`。Dockerに登録されていなければSandboxを起動しない、起動後のinspectで実行環境も確かめる）、gVisorではRuntime Profileのプロセス数の上限をホストのpidsへ換算（×2＋64）、メモリの超過でSandboxごと止まったときの知らせ（Attemptの失敗の理由に残し、次のAttemptでモデルに上限と減らし方を伝え、繰り返したら利用者にも理由を示す）、契約テストとLauncherのテストの実行環境の切替え（`YORIKI_SANDBOX_TEST_RUNTIME`）、所要時間の比較（`sandbox/benchmarks/docs.py`）、CI（`.github/actions/install-gvisor`、`sandbox-gvisor`（amd64・arm64、userns-remap）、`sandbox-runner` をgVisor＋userns-remapで）、deployment.md §7.1（gVisorの入れ方） |
+| （成果物とファイル） | `artifact` アプリ：Storage Backend（`artifact/storage.py`。Local・S3（boto3。上書きしないことを `If-None-Match: *` で守る）。`YORIKI_STORAGE_BACKEND` で選び、保存先のIDとkeyで記録する）、BlobObject・BlobLocation・Artifact、添付のアップロード（`app/v1/conversations/{id}/artifacts/`、multipart、`YORIKI_UPLOAD_MAX_MB`）とメッセージへの添付（`attachments`。送ったときに `/workspace/input` の中の名前を決め、同じ名前は「名前 (2)」）、ダウンロード（セッションの `download` と期限付きtokenの `/api/files/<token>/`。いつも添付として返し、`nosniff`・CSPの `sandbox`。Localはnginxの `X-Accel-Redirect`、それ以外はapiが非同期のiteratorで返す）。Sandbox：会話の添付すべてをAttemptごとのディレクトリに置き、`/workspace/input` に読取り専用でbind mount（起動後のinspectでも確かめる。実行中の追加指示の添付も足す）、Attemptを終えるたびに `/workspace/output` を成果物として回収（変わっていないファイル・隠しファイル・symlinkは回収しない）、Workspaceのsnapshotも同じ保存先へ（`runtime/storage.py` を移した。S3なら別のWorkerで再開できる）。モデルには添付の一覧と、新しい依頼ではそれまでの添付の一覧を渡す。画面：入力欄のクリップとドロップでの添付（会話を始めるフォームも）、メッセージの添付、「添付と成果物」の欄（広い画面は右の欄、狭い画面はドロワー）。nginx（アップロードの上限、`/_protected/` のヘッダー）、Compose（`/var/lib/yoriki/objects`）、deployment.md §7.2。design.md 0.26：同じ会話の中で前の依頼の添付・作業ファイルを使えるようにした |
 
 確認済みのこと：
 
@@ -47,6 +48,7 @@
 
 - 会話の画面は、偽のLLMサーバーを使ってブラウザ（Playwright）から一通り操作して確かめた（開始、逐次表示、質問への回答、追加の指示、次の依頼、停止、effortの切り替え、再試行の後のモデルの切り替え、狭い画面、XSSを含む応答）。実際のプロバイダでは、まだ試していない。
 - gVisor：契約テストは手元のarm64（Docker Desktopの中のdind）とCIのamd64・arm64（userns-remap）で、LauncherとSandboxのToolのテストは手元のdind（userns-remap）とCIのamd64（userns-remap、AppArmor）で、すべて通った。gVisorでの会話のRun（qclusterから）は、Linuxのホストではまだ試していない。
+- 成果物とファイルは、手元のqcluster・偽のLLM（shellで `/workspace/input` を読み、`/workspace/output` に書く）・ブラウザ（Playwright）で、会話を始めるフォームでの添付 → Run → 成果物の欄 → ダウンロード（HTMLも添付として返る）→ 同じ名前の添付の2回目の依頼（「(2)」に分かれ、変わったファイルだけが新しい成果物になる）→ 狭い画面のドロワー、まで確かめた。S3はmotoで確かめただけで、実際のS3・S3互換のストレージでは試していない。nginxの `X-Accel-Redirect` は、Composeの構成ではまだ試していない。
 - #30 のSandboxは、手元のqcluster（fork）・手元のレジストリのRuntime Profile（platformのdigest）・Toolを呼ぶ偽のLLMで、shell → read → 確認待ち（Checkpointを保存してSandboxを消す）→ 回答 → 戻したWorkspaceで edit → 完了、まで確かめた。画面での表示は、ブラウザではまだ確かめていない。Linuxのホスト（本番の構成のqcluster・userns-remap）では、まだ試していない。
 
 ## 2 実装の中で決めたこと
@@ -70,7 +72,9 @@
 - Compose：channel-listener（Channelの受信を実装するとき）。
 - 管理コマンド：`drain_workers`・`resume_workers`（Workerの実行を実装するとき）。
 - 業務のアプリは `llm`、`conversation`、`run`、`harness`、`stream`、`usage`、`runtime`（Runtime Profile、Launcher）まで。`skill`、`plugin`、`artifact`、`task`、`delivery`、`connector` 等（backend-conventions.md §1.2）は、まだない。
-- Sandboxで後回しにしたもの：`/workspace/input`・`/workspace/master` のmount（Artifact・Skillの段階）、`install_python_packages` と `/packages`（PackageBundle・EnvironmentRevision）、`read` の画像（PDFのページ・画像。RunEventに画像を保存するArtifactの段階）、ステップごとのCheckpoint（今はAttemptを終えるときだけ。障害で落ちると、最後のCheckpointより後の変更は失われ、モデルに知らせる）、snapshotの保持期限と削除、別のWorkerから読めるsnapshotの保存先（S3。成果物の段階のStorage Backend）、非公開のレジストリからのpullの認証。
+- Sandboxで後回しにしたもの：`/workspace/master` のmount（Skillの段階）、`install_python_packages` と `/packages`（PackageBundle・EnvironmentRevision）、`read` の画像（PDFのページ・画像。RunEventに画像を保存する）、ステップごとのCheckpoint（今はAttemptを終えるときだけ。障害で落ちると、最後のCheckpointより後の変更は失われ、モデルに知らせる）、snapshotの保持期限と削除、非公開のレジストリからのpullの認証。
+- **同じ会話の次の依頼のRunに、前の依頼のやり取り（発言・応答）を渡していない**。RunEventはRunごとで、モデルの文脈は新しいRunの発言から始まる。ファイルは引き継ぐ（添付は `/workspace/input`、作業ファイルはCheckpoint）が、「さっきの結果を直して」のような依頼でモデルが前のやり取りを知らない。前のRunの発言と最後の応答（長ければ要約）を最初の文脈に入れる方式を、harness.md に決めてから実装する。
+- 成果物とファイルで後回しにしたもの：Storage Backendの `validate_config`・`healthcheck`（セットアップ時の確認。design.md §7.8）、古い保存先を読み続ける設定と移行のコマンド（design.md §7.10）、WorkspaceSnapshotのModel（今はCheckpointが保存先・key・hashを持つ）、保持期限での清掃（`cleanup_artifacts`。期限 `expires` は記録している）と、DBに記録する前に失敗した参照のないobjectの回収、S3の期限付きURL（今はapiが読んで返す）、送らずに残った添付の削除、画像のプレビュー、エージェントの `present_files`（harness.md §10.5）。
 - gVisorで後回しにしたもの：rootless Dockerとの組み合わせ（確かめていない。gVisorではuserns-remapを使う）、メモリの超過でSandboxごと止まるのを避ける方法（gVisorの中の上限をホストのcgroupより先に効かせる設定は、runscの外から指定できなかった）、プロセス数の換算（×2＋64）の見直し（試験の値から決めた）。
 - 補助コマンドが返すパス（symlinkを辿った先）と、モデルが指定したパスが違うと、読んだ版の記録が見つからず `edit` が「まだ読んでいない」になる（symlinkを使うときだけ）。
 - 会話の画面で後回しにしたもの：添付と成果物の一覧（Artifactの段階）、入力欄の `/`・`@` での指定（Skill・Connectorの段階）、次の依頼の開始前の編集・取消（design.md §11.2。APIもまだない）、会話のタイトルの変更、実行履歴の画面（`/runs`）。
@@ -86,7 +90,7 @@
 
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。提案する順番：
 
-1. **成果物とファイル（`artifact`）**：Local・S3のStorage Backend、添付（`/workspace/input` へのmount）、成果物の取得（`/api/files/<token>/`、`X-Accel-Redirect`）。Workspaceのsnapshotの保存先（`runtime/storage.py` の `SnapshotStorage`）にS3の実装を足し、複数のWorkerで再開できるようにする。`read` の画像もここで。
+1. **会話の続きの文脈と `read` の画像**：同じ会話の次の依頼のRunに、前の依頼のやり取りを渡す（§3）。`read` でPDFのページ・画像をモデルに見せる（RunEventに画像をArtifactの参照として保存する）。
 2. **Skill（`skill`、`resource`）**：Draft・Version・公開範囲と公開、Skillの資料（マスター・テンプレート）、会話からのSkill更新、入力欄の `/` での指定、エージェントに見せる一覧（利用者の権限で使えるものだけ）。役割「Plugin公開者」（`user/roles.py`）を「Skill公開者」に改める（design.md 0.19）。
 3. **Connector（`connector`）とタスク・配信（`task`、`delivery`）**：読取り専用のDB Connector、Connectorを使える利用者・役割と操作（ConnectorPermission。design.md §4.9.1）、入力欄の `@` での指定、Task Definition（使うSkill・モデル・許可する操作）、Webhook・Zapierの通知、Trigger。DB Connector（種別：PostgreSQL・MySQL・SQL Server、ホスト、DB名、ユーザー、パスワード等）とHTTP Connector（ホスト、ヘッダー、認証情報等）の設定は管理画面で登録し、資格情報は `utils/crypto.py` で暗号化してDBに保存する（backend-conventions.md §6.4）。個人情報を主な中身とする接続先には機密のフラグを付けられるようにし、フラグの付いたConnectorはローカルLLMのモデルを使うタスク・会話にだけ割り当てる（design.md §4冒頭、§4.9.1）。
 4. **最初の2つの業務**（design.md §13。Skillとタスクとして作る）：請求書PDF → 社内DBと照合 → 取込用のCSV、契約書レビュー → Zapierへ結果。
@@ -109,7 +113,7 @@ cd frontend && pnpm install
 - 基盤管理者は `cd api && uv run python src/manage.py createsuperuser` で作る。開発時はDjangoの管理画面（`/api/admin/`）のパスワードログインでセッションを作れる。
 - Sandboxのイメージは `docker build -f sandbox/images/docs/Dockerfile -t yoriki-sandbox-docs:dev sandbox` でビルドし、`cd sandbox && uv sync && uv run pytest` で契約テストを動かす（sandbox/README.md）。apiのLauncher・SandboxのToolのテスト（`pytest -m sandbox`）も、このイメージ（`YORIKI_SANDBOX_TEST_IMAGE`）で動く。イメージがなければ飛ばす。
 - Sandboxは既定でgVisor（runsc）で動かすが、Docker DesktopにはgVisorがないので、手元の `.envrc` には `YORIKI_SANDBOX_RUNTIME=runc` を設定する（`.envrc.example`）。gVisorでの動きはCIで確かめる（PRでは `sandbox-gvisor`・`sandbox-runner` が動く。PRの前に手元のブランチで動かすなら、pushして `gh workflow run sandbox.yml --ref <ブランチ>`・`gh workflow run backend.yml --ref <ブランチ>`）。手元で試すときは sandbox/README.md のdindの方法を使う。
-- Runを手元で動かすと、Workerの作業領域（ジョブの出力、snapshot）を `YORIKI_WORKSPACES_DIR`（`.envrc.example` ではリポジトリの `.workspaces/`）に作る。
+- Runを手元で動かすと、Workerの作業領域（ジョブの出力、Sandboxに見せる添付）を `YORIKI_WORKSPACES_DIR`（`.envrc.example` ではリポジトリの `.workspaces/`）に作る。添付・成果物・snapshotは `YORIKI_STORAGE_LOCAL_ROOT`（`.envrc.example` ではリポジトリの `.objects/`）に置く。既存の `.envrc` にはこの行を足す（ないと既定の `/var/lib/yoriki/objects` に書けず、アップロードが失敗する）。
 - Runtime Profileを手元で登録するときは、手元のレジストリにイメージをpushする：`docker run -d --name yoriki-dev-registry -p 127.0.0.1:5001:5000 registry:3`、`docker tag yoriki-sandbox-docs:dev localhost:5001/yoriki-sandbox-docs:dev && docker push localhost:5001/yoriki-sandbox-docs:dev`。apiは `YORIKI_SANDBOX_INSECURE_REGISTRIES=localhost:5001` を付けて起動し、管理画面で `localhost:5001/yoriki-sandbox-docs@<pushで表示されたdigest>` を登録する。開発用のDBには、この方法で登録した既定のRuntime Profile「文書処理」（linux/arm64）がある。既定のRuntime Profileがないと、会話のRunは始まらない。
 
 - 環境変数はリポジトリルートの `.envrc`（direnv）。テストやmypyは、`.envrc` を読み込んだ状態で実行する。

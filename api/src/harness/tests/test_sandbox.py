@@ -354,7 +354,9 @@ def test_attachments_are_read_only_inputs_and_outputs_become_artifacts(conversat
     run = execute(run, adapter)
     assert run.status == RunStatus.WAITING_USER
     r = results(run)
-    assert "a,b\n1,2" in text(r["c1"]) and "Read-only file system" in text(r["c1"])
+    assert "a,b\n1,2" in text(r["c1"])
+    # 書けない（runcでは読取り専用、gVisorでは権限のエラーになる）
+    assert "Read-only file system" in text(r["c1"]) or "Permission denied" in text(r["c1"])
     outputs = Artifact.objects.filter(run=run, kind=ArtifactKind.OUTPUT)
     # 隠しファイルとsymlinkは回収しない
     assert [(a.path, a.name) for a in outputs] == [("sub/集計.csv", "集計.csv")]

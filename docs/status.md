@@ -34,7 +34,7 @@
 | #26 | Sandboxのイメージ：`sandbox/CONTRACT.md`（契約番号1。イメージの配置、起動の制限、コマンドの環境、補助コマンドの入出力）、docsのイメージ（Python 3.13、GNUのツール、日本語のフォント、文書処理のライブラリをlockからイメージのPythonへ）、補助コマンド `yoriki-sandbox`（PID 1のinit、exec・kill（グループかPID 1以外のすべて）・形式ごとのread・write・edit（一時ファイルから置き換え、改行は行ごとに保つ）・glob・grep・stat・init-env）、契約テスト（制限の確認、サブコマンド、代表的なコマンド111件）、CI（`sandbox.yml`）。design.md 0.22：`/workspace/env` はイメージのPythonの上の薄い環境（`--system-site-packages`）にした |
 | #27 | Runtime Profile：`runtime` アプリ（`RuntimeProfile`・`RuntimeProfileVersion`。中身を変えると版が増える）、レジストリのAPIでのイメージの確認（digest、platform、契約番号のラベル。許可したレジストリだけ、HTTPSと公開のアドレスだけ）、`v1/runtime_profiles`、Runを始めるときに既定の版を固定（`Run.runtime_version`。既定がなければRunを始めない）、`/manage/runtime_profiles`。design.md 0.23：Runtime ProfileはSkillごとでなくRunの単位で決める。モデル設定の「既定にする」が同時の要求で500になる問題も直した |
 | #30 | LauncherとSandboxのTool：`runtime/launcher.py`（Docker SDK（docker-py）。CONTRACT.md §2の制限で起動し、起動後にinspectで確かめ直す。Workerのplatformのdigestを選んでAttemptに記録。補助コマンド、コマンドのexec、tarでのWorkspaceの取り出し・戻し、`docker rm -f`。終わったAttemptのコンテナの掃除。userns-remap・rootlessでなければ警告）、Workspaceのsnapshotの保存先の抽象（`runtime/storage.py`。design.md §7.8の契約。初期はWorkerのローカルディスク）、`run.Checkpoint`（Attemptを終えるときに保存。新しいAttemptと同じ会話の次の依頼は、最後のCheckpointから戻す。戻せないWorkerでは空で続けて知らせる。design.md 0.24）、RunnerのTool（`shell`・`job_output`・`job_kill`・`read`・`write`・`edit`・`glob`・`grep`。読んでから書く版の確認、出力の上限と退避、読取りのToolの並列の実行、バックグラウンドのジョブとその終了の知らせ、障害の後の知らせ、Sandboxの喪失での別のAttemptでのやり直し）、画面の作業の記録のToolの表示名、CIの `sandbox-runner`（Sandboxのイメージをビルドして実際のDockerでテスト）、deployment.md §7.1（ホストの更新、userns-remap・rootless Docker） |
-| #31 | gVisorの評価と既定化（design.md 0.25 §7.2）：設定 `YORIKI_SANDBOX_RUNTIME`（既定 `runsc`。Dockerに登録されていなければSandboxを起動しない、起動後のinspectで実行環境も確かめる）、gVisorではRuntime Profileのプロセス数の上限をホストのpidsへ換算（×2＋64）、メモリの超過でSandboxごと止まったときの知らせ（Attemptの失敗の理由に残し、次のAttemptでモデルに上限と減らし方を伝え、繰り返したら利用者にも理由を示す）、契約テストとLauncherのテストの実行環境の切替え（`YORIKI_SANDBOX_TEST_RUNTIME`）、所要時間の比較（`sandbox/benchmarks/docs.py`）、CI（`.github/actions/install-gvisor`、`sandbox-gvisor`（amd64・arm64）、`sandbox-runner` をgVisor＋userns-remapで）、deployment.md §7.1（gVisorの入れ方） |
+| #31 | gVisorの評価と既定化（design.md 0.25 §7.2）：設定 `YORIKI_SANDBOX_RUNTIME`（既定 `runsc`。Dockerに登録されていなければSandboxを起動しない、起動後のinspectで実行環境も確かめる）、gVisorではRuntime Profileのプロセス数の上限をホストのpidsへ換算（×2＋64）、メモリの超過でSandboxごと止まったときの知らせ（Attemptの失敗の理由に残し、次のAttemptでモデルに上限と減らし方を伝え、繰り返したら利用者にも理由を示す）、契約テストとLauncherのテストの実行環境の切替え（`YORIKI_SANDBOX_TEST_RUNTIME`）、所要時間の比較（`sandbox/benchmarks/docs.py`）、CI（`.github/actions/install-gvisor`、`sandbox-gvisor`（amd64・arm64、userns-remap）、`sandbox-runner` をgVisor＋userns-remapで）、deployment.md §7.1（gVisorの入れ方） |
 
 確認済みのこと：
 
@@ -46,7 +46,7 @@
 - 実際のIdP（Entra ID・Google Workspace）でのログインは、まだ試していない（client IDの発行が要る）。
 
 - 会話の画面は、偽のLLMサーバーを使ってブラウザ（Playwright）から一通り操作して確かめた（開始、逐次表示、質問への回答、追加の指示、次の依頼、停止、effortの切り替え、再試行の後のモデルの切り替え、狭い画面、XSSを含む応答）。実際のプロバイダでは、まだ試していない。
-- gVisor：契約テストは手元のarm64（Docker Desktopの中のdind）とCIのamd64・arm64で、LauncherとSandboxのToolのテストは手元のdind（userns-remap）とCIのamd64（userns-remap、AppArmor）で、すべて通った。gVisorでの会話のRun（qclusterから）は、Linuxのホストではまだ試していない。
+- gVisor：契約テストは手元のarm64（Docker Desktopの中のdind）とCIのamd64・arm64（userns-remap）で、LauncherとSandboxのToolのテストは手元のdind（userns-remap）とCIのamd64（userns-remap、AppArmor）で、すべて通った。gVisorでの会話のRun（qclusterから）は、Linuxのホストではまだ試していない。
 - #30 のSandboxは、手元のqcluster（fork）・手元のレジストリのRuntime Profile（platformのdigest）・Toolを呼ぶ偽のLLMで、shell → read → 確認待ち（Checkpointを保存してSandboxを消す）→ 回答 → 戻したWorkspaceで edit → 完了、まで確かめた。画面での表示は、ブラウザではまだ確かめていない。Linuxのホスト（本番の構成のqcluster・userns-remap）では、まだ試していない。
 
 ## 2 実装の中で決めたこと

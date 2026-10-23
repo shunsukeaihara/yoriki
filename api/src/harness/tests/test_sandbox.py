@@ -1,11 +1,16 @@
 """SandboxのToolとWorkspaceの引継ぎのテスト。LLMの応答は FakeAdapter で差し替え、Sandboxは実際のDockerで動かす
 （イメージがなければ飛ばす。conftest.py の sandbox_image）"""
 
+import io
+from unittest import mock
+
 import docker
 import pytest
 
+from artifact.models import Artifact, ArtifactKind
 from conversation.dispatch import MessageMode, post_message
 from conversation.factories import ConversationFactory
+from conversation.models import ConversationMessage
 from harness.runner import Runner
 from run.models import (
     Checkpoint,
@@ -314,3 +319,82 @@ def test_large_job_output_is_saved_in_full(conversation):
     assert "[full output: /workspace/work/.yoriki/outputs/" in text(r["c1"])
     assert "1500000 /workspace/work/.yoriki/outputs/" in text(r["c2"]) or "1500000 .yoriki/outputs/" in text(r["c2"])
     assert text(r["c2"]).rstrip().endswith("1500000")
+
+
+def test_attachments_are_read_only_inputs_and_outputs_become_artifacts(conversation):
+    """添付は /workspace/input に読取り専用で見え、/workspace/output のファイルは成果物になる（design.md §7.1・§7.4）"""
+    attachment = Artifact.upload(
+        io.BytesIO(b"a,b\n1,2\n"), "請求書.csv", owner=conversation.owner, conversation=conversation
+    )
+    post_message(
+        conversation,
+        body="集計して",
+        client_message_id="",
+        mode=MessageMode.AUTO,
+        actor=conversation.owner,
+        attachments=[attachment],
+    )
+    run = Run.objects.get(conversation=conversation)
+    adapter = FakeAdapter(
+        [
+            calls(("c1", "shell", shell("cat /workspace/input/請求書.csv; touch /workspace/input/x"))),
+            calls(
+                (
+                    "c2",
+                    "shell",
+                    shell(
+                        "mkdir -p /workspace/output/sub /workspace/output/.cache && echo total > /workspace/output/sub/"
+                        "集計.csv && echo hidden > /workspace/output/.cache/x && ln -s /etc/passwd /workspace/output/l"
+                    ),
+                )
+            ),
+            calls(("c3", "ask_user", QUESTION)),
+        ]
+    )
+    run = execute(run, adapter)
+    assert run.status == RunStatus.WAITING_USER
+    r = results(run)
+    assert "a,b\n1,2" in text(r["c1"])
+    # 書けない（runcでは読取り専用、gVisorでは権限のエラーになる）
+    assert "Read-only file system" in text(r["c1"]) or "Permission denied" in text(r["c1"])
+    outputs = Artifact.objects.filter(run=run, kind=ArtifactKind.OUTPUT)
+    # 隠しファイルとsymlinkは回収しない
+    assert [(a.path, a.name) for a in outputs] == [("sub/集計.csv", "集計.csv")]
+    with outputs[0].blob.open() as f:
+        assert f.read() == b"total\n"
+
+    # 回答の後の新しいAttemptでは、変わっていない成果物を回収し直さない。追加指示の添付は動いているSandboxに見える
+    clarification = ClarificationRequest.objects.get(run=run)
+    clarification.accept_answer([{"selected": ["CSV"], "text": ""}], "", conversation.owner)
+    adapter = FakeAdapter(
+        [
+            calls(("c4", "shell", shell("sleep 0.1"))),
+            calls(("c5", "shell", shell("ls /workspace/input; echo changed > /workspace/output/sub/集計.csv"))),
+            reply("できました"),
+        ]
+    )
+    later = Artifact.upload(io.BytesIO(b"x"), "追加.txt", owner=conversation.owner, conversation=conversation)
+
+    original_step = Runner._step
+
+    def step(self):
+        # Sandboxが動いている間に、添付つきの追加指示を送る
+        if self.session.started and not ConversationMessage.objects.filter(body="これも").exists():
+            post_message(
+                conversation,
+                body="これも",
+                client_message_id="",
+                mode=MessageMode.AUTO,
+                actor=conversation.owner,
+                attachments=[later],
+            )
+        return original_step(self)
+
+    with mock.patch.object(Runner, "_step", step):
+        run = execute(run, adapter)
+    assert run.status == RunStatus.COMPLETED
+    assert "追加.txt" in text(results(run)["c5"]) and "請求書.csv" in text(results(run)["c5"])
+    outputs = Artifact.objects.filter(run=run, kind=ArtifactKind.OUTPUT).order_by("pk")
+    assert [a.path for a in outputs] == ["sub/集計.csv", "sub/集計.csv"]
+    with outputs[1].blob.open() as f:
+        assert f.read() == b"changed\n"

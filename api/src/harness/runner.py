@@ -17,6 +17,8 @@ from django.db.models import Max
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
+from artifact.models import Artifact, BlobObject
+from conversation.dispatch import user_message_data
 from conversation.models import (
     ConversationMessage,
     InstructionKind,
@@ -67,7 +69,9 @@ from . import compaction
 from .context import (
     ADDITIONAL_INSTRUCTION_PREFIX,
     RUNTIME_CONTEXT_TAG,
+    Item,
     build_items,
+    inherited_items,
     parts_to_json,
     pending_tool_calls,
     provider_key,
@@ -155,6 +159,8 @@ class Runner:
         self.last_call_key = ""
         self.last_error_key = ""
         self.error_repeats = 0
+        # 同じ会話の前の依頼から引き継ぐ文脈（親のRunは終わっていて変わらないので、最初に1回だけ読む）
+        self.inherited: list[Item] = []
 
     # --- 入口 ---
 
@@ -202,6 +208,7 @@ class Runner:
         """結果のないTool呼出しを閉じ、Workspaceの食い違いと実行時の文脈の変化を追記する（harness.md §11.1）"""
         events = self._events()
         self.start_sequence = events[-1].sequence if events else 0
+        self.inherited = inherited_items(self.run_obj)
         self.tools = self._exposed_tools()
         tools = {t.name: t for t in self.tools}
         # 実行中のRunに回答待ちの確認が残っていれば、前のAttemptが待ちに移る前に止まったもの。答えられないので閉じる
@@ -318,7 +325,7 @@ class Runner:
         prompt = RunPrompt.store(system, [self._tool_json(t) for t in self.tools])
         events = self._events()
         self._record_header(prompt, events)
-        items = build_items(run, events)
+        items = build_items(run, events, self.inherited)
 
         if compaction.estimate_tokens(events, items) > compaction.threshold(version):
             return self._compact(system, items)
@@ -407,11 +414,14 @@ class Runner:
             )
             for instruction in instructions:
                 text = f"{ADDITIONAL_INSTRUCTION_PREFIX}\n{instruction.message.body}"
-                RunEvent.record(run, RunEventKind.USER_MESSAGE, {"text": text, "message": instruction.message.uid})
+                RunEvent.record(run, RunEventKind.USER_MESSAGE, user_message_data(instruction.message, text))
                 instruction.state = InstructionState.APPLIED
                 instruction.applied = timezone.now()
                 instruction.save(update_fields=["state", "applied", "updated"])
                 applied = True
+        if applied and self.session.started:
+            # 追加指示に付いた添付を、動いているSandboxの /workspace/input にも置く
+            self.session.sync_inputs()
         return applied
 
     def _exposed_tools(self) -> tuple[Tool, ...]:
@@ -618,19 +628,21 @@ class Runner:
             return
         if saved is None:
             return
-        stored, storage_id, stopped = saved
         with self.run_obj.fenced(self.attempt) as run:
             sequence = RunEvent.objects.filter(run=run).aggregate(last=Max("sequence"))["last"] or 0
             Checkpoint.objects.create(
                 run=run,
                 attempt=self.attempt,
                 sequence=sequence,
-                storage=storage_id,
-                key=stored.key,
-                size=stored.size,
-                sha256=stored.sha256,
-                stopped_jobs=stopped,
+                storage=saved.backend_id,
+                key=saved.snapshot.key,
+                size=saved.snapshot.size,
+                sha256=saved.snapshot.sha256,
+                stopped_jobs=saved.stopped,
             )
+            # /workspace/output のファイルは、利用者が会話の画面から取得できる成果物にする（design.md §7.4）
+            for output in saved.outputs:
+                Artifact.create_output(run, output.path, BlobObject.register(output.stored, saved.backend_id))
 
     def _sandbox_failure(self, error: SandboxUnavailable) -> None:
         """Sandboxを起動できない・失われた。やり直せるなら別のAttemptで（harness.md §4.3の retry_wait）"""

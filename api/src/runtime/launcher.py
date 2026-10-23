@@ -18,6 +18,7 @@ from typing import IO, Any
 import docker
 from django.conf import settings
 from docker.errors import DockerException, ImageNotFound, NotFound
+from docker.types import Mount
 from docker.utils.socket import STDERR, STDOUT, frames_iter
 
 from .contract import CONTRACT_LABEL, SUPPORTED_CONTRACTS
@@ -27,6 +28,7 @@ logger = logging.getLogger(__name__)
 HELPER = "/opt/yoriki/bin/yoriki-sandbox"
 SANDBOX_USER = "10001:10001"
 WORK_DIR = "/workspace/work"
+INPUT_DIR = "/workspace/input"
 # Launcherが起動したコンテナに付けるラベル。残ったコンテナを探して消すときに使う
 SANDBOX_LABEL = "org.yoriki.sandbox"
 ATTEMPT_LABEL = "org.yoriki.attempt"
@@ -68,9 +70,11 @@ class SandboxSpec:
     # Dockerに登録したコンテナの実行環境（`runsc` 等）。空ならDockerの既定（runc）
     runtime: str = ""
     labels: dict[str, str] = field(default_factory=dict)
+    # /workspace/input に読取り専用でmountする、Workerのディレクトリ（添付）。dockerdから見たパスにする
+    input_dir: str = ""
 
     @classmethod
-    def for_version(cls, version, platform: str, *, labels: dict[str, str]) -> "SandboxSpec":
+    def for_version(cls, version, platform: str, *, labels: dict[str, str], input_dir: str = "") -> "SandboxSpec":
         """Workerのplatformに合うmanifestのdigestを選ぶ。合うものがなければ起動を断る（design.md §7.3）"""
         image = settings.YORIKI_SANDBOX_IMAGE_OVERRIDE
         if not image:
@@ -92,6 +96,7 @@ class SandboxSpec:
             env_mb=version.env_mb,
             runtime=settings.YORIKI_SANDBOX_RUNTIME,
             labels={SANDBOX_LABEL: "1", **labels},
+            input_dir=input_dir,
         )
 
     @property
@@ -133,6 +138,8 @@ class SandboxSpec:
         }
         if self.runtime:
             config["runtime"] = self.runtime
+        if self.input_dir:
+            config["mounts"] = [Mount(INPUT_DIR, self.input_dir, type="bind", read_only=True)]
         return config
 
 
@@ -170,8 +177,11 @@ def verify_container(info: dict[str, Any], spec: SandboxSpec) -> list[str]:
             problems.append(f"HostConfig.{key} is host")
     if host.get("Init"):
         problems.append("--init is set (the image's init must be PID 1)")
-    if host.get("Binds") or host.get("Devices") or host.get("Mounts") or info.get("Mounts"):
-        problems.append("host directories or devices are mounted")
+    # mountしてよいのは、添付のディレクトリを読取り専用で /workspace/input にだけ（CONTRACT.md §2）
+    mounts = [(m.get("Type"), m.get("Source"), m.get("Destination"), m.get("RW")) for m in info.get("Mounts") or []]
+    expected_mounts = [("bind", spec.input_dir, INPUT_DIR, False)] if spec.input_dir else []
+    if host.get("Binds") or host.get("Devices") or mounts != expected_mounts:
+        problems.append(f"unexpected mounts: {mounts or host.get('Binds') or host.get('Devices')}")
     if (host.get("Tmpfs") or {}) != spec.tmpfs():
         problems.append(f"tmpfs mounts differ: {host.get('Tmpfs')}")
     if config.get("User") != SANDBOX_USER:

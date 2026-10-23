@@ -16,6 +16,7 @@ __pycache__/
 
 # Workerの作業領域（手元の開発。.envrc.example の YORIKI_WORKSPACES_DIR）
 .workspaces/
+.objects/
 
 # ツールのキャッシュ
 .ruff_cache/
@@ -24,3 +25,4 @@ __pycache__/
 
 # 手元だけの参考情報（公開しない）
 AGENTS.local.md
+CLAUDE.local.md

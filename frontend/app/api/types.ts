@@ -54,6 +54,8 @@ export type MessageWrite = Api<'MessageRequest'>
 export type MessageRoleEnum = Schemas['MessageRoleEnum']
 export type InstructionKindEnum = Schemas['InstructionKindEnum']
 export type InstructionStateEnum = Schemas['InstructionStateEnum']
+export type Artifact = Api<'Artifact'>
+export type ArtifactKindEnum = Schemas['ArtifactKindEnum']
 
 export type RunStatusEnum = Schemas['RunStatusEnum']
 export type RunEventKindEnum = Schemas['RunEventKindEnum']
@@ -73,6 +75,7 @@ export type RunMessageEvent = Api<'RunMessageEvent'>
 export type UserStreamEvent = Api<'UserStreamEvent'>
 
 export type ConversationListParams = ListParams
+export type ArtifactListParams = ListParams & { kind?: ArtifactKindEnum }
 export type RunListParams = ListParams & { status?: RunStatusEnum; conversation?: string }
 export type ClarificationListParams = ListParams & { status?: ClarificationStatusEnum }
 export type ToolCallInfo = Api<'ToolCallInfo'>

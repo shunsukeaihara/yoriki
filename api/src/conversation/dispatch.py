@@ -4,6 +4,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
+from artifact.models import Artifact, ArtifactKind
 from run.dispatch import enqueue_run
 from run.models import (
     ACTIVE_STATUSES,
@@ -29,6 +30,31 @@ class CannotStart(Exception):
     pass
 
 
+# 新しい依頼の最初の発言に添える、それまでの添付の数の上限（新しいものから）
+EARLIER_ATTACHMENTS_LIMIT = 50
+
+
+def user_message_data(message: ConversationMessage, text: str, *, first: bool = False) -> dict[str, object]:
+    """利用者の発言のRunEventの内容。添付は /workspace/input の場所とあわせて残す（harness/context.py が読む）。
+
+    Runの最初の発言（first）には、同じ会話でそれまでに送った添付も添える。/workspace/input には会話の添付が
+    すべてあり、作業ファイルも前の依頼のCheckpointから引き継ぐので、前の依頼のファイルを使う依頼に答えられるように
+    """
+    data: dict[str, object] = {"text": text, "message": message.uid}
+    if attachments := describe_attachments(message):
+        data["attachments"] = attachments
+    if first:
+        earlier = (
+            Artifact.objects.sent_inputs(message.conversation_id)
+            .exclude(messages=message)
+            .select_related("blob")
+            .order_by("-pk")[:EARLIER_ATTACHMENTS_LIMIT]
+        )
+        if earlier_list := [a.describe() for a in reversed(earlier)]:
+            data["earlier_attachments"] = earlier_list
+    return data
+
+
 def resolve_effort(conversation: Conversation, version) -> str:
     """利用者が固定したeffortがモデルの受け付ける値ならそれを、なければモデルの既定を使う"""
     if conversation.effort and conversation.effort in version.effort_values:
@@ -40,8 +66,21 @@ def active_run(conversation: Conversation) -> Run | None:
     return Run.objects.select_for_update().filter(conversation=conversation, status__in=ACTIVE_STATUSES).first()
 
 
+def describe_attachments(message: ConversationMessage) -> list[dict[str, object]]:
+    """RunEventに残す添付の一覧"""
+    return [a.describe() for a in message.attachments.select_related("blob").order_by("pk")]
+
+
 @transaction.atomic
-def post_message(conversation: Conversation, *, body: str, client_message_id: str, mode: str, actor):
+def post_message(
+    conversation: Conversation,
+    *,
+    body: str,
+    client_message_id: str,
+    mode: str,
+    actor,
+    attachments: list[Artifact] | None = None,
+):
     """利用者のメッセージを保存し、新しいRun・追加指示・確認への回答・次の依頼のどれかとして受け付ける"""
     conversation = Conversation.objects.select_for_update().get(pk=conversation.pk)
     if client_message_id:
@@ -53,10 +92,24 @@ def post_message(conversation: Conversation, *, body: str, client_message_id: st
     message = ConversationMessage.objects.create(
         conversation=conversation, sender=actor, role=MessageRole.USER, body=body, client_message_id=client_message_id
     )
+    if attachments:
+        # 検証の後に、別のメッセージで送られていないかを会話の行ロックの中で確かめる
+        unsent = list(
+            Artifact.objects.select_for_update()
+            .filter(
+                pk__in=[a.pk for a in attachments], conversation=conversation, kind=ArtifactKind.ATTACHMENT, path=""
+            )
+            .order_by("pk")
+        )
+        if len(unsent) != len(attachments):
+            raise CannotStart(_("送信済みの添付が含まれています。添付し直してください。"))
+        Artifact.attach(conversation, unsent)
+        message.attachments.set(unsent)
     conversation.last_posted = timezone.now()
     fields = ["last_posted", "updated"]
     if not conversation.title:
-        conversation.title = body.strip().splitlines()[0][:50] if body.strip() else ""
+        first_line = body.strip().splitlines()[0] if body.strip() else ""
+        conversation.title = (first_line or ", ".join(a.name for a in attachments or []))[:50]
         fields.append("title")
     conversation.save(update_fields=fields)
 
@@ -71,7 +124,12 @@ def post_message(conversation: Conversation, *, body: str, client_message_id: st
     ).first()
     if mode == MessageMode.AUTO and question is not None and run.status == RunStatus.WAITING_USER:
         # 確認待ちのときのメッセージは、その確認への自由記述の回答にする
-        question.accept_answer([{"selected": [], "text": ""} for _q in question.questions], body, actor)
+        question.accept_answer(
+            [{"selected": [], "text": ""} for _q in question.questions],
+            body,
+            actor,
+            attachments=describe_attachments(message),
+        )
         return message
     kind = (
         InstructionKind.NEXT
@@ -124,7 +182,7 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
     message.run = run
     message.save(update_fields=["run"])
     RunEvent.record(run, RunEventKind.STATUS, {"status": RunStatus.QUEUED}, actor=actor)
-    RunEvent.record(run, RunEventKind.USER_MESSAGE, {"text": message.body, "message": message.uid}, actor=actor)
+    RunEvent.record(run, RunEventKind.USER_MESSAGE, user_message_data(message, message.body, first=True), actor=actor)
     enqueue_run(run)
     return run
 

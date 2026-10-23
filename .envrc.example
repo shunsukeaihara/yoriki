@@ -36,7 +36,7 @@ export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
 # 開発時のリダイレクトURIは http://localhost:3000/api/accounts/<microsoft|google>/login/callback/ になる
 
 # --- Sandbox ---
-# Workerの作業領域（ジョブの出力、Workspaceのsnapshot）。既定の /var/lib/yoriki/workspaces は手元では書けないので、
+# Workerの作業領域（ジョブの出力、Sandboxに見せる添付）。既定の /var/lib/yoriki/workspaces は手元では書けないので、
 # リポジトリの中の .workspaces/（gitに入れない）にする
 export YORIKI_WORKSPACES_DIR="$PWD/.workspaces"
 # 手元でビルドしたSandboxイメージに差し替える（開発時だけ有効。本番では無視する。deployment.md §3.3）
@@ -48,6 +48,15 @@ export YORIKI_SANDBOX_RUNTIME=runc
 # HTTPで読むレジストリ。手元に立てたレジストリ（docker run -p 5001:5000 registry:3）にpushしたイメージを、
 # Runtime Profileとして登録して試すときだけ使う（本番では設定しない）
 # export YORIKI_SANDBOX_INSECURE_REGISTRIES=localhost:5001
+
+# --- ファイルの保存先（添付・成果物・Workspaceのsnapshot。design.md §7.8） ---
+# 既定の /var/lib/yoriki/objects は手元では書けないので、リポジトリの中の .objects/（gitに入れない）にする。
+# 手元ではnginxを通さないので、YORIKI_STORAGE_ACCEL_REDIRECT は設定しない（apiがファイルを返す）
+export YORIKI_STORAGE_LOCAL_ROOT="$PWD/.objects"
+# S3で試すとき（YORIKI_STORAGE_S3_BUCKET 等は deploy/env/yoriki.env.example）
+# export YORIKI_STORAGE_BACKEND=s3
+# 添付の1つのファイルの上限（MB）
+# export YORIKI_UPLOAD_MAX_MB=50
 
 # --- フロントエンド（Nuxt） ---
 # 開発サーバーが /api を転送する先（既定は http://localhost:8000）

@@ -17,7 +17,8 @@ TOOL_GUIDANCE = {
     ),
     "write": (
         "- Inputs are in /workspace/input and /workspace/master (read-only). Work in /workspace/work and put "
-        "deliverables in /workspace/output."
+        "deliverables in /workspace/output; files there are given to the user when you finish or stop to ask, so "
+        "keep only finished files there."
     ),
     "ask_user": "- Use `ask_user` for business decisions only. Call it alone; the answers arrive as its result.",
     "todo_write": (

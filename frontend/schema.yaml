@@ -191,6 +191,145 @@ paths:
               schema:
                 $ref: '#/components/schemas/Conversation'
           description: ''
+  /api/app/v1/conversations/{conversation}/artifacts/:
+    get:
+      operationId: app_v1_conversations_artifacts_list
+      description: 会話の添付と成果物に関するAPI
+      parameters:
+      - in: path
+        name: conversation
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - in: query
+        name: kind
+        schema:
+          type: integer
+          title: 種別
+          enum:
+          - 1
+          - 2
+        description: |-
+          * `1` - 添付
+          * `2` - 成果物
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - app/conversation/artifact
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedArtifactList'
+          description: ''
+    post:
+      operationId: app_v1_conversations_artifacts_create
+      description: 会話の添付と成果物に関するAPI
+      parameters:
+      - in: path
+        name: conversation
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/conversation/artifact
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ArtifactRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Artifact'
+          description: ''
+  /api/app/v1/conversations/{conversation}/artifacts/{uid}/:
+    get:
+      operationId: app_v1_conversations_artifacts_retrieve
+      description: 会話の添付と成果物に関するAPI
+      parameters:
+      - in: path
+        name: conversation
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/conversation/artifact
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Artifact'
+          description: ''
+  /api/app/v1/conversations/{conversation}/artifacts/{uid}/download/:
+    get:
+      operationId: app_v1_conversations_artifacts_download_retrieve
+      description: ファイルを取得する（ダウンロードとして返す）
+      parameters:
+      - in: path
+        name: conversation
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/conversation/artifact
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+          description: ファイル
   /api/app/v1/conversations/{conversation}/messages/:
     get:
       operationId: app_v1_conversations_messages_list
@@ -260,7 +399,6 @@ paths:
           multipart/form-data:
             schema:
               $ref: '#/components/schemas/MessageRequest'
-        required: true
       security:
       - cookieAuth: []
       responses:
@@ -701,6 +839,30 @@ paths:
           description: ''
         '409':
           description: 他の処理と競合した
+  /api/files/{token}/:
+    get:
+      operationId: files_retrieve
+      description: 期限付きのtokenで成果物を取得する（ログインなし。Zapier等の外部へ渡すURL）
+      parameters:
+      - in: path
+        name: token
+        schema:
+          type: string
+        required: true
+      tags:
+      - files
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+          description: ファイル
+        '404':
+          description: No response body
   /api/ping/:
     get:
       operationId: ping_retrieve
@@ -1985,6 +2147,72 @@ components:
       - supports_images
       - supports_reasoning
       - supports_tools
+    Artifact:
+      type: object
+      description: |-
+        会話の添付と成果物。添付は `file` を送って作る（multipart/form-data）。メッセージに付けて送るまでは、
+        一覧に出ない
+      properties:
+        id:
+          type: string
+          readOnly: true
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/ArtifactKindEnum'
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+          title: ファイル名
+        path:
+          type: string
+          readOnly: true
+          title: パス
+        content_type:
+          type: string
+          readOnly: true
+          title: 形式
+        size:
+          type: integer
+          readOnly: true
+        run:
+          type: string
+          readOnly: true
+          nullable: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - content_type
+      - created
+      - id
+      - kind
+      - name
+      - path
+      - run
+      - size
+    ArtifactKindEnum:
+      enum:
+      - 1
+      - 2
+      type: integer
+      description: |-
+        * `1` - 添付
+        * `2` - 成果物
+    ArtifactRequest:
+      type: object
+      description: |-
+        会話の添付と成果物。添付は `file` を送って作る（multipart/form-data）。メッセージに付けて送るまでは、
+        一覧に出ない
+      properties:
+        file:
+          type: string
+          format: binary
+          writeOnly: true
+          description: 添付するファイル
+      required:
+      - file
     AuthMethods:
       type: object
       description: ログイン画面に出すログインの方法
@@ -2790,7 +3018,18 @@ components:
           readOnly: true
         body:
           type: string
+          default: ''
           maxLength: 20000
+        attachments:
+          type: array
+          items:
+            type: string
+          description: 送る添付（この会話にアップロードして、まだ送っていないもの）
+        attachments_info:
+          type: array
+          items:
+            $ref: '#/components/schemas/Artifact'
+          readOnly: true
         instruction:
           allOf:
           - $ref: '#/components/schemas/InstructionInfo'
@@ -2801,7 +3040,7 @@ components:
           format: date-time
           readOnly: true
       required:
-      - body
+      - attachments_info
       - created
       - id
       - instruction
@@ -2814,8 +3053,14 @@ components:
       properties:
         body:
           type: string
-          minLength: 1
+          default: ''
           maxLength: 20000
+        attachments:
+          type: array
+          items:
+            type: string
+            minLength: 1
+          description: 送る添付（この会話にアップロードして、まだ送っていないもの）
         client_message_id:
           type: string
           writeOnly: true
@@ -2830,8 +3075,6 @@ components:
 
             * `auto` - 自動
             * `next` - 次の依頼
-      required:
-      - body
     MessageRoleEnum:
       enum:
       - 1
@@ -3258,6 +3501,25 @@ components:
     NullEnum:
       enum:
       - null
+    PaginatedArtifactList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Artifact'
     PaginatedClarificationRequestList:
       type: object
       required:

@@ -389,8 +389,10 @@ class ClarificationRequest(models.Model):
         return self.uid
 
     @transaction.atomic
-    def accept_answer(self, answers: list[dict[str, Any]], comment: str, actor) -> None:
-        """回答を保存し、同じtransactionでRunを再キューする"""
+    def accept_answer(
+        self, answers: list[dict[str, Any]], comment: str, actor, *, attachments: list[dict[str, Any]] | None = None
+    ) -> None:
+        """回答を保存し、同じtransactionでRunを再キューする。`attachments` は回答に添えた添付の一覧"""
         from .dispatch import enqueue_run  # noqa: PLC0415  dispatchがこのModelをimportするため
 
         run = Run.locked(self.run_id)
@@ -404,17 +406,15 @@ class ClarificationRequest(models.Model):
         self.answered = timezone.now()
         self.save(update_fields=["status", "answers", "comment", "answered_by", "answered"])
         self.run = run
-        RunEvent.record(
-            run,
-            RunEventKind.CLARIFICATION_ANSWERED,
-            {"clarification": self.uid, "answers": answers, "comment": comment},
-            actor=actor,
-        )
+        data: dict[str, Any] = {"clarification": self.uid, "answers": answers, "comment": comment}
+        if attachments:
+            data["attachments"] = attachments
+        RunEvent.record(run, RunEventKind.CLARIFICATION_ANSWERED, data, actor=actor)
         if self.kind == ClarificationKind.QUESTION:
             # ask_user の呼出しへの結果として記録する。呼出しの直後に結果がある形になる（harness.md §10.3）
             from harness.tools.ask_user import answer_result  # noqa: PLC0415  harnessがrunのModelを使うため
 
-            RunEvent.record(run, RunEventKind.TOOL_RESULT, answer_result(self, actor))
+            RunEvent.record(run, RunEventKind.TOOL_RESULT, answer_result(self, actor, attachments or []))
             ToolInvocation.objects.filter(run=run, call_id=self.tool_call_id).update(
                 status=ToolStatus.SUCCEEDED, ended=timezone.now()
             )

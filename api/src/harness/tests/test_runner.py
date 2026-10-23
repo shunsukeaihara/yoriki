@@ -315,6 +315,52 @@ def test_max_tokens_reply_is_nudged(conversation):
 
 
 @pytest.mark.django_db
+@pytest.mark.django_db
+def test_next_request_inherits_the_context_of_the_earlier_requests(conversation, app_user):
+    """同じ会話の次の依頼は、前の依頼の文脈（発言・Tool呼出し・応答）をそのまま引き継ぐ（design.md §5.1）"""
+    todos = {"todos": [{"content": "読む", "status": "completed"}]}
+    first = execute(start(conversation), FakeAdapter([calls(("c1", "todo_write", todos)), reply("1件目の結果です")]))
+    post_message(conversation, body="2件目も", client_message_id="", mode=MessageMode.AUTO, actor=app_user)
+    second = Run.objects.exclude(pk=first.pk).get(conversation=conversation)
+    adapter = FakeAdapter([reply("2件目の結果です")])
+    execute(second, adapter)
+    post_message(conversation, body="3件目も", client_message_id="", mode=MessageMode.AUTO, actor=app_user)
+    third = Run.objects.exclude(pk__in=[first.pk, second.pk]).get(conversation=conversation)
+    adapter = FakeAdapter([reply("3件目の結果です")])
+    execute(third, adapter)
+
+    texts = [m.text for m in adapter.requests[0].messages]
+    order = ["請求書を確認して", "1件目の結果です", "2件目も", "2件目の結果です", "3件目も"]
+    positions = [next(i for i, t in enumerate(texts) if word in t) for word in order]
+    assert positions == sorted(positions)
+    assert any(c.name == "todo_write" for m in adapter.requests[0].messages for c in m.tool_calls)
+
+
+@pytest.mark.django_db
+def test_inherited_calls_without_results_are_closed(conversation, app_user):
+    """前の依頼が結果のないTool呼出しで終わっていても、次の依頼の要求は呼出しと結果が対応する"""
+    first = start(conversation)
+    attempt = claim_run(first.pk)
+    assert attempt is not None
+    with first.fenced(attempt) as locked:
+        RunEvent.record(
+            locked,
+            RunEventKind.ASSISTANT_MESSAGE,
+            {"text": "", "tool_calls": [{"id": "c1", "name": "shell", "arguments": {"command": "x"}}]},
+        )
+        locked.set_status(RunStatus.FAILED, end_reason=RunEndReason.INTERNAL)
+    attempt.end()
+    post_message(conversation, body="続けて", client_message_id="", mode=MessageMode.AUTO, actor=app_user)
+    second = Run.objects.exclude(pk=first.pk).get(conversation=conversation)
+    adapter = FakeAdapter([reply("確かめます")])
+    execute(second, adapter)
+    messages = adapter.requests[0].messages
+    index = next(i for i, m in enumerate(messages) if m.tool_calls)
+    assert messages[index + 1].role == "tool"
+    assert messages[index + 1].tool_call_id == "c1"
+    assert "result is unknown" in messages[index + 1].text
+
+
 def test_compaction_replaces_the_older_part(conversation, monkeypatch):
     run = start(conversation, body="長い依頼です" * 10)
     todos = {"todos": [{"content": "読む", "status": "in_progress"}]}

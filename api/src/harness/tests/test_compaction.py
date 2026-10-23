@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from harness.compaction import estimate_tokens, threshold
+from harness.compaction import choose_range, estimate_tokens, threshold
 from harness.context import Item
 from llm.providers.base import Message
 from run.models import RunEvent, RunEventKind
@@ -24,3 +24,15 @@ def test_estimate_uses_the_compacted_history_after_compaction():
     assert estimate_tokens(events, items) == 2
     # 圧縮の前なら、直前の要求の実際のtoken数から数える
     assert estimate_tokens(events[:2], items) == 91_000
+
+
+def test_inherited_context_is_compacted_as_a_whole():
+    """前の依頼から引き継いだ文脈（sequence 0）の途中では切らない"""
+    inherited = [Item(0, RunEventKind.USER_MESSAGE, Message("user", "前の依頼" * 50)) for _i in range(10)]
+    own = [
+        Item(1, RunEventKind.USER_MESSAGE, Message("user", "次の依頼")),
+        Item(2, RunEventKind.ASSISTANT_MESSAGE, Message("assistant", "了解")),
+    ]
+    chosen = choose_range([*inherited, *own])
+    assert chosen is not None
+    assert (chosen.start, chosen.end) == (0, 0)

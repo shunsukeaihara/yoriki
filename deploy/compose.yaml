@@ -15,6 +15,7 @@ services:
       - ./nginx/sites/tls.conf:/etc/nginx/conf.d/default.conf:ro
       - ./nginx/snippets:/etc/nginx/snippets:ro
       - static:/var/lib/yoriki/static:ro
+      - /var/lib/yoriki/objects:/var/lib/yoriki/objects:ro
       - ${YORIKI_NGINX_CERTS_DIR:-/etc/yoriki/certs}:/etc/nginx/certs:ro
 
   frontend:

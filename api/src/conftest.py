@@ -14,6 +14,17 @@ from user.factories import UserFactory
 from user.models import User
 
 
+@pytest.fixture(autouse=True)
+def fixture_storage(settings, tmp_path) -> None:
+    """添付・成果物・snapshotの保存先を、テストごとの一時ディレクトリにする"""
+    settings.YORIKI_STORAGE = {
+        "DEFAULT": "test-main",
+        "BACKENDS": {
+            "test-main": {"BACKEND": "artifact.storage.LocalStorage", "OPTIONS": {"root": str(tmp_path / "objects")}}
+        },
+    }
+
+
 @pytest.fixture(name="api_client")
 def fixture_api_client() -> APIClient:
     return APIClient()
@@ -57,10 +68,6 @@ def fixture_sandbox_image(settings, tmp_path) -> str:
     settings.YORIKI_SANDBOX_IMAGE_OVERRIDE = image
     settings.YORIKI_SANDBOX_RUNTIME = os.getenv("YORIKI_SANDBOX_TEST_RUNTIME", "")
     settings.YORIKI_WORKSPACES_DIR = str(tmp_path / "workspaces")
-    settings.YORIKI_SNAPSHOT_STORAGE = {
-        "BACKEND": "runtime.storage.LocalSnapshotStorage",
-        "OPTIONS": {"root": str(tmp_path / "workspaces" / "snapshots")},
-    }
     return image
 
 

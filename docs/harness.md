@@ -203,6 +203,17 @@ Anthropicのthinkingブロック（署名付き）、OpenAIのreasoning（暗号
 
 ---
 
+### 5.6 同じ会話・同じタスクの中での引継ぎ
+
+同じ会話の中では、文脈とWorkspaceを必ず引き継ぐ（design.md §5.1）。同じ会話の次の依頼は新しいRunになるが、モデルから見ると1つの続いた会話になる。
+
+- **文脈**：子のRunの要求は、親のRun（同じ会話の前の依頼）の最後の要求と同じ履歴を先頭に置き、その後に自分のRunEventを続ける。親が引き継いだ分も含むので、何件前の依頼まででも遡る（`harness/context.py` の `inherited_items()`）。親は終わっていて記録が変わらないので、Runnerは最初に1回だけ読む。
+- 引き継いだ履歴は、sequence 0 の1つのまとまりとして扱う。長くなれば、圧縮（§9）がまとまりごと要約に入れる（途中では切らない）。親がまとまりごと圧縮していれば、それより前のRunは読まない。
+- 親が結果のないTool呼出しのまま終わっていた（失敗・停止）ときは、結果が分からないことを結果として補う（§5.4）。
+- モデル・effortは子のRunのもので、推論の途中経過は同じ接続・同じモデルの応答のものだけを戻す（§5.5）。
+- **Workspace**：`/workspace/work`・`/workspace/output` は親のRunの最後のCheckpointから戻し（§8.1）、`/workspace/input` には会話でそれまでに送った添付をすべて置く。最初の発言には、それまでの添付の一覧を添える。
+- **タスク**：トリガーで起動してから終わるまでが1つのRunで、その間（確認待ち・再試行・別のAttempt）は文脈とWorkspaceを引き継ぐ。別のときのトリガーで起動したRunは別のもので、前の回の文脈もWorkspaceも引き継がない。
+
 ## 6 system promptと実行時の文脈
 
 ### 6.1 system promptの構成
@@ -483,7 +494,9 @@ Docker操作はLauncher（design.md §7.3、`runtime/launcher.py`）にまとめ
 - 起動したら、inspectの結果でsandbox/CONTRACT.md §2の制限がかかっていることを確かめ直し、違えば使わずに消す（design.md §7.2の対策の1）。イメージの契約番号のラベルもWorkerで確かめる。
 - SandboxはAttemptごとに1つで、最初にSandboxのToolが呼ばれた時点で起動し、最後のCheckpointからWorkspaceを戻す（Runに自分のCheckpointがなければ、同じ会話の前の依頼のもの。design.md §7.9）。
 - Attemptを終えるとき（確認待ち・完了・停止・失敗）は、ジョブを止め、`kill` の `all` の後に `/workspace/work`・`/workspace/output` をSandboxの中のtarで取り出して保存し（tmpfsは `docker cp` で読めない）、Checkpointを記録してから状態を変え、最後に `docker rm -f` で消す。確認待ち・完了で保存できなければ、Sandboxの障害として別のAttemptでやり直す。
-- 保存先は `runtime/storage.py` の抽象（design.md §7.8のStorage Backendと同じ契約）で、初期はWorkerのローカルディスク。
+- 同じtarから `/workspace/output` の通常のファイルを取り出し、成果物（Artifact）として保存する（design.md §7.4）。symlink・特殊なファイル・隠しファイルは回収せず、会話の同じパスの最新の成果物と中身が同じファイルも回収し直さない。1回に200個まで。
+- 保存先はArtifactと同じStorage Backend（`artifact/storage.py`。design.md §7.8）。S3にすれば、別のWorkerでも最後のCheckpointから戻せる。
+- 会話の添付は、Workerの作業領域のAttemptごとのディレクトリに置き、`/workspace/input` に読取り専用のbind mountで見せる。実行中に届いた追加指示の添付も、同じディレクトリに足せばそのまま見える。
 
 ### 8.2 コマンドの環境
 

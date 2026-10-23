@@ -4,6 +4,7 @@ version = "0.1.0"
 requires-python = "==3.13.*"
 dependencies = [
     "anthropic>=1.11.0",
+    "boto3>=1.43.110",
     "cryptography>=50.0.2",
     "django>=6.1.2",
     "django-allauth[socialaccount]>=65.20.0",
@@ -29,10 +30,12 @@ dev = [
     "django-stubs>=6.1.2",
     "djangorestframework-stubs>=3.18.1",
     "factory-boy>=3.3.3",
+    "moto[s3]>=5.2.3",
     "mypy>=2.4.0",
     "pytest>=9.1.1",
     "pytest-django>=4.14.0",
     "ruff>=0.17.1",
+    "types-boto3[s3]>=1.43.110",
     "types-docker>=7.2.0.20261006",
     "types-jsonschema>=4.26.0.20260518",
 ]

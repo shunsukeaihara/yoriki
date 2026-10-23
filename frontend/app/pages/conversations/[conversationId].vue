@@ -26,7 +26,13 @@ const messages = useConversationMessages(conversationId)
 const { items: runs, fetchAll: fetchRuns } = useFetchAll(() =>
   api.runs().list({ conversation: conversationId, pageSize: 200 }),
 )
-await Promise.all([messages.refresh(), fetchRuns()])
+// 添付と成果物（送った添付と、Run が作った成果物）
+const {
+  items: files,
+  loading: filesLoading,
+  fetchAll: fetchFiles,
+} = useFetchAll(() => api.conversations(conversationId).artifacts().list({ pageSize: 200 }))
+await Promise.all([messages.refresh(), fetchRuns(), fetchFiles()])
 
 const activeRun = computed(() => conversation.value?.activeRun ?? null)
 const activeRunId = computed(() => activeRun.value?.id ?? null)
@@ -61,7 +67,7 @@ const syncNow = async () => {
   try {
     do {
       syncAgain = false
-      await Promise.all([refreshConversation(), messages.refresh(), fetchRuns()])
+      await Promise.all([refreshConversation(), messages.refresh(), fetchRuns(), fetchFiles()])
       // 確認は、読み直した会話の実行中の Run のものを読む
       await fetchClarifications()
       if (conversation.value) listStore.upsert(conversation.value)
@@ -130,6 +136,13 @@ const sending = ref(false)
 // 送信に失敗して送り直すときは同じ ID を使い、サーバーで二重に受け付けないようにする（design.md §5.5）
 let clientMessageId = crypto.randomUUID()
 
+// 添付は選んだらすぐにアップロードし、送るときに ID を付ける
+const attachments = useAttachmentUploads()
+const attach = (selected: File[]) => {
+  attachments.add(selected)
+  attachments.upload(conversationId)
+}
+
 const send = async () => {
   const body = text.value
   sending.value = true
@@ -137,10 +150,16 @@ const send = async () => {
     const message = await api
       .conversations(conversationId)
       .messages()
-      .create({ body, clientMessageId, mode: mode.value as MessageWrite['mode'] })
+      .create({
+        body,
+        attachments: attachments.ids.value,
+        clientMessageId,
+        mode: mode.value as MessageWrite['mode'],
+      })
     clientMessageId = crypto.randomUUID()
     text.value = ''
     mode.value = MessageMode.AUTO
+    attachments.clear()
     messages.add(message)
     sync()
   } catch (err) {
@@ -187,97 +206,157 @@ const onDelete = async () => {
   }
 }
 
+// 添付と成果物の欄。広い画面では右の欄に、狭い画面ではドロワーに出す
+// （ページの根は1つにするので、会話の欄とこの欄を display: contents の div で包み、ダッシュボードの横並びにする）
+const isWide = useMediaQuery('(min-width: 1024px)')
+const filesPanelOpen = ref(true)
+const filesDrawerOpen = ref(false)
+const toggleFiles = () => {
+  if (isWide.value) filesPanelOpen.value = !filesPanelOpen.value
+  else filesDrawerOpen.value = true
+}
+
 const menuItems = computed(() => [
   [{ label: t('会話を削除'), icon: 'i-lucide-trash-2', color: 'error' as const, onSelect: onDelete }],
 ])
 </script>
 
 <template>
-  <UDashboardPanel :id="`conversation-${conversationId}`" :ui="{ body: 'p-0 sm:p-0' }">
-    <template #header>
-      <UDashboardNavbar :title="conversation?.title || $t('新しい会話')">
-        <template #right>
-          <ConversationModelSettings
-            v-if="conversation"
-            :conversation="conversation"
-            :models="models"
-            class="hidden sm:flex"
-            @updated="onUpdated"
-          />
-          <UDropdownMenu :items="menuItems">
-            <DBtn icon="i-lucide-ellipsis" variant="ghost" color="neutral" :aria-label="$t('メニュー')" />
-          </UDropdownMenu>
-        </template>
-      </UDashboardNavbar>
-      <!-- 狭い画面では、モデルの切り替えを見出しの下の行に出す -->
-      <UDashboardToolbar v-if="conversation" class="sm:hidden">
-        <ConversationModelSettings :conversation="conversation" :models="models" @updated="onUpdated" />
-      </UDashboardToolbar>
-    </template>
+  <div class="contents">
+    <UDashboardPanel :id="`conversation-${conversationId}`" :ui="{ body: 'p-0 sm:p-0' }">
+      <template #header>
+        <UDashboardNavbar :title="conversation?.title || $t('新しい会話')">
+          <template #right>
+            <ConversationModelSettings
+              v-if="conversation"
+              :conversation="conversation"
+              :models="models"
+              class="hidden sm:flex"
+              @updated="onUpdated"
+            />
+            <DBtn
+              icon="i-lucide-folder-open"
+              variant="ghost"
+              color="neutral"
+              :aria-label="$t('添付と成果物')"
+              @click="toggleFiles"
+            />
+            <UDropdownMenu :items="menuItems">
+              <DBtn icon="i-lucide-ellipsis" variant="ghost" color="neutral" :aria-label="$t('メニュー')" />
+            </UDropdownMenu>
+          </template>
+        </UDashboardNavbar>
+        <!-- 狭い画面では、モデルの切り替えを見出しの下の行に出す -->
+        <UDashboardToolbar v-if="conversation" class="sm:hidden">
+          <ConversationModelSettings :conversation="conversation" :models="models" @updated="onUpdated" />
+        </UDashboardToolbar>
+      </template>
 
-    <template #body>
-      <UContainer class="flex max-w-3xl flex-1 flex-col gap-4 pt-4 sm:gap-6">
-        <div v-if="messages.hasOlder.value" class="flex justify-center">
-          <DBtn variant="ghost" color="neutral" :loading="messages.loadingOlder.value" @click="messages.loadOlder()">
-            {{ $t('以前のメッセージを表示') }}
-          </DBtn>
-        </div>
+      <template #body>
+        <UContainer class="flex max-w-3xl flex-1 flex-col gap-4 pt-4 sm:gap-6">
+          <div v-if="messages.hasOlder.value" class="flex justify-center">
+            <DBtn variant="ghost" color="neutral" :loading="messages.loadingOlder.value" @click="messages.loadOlder()">
+              {{ $t('以前のメッセージを表示') }}
+            </DBtn>
+          </div>
 
-        <UChatMessages
-          :messages="chatMessages"
-          :status="chatStatus"
-          should-auto-scroll
-          :spacing-offset="160"
-          class="flex-1"
-        >
-          <template #content="{ message }">
-            <template v-for="item in [itemOf(message.id)]" :key="item?.id">
-              <template v-if="item?.kind === 'run' && runById.has(item.runId)">
-                <RunWork
-                  :run="runById.get(item.runId)!"
-                  :events="item.runId === activeRunId ? live.events.value : undefined"
-                  :delta="item.runId === activeRunId ? live.delta.value : undefined"
-                  :clarifications="item.runId === activeRunId ? clarifications : undefined"
-                  @answered="sync()"
-                />
-              </template>
-              <template v-else-if="item?.kind === 'message'">
-                <MarkdownContent v-if="item.message.role === MessageRole.AGENT" :text="item.message.body" />
-                <!-- システムのメッセージ（次の依頼を始められなかった理由等） -->
-                <p
-                  v-else-if="item.message.role === MessageRole.SYSTEM"
-                  class="flex items-start gap-2 text-sm whitespace-pre-wrap text-muted"
-                >
-                  <UIcon name="i-lucide-info" class="mt-0.5 size-4 shrink-0" />
-                  <span>{{ item.message.body }}</span>
-                </p>
-                <p v-else class="whitespace-pre-wrap">{{ item.message.body }}</p>
-                <UBadge
-                  v-if="item.message.instruction"
-                  :color="isWaitingNextRequest(item.message) ? 'warning' : 'neutral'"
-                  variant="outline"
-                  size="sm"
-                  class="mt-2"
-                >
-                  {{ instructionLabel(item.message) }}
-                </UBadge>
+          <UChatMessages
+            :messages="chatMessages"
+            :status="chatStatus"
+            should-auto-scroll
+            :spacing-offset="160"
+            class="flex-1"
+          >
+            <template #content="{ message }">
+              <template v-for="item in [itemOf(message.id)]" :key="item?.id">
+                <template v-if="item?.kind === 'run' && runById.has(item.runId)">
+                  <RunWork
+                    :run="runById.get(item.runId)!"
+                    :events="item.runId === activeRunId ? live.events.value : undefined"
+                    :delta="item.runId === activeRunId ? live.delta.value : undefined"
+                    :clarifications="item.runId === activeRunId ? clarifications : undefined"
+                    @answered="sync()"
+                  />
+                </template>
+                <template v-else-if="item?.kind === 'message'">
+                  <MarkdownContent v-if="item.message.role === MessageRole.AGENT" :text="item.message.body" />
+                  <!-- システムのメッセージ（次の依頼を始められなかった理由等） -->
+                  <p
+                    v-else-if="item.message.role === MessageRole.SYSTEM"
+                    class="flex items-start gap-2 text-sm whitespace-pre-wrap text-muted"
+                  >
+                    <UIcon name="i-lucide-info" class="mt-0.5 size-4 shrink-0" />
+                    <span>{{ item.message.body }}</span>
+                  </p>
+                  <p v-else-if="item.message.body" class="whitespace-pre-wrap">{{ item.message.body }}</p>
+                  <ul v-if="item.message.attachmentsInfo.length" class="mt-1 grid gap-0.5">
+                    <li v-for="artifact in item.message.attachmentsInfo" :key="artifact.id">
+                      <ArtifactLink :conversation-id="conversationId" :artifact="artifact" />
+                    </li>
+                  </ul>
+                  <UBadge
+                    v-if="item.message.instruction"
+                    :color="isWaitingNextRequest(item.message) ? 'warning' : 'neutral'"
+                    variant="outline"
+                    size="sm"
+                    class="mt-2"
+                  >
+                    {{ instructionLabel(item.message) }}
+                  </UBadge>
+                </template>
               </template>
             </template>
-          </template>
-        </UChatMessages>
+          </UChatMessages>
 
-        <ConversationPrompt
-          v-model="text"
-          v-model:mode="mode"
-          :active-run="activeRun"
-          :has-open-question="hasOpenQuestion"
-          :sending="sending"
-          :stopping="stopping"
-          class="sticky bottom-0 z-10 rounded-b-none"
-          @submit="send"
-          @stop="stop"
-        />
-      </UContainer>
-    </template>
-  </UDashboardPanel>
+          <ConversationPrompt
+            v-model="text"
+            v-model:mode="mode"
+            :active-run="activeRun"
+            :has-open-question="hasOpenQuestion"
+            :attachments="attachments.items.value"
+            :sending="sending"
+            :stopping="stopping"
+            class="sticky bottom-0 z-10 rounded-b-none"
+            @submit="send"
+            @stop="stop"
+            @attach="attach"
+            @remove-attachment="attachments.remove"
+            @retry-attachments="attachments.upload(conversationId)"
+          />
+        </UContainer>
+      </template>
+    </UDashboardPanel>
+
+    <UDashboardPanel
+      v-if="isWide && filesPanelOpen"
+      :id="`conversation-files-${conversationId}`"
+      :default-size="22"
+      :min-size="16"
+      :max-size="40"
+      resizable
+    >
+      <template #header>
+        <UDashboardNavbar :title="$t('添付と成果物')">
+          <template #right>
+            <DBtn
+              icon="i-lucide-x"
+              variant="ghost"
+              color="neutral"
+              :aria-label="$t('閉じる')"
+              @click="filesPanelOpen = false"
+            />
+          </template>
+        </UDashboardNavbar>
+      </template>
+      <template #body>
+        <ConversationFiles :conversation-id="conversationId" :items="files" :loading="filesLoading" />
+      </template>
+    </UDashboardPanel>
+
+    <DDrawer v-if="!isWide" v-model:open="filesDrawerOpen" :title="$t('添付と成果物')">
+      <template #content>
+        <ConversationFiles :conversation-id="conversationId" :items="files" :loading="filesLoading" />
+      </template>
+    </DDrawer>
+  </div>
 </template>

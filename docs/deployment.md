@@ -70,10 +70,10 @@ yoriki/
 
 | サービス | イメージ | コマンド | ネットワーク | 永続化 |
 |---|---|---|---|---|
-| nginx | nginx | — | edge | 証明書、設定（RO） |
+| nginx | nginx | — | edge | 証明書、設定、objects（RO。Local保存のファイルを `X-Accel-Redirect` で返す） |
 | frontend | yoriki-frontend | `node .output/server/index.mjs` | edge | なし |
 | api | yoriki-api | `uvicorn app.asgi:application ...` | edge、backend、egress | objects（Local保存のとき） |
-| qcluster | yoriki-api | `python manage.py qcluster` | backend、egress | workspaces、Dockerソケット |
+| qcluster | yoriki-api | `python manage.py qcluster` | backend、egress | workspaces、objects（Local保存のとき）、Dockerソケット |
 | channel-listener | yoriki-api | `python manage.py run_channel_listener` | backend、egress | なし（profile `channels` のときだけ起動。Channelの受信を実装するときにComposeへ追加する） |
 | static | yoriki-api | 静的ファイルを共有ボリュームへコピーして終わる | なし | static（nginxと共有） |
 | backup | postgres | `pg_dump` | backend | `/var/lib/yoriki/backups`（profile `tools`、cron等で実行） |
@@ -285,13 +285,13 @@ docker compose -f deploy/compose.yaml exec api python manage.py resume_workers
 - **バックアップ**：`pg_dump` と、Local保存のobjectsのディレクトリを同じ時点で取得する（design.md §10）。復元手順を定期的に試す。
 - **掃除**：使わなくなったSandboxイメージは、RunやCheckpointが参照していないことを確認してから削除する（design.md §10.1）。`docker image prune` を無条件に実行しない。
 - **Sandboxのコンテナ**：LauncherはAttemptを終えるときにSandboxを `docker rm -f` で消す。Workerが落ちて残ったものは、次にSandboxを起動するときに、終わったAttemptのもの（ラベル `org.yoriki.attempt`）を探して消す。
-- **Workspaceのsnapshot**：`/var/lib/yoriki/workspaces/snapshots` に、Runごとのsnapshot（tar）がたまる。保持期限での削除はまだない（docs/status.md §3）。
+- **ファイルの保存先**：添付・成果物・Workspaceのsnapshot（tar）は、`YORIKI_STORAGE_BACKEND` で選んだ保存先（Localなら `/var/lib/yoriki/objects`、S3ならbucket）に置く（§7.2）。保持期限での削除はまだない（docs/status.md §3）。
 
 ### 7.1 Sandboxを動かすホスト
 
 Sandboxから脱出されたときの影響を小さくするための手順（design.md §7.2の対策の2・4・5）。qclusterを動かすサーバー（単一ホストならそのホスト、分けるならWorkerサーバー）で行う。
 
-**作業領域**：qclusterのコンテナの利用者（uid 10001）が書けるディレクトリを、ホストとコンテナで同じパスに用意する（§3.1）。ジョブの出力とWorkspaceのsnapshotを置く。Sandboxにはmountしない（Sandboxの書ける場所はすべて大きさを決めたtmpfs）。
+**作業領域**：qclusterのコンテナの利用者（uid 10001）が書けるディレクトリを、ホストとコンテナで同じパスに用意する（§3.1）。ジョブの出力と、Sandboxに見せる添付を置く。Sandboxには、Attemptごとの添付のディレクトリだけを `/workspace/input` に読取り専用でmountする（Sandboxの書ける場所はすべて大きさを決めたtmpfs）。Sandboxの利用者（userns-remapではホストの別のuid）が添付を読めるよう、添付のディレクトリとファイルは誰でも読める権限で作る。
 
 ```bash
 sudo install -d -o 10001 -g 10001 -m 0700 /var/lib/yoriki/workspaces
@@ -337,6 +337,19 @@ docker run --rm --runtime=runsc <Sandboxのイメージ> dmesg | head -1   # "St
 Launcherは、Dockerがuserns-remapでもrootlessでもなければ、qclusterのログに警告を出す（起動は止めない）。
 
 ---
+
+### 7.2 ファイルの保存先
+
+添付・成果物・Workspaceのsnapshotは、Storage Backend（design.md §7.8、`api/src/artifact/storage.py`）に置く。どれを使うかは `YORIKI_STORAGE_BACKEND`（`local`・`s3`）で決め、apiとqcluster（Workerサーバーを含む）で同じ設定にする。
+
+- **Local**（単一ホスト）：`/var/lib/yoriki/objects` に置き、api・qclusterが読み書きし、nginxが読取り専用でmountする。ダウンロードは、apiが権限を確かめた後に `X-Accel-Redirect`（`YORIKI_STORAGE_ACCEL_REDIRECT=/_protected/`）でnginxに返させる。バックアップはDBと同じ時点で取る（§7）。
+
+  ```bash
+  sudo install -d -o 10001 -g 10001 -m 0755 /var/lib/yoriki/objects
+  ```
+
+- **S3**（Workerを別のサーバーに置くとき）：非公開のbucketと、Yorikiのprefixだけに `s3:PutObject`・`s3:GetObject`・`s3:DeleteObject`（と、存在の確認のための `s3:ListBucket`）を許したIAM roleを使う。資格情報はインスタンスプロファイル等で渡し、`yoriki.env` に書かない（どうしても書くときは `AWS_ACCESS_KEY_ID`・`AWS_SECRET_ACCESS_KEY`）。上書きしないことを条件付きの書込み（`If-None-Match: *`）で守るので、S3互換のストレージは、これに対応しているかを確かめてから使う。ダウンロードはapiが保存先から読んで返す。保存先のライフサイクルの設定で、Yorikiの保持期限より先に消さない（design.md §8）。
+- 保存したファイルは、保存先のID（`YORIKI_STORAGE_ID`）とkeyで記録する。rootやbucketを変えるときは、同じIDのまま付け替えず、新しいIDにする（design.md §7.10）。既定の保存先を変えた後も以前の保存先のファイルを読めるよう、以前の保存先を `YORIKI_STORAGE_PREVIOUS`（JSON。読むだけ）に残す。既存のファイルを新しい保存先へ移すコマンドはまだない（docs/status.md §3）。
 
 ## 8 公開の方法
 

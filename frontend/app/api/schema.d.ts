@@ -3938,7 +3938,9 @@ export interface operations {
     };
     app_v1_skills_drafts_destroy: {
         parameters: {
-            query?: never;
+            query: {
+                revision: number;
+            };
             header?: never;
             path: {
                 skill: string;
@@ -3950,6 +3952,13 @@ export interface operations {
         responses: {
             /** @description No response body */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった） */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

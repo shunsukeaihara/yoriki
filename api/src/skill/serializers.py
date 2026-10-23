@@ -461,7 +461,7 @@ class SkillDraftAssetSerializer(serializers.ModelSerializer):
 
 
 class SkillDraftRevisionSerializer(serializers.Serializer):
-    """資料を外すときの、編集を始めた時点のDraftのrevision（クエリ文字列）"""
+    """Draftを破棄する・資料を外すときの、編集を始めた時点のDraftのrevision（クエリ文字列）"""
 
     revision = serializers.IntegerField(min_value=1)
 

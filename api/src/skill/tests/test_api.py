@@ -192,6 +192,11 @@ class TestDraftAndPublish:
         assert SkillVersion.objects.filter(skill=skill).count() == 1
         # operation keyのない再送は、閉じたDraftなので409
         assert _publish(api_client, skill_id, draft).status_code == 409
+        # 公開のkeyを、別のDraftの公開や切戻しに使い回せない
+        draft = api_client.post(f"{SKILLS}{skill_id}/drafts/", {}, format="json").json()
+        assert _publish(api_client, skill_id, draft, operation_key="op-1").status_code == 409
+        rollback = {"number": 1, "expected_version": 1, "operation_key": "op-1"}
+        assert api_client.post(f"{SKILLS}{skill_id}/rollback/", rollback, format="json").status_code == 409
 
     @pytest.mark.django_db
     def test_cannot_publish_without_instructions(self, api_client, app_user):
@@ -237,7 +242,11 @@ class TestDraftAndPublish:
     def test_discard_draft(self, api_client, app_user):
         skill_id = _create(api_client, app_user)["id"]
         draft = _draft(api_client, skill_id)
-        assert api_client.delete(f"{SKILLS}{skill_id}/drafts/{draft['id']}/").status_code == 204
+        url = f"{SKILLS}{skill_id}/drafts/{draft['id']}/"
+        api_client.patch(url, {"revision": draft["revision"], "instructions": "他の人の変更"}, format="json")
+        # 古い画面からの破棄で、その後の変更を黙って消さない
+        assert api_client.delete(f"{url}?revision={draft['revision']}").status_code == 409
+        assert api_client.delete(f"{url}?revision={draft['revision'] + 1}").status_code == 204
         assert api_client.get(f"{SKILLS}{skill_id}/drafts/").json() == []
 
 
@@ -443,6 +452,11 @@ class TestRollbackAndSuspend:
         assert again.json()["number"] == 3
         assert SkillVersion.objects.filter(skill=skill).count() == 3
 
+        # 同じkeyを別の操作に使うと、前の結果を返さずに409
+        reused = api_client.post(
+            _url(skill, "rollback/"), {"number": 2, "expected_version": 3, "operation_key": "rb"}, format="json"
+        )
+        assert reused.status_code == 409
         stale = api_client.post(_url(skill, "rollback/"), {"number": 2, "expected_version": 2}, format="json")
         assert stale.status_code == 409
         current = api_client.post(_url(skill, "rollback/"), {"number": 3, "expected_version": 3}, format="json")

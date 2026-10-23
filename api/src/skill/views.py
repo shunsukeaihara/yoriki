@@ -213,7 +213,9 @@ class AppSkillChangeViewSet(SkillMixin, mixins.ListModelMixin, GenericViewSet):
     create=extend_schema(request=SkillDraftOpenSerializer, responses={201: SkillDraftSerializer, 409: CONFLICT}),
     update=extend_schema(responses={200: SkillDraftSerializer, 409: CONFLICT}),
     partial_update=extend_schema(responses={200: SkillDraftSerializer, 409: CONFLICT}),
-    destroy=extend_schema(description="Draftを破棄する"),
+    destroy=extend_schema(
+        description="Draftを破棄する", parameters=[SkillDraftRevisionSerializer], responses={204: None, 409: CONFLICT}
+    ),
 )
 class AppSkillDraftViewSet(
     SkillMixin,
@@ -244,6 +246,16 @@ class AppSkillDraftViewSet(
 
     def perform_update(self, serializer):
         serializer.save(actor=self.request.user)
+
+    def destroy(self, request, *args, **kwargs):
+        draft = self.get_object()
+        serializer = SkillDraftRevisionSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        try:
+            draft.discard(expected_revision=serializer.validated_data["revision"])
+        except VersionConflict as exc:
+            raise Conflict() from exc
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class SkillDraftMixin(SkillMixin):

@@ -1394,6 +1394,12 @@ paths:
       operationId: app_v1_skills_drafts_destroy
       description: Draftを破棄する
       parameters:
+      - in: query
+        name: revision
+        schema:
+          type: integer
+          minimum: 1
+        required: true
       - in: path
         name: skill
         schema:
@@ -1412,6 +1418,8 @@ paths:
       responses:
         '204':
           description: No response body
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった）
   /api/app/v1/skills/{skill}/files/{uid}/:
     get:
       operationId: app_v1_skills_files_retrieve

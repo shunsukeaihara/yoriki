@@ -9,6 +9,7 @@ DraftはSkillごとに1つで、revisionで同時の編集を検出し、公開�
 Skillの本文は権限の根拠にしない。実行するときのToolの許可は、利用者・Skill・Runの範囲をサーバーで照合して決める。
 """
 
+from collections.abc import Callable
 from enum import IntEnum
 from typing import IO, Any
 
@@ -226,11 +227,26 @@ class Skill(models.Model):
     def _lock(self) -> "Skill":
         return Skill.objects.select_for_update(of=("self",)).select_related("current_version").get(pk=self.pk)
 
-    def _recorded(self, operation_key: str) -> "SkillChange | None":
-        """同じoperation keyの操作が済んでいれば、その記録（再送で版を重ねて作らない。design.md §3.7）"""
+    def _recorded(
+        self, operation_key: str, kind: "SkillChangeKind", same: Callable[["SkillChange"], bool]
+    ) -> "SkillVersion | None":
+        """同じoperation keyの操作が済んでいれば、その結果の版（再送で版を重ねて作らない。design.md §3.7）。
+
+        同じkeyが別の操作（種別か対象の違うもの）に使われていたら、要求した操作をせずに前の結果を返すことになるので
+        VersionConflict
+        """
         if not operation_key:
             return None
-        return SkillChange.objects.filter(skill=self, operation_key=operation_key).select_related("version").first()
+        done = (
+            SkillChange.objects.filter(skill=self, operation_key=operation_key)
+            .select_related("version__rolled_back_from")
+            .first()
+        )
+        if done is None:
+            return None
+        if done.kind != kind or done.version is None or not same(done):
+            raise VersionConflict(f"the operation key {operation_key} was used for another operation")
+        return done.version
 
     def _next_number(self) -> int:
         return (self.versions.aggregate(n=Max("number"))["n"] or 0) + 1
@@ -246,9 +262,13 @@ class Skill(models.Model):
         （design.md §3.10）
         """
         current = self._lock()
-        if done := current._recorded(operation_key):
-            assert done.version is not None
-            return done.version
+        # 公開したDraftは閉じている。まだあるなら、このkeyは別のDraftの公開に使われた
+        if done := current._recorded(
+            operation_key,
+            SkillChangeKind.PUBLISH,
+            lambda _change: not SkillDraft.objects.filter(skill=current, uid=draft_uid).exists(),
+        ):
+            return done
         draft = (
             SkillDraft.objects.select_for_update()
             .filter(skill=current, uid=draft_uid)
@@ -303,9 +323,16 @@ class Skill(models.Model):
     ) -> "SkillVersion":
         """選んだ過去の版と同じ中身・資料の版を新しく作り、公開中の版にする（履歴は消さない。design.md §3.7）"""
         current = self._lock()
-        if done := current._recorded(operation_key):
-            assert done.version is not None
-            return done.version
+        if done := current._recorded(
+            operation_key,
+            SkillChangeKind.ROLLBACK,
+            lambda change: (
+                change.version is not None
+                and change.version.rolled_back_from is not None
+                and change.version.rolled_back_from.number == number
+            ),
+        ):
+            return done
         if current.version_number != expected_version:
             raise VersionConflict(f"expected version={expected_version} latest={current.version_number}")
         source = current.versions.prefetch_related("assets__resource_version").filter(number=number).first()
@@ -556,6 +583,11 @@ class SkillDraft(SkillContent):
         locked.save()
         self._bump(current, actor, [])
         return locked
+
+    @transaction.atomic
+    def discard(self, *, expected_revision: int) -> None:
+        """Draftを破棄する。編集を始めた後に他の人が変えていたら VersionConflict（その変更を黙って消さない）"""
+        self._lock(expected_revision).delete()
 
     @transaction.atomic
     def remove_asset(self, asset: "SkillDraftAsset", *, actor, expected_revision: int) -> None:

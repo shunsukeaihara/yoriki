@@ -57,6 +57,7 @@ const { onSubmit, loading, errors } = createSubmit({
       const message = await api.conversations(conversation.id).messages().create({
         body,
         attachments: attachments.ids.value,
+        createSkill: false,
         clientMessageId: crypto.randomUUID(),
         mode: MessageMode.AUTO,
       })

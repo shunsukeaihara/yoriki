@@ -243,6 +243,11 @@ class ClarificationRequestSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["target"] = data["target"] or None  # 対象のない確認（ask_user・モデルの切り替え）
+        return data
+
 
 class ClarificationAnswerSerializer(serializers.Serializer):
     """確認への回答。質問ごとの選択（と自由記述）を質問と同じ順に送る。補足だけでもよい"""

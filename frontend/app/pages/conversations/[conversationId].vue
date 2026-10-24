@@ -22,10 +22,10 @@ const { data: models } = await useAsyncData('app-model-profiles', () => api.mode
   default: () => [],
 })
 
-// 入力欄の `/` で指定できる Skill（公開中で停止していないもの）
-const { items: usableSkills, fetchAll: fetchSkills } = useFetchAll(() =>
-  api.skills().list({ published: true, suspended: false, pageSize: 200 }),
-)
+// 入力欄の `/` の一覧。見える Skill から、使えるもの（公開中で停止していない）と編集できるものに分ける
+const { items: visibleSkills, fetchAll: fetchSkills } = useFetchAll(() => api.skills().list({ pageSize: 200 }))
+const usableSkills = computed(() => visibleSkills.value.filter((s) => s.version > 0 && !s.suspended))
+const editableSkills = computed(() => visibleSkills.value.filter((s) => s.access >= SkillAccess.EDIT))
 
 const messages = useConversationMessages(conversationId)
 const { items: runs, fetchAll: fetchRuns } = useFetchAll(() =>
@@ -72,7 +72,8 @@ const syncNow = async () => {
   try {
     do {
       syncAgain = false
-      await Promise.all([refreshConversation(), messages.refresh(), fetchRuns(), fetchFiles()])
+      // Skill は、会話で作った・公開したものを次の依頼から `/` で選べるように読み直す
+      await Promise.all([refreshConversation(), messages.refresh(), fetchRuns(), fetchFiles(), fetchSkills()])
       // 確認は、読み直した会話の実行中の Run のものを読む
       await fetchClarifications()
       if (conversation.value) listStore.upsert(conversation.value)
@@ -138,6 +139,7 @@ const instructionLabel = (message: Message) => {
 const text = ref('')
 const mode = ref<string>(MessageMode.AUTO)
 const selectedSkills = ref<Skill[]>([])
+const skillEdit = ref<SkillEditChoice | null>(null)
 const sending = ref(false)
 // 送信に失敗して送り直すときは同じ ID を使い、サーバーで二重に受け付けないようにする（design.md §5.5）
 let clientMessageId = crypto.randomUUID()
@@ -160,6 +162,8 @@ const send = async () => {
         body,
         attachments: attachments.ids.value,
         skills: selectedSkills.value.map((s) => s.id),
+        editSkill: skillEdit.value?.skill?.id ?? null,
+        createSkill: skillEdit.value !== null && skillEdit.value.skill === null,
         clientMessageId,
         mode: mode.value as MessageWrite['mode'],
       })
@@ -167,6 +171,7 @@ const send = async () => {
     text.value = ''
     mode.value = MessageMode.AUTO
     selectedSkills.value = []
+    skillEdit.value = null
     attachments.clear()
     messages.add(message)
     sync()
@@ -297,6 +302,20 @@ const menuItems = computed(() => [
                     <span>{{ item.message.body }}</span>
                   </p>
                   <template v-else>
+                    <UBadge
+                      v-if="item.message.skillEdit"
+                      color="warning"
+                      variant="subtle"
+                      size="sm"
+                      :icon="item.message.skillEdit.id ? 'i-lucide-pencil' : 'i-lucide-plus'"
+                      class="mb-1"
+                    >
+                      {{
+                        item.message.skillEdit.id
+                          ? $t('Skillの編集：{name}', { name: item.message.skillEdit.name })
+                          : $t('新しいSkillを作る')
+                      }}
+                    </UBadge>
                     <ul v-if="item.message.skillsInfo.length" class="mb-1 flex flex-wrap gap-1">
                       <li v-for="skill in item.message.skillsInfo" :key="skill.id">
                         <UBadge color="primary" variant="subtle" size="sm" icon="i-lucide-sparkles">
@@ -329,8 +348,10 @@ const menuItems = computed(() => [
             v-model="text"
             v-model:mode="mode"
             v-model:selected-skills="selectedSkills"
+            v-model:skill-edit="skillEdit"
             :active-run="activeRun"
             :skills="usableSkills"
+            :editable-skills="editableSkills"
             :has-open-question="hasOpenQuestion"
             :attachments="attachments.items.value"
             :sending="sending"

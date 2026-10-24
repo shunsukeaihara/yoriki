@@ -3621,6 +3621,27 @@ components:
           type: string
           default: ''
           maxLength: 5000
+    ClarificationContext:
+      type: object
+      description: 確認の対象。Skillの編集の確認で、対象のSkill（新しいSkillならskillが空）と変更の要約
+      properties:
+        skill:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        scope:
+          type: string
+          readOnly: true
+        summary:
+          type: string
+          readOnly: true
+      required:
+      - name
+      - scope
+      - skill
+      - summary
     ClarificationEvent:
       type: object
       description: エージェントからの確認（回答待ち）
@@ -3656,10 +3677,12 @@ components:
       enum:
       - 1
       - 2
+      - 3
       type: integer
       description: |-
         * `1` - エージェントからの質問
         * `2` - モデルの切り替えの確認
+        * `3` - Skillの編集の確認
     ClarificationOption:
       type: object
       properties:
@@ -3711,6 +3734,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/ClarificationStatusEnum'
           readOnly: true
+        target:
+          allOf:
+          - $ref: '#/components/schemas/ClarificationContext'
+          readOnly: true
+          nullable: true
         questions:
           type: array
           items:
@@ -3757,6 +3785,7 @@ components:
       - questions
       - run
       - status
+      - target
     ClarificationStatusEnum:
       enum:
       - 1
@@ -4484,6 +4513,11 @@ components:
           items:
             $ref: '#/components/schemas/MessageSkill'
           readOnly: true
+        skill_edit:
+          allOf:
+          - $ref: '#/components/schemas/MessageSkillEdit'
+          nullable: true
+          readOnly: true
         instruction:
           allOf:
           - $ref: '#/components/schemas/InstructionInfo'
@@ -4501,6 +4535,7 @@ components:
       - role
       - run
       - sender
+      - skill_edit
       - skills_info
     MessageRequest:
       type: object
@@ -4524,6 +4559,17 @@ components:
             writeOnly: true
           writeOnly: true
           description: 入力欄の `/` で指定したSkill。実行中なら次の依頼になる（Skillの版は依頼を始めるときに決める）
+        edit_skill:
+          type: string
+          minLength: 1
+          writeOnly: true
+          nullable: true
+          description: 入力欄の `/` で「編集」を選んだSkill。このメッセージはSkillの編集の依頼になる（別のRunで行う）
+        create_skill:
+          type: boolean
+          writeOnly: true
+          default: false
+          description: 入力欄の `/` で「新しいSkillを作る」を選んだ。このメッセージは新しいSkillを作る依頼になる
         client_message_id:
           type: string
           writeOnly: true
@@ -4551,6 +4597,19 @@ components:
     MessageSkill:
       type: object
       description: メッセージで指定したSkill（送ったときの名前）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+      required:
+      - id
+      - name
+    MessageSkillEdit:
+      type: object
+      description: メッセージのSkillの編集の依頼（送ったときの名前）。新しいSkillを作る依頼ではidが空
       properties:
         id:
           type: string
@@ -5826,6 +5885,10 @@ components:
         conversation:
           type: string
           readOnly: true
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/RunKindEnum'
+          readOnly: true
         status:
           allOf:
           - $ref: '#/components/schemas/RunStatusEnum'
@@ -5873,6 +5936,12 @@ components:
           readOnly: true
           nullable: true
           description: 業務結果（submit_result の内容）
+        skill_changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunSkillChange'
+          readOnly: true
+          description: Skillの編集のRunで変えたSkill
         created:
           type: string
           format: date-time
@@ -5896,8 +5965,10 @@ components:
       - error
       - finished
       - id
+      - kind
       - model_profile_name
       - result
+      - skill_changes
       - skills
       - status
       - status_display
@@ -5995,6 +6066,14 @@ components:
         * `51` - 確認への回答
         * `60` - モデルの再試行
         * `90` - 実行の終了
+    RunKindEnum:
+      enum:
+      - 1
+      - 2
+      type: integer
+      description: |-
+        * `1` - 業務
+        * `2` - Skillの編集
     RunMessageEvent:
       type: object
       description: 確定したメッセージとTool実行（利用者の発言、エージェントの応答、Toolの結果）
@@ -6097,6 +6176,95 @@ components:
       - name
       - number
       - skill
+    RunSkillChange:
+      type: object
+      description: Skillの編集のRunで変えたSkill（Skill管理のToolの結果。harness.md §10.9）。Skillごとに最後の状態
+      properties:
+        skill:
+          type: string
+          readOnly: true
+          description: SkillのID
+        name:
+          type: string
+          readOnly: true
+        scope:
+          type: string
+          readOnly: true
+          description: 範囲（「部門 経理部」等）
+        state:
+          allOf:
+          - $ref: '#/components/schemas/RunSkillChangeStateEnum'
+          readOnly: true
+        version:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: 公開・切戻しでできた版
+        revision:
+          type: integer
+          readOnly: true
+          nullable: true
+          description: 保存したDraftのrevision
+        summary:
+          allOf:
+          - $ref: '#/components/schemas/RunSkillChangeSummary'
+          readOnly: true
+          nullable: true
+          description: 変わった項目と資料のkey
+      required:
+      - name
+      - revision
+      - scope
+      - skill
+      - state
+      - summary
+      - version
+    RunSkillChangeStateEnum:
+      enum:
+      - created
+      - draft_saved
+      - published
+      - rolled_back
+      type: string
+      description: |-
+        * `created` - 作成
+        * `draft_saved` - 変更案を保存
+        * `published` - 公開
+        * `rolled_back` - 切戻し
+    RunSkillChangeSummary:
+      type: object
+      properties:
+        fields:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        assets_added:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        assets_removed:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        assets_replaced:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        assets_changed:
+          type: array
+          items:
+            type: string
+          readOnly: true
+      required:
+      - assets_added
+      - assets_changed
+      - assets_removed
+      - assets_replaced
+      - fields
     RunStatusEnum:
       enum:
       - 1

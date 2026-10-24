@@ -41,7 +41,10 @@ export const DepartmentRole = {
   PUBLISHER: 3,
 } as const satisfies Record<string, DepartmentRoleEnum>
 
-type T = (key: string) => string
+/** 入力欄で選んだ Skill の編集の依頼。skill が null なら新しい Skill を作る（design.md §11.6） */
+export type SkillEditChoice = { skill: Skill | null }
+
+type T = (key: string, params?: Record<string, unknown>) => string
 
 /** 公開範囲の選択肢（検索条件と作成）。一覧の表示はサーバーの scopeDisplay を使う */
 export const skillScopeItems = (t: T) => [
@@ -97,6 +100,28 @@ export const skillFieldLabel = (name: string, t: T): string => {
     output_schema: t('業務結果のSchema'),
   }
   return labels[name] ?? name
+}
+
+/** 変わった項目と資料の key（SkillChange・Runで変えたSkillの summary） */
+export type SkillChangeSummary = Partial<
+  Record<'fields' | 'assetsAdded' | 'assetsReplaced' | 'assetsChanged' | 'assetsRemoved', readonly string[]>
+>
+
+/** 変更点の行（「手順・使ってよいTool」「資料の追加：vendor-master」等） */
+export const skillChangeLines = (summary: SkillChangeSummary | null | undefined, t: T): string[] => {
+  if (!summary) return []
+  const lines: string[] = []
+  if (summary.fields?.length) lines.push(summary.fields.map((name) => skillFieldLabel(name, t)).join('・'))
+  const assets: [keyof SkillChangeSummary, string][] = [
+    ['assetsAdded', t('資料の追加')],
+    ['assetsReplaced', t('資料の置換')],
+    ['assetsChanged', t('資料の用途・説明')],
+    ['assetsRemoved', t('資料の削除')],
+  ]
+  for (const [key, label] of assets) {
+    if (summary[key]?.length) lines.push(t('{label}：{keys}', { label, keys: summary[key]!.join(', ') }))
+  }
+  return lines
 }
 
 /** 公開・切戻しのoperation key。ダイアログを開くたびに作り、同じ操作の再送で版を重ねて作らない */

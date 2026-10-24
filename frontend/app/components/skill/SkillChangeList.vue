@@ -16,22 +16,7 @@ const columns: TableColumn<SkillChange>[] = [
   { accessorKey: 'actorInfo', header: t('操作者') },
 ]
 
-/** 変更点の行（「手順・使ってよいTool」「追加：vendor-master」等） */
-const summaryLines = (change: SkillChange): string[] => {
-  const s = change.summary
-  const lines: string[] = []
-  if (s.fields?.length) lines.push(s.fields.map((name) => skillFieldLabel(name, t)).join('・'))
-  const assets: [string, string][] = [
-    ['assetsAdded', t('資料の追加')],
-    ['assetsReplaced', t('資料の置換')],
-    ['assetsChanged', t('資料の用途・説明')],
-    ['assetsRemoved', t('資料の削除')],
-  ]
-  for (const [key, label] of assets) {
-    if (s[key]?.length) lines.push(t('{label}：{keys}', { label, keys: s[key]!.join(', ') }))
-  }
-  return lines
-}
+const summaryLines = (change: SkillChange): string[] => skillChangeLines(change.summary, t)
 </script>
 
 <template>

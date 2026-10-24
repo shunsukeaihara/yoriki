@@ -22,6 +22,11 @@ const { data: models } = await useAsyncData('app-model-profiles', () => api.mode
   default: () => [],
 })
 
+// 入力欄の `/` で指定できる Skill（公開中で停止していないもの）
+const { items: usableSkills, fetchAll: fetchSkills } = useFetchAll(() =>
+  api.skills().list({ published: true, suspended: false, pageSize: 200 }),
+)
+
 const messages = useConversationMessages(conversationId)
 const { items: runs, fetchAll: fetchRuns } = useFetchAll(() =>
   api.runs().list({ conversation: conversationId, pageSize: 200 }),
@@ -32,7 +37,7 @@ const {
   loading: filesLoading,
   fetchAll: fetchFiles,
 } = useFetchAll(() => api.conversations(conversationId).artifacts().list({ pageSize: 200 }))
-await Promise.all([messages.refresh(), fetchRuns(), fetchFiles()])
+await Promise.all([messages.refresh(), fetchRuns(), fetchFiles(), fetchSkills()])
 
 const activeRun = computed(() => conversation.value?.activeRun ?? null)
 const activeRunId = computed(() => activeRun.value?.id ?? null)
@@ -132,6 +137,7 @@ const instructionLabel = (message: Message) => {
 
 const text = ref('')
 const mode = ref<string>(MessageMode.AUTO)
+const selectedSkills = ref<Skill[]>([])
 const sending = ref(false)
 // 送信に失敗して送り直すときは同じ ID を使い、サーバーで二重に受け付けないようにする（design.md §5.5）
 let clientMessageId = crypto.randomUUID()
@@ -153,12 +159,14 @@ const send = async () => {
       .create({
         body,
         attachments: attachments.ids.value,
+        skills: selectedSkills.value.map((s) => s.id),
         clientMessageId,
         mode: mode.value as MessageWrite['mode'],
       })
     clientMessageId = crypto.randomUUID()
     text.value = ''
     mode.value = MessageMode.AUTO
+    selectedSkills.value = []
     attachments.clear()
     messages.add(message)
     sync()
@@ -288,7 +296,16 @@ const menuItems = computed(() => [
                     <UIcon name="i-lucide-info" class="mt-0.5 size-4 shrink-0" />
                     <span>{{ item.message.body }}</span>
                   </p>
-                  <p v-else-if="item.message.body" class="whitespace-pre-wrap">{{ item.message.body }}</p>
+                  <template v-else>
+                    <ul v-if="item.message.skillsInfo.length" class="mb-1 flex flex-wrap gap-1">
+                      <li v-for="skill in item.message.skillsInfo" :key="skill.id">
+                        <UBadge color="primary" variant="subtle" size="sm" icon="i-lucide-sparkles">
+                          {{ skill.name }}
+                        </UBadge>
+                      </li>
+                    </ul>
+                    <p v-if="item.message.body" class="whitespace-pre-wrap">{{ item.message.body }}</p>
+                  </template>
                   <ul v-if="item.message.attachmentsInfo.length" class="mt-1 grid gap-0.5">
                     <li v-for="artifact in item.message.attachmentsInfo" :key="artifact.id">
                       <ArtifactLink :conversation-id="conversationId" :artifact="artifact" />
@@ -311,7 +328,9 @@ const menuItems = computed(() => [
           <ConversationPrompt
             v-model="text"
             v-model:mode="mode"
+            v-model:selected-skills="selectedSkills"
             :active-run="activeRun"
+            :skills="usableSkills"
             :has-open-question="hasOpenQuestion"
             :attachments="attachments.items.value"
             :sending="sending"

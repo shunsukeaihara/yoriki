@@ -75,6 +75,7 @@ class RunEndReason(models.IntegerChoices):
     ATTEMPTS = 16, _("再試行の上限")
     EXPIRED = 17, _("回答期限切れ")
     SANDBOX = 18, _("実行環境を使えない")
+    SKILL = 19, _("Skillを使えない")
     INTERNAL = 99, _("内部のエラー")
 
 
@@ -111,6 +112,8 @@ class Run(models.Model):
     handles_sensitive_data = models.BooleanField(_("個人情報・機密情報を扱う"), default=False)
     # 開始時に固定したもの（fixed）と、実行中に追記したもの（appended。順序と時刻つき）。design.md §3.2
     manifest = models.JSONField(_("Manifest"), default=dict)
+    # 業務結果。SkillかTask Definitionが業務結果のSchemaを持つRunで、submit_result が確定する（harness.md §10.5）
+    result = models.JSONField(_("業務結果"), null=True, blank=True)
     end_reason = models.PositiveSmallIntegerField(_("終わり方"), choices=RunEndReason.choices, null=True, blank=True)
     error = models.TextField(_("失敗の理由"), blank=True)
     step_count = models.PositiveIntegerField(_("ステップ数"), default=0)
@@ -305,6 +308,7 @@ class RunEventKind(models.IntegerChoices):
     CONTEXT = 31, _("実行時の文脈")
     COMPACTION = 32, _("文脈の圧縮")
     MODEL_SWITCHED = 40, _("モデルの切り替え")
+    SKILL_LOADED = 41, _("Skillの読込み")
     CLARIFICATION_REQUESTED = 50, _("確認の質問")
     CLARIFICATION_ANSWERED = 51, _("確認への回答")
     LLM_RETRY = 60, _("モデルの再試行")

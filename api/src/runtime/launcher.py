@@ -29,6 +29,7 @@ HELPER = "/opt/yoriki/bin/yoriki-sandbox"
 SANDBOX_USER = "10001:10001"
 WORK_DIR = "/workspace/work"
 INPUT_DIR = "/workspace/input"
+MASTER_DIR = "/workspace/master"
 # Launcherが起動したコンテナに付けるラベル。残ったコンテナを探して消すときに使う
 SANDBOX_LABEL = "org.yoriki.sandbox"
 ATTEMPT_LABEL = "org.yoriki.attempt"
@@ -70,11 +71,15 @@ class SandboxSpec:
     # Dockerに登録したコンテナの実行環境（`runsc` 等）。空ならDockerの既定（runc）
     runtime: str = ""
     labels: dict[str, str] = field(default_factory=dict)
-    # /workspace/input に読取り専用でmountする、Workerのディレクトリ（添付）。dockerdから見たパスにする
+    # /workspace/input・/workspace/master に読取り専用でmountする、Workerのディレクトリ（添付と、Skillの資料）。
+    # dockerdから見たパスにする
     input_dir: str = ""
+    master_dir: str = ""
 
     @classmethod
-    def for_version(cls, version, platform: str, *, labels: dict[str, str], input_dir: str = "") -> "SandboxSpec":
+    def for_version(
+        cls, version, platform: str, *, labels: dict[str, str], input_dir: str = "", master_dir: str = ""
+    ) -> "SandboxSpec":
         """Workerのplatformに合うmanifestのdigestを選ぶ。合うものがなければ起動を断る（design.md §7.3）"""
         image = settings.YORIKI_SANDBOX_IMAGE_OVERRIDE
         if not image:
@@ -97,6 +102,7 @@ class SandboxSpec:
             runtime=settings.YORIKI_SANDBOX_RUNTIME,
             labels={SANDBOX_LABEL: "1", **labels},
             input_dir=input_dir,
+            master_dir=master_dir,
         )
 
     @property
@@ -138,9 +144,14 @@ class SandboxSpec:
         }
         if self.runtime:
             config["runtime"] = self.runtime
-        if self.input_dir:
-            config["mounts"] = [Mount(INPUT_DIR, self.input_dir, type="bind", read_only=True)]
+        if mounts := [Mount(target, source, type="bind", read_only=True) for source, target in self.bind_mounts()]:
+            config["mounts"] = mounts
         return config
+
+    def bind_mounts(self) -> list[tuple[str, str]]:
+        """読取り専用でmountする（Workerのディレクトリ, Sandboxのパス）"""
+        pairs = [(self.input_dir, INPUT_DIR), (self.master_dir, MASTER_DIR)]
+        return [(source, target) for source, target in pairs if source]
 
 
 def verify_container(info: dict[str, Any], spec: SandboxSpec) -> list[str]:
@@ -177,9 +188,13 @@ def verify_container(info: dict[str, Any], spec: SandboxSpec) -> list[str]:
             problems.append(f"HostConfig.{key} is host")
     if host.get("Init"):
         problems.append("--init is set (the image's init must be PID 1)")
-    # mountしてよいのは、添付のディレクトリを読取り専用で /workspace/input にだけ（CONTRACT.md §2）
-    mounts = [(m.get("Type"), m.get("Source"), m.get("Destination"), m.get("RW")) for m in info.get("Mounts") or []]
-    expected_mounts = [("bind", spec.input_dir, INPUT_DIR, False)] if spec.input_dir else []
+    # mountしてよいのは、添付とSkillの資料のディレクトリを、読取り専用で /workspace/input・/workspace/master にだけ
+    # （CONTRACT.md §2）
+    mounts = sorted(
+        ((m.get("Type"), m.get("Source"), m.get("Destination"), m.get("RW")) for m in info.get("Mounts") or []),
+        key=str,
+    )
+    expected_mounts = sorted((("bind", source, target, False) for source, target in spec.bind_mounts()), key=str)
     if host.get("Binds") or host.get("Devices") or mounts != expected_mounts:
         problems.append(f"unexpected mounts: {mounts or host.get('Binds') or host.get('Devices')}")
     if (host.get("Tmpfs") or {}) != spec.tmpfs():

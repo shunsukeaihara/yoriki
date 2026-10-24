@@ -1,3 +1,6 @@
+// 入力欄の `/` で1つのメッセージに指定できる Skill の数（バックエンドの harness.skills.MAX_EXPLICIT_SKILLS）
+export const MAX_CHOSEN_SKILLS = 3
+
 // バックエンドの skill.models.SkillScope と同じ値
 export const SkillScope = {
   PERSONAL: 1,

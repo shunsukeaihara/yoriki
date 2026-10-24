@@ -13,6 +13,7 @@ from conversation.factories import ConversationFactory
 from conversation.models import ConversationMessage
 from harness.runner import Runner
 from llm.providers.base import ImagePart
+from resources.factories import ResourceVersionFactory
 from run.models import (
     Checkpoint,
     ClarificationRequest,
@@ -23,6 +24,8 @@ from run.models import (
     RunStatus,
 )
 from run.tasks import claim_run
+from skill.factories import SkillFactory, SkillVersionFactory
+from skill.models import SkillAssetBinding, SkillAssetRole
 
 from .fakes import FakeAdapter, calls, reply
 
@@ -420,3 +423,52 @@ def test_attachments_are_read_only_inputs_and_outputs_become_artifacts(conversat
     assert [a.path for a in outputs] == ["sub/集計.csv", "sub/集計.csv"]
     with outputs[1].blob.open() as f:
         assert f.read() == b"changed\n"
+
+
+def test_skill_files_are_readable_under_master(conversation, app_user):
+    """`/` で指定したSkillの資料は起動するときに、途中で読み込んだSkillの資料は動いているSandboxに置く"""
+
+    def skill_with_file(name: str, content: bytes):
+        version = SkillVersionFactory.create(
+            skill=SkillFactory.create(name=name, created_by=app_user), tools=["read", "shell"]
+        )
+        resource = ResourceVersionFactory.create(name="master.csv", content=content)
+        SkillAssetBinding.objects.create(
+            version=version, key="master", role=SkillAssetRole.MASTER, resource_version=resource
+        )
+        return version.skill
+
+    chosen = skill_with_file("指定したSkill", b"chosen\n")
+    loaded = skill_with_file("読み込むSkill", b"loaded\n")
+    post_message(
+        conversation, body="作業して", client_message_id="", mode=MessageMode.AUTO, actor=app_user, skills=[chosen]
+    )
+    run = Run.objects.get(conversation=conversation)
+    # 指定したRunには `skill` を出さないので、途中の読込みは同じ会話の次の依頼で確かめる
+    adapter = FakeAdapter(
+        [
+            calls(("c1", "read", {"path": f"/workspace/master/skills/{chosen.uid}/master/master.csv"})),
+            calls(("c2", "shell", shell("touch /workspace/master/x"))),
+            reply("できました。"),
+        ]
+    )
+    run = execute(run, adapter)
+    r = results(run)
+    assert "chosen" in text(r["c1"])
+    assert "Read-only file system" in text(r["c2"]) or "Permission denied" in text(r["c2"])
+
+    run = post(conversation, "続けて")
+    path = f"/workspace/master/skills/{loaded.uid}/master/master.csv"
+    adapter = FakeAdapter(
+        [
+            calls(("c3", "shell", shell("ls /workspace/master/skills"))),
+            calls(("c4", "skill", {"name": "読み込むSkill"})),
+            calls(("c5", "read", {"path": path})),
+            reply("できました。"),
+        ]
+    )
+    run = execute(run, adapter)
+    r = results(run)
+    assert not r["c4"]["is_error"], r["c4"]
+    assert path in text(r["c4"])
+    assert "loaded" in text(r["c5"])

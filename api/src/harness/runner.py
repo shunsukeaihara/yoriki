@@ -80,8 +80,12 @@ from .context import runtime_context as build_runtime_context
 from .prompts import system_prompt
 from .recovery import request_model_switch
 from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, SandboxSession
+from .skills import explicit_versions, revoked_skill
 from .tools import ALL_TOOLS, SANDBOX_TOOLS, WORKSPACE_WRITING_TOOLS
 from .tools.base import Effect, Tool, ToolContext, ToolResult
+from .tools.skill_tool import make_skill_tool
+from .tools.submit_result import NAME as SUBMIT_RESULT
+from .tools.submit_result import make_submit_result_tool
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +113,18 @@ SAME_ERROR_NOTICE = (
 RUNNING_JOBS_NOTICE = (
     "Background jobs are still running: {jobs}. Before you finish, wait for them (job_output with wait) or stop "
     "them (job_kill). Jobs are stopped when the work ends."
+)
+RESULT_REQUIRED_NOTICE = (
+    "This work must end with submit_result. Check the result, call submit_result with it, and then write your final "
+    "reply."
+)
+RESULT_RESET_NOTICE = (
+    "The result you submitted was cleared because the user gave a new instruction. Apply it, then call "
+    "submit_result again with the updated result."
+)
+RESULT_GRACE_NOTICE = (
+    "The maximum number of steps is near: this is the last step in which you can call tools. Call submit_result "
+    "now with the result you have, and note anything unfinished in it if the schema allows."
 )
 STEP_LIMIT_NOTICE = (
     "The maximum number of steps for this request has been reached. Tools are now disabled. Reply with text only: "
@@ -153,6 +169,8 @@ class Runner:
         self.start_sequence = 0
         self.warned_running_jobs = False
         self.tools: tuple[Tool, ...] = ()
+        # Skillで決まるTool（Run開始時に固定したManifestから作る。Runの中では変わらない）
+        self.skill_tools: tuple[Tool, ...] | None = None
         self.nudges = 0
         self.compacted_for_overflow = False
         self.repeats: dict[str, int] = {}
@@ -200,6 +218,7 @@ class Runner:
         self.run_obj.model_version = run.model_version
         self.run_obj.effort = run.effort
         self.run_obj.step_count = run.step_count
+        self.run_obj.manifest = run.manifest
         return self.run_obj
 
     # --- 再開 ---
@@ -321,6 +340,9 @@ class Runner:
             self._record(RunEventKind.CONTEXT, {"text": STEP_LIMIT_NOTICE})
 
         self.tools = self._exposed_tools()
+        if run.step_count == MAX_STEPS - 1 and self._result_missing():
+            # 上限の前に1回だけ、今ある結果で業務結果を確定する猶予を与える（harness.md §4.4）
+            self._record(RunEventKind.CONTEXT, {"text": RESULT_GRACE_NOTICE})
         system = system_prompt(self.tools)
         prompt = RunPrompt.store(system, [self._tool_json(t) for t in self.tools])
         events = self._events()
@@ -335,11 +357,18 @@ class Runner:
             return result
         self._record_response(result, UsagePurpose.STEP, images_sent=compaction.images_sent(items))
         if final:
-            self._finish_with_reply(result.text, RunStatus.FAILED, RunEndReason.STEP_LIMIT)
-            return False
+            return self._finish_at_step_limit(result.text)
         if not result.calls:
             return self._handle_reply(result)
         return self._execute_calls(result.calls)
+
+    def _finish_at_step_limit(self, text: str) -> bool:
+        """ステップ数の上限の最後のまとめの応答で終える。業務結果を確定していれば完了にする（その間に追加の指示が
+        届いていれば、取り込んで続ける）"""
+        if any(t.name == SUBMIT_RESULT for t in self.tools) and not self._result_missing():
+            return self._finish_with_reply(text, RunStatus.COMPLETED, RunEndReason.COMPLETED)
+        self._finish_with_reply(text, RunStatus.FAILED, RunEndReason.STEP_LIMIT)
+        return False
 
     def _ask_model(self, system: str, items, *, final: bool) -> ModelResponse | bool:
         """モデルを呼ぶ。応答が得られなければ、ステップを続けるかどうか（圧縮した・待ちや失敗にした）を返す"""
@@ -374,6 +403,10 @@ class Runner:
             return False
         if run.status != RunStatus.RUNNING:
             raise LeaseLost(f"run={run.uid} status={run.status}")
+        if reason := revoked_skill(run):
+            # 停止・権限の失効は、始めた後のRunでも次の区切りから使わせない（design.md §3.2）
+            self._fail(RunEndReason.SKILL, reason)
+            return False
         self._apply_instructions()
         self._record_finished_jobs()
         return True
@@ -419,20 +452,47 @@ class Runner:
                 instruction.applied = timezone.now()
                 instruction.save(update_fields=["state", "applied", "updated"])
                 applied = True
+            if applied and run.result is not None:
+                # 確定した業務結果は、取り込んだ指示を反映していない。確定し直させる（harness.md §10.4・§10.5）
+                Run.objects.filter(pk=run.pk).update(result=None, updated=timezone.now())
+                self.run_obj.result = None
+                RunEvent.record(run, RunEventKind.CONTEXT, {"text": RESULT_RESET_NOTICE, "result_reset": True})
         if applied and self.session.started:
             # 追加指示に付いた添付を、動いているSandboxの /workspace/input にも置く
             self.session.sync_inputs()
         return applied
 
     def _exposed_tools(self) -> tuple[Tool, ...]:
-        """Runに出すToolの一覧（harness.md §7.5）。Tool呼出しに対応しないモデルには出さない"""
+        """Runに出すToolの一覧（harness.md §7.5）。Tool呼出しに対応しないモデルには出さない。
+
+        `/` でSkillを指定したRunでは、そのSkillの使ってよいToolに限り、業務結果のSchemaがあれば submit_result を
+        加える。指定がなければ、利用者が使えるToolの全体と、Skillを読み込む `skill` を出す
+        """
         if not self.run_obj.model_version.supports_tools:
             return ()
-        tools = ALL_TOOLS
+        tools = self._skill_tools()
         if self.run_obj.runtime_version_id is None:
             tools = tuple(t for t in tools if t not in SANDBOX_TOOLS)
         if not self.run_obj.is_interactive:
             tools = tuple(t for t in tools if t.name != "ask_user")
+        return tools
+
+    def _skill_tools(self) -> tuple[Tool, ...]:
+        if self.skill_tools is not None:
+            return self.skill_tools
+        explicit = explicit_versions(self.run_obj)
+        if explicit:
+            allowed = {name for version in explicit for name in version.tools}
+            tools = tuple(t for t in ALL_TOOLS if t.name in allowed)
+            schema = next((v.output_schema for v in explicit if v.output_schema), None)
+            if schema:
+                tools += (make_submit_result_tool(schema),)
+        else:
+            tools = ALL_TOOLS
+            catalog = ((self.run_obj.manifest or {}).get("fixed") or {}).get("skill_catalog") or {}
+            if names := [e["name"] for e in catalog.get("skills", [])]:
+                tools += (make_skill_tool(names),)
+        self.skill_tools = tools
         return tools
 
     @staticmethod
@@ -567,8 +627,26 @@ class Runner:
             jobs = ", ".join(f"{j.job_id} ({j.description})" for j in running)
             self._record(RunEventKind.CONTEXT, {"text": RUNNING_JOBS_NOTICE.format(jobs=jobs)})
             return True
+        if self._result_missing():
+            # 業務結果のSchemaがあるのに submit_result を呼ばなかった。1回だけ促す（harness.md §10.5）。
+            # 追加の指示で確定した結果を取り消した後は、もう一度促してよい
+            notices = [e for e in self._events() if e.kind == RunEventKind.CONTEXT]
+            since = max((e.sequence for e in notices if e.data.get("result_reset")), default=0)
+            if not any(e.data.get("result_required") for e in notices if e.sequence > since):
+                self._record(RunEventKind.CONTEXT, {"text": RESULT_REQUIRED_NOTICE, "result_required": True})
+                return True
+            return self._finish_with_reply(
+                response.text,
+                RunStatus.FAILED,
+                RunEndReason.NO_RESULT,
+                error=_("Skillが決めた形の業務結果を、エージェントが確定しませんでした。"),
+            )
         # 最後の応答の間に追加指示が届いていれば、終えずに取り込んで続ける（harness.md §10.4）
         return self._finish_with_reply(response.text, RunStatus.COMPLETED, RunEndReason.COMPLETED)
+
+    def _result_missing(self) -> bool:
+        """業務結果のSchemaがあるRunで、まだ submit_result で確定していない"""
+        return any(t.name == SUBMIT_RESULT for t in self.tools) and self.run_obj.result is None
 
     def _nudge(self, text: str) -> bool:
         self.nudges += 1
@@ -578,7 +656,7 @@ class Runner:
         self._record(RunEventKind.CONTEXT, {"text": text})
         return True
 
-    def _finish_with_reply(self, text: str, status: RunStatus, end_reason: RunEndReason) -> bool:
+    def _finish_with_reply(self, text: str, status: RunStatus, end_reason: RunEndReason, *, error: str = "") -> bool:
         """応答を会話に載せてRunを終える。完了の前に追加指示が届いていれば、終えずにTrue（続ける）を返す"""
         self._checkpoint()
         with self.run_obj.fenced(self.attempt) as run:
@@ -592,7 +670,8 @@ class Runner:
             ).exists()
             if status == RunStatus.COMPLETED and pending:
                 return True
-            error = "" if status == RunStatus.COMPLETED else str(end_reason.label)
+            if status != RunStatus.COMPLETED:
+                error = error or str(end_reason.label)
             run.set_status(status, end_reason=end_reason, error=error)
         return False
 
@@ -829,6 +908,7 @@ class Runner:
             session=self.session,
             file_version=self._file_version,
             interrupted=self._interrupted,
+            exposed=frozenset(t.name for t in self.tools),
         )
         try:
             result = tool.execute(call.arguments, context)

@@ -68,6 +68,14 @@ class SkillChangeKind(models.IntegerChoices):
     RESUME = 4, _("再開")
 
 
+# 必要な能力と、それを持つかを示すモデル設定の版の項目
+REQUIREMENT_CAPABILITIES = {
+    SkillRequirement.TOOL_CALLING: "supports_tools",
+    SkillRequirement.IMAGE_INPUT: "supports_images",
+    SkillRequirement.DOCUMENT_INPUT: "supports_documents",
+    SkillRequirement.STRUCTURED_OUTPUT: "supports_structured_output",
+}
+
 # Draftと版が持つ中身。版を作るときにDraftからそのまま写す
 CONTENT_FIELDS = ("description", "instructions", "tools", "requires", "input_schema", "output_schema")
 DEPARTMENT_ACCESS = {
@@ -130,6 +138,10 @@ class SkillQuerySet(models.QuerySet):
             | company,
             deleted=False,
         )
+
+    def usable_by(self, user) -> "SkillQuerySet":
+        """利用者が会話・タスクで使えるSkill：見えるもののうち、公開中の版があり、停止していないもの"""
+        return self.visible_to(user).filter(current_version__isnull=False, suspended=False)
 
 
 class Skill(models.Model):
@@ -225,6 +237,18 @@ class Skill(models.Model):
         if user.has_perm(AppPermission.EDIT_COMPANY_SKILLS.perm):
             return SkillAccess.EDIT
         return SkillAccess.USE
+
+    def unusable_reason(self, user, model_version) -> str:
+        """利用者がこのモデル設定の版で使えない理由（使えれば空文字）。Run開始時とエージェントが読み込むときに、
+        その時点の公開中の版で確かめる（design.md §3.2・§4.8）"""
+        if self.access_of(user) < SkillAccess.USE:
+            return str(_("このSkillを使う権限がありません"))
+        if self.suspended:
+            return str(_("このSkillは停止中です"))
+        version = self.current_version
+        if version is None:
+            return str(_("このSkillはまだ公開されていません"))
+        return version.unsupported_by(model_version)
 
     @property
     def version_number(self) -> int:
@@ -442,6 +466,21 @@ class SkillVersion(SkillContent):
 
     def __str__(self):
         return f"{self.skill} v{self.number}"
+
+    def unsupported_by(self, model_version) -> str:
+        """使うモデルが、この版の必要な能力を持たない理由（持てば空文字）。Toolを使うSkillと、業務結果を
+        submit_result で確定するSkillは、Tool呼出しも要る"""
+        requires = set(self.requires)
+        if self.tools or self.output_schema:
+            requires.add(SkillRequirement.TOOL_CALLING)
+        missing = [
+            str(SkillRequirement(r).label)
+            for r in sorted(requires)
+            if not getattr(model_version, REQUIREMENT_CAPABILITIES[SkillRequirement(r)])
+        ]
+        if not missing:
+            return ""
+        return str(_("このモデルは、Skillに必要な能力（%(missing)s）を持ちません") % {"missing": "、".join(missing)})
 
 
 class SkillAssetBinding(models.Model):

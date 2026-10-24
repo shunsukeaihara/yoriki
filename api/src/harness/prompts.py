@@ -20,6 +20,16 @@ TOOL_GUIDANCE = {
         "deliverables in /workspace/output; files there are given to the user when you finish or stop to ask, so "
         "keep only finished files there."
     ),
+    "skill": (
+        "- When the request names a skill or clearly matches the description of a skill in <skills>, load it with "
+        "`skill` before you start, and tell the user in one line which skill you use. If several match, load the "
+        "smallest set that covers the request. Do not guess a skill's procedure without loading it. If none "
+        "matches, work without a skill."
+    ),
+    "submit_result": (
+        "- This work has a result schema. When the work is done and checked, call `submit_result` alone with the "
+        "result, then write your final reply."
+    ),
     "ask_user": "- Use `ask_user` for business decisions only. Call it alone; the answers arrive as its result.",
     "todo_write": (
         "- For work with 3 or more steps, keep a task list with `todo_write` and update it as you progress."

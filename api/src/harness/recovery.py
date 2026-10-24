@@ -5,11 +5,14 @@ from django.utils.translation import gettext as _
 from llm.models import ModelProfile, ProviderKind
 from run.models import ClarificationKind, ClarificationRequest, Run, RunEvent, RunEventKind
 
+from .skills import unsupported_skills
+
 RETRY_VALUE = "retry"
 
 
 def switch_candidates(run: Run) -> list[ModelProfile]:
-    """切り替えてよいモデル設定。機密の会話はローカルLLMだけ。Toolを使うのでTool呼出しに対応するものだけ"""
+    """切り替えてよいモデル設定。機密の会話はローカルLLMだけ。Toolを使うのでTool呼出しに対応するものだけ。
+    使っているSkillの必要な能力を持つものだけ"""
     profiles = (
         ModelProfile.objects.filter(
             deleted=False,
@@ -24,7 +27,8 @@ def switch_candidates(run: Run) -> list[ModelProfile]:
     )
     if run.handles_sensitive_data:
         profiles = profiles.filter(current_version__connection__kind=ProviderKind.LOCAL)
-    return list(profiles[:3])
+    usable = [p for p in profiles if p.current_version and not unsupported_skills(run, p.current_version)]
+    return usable[:3]
 
 
 def request_model_switch(run: Run, detail: str) -> ClarificationRequest:

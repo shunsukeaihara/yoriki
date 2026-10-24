@@ -19,7 +19,12 @@ export const isActiveRun = (run: Pick<Run, 'status'>) => ACTIVE.includes(run.sta
 
 /** 会話に作業の表示を出すか。1回の応答で終わった Run には、応答のほかに出すものがない */
 export const hasWorkToShow = (run: Run) =>
-  isActiveRun(run) || run.status !== RunStatus.COMPLETED || run.stepCount > 1 || run.todos.length > 0
+  isActiveRun(run) ||
+  run.status !== RunStatus.COMPLETED ||
+  run.stepCount > 1 ||
+  run.todos.length > 0 ||
+  run.skills.length > 0 ||
+  run.result != null
 
 export const runStatusColor = (status: RunStatusEnum) => {
   switch (status) {
@@ -108,6 +113,10 @@ export const toolLabel = (
       return t('ジョブの出力を確認')
     case 'job_kill':
       return t('ジョブを停止')
+    case 'skill':
+      return t('Skillを読み込む：{name}', { name: arg('name') })
+    case 'submit_result':
+      return t('業務結果を確定')
     default:
       return call.name
   }

@@ -4479,6 +4479,11 @@ components:
           items:
             $ref: '#/components/schemas/Artifact'
           readOnly: true
+        skills_info:
+          type: array
+          items:
+            $ref: '#/components/schemas/MessageSkill'
+          readOnly: true
         instruction:
           allOf:
           - $ref: '#/components/schemas/InstructionInfo'
@@ -4496,6 +4501,7 @@ components:
       - role
       - run
       - sender
+      - skills_info
     MessageRequest:
       type: object
       description: 会話のメッセージ。投稿すると、新しい依頼・今の作業への追加指示・確認への回答・次の依頼のどれかになる
@@ -4510,6 +4516,14 @@ components:
             type: string
             minLength: 1
           description: 送る添付（この会話にアップロードして、まだ送っていないもの）
+        skills:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            writeOnly: true
+          writeOnly: true
+          description: 入力欄の `/` で指定したSkill。実行中なら次の依頼になる（Skillの版は依頼を始めるときに決める）
         client_message_id:
           type: string
           writeOnly: true
@@ -4534,6 +4548,19 @@ components:
         * `1` - ユーザー
         * `2` - エージェント
         * `3` - システム
+    MessageSkill:
+      type: object
+      description: メッセージで指定したSkill（送ったときの名前）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+      required:
+      - id
+      - name
     MinimumDepartment:
       type: object
       properties:
@@ -5836,6 +5863,16 @@ components:
             $ref: '#/components/schemas/Todo'
           readOnly: true
           description: 作業の計画（todo_write の最新の内容）
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunSkill'
+          readOnly: true
+          description: 使っているSkillと版
+        result:
+          readOnly: true
+          nullable: true
+          description: 業務結果（submit_result の内容）
         created:
           type: string
           format: date-time
@@ -5860,6 +5897,8 @@ components:
       - finished
       - id
       - model_profile_name
+      - result
+      - skills
       - status
       - status_display
       - step_count
@@ -5905,6 +5944,7 @@ components:
       - 16
       - 17
       - 18
+      - 19
       - 99
       type: integer
       description: |-
@@ -5919,6 +5959,7 @@ components:
         * `16` - 再試行の上限
         * `17` - 回答期限切れ
         * `18` - 実行環境を使えない
+        * `19` - Skillを使えない
         * `99` - 内部のエラー
     RunEventKindEnum:
       enum:
@@ -5932,6 +5973,7 @@ components:
       - 31
       - 32
       - 40
+      - 41
       - 50
       - 51
       - 60
@@ -5948,6 +5990,7 @@ components:
         * `31` - 実行時の文脈
         * `32` - 文脈の圧縮
         * `40` - モデルの切り替え
+        * `41` - Skillの読込み
         * `50` - 確認の質問
         * `51` - 確認への回答
         * `60` - モデルの再試行
@@ -6030,6 +6073,30 @@ components:
       - run
       - sequence
       - type
+    RunSkill:
+      type: object
+      description: Runが使うSkillと版（Manifestに固定・追記したもの）
+      properties:
+        skill:
+          type: string
+          readOnly: true
+          description: SkillのID
+        name:
+          type: string
+          readOnly: true
+        number:
+          type: integer
+          readOnly: true
+          description: 版
+        chosen:
+          type: boolean
+          readOnly: true
+          description: 利用者が `/` で指定した
+      required:
+      - chosen
+      - name
+      - number
+      - skill
     RunStatusEnum:
       enum:
       - 1

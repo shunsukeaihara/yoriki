@@ -12,6 +12,8 @@ const run = (overrides: Partial<Run>): Run => ({
   effort: '',
   stepCount: 1,
   todos: [],
+  skills: [],
+  result: null,
   created: '2026-10-21T00:00:00Z',
   updated: '2026-10-21T00:00:00Z',
   finished: null,
@@ -28,6 +30,9 @@ describe('run', () => {
   it('1回の応答で終わった Run には、作業の表示を出さない', () => {
     expect(hasWorkToShow(run({}))).toBe(false)
     expect(hasWorkToShow(run({ stepCount: 2 }))).toBe(true)
+    // Skill を使った Run は、使った版と業務結果を出す
+    expect(hasWorkToShow(run({ skills: [{ skill: 's1', name: '請求書の照合', number: 3, chosen: true }] }))).toBe(true)
+    expect(hasWorkToShow(run({ result: { verdict: 'ok' } }))).toBe(true)
     expect(hasWorkToShow(run({ status: RunStatus.FAILED }))).toBe(true)
     expect(hasWorkToShow(run({ todos: [{ content: '読む', status: TodoStatus.COMPLETED }] }))).toBe(true)
   })
@@ -42,6 +47,7 @@ describe('toolLabel', () => {
       '表を抽出',
     )
     expect(toolLabel({ name: 'shell', arguments: { command: 'ls' } }, t)).toBe('コマンドを実行')
+    expect(toolLabel({ name: 'skill', arguments: { name: '請求書の照合' } }, t)).toBe('Skillを読み込む：請求書の照合')
   })
 
   it('ファイルの Tool は対象のパスを出す', () => {

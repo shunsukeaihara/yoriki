@@ -4,9 +4,11 @@ from rest_framework.test import APIClient
 from llm.factories import LLMConnectionFactory, ModelProfileFactory
 from llm.models import ProviderKind
 from run.factories import ClarificationRequestFactory, RunFactory
-from run.models import ClarificationStatus, Run, RunEvent, RunEventKind, RunStatus
+from run.models import ClarificationStatus, Run, RunEvent, RunEventKind, RunKind, RunStatus
 from skill.factories import SkillFactory, SkillVersionFactory
-from skill.models import SkillRequirement
+from skill.models import SkillRequirement, SkillScope
+from user.factories import DepartmentFactory, DepartmentMembershipFactory
+from user.models import DepartmentRole
 
 from .factories import ConversationFactory
 from .models import Conversation, InstructionKind, UserInstruction
@@ -193,6 +195,44 @@ class TestMessage:
             res = api_client.post(self.url(conversation), {"body": "依頼", "skills": [skill.uid]}, format="json")
             assert res.status_code == 400
             assert "skills" in res.data
+        assert not Run.objects.filter(conversation=conversation).exists()
+
+    def test_edit_skill_message_starts_a_skill_edit_run(self, api_client, app_user):
+        conversation = ConversationFactory.create(owner=app_user)
+        skill = SkillVersionFactory.create(skill__created_by=app_user).skill
+        res = api_client.post(self.url(conversation), {"body": "説明を直して", "edit_skill": skill.uid}, format="json")
+        assert res.status_code == 201, res.data
+        assert res.data["skill_edit"] == {"id": skill.uid, "name": skill.name}
+        run = Run.objects.get(conversation=conversation)
+        assert run.kind == RunKind.SKILL_EDIT
+        assert run.manifest["fixed"]["skill_edit"] == {"skill": skill.uid, "name": skill.name}
+
+    def test_create_skill_message_and_edit_during_a_run_is_the_next_request(self, api_client, app_user):
+        conversation = ConversationFactory.create(owner=app_user)
+        RunFactory.create(conversation=conversation, status=RunStatus.RUNNING)
+        res = api_client.post(self.url(conversation), {"body": "Skillにして", "create_skill": True}, format="json")
+        assert res.status_code == 201, res.data
+        assert res.data["skill_edit"] == {"id": "", "name": ""}
+        assert UserInstruction.objects.get(conversation=conversation).kind == InstructionKind.NEXT
+
+    def test_edit_skill_needs_edit_access_and_a_body(self, api_client, app_user, other_user):
+        conversation = ConversationFactory.create(owner=app_user)
+        department = DepartmentFactory.create()
+        DepartmentMembershipFactory.create(department=department, user=app_user, role=DepartmentRole.MEMBER)
+        shared = SkillVersionFactory.create(
+            skill__created_by=other_user, skill__scope=SkillScope.DEPARTMENT, skill__department=department
+        ).skill
+        mine = SkillVersionFactory.create(skill__created_by=app_user).skill
+        cases = [
+            ({"body": "直して", "edit_skill": shared.uid}, "edit_skill"),
+            ({"body": "", "edit_skill": mine.uid}, "body"),
+            ({"body": "直して", "edit_skill": mine.uid, "skills": [mine.uid]}, "skills"),
+            ({"body": "直して", "edit_skill": mine.uid, "create_skill": True}, "create_skill"),
+        ]
+        for data, field in cases:
+            res = api_client.post(self.url(conversation), data, format="json")
+            assert res.status_code == 400
+            assert field in res.data
         assert not Run.objects.filter(conversation=conversation).exists()
 
     def test_model_without_the_capabilities_of_the_skills_in_use_is_rejected(self, api_client, app_user):

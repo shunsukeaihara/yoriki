@@ -1,0 +1,99 @@
+"""Skillの編集のRun（harness.md §10.9、design.md §11.6）。
+
+編集のRunは対象のSkillを1つだけ持ち、Run開始時にManifestの `fixed.skill_edit` へ固定する（新しいSkillを作る依頼では
+空で始め、`create_skill` で作ったSkillを追記する）。Skill管理のToolは引数にSkillを取らず、対象のSkillにだけ働く。
+"""
+
+from typing import Any
+
+from django.utils.translation import gettext as _
+
+from run.models import Run, RunKind
+from skill.models import Skill, SkillAccess, SkillScope
+
+from .skills import scope_label
+
+
+def edit_entry(run: Run) -> dict[str, Any] | None:
+    """編集のRunの対象（{"skill", "name"}。新しいSkillを作る依頼でまだ作っていなければ skill は空）。
+    業務のRunならNone"""
+    if run.kind != RunKind.SKILL_EDIT:
+        return None
+    manifest = run.manifest or {}
+    entry = dict((manifest.get("fixed") or {}).get("skill_edit") or {})
+    for appended in manifest.get("appended", []):
+        if appended.get("kind") == "skill_edit":
+            entry = {"skill": appended["skill"], "name": appended["name"]}
+    return entry
+
+
+def edit_target(run: Run) -> Skill | None:
+    entry = edit_entry(run)
+    if not entry or not entry.get("skill"):
+        return None
+    return Skill.objects.select_related("current_version", "department").filter(uid=entry["skill"]).first()
+
+
+def editable_skills(user) -> list[Skill]:
+    """利用者がDraftを変更できるSkill（個人・部門・全社の順）"""
+    skills = Skill.objects.visible_to(user).select_related("department", "current_version").order_by("scope", "name")
+    return [s for s in skills if s.scope_access_of(user) >= SkillAccess.EDIT]
+
+
+def labeled_name(skill: Skill) -> str:
+    """範囲を添えた名前（「名寄せ (部門 経理部)」）。同じ名前のSkillを区別して指すのに使う"""
+    return f"{skill.name} ({scope_label(skill)})"
+
+
+def find_editable(user, name: str) -> tuple[Skill | None, str]:
+    """名前（範囲を添えた名前も可）から、利用者が編集できるSkillを1つに決める。決まらなければ、モデル向けの理由"""
+    name = name.strip()
+    skills = editable_skills(user)
+    matches = [s for s in skills if labeled_name(s) == name] or [s for s in skills if s.name == name]
+    if len(matches) == 1:
+        return matches[0], ""
+    if matches:
+        names = ", ".join(f'"{labeled_name(s)}"' for s in matches)
+        return None, f"Several skills are named {name!r}: {names}. Call again with one of these names."
+    if not skills:
+        return None, (
+            f"The user cannot edit any skill, including {name!r}. Tell the user that the change applies only to this "
+            "work, and that a person who can edit the skill needs to change it."
+        )
+    names = ", ".join(f'"{labeled_name(s)}"' for s in skills[:30])
+    return None, (
+        f"The user cannot edit a skill named {name!r}. Skills the user can edit: {names}. Call again with one of "
+        "them, or with an empty skill to create a new skill."
+    )
+
+
+def access_label(access: SkillAccess) -> str:
+    return "publish" if access >= SkillAccess.PUBLISH else "edit"
+
+
+def runtime_text(run: Run) -> str:
+    """`<runtime_context>` の中の `<skill_edit>`。対象と、利用者がそのSkillでできること"""
+    entry = edit_entry(run)
+    if entry is None:
+        return ""
+    skill = edit_target(run)
+    if skill is None:
+        return '  <skill_edit new="true" />'
+    access = skill.scope_access_of(run.owner)
+    return (
+        f'  <skill_edit skill="{_escape(skill.name)}" scope="{_escape(scope_label(skill))}" '
+        f'version="{skill.version_number}" your_access="{access_label(access)}" />'
+    )
+
+
+def confirmation_title(skill: Skill | None) -> str:
+    """request_skill_edit の確認の文（画面に出すので日本語）"""
+    if skill is None:
+        return _("新しいSkillを作りますか？")
+    if skill.scope == SkillScope.PERSONAL:
+        return _("Skill「%(name)s」を編集しますか？") % {"name": skill.name}
+    return _("Skill「%(name)s」（%(scope)s）を編集しますか？") % {"name": skill.name, "scope": scope_label(skill)}
+
+
+def _escape(value: str) -> str:
+    return value.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")

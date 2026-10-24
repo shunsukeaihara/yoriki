@@ -81,6 +81,7 @@ def test_reply_completes_the_run(conversation):
     assert any(m.role == "user" and m.text == "請求書を確認して" for m in request.messages)
     assert {t.name for t in request.tools} == {
         "ask_user",
+        "request_skill_edit",
         "todo_write",
         "read",
         "write",

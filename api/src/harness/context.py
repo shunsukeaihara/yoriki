@@ -19,6 +19,7 @@ from llm.providers.base import ImagePart, Message, Part, TextPart, ToolCall
 from run.models import Run, RunEvent, RunEventKind
 from runtime.launcher import WORK_DIR
 
+from .skill_edit import runtime_text as skill_edit_text
 from .skills import catalog_text
 
 logger = logging.getLogger(__name__)
@@ -273,6 +274,9 @@ def runtime_context(run: Run, *, user_name: str) -> str:
     catalog = ((run.manifest or {}).get("fixed") or {}).get("skill_catalog")
     if catalog and catalog.get("skills"):
         lines.append(catalog_text(catalog))
+    # Skillの編集のRunの対象（harness.md §10.9）
+    if edit := skill_edit_text(run):
+        lines.append(edit)
     lines.append("</runtime_context>")
     return "\n".join(lines)
 

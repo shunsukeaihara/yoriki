@@ -188,7 +188,7 @@ def test_chosen_skill_is_given_with_the_first_message_and_limits_the_tools(conve
     run = execute(run, adapter)
 
     request = adapter.requests[0]
-    assert tool_names(request) == ["read", "todo_write"]
+    assert tool_names(request) == ["read", "todo_write", "request_skill_edit"]
     message = next(m.text for m in request.messages if m.role == "user" and m.text.startswith("この3件を確認して"))
     assert "手順の本文" in message
     assert f'<skill name="{skill.name}" version="{version.number}">' in message
@@ -197,12 +197,13 @@ def test_chosen_skill_is_given_with_the_first_message_and_limits_the_tools(conve
 
 
 @pytest.mark.django_db
-def test_chosen_skill_without_tools_gets_no_tools(conversation, app_user):
+def test_chosen_skill_without_tools_gets_no_work_tools(conversation, app_user):
     skill, _version = publish(app_user, tools=[])
     run = start(conversation, skills=[skill])
     adapter = FakeAdapter([reply("回答案です")])
     execute(run, adapter)
-    assert tool_names(adapter.requests[0]) == []
+    # Skillの編集の提案だけは出す（作業の権限を増やさない。harness.md §7.5）
+    assert tool_names(adapter.requests[0]) == ["request_skill_edit"]
 
 
 @pytest.mark.django_db
@@ -237,7 +238,7 @@ def test_submit_result_records_the_business_result(conversation, app_user):
         ]
     )
     run = execute(run, adapter)
-    assert tool_names(adapter.requests[0]) == ["submit_result"]
+    assert tool_names(adapter.requests[0]) == ["submit_result", "request_skill_edit"]
     assert adapter.requests[0].tools[0].parameters == RESULT_SCHEMA
     invalid, recorded = results(run, "submit_result")
     assert invalid["is_error"]

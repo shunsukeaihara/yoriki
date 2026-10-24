@@ -5,8 +5,9 @@ import pytest
 from conversation.dispatch import CannotStart, MessageMode, post_message
 from conversation.factories import ConversationFactory
 from conversation.models import InstructionKind, UserInstruction
+from harness import runner as runner_module
 from harness.recovery import switch_candidates
-from harness.runner import Runner
+from harness.runner import RESULT_GRACE_NOTICE, Runner
 from harness.sandbox import SandboxSession
 from harness.skills import build_catalog
 from harness.tools.base import schema_problem
@@ -338,3 +339,22 @@ def test_model_switch_keeps_to_models_the_skills_in_use_can_run(conversation, ap
     ModelProfileFactory.create(name="画像なし", version__supports_tools=True)
     run = start(conversation, skills=[skill])
     assert [p.name for p in switch_candidates(run)] == [with_images.name]
+
+
+@pytest.mark.django_db
+def test_result_can_be_submitted_just_before_the_step_limit(conversation, app_user, monkeypatch):
+    monkeypatch.setattr(runner_module, "MAX_STEPS", 2)
+    skill, _version = publish(app_user, tools=["todo_write"], output_schema=RESULT_SCHEMA)
+    run = start(conversation, skills=[skill])
+    todos = {"todos": [{"content": "読む", "status": "in_progress"}]}
+    adapter = FakeAdapter(
+        [
+            calls(("c1", "todo_write", todos)),
+            calls(("c2", "submit_result", {"verdict": "ok"})),
+            reply("ここまでの結果です。"),
+        ]
+    )
+    run = execute(run, adapter)
+    assert any(RESULT_GRACE_NOTICE in m.text for m in adapter.requests[1].messages)
+    assert run.status == RunStatus.COMPLETED
+    assert run.result == {"verdict": "ok"}

@@ -17,7 +17,6 @@ from skill.models import Skill, SkillAccess, SkillScope, SkillVersion
 MASTER_DIR = "/workspace/master"
 # 一覧に使う文脈の割合と、説明を短くする段階（文字数。日本語は1文字を1 tokenとして数える）
 CATALOG_CONTEXT_RATIO = 0.02
-CATALOG_MIN_CHARS = 1000
 DESCRIPTION_LIMITS = (300, 120, 40)
 # 入力欄の `/` で1つのメッセージに指定できるSkillの数
 MAX_EXPLICIT_SKILLS = 3
@@ -79,7 +78,7 @@ def build_catalog(user, model_version) -> dict[str, Any]:
         }
         for skill in usable
     ]
-    budget = max(CATALOG_MIN_CHARS, int(model_version.max_input_tokens * CATALOG_CONTEXT_RATIO))
+    budget = int(model_version.max_input_tokens * CATALOG_CONTEXT_RATIO)
     for limit in DESCRIPTION_LIMITS:
         shortened = [{**e, "description": _one_line(e["description"], limit)} for e in entries]
         if sum(len(e["name"]) + len(e["description"]) + 30 for e in shortened) <= budget:

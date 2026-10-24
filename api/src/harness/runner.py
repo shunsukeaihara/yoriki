@@ -118,6 +118,10 @@ RESULT_REQUIRED_NOTICE = (
     "This work must end with submit_result. Check the result, call submit_result with it, and then write your final "
     "reply."
 )
+RESULT_GRACE_NOTICE = (
+    "The maximum number of steps is near: this is the last step in which you can call tools. Call submit_result "
+    "now with the result you have, and note anything unfinished in it if the schema allows."
+)
 STEP_LIMIT_NOTICE = (
     "The maximum number of steps for this request has been reached. Tools are now disabled. Reply with text only: "
     "summarize what you have done, what remains, and what the user should do next."
@@ -332,6 +336,9 @@ class Runner:
             self._record(RunEventKind.CONTEXT, {"text": STEP_LIMIT_NOTICE})
 
         self.tools = self._exposed_tools()
+        if run.step_count == MAX_STEPS - 1 and self._result_missing():
+            # 上限の前に1回だけ、今ある結果で業務結果を確定する猶予を与える（harness.md §4.4）
+            self._record(RunEventKind.CONTEXT, {"text": RESULT_GRACE_NOTICE})
         system = system_prompt(self.tools)
         prompt = RunPrompt.store(system, [self._tool_json(t) for t in self.tools])
         events = self._events()
@@ -346,7 +353,11 @@ class Runner:
             return result
         self._record_response(result, UsagePurpose.STEP, images_sent=compaction.images_sent(items))
         if final:
-            self._finish_with_reply(result.text, RunStatus.FAILED, RunEndReason.STEP_LIMIT)
+            if any(t.name == SUBMIT_RESULT for t in self.tools) and not self._result_missing():
+                # 業務結果を確定した後の、最後のまとめの応答
+                self._finish_with_reply(result.text, RunStatus.COMPLETED, RunEndReason.COMPLETED)
+            else:
+                self._finish_with_reply(result.text, RunStatus.FAILED, RunEndReason.STEP_LIMIT)
             return False
         if not result.calls:
             return self._handle_reply(result)
@@ -604,7 +615,7 @@ class Runner:
             jobs = ", ".join(f"{j.job_id} ({j.description})" for j in running)
             self._record(RunEventKind.CONTEXT, {"text": RUNNING_JOBS_NOTICE.format(jobs=jobs)})
             return True
-        if any(t.name == SUBMIT_RESULT for t in self.tools) and self.run_obj.result is None:
+        if self._result_missing():
             # 業務結果のSchemaがあるのに submit_result を呼ばなかった。1回だけ促す（harness.md §10.5）
             if not any(e.data.get("result_required") for e in self._events() if e.kind == RunEventKind.CONTEXT):
                 self._record(RunEventKind.CONTEXT, {"text": RESULT_REQUIRED_NOTICE, "result_required": True})
@@ -617,6 +628,10 @@ class Runner:
             )
         # 最後の応答の間に追加指示が届いていれば、終えずに取り込んで続ける（harness.md §10.4）
         return self._finish_with_reply(response.text, RunStatus.COMPLETED, RunEndReason.COMPLETED)
+
+    def _result_missing(self) -> bool:
+        """業務結果のSchemaがあるRunで、まだ submit_result で確定していない"""
+        return any(t.name == SUBMIT_RESULT for t in self.tools) and self.run_obj.result is None
 
     def _nudge(self, text: str) -> bool:
         self.nudges += 1

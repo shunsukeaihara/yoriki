@@ -37,11 +37,12 @@ const picker = useFilePicker(
   },
 )
 
+const canAddSkill = computed(() => Boolean(props.skills?.length) && selectedSkills.value.length < MAX_CHOSEN_SKILLS)
 const skillPickerOpen = ref(false)
 const skillSearch = ref('')
 // 行の始めか空白の後に `/` を打ったら、その `/` を消して一覧を開く
 watch(text, (value, old) => {
-  if (!props.skills?.length || value.length !== (old?.length ?? 0) + 1) return
+  if (!canAddSkill.value || value.length !== (old?.length ?? 0) + 1) return
   if (!/(^|\s)\/$/.test(value)) return
   text.value = value.slice(0, -1)
   skillSearch.value = ''
@@ -133,7 +134,7 @@ const onSubmit = () => {
           v-model:search-term="skillSearch"
           :skills="skills"
           :selected="selectedSkills.map((s) => s.id)"
-          :disabled="disabled"
+          :disabled="disabled || !canAddSkill"
           @select="selectSkill"
         />
         <DSelectButton

@@ -7,7 +7,7 @@ from conversation.factories import ConversationFactory
 from conversation.models import InstructionKind, UserInstruction
 from harness import runner as runner_module
 from harness.recovery import switch_candidates
-from harness.runner import RESULT_GRACE_NOTICE, Runner
+from harness.runner import RESULT_GRACE_NOTICE, RESULT_RESET_NOTICE, Runner
 from harness.sandbox import SandboxSession
 from harness.skills import build_catalog
 from harness.tools.base import schema_problem
@@ -358,3 +358,31 @@ def test_result_can_be_submitted_just_before_the_step_limit(conversation, app_us
     assert any(RESULT_GRACE_NOTICE in m.text for m in adapter.requests[1].messages)
     assert run.status == RunStatus.COMPLETED
     assert run.result == {"verdict": "ok"}
+
+
+@pytest.mark.django_db
+def test_instruction_after_the_result_asks_to_submit_it_again(conversation, app_user):
+    skill, _version = publish(app_user, tools=[], output_schema=RESULT_SCHEMA)
+    run = start(conversation, skills=[skill])
+
+    class Script(FakeAdapter):
+        def stream(self, request):
+            if len(self.requests) == 1:
+                post_message(
+                    conversation, body="理由も書いて", client_message_id="", mode=MessageMode.AUTO, actor=app_user
+                )
+            yield from super().stream(request)
+
+    adapter = Script(
+        [
+            calls(("c1", "submit_result", {"verdict": "ok"})),
+            reply("確認しました"),
+            reply("理由を足しました"),
+            calls(("c2", "submit_result", {"verdict": "ok", "reason": "問題なし"})),
+            reply("確認しました。問題ありません"),
+        ]
+    )
+    run = execute(run, adapter)
+    assert any(RESULT_RESET_NOTICE in m.text for m in adapter.requests[2].messages)
+    assert run.status == RunStatus.COMPLETED
+    assert run.result == {"verdict": "ok", "reason": "問題なし"}

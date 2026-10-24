@@ -118,6 +118,10 @@ RESULT_REQUIRED_NOTICE = (
     "This work must end with submit_result. Check the result, call submit_result with it, and then write your final "
     "reply."
 )
+RESULT_RESET_NOTICE = (
+    "The result you submitted was cleared because the user gave a new instruction. Apply it, then call "
+    "submit_result again with the updated result."
+)
 RESULT_GRACE_NOTICE = (
     "The maximum number of steps is near: this is the last step in which you can call tools. Call submit_result "
     "now with the result you have, and note anything unfinished in it if the schema allows."
@@ -445,6 +449,11 @@ class Runner:
                 instruction.applied = timezone.now()
                 instruction.save(update_fields=["state", "applied", "updated"])
                 applied = True
+            if applied and run.result is not None:
+                # 確定した業務結果は、取り込んだ指示を反映していない。確定し直させる（harness.md §10.4・§10.5）
+                Run.objects.filter(pk=run.pk).update(result=None, updated=timezone.now())
+                self.run_obj.result = None
+                RunEvent.record(run, RunEventKind.CONTEXT, {"text": RESULT_RESET_NOTICE})
         if applied and self.session.started:
             # 追加指示に付いた添付を、動いているSandboxの /workspace/input にも置く
             self.session.sync_inputs()

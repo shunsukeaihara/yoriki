@@ -670,7 +670,7 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 
 - 成果物は `/workspace/output` に置かせる。完了時にRunnerがすべて回収・検証して永続化する（design.md §7.4）。
 - `present_files` は、主な成果物と説明を示すだけ（ファイルの中身はコピーしない。DeepSeek Harnessの方式）。画面の「添付と成果物」で、示した成果物を先に出す。存在しないパスは、直し方を添えたエラーにする。
-- **業務結果のSchema**があるRun（SkillかTask Definitionが出力のSchemaを持つ。例：契約書レビューの判定・理由・指摘箇所）では、`submit_result` の引数をそのSchemaにする。Runnerは検証し、通れば業務結果として保存し（`Run.result`。もう一度呼べば置き換える）、最後の応答を書かせて完了の手順（design.md §5.2の7）に進む。Schemaがあるのに `submit_result` を呼ばずに最後の応答を返したら、1回だけ呼ぶよう促し、それでも呼ばなければ `no_result` で終える（Gemini CLIの方式）。
+- **業務結果のSchema**があるRun（SkillかTask Definitionが出力のSchemaを持つ。例：契約書レビューの判定・理由・指摘箇所）では、`submit_result` の引数をそのSchemaにする。Runnerは検証し、通れば業務結果として保存し（`Run.result`。もう一度呼べば置き換える）、最後の応答を書かせて完了の手順（design.md §5.2の7）に進む。確定した後に今の作業への追加の指示を取り込んだら、業務結果を取り消して、指示を反映した結果で確定し直させる。Schemaがあるのに `submit_result` を呼ばずに最後の応答を返したら、1回だけ呼ぶよう促し、それでも呼ばなければ `no_result` で終える（Gemini CLIの方式）。
 - 最後の応答の本文は、会話のメッセージとして保存する。
 
 ### 10.6 予算

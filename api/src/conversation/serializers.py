@@ -13,7 +13,7 @@ from llm.models import ModelProfile
 from llm.serializers import AppModelProfileSerializer
 from run.models import ACTIVE_STATUSES, Run
 from run.serializers import RunSerializer
-from skill.models import Skill
+from skill.models import Skill, SkillAccess
 from utils.fields import NormalizedTextField
 
 from .dispatch import CannotStart, MessageMode, post_message
@@ -134,6 +134,13 @@ class MessageSkillSerializer(serializers.Serializer):
     name = serializers.CharField(read_only=True)
 
 
+class MessageSkillEditSerializer(serializers.Serializer):
+    """メッセージのSkillの編集の依頼（送ったときの名前）。新しいSkillを作る依頼ではidが空"""
+
+    id = serializers.CharField(read_only=True)
+    name = serializers.CharField(read_only=True)
+
+
 class MessageSerializer(serializers.ModelSerializer):
     """会話のメッセージ。投稿すると、新しい依頼・今の作業への追加指示・確認への回答・次の依頼のどれかになる"""
 
@@ -164,6 +171,21 @@ class MessageSerializer(serializers.ModelSerializer):
         help_text=_("入力欄の `/` で指定したSkill。実行中なら次の依頼になる（Skillの版は依頼を始めるときに決める）"),
     )
     skills_info = MessageSkillSerializer(source="skills", many=True, read_only=True)
+    edit_skill: "serializers.SlugRelatedField[Skill]" = serializers.SlugRelatedField(
+        slug_field="uid",
+        required=False,
+        allow_null=True,
+        queryset=Skill.objects.none(),
+        write_only=True,
+        help_text=_("入力欄の `/` で「編集」を選んだSkill。このメッセージはSkillの編集の依頼になる（別のRunで行う）"),
+    )
+    create_skill = serializers.BooleanField(
+        required=False,
+        default=False,
+        write_only=True,
+        help_text=_("入力欄の `/` で「新しいSkillを作る」を選んだ。このメッセージは新しいSkillを作る依頼になる"),
+    )
+    skill_edit = serializers.SerializerMethodField()
     client_message_id = serializers.CharField(max_length=64, required=False, allow_blank=True, write_only=True)
     mode = serializers.ChoiceField(
         choices=[(MessageMode.AUTO, _("自動")), (MessageMode.NEXT, _("次の依頼"))],
@@ -185,6 +207,9 @@ class MessageSerializer(serializers.ModelSerializer):
             "attachments_info",
             "skills",
             "skills_info",
+            "edit_skill",
+            "create_skill",
+            "skill_edit",
             "client_message_id",
             "mode",
             "instruction",
@@ -214,7 +239,15 @@ class MessageSerializer(serializers.ModelSerializer):
             # 指定できるのは、利用者が使えるSkillだけ（使えるかはRun開始時にもう一度確かめる）
             skill_relation: Any = skills.child_relation
             skill_relation.queryset = Skill.objects.usable_by(request.user)
+        edit_skill: Any = fields["edit_skill"]
+        if request is not None:
+            # 編集の権限は validate_edit_skill() で確かめる（見えないSkillは、ないものとして断る）
+            edit_skill.queryset = Skill.objects.visible_to(request.user)
         return fields
+
+    @extend_schema_field(MessageSkillEditSerializer(allow_null=True))
+    def get_skill_edit(self, obj: ConversationMessage) -> dict[str, str] | None:
+        return obj.skill_edit or None
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
@@ -234,10 +267,34 @@ class MessageSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(_("Skillは%(limit)s個まで指定できます") % {"limit": MAX_EXPLICIT_SKILLS})
         return value
 
+    def validate_edit_skill(self, value: Skill | None) -> Skill | None:
+        if value is not None and value.scope_access_of(self.context["request"].user) < SkillAccess.EDIT:
+            raise serializers.ValidationError(_("このSkillを編集する権限がありません"))
+        return value
+
     def validate(self, attrs):
+        editing = attrs.get("edit_skill") is not None or attrs.get("create_skill")
+        if editing and attrs.get("skills"):
+            raise serializers.ValidationError(
+                {"skills": _("Skillの編集の依頼では、使うSkillを指定できません。別のメッセージで送ってください")}
+            )
+        if attrs.get("edit_skill") is not None and attrs.get("create_skill"):
+            raise serializers.ValidationError(
+                {"create_skill": _("編集と新しいSkillの作成は、どちらか1つにしてください")}
+            )
+        if editing and not attrs.get("body", "").strip():
+            raise serializers.ValidationError({"body": _("Skillをどう変えるかを入力してください")})
         if not attrs.get("body", "").strip() and not attrs.get("attachments") and not attrs.get("skills"):
             raise serializers.ValidationError({"body": _("本文を入力してください")})
         return attrs
+
+    @staticmethod
+    def _skill_edit(validated_data) -> dict[str, str] | None:
+        if (skill := validated_data.get("edit_skill")) is not None:
+            return {"id": skill.uid, "name": skill.name}
+        if validated_data.get("create_skill"):
+            return {"id": "", "name": ""}
+        return None
 
     def create(self, validated_data) -> ConversationMessage:
         try:
@@ -249,6 +306,7 @@ class MessageSerializer(serializers.ModelSerializer):
                 actor=validated_data["sender"],
                 attachments=validated_data.get("attachments", []),
                 skills=validated_data.get("skills", []),
+                skill_edit=self._skill_edit(validated_data),
             )
         except CannotStart as exc:
             raise serializers.ValidationError({"non_field_errors": [str(exc)]}) from exc

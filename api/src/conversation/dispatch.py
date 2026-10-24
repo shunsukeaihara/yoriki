@@ -15,10 +15,11 @@ from run.models import (
     Run,
     RunEvent,
     RunEventKind,
+    RunKind,
     RunStatus,
 )
 from runtime.models import RuntimeProfile
-from skill.models import Skill
+from skill.models import Skill, SkillAccess
 
 from .models import Conversation, ConversationMessage, InstructionKind, InstructionState, MessageRole, UserInstruction
 
@@ -89,10 +90,12 @@ def post_message(
     actor,
     attachments: list[Artifact] | None = None,
     skills: list[Skill] | None = None,
+    skill_edit: dict[str, str] | None = None,
 ):
     """利用者のメッセージを保存し、新しいRun・追加指示・確認への回答・次の依頼のどれかとして受け付ける。
 
-    Skillを指定したメッセージは、Skillの版をRun開始時に決めるので、実行中なら次の依頼にする
+    Skillを指定したメッセージは、Skillの版をRun開始時に決めるので、実行中なら次の依頼にする。Skillの編集の依頼
+    （`skill_edit`。{"id", "name"}、新しいSkillならidが空）も、別のRunになるので同じく次の依頼にする
     """
     conversation = Conversation.objects.select_for_update().get(pk=conversation.pk)
     if client_message_id:
@@ -108,6 +111,7 @@ def post_message(
         body=body,
         client_message_id=client_message_id,
         skills=[{"id": s.uid, "name": s.name} for s in skills or []],
+        skill_edit=skill_edit or {},
     )
     if attachments:
         # 検証の後に、別のメッセージで送られていないかを会話の行ロックの中で確かめる
@@ -136,10 +140,11 @@ def post_message(
         return message
     message.run = run
     message.save(update_fields=["run"])
+    separate = bool(skills) or bool(skill_edit)  # 別のRunとして始める依頼
     question = ClarificationRequest.objects.filter(
-        run=run, status=ClarificationStatus.OPEN, kind=ClarificationKind.QUESTION
+        run=run, status=ClarificationStatus.OPEN, kind__in=(ClarificationKind.QUESTION, ClarificationKind.SKILL_EDIT)
     ).first()
-    if mode == MessageMode.AUTO and question is not None and run.status == RunStatus.WAITING_USER and not skills:
+    if mode == MessageMode.AUTO and question is not None and run.status == RunStatus.WAITING_USER and not separate:
         # 確認待ちのときのメッセージは、その確認への自由記述の回答にする
         question.accept_answer(
             [{"selected": [], "text": ""} for _q in question.questions],
@@ -150,13 +155,46 @@ def post_message(
         return message
     kind = (
         InstructionKind.NEXT
-        if mode == MessageMode.NEXT or run.status == RunStatus.CANCELLING or skills
+        if mode == MessageMode.NEXT or run.status == RunStatus.CANCELLING or separate
         else InstructionKind.CURRENT
     )
     UserInstruction.objects.create(
         conversation=conversation, message=message, run=run if kind == InstructionKind.CURRENT else None, kind=kind
     )
     return message
+
+
+def accept_skill_edit(clarification: ClarificationRequest, actor) -> None:
+    """request_skill_edit の確認が承認されたら、要約を本文とするSkillの編集の依頼を、次の依頼として受け付ける
+    （確認への回答と同じtransactionで呼ぶ。harness.md §10.9）。今のRunが終わった後に始まる"""
+    from harness.tools.request_skill_edit import approved  # noqa: PLC0415  harnessがconversationをimportするため
+
+    if not approved(clarification):
+        return
+    target = clarification.context
+    message = ConversationMessage.objects.create(
+        conversation=clarification.run.conversation,
+        sender=actor,
+        role=MessageRole.USER,
+        body=target.get("summary", ""),
+        skill_edit={"id": target.get("skill", ""), "name": target.get("name", "")},
+    )
+    UserInstruction.objects.create(conversation=message.conversation, message=message, kind=InstructionKind.NEXT)
+
+
+def resolve_skill_edit(message: ConversationMessage, user, version) -> dict[str, object]:
+    """Skillの編集の依頼の対象を確かめて、Manifestに固定する内容にする。編集できなければ CannotStart"""
+    if not version.supports_tools:
+        raise CannotStart(_("このモデルはToolを使えないので、Skillを編集できません。別のモデルを選んでください。"))
+    uid = message.skill_edit.get("id", "")
+    if not uid:
+        return {"skill": "", "name": ""}
+    skill = Skill.objects.filter(uid=uid, deleted=False).select_related("department").first()
+    if skill is None:
+        raise CannotStart(_("編集するSkillが削除されました。"))
+    if skill.scope_access_of(user) < SkillAccess.EDIT:
+        raise CannotStart(_("Skill「%(name)s」を編集する権限がありません。") % {"name": skill.name})
+    return {"skill": skill.uid, "name": skill.name}
 
 
 def chosen_skills(message: ConversationMessage) -> list[Skill]:
@@ -186,13 +224,29 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
         raise CannotStart(
             _("コマンドを動かす環境（Runtime Profile）が登録されていません。基盤管理者に問い合わせてください。")
         )
-    # `/` で指定したSkillは、その時点の公開中の版へ解決して固定する。指定がなければ、エージェントが選べるSkillの
-    # 一覧を固定する（Toolの一覧と `skill` の引数をRunの中で変えない。harness.md §7.5・§10.1）
+    # Skillの編集の依頼は、対象のSkillを固定した編集のRunにする（harness.md §10.9）。それ以外では、`/` で指定した
+    # Skillをその時点の公開中の版へ解決して固定し、指定がなければ、エージェントが選べるSkillの一覧を固定する
+    # （Toolの一覧と `skill` の引数をRunの中で変えない。harness.md §7.5・§10.1）
+    skill_edit = resolve_skill_edit(message, conversation.owner, version) if message.skill_edit else None
     try:
-        skills = resolve_explicit(chosen_skills(message), conversation.owner, version)
+        skills = resolve_explicit(chosen_skills(message), conversation.owner, version) if not skill_edit else []
     except SkillUnavailable as exc:
         raise CannotStart(_("指定したSkillを使えません。%(reason)s") % {"reason": exc}) from exc
-    catalog = build_catalog(conversation.owner, version) if not skills and version.supports_tools else None
+    catalog = (
+        build_catalog(conversation.owner, version)
+        if not skills and skill_edit is None and version.supports_tools
+        else None
+    )
+    fixed: dict[str, object] = {
+        "model_version": version.pk,
+        "effort": effort,
+        "runtime_version": runtime_version.pk,
+        "handles_sensitive_data": conversation.handles_sensitive_data,
+        "skills": skills,
+        "skill_catalog": catalog,
+    }
+    if skill_edit is not None:
+        fixed["skill_edit"] = skill_edit
     if parent is None:
         # 同じ会話の前の依頼。作業ファイルはその最後のCheckpointから引き継ぐ（design.md §7.9）
         parent = Run.objects.filter(conversation=conversation).order_by("-created", "-pk").first()
@@ -200,21 +254,12 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
         conversation=conversation,
         parent=parent,
         owner=conversation.owner,
+        kind=RunKind.WORK if skill_edit is None else RunKind.SKILL_EDIT,
         model_version=version,
         effort=effort,
         runtime_version=runtime_version,
         handles_sensitive_data=conversation.handles_sensitive_data,
-        manifest={
-            "fixed": {
-                "model_version": version.pk,
-                "effort": effort,
-                "runtime_version": runtime_version.pk,
-                "handles_sensitive_data": conversation.handles_sensitive_data,
-                "skills": skills,
-                "skill_catalog": catalog,
-            },
-            "appended": [],
-        },
+        manifest={"fixed": fixed, "appended": []},
     )
     message.run = run
     message.save(update_fields=["run"])

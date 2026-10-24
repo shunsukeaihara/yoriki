@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-25（#36）
+- 最終更新：2026-10-25（#37）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -40,6 +40,7 @@
 | #34 | `skill` アプリ：Skill（公開範囲は個人・部門・全社で作成時に固定、公開中の版、緊急停止）、SkillDraft（Skillごとに1つ、revisionで競合を検出、公開で閉じる）、不変のSkillVersion・SkillAssetBinding（説明・手順・Tool・必要な能力・入出力のSchema・資料の版）、SkillChange（公開・切戻し・停止の記録、operation keyで再送を重ねない）。`resources` アプリ：Resource・ResourceVersion（資料の原本の版。中身はBlobObject）。`user` アプリ：部門（Department）と所属（部門の中の役割：利用・編集・公開）と管理API（`v1/departments`）、`app/v1/my/` の所属する部門。permission `skill.can_edit_company_skills`・`can_publish_company_skills` と役割「Skill公開者」（「Plugin公開者」を改名）。API：`app/v1/skills`（作成・公開・切戻し・停止・再開・削除）と、その下の `versions`・`changes`・`drafts`・`drafts/{id}/assets`（資料のアップロード・置換）・`files`（原本の取得） |
 | #35 | Skillの画面：社員向けの `/skills`（一覧・作成。作れる範囲だけを出す）と `/skills/[skillId]`（公開中の版の中身、Draftの編集（説明・手順・Tool（公開の役割だけ）・必要な能力・入出力のSchema）、資料の追加・変更・置換・外す、公開、Draftの破棄、版の履歴（中身・この版から編集・この版に戻す）、変更の記録、名前の変更・停止・再開・削除）。Draftのrevisionでの競合（409）からの読み直し、資料の操作の後も入力中の本文を残す、公開・切戻しのoperation key。部門と所属の管理画面 `/manage/departments`（基盤管理者）。`composables/skill.ts`。Skillの画面は `/manage` ではなく社員向けに置く（frontend-conventions.md §8.1）。最初の公開の変更点に空の項目が載っていたのを直した |
 | #36 | 会話でSkillを使う（design.md 0.28、harness.md §10.1）：エージェントに見せるSkillの一覧（使えて、モデルが必要な能力を持つもの。文脈の2%まで、同じ名前は範囲を添える）をRun開始時にManifestへ固定し、`<runtime_context>` の `<skills>` と `skill` の引数のenumにする。`skill` Tool（その時点の公開中の版へ解決し、権限・停止・能力・要るToolを確かめてManifestへ追記、`skill.loaded`。同じRunでは同じ版）。入力欄の `/` での指定（メッセージの `skills`。3つまで。Run開始時に版を解決して最初の発言に本文を入れ、Toolはその `tools` に限る。実行中なら次の依頼）。資料はWorkerのディレクトリを `/workspace/master` に読取り専用でbind mountして `skills/<Skill>/<key>/<ファイル名>` に置く（起動の前と、動いているSandboxへの途中の読込み）。`submit_result`（`/` で指定したSkillの業務結果のSchemaを引数にし、`Run.result` に保存。呼ばずに終えようとしたら1回促し、なければ `no_result`）。Runが使うSkillが停止・削除・権限の失効をしたら次の区切りで止める（`skill`）。モデルの切り替えはSkillの必要な能力を持つモデルに限る。業務結果のSchemaを全プロバイダで通る範囲に限る検証。system promptのSkillの節。画面：入力欄のSkillのボタンと `/` の一覧、メッセージのSkill、Runの使ったSkillと版、業務結果。APIは `Run.skills`・`result`、メッセージの `skills`・`skillsInfo` |
+| #37 | 会話からのSkill更新（design.md 0.29 §11.6、harness.md §10.9）：Skillの編集のRun（`Run.kind`。対象のSkillを1つだけManifestの `fixed.skill_edit` に固定し、新しいSkillは `create_skill` で作って追記する）。始め方は、入力欄の `/` の「編集」「新しいSkillを作る」（メッセージの `edit_skill`・`create_skill`。実行中なら次の依頼）と、業務のRunの `request_skill_edit`（対象を利用者が編集できるSkillから名前で決め、確認（種類「Skillの編集」）で承認されたら要約を本文とする編集の依頼を次の依頼として受け付ける。自由記述の回答は承認にしない）。Skill管理のTool（`get_skill`（公開中の版とDraftの資料を `/workspace/master/skills`・`drafts` に置く）、`create_skill`、`update_skill_draft`、`stage_skill_asset`（Sandboxのファイルを原本のbytesのままDraftの資料に追加・置換。添付の置換も兼ねる）、`remove_skill_asset`、`publish_skill_draft`（公開の役割がなければ変更案として保存）、`rollback_skill`）は、管理APIと同じSerializer・Modelのメソッドで検証と権限を確かめ、公開・切戻しはToolInvocationのoperation keyで重ねない。SkillChangeに編集のRunを記録。画面：`/` の一覧の「使う」「編集する」「新しいSkillを作る」、編集の依頼のメッセージ、提案の確認、Runの「Skillの編集」と変えたSkill（状態・版・変更点・Skillの画面へのリンク）。APIは `Run.kind`・`skillChanges`、確認の `target`、メッセージの `skillEdit` |
 
 確認済みのこと：
 
@@ -56,6 +57,7 @@
 - gVisor：契約テストは手元のarm64（Docker Desktopの中のdind）とCIのamd64・arm64（userns-remap）で、LauncherとSandboxのToolのテストは手元のdind（userns-remap）とCIのamd64（userns-remap、AppArmor）で、すべて通った。gVisorでの会話のRun（qclusterから）は、Linuxのホストではまだ試していない。
 - 成果物とファイルは、手元のqcluster・偽のLLM（shellで `/workspace/input` を読み、`/workspace/output` に書く）・ブラウザ（Playwright）で、会話を始めるフォームでの添付 → Run → 成果物の欄 → ダウンロード（HTMLも添付として返る）→ 同じ名前の添付の2回目の依頼（「(2)」に分かれ、変わったファイルだけが新しい成果物になる）→ 狭い画面のドロワー、まで確かめた。S3はmotoで確かめただけで、実際のS3・S3互換のストレージでは試していない。nginxの `X-Accel-Redirect` は、Composeの構成ではまだ試していない。
 - #36 の会話でのSkillは、手元のqcluster・手元のレジストリのRuntime Profile（runc）・偽のLLM・ブラウザ（Playwright）で、`/` の一覧から部門のSkillを選んで送る → 最初の発言にSkillの本文 → 実際のSandboxで `/workspace/master` の資料を `read` → 業務結果のSchemaがあるので `submit_result` を促して `no_result`、と、次の依頼で指定せずに送る → `<skills>` からエージェントが `skill` で読み込む → 完了、まで確かめた。実際のプロバイダのモデルがSkillを選ぶかは、まだ試していない。
+- #37 の会話からのSkill更新は、手元のqcluster・手元のレジストリのRuntime Profile（runc）・偽のLLM・ブラウザ（Playwright）で、基盤管理者が `/` の「編集」から部門のSkillを編集 → `get_skill` → `update_skill_draft` → `publish_skill_draft` で第4版を公開（Runに「第4版を公開・次の依頼から反映」）、業務の会話で「Skillも直しておいて」→ `request_skill_edit` の確認 →「Skillを編集する」→ 業務のRunの完了後に編集のRunが始まって第5版を公開、部門の「編集」の役割の社員では公開されず「変更案を保存（未公開）」、狭い画面、まで確かめた。実際のプロバイダのモデルが「今回だけ」と「今後も」を区別して `request_skill_edit` を呼ぶかは、まだ試していない。
 - #30 のSandboxは、手元のqcluster（fork）・手元のレジストリのRuntime Profile（platformのdigest）・Toolを呼ぶ偽のLLMで、shell → read → 確認待ち（Checkpointを保存してSandboxを消す）→ 回答 → 戻したWorkspaceで edit → 完了、まで確かめた。画面での表示は、ブラウザではまだ確かめていない。Linuxのホスト（本番の構成のqcluster・userns-remap）では、まだ試していない。
 
 ## 2 実装の中で決めたこと
@@ -81,7 +83,8 @@
 - Compose：channel-listener（Channelの受信を実装するとき）。
 - 管理コマンド：`drain_workers`・`resume_workers`（Workerの実行を実装するとき）。
 - 業務のアプリは `llm`、`conversation`、`run`、`harness`、`stream`、`usage`、`runtime`（Runtime Profile、Launcher）、`artifact`、`skill`・`resources`（土台だけ）まで。`plugin`、`task`、`delivery`、`connector` 等（backend-conventions.md §1.2）は、まだない。
-- Skillで後回しにしたもの：実行中のRunでSkillを最新の公開版へ切り替える依頼（design.md §3.2）、機密の制限によるSkillの絞り込み（Connectorの段階）、会話からのSkill更新（編集のRunとSkill管理のTool）、Draftの評価（SkillEvaluation、`test_skill_draft`）、Resource Collection、Connectorの宣言、資料の形式ごとの検証（MD・CSV・PPTX。今は大きさだけを確かめる）、版の差分の表示（今はSkillChangeに変わった項目と資料のkeyだけを記録）、公開せずに捨てたDraftの資料の原本の回収、共通Skillから個人用を派生させる操作、Draftを開いた後に別の版が公開されたときの取り込み（今は破棄して開き直す）、画面のToolの選択肢と説明（今はフロントエンドに `harness.tools.ALL_TOOLS` と同じ一覧を持つ。APIで返すようにする）。
+- Skillで後回しにしたもの：実行中のRunでSkillを最新の公開版へ切り替える依頼（design.md §3.2）、機密の制限によるSkillの絞り込み（Connectorの段階）、Draftの評価（SkillEvaluation、`test_skill_draft`）、Resource Collection、Connectorの宣言、資料の形式ごとの検証（MD・CSV・PPTX。今は大きさだけを確かめる）、版の差分の表示（今はSkillChangeに変わった項目と資料のkeyだけを記録）、公開せずに捨てたDraftの資料の原本の回収、共通Skillから個人用を派生させる操作、Draftを開いた後に別の版が公開されたときの取り込み（今は破棄して開き直す）、画面のToolの選択肢と説明（今はフロントエンドに `harness.tools.ALL_TOOLS` と同じ一覧を持つ。APIで返すようにする）。
+- 会話からのSkill更新で後回しにしたもの：中身が前の版と同じDraftの公開を止めない（版が増える）、Draftに他の人の未公開の変更があっても一緒に公開する（`get_skill` の説明で、公開の前に利用者へ伝えさせるだけ）、編集のRunの対象は1つだけ（複数のSkillをまとめて直す依頼は分ける）、別のAttemptで再開すると `/workspace/master` のDraftの資料が置き直されない（`get_skill` を呼び直せば置く）、資料の形式ごとの検証（⑤）。
 - Sandboxで後回しにしたもの：`/workspace/master` のmount（Skillの段階）、`install_python_packages` と `/packages`（PackageBundle・EnvironmentRevision）、ステップごとのCheckpoint（今はAttemptを終えるときだけ。障害で落ちると、最後のCheckpointより後の変更は失われ、モデルに知らせる）、snapshotの保持期限と削除、非公開のレジストリからのpullの認証。
 - 引き継いだ文脈が、それだけでモデルの文脈に収まらないほど大きいとき（前の依頼が文脈の上限で失敗した等）は、要約の要求も収まらず、次の依頼も失敗する。前の依頼の中で圧縮が働くので通常は起きない。
 - 成果物とファイルで後回しにしたもの：Storage Backendの `validate_config`・`healthcheck`（セットアップ時の確認。design.md §7.8）、既存のファイルを新しい保存先へ移すコマンド（design.md §7.10。以前の保存先を読む設定 `YORIKI_STORAGE_PREVIOUS` はある）、WorkspaceSnapshotのModel（今はCheckpointが保存先・key・hashを持つ）、保持期限での清掃（`cleanup_artifacts`。期限 `expires` は記録している）と、DBに記録する前に失敗した参照のないobjectの回収、S3の期限付きURL（今はapiが読んで返す）、送らずに残った添付の削除、画像のプレビュー、エージェントの `present_files`（harness.md §10.5）。
@@ -99,10 +102,12 @@
 
 ## 4 次の作業
 
+**進行中**：#37（会話からのSkill更新。ブランチ `feature/skill-edit-runs`）はPRを作成済みで、CIの結果とマージの指示を待っている。再開したら `gh pr checks 37` でCIを確かめ、失敗していれば直してpushする。マージは利用者の指示があったときだけ行い（squash merge、`[skip ci]` は development.md §4.1）、マージの後は手元とGitHubのブランチを消す。マージの前に本書を変えるときは、このPRの中でコミットする。
+
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。上から順に着手する（利用者から別の指示がなければ、1から始める）。提案する順番：
 
-1. **Skill（`skill`、`resources`）**：利用者と合意したPRの分け方は「① 土台（backend。済み） → ② 管理画面（frontend） → ③ 会話での利用 → ④ 会話からのSkill更新 → ⑤ 評価とCSV・PPTXの検証・編集」。③まで済み。次は④：会話からのSkill更新（Skillの編集のRun（関連Run）とSkill管理のTool。design.md §3.5・§3.6・§3.9、§11.6・§11.8。「今回だけ」と「今後も」の区別、公開の権限がなければDraftとして保存）。
-   - 読む章：design.md §3（エージェントとSkillのモデル。§3.2 版、§3.3 定義例、§3.5 エージェントによる作成と修正、§3.8 参照ファイル）、§11.6（会話からのSkill更新）、§11.8（Skillの資料を会話で管理する）、§12（受入条件）、backend-conventions.md §1.2（`skill` アプリのModelの一覧）、harness.md §7.5（Runの種類ごとのTool）・§10.1・§10.7（Skillの編集・公開のTool）。
+1. **Skill（`skill`、`resources`）**：利用者と合意したPRの分け方は「① 土台（backend。済み） → ② 管理画面（frontend） → ③ 会話での利用 → ④ 会話からのSkill更新 → ⑤ 評価とCSV・PPTXの検証・編集」。④まで済み。次は⑤：Draftの評価（SkillEvaluation、`test_skill_draft`。評価のRunにはSkill公開のToolを出さない）と、資料の形式ごとの検証・編集（MD・CSV・PPTX。design.md §3.7・§3.9・§12）。
+   - 読む章：design.md §3.7（差分と競合と評価）、§3.8・§3.9（参照ファイルと形式ごとの検証）、§11.8、§12（受入条件）、harness.md §7.5（評価のRunのTool）・§10.9（Skillの編集のRun）。
 2. **Connector（`connector`）とタスク・配信（`task`、`delivery`）**：読取り専用のDB Connector、Connectorを使える利用者・役割と操作（ConnectorPermission。design.md §4.9.1）、入力欄の `@` での指定、Task Definition（使うSkill・モデル・許可する操作）、Webhook・Zapierの通知、Trigger。DB Connector（種別：PostgreSQL・MySQL・SQL Server、ホスト、DB名、ユーザー、パスワード等）とHTTP Connector（ホスト、ヘッダー、認証情報等）の設定は管理画面で登録し、資格情報は `utils/crypto.py` で暗号化してDBに保存する（backend-conventions.md §6.4）。個人情報を主な中身とする接続先には機密のフラグを付けられるようにし、フラグの付いたConnectorはローカルLLMのモデルを使うタスク・会話にだけ割り当てる（design.md §4冒頭、§4.9.1）。
 3. **最初の2つの業務**（design.md §13。Skillとタスクとして作る）：請求書PDF → 社内DBと照合 → 取込用のCSV、契約書レビュー → Zapierへ結果。
 4. **Channel Plugin**（Teams・Slack・Discord。`plugin` のRegistry）。
@@ -120,7 +125,7 @@ cd frontend && pnpm install
 
 - `.envrc` に `YORIKI_SECRET_ENCRYPTION_KEYS` を設定する（`.envrc.example` の生成コマンドで作る）。設定がなくても起動はするが、LLMの接続のAPI keyを保存するときに入力エラーになる。
 - Runを手元で動かすときは、api（`uvicorn app.asgi:application --port 8000`）と `python src/manage.py qcluster` を起動する。macOSでは、qclusterに `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` が要る（`.envrc.example`。ないとforkしたworkerがHTTPの接続で落ちる）。
-- LLMのAPI keyがなくても、OpenAI互換の応答を返す小さな偽のサーバーを立て、ローカルLLMの接続として登録すれば、API → Q2 → Runner → SSEを一通り確かめられる（#22で確かめた方法）。開発用のDBには、そのときの確認用のユーザー（`e2e-check@example.co.jp`）と、接続「確認用の偽LLM」・モデル設定「確認用の偽モデル」「確認用の偽モデル（推論）」（effortは low・medium・high）が残っている。モデル設定「社内Qwen」の接続先はつながらないので、再試行の後のモデルの切り替えの確認に使える。偽のサーバーはリポジトリに置いていない。#36 では、`http.server` で `POST /v1/chat/completions` にSSE（`chat.completion.chunk` の並び、最後にusageと `[DONE]`）を返し、要求の `tools` を見て「`skill` があれば一覧の最初を読み込む → 発言・Tool結果に `/workspace/master/...` のパスがあれば `read` → 文で答える」と決める50行ほどのスクリプトを `127.0.0.1:8765` で動かした。開発用のDBの部門のSkill「請求書の照合」（版3）は、資料 `vendor-master.csv` と業務結果のSchema（`{"ok": boolean}`）を持つので、`/` で指定すると `submit_result` が要る。
+- LLMのAPI keyがなくても、OpenAI互換の応答を返す小さな偽のサーバーを立て、ローカルLLMの接続として登録すれば、API → Q2 → Runner → SSEを一通り確かめられる（#22で確かめた方法）。開発用のDBには、そのときの確認用のユーザー（`e2e-check@example.co.jp`）と、接続「確認用の偽LLM」・モデル設定「確認用の偽モデル」「確認用の偽モデル（推論）」（effortは low・medium・high）が残っている。モデル設定「社内Qwen」の接続先はつながらないので、再試行の後のモデルの切り替えの確認に使える。偽のサーバーはリポジトリに置いていない。#36 では、`http.server` で `POST /v1/chat/completions` にSSE（`chat.completion.chunk` の並び、最後にusageと `[DONE]`）を返し、要求の `tools` を見て「`skill` があれば一覧の最初を読み込む → 発言・Tool結果に `/workspace/master/...` のパスがあれば `read` → 文で答える」と決める50行ほどのスクリプトを `127.0.0.1:8765` で動かした。開発用のDBの部門のSkill「請求書の照合」（版3）は、資料 `vendor-master.csv` と業務結果のSchema（`{"ok": boolean}`）を持つので、`/` で指定すると `submit_result` が要る。会話からのSkill更新では、同じ偽のサーバーを「要求の `tools` に `get_skill` があれば `get_skill` → `update_skill_draft`（結果の `<draft revision=` を使う）→ `publish_skill_draft`（結果の `now revision` を使う）→ 文で答える。業務のRunで利用者の発言に「Skillも直して」があれば `request_skill_edit`」と決める形にした。部門の「編集」の役割の社員 `skill-member@example.co.jp` で確かめたときのDraftが、Skill「請求書の照合」（版5）に残っている。
 - 基盤管理者は `cd api && uv run python src/manage.py createsuperuser` で作る。開発時はDjangoの管理画面（`/api/admin/`）のパスワードログインでセッションを作れる。
 - Sandboxのイメージは `docker build -f sandbox/images/docs/Dockerfile -t yoriki-sandbox-docs:dev sandbox` でビルドし、`cd sandbox && uv sync && uv run pytest` で契約テストを動かす（sandbox/README.md）。apiのLauncher・SandboxのToolのテスト（`pytest -m sandbox`）も、このイメージ（`YORIKI_SANDBOX_TEST_IMAGE`）で動く。イメージがなければ飛ばす。
 - Sandboxは既定でgVisor（runsc）で動かすが、Docker DesktopにはgVisorがないので、手元の `.envrc` には `YORIKI_SANDBOX_RUNTIME=runc` を設定する（`.envrc.example`）。gVisorでの動きはCIで確かめる（PRでは `sandbox-gvisor`・`sandbox-runner` が動く。PRの前に手元のブランチで動かすなら、pushして `gh workflow run sandbox.yml --ref <ブランチ>`・`gh workflow run backend.yml --ref <ブランチ>`）。手元で試すときは sandbox/README.md のdindの方法を使う。

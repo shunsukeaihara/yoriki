@@ -76,6 +76,9 @@ class ConversationMessage(models.Model):
     # 利用者が入力欄の `/` で指定したSkill（[{"id", "name"}]。送ったときの名前を残す）。このメッセージで始めるRunの
     # 開始時に、その時点の公開中の版へ解決する（design.md §3.2）
     skills = models.JSONField(_("指定したSkill"), default=list, blank=True)
+    # Skillの編集の依頼（{"id", "name"}。新しいSkillを作る依頼ではidが空）。空でなければ、このメッセージで始めるRunは
+    # Skillの編集のRunになる（入力欄の `/` での明示か、request_skill_edit の承認。design.md §11.6）
+    skill_edit = models.JSONField(_("Skillの編集の依頼"), default=dict, blank=True)
     # 画面が送るID。再送されたメッセージを二重に受け付けない（design.md §5.5）
     client_message_id = models.CharField(_("クライアントのメッセージID"), max_length=64, blank=True)
 

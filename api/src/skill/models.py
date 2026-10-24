@@ -299,7 +299,14 @@ class Skill(models.Model):
 
     @transaction.atomic
     def publish_draft(
-        self, draft_uid: str, *, actor, expected_revision: int, change_reason: str = "", operation_key: str = ""
+        self,
+        draft_uid: str,
+        *,
+        actor,
+        expected_revision: int,
+        change_reason: str = "",
+        operation_key: str = "",
+        run=None,
     ) -> "SkillVersion":
         """Draftから新しい版を作り、公開中の版にする。Draftは閉じる（消す）。
 
@@ -356,6 +363,7 @@ class Skill(models.Model):
             summary=summary,
             draft_uid=draft.uid,
             operation_key=operation_key,
+            run=run,
         )
         draft.delete()
         self.current_version = version
@@ -363,7 +371,14 @@ class Skill(models.Model):
 
     @transaction.atomic
     def rollback(
-        self, number: int, *, actor, expected_version: int, change_reason: str = "", operation_key: str = ""
+        self,
+        number: int,
+        *,
+        actor,
+        expected_version: int,
+        change_reason: str = "",
+        operation_key: str = "",
+        run=None,
     ) -> "SkillVersion":
         """選んだ過去の版と同じ中身・資料の版を新しく作り、公開中の版にする（履歴は消さない。design.md §3.7）"""
         current = self._lock()
@@ -415,6 +430,7 @@ class Skill(models.Model):
             reason=change_reason,
             summary=summary,
             operation_key=operation_key,
+            run=run,
         )
         self.current_version = version
         return version
@@ -702,6 +718,10 @@ class SkillChange(models.Model):
     summary = models.JSONField(_("変更点"), default=dict, blank=True)
     # 公開したDraftのID（Draftは公開で消える）。同じkeyの再送が同じDraftの公開かを確かめる
     draft_uid = models.CharField(_("公開したDraft"), max_length=22, blank=True)
+    # 会話から変更したときの、Skillの編集のRun（design.md §3.7）
+    run = models.ForeignKey(
+        "run.Run", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("編集のRun")
+    )
     # 画面・エージェントが操作ごとに付けるkey。同じkeyの再送では、前の結果を返す
     operation_key = models.CharField(_("operation key"), max_length=100, blank=True)
 

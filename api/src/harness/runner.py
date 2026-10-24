@@ -55,6 +55,7 @@ from run.models import (
     RunEndReason,
     RunEvent,
     RunEventKind,
+    RunKind,
     RunPrompt,
     RunStatus,
     ToolInvocation,
@@ -83,6 +84,8 @@ from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, SandboxSession
 from .skills import explicit_versions, revoked_skill
 from .tools import ALL_TOOLS, SANDBOX_TOOLS, WORKSPACE_WRITING_TOOLS
 from .tools.base import Effect, Tool, ToolContext, ToolResult
+from .tools.request_skill_edit import REQUEST_SKILL_EDIT
+from .tools.skill_admin import CREATE_SKILL, SKILL_ADMIN_TOOLS
 from .tools.skill_tool import make_skill_tool
 from .tools.submit_result import NAME as SUBMIT_RESULT
 from .tools.submit_result import make_submit_result_tool
@@ -102,6 +105,8 @@ REPEAT_WARN, REPEAT_STOP = 3, 5
 MAX_NUDGES = 3
 # 並べて実行するToolの数の上限（harness.md §7.6）
 MAX_PARALLEL = 4
+# Tool呼出し（ask_user・request_skill_edit）に対応する確認。結果はその呼出しへの結果として記録する
+TOOL_CLARIFICATIONS = (ClarificationKind.QUESTION, ClarificationKind.SKILL_EDIT)
 
 REPEAT_NOTICE = (
     "\n\n[You are repeating the same tool call with identical arguments. Check the previous result and try a "
@@ -232,7 +237,7 @@ class Runner:
         tools = {t.name: t for t in self.tools}
         # 実行中のRunに回答待ちの確認が残っていれば、前のAttemptが待ちに移る前に止まったもの。答えられないので閉じる
         ClarificationRequest.objects.filter(
-            run=self.run_obj, kind=ClarificationKind.QUESTION, status=ClarificationStatus.OPEN
+            run=self.run_obj, kind__in=TOOL_CLARIFICATIONS, status=ClarificationStatus.OPEN
         ).update(status=ClarificationStatus.CANCELLED)
         for call in pending_tool_calls(events):
             tool = tools.get(call["name"])
@@ -474,24 +479,33 @@ class Runner:
         if self.run_obj.runtime_version_id is None:
             tools = tuple(t for t in tools if t not in SANDBOX_TOOLS)
         if not self.run_obj.is_interactive:
-            tools = tuple(t for t in tools if t.name != "ask_user")
+            tools = tuple(t for t in tools if t.name not in ("ask_user", REQUEST_SKILL_EDIT.name))
         return tools
 
     def _skill_tools(self) -> tuple[Tool, ...]:
         if self.skill_tools is not None:
             return self.skill_tools
         explicit = explicit_versions(self.run_obj)
-        if explicit:
+        if self.run_obj.kind == RunKind.SKILL_EDIT:
+            # Skillの編集のRun：Skill管理のToolを出し、Skillを使う・提案するToolは出さない（harness.md §10.9）。
+            # 新しいSkillを作る依頼でだけ create_skill を出す
+            tools = (*ALL_TOOLS, *SKILL_ADMIN_TOOLS)
+            if not ((self.run_obj.manifest or {}).get("fixed") or {}).get("skill_edit", {}).get("skill"):
+                tools += (CREATE_SKILL,)
+        elif explicit:
             allowed = {name for version in explicit for name in version.tools}
             tools = tuple(t for t in ALL_TOOLS if t.name in allowed)
             schema = next((v.output_schema for v in explicit if v.output_schema), None)
             if schema:
                 tools += (make_submit_result_tool(schema),)
+            # Skillの編集の提案は作業の権限を増やさないので、Skillの指定にかかわらず出す（harness.md §7.5）
+            tools += (REQUEST_SKILL_EDIT,)
         else:
             tools = ALL_TOOLS
             catalog = ((self.run_obj.manifest or {}).get("fixed") or {}).get("skill_catalog") or {}
             if names := [e["name"] for e in catalog.get("skills", [])]:
                 tools += (make_skill_tool(names),)
+            tools += (REQUEST_SKILL_EDIT,)
         self.skill_tools = tools
         return tools
 
@@ -984,18 +998,20 @@ class Runner:
             self._record_tool_result(call.id, call.name, ToolResult.error(text), ToolStatus.CANCELLED)
 
     def _wait_for_user(self, call: ToolCall, rest: list[ToolCall]) -> bool:
-        """ask_user の結果は記録せずにWAITING_USERにし、Attemptを終える（harness.md §10.3）"""
+        """ask_user・request_skill_edit の結果は記録せずにWAITING_USERにし、Attemptを終える（harness.md §10.3）"""
         self._close_calls(rest, "Not executed: waiting for the user's answer. Call again after the answer if needed.")
         invocation = ToolInvocation.objects.get(run=self.run_obj, call_id=call.id)
         self._checkpoint()
         with self.run_obj.fenced(self.attempt) as run:
             # 確認の作成とWAITING_USERへの遷移を同じtransactionで行う。途中でleaseを失っても、
             # 答えられない確認だけが残ることはない
+            value = invocation.value or {}
             clarification = ClarificationRequest.objects.create(
                 run=run,
-                kind=ClarificationKind.QUESTION,
+                kind=value.get("kind", ClarificationKind.QUESTION),
                 tool_call_id=call.id,
-                questions=(invocation.value or {})["questions"],
+                questions=value["questions"],
+                context=value.get("context", {}),
                 expires=timezone.now() + CLARIFICATION_TTL,
             )
             ToolInvocation.objects.filter(pk=invocation.pk).update(value={"clarification": clarification.uid})

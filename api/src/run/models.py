@@ -61,6 +61,13 @@ class RunTrigger(models.IntegerChoices):
     TASK = 2, _("タスク")
 
 
+class RunKind(models.IntegerChoices):
+    """Runの種類（harness.md §7.5の1）。Skill管理のToolは、Skillの編集のRunにだけ出す（design.md §3.6）"""
+
+    WORK = 1, _("業務")
+    SKILL_EDIT = 2, _("Skillの編集")
+
+
 class RunEndReason(models.IntegerChoices):
     """Runの終わり方（harness.md §4.3）"""
 
@@ -93,6 +100,7 @@ class Run(models.Model):
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="runs", verbose_name=_("実行主体")
     )
+    kind = models.PositiveSmallIntegerField(_("種類"), choices=RunKind.choices, default=RunKind.WORK)
     status = models.PositiveSmallIntegerField(_("状態"), choices=RunStatus.choices, default=RunStatus.QUEUED)
     # 今使っているモデル設定の版とeffort。開始時に固定し、利用者が切り替えたときだけ変わる（Manifestにも追記する）
     model_version = models.ForeignKey(
@@ -353,6 +361,7 @@ class RunEvent(models.Model):
 class ClarificationKind(models.IntegerChoices):
     QUESTION = 1, _("エージェントからの質問")
     MODEL_SWITCH = 2, _("モデルの切り替えの確認")
+    SKILL_EDIT = 3, _("Skillの編集の確認")
 
 
 class ClarificationStatus(models.IntegerChoices):
@@ -371,6 +380,8 @@ class ClarificationRequest(models.Model):
     tool_call_id = models.CharField(_("Tool呼出しのID"), max_length=200, blank=True)
     # [{"header", "question", "options": [{"label", "description", "value"}], "multi_select"}]
     questions = models.JSONField(_("質問"), default=list)
+    # 確認の対象（種類ごと）。Skillの編集では {"skill", "name", "scope", "summary"}（harness.md §10.9）
+    context = models.JSONField(_("確認の対象"), default=dict, blank=True)
     # [{"selected": [label...], "text": ""}]（questionsと同じ順）
     answers = models.JSONField(_("回答"), default=list, blank=True)
     comment = models.TextField(_("補足"), blank=True)
@@ -422,6 +433,16 @@ class ClarificationRequest(models.Model):
             ToolInvocation.objects.filter(run=run, call_id=self.tool_call_id).update(
                 status=ToolStatus.SUCCEEDED, ended=timezone.now()
             )
+        elif self.kind == ClarificationKind.SKILL_EDIT:
+            # 承認されたら、Skillの編集のRunを次の依頼として受け付ける（harness.md §10.9）
+            from conversation.dispatch import accept_skill_edit  # noqa: PLC0415  conversationがrunをimportするため
+            from harness.tools.request_skill_edit import answer_result as skill_edit_result  # noqa: PLC0415
+
+            RunEvent.record(run, RunEventKind.TOOL_RESULT, skill_edit_result(self, actor))
+            ToolInvocation.objects.filter(run=run, call_id=self.tool_call_id).update(
+                status=ToolStatus.SUCCEEDED, ended=timezone.now()
+            )
+            accept_skill_edit(self, actor)
         else:
             from harness.recovery import apply_model_switch_answer  # noqa: PLC0415
 

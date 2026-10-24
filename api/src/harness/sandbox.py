@@ -42,7 +42,7 @@ from runtime.launcher import (
 )
 from skill.models import Skill, SkillVersion
 
-from .skills import asset_path, loaded_entries
+from .skills import asset_path, draft_asset_path, loaded_entries
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -266,15 +266,34 @@ class SandboxSession:
         そのまま見える（harness.md §10.1）。置けなければ SandboxUnavailable"""
         if version.pk in self.skill_versions:
             return
-        root = self.master_dir / "skills" / skill.uid
+        self._place_assets(
+            self.master_dir / "skills" / skill.uid,
+            [(asset_path(skill.uid, a.key, a.resource_version.name), a.resource_version) for a in version.assets.all()],
+        )
+        self.skill_versions.add(version.pk)
+
+    def place_draft_assets(self, skill, draft) -> None:
+        """SkillのDraftの資料を /workspace/master/drafts/<Skill>/r<revision>/<key>/ に置く（Skillの編集のRun。
+        harness.md §10.9）。前のrevisionの資料は残さない"""
+        self._place_assets(
+            self.master_dir / "drafts" / skill.uid,
+            [
+                (draft_asset_path(skill.uid, draft.revision, a.key, a.resource_version.name), a.resource_version)
+                for a in draft.assets.all()
+            ],
+        )
+
+    def _place_assets(self, root: Path, files: list[tuple[str, Any]]) -> None:
+        """資料の版（ResourceVersion）を、/workspace/master の中のパスに置く。`root` の下の前の中身は消す"""
+        self.master_dir.mkdir(parents=True, exist_ok=True)
+        self.master_dir.chmod(0o755)
         if root.exists():
             # 同じSkillの別の版（版の切り替え）。前の版の資料を残さない
             shutil.rmtree(root)
-        for asset in version.assets.all():
-            resource = asset.resource_version
-            path = self.master_dir / posixpath.relpath(asset_path(skill.uid, asset.key, resource.name), MASTER_DIR)
+        for sandbox_path, resource in files:
+            path = self.master_dir / posixpath.relpath(sandbox_path, MASTER_DIR)
             if self.master_dir not in path.parents:
-                logger.warning("run %s: skipping skill asset %s with a bad name", self.run.uid, asset.pk)
+                logger.warning("run %s: skipping skill asset %s with a bad name", self.run.uid, resource.pk)
                 continue
             try:
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -286,7 +305,32 @@ class SandboxSession:
                 os.replace(tmp.name, path)
             except (OSError, StorageError) as exc:
                 raise SandboxUnavailable(f"cannot prepare the skill file {resource.uid}: {exc}") from exc
-        self.skill_versions.add(version.pk)
+
+    def read_file(self, path: str, limit: int) -> bytes:
+        """Sandboxの中のファイル（/workspace の下の正規化した絶対パス）の中身を、そのままのbytesで読む。
+        Sandboxの中のtarで取り出し、通常のファイルでなければ（symlink・ディレクトリ）FileNotFoundError、
+        `limit` バイトを超えれば ValueError"""
+        sandbox = self.ensure()
+        relative = posixpath.relpath(path, WORKSPACE)
+
+        def fetch() -> bytes:
+            with tempfile.TemporaryFile(dir=self.dir) as archive:
+                sandbox.archive([relative], archive)
+                archive.seek(0)
+                with tarfile.open(fileobj=archive) as tar:
+                    member = tar.next()
+                    if member is None or not member.isfile() or member.name.rstrip("/") != relative:
+                        raise FileNotFoundError(path)
+                    if member.size > limit:
+                        raise ValueError(f"{path} is larger than {limit} bytes")
+                    src = tar.extractfile(member)
+                    assert src is not None  # 通常のファイル
+                    return src.read()
+
+        self.dir.mkdir(parents=True, exist_ok=True)
+        if threading.get_ident() == self.owner_thread:
+            return self._keep_lease(fetch)
+        return fetch()
 
     def sync_inputs(self) -> None:
         """会話の添付（取り込んだ依頼のもの）を、Workerのディレクトリ（Sandboxの /workspace/input に読取り専用で

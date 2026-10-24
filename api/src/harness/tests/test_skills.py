@@ -367,7 +367,7 @@ def test_instruction_after_the_result_asks_to_submit_it_again(conversation, app_
 
     class Script(FakeAdapter):
         def stream(self, request):
-            if len(self.requests) == 1:
+            if len(self.requests) == 2:
                 post_message(
                     conversation, body="理由も書いて", client_message_id="", mode=MessageMode.AUTO, actor=app_user
                 )
@@ -375,14 +375,15 @@ def test_instruction_after_the_result_asks_to_submit_it_again(conversation, app_
 
     adapter = Script(
         [
+            reply("確認しました"),  # 促される
             calls(("c1", "submit_result", {"verdict": "ok"})),
-            reply("確認しました"),
-            reply("理由を足しました"),
+            reply("確認しました"),  # この間に追加の指示が届く
+            reply("理由を足しました"),  # 取り消された結果を確定し直すよう、もう一度促される
             calls(("c2", "submit_result", {"verdict": "ok", "reason": "問題なし"})),
             reply("確認しました。問題ありません"),
         ]
     )
     run = execute(run, adapter)
-    assert any(RESULT_RESET_NOTICE in m.text for m in adapter.requests[2].messages)
+    assert any(RESULT_RESET_NOTICE in m.text for m in adapter.requests[3].messages)
     assert run.status == RunStatus.COMPLETED
     assert run.result == {"verdict": "ok", "reason": "問題なし"}

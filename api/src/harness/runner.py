@@ -357,15 +357,18 @@ class Runner:
             return result
         self._record_response(result, UsagePurpose.STEP, images_sent=compaction.images_sent(items))
         if final:
-            if any(t.name == SUBMIT_RESULT for t in self.tools) and not self._result_missing():
-                # 業務結果を確定した後の、最後のまとめの応答
-                self._finish_with_reply(result.text, RunStatus.COMPLETED, RunEndReason.COMPLETED)
-            else:
-                self._finish_with_reply(result.text, RunStatus.FAILED, RunEndReason.STEP_LIMIT)
-            return False
+            return self._finish_at_step_limit(result.text)
         if not result.calls:
             return self._handle_reply(result)
         return self._execute_calls(result.calls)
+
+    def _finish_at_step_limit(self, text: str) -> bool:
+        """ステップ数の上限の最後のまとめの応答で終える。業務結果を確定していれば完了にする（その間に追加の指示が
+        届いていれば、取り込んで続ける）"""
+        if any(t.name == SUBMIT_RESULT for t in self.tools) and not self._result_missing():
+            return self._finish_with_reply(text, RunStatus.COMPLETED, RunEndReason.COMPLETED)
+        self._finish_with_reply(text, RunStatus.FAILED, RunEndReason.STEP_LIMIT)
+        return False
 
     def _ask_model(self, system: str, items, *, final: bool) -> ModelResponse | bool:
         """モデルを呼ぶ。応答が得られなければ、ステップを続けるかどうか（圧縮した・待ちや失敗にした）を返す"""
@@ -453,7 +456,7 @@ class Runner:
                 # 確定した業務結果は、取り込んだ指示を反映していない。確定し直させる（harness.md §10.4・§10.5）
                 Run.objects.filter(pk=run.pk).update(result=None, updated=timezone.now())
                 self.run_obj.result = None
-                RunEvent.record(run, RunEventKind.CONTEXT, {"text": RESULT_RESET_NOTICE})
+                RunEvent.record(run, RunEventKind.CONTEXT, {"text": RESULT_RESET_NOTICE, "result_reset": True})
         if applied and self.session.started:
             # 追加指示に付いた添付を、動いているSandboxの /workspace/input にも置く
             self.session.sync_inputs()
@@ -625,8 +628,11 @@ class Runner:
             self._record(RunEventKind.CONTEXT, {"text": RUNNING_JOBS_NOTICE.format(jobs=jobs)})
             return True
         if self._result_missing():
-            # 業務結果のSchemaがあるのに submit_result を呼ばなかった。1回だけ促す（harness.md §10.5）
-            if not any(e.data.get("result_required") for e in self._events() if e.kind == RunEventKind.CONTEXT):
+            # 業務結果のSchemaがあるのに submit_result を呼ばなかった。1回だけ促す（harness.md §10.5）。
+            # 追加の指示で確定した結果を取り消した後は、もう一度促してよい
+            notices = [e for e in self._events() if e.kind == RunEventKind.CONTEXT]
+            since = max((e.sequence for e in notices if e.data.get("result_reset")), default=0)
+            if not any(e.data.get("result_required") for e in notices if e.sequence > since):
                 self._record(RunEventKind.CONTEXT, {"text": RESULT_REQUIRED_NOTICE, "result_required": True})
                 return True
             return self._finish_with_reply(

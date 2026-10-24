@@ -97,6 +97,8 @@
 
 ## 4 次の作業
 
+**進行中のPR**（マージするときに、この段落を消す）：#35（ブランチ `feature/skill-screens`。Skillの画面と部門の管理画面）。Codexのレビューは指摘なし。CIが通ったら利用者に報告し、マージの指示を待つ（squash merge）。マージ済みなら、この段落は消し忘れなので消す。
+
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。上から順に着手する（利用者から別の指示がなければ、1から始める）。提案する順番：
 
 1. **Skill（`skill`、`resources`）**：利用者と合意したPRの分け方は「① 土台（backend。済み） → ② 管理画面（frontend） → ③ 会話での利用 → ④ 会話からのSkill更新 → ⑤ 評価とCSV・PPTXの検証・編集」。②まで済み。次は③：会話での利用（`<skills>` の一覧、`skill` Tool、入力欄の `/` での指定、資料の `/workspace/master` への展開、`submit_result`）。harness.md §10.1・§7.5 に従う。
@@ -127,6 +129,7 @@ cd frontend && pnpm install
 
 - 環境変数はリポジトリルートの `.envrc`（direnv）。テストやmypyは、`.envrc` を読み込んだ状態で実行する。エージェントが `.envrc` を読めない設定のときは、`.envrc.example` の `export` の行と、新しく生成した `YORIKI_SECRET_ENCRYPTION_KEYS`（Fernet）・`YORIKI_SANDBOX_RUNTIME=runc` を一時ファイルに書き、リポジトリのルートでコマンドごとに `source` する（`$PWD` を使う行があるため）。
 - Sandboxの補助コマンド（`sandbox/helper/`）を変えたら、イメージをビルドし直す（#33で `read` の画像の符号化を変えた）。手元のレジストリのRuntime Profileで会話を動かすときは、pushし直して管理画面で新しいdigestに更新する。`pytest -m sandbox` は `YORIKI_SANDBOX_TEST_IMAGE=yoriki-sandbox-docs:dev` を付けて動かす。
+- 画面をブラウザで確かめるときは、api（上記）と `cd frontend && pnpm dev` を起動し、Playwright（Python）で操作する。手元のブラウザのキャッシュ（chromium-1208）に合う版は `uv run --no-project --with playwright==1.58.0 python <script>`。基盤管理者は `/login?method=password` でログインし、`storage_state` を保存して使い回す。SSOの社員はパスワードでログインできないので、`manage.py shell` でその社員のセッションを作り（`BACKEND_SESSION_KEY` は `utils.backends.PasswordBackend`）、Cookie `sessionid` に入れる。開発用のDBには、#35 で使った基盤管理者 `skill-admin@example.co.jp`（パスワード `check-pass-123`）、社員 `skill-member@example.co.jp`（部門「経理部」の編集の役割）、部門のSkill「請求書の照合」（版3まで）が残っている。
 - 変更前に、AGENTS.md と、触る範囲の規約を読む。作業の進め方（ブランチ、コミット、Pull Request、CI、マージ）は development.md に従う。
 - 作業の区切りでは、本書の §1・§3・§4 を更新する。Pull Requestで進めた作業は、マージの前にそのPull Requestの中で更新する（マージの後に `main` へ別にコミットしない）。
 - Codexのレビュー：手元で `codex review --base main -c 'developer_instructions="レビューの指摘とまとめは、すべて日本語で書いてください。"'` を実行し（数分かかる。出力の `[P1]`・`[P2]` の行と末尾を読む）、指摘をコードで確かめて直し（テストも足す）、コミットして、指摘がなくなるまで繰り返す。PRの前に回してよい。

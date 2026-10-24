@@ -172,6 +172,17 @@ class TestCreate:
         assert "output_schema" in res.json()
 
     @pytest.mark.django_db
+    def test_result_schema_must_fit_every_provider(self, api_client, app_user):
+        """業務結果のSchemaは submit_result の引数になる（harness.md §7.3）"""
+        api_client.force_login(app_user)
+        schema = {"type": "object", "properties": {"verdict": {"anyOf": [{"type": "string"}, {"type": "null"}]}}}
+        res = api_client.post(
+            SKILLS, {"scope": SkillScope.PERSONAL, "name": "x", "output_schema": schema}, format="json"
+        )
+        assert res.status_code == 400
+        assert "anyOf" in res.json()["output_schema"][0]
+
+    @pytest.mark.django_db
     def test_unknown_tool(self, api_client, app_user):
         api_client.force_login(app_user)
         res = api_client.post(SKILLS, {"scope": SkillScope.PERSONAL, "name": "x", "tools": ["rm_rf"]}, format="json")

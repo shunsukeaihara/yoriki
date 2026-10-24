@@ -5,6 +5,7 @@ from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from artifact.models import Artifact, ArtifactKind
+from harness.skills import SkillUnavailable, build_catalog, explicit_text, resolve_explicit
 from run.dispatch import enqueue_run
 from run.models import (
     ACTIVE_STATUSES,
@@ -17,6 +18,7 @@ from run.models import (
     RunStatus,
 )
 from runtime.models import RuntimeProfile
+from skill.models import Skill
 
 from .models import Conversation, ConversationMessage, InstructionKind, InstructionState, MessageRole, UserInstruction
 
@@ -34,13 +36,19 @@ class CannotStart(Exception):
 EARLIER_ATTACHMENTS_LIMIT = 50
 
 
-def user_message_data(message: ConversationMessage, text: str, *, first: bool = False) -> dict[str, object]:
+def user_message_data(
+    message: ConversationMessage, text: str, *, first: bool = False, skills: list[dict[str, object]] | None = None
+) -> dict[str, object]:
     """利用者の発言のRunEventの内容。添付は /workspace/input の場所とあわせて残す（harness/context.py が読む）。
 
     Runの最初の発言（first）には、同じ会話でそれまでに送った添付も添える。/workspace/input には会話の添付が
-    すべてあり、作業ファイルも前の依頼のCheckpointから引き継ぐので、前の依頼のファイルを使う依頼に答えられるように
+    すべてあり、作業ファイルも前の依頼のCheckpointから引き継ぐので、前の依頼のファイルを使う依頼に答えられるように。
+    `skills` は `/` で指定してRun開始時に解決したSkill（Manifestの内容）。本文も添え、モデルに `skill` を呼ばせない
     """
     data: dict[str, object] = {"text": text, "message": message.uid}
+    if skills:
+        data["skills"] = skills
+        data["skills_text"] = explicit_text(skills)
     if attachments := describe_attachments(message):
         data["attachments"] = attachments
     if first:
@@ -80,8 +88,12 @@ def post_message(
     mode: str,
     actor,
     attachments: list[Artifact] | None = None,
+    skills: list[Skill] | None = None,
 ):
-    """利用者のメッセージを保存し、新しいRun・追加指示・確認への回答・次の依頼のどれかとして受け付ける"""
+    """利用者のメッセージを保存し、新しいRun・追加指示・確認への回答・次の依頼のどれかとして受け付ける。
+
+    Skillを指定したメッセージは、Skillの版をRun開始時に決めるので、実行中なら次の依頼にする
+    """
     conversation = Conversation.objects.select_for_update().get(pk=conversation.pk)
     if client_message_id:
         sent = ConversationMessage.objects.filter(
@@ -105,6 +117,8 @@ def post_message(
             raise CannotStart(_("送信済みの添付が含まれています。添付し直してください。"))
         Artifact.attach(conversation, unsent)
         message.attachments.set(unsent)
+    if skills:
+        message.skills.set(skills)
     conversation.last_posted = timezone.now()
     fields = ["last_posted", "updated"]
     if not conversation.title:
@@ -122,7 +136,7 @@ def post_message(
     question = ClarificationRequest.objects.filter(
         run=run, status=ClarificationStatus.OPEN, kind=ClarificationKind.QUESTION
     ).first()
-    if mode == MessageMode.AUTO and question is not None and run.status == RunStatus.WAITING_USER:
+    if mode == MessageMode.AUTO and question is not None and run.status == RunStatus.WAITING_USER and not skills:
         # 確認待ちのときのメッセージは、その確認への自由記述の回答にする
         question.accept_answer(
             [{"selected": [], "text": ""} for _q in question.questions],
@@ -133,7 +147,7 @@ def post_message(
         return message
     kind = (
         InstructionKind.NEXT
-        if mode == MessageMode.NEXT or run.status == RunStatus.CANCELLING
+        if mode == MessageMode.NEXT or run.status == RunStatus.CANCELLING or skills
         else InstructionKind.CURRENT
     )
     UserInstruction.objects.create(
@@ -158,6 +172,15 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
         raise CannotStart(
             _("コマンドを動かす環境（Runtime Profile）が登録されていません。基盤管理者に問い合わせてください。")
         )
+    # `/` で指定したSkillは、その時点の公開中の版へ解決して固定する。指定がなければ、エージェントが選べるSkillの
+    # 一覧を固定する（Toolの一覧と `skill` の引数をRunの中で変えない。harness.md §7.5・§10.1）
+    try:
+        skills = resolve_explicit(
+            list(message.skills.select_related("current_version", "department")), conversation.owner, version
+        )
+    except SkillUnavailable as exc:
+        raise CannotStart(_("指定したSkillを使えません。%(reason)s") % {"reason": exc}) from exc
+    catalog = build_catalog(conversation.owner, version) if not skills and version.supports_tools else None
     if parent is None:
         # 同じ会話の前の依頼。作業ファイルはその最後のCheckpointから引き継ぐ（design.md §7.9）
         parent = Run.objects.filter(conversation=conversation).order_by("-created", "-pk").first()
@@ -175,6 +198,8 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
                 "effort": effort,
                 "runtime_version": runtime_version.pk,
                 "handles_sensitive_data": conversation.handles_sensitive_data,
+                "skills": skills,
+                "skill_catalog": catalog,
             },
             "appended": [],
         },
@@ -182,7 +207,8 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
     message.run = run
     message.save(update_fields=["run"])
     RunEvent.record(run, RunEventKind.STATUS, {"status": RunStatus.QUEUED}, actor=actor)
-    RunEvent.record(run, RunEventKind.USER_MESSAGE, user_message_data(message, message.body, first=True), actor=actor)
+    data = user_message_data(message, message.body, first=True, skills=skills)
+    RunEvent.record(run, RunEventKind.USER_MESSAGE, data, actor=actor)
     enqueue_run(run)
     return run
 

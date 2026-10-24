@@ -73,6 +73,8 @@ class ConversationMessage(models.Model):
     attachments = models.ManyToManyField(
         "artifact.Artifact", blank=True, related_name="messages", verbose_name=_("添付")
     )
+    # 利用者が入力欄の `/` で指定したSkill。このメッセージで始めるRunの開始時に公開中の版へ解決する（design.md §3.2）
+    skills = models.ManyToManyField("skill.Skill", blank=True, related_name="+", verbose_name=_("指定したSkill"))
     # 画面が送るID。再送されたメッセージを二重に受け付けない（design.md §5.5）
     client_message_id = models.CharField(_("クライアントのメッセージID"), max_length=64, blank=True)
 

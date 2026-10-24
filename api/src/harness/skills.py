@@ -1,0 +1,190 @@
+"""会話・タスクでSkillを使う（harness.md §10.1、design.md §3.2）。
+
+エージェントに見せるSkillの一覧と、入力欄の `/` で指定したSkillは、Run開始時に決めてManifestに固定する
+（Toolの一覧と `skill` の引数のenumをRunの中で変えないため）。エージェントが途中で読み込んだSkillは、その時点の
+公開中の版へ解決してManifestへ追記する。資料はSandboxの /workspace/master/skills/<Skill>/<key>/ に読取り専用で置く。
+"""
+
+import re
+from typing import Any
+
+from django.db.models import Case, IntegerField, Value, When
+from django.utils.translation import gettext as _
+
+from run.models import Run
+from skill.models import Skill, SkillScope, SkillVersion
+
+MASTER_DIR = "/workspace/master"
+# 一覧に使う文脈の割合と、説明を短くする段階（文字数。日本語は1文字を1 tokenとして数える）
+CATALOG_CONTEXT_RATIO = 0.02
+CATALOG_MIN_CHARS = 1000
+DESCRIPTION_LIMITS = (300, 120, 40)
+# 入力欄の `/` で1つのメッセージに指定できるSkillの数
+MAX_EXPLICIT_SKILLS = 3
+
+
+class SkillUnavailable(Exception):
+    pass
+
+
+def skill_dir(skill_uid: str) -> str:
+    return f"{MASTER_DIR}/skills/{skill_uid}"
+
+
+def asset_path(skill_uid: str, key: str, name: str) -> str:
+    """資料のSandboxの中のパス。keyとファイル名はサーバーが検証した値なので、パスの外へは出ない（design.md §7.1）"""
+    return f"{skill_dir(skill_uid)}/{key}/{name}"
+
+
+def _scope_label(skill: Skill) -> str:
+    if skill.scope == SkillScope.DEPARTMENT and skill.department is not None:
+        return f"{skill.get_scope_display()} {skill.department.name}"
+    return str(skill.get_scope_display())
+
+
+def _one_line(text: str, limit: int) -> str:
+    text = re.sub(r"\s+", " ", text).strip()
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def build_catalog(user, model_version) -> dict[str, Any]:
+    """エージェントに見せる一覧：利用者が使え、使うモデルが必要な能力を持つSkillの名前と説明（harness.md §10.1）。
+
+    一覧の量は文脈の2%までにし、超えたら説明を短くして、それでも入らない分は数だけを示す。同じ名前のSkillが
+    範囲（個人・部門・全社）の違いで重なれば、範囲を添えて分ける（`skill` の引数のenumにするため）
+    """
+    skills = (
+        Skill.objects.usable_by(user)
+        .select_related("current_version", "department")
+        .annotate(
+            # 本人のものを先に（同じ名前なら、より身近な範囲のものを先に見せる）
+            order=Case(
+                When(scope=SkillScope.PERSONAL, then=Value(0)),
+                When(scope=SkillScope.DEPARTMENT, then=Value(1)),
+                default=Value(2),
+                output_field=IntegerField(),
+            )
+        )
+        .order_by("order", "name", "pk")
+    )
+    usable = [s for s in skills if s.current_version and not s.current_version.unsupported_by(model_version)]
+    counts: dict[str, int] = {}
+    for skill in usable:
+        counts[skill.name] = counts.get(skill.name, 0) + 1
+    entries = [
+        {
+            "skill": skill.uid,
+            "name": skill.name if counts[skill.name] == 1 else f"{skill.name} ({_scope_label(skill)})",
+            "description": skill.current_version.description if skill.current_version else "",
+        }
+        for skill in usable
+    ]
+    budget = max(CATALOG_MIN_CHARS, int(model_version.max_input_tokens * CATALOG_CONTEXT_RATIO))
+    for limit in DESCRIPTION_LIMITS:
+        shortened = [{**e, "description": _one_line(e["description"], limit)} for e in entries]
+        if sum(len(e["name"]) + len(e["description"]) + 30 for e in shortened) <= budget:
+            return {"skills": shortened, "omitted": 0}
+    listed: list[dict[str, Any]] = []
+    used = 0
+    for entry in shortened:
+        used += len(entry["name"]) + len(entry["description"]) + 30
+        if used > budget:
+            break
+        listed.append(entry)
+    return {"skills": listed, "omitted": len(entries) - len(listed)}
+
+
+def catalog_text(catalog: dict[str, Any]) -> str:
+    """`<runtime_context>` の中の `<skills>`"""
+    lines = ["  <skills>"]
+    for entry in catalog["skills"]:
+        lines.append(f'    <skill name="{_escape(entry["name"])}">{_escape(entry["description"])}</skill>')
+    if catalog.get("omitted"):
+        lines.append(f"    ({catalog['omitted']} more skills are not listed)")
+    lines.append("  </skills>")
+    return "\n".join(lines)
+
+
+def resolve_explicit(skills: list[Skill], user, model_version) -> list[dict[str, Any]]:
+    """入力欄の `/` で指定したSkillを公開中の版へ解決する（design.md §3.2）。使えなければ SkillUnavailable。
+
+    返すのはManifestに固定する内容と、最初の発言に入れる本文。業務結果のSchema（`submit_result` の引数）は
+    1つのRunで1つだけにする
+    """
+    if len(skills) > MAX_EXPLICIT_SKILLS:
+        raise SkillUnavailable(_("指定できるSkillは%(limit)s個までです") % {"limit": MAX_EXPLICIT_SKILLS})
+    resolved = []
+    for skill in skills:
+        if reason := skill.unusable_reason(user, model_version):
+            raise SkillUnavailable(_("%(name)s：%(reason)s") % {"name": skill.name, "reason": reason})
+        assert skill.current_version_id is not None  # unusable_reason() が確かめた
+        version = SkillVersion.objects.prefetch_related("assets__resource_version").get(pk=skill.current_version_id)
+        resolved.append((skill, version))
+    if sum(1 for _skill, version in resolved if version.output_schema) > 1:
+        raise SkillUnavailable(_("業務結果の形を決めているSkillは、1つの依頼に1つだけ指定できます"))
+    return [manifest_entry(skill, version) for skill, version in resolved]
+
+
+def manifest_entry(skill: Skill, version: SkillVersion, name: str = "") -> dict[str, Any]:
+    return {"skill": skill.uid, "name": name or skill.name, "version": version.pk, "number": version.number}
+
+
+def loaded_entries(run: Run) -> list[dict[str, Any]]:
+    """Runが使うSkill（`/` で指定して固定したものと、エージェントが読み込んで追記したもの）。同じSkillは最後のもの"""
+    manifest = run.manifest or {}
+    entries = list((manifest.get("fixed") or {}).get("skills", []))
+    entries += [e for e in manifest.get("appended", []) if e.get("kind") == "skill"]
+    latest: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        latest[entry["skill"]] = entry
+    return list(latest.values())
+
+
+def explicit_versions(run: Run) -> list[SkillVersion]:
+    """`/` で指定して固定したSkillの版（Runの中では変わらない）"""
+    pks = [e["version"] for e in ((run.manifest or {}).get("fixed") or {}).get("skills", [])]
+    versions = {v.pk: v for v in SkillVersion.objects.filter(pk__in=pks).select_related("skill")}
+    return [versions[pk] for pk in pks if pk in versions]
+
+
+def render(skill: Skill, version: SkillVersion, *, name: str = "") -> str:
+    """Skillの本文と資料の場所（harness.md §10.1）。`skill` の結果と、`/` で指定したときの最初の発言に入れる"""
+    lines = [f'<skill name="{_escape(name or skill.name)}" version="{version.number}">']
+    lines.append(f"<instructions>\n{version.instructions.strip()}\n</instructions>")
+    assets = sorted(version.assets.all(), key=lambda a: a.key)
+    if assets:
+        lines.append("<assets>")
+        for asset in assets:
+            description = f" — {_one_line(asset.description, 200)}" if asset.description else ""
+            role = asset.get_role_display()
+            path = asset_path(skill.uid, asset.key, asset.resource_version.name)
+            lines.append(f"  {path} ({role}, version {asset.resource_version.number}){description}")
+        lines.append("</assets>")
+    if version.tools:
+        lines.append(f"<tools>{', '.join(version.tools)}</tools>")
+    else:
+        lines.append("<tools>none (this skill does not run commands)</tools>")
+    if version.output_schema:
+        import json  # noqa: PLC0415  業務結果のSchemaがあるときだけ使う
+
+        schema = json.dumps(version.output_schema, ensure_ascii=False)
+        lines.append(f"<output_schema>\n{schema}\n</output_schema>")
+    lines.append("</skill>")
+    return "\n".join(lines)
+
+
+def explicit_text(entries: list[dict[str, Any]]) -> str:
+    """`/` で指定したSkillの本文。最初の発言に添える（モデルに `skill` を呼ばせない）"""
+    versions = {
+        v.pk: v
+        for v in SkillVersion.objects.filter(pk__in=[e["version"] for e in entries])
+        .select_related("skill")
+        .prefetch_related("assets__resource_version")
+    }
+    blocks = [render(versions[e["version"]].skill, versions[e["version"]]) for e in entries]
+    head = "The user chose these skills for this request. Follow them:"
+    return head + "\n" + "\n\n".join(blocks)
+
+
+def _escape(value: str) -> str:
+    return value.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")

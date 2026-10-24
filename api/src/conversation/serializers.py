@@ -8,10 +8,12 @@ from rest_framework import serializers
 
 from artifact.models import Artifact, ArtifactKind
 from artifact.serializers import ArtifactSerializer
+from harness.skills import MAX_EXPLICIT_SKILLS
 from llm.models import ModelProfile
 from llm.serializers import AppModelProfileSerializer
 from run.models import ACTIVE_STATUSES, Run
 from run.serializers import RunSerializer
+from skill.models import Skill
 from utils.fields import NormalizedTextField
 
 from .dispatch import CannotStart, MessageMode, post_message
@@ -115,6 +117,15 @@ class InstructionInfoSerializer(serializers.Serializer):
     state_display = serializers.CharField(source="get_state_display", read_only=True)
 
 
+class MessageSkillSerializer(serializers.ModelSerializer):
+    id = serializers.CharField(source="uid", read_only=True)
+
+    class Meta:
+        model = Skill
+        fields = ["id", "name"]
+        read_only_fields = fields
+
+
 class MessageSerializer(serializers.ModelSerializer):
     """会話のメッセージ。投稿すると、新しい依頼・今の作業への追加指示・確認への回答・次の依頼のどれかになる"""
 
@@ -136,6 +147,14 @@ class MessageSerializer(serializers.ModelSerializer):
         help_text=_("送る添付（この会話にアップロードして、まだ送っていないもの）"),
     )
     attachments_info = ArtifactSerializer(source="attachments", many=True, read_only=True)
+    skills: "serializers.SlugRelatedField[Skill]" = serializers.SlugRelatedField(
+        slug_field="uid",
+        many=True,
+        required=False,
+        queryset=Skill.objects.none(),
+        help_text=_("入力欄の `/` で指定したSkill。実行中なら次の依頼になる（Skillの版は依頼を始めるときに決める）"),
+    )
+    skills_info = MessageSkillSerializer(source="skills", many=True, read_only=True)
     client_message_id = serializers.CharField(max_length=64, required=False, allow_blank=True, write_only=True)
     mode = serializers.ChoiceField(
         choices=[(MessageMode.AUTO, _("自動")), (MessageMode.NEXT, _("次の依頼"))],
@@ -155,6 +174,8 @@ class MessageSerializer(serializers.ModelSerializer):
             "body",
             "attachments",
             "attachments_info",
+            "skills",
+            "skills_info",
             "client_message_id",
             "mode",
             "instruction",
@@ -179,6 +200,11 @@ class MessageSerializer(serializers.ModelSerializer):
             relation.queryset = Artifact.objects.owned_by(request.user).filter(
                 conversation=view.conversation, kind=ArtifactKind.ATTACHMENT
             )
+        skills = fields["skills"]
+        if request is not None and isinstance(skills, serializers.ManyRelatedField):
+            # 指定できるのは、利用者が使えるSkillだけ（使えるかはRun開始時にもう一度確かめる）
+            skill_relation: Any = skills.child_relation
+            skill_relation.queryset = Skill.objects.usable_by(request.user)
         return fields
 
     def to_representation(self, instance):
@@ -193,8 +219,14 @@ class MessageSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(_("添付は%(limit)s個までです") % {"limit": limit})
         return list(dict.fromkeys(value))
 
+    def validate_skills(self, value: list[Skill]) -> list[Skill]:
+        value = list(dict.fromkeys(value))
+        if len(value) > MAX_EXPLICIT_SKILLS:
+            raise serializers.ValidationError(_("Skillは%(limit)s個まで指定できます") % {"limit": MAX_EXPLICIT_SKILLS})
+        return value
+
     def validate(self, attrs):
-        if not attrs.get("body", "").strip() and not attrs.get("attachments"):
+        if not attrs.get("body", "").strip() and not attrs.get("attachments") and not attrs.get("skills"):
             raise serializers.ValidationError({"body": _("本文を入力してください")})
         return attrs
 
@@ -207,6 +239,7 @@ class MessageSerializer(serializers.ModelSerializer):
                 mode=validated_data["mode"],
                 actor=validated_data["sender"],
                 attachments=validated_data.get("attachments", []),
+                skills=validated_data.get("skills", []),
             )
         except CannotStart as exc:
             raise serializers.ValidationError({"non_field_errors": [str(exc)]}) from exc

@@ -42,6 +42,8 @@ class ToolContext:
     file_version: Callable[[str], str | None] = _no_version
     # 取消・追加指示が届いた。長く待つToolは待つのをやめる
     interrupted: Callable[[], bool] = _not_interrupted
+    # このRunに出しているToolの名前（読み込むSkillが要するToolがあるかを確かめる）
+    exposed: frozenset[str] = frozenset()
     # 出力を退避したSandboxの中のファイル。Runnerが結果のmetaに記録し、障害で消えたときに知らせる
     spilled: list[str] = field(default_factory=list)
 
@@ -106,6 +108,28 @@ class Tool:
         lines.append(f"Arguments provided: {_short_json(arguments)}")
         lines.append("Fix the arguments and call the tool again.")
         return "\n".join(lines)
+
+
+# 全プロバイダで通らない書き方（harness.md §7.3）
+UNSUPPORTED_SCHEMA_KEYS = ("$ref", "$defs", "definitions", "oneOf", "anyOf", "allOf", "not", "if", "then", "else")
+
+
+def schema_problem(schema: Any, *, root: bool = True) -> str:
+    """引数のSchemaが全プロバイダで通る範囲か（harness.md §7.3）。範囲の外なら理由、範囲の中なら空文字"""
+    if not isinstance(schema, dict):
+        return "a schema must be an object"
+    checks = [
+        (root and schema.get("type") != "object", 'the root must be {"type": "object"}'),
+        ("enum" in schema and "type" not in schema, "enum needs type"),
+        (isinstance(schema.get("type"), list), "type must be a single type"),
+        (isinstance(schema.get("items"), list), "tuple items are not supported"),
+        *((key in schema, f"{key} is not supported") for key in UNSUPPORTED_SCHEMA_KEYS),
+    ]
+    if problem := next((text for failed, text in checks if failed), ""):
+        return problem
+    children = list((schema.get("properties") or {}).values())
+    children += [schema[key] for key in ("items", "additionalProperties") if isinstance(schema.get(key), dict)]
+    return next((p for child in children if (p := schema_problem(child, root=False))), "")
 
 
 def _short_json(value: Any) -> str:

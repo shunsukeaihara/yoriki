@@ -31,6 +31,7 @@ from artifact.storage import StorageBackend, StorageError, StoredObject, get_sto
 from run.models import Checkpoint, ExecutionAttempt, Run
 from runtime.launcher import (
     ATTEMPT_LABEL,
+    MASTER_DIR,
     RUN_LABEL,
     WORK_DIR,
     Exec,
@@ -39,6 +40,9 @@ from runtime.launcher import (
     SandboxSpec,
     SandboxUnavailable,
 )
+from skill.models import Skill, SkillVersion
+
+from .skills import asset_path, loaded_entries
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -191,8 +195,9 @@ class SandboxSession:
         self.dir = Path(settings.YORIKI_WORKSPACES_DIR) / "attempts" / f"{run.uid}-{attempt.number}"
         # 戻したCheckpoint。このRunのものなら、その時点までの読んだファイルの版の記録を使える（harness.md §11.1）
         self.restored: Checkpoint | None = None
-        # /workspace/input に置いた添付（ArtifactのID）
+        # /workspace/input に置いた添付（ArtifactのID）と、/workspace/master に置いたSkillの版（SkillVersionのID）
         self.inputs: set[int] = set()
+        self.skill_versions: set[int] = set()
         # 最初のSandboxのToolの結果に添える知らせ
         self.notice = ""
         # DBに触ってよいスレッド（Runner）
@@ -214,11 +219,13 @@ class SandboxSession:
         remove_stale_sandboxes(launcher)
         platform = launcher.platform()
         self.sync_inputs()
+        self.sync_skill_assets()
         spec = SandboxSpec.for_version(
             version,
             platform,
             labels={RUN_LABEL: self.run.uid, ATTEMPT_LABEL: str(self.attempt.pk)},
             input_dir=str(self.input_dir),
+            master_dir=str(self.master_dir),
         )
         with self.run.fenced(self.attempt):
             ExecutionAttempt.objects.filter(pk=self.attempt.pk).update(
@@ -233,6 +240,53 @@ class SandboxSession:
     @property
     def input_dir(self) -> Path:
         return self.dir / "input"
+
+    @property
+    def master_dir(self) -> Path:
+        return self.dir / "master"
+
+    def sync_skill_assets(self) -> None:
+        """Manifestに固定・追記した全Skillの資料を、/workspace/master にmountするWorkerのディレクトリに置く
+        （Sandboxを起動する前に呼ぶ。design.md §3.8）"""
+        self.master_dir.mkdir(parents=True, exist_ok=True)
+        self.master_dir.chmod(0o755)
+        run = Run.objects.only("manifest").get(pk=self.run.pk)
+        entries = [e for e in loaded_entries(run) if e["version"] not in self.skill_versions]
+        if not entries:
+            return
+        skills = {s.uid: s for s in Skill.objects.filter(uid__in=[e["skill"] for e in entries])}
+        versions = SkillVersion.objects.prefetch_related("assets__resource_version__blob").in_bulk(
+            [e["version"] for e in entries]
+        )
+        for entry in entries:
+            self.place_skill_assets(skills[entry["skill"]], versions[entry["version"]])
+
+    def place_skill_assets(self, skill, version) -> None:
+        """Skillの版の資料を /workspace/master/skills/<Skill>/<key>/ に置く。bind mountなので、動いているSandboxにも
+        そのまま見える（harness.md §10.1）。置けなければ SandboxUnavailable"""
+        if version.pk in self.skill_versions:
+            return
+        root = self.master_dir / "skills" / skill.uid
+        if root.exists():
+            # 同じSkillの別の版（版の切り替え）。前の版の資料を残さない
+            shutil.rmtree(root)
+        for asset in version.assets.all():
+            resource = asset.resource_version
+            path = self.master_dir / posixpath.relpath(asset_path(skill.uid, asset.key, resource.name), MASTER_DIR)
+            if self.master_dir not in path.parents:
+                logger.warning("run %s: skipping skill asset %s with a bad name", self.run.uid, asset.pk)
+                continue
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                for parent in path.relative_to(self.master_dir).parents:
+                    (self.master_dir / parent).chmod(0o755)
+                with resource.blob.open() as src, tempfile.NamedTemporaryFile(dir=self.dir, delete=False) as tmp:
+                    shutil.copyfileobj(src, tmp, 1024 * 1024)
+                os.chmod(tmp.name, 0o644)
+                os.replace(tmp.name, path)
+            except (OSError, StorageError) as exc:
+                raise SandboxUnavailable(f"cannot prepare the skill file {resource.uid}: {exc}") from exc
+        self.skill_versions.add(version.pk)
 
     def sync_inputs(self) -> None:
         """会話の添付（取り込んだ依頼のもの）を、Workerのディレクトリ（Sandboxの /workspace/input に読取り専用で

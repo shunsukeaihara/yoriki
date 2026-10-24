@@ -19,6 +19,8 @@ from llm.providers.base import ImagePart, Message, Part, TextPart, ToolCall
 from run.models import Run, RunEvent, RunEventKind
 from runtime.launcher import WORK_DIR
 
+from .skills import catalog_text
+
 logger = logging.getLogger(__name__)
 
 ADDITIONAL_INSTRUCTION_PREFIX = "[Additional instruction during the work]"
@@ -183,6 +185,8 @@ def _build(key: dict[str, str], events: Iterable[RunEvent], items: list[Item]) -
         match event.kind:
             case RunEventKind.USER_MESSAGE:
                 text = data["text"]
+                if data.get("skills_text"):
+                    text = f"{text}\n\n{data['skills_text']}".strip()
                 if data.get("attachments"):
                     text = f"{text}\n\n{attachments_text(data['attachments'])}".strip()
                 if data.get("earlier_attachments"):
@@ -264,8 +268,12 @@ def runtime_context(run: Run, *, user_name: str) -> str:
             else '  <sandbox available="false" />'
         ),
         f"  <confidential>{'true' if run.handles_sensitive_data else 'false'}</confidential>",
-        "</runtime_context>",
     ]
+    # エージェントが選べるSkillの一覧（Run開始時に固定したもの。`/` で指定したRunにはない）
+    catalog = ((run.manifest or {}).get("fixed") or {}).get("skill_catalog")
+    if catalog and catalog.get("skills"):
+        lines.append(catalog_text(catalog))
+    lines.append("</runtime_context>")
     return "\n".join(lines)
 
 

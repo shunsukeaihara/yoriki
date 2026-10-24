@@ -80,8 +80,12 @@ from .context import runtime_context as build_runtime_context
 from .prompts import system_prompt
 from .recovery import request_model_switch
 from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, SandboxSession
+from .skills import explicit_versions
 from .tools import ALL_TOOLS, SANDBOX_TOOLS, WORKSPACE_WRITING_TOOLS
 from .tools.base import Effect, Tool, ToolContext, ToolResult
+from .tools.skill_tool import make_skill_tool
+from .tools.submit_result import NAME as SUBMIT_RESULT
+from .tools.submit_result import make_submit_result_tool
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +113,10 @@ SAME_ERROR_NOTICE = (
 RUNNING_JOBS_NOTICE = (
     "Background jobs are still running: {jobs}. Before you finish, wait for them (job_output with wait) or stop "
     "them (job_kill). Jobs are stopped when the work ends."
+)
+RESULT_REQUIRED_NOTICE = (
+    "This work must end with submit_result. Check the result, call submit_result with it, and then write your final "
+    "reply."
 )
 STEP_LIMIT_NOTICE = (
     "The maximum number of steps for this request has been reached. Tools are now disabled. Reply with text only: "
@@ -153,6 +161,8 @@ class Runner:
         self.start_sequence = 0
         self.warned_running_jobs = False
         self.tools: tuple[Tool, ...] = ()
+        # Skillで決まるTool（Run開始時に固定したManifestから作る。Runの中では変わらない）
+        self.skill_tools: tuple[Tool, ...] | None = None
         self.nudges = 0
         self.compacted_for_overflow = False
         self.repeats: dict[str, int] = {}
@@ -425,14 +435,36 @@ class Runner:
         return applied
 
     def _exposed_tools(self) -> tuple[Tool, ...]:
-        """Runに出すToolの一覧（harness.md §7.5）。Tool呼出しに対応しないモデルには出さない"""
+        """Runに出すToolの一覧（harness.md §7.5）。Tool呼出しに対応しないモデルには出さない。
+
+        `/` でSkillを指定したRunでは、そのSkillの使ってよいToolに限り、業務結果のSchemaがあれば submit_result を
+        加える。指定がなければ、利用者が使えるToolの全体と、Skillを読み込む `skill` を出す
+        """
         if not self.run_obj.model_version.supports_tools:
             return ()
-        tools = ALL_TOOLS
+        tools = self._skill_tools()
         if self.run_obj.runtime_version_id is None:
             tools = tuple(t for t in tools if t not in SANDBOX_TOOLS)
         if not self.run_obj.is_interactive:
             tools = tuple(t for t in tools if t.name != "ask_user")
+        return tools
+
+    def _skill_tools(self) -> tuple[Tool, ...]:
+        if self.skill_tools is not None:
+            return self.skill_tools
+        explicit = explicit_versions(self.run_obj)
+        if explicit:
+            allowed = {name for version in explicit for name in version.tools}
+            tools = tuple(t for t in ALL_TOOLS if t.name in allowed)
+            schema = next((v.output_schema for v in explicit if v.output_schema), None)
+            if schema:
+                tools += (make_submit_result_tool(schema),)
+        else:
+            tools = ALL_TOOLS
+            catalog = ((self.run_obj.manifest or {}).get("fixed") or {}).get("skill_catalog") or {}
+            if names := [e["name"] for e in catalog.get("skills", [])]:
+                tools += (make_skill_tool(names),)
+        self.skill_tools = tools
         return tools
 
     @staticmethod
@@ -567,6 +599,12 @@ class Runner:
             jobs = ", ".join(f"{j.job_id} ({j.description})" for j in running)
             self._record(RunEventKind.CONTEXT, {"text": RUNNING_JOBS_NOTICE.format(jobs=jobs)})
             return True
+        if any(t.name == SUBMIT_RESULT for t in self.tools) and self.run_obj.result is None:
+            # 業務結果のSchemaがあるのに submit_result を呼ばなかった。1回だけ促す（harness.md §10.5）
+            if not any(e.data.get("result_required") for e in self._events() if e.kind == RunEventKind.CONTEXT):
+                self._record(RunEventKind.CONTEXT, {"text": RESULT_REQUIRED_NOTICE, "result_required": True})
+                return True
+            return self._finish_with_reply(response.text, RunStatus.FAILED, RunEndReason.NO_RESULT)
         # 最後の応答の間に追加指示が届いていれば、終えずに取り込んで続ける（harness.md §10.4）
         return self._finish_with_reply(response.text, RunStatus.COMPLETED, RunEndReason.COMPLETED)
 
@@ -829,6 +867,7 @@ class Runner:
             session=self.session,
             file_version=self._file_version,
             interrupted=self._interrupted,
+            exposed=frozenset(t.name for t in self.tools),
         )
         try:
             result = tool.execute(call.arguments, context)

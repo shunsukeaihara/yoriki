@@ -11,6 +11,7 @@ from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 
 from harness.tools import ALL_TOOLS
+from harness.tools.base import schema_problem
 from resources.models import ResourceVersion
 from user.models import Department
 from user.serializers import MinimumUserSerializer
@@ -112,7 +113,13 @@ class SkillContentSerializer(serializers.ModelSerializer):
         return _schema_or_none(value)
 
     def validate_output_schema(self, value: Any) -> Any:
-        return _schema_or_none(value)
+        value = _schema_or_none(value)
+        # 業務結果のSchemaは submit_result の引数になるので、全プロバイダで通る範囲に限る（harness.md §7.3）
+        if value is not None and (problem := schema_problem(value)):
+            raise serializers.ValidationError(
+                _("業務結果のSchemaに使えない書き方があります：%(problem)s") % {"problem": problem}
+            )
+        return value
 
 
 class SkillVersionSerializer(ReadOnlyModelSerializer):

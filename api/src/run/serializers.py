@@ -29,6 +29,15 @@ class TodoSerializer(serializers.Serializer):
     )
 
 
+class RunSkillSerializer(serializers.Serializer):
+    """Runが使うSkillと版（Manifestに固定・追記したもの）"""
+
+    skill = serializers.CharField(read_only=True, help_text=_("SkillのID"))
+    name = serializers.CharField(read_only=True)
+    number = serializers.IntegerField(read_only=True, help_text=_("版"))
+    chosen = serializers.BooleanField(read_only=True, help_text=_("利用者が `/` で指定した"))
+
+
 class RunSerializer(serializers.ModelSerializer):
     id = serializers.CharField(source="uid", read_only=True)
     conversation: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(slug_field="uid", read_only=True)
@@ -38,6 +47,8 @@ class RunSerializer(serializers.ModelSerializer):
     end_reason_display = serializers.CharField(source="get_end_reason_display", read_only=True, allow_null=True)
     model_profile_name = serializers.CharField(source="model_version.profile.name", read_only=True)
     todos = serializers.SerializerMethodField(help_text=_("作業の計画（todo_write の最新の内容）"))
+    skills = serializers.SerializerMethodField(help_text=_("使っているSkillと版"))
+    result = serializers.JSONField(read_only=True, allow_null=True, help_text=_("業務結果（submit_result の内容）"))
 
     class Meta:
         model = Run
@@ -53,6 +64,8 @@ class RunSerializer(serializers.ModelSerializer):
             "effort",
             "step_count",
             "todos",
+            "skills",
+            "result",
             "created",
             "updated",
             "finished",
@@ -69,6 +82,13 @@ class RunSerializer(serializers.ModelSerializer):
             .first()
         )
         return (event.data.get("value") or {}).get("todos", []) if event else []
+
+    @extend_schema_field(RunSkillSerializer(many=True))
+    def get_skills(self, obj: Run) -> list[dict[str, Any]]:
+        manifest = obj.manifest or {}
+        chosen = [{**e, "chosen": True} for e in (manifest.get("fixed") or {}).get("skills") or []]
+        loaded = [{**e, "chosen": False} for e in manifest.get("appended", []) if e.get("kind") == "skill"]
+        return list(RunSkillSerializer([*chosen, *loaded], many=True).data)
 
 
 class RunCancelSerializer(serializers.Serializer):

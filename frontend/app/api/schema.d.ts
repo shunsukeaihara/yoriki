@@ -1562,8 +1562,6 @@ export interface components {
             /** @description 送る添付（この会話にアップロードして、まだ送っていないもの） */
             attachments?: string[];
             readonly attachments_info: components["schemas"]["Artifact"][];
-            /** @description 入力欄の `/` で指定したSkill。実行中なら次の依頼になる（Skillの版は依頼を始めるときに決める） */
-            skills?: string[];
             readonly skills_info: components["schemas"]["MessageSkill"][];
             readonly instruction: components["schemas"]["InstructionInfo"] | null;
             /** Format: date-time */
@@ -1594,9 +1592,9 @@ export interface components {
          * @enum {integer}
          */
         MessageRoleEnum: 1 | 2 | 3;
+        /** @description メッセージで指定したSkill（送ったときの名前） */
         MessageSkill: {
             readonly id: string;
-            /** 名前 */
             readonly name: string;
         };
         MinimumDepartment: {
@@ -2321,10 +2319,11 @@ export interface components {
          *     * `16` - 再試行の上限
          *     * `17` - 回答期限切れ
          *     * `18` - 実行環境を使えない
+         *     * `19` - Skillを使えない
          *     * `99` - 内部のエラー
          * @enum {integer}
          */
-        RunEndReasonEnum: 1 | 2 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 99;
+        RunEndReasonEnum: 1 | 2 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 99;
         /**
          * @description * `1` - 状態の遷移
          *     * `10` - 利用者の発言

@@ -66,7 +66,6 @@ class AppConversationMessageViewSet(MyConversationMixin, ListModelMixin, CreateM
     permission_classes = [AppUser]
     queryset = ConversationMessage.objects.select_related("run", "sender", "instruction").prefetch_related(
         Prefetch("attachments", queryset=Artifact.objects.select_related("blob", "run").order_by("pk")),
-        "skills",
     )
     serializer_class = MessageSerializer
     ordering = "-pk"

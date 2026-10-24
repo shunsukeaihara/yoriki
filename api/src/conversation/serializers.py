@@ -127,13 +127,11 @@ class InstructionInfoSerializer(serializers.Serializer):
     state_display = serializers.CharField(source="get_state_display", read_only=True)
 
 
-class MessageSkillSerializer(serializers.ModelSerializer):
-    id = serializers.CharField(source="uid", read_only=True)
+class MessageSkillSerializer(serializers.Serializer):
+    """メッセージで指定したSkill（送ったときの名前）"""
 
-    class Meta:
-        model = Skill
-        fields = ["id", "name"]
-        read_only_fields = fields
+    id = serializers.CharField(read_only=True)
+    name = serializers.CharField(read_only=True)
 
 
 class MessageSerializer(serializers.ModelSerializer):
@@ -162,6 +160,7 @@ class MessageSerializer(serializers.ModelSerializer):
         many=True,
         required=False,
         queryset=Skill.objects.none(),
+        write_only=True,
         help_text=_("入力欄の `/` で指定したSkill。実行中なら次の依頼になる（Skillの版は依頼を始めるときに決める）"),
     )
     skills_info = MessageSkillSerializer(source="skills", many=True, read_only=True)

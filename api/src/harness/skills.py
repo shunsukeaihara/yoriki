@@ -70,14 +70,17 @@ def build_catalog(user, model_version) -> dict[str, Any]:
     counts: dict[str, int] = {}
     for skill in usable:
         counts[skill.name] = counts.get(skill.name, 0) + 1
-    entries = [
-        {
-            "skill": skill.uid,
-            "name": skill.name if counts[skill.name] == 1 else f"{skill.name} ({_scope_label(skill)})",
-            "description": skill.current_version.description if skill.current_version else "",
-        }
-        for skill in usable
-    ]
+    entries = []
+    taken: set[str] = set()
+    for skill in usable:
+        name = skill.name if counts[skill.name] == 1 else f"{skill.name} ({_scope_label(skill)})"
+        # 範囲を添えても別のSkillの名前と重なれば（「X (個人)」という名前のSkill等）、番号を足す
+        base, number = name, 2
+        while name in taken:
+            name, number = f"{base} ({number})", number + 1
+        taken.add(name)
+        description = skill.current_version.description if skill.current_version else ""
+        entries.append({"skill": skill.uid, "name": name, "description": description})
     budget = int(model_version.max_input_tokens * CATALOG_CONTEXT_RATIO)
     for limit in DESCRIPTION_LIMITS:
         shortened = [{**e, "description": _one_line(e["description"], limit)} for e in entries]

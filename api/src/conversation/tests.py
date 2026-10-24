@@ -179,6 +179,9 @@ class TestMessage:
         assert res.data["skills_info"] == [{"id": version.skill.uid, "name": "請求書の照合"}]
         run = Run.objects.get(conversation=conversation)
         assert [s["version"] for s in run.manifest["fixed"]["skills"]] == [version.pk]
+        # 履歴には送ったときの名前を出す（後でSkillの名前を変えても変わらない）
+        version.skill.name = "新しい名前"
+        version.skill.save()
         listed = api_client.get(self.url(conversation))
         assert listed.data["results"][0]["skills_info"] == res.data["skills_info"]
 

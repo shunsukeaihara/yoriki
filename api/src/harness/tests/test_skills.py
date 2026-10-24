@@ -163,8 +163,11 @@ def test_catalog_separates_same_names_and_shortens_to_the_budget(app_user):
     SkillVersionFactory.create(skill=company)
     names = [e["name"] for e in build_catalog(app_user, version)["skills"]]
     assert names == ["名寄せ (個人)", "名寄せ (全社)"]
+    publish(app_user, name="名寄せ (個人)")  # 範囲を添えた名前と同じ名前のSkill
+    names = [e["name"] for e in build_catalog(app_user, version)["skills"]]
+    assert sorted(names) == ["名寄せ (個人)", "名寄せ (個人) (2)", "名寄せ (全社)"]
 
-    for n in range(40):
+    for n in range(39):
         publish(app_user, name=f"Skill{n:02d}", description="説明" * 200)
     version.max_input_tokens = 50_000  # 一覧は1000文字まで
     catalog = build_catalog(app_user, version)
@@ -219,7 +222,7 @@ def test_message_with_a_skill_during_a_run_becomes_the_next_request(conversation
     )
     instruction = UserInstruction.objects.get(message__body="次はこれ")
     assert instruction.kind == InstructionKind.NEXT
-    assert list(instruction.message.skills.all()) == [skill]
+    assert instruction.message.skills == [{"id": skill.uid, "name": skill.name}]
 
 
 @pytest.mark.django_db

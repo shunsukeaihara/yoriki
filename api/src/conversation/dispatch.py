@@ -102,7 +102,12 @@ def post_message(
         if sent is not None:
             return sent  # 再送。二重に受け付けない
     message = ConversationMessage.objects.create(
-        conversation=conversation, sender=actor, role=MessageRole.USER, body=body, client_message_id=client_message_id
+        conversation=conversation,
+        sender=actor,
+        role=MessageRole.USER,
+        body=body,
+        client_message_id=client_message_id,
+        skills=[{"id": s.uid, "name": s.name} for s in skills or []],
     )
     if attachments:
         # 検証の後に、別のメッセージで送られていないかを会話の行ロックの中で確かめる
@@ -117,8 +122,6 @@ def post_message(
             raise CannotStart(_("送信済みの添付が含まれています。添付し直してください。"))
         Artifact.attach(conversation, unsent)
         message.attachments.set(unsent)
-    if skills:
-        message.skills.set(skills)
     conversation.last_posted = timezone.now()
     fields = ["last_posted", "updated"]
     if not conversation.title:
@@ -156,6 +159,17 @@ def post_message(
     return message
 
 
+def chosen_skills(message: ConversationMessage) -> list[Skill]:
+    """メッセージで指定したSkill（指定の順）。削除されたものがあれば SkillUnavailable"""
+    ids = [s["id"] for s in message.skills]
+    skills = Skill.objects.filter(uid__in=ids, deleted=False).select_related("current_version", "department")
+    found = {s.uid: s for s in skills}
+    missing = [s["name"] for s in message.skills if s["id"] not in found]
+    if missing:
+        raise SkillUnavailable(_("%(names)s：削除されました") % {"names": "、".join(missing)})
+    return [found[uid] for uid in ids]
+
+
 def start_run(conversation: Conversation, message: ConversationMessage, actor, *, parent: Run | None = None) -> Run:
     """呼び出し側のtransactionの中で呼ぶ。モデル設定の版とeffortを固定し、最初の発言を記録して実行を依頼する"""
     profile = conversation.model_profile
@@ -175,9 +189,7 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
     # `/` で指定したSkillは、その時点の公開中の版へ解決して固定する。指定がなければ、エージェントが選べるSkillの
     # 一覧を固定する（Toolの一覧と `skill` の引数をRunの中で変えない。harness.md §7.5・§10.1）
     try:
-        skills = resolve_explicit(
-            list(message.skills.select_related("current_version", "department")), conversation.owner, version
-        )
+        skills = resolve_explicit(chosen_skills(message), conversation.owner, version)
     except SkillUnavailable as exc:
         raise CannotStart(_("指定したSkillを使えません。%(reason)s") % {"reason": exc}) from exc
     catalog = build_catalog(conversation.owner, version) if not skills and version.supports_tools else None

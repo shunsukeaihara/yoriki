@@ -97,8 +97,6 @@
 
 ## 4 次の作業
 
-**進行中のPR**（マージするときに、この段落を消す）：#35（ブランチ `feature/skill-screens`。Skillの画面と部門の管理画面）。Codexのレビューは指摘なし。CIが通ったら利用者に報告し、マージの指示を待つ（squash merge）。マージ済みなら、この段落は消し忘れなので消す。
-
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。上から順に着手する（利用者から別の指示がなければ、1から始める）。提案する順番：
 
 1. **Skill（`skill`、`resources`）**：利用者と合意したPRの分け方は「① 土台（backend。済み） → ② 管理画面（frontend） → ③ 会話での利用 → ④ 会話からのSkill更新 → ⑤ 評価とCSV・PPTXの検証・編集」。②まで済み。次は③：会話での利用（`<skills>` の一覧、`skill` Tool、入力欄の `/` での指定、資料の `/workspace/master` への展開、`submit_result`）。harness.md §10.1・§7.5 に従う。

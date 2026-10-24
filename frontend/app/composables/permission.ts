@@ -9,6 +9,11 @@ export const PermissionCode = {
   CHANGE_LLM_CONNECTION: 'llm.change_llmconnection',
   CHANGE_MODEL_PROFILE: 'llm.change_modelprofile',
   CHANGE_RUNTIME_PROFILE: 'runtime.change_runtimeprofile',
+  // 部門と所属も基盤管理者だけが管理する
+  CHANGE_DEPARTMENT: 'user.change_department',
+  // 全社の範囲のSkill（役割「Skill公開者」）。個人・部門の範囲は、本人・部門の中の役割で決まる（Skill.access）
+  EDIT_COMPANY_SKILLS: 'skill.can_edit_company_skills',
+  PUBLISH_COMPANY_SKILLS: 'skill.can_publish_company_skills',
 } as const
 export type PermissionCode = (typeof PermissionCode)[keyof typeof PermissionCode]
 

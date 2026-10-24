@@ -210,6 +210,9 @@ class TestDraftAndPublish:
         assert change.kind == SkillChangeKind.PUBLISH
         assert change.previous_version is None
         assert "instructions" in change.summary["fields"]
+        # 最初の版でも、空のままの項目は変わった項目にしない
+        assert "requires" not in change.summary["fields"]
+        assert "input_schema" not in change.summary["fields"]
 
         # 再送しても版を重ねて作らない（Draftは閉じていても、同じ結果を返す）
         again = _publish(api_client, skill_id, draft, operation_key="op-1")

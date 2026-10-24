@@ -21,6 +21,15 @@ const { items: manageItems } = useManageMenu()
           block
           :class="collapsed ? undefined : 'justify-start'"
         />
+        <DBtn
+          to="/skills"
+          icon="i-lucide-book-open-check"
+          :label="collapsed ? undefined : $t('Skill')"
+          variant="ghost"
+          color="neutral"
+          block
+          :class="collapsed ? undefined : 'justify-start'"
+        />
         <ConversationList :collapsed="collapsed" />
       </template>
 

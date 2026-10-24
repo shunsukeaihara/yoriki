@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-24（#34）
+- 最終更新：2026-10-24（#35）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -38,6 +38,7 @@
 | #32 | `artifact` アプリ：Storage Backend（`artifact/storage.py`。Local・S3（boto3。上書きしないことを `If-None-Match: *` で守る）。`YORIKI_STORAGE_BACKEND` で選び、保存先のIDとkeyで記録する）、BlobObject・BlobLocation・Artifact、添付のアップロード（`app/v1/conversations/{id}/artifacts/`、multipart、`YORIKI_UPLOAD_MAX_MB`）とメッセージへの添付（`attachments`。送ったときに `/workspace/input` の中の名前を決め、同じ名前は「名前 (2)」）、ダウンロード（セッションの `download` と期限付きtokenの `/api/files/<token>/`。いつも添付として返し、`nosniff`・CSPの `sandbox`。Localはnginxの `X-Accel-Redirect`、それ以外はapiが非同期のiteratorで返す）。Sandbox：会話の添付すべてをAttemptごとのディレクトリに置き、`/workspace/input` に読取り専用でbind mount（起動後のinspectでも確かめる。実行中の追加指示の添付も足す）、Attemptを終えるたびに `/workspace/output` を成果物として回収（変わっていないファイル・隠しファイル・symlinkは回収しない）、Workspaceのsnapshotも同じ保存先へ（`runtime/storage.py` を移した。S3なら別のWorkerで再開できる）。モデルには添付の一覧と、新しい依頼ではそれまでの添付の一覧を渡す。同じ会話の次の依頼のRunは、前の依頼のRunの文脈を先頭に引き継ぐ（harness.md §5.6。結果のないTool呼出しは補い、圧縮では1つのまとまりにする）。画面：入力欄のクリップとドロップでの添付（会話を始めるフォームも）、メッセージの添付、「添付と成果物」の欄（広い画面は右の欄、狭い画面はドロワー）。nginx（アップロードの上限、`/_protected/` のヘッダー）、Compose（`/var/lib/yoriki/objects`）、deployment.md §7.2。design.md 0.26：同じ会話の中では依頼が変わっても文脈とWorkspaceを引き継ぐ（タスクはトリガーで起動してから終わるまで） |
 | #33 | `read` の画像：モデル設定が画像入力に対応するときだけ、補助コマンドに画像を求め、スキャンのPDFのページ（1回に5枚まで）と画像ファイルをTool結果の画像としてモデルに渡す（対応しないモデルには、画像に対応するモデルが要ることを伝える文）。画像のbytesは保存先にBlobObjectとして置き、RunEventには参照だけを残す（Artifactにはしない。Workerは読んだ画像をプロセスに残す）。送る前に今のモデルに合わせる（途中で画像に対応しないモデルに切り替えたら断りの文に、1回の要求で新しい側の20枚まで）。圧縮の見積もりで画像1枚を1,600 tokenと数える。繰返しの注意で画像が落ちていたのを直した。補助コマンド：PNGで1MBを超える画像はJPEGにする（CONTRACT.md §4.3。契約番号は変えない） |
 | #34 | `skill` アプリ：Skill（公開範囲は個人・部門・全社で作成時に固定、公開中の版、緊急停止）、SkillDraft（Skillごとに1つ、revisionで競合を検出、公開で閉じる）、不変のSkillVersion・SkillAssetBinding（説明・手順・Tool・必要な能力・入出力のSchema・資料の版）、SkillChange（公開・切戻し・停止の記録、operation keyで再送を重ねない）。`resources` アプリ：Resource・ResourceVersion（資料の原本の版。中身はBlobObject）。`user` アプリ：部門（Department）と所属（部門の中の役割：利用・編集・公開）と管理API（`v1/departments`）、`app/v1/my/` の所属する部門。permission `skill.can_edit_company_skills`・`can_publish_company_skills` と役割「Skill公開者」（「Plugin公開者」を改名）。API：`app/v1/skills`（作成・公開・切戻し・停止・再開・削除）と、その下の `versions`・`changes`・`drafts`・`drafts/{id}/assets`（資料のアップロード・置換）・`files`（原本の取得） |
+| #35 | Skillの画面：社員向けの `/skills`（一覧・作成。作れる範囲だけを出す）と `/skills/[skillId]`（公開中の版の中身、Draftの編集（説明・手順・Tool（公開の役割だけ）・必要な能力・入出力のSchema）、資料の追加・変更・置換・外す、公開、Draftの破棄、版の履歴（中身・この版から編集・この版に戻す）、変更の記録、名前の変更・停止・再開・削除）。Draftのrevisionでの競合（409）からの読み直し、資料の操作の後も入力中の本文を残す、公開・切戻しのoperation key。部門と所属の管理画面 `/manage/departments`（基盤管理者）。`composables/skill.ts`。Skillの画面は `/manage` ではなく社員向けに置く（frontend-conventions.md §8.1）。最初の公開の変更点に空の項目が載っていたのを直した |
 
 確認済みのこと：
 
@@ -49,6 +50,7 @@
 - 実際のIdP（Entra ID・Google Workspace）でのログインは、まだ試していない（client IDの発行が要る）。
 
 - 会話の画面は、偽のLLMサーバーを使ってブラウザ（Playwright）から一通り操作して確かめた（開始、逐次表示、質問への回答、追加の指示、次の依頼、停止、effortの切り替え、再試行の後のモデルの切り替え、狭い画面、XSSを含む応答）。実際のプロバイダでは、まだ試していない。
+- Skillの画面は、開発サーバーでブラウザ（Playwright）から、基盤管理者と部門の「編集」の役割の社員で一通り操作して確かめた（部門と所属の追加、部門のSkillの作成、Draftの編集・保存、資料の追加と置換、公開、別のタブからの変更による409と読み直し、版の中身、切戻し、停止と再開、変更の記録、編集の役割ではToolを変えられず公開・名前の変更・停止がないこと、狭い画面）。
 - `read` の画像は、偽のSandboxのテストと、手元の実際のSandbox（runc）でスキャンのPDFを読むテストで確かめた。実際のプロバイダのモデル（画像の入力）では、まだ試していない。
 - gVisor：契約テストは手元のarm64（Docker Desktopの中のdind）とCIのamd64・arm64（userns-remap）で、LauncherとSandboxのToolのテストは手元のdind（userns-remap）とCIのamd64（userns-remap、AppArmor）で、すべて通った。gVisorでの会話のRun（qclusterから）は、Linuxのホストではまだ試していない。
 - 成果物とファイルは、手元のqcluster・偽のLLM（shellで `/workspace/input` を読み、`/workspace/output` に書く）・ブラウザ（Playwright）で、会話を始めるフォームでの添付 → Run → 成果物の欄 → ダウンロード（HTMLも添付として返る）→ 同じ名前の添付の2回目の依頼（「(2)」に分かれ、変わったファイルだけが新しい成果物になる）→ 狭い画面のドロワー、まで確かめた。S3はmotoで確かめただけで、実際のS3・S3互換のストレージでは試していない。nginxの `X-Accel-Redirect` は、Composeの構成ではまだ試していない。
@@ -77,7 +79,7 @@
 - Compose：channel-listener（Channelの受信を実装するとき）。
 - 管理コマンド：`drain_workers`・`resume_workers`（Workerの実行を実装するとき）。
 - 業務のアプリは `llm`、`conversation`、`run`、`harness`、`stream`、`usage`、`runtime`（Runtime Profile、Launcher）、`artifact`、`skill`・`resources`（土台だけ）まで。`plugin`、`task`、`delivery`、`connector` 等（backend-conventions.md §1.2）は、まだない。
-- Skillで後回しにしたもの：管理画面（フロントエンド）、会話での利用（`<skills>` の一覧、`skill` Tool、`/` での指定、資料の `/workspace/master` への展開、`submit_result`）、会話からのSkill更新（編集のRunとSkill管理のTool）、Draftの評価（SkillEvaluation、`test_skill_draft`）、Resource Collection、Connectorの宣言、資料の形式ごとの検証（MD・CSV・PPTX。今は大きさだけを確かめる）、版の差分の表示（今はSkillChangeに変わった項目と資料のkeyだけを記録）、公開せずに捨てたDraftの資料の原本の回収、共通Skillから個人用を派生させる操作。
+- Skillで後回しにしたもの：会話での利用（`<skills>` の一覧、`skill` Tool、`/` での指定、資料の `/workspace/master` への展開、`submit_result`）、会話からのSkill更新（編集のRunとSkill管理のTool）、Draftの評価（SkillEvaluation、`test_skill_draft`）、Resource Collection、Connectorの宣言、資料の形式ごとの検証（MD・CSV・PPTX。今は大きさだけを確かめる）、版の差分の表示（今はSkillChangeに変わった項目と資料のkeyだけを記録）、公開せずに捨てたDraftの資料の原本の回収、共通Skillから個人用を派生させる操作、Draftを開いた後に別の版が公開されたときの取り込み（今は破棄して開き直す）、画面のToolの選択肢と説明（今はフロントエンドに `harness.tools.ALL_TOOLS` と同じ一覧を持つ。APIで返すようにする）。
 - Sandboxで後回しにしたもの：`/workspace/master` のmount（Skillの段階）、`install_python_packages` と `/packages`（PackageBundle・EnvironmentRevision）、ステップごとのCheckpoint（今はAttemptを終えるときだけ。障害で落ちると、最後のCheckpointより後の変更は失われ、モデルに知らせる）、snapshotの保持期限と削除、非公開のレジストリからのpullの認証。
 - 引き継いだ文脈が、それだけでモデルの文脈に収まらないほど大きいとき（前の依頼が文脈の上限で失敗した等）は、要約の要求も収まらず、次の依頼も失敗する。前の依頼の中で圧縮が働くので通常は起きない。
 - 成果物とファイルで後回しにしたもの：Storage Backendの `validate_config`・`healthcheck`（セットアップ時の確認。design.md §7.8）、既存のファイルを新しい保存先へ移すコマンド（design.md §7.10。以前の保存先を読む設定 `YORIKI_STORAGE_PREVIOUS` はある）、WorkspaceSnapshotのModel（今はCheckpointが保存先・key・hashを持つ）、保持期限での清掃（`cleanup_artifacts`。期限 `expires` は記録している）と、DBに記録する前に失敗した参照のないobjectの回収、S3の期限付きURL（今はapiが読んで返す）、送らずに残った添付の削除、画像のプレビュー、エージェントの `present_files`（harness.md §10.5）。
@@ -97,7 +99,7 @@
 
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。上から順に着手する（利用者から別の指示がなければ、1から始める）。提案する順番：
 
-1. **Skill（`skill`、`resources`）**：利用者と合意したPRの分け方は「① 土台（backend。済み） → ② 管理画面（frontend） → ③ 会話での利用 → ④ 会話からのSkill更新 → ⑤ 評価とCSV・PPTXの検証・編集」。次は②：Skillの一覧・作成・Draftの編集（Toolの選択は公開の役割だけ）・資料のアップロードと置換・公開・版の履歴と切戻し・停止、部門と所属の管理画面（`v1/departments`。基盤管理者）。③は harness.md §10.1・§7.5 に従う。
+1. **Skill（`skill`、`resources`）**：利用者と合意したPRの分け方は「① 土台（backend。済み） → ② 管理画面（frontend） → ③ 会話での利用 → ④ 会話からのSkill更新 → ⑤ 評価とCSV・PPTXの検証・編集」。②まで済み。次は③：会話での利用（`<skills>` の一覧、`skill` Tool、入力欄の `/` での指定、資料の `/workspace/master` への展開、`submit_result`）。harness.md §10.1・§7.5 に従う。
    - 読む章：design.md §3（エージェントとSkillのモデル。§3.2 版、§3.3 定義例、§3.5 エージェントによる作成と修正、§3.8 参照ファイル）、§11.6（会話からのSkill更新）、§11.8（Skillの資料を会話で管理する）、§12（受入条件）、backend-conventions.md §1.2（`skill` アプリのModelの一覧）、harness.md（Skillの読込み・`/workspace/master`）。
 2. **Connector（`connector`）とタスク・配信（`task`、`delivery`）**：読取り専用のDB Connector、Connectorを使える利用者・役割と操作（ConnectorPermission。design.md §4.9.1）、入力欄の `@` での指定、Task Definition（使うSkill・モデル・許可する操作）、Webhook・Zapierの通知、Trigger。DB Connector（種別：PostgreSQL・MySQL・SQL Server、ホスト、DB名、ユーザー、パスワード等）とHTTP Connector（ホスト、ヘッダー、認証情報等）の設定は管理画面で登録し、資格情報は `utils/crypto.py` で暗号化してDBに保存する（backend-conventions.md §6.4）。個人情報を主な中身とする接続先には機密のフラグを付けられるようにし、フラグの付いたConnectorはローカルLLMのモデルを使うタスク・会話にだけ割り当てる（design.md §4冒頭、§4.9.1）。
 3. **最初の2つの業務**（design.md §13。Skillとタスクとして作る）：請求書PDF → 社内DBと照合 → 取込用のCSV、契約書レビュー → Zapierへ結果。
@@ -125,6 +127,7 @@ cd frontend && pnpm install
 
 - 環境変数はリポジトリルートの `.envrc`（direnv）。テストやmypyは、`.envrc` を読み込んだ状態で実行する。エージェントが `.envrc` を読めない設定のときは、`.envrc.example` の `export` の行と、新しく生成した `YORIKI_SECRET_ENCRYPTION_KEYS`（Fernet）・`YORIKI_SANDBOX_RUNTIME=runc` を一時ファイルに書き、リポジトリのルートでコマンドごとに `source` する（`$PWD` を使う行があるため）。
 - Sandboxの補助コマンド（`sandbox/helper/`）を変えたら、イメージをビルドし直す（#33で `read` の画像の符号化を変えた）。手元のレジストリのRuntime Profileで会話を動かすときは、pushし直して管理画面で新しいdigestに更新する。`pytest -m sandbox` は `YORIKI_SANDBOX_TEST_IMAGE=yoriki-sandbox-docs:dev` を付けて動かす。
+- 画面をブラウザで確かめるときは、api（上記）と `cd frontend && pnpm dev` を起動し、Playwright（Python）で操作する。手元のブラウザのキャッシュ（chromium-1208）に合う版は `uv run --no-project --with playwright==1.58.0 python <script>`。基盤管理者は `/login?method=password` でログインし、`storage_state` を保存して使い回す。SSOの社員はパスワードでログインできないので、`manage.py shell` でその社員のセッションを作り（`BACKEND_SESSION_KEY` は `utils.backends.PasswordBackend`）、Cookie `sessionid` に入れる。開発用のDBには、#35 で使った基盤管理者 `skill-admin@example.co.jp`（パスワード `check-pass-123`）、社員 `skill-member@example.co.jp`（部門「経理部」の編集の役割）、部門のSkill「請求書の照合」（版3まで）が残っている。
 - 変更前に、AGENTS.md と、触る範囲の規約を読む。作業の進め方（ブランチ、コミット、Pull Request、CI、マージ）は development.md に従う。
 - 作業の区切りでは、本書の §1・§3・§4 を更新する。Pull Requestで進めた作業は、マージの前にそのPull Requestの中で更新する（マージの後に `main` へ別にコミットしない）。
 - Codexのレビュー：手元で `codex review --base main -c 'developer_instructions="レビューの指摘とまとめは、すべて日本語で書いてください。"'` を実行し（数分かかる。出力の `[P1]`・`[P2]` の行と末尾を読む）、指摘をコードで確かめて直し（テストも足す）、コミットして、指摘がなくなるまで繰り返す。PRの前に回してよい。

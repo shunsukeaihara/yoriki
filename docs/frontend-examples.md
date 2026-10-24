@@ -36,6 +36,7 @@
 | `RunStatus`、`ClarificationStatus`、`ClarificationKind`、`isCancellable`、`isActiveRun` | `frontend/app/composables/run.ts` |
 | `RunStatusBadge`、`RunEventLog`（作業の記録）、`RunWork`（会話の中の作業）、`RunClarificationForm`（確認への回答） | `frontend/app/components/run/` |
 | `MarkdownContent`、`renderMarkdown` | `frontend/app/components/common/MarkdownContent.vue`、`frontend/app/composables/markdown.ts`（frontend-conventions.md §7.5） |
+| Skillの画面（Draft の revision での競合の検出、multipart の資料、operation key、権限による出し分け） | `frontend/app/pages/skills/`、`frontend/app/components/skill/`、`frontend/app/composables/skill.ts` |
 | 会話の画面（REST で取得し、ストリームのイベントで取得し直す実装例） | `frontend/app/pages/conversations/[conversationId].vue`、`frontend/app/composables/conversation.ts`、`frontend/app/components/conversation/` |
 
 ### これから作るもの

@@ -468,9 +468,10 @@ class SkillVersion(SkillContent):
         return f"{self.skill} v{self.number}"
 
     def unsupported_by(self, model_version) -> str:
-        """使うモデルが、この版の必要な能力を持たない理由（持てば空文字）。Toolを使うSkillはTool呼出しも要る"""
+        """使うモデルが、この版の必要な能力を持たない理由（持てば空文字）。Toolを使うSkillと、業務結果を
+        submit_result で確定するSkillは、Tool呼出しも要る"""
         requires = set(self.requires)
-        if self.tools:
+        if self.tools or self.output_schema:
             requires.add(SkillRequirement.TOOL_CALLING)
         missing = [
             str(SkillRequirement(r).label)

@@ -8,7 +8,7 @@ from rest_framework import serializers
 
 from artifact.models import Artifact, ArtifactKind
 from artifact.serializers import ArtifactSerializer
-from harness.skills import MAX_EXPLICIT_SKILLS
+from harness.skills import MAX_EXPLICIT_SKILLS, unsupported_skills
 from llm.models import ModelProfile
 from llm.serializers import AppModelProfileSerializer
 from run.models import ACTIVE_STATUSES, Run
@@ -85,6 +85,16 @@ class ConversationSerializer(serializers.ModelSerializer):
             effort = attrs["effort"] = ""  # モデルを変えたら、そのモデルの既定から始める
         if effort and effort not in version.effort_values:
             raise serializers.ValidationError({"effort": _("このモデルが受け付けるeffortの値から選んでください")})
+        if self.instance is not None and "model_profile" in attrs:
+            # 実行中のRunも切り替わるので、そのRunが使うSkillの必要な能力を持つモデルに限る（design.md §4.8）
+            run = self.instance.runs.filter(status__in=ACTIVE_STATUSES).first()
+            if run is not None and (names := unsupported_skills(run, version)):
+                raise serializers.ValidationError(
+                    {
+                        "model_profile": _("このモデルは、使っているSkill（%(names)s）に必要な能力を持ちません")
+                        % {"names": "、".join(names)}
+                    }
+                )
         return attrs
 
     def update(self, instance: Conversation, validated_data) -> Conversation:

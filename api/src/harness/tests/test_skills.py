@@ -5,10 +5,12 @@ import pytest
 from conversation.dispatch import CannotStart, MessageMode, post_message
 from conversation.factories import ConversationFactory
 from conversation.models import InstructionKind, UserInstruction
+from harness.recovery import switch_candidates
 from harness.runner import Runner
 from harness.sandbox import SandboxSession
 from harness.skills import build_catalog
 from harness.tools.base import schema_problem
+from llm.factories import ModelProfileFactory
 from resources.factories import ResourceVersionFactory
 from run.models import Run, RunEndReason, RunEvent, RunEventKind, RunStatus
 from run.tasks import claim_run
@@ -302,3 +304,37 @@ def test_schema_problem_accepts_only_what_every_provider_takes():
     assert "anyOf" in schema_problem({"type": "object", "properties": {"a": {"anyOf": []}}})
     assert schema_problem({"type": "object", "properties": {"a": {"enum": ["x"]}}}) == "enum needs type"
     assert "tuple" in schema_problem({"type": "object", "properties": {"a": {"type": "array", "items": [{}]}}})
+
+
+@pytest.mark.django_db
+def test_run_stops_when_a_skill_in_use_is_suspended(conversation, app_user):
+    skill, _version = publish(app_user, tools=["todo_write"])
+    run = start(conversation, skills=[skill])
+    skill.set_suspended(True, actor=app_user)
+    run = execute(run, FakeAdapter([]))
+    assert run.status == RunStatus.FAILED
+    assert run.end_reason == RunEndReason.SKILL
+    assert "停止中" in run.error
+
+
+@pytest.mark.django_db
+def test_result_schema_needs_a_model_that_calls_tools(app_user):
+    conversation = ConversationFactory.create(owner=app_user, model_profile__version__supports_tools=False)
+    skill, _version = publish(app_user, tools=[], output_schema=RESULT_SCHEMA)
+    with pytest.raises(CannotStart, match="Tool呼出し"):
+        start(conversation, skills=[skill])
+
+
+@pytest.mark.django_db
+def test_model_switch_keeps_to_models_the_skills_in_use_can_run(conversation, app_user):
+    skill, _version = publish(app_user, requires=[SkillRequirement.IMAGE_INPUT])
+    model_version = conversation.model_profile.current_version
+    assert model_version is not None
+    model_version.supports_images = True
+    model_version.save()
+    with_images = ModelProfileFactory.create(
+        name="画像あり", version__supports_tools=True, version__supports_images=True
+    )
+    ModelProfileFactory.create(name="画像なし", version__supports_tools=True)
+    run = start(conversation, skills=[skill])
+    assert [p.name for p in switch_candidates(run)] == [with_images.name]

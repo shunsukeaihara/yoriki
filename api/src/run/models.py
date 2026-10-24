@@ -75,6 +75,7 @@ class RunEndReason(models.IntegerChoices):
     ATTEMPTS = 16, _("再試行の上限")
     EXPIRED = 17, _("回答期限切れ")
     SANDBOX = 18, _("実行環境を使えない")
+    SKILL = 19, _("Skillを使えない")
     INTERNAL = 99, _("内部のエラー")
 
 

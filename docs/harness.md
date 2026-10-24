@@ -117,7 +117,7 @@ RunnerはQClusterのプロセスの中で動き、Provider Adapter・Connector�
 
 | 終わり方 | きっかけ | Runの状態 |
 |---|---|---|
-| `completed` | 最後の応答。業務結果のSchemaがあるRunでは `submit_result` の成功（§10.5） | COMPLETED |
+| `completed` | 最後の応答。業務結果のSchemaがあるRunでは、`submit_result` で確定した後の最後の応答（§10.5） | COMPLETED |
 | `waiting_user` | `ask_user`、モデルの障害時の切り替えの確認（§10.8） | WAITING_USER |
 | `cancelled` | 取消要求 | CANCELLED |
 | `retry_wait` | 復旧できる障害（Sandboxの喪失、Workerの停止） | RETRY_WAIT |
@@ -127,6 +127,7 @@ RunnerはQClusterのプロセスの中で動き、Provider Adapter・Connector�
 | `provider` | 再試行してもモデルにつながらない（タスクのRun） | FAILED |
 | `repeated_errors` | 同じ誤りの繰返し、Tool呼出しの形の誤りの連続（§11.3） | FAILED |
 | `no_result` | 業務結果のSchemaがあるのに `submit_result` を呼ばずに終わった | FAILED |
+| `skill` | Runが使うSkill（`/` で指定した・読み込んだもの）が停止・削除されたか、利用者が使えなくなった（§10.1） | FAILED |
 | `internal` | 想定していない例外 | FAILED |
 
 ### 4.4 上限
@@ -627,6 +628,8 @@ Runnerは、shell以外のToolの処理もSandboxの中で行う。ファイル�
 
 同じRunでもう一度読み込んでも、追記した版を返す（途中で公開し直されても切り替えない）。
 
+Runが使うSkill（`/` で指定したものと、読み込んだもの）が停止・削除されたか、利用者が使えなくなったら（権限の失効）、過去の版でも使わせない（design.md §3.2）。Runnerは毎ステップの区切りで確かめ、`skill` で終える。モデルの切り替えの候補と、利用者が会話のモデルを変えるときも、Runが使うSkillの必要な能力を持つモデルに限る。
+
 **明示した場合**（`/` やTask Definition）：Run開始時にSkill Versionへ解決し（使えなければRunを始めず、利用者に理由を返す）、Manifestに固定して（`fixed.skills`）、上と同じ内容を最初の `message.user` に入れる。モデルに `skill` を呼ばせない。
 
 - 1つのメッセージで指定できるSkillは3つまで。業務結果のSchemaを持つSkillは、そのうち1つまで（`submit_result` の引数が1つに決まるように）。
@@ -667,7 +670,7 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 
 - 成果物は `/workspace/output` に置かせる。完了時にRunnerがすべて回収・検証して永続化する（design.md §7.4）。
 - `present_files` は、主な成果物と説明を示すだけ（ファイルの中身はコピーしない。DeepSeek Harnessの方式）。画面の「添付と成果物」で、示した成果物を先に出す。存在しないパスは、直し方を添えたエラーにする。
-- **業務結果のSchema**があるRun（SkillかTask Definitionが出力のSchemaを持つ。例：契約書レビューの判定・理由・指摘箇所）では、`submit_result` の引数をそのSchemaにする。Runnerは検証し、通れば業務結果として保存して、完了の手順（design.md §5.2の7）に進む。Schemaがあるのに `submit_result` を呼ばずに最後の応答を返したら、1回だけ呼ぶよう促し、それでも呼ばなければ `no_result` で終える（Gemini CLIの方式）。
+- **業務結果のSchema**があるRun（SkillかTask Definitionが出力のSchemaを持つ。例：契約書レビューの判定・理由・指摘箇所）では、`submit_result` の引数をそのSchemaにする。Runnerは検証し、通れば業務結果として保存し（`Run.result`。もう一度呼べば置き換える）、最後の応答を書かせて完了の手順（design.md §5.2の7）に進む。Schemaがあるのに `submit_result` を呼ばずに最後の応答を返したら、1回だけ呼ぶよう促し、それでも呼ばなければ `no_result` で終える（Gemini CLIの方式）。
 - 最後の応答の本文は、会話のメッセージとして保存する。
 
 ### 10.6 予算

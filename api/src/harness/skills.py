@@ -12,7 +12,7 @@ from django.db.models import Case, IntegerField, Value, When
 from django.utils.translation import gettext as _
 
 from run.models import Run
-from skill.models import Skill, SkillScope, SkillVersion
+from skill.models import Skill, SkillAccess, SkillScope, SkillVersion
 
 MASTER_DIR = "/workspace/master"
 # 一覧に使う文脈の割合と、説明を短くする段階（文字数。日本語は1文字を1 tokenとして数える）
@@ -145,6 +145,47 @@ def explicit_versions(run: Run) -> list[SkillVersion]:
     pks = [e["version"] for e in ((run.manifest or {}).get("fixed") or {}).get("skills", [])]
     versions = {v.pk: v for v in SkillVersion.objects.filter(pk__in=pks).select_related("skill")}
     return [versions[pk] for pk in pks if pk in versions]
+
+
+def loaded_skills(run: Run) -> list[tuple[dict[str, Any], Skill | None, SkillVersion | None]]:
+    """Runが使うSkill（Manifestの記録、今のSkill、固定した版）。Skillが消えていればNone"""
+    entries = loaded_entries(run)
+    skills = {
+        s.uid: s
+        for s in Skill.objects.filter(uid__in=[e["skill"] for e in entries]).select_related(
+            "department", "current_version"
+        )
+    }
+    versions = SkillVersion.objects.in_bulk([e["version"] for e in entries])
+    return [(e, skills.get(e["skill"]), versions.get(e["version"])) for e in entries]
+
+
+def revoked_skill(run: Run) -> str:
+    """Runが使うSkillのうち、停止・削除されたか、利用者が使えなくなったものがあれば、その理由。過去の版でも、
+    実行時には拒否する（design.md §3.2）"""
+    for entry, skill, _version in loaded_skills(run):
+        if skill is None or skill.deleted:
+            reason = _("削除されました")
+        elif skill.suspended:
+            reason = _("停止中です")
+        elif skill.access_of(run.owner) < SkillAccess.USE:
+            reason = _("使う権限がありません")
+        else:
+            continue
+        return _("Skill「%(name)s」を使えなくなったので、作業を止めました（%(reason)s）。") % {
+            "name": entry["name"],
+            "reason": reason,
+        }
+    return ""
+
+
+def unsupported_skills(run: Run, model_version) -> list[str]:
+    """Runが使うSkillのうち、モデル設定の版が必要な能力を持たないものの名前（モデルの切り替えの条件。design.md §4.8）"""
+    return [
+        entry["name"]
+        for entry, _skill, version in loaded_skills(run)
+        if version is not None and version.unsupported_by(model_version)
+    ]
 
 
 def render(skill: Skill, version: SkillVersion, *, name: str = "", result_tool: bool = True) -> str:

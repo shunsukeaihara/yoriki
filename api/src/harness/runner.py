@@ -80,7 +80,7 @@ from .context import runtime_context as build_runtime_context
 from .prompts import system_prompt
 from .recovery import request_model_switch
 from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, SandboxSession
-from .skills import explicit_versions
+from .skills import explicit_versions, revoked_skill
 from .tools import ALL_TOOLS, SANDBOX_TOOLS, WORKSPACE_WRITING_TOOLS
 from .tools.base import Effect, Tool, ToolContext, ToolResult
 from .tools.skill_tool import make_skill_tool
@@ -210,6 +210,7 @@ class Runner:
         self.run_obj.model_version = run.model_version
         self.run_obj.effort = run.effort
         self.run_obj.step_count = run.step_count
+        self.run_obj.manifest = run.manifest
         return self.run_obj
 
     # --- 再開 ---
@@ -384,6 +385,10 @@ class Runner:
             return False
         if run.status != RunStatus.RUNNING:
             raise LeaseLost(f"run={run.uid} status={run.status}")
+        if reason := revoked_skill(run):
+            # 停止・権限の失効は、始めた後のRunでも次の区切りから使わせない（design.md §3.2）
+            self._fail(RunEndReason.SKILL, reason)
+            return False
         self._apply_instructions()
         self._record_finished_jobs()
         return True

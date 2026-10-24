@@ -191,7 +191,10 @@ GET_SKILL_DESCRIPTION = """Read the skill you are editing: the published version
 Call this first, and again after the draft may have changed. The skill's files are placed read-only under \
 /workspace/master: the published version's files under skills/, the draft's files under drafts/. To change a file, \
 copy it to /workspace/work, edit the copy, and register it with stage_skill_asset. Use the draft's revision as \
-expected_revision when you change the draft."""
+expected_revision when you change the draft.
+
+A draft may already hold changes someone else made and has not published. Keep them, and before you publish, tell \
+the user that they will be published together with your change."""
 
 GET_SKILL_PARAMETERS: dict[str, Any] = {"type": "object", "properties": {}, "additionalProperties": False}
 

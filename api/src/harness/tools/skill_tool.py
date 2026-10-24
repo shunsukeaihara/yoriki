@@ -9,6 +9,7 @@ from skill.models import Skill, SkillAccess, SkillVersion
 
 from ..skills import loaded_entries, manifest_entry, render
 from .base import Effect, Tool, ToolContext, ToolResult
+from .submit_result import NAME as SUBMIT_RESULT
 
 NAME = "skill"
 
@@ -50,7 +51,7 @@ def execute(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
 
     loaded = next((e for e in loaded_entries(run) if e["skill"] == skill.uid), None)
     if loaded is not None:
-        return _load_again(skill, loaded, entry["name"], user)
+        return _load_again(skill, loaded, entry["name"], context)
     if reason := skill.unusable_reason(user, model_version):
         return _unusable(reason)
     assert skill.current_version_id is not None  # unusable_reason() が確かめた
@@ -71,20 +72,20 @@ def execute(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         current.save(update_fields=["manifest", "updated"])
         RunEvent.record(current, RunEventKind.SKILL_LOADED, value, comment=skill.name)
         run.manifest = current.manifest
-    return _loaded(skill, version, entry["name"])
+    return _loaded(skill, version, entry["name"], context)
 
 
-def _load_again(skill: Skill, loaded: dict[str, Any], name: str, user) -> ToolResult:
+def _load_again(skill: Skill, loaded: dict[str, Any], name: str, context: ToolContext) -> ToolResult:
     """同じRunでは追記した版を返す（途中で公開し直されても切り替えない）。停止や権限の失効は確かめ直す"""
-    if skill.access_of(user) < SkillAccess.USE or skill.suspended:
+    if skill.access_of(context.run.owner) < SkillAccess.USE or skill.suspended:
         return _unusable(_("このSkillは使えなくなりました"))
     version = SkillVersion.objects.prefetch_related("assets__resource_version").get(pk=loaded["version"])
-    return _loaded(skill, version, name)
+    return _loaded(skill, version, name, context)
 
 
-def _loaded(skill: Skill, version: SkillVersion, name: str) -> ToolResult:
+def _loaded(skill: Skill, version: SkillVersion, name: str, context: ToolContext) -> ToolResult:
     return ToolResult.text(
-        render(skill, version, name=name),
+        render(skill, version, name=name, result_tool=SUBMIT_RESULT in context.exposed),
         value={"skill": skill.uid, "version": version.number},
         meta={"skill": skill.name, "version": version.number},
     )

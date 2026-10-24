@@ -147,8 +147,12 @@ def explicit_versions(run: Run) -> list[SkillVersion]:
     return [versions[pk] for pk in pks if pk in versions]
 
 
-def render(skill: Skill, version: SkillVersion, *, name: str = "") -> str:
-    """Skillの本文と資料の場所（harness.md §10.1）。`skill` の結果と、`/` で指定したときの最初の発言に入れる"""
+def render(skill: Skill, version: SkillVersion, *, name: str = "", result_tool: bool = True) -> str:
+    """Skillの本文と資料の場所（harness.md §10.1）。`skill` の結果と、`/` で指定したときの最初の発言に入れる。
+
+    `result_tool` は、このRunに submit_result があるか。途中で読み込んだSkillにはない（Toolの一覧はRun開始時に
+    決める）ので、業務結果は最後の応答に書かせる
+    """
     lines = [f'<skill name="{_escape(name or skill.name)}" version="{version.number}">']
     lines.append(f"<instructions>\n{version.instructions.strip()}\n</instructions>")
     assets = sorted(version.assets.all(), key=lambda a: a.key)
@@ -169,6 +173,11 @@ def render(skill: Skill, version: SkillVersion, *, name: str = "") -> str:
 
         schema = json.dumps(version.output_schema, ensure_ascii=False)
         lines.append(f"<output_schema>\n{schema}\n</output_schema>")
+        if not result_tool:
+            lines.append(
+                "<note>submit_result is not available in this work. Put the result in this form in your final "
+                "reply instead.</note>"
+            )
     lines.append("</skill>")
     return "\n".join(lines)
 

@@ -604,7 +604,12 @@ class Runner:
             if not any(e.data.get("result_required") for e in self._events() if e.kind == RunEventKind.CONTEXT):
                 self._record(RunEventKind.CONTEXT, {"text": RESULT_REQUIRED_NOTICE, "result_required": True})
                 return True
-            return self._finish_with_reply(response.text, RunStatus.FAILED, RunEndReason.NO_RESULT)
+            return self._finish_with_reply(
+                response.text,
+                RunStatus.FAILED,
+                RunEndReason.NO_RESULT,
+                error=_("Skillが決めた形の業務結果を、エージェントが確定しませんでした。"),
+            )
         # 最後の応答の間に追加指示が届いていれば、終えずに取り込んで続ける（harness.md §10.4）
         return self._finish_with_reply(response.text, RunStatus.COMPLETED, RunEndReason.COMPLETED)
 
@@ -616,7 +621,7 @@ class Runner:
         self._record(RunEventKind.CONTEXT, {"text": text})
         return True
 
-    def _finish_with_reply(self, text: str, status: RunStatus, end_reason: RunEndReason) -> bool:
+    def _finish_with_reply(self, text: str, status: RunStatus, end_reason: RunEndReason, *, error: str = "") -> bool:
         """応答を会話に載せてRunを終える。完了の前に追加指示が届いていれば、終えずにTrue（続ける）を返す"""
         self._checkpoint()
         with self.run_obj.fenced(self.attempt) as run:
@@ -630,7 +635,8 @@ class Runner:
             ).exists()
             if status == RunStatus.COMPLETED and pending:
                 return True
-            error = "" if status == RunStatus.COMPLETED else str(end_reason.label)
+            if status != RunStatus.COMPLETED:
+                error = error or str(end_reason.label)
             run.set_status(status, end_reason=end_reason, error=error)
         return False
 

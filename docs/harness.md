@@ -329,7 +329,7 @@ class ToolResult:
 
 | Tool | 引数 | 内容 | effect | 並列 |
 |---|---|---|---|---|
-| `skill` | `name`（使えるSkillの名前のenum） | Skillを読み込む（§10.1） | READ | 可 |
+| `skill` | `name`（使えるSkillの名前のenum） | Skillを読み込む（§10.1） | READ | 不可（Manifestへの追記を伴うので、1つずつ実行する） |
 | `ask_user` | `questions`（1〜3。各 `header`・`question`・`options`・`multi_select`） | 利用者に確かめる（§10.3） | INTERACT | 不可（単独で呼ぶ） |
 | `present_files` | `files`（`path`・`description` の並び。4件まで） | 主な成果物を示す（§10.5） | READ | 不可 |
 | `submit_result` | 業務結果のSchema（SkillかTask Definitionのもの） | 業務結果を確定する（§10.5） | READ | 不可（単独で呼ぶ） |
@@ -353,7 +353,7 @@ class ToolResult:
 **Runに出すToolの一覧**は、Run開始時に次から決め、`request.header` に記録する。Runの中では変えない（prompt cacheを保つため）。
 
 1. Runの種類：業務のRun、Skillの編集のRun、Draftの評価のRun（design.md §3.6・§3.7）。Skill管理のToolは編集のRunだけ、Skill公開のToolは評価のRunには出さない。
-2. Skill：`/` かTask DefinitionでSkillを指定したRunでは、そのSkillの `tools` に限る。指定がなく、エージェントが探して使う会話では、利用者が使えるToolの全体を出す。
+2. Skill：`/` かTask DefinitionでSkillを指定したRunでは、そのSkillの `tools` に限り、業務結果のSchemaがあれば `submit_result` を加える（`skill` は出さない）。指定がなく、エージェントが探して使う会話では、利用者が使えるToolの全体と `skill` を出す。
 3. 利用者の権限と組織のポリシー：Connectorの操作は、ConnectorPermissionで使えるものだけ（design.md §4.9.1）。
 4. モデルの能力：Tool呼出しに対応しないモデルでは、Toolを出さない（Skillも、Toolが要るものは候補にしない。design.md §4.8）。
 5. 確認の相手：`ask_user` は、答える人がいるRun（会話、または対話Bindingのあるタスク）だけに出す。
@@ -592,6 +592,9 @@ Runnerは、shell以外のToolの処理もSandboxの中で行う。ファイル�
 
 **一覧**：`context.snapshot` の `<skills>` に、利用者が使えて、使うモデルの能力を満たし、機密の制限に合うSkillの名前と説明だけを並べる（design.md §3.1・§4.8）。一覧の量は文脈の2%までにし、超えたら説明を短くして「ほかにN件」と書く（Codexの方式）。`skill` の引数 `name` は、一覧の名前のenumにする。
 
+- 一覧はRun開始時に決めてManifestに固定する（`fixed.skill_catalog`）。Toolの定義（`skill` のenum）をRunの中で変えないためで、Runの途中で公開されたSkillは次の依頼から一覧に出る。`/` でSkillを指定したRunには一覧を出さない。
+- 同じ名前のSkillが範囲（個人・部門・全社）の違いで重なれば、範囲を添えた名前にする（「名寄せ (個人)」）。並びは個人・部門・全社の順。
+
 **使い方の規則**（system promptに入れる）：
 
 - 依頼がSkillの名前を挙げているか、説明にはっきり合うときは、作業の前に `skill` で読み込む。合うものが複数あれば、必要な最小の組を読み込む。
@@ -599,7 +602,7 @@ Runnerは、shell以外のToolの処理もSandboxの中で行う。ファイル�
 - どのSkillを使うかを、利用者に1行で伝える。
 - 合うSkillがなければ、Skillなしで進めてよい。
 
-**読込み**：`skill` が呼ばれたら、RunnerはそのSkillをその時点の最新の公開版へ解決し、権限・必要な能力・機密の制限を確かめて、Manifestへの追記と `skill.loaded` の記録を同じDB transactionで行う（design.md §3.2）。結果として返すもの：
+**読込み**：`skill` が呼ばれたら、RunnerはそのSkillをその時点の最新の公開版へ解決し、権限・停止・必要な能力・機密の制限と、Skillの要るToolがこのRunにあるかを確かめて、Manifestへの追記と `skill.loaded` の記録を同じDB transactionで行う（design.md §3.2）。結果として返すもの：
 
 ```
 <skill name="請求書の照合" version="7">
@@ -608,20 +611,26 @@ Runnerは、shell以外のToolの処理もSandboxの中で行う。ファイル�
   /workspace/master/skills/inv-check/vendor-master/ — vendor-master.csv（マスター。第4版）
   /workspace/master/skills/inv-check/check-script/ — reconcile.py（照合のスクリプト）
 </assets>
+<tools>shell, read</tools>
 <connectors>core-db: datasource_query</connectors>
 <output_schema>…あれば…</output_schema>
 </skill>
 ```
 
-資料はSandboxを起動するときに `/workspace/master` へ展開する（design.md §3.8）。Sandboxを起動した後に読み込んだSkillは、次のように扱う。
+- 途中で読み込んだSkillに業務結果のSchemaがあっても、Toolの一覧は変えないので `submit_result` はない。その場合は、Schemaの形で最後の応答に書くよう結果に添える。業務結果を確定させたいときは、`/` かTask DefinitionでSkillを指定する。
+
+資料はSandboxを起動するときに `/workspace/master` へ展開する（design.md §3.8）。`/workspace/master` は、Workerの作業領域のディレクトリを読取り専用でbind mountしたもので（添付の `/workspace/input` と同じ方式。sandbox/CONTRACT.md §2）、Runnerはその中に `skills/{skill_id}/{資料のkey}/{ファイル名}` で置く。Sandboxを起動した後に読み込んだSkillは、次のように扱う。
 
 - Runtime ProfileはRunの単位で決まり、Skillは指定しない（design.md §7.3）。Skillを読み込んでもSandboxは替わらない。
-- Launcherが固定した版の資料を、Sandboxの外から `/workspace/master/skills/{skill_id}/` へ置いて（Sandboxからは読取り専用のまま）、置けたことを確かめてから `skill` の結果を返す。置けなければ読込みを失敗にし、Manifestへの追記も取り消す（同じtransactionで扱う）。
+- 固定した版の資料を、Sandboxの外から `/workspace/master/skills/{skill_id}/` へ置いて（bind mountなので動いているSandboxにもそのまま見え、Sandboxからは読取り専用のまま）、置けたことを確かめてからManifestへ追記し、`skill` の結果を返す。置けなければ読込みを失敗にし、Manifestへは追記しない。
 - Sandboxをまだ起動していないときは、起動するときに、Manifestに追記した全Skillの資料を展開する。
 
 同じRunでもう一度読み込んでも、追記した版を返す（途中で公開し直されても切り替えない）。
 
-**明示した場合**（`/` やTask Definition）：Run開始時にSkill Versionへ解決し、上と同じ内容を最初の `message.user` に入れる。モデルに `skill` を呼ばせない。
+**明示した場合**（`/` やTask Definition）：Run開始時にSkill Versionへ解決し（使えなければRunを始めず、利用者に理由を返す）、Manifestに固定して（`fixed.skills`）、上と同じ内容を最初の `message.user` に入れる。モデルに `skill` を呼ばせない。
+
+- 1つのメッセージで指定できるSkillは3つまで。業務結果のSchemaを持つSkillは、そのうち1つまで（`submit_result` の引数が1つに決まるように）。
+- 実行中の会話でSkillを指定したメッセージは、Skillの版を依頼を始めるときに決めるので、次の依頼として受け付ける（design.md §11.4）。
 
 **スクリプト**：Skillの資料にスクリプトがあれば、書き直さずに実行するか、コピーして直して使うよう、system promptに書く（Codexの方式）。
 

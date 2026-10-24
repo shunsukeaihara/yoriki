@@ -143,6 +143,7 @@ def test_skill_needing_tools_missing_in_this_run_is_not_loaded(conversation, app
 def test_catalog_excludes_skills_the_model_cannot_run(app_user):
     conversation = ConversationFactory.create(owner=app_user)
     version = conversation.model_profile.current_version
+    assert version is not None
     publish(app_user, name="画像のSkill", requires=[SkillRequirement.IMAGE_INPUT])
     publish(app_user, name="文章のSkill")
     names = [e["name"] for e in build_catalog(app_user, version)["skills"]]
@@ -153,6 +154,7 @@ def test_catalog_excludes_skills_the_model_cannot_run(app_user):
 def test_catalog_separates_same_names_and_shortens_to_the_budget(app_user):
     conversation = ConversationFactory.create(owner=app_user)
     version = conversation.model_profile.current_version
+    assert version is not None
     publish(app_user, name="名寄せ")
     company = SkillFactory.create(name="名寄せ", scope=SkillScope.COMPANY, owner=None, created_by=app_user)
     SkillVersionFactory.create(skill=company)
@@ -246,8 +248,22 @@ def test_reply_without_submit_result_is_nudged_once_then_ends_with_no_result(con
     run = execute(run, adapter)
     assert run.status == RunStatus.FAILED
     assert run.end_reason == RunEndReason.NO_RESULT
+    assert run.error == "Skillが決めた形の業務結果を、エージェントが確定しませんでした。"
     notices = RunEvent.objects.filter(run=run, kind=RunEventKind.CONTEXT, data__result_required=True)
     assert notices.count() == 1
+
+
+@pytest.mark.django_db
+def test_loaded_skill_with_a_result_schema_asks_for_the_result_in_the_reply(conversation, app_user):
+    """途中で読み込んだSkillのためにToolの一覧は変えない（submit_result は出さない）"""
+    skill, _version = publish(app_user, output_schema=RESULT_SCHEMA)
+    run = start(conversation)
+    adapter = FakeAdapter([calls(("c1", "skill", {"name": skill.name})), reply("判定：ok")])
+    run = execute(run, adapter)
+    assert run.status == RunStatus.COMPLETED
+    assert "submit_result" not in tool_names(adapter.requests[1])
+    [result] = results(run, "skill")
+    assert "submit_result is not available" in result["content"][0]["text"]
 
 
 @pytest.mark.django_db

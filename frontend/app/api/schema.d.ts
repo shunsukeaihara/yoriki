@@ -1562,6 +1562,9 @@ export interface components {
             /** @description 送る添付（この会話にアップロードして、まだ送っていないもの） */
             attachments?: string[];
             readonly attachments_info: components["schemas"]["Artifact"][];
+            /** @description 入力欄の `/` で指定したSkill。実行中なら次の依頼になる（Skillの版は依頼を始めるときに決める） */
+            skills?: string[];
+            readonly skills_info: components["schemas"]["MessageSkill"][];
             readonly instruction: components["schemas"]["InstructionInfo"] | null;
             /** Format: date-time */
             readonly created: string;
@@ -1572,6 +1575,8 @@ export interface components {
             body: string;
             /** @description 送る添付（この会話にアップロードして、まだ送っていないもの） */
             attachments?: string[];
+            /** @description 入力欄の `/` で指定したSkill。実行中なら次の依頼になる（Skillの版は依頼を始めるときに決める） */
+            skills?: string[];
             client_message_id?: string;
             /**
              * @description auto：実行中なら今の作業への追加指示、確認待ちなら回答。next：今の作業の後に始める
@@ -1589,6 +1594,11 @@ export interface components {
          * @enum {integer}
          */
         MessageRoleEnum: 1 | 2 | 3;
+        MessageSkill: {
+            readonly id: string;
+            /** 名前 */
+            readonly name: string;
+        };
         MinimumDepartment: {
             readonly id: string;
             /** 名前 */
@@ -2271,6 +2281,10 @@ export interface components {
             readonly step_count: number;
             /** @description 作業の計画（todo_write の最新の内容） */
             readonly todos: components["schemas"]["Todo"][];
+            /** @description 使っているSkillと版 */
+            readonly skills: components["schemas"]["RunSkill"][];
+            /** @description 業務結果（submit_result の内容） */
+            readonly result: unknown;
             /** Format: date-time */
             readonly created: string;
             /** Format: date-time */
@@ -2322,13 +2336,14 @@ export interface components {
          *     * `31` - 実行時の文脈
          *     * `32` - 文脈の圧縮
          *     * `40` - モデルの切り替え
+         *     * `41` - Skillの読込み
          *     * `50` - 確認の質問
          *     * `51` - 確認への回答
          *     * `60` - モデルの再試行
          *     * `90` - 実行の終了
          * @enum {integer}
          */
-        RunEventKindEnum: 1 | 10 | 11 | 12 | 21 | 22 | 30 | 31 | 32 | 40 | 50 | 51 | 60 | 90;
+        RunEventKindEnum: 1 | 10 | 11 | 12 | 21 | 22 | 30 | 31 | 32 | 40 | 41 | 50 | 51 | 60 | 90;
         /** @description 確定したメッセージとTool実行（利用者の発言、エージェントの応答、Toolの結果） */
         RunMessageEvent: {
             /**
@@ -2359,6 +2374,16 @@ export interface components {
             readonly kind: components["schemas"]["RunEventKindEnum"];
             readonly kind_display: string;
             readonly comment: string;
+        };
+        /** @description Runが使うSkillと版（Manifestに固定・追記したもの） */
+        RunSkill: {
+            /** @description SkillのID */
+            readonly skill: string;
+            readonly name: string;
+            /** @description 版 */
+            readonly number: number;
+            /** @description 利用者が `/` で指定した */
+            readonly chosen: boolean;
         };
         /**
          * @description * `1` - 順番待ち

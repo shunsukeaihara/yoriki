@@ -5,6 +5,7 @@ from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
+from skill.serializers import AssetDiffCountSerializer, asset_diff_items
 from utils.exceptions import Conflict
 
 from .errors import AlreadyAnswered, InvalidTransition
@@ -65,6 +66,11 @@ class RunSkillChangeSerializer(serializers.Serializer):
     version = serializers.IntegerField(read_only=True, allow_null=True, help_text=_("公開・切戻しでできた版"))
     revision = serializers.IntegerField(read_only=True, allow_null=True, help_text=_("保存したDraftのrevision"))
     summary = RunSkillChangeSummarySerializer(read_only=True, allow_null=True, help_text=_("変わった項目と資料のkey"))
+    asset_diffs = serializers.SerializerMethodField(help_text=_("置き換えた資料の差分の数"))
+
+    @extend_schema_field(AssetDiffCountSerializer(many=True))
+    def get_asset_diffs(self, obj: dict[str, Any]) -> list[dict[str, Any]]:
+        return asset_diff_items(obj.get("asset_diffs"))
 
 
 # 結果の値がSkillの変更（RunSkillChangeSerializer）になるTool
@@ -93,7 +99,8 @@ def skill_changes(run: Run) -> list[dict[str, Any]]:
             merged: dict[str, list[str]] = {k: list(v) for k, v in (before.get("summary") or {}).items()}
             for key, names in (value.get("summary") or {}).items():
                 merged[key] = list(dict.fromkeys([*merged.get(key, []), *names]))
-            value = {**value, "summary": merged}
+            diffs = {**(before.get("asset_diffs") or {}), **(value.get("asset_diffs") or {})}
+            value = {**value, "summary": merged, "asset_diffs": diffs}
         changes[value["skill"]] = value
     return list(changes.values())
 

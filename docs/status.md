@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-25（#37）
+- 最終更新：2026-10-25（#40）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -41,6 +41,7 @@
 | #35 | Skillの画面：社員向けの `/skills`（一覧・作成。作れる範囲だけを出す）と `/skills/[skillId]`（公開中の版の中身、Draftの編集（説明・手順・Tool（公開の役割だけ）・必要な能力・入出力のSchema）、資料の追加・変更・置換・外す、公開、Draftの破棄、版の履歴（中身・この版から編集・この版に戻す）、変更の記録、名前の変更・停止・再開・削除）。Draftのrevisionでの競合（409）からの読み直し、資料の操作の後も入力中の本文を残す、公開・切戻しのoperation key。部門と所属の管理画面 `/manage/departments`（基盤管理者）。`composables/skill.ts`。Skillの画面は `/manage` ではなく社員向けに置く（frontend-conventions.md §8.1）。最初の公開の変更点に空の項目が載っていたのを直した |
 | #36 | 会話でSkillを使う（design.md 0.28、harness.md §10.1）：エージェントに見せるSkillの一覧（使えて、モデルが必要な能力を持つもの。文脈の2%まで、同じ名前は範囲を添える）をRun開始時にManifestへ固定し、`<runtime_context>` の `<skills>` と `skill` の引数のenumにする。`skill` Tool（その時点の公開中の版へ解決し、権限・停止・能力・要るToolを確かめてManifestへ追記、`skill.loaded`。同じRunでは同じ版）。入力欄の `/` での指定（メッセージの `skills`。3つまで。Run開始時に版を解決して最初の発言に本文を入れ、Toolはその `tools` に限る。実行中なら次の依頼）。資料はWorkerのディレクトリを `/workspace/master` に読取り専用でbind mountして `skills/<Skill>/<key>/<ファイル名>` に置く（起動の前と、動いているSandboxへの途中の読込み）。`submit_result`（`/` で指定したSkillの業務結果のSchemaを引数にし、`Run.result` に保存。呼ばずに終えようとしたら1回促し、なければ `no_result`）。Runが使うSkillが停止・削除・権限の失効をしたら次の区切りで止める（`skill`）。モデルの切り替えはSkillの必要な能力を持つモデルに限る。業務結果のSchemaを全プロバイダで通る範囲に限る検証。system promptのSkillの節。画面：入力欄のSkillのボタンと `/` の一覧、メッセージのSkill、Runの使ったSkillと版、業務結果。APIは `Run.skills`・`result`、メッセージの `skills`・`skillsInfo` |
 | #37 | 会話からのSkill更新（design.md 0.29 §11.6、harness.md §10.9）：Skillの編集のRun（`Run.kind`。対象のSkillを1つだけManifestの `fixed.skill_edit` に固定し、新しいSkillは `create_skill` で作って追記する）。始め方は、入力欄の `/` の「編集」「新しいSkillを作る」（メッセージの `edit_skill`・`create_skill`。実行中なら次の依頼）と、業務のRunの `request_skill_edit`（対象を利用者が編集できるSkillから名前で決め、確認（種類「Skillの編集」）で承認されたら要約を本文とする編集の依頼を次の依頼として受け付ける。自由記述の回答は承認にしない）。Skill管理のTool（`get_skill`（公開中の版とDraftの資料を `/workspace/master/skills`・`drafts` に置く）、`create_skill`、`update_skill_draft`、`stage_skill_asset`（Sandboxのファイルを原本のbytesのままDraftの資料に追加・置換。添付の置換も兼ねる）、`remove_skill_asset`、`publish_skill_draft`（公開の役割がなければ変更案として保存）、`rollback_skill`）は、管理APIと同じSerializer・Modelのメソッドで検証と権限を確かめ、公開・切戻しはToolInvocationのoperation keyで重ねない。SkillChangeに編集のRunを記録。画面：`/` の一覧の「使う」「編集する」「新しいSkillを作る」、編集の依頼のメッセージ、提案の確認、Runの「Skillの編集」と変えたSkill（状態・版・変更点・Skillの画面へのリンク）。APIは `Run.kind`・`skillChanges`、確認の `target`、メッセージの `skillEdit` |
+| #40 | Skillの資料の形式ごとの検証と差分（design.md §3.9）：`resources/formats.py`（MD：文字コード（UTF-8・BOM付き・cp932）・改行・本文の差分。CSV：文字コード・区切り・見出し・列の数・必須列・キーの空と重複・列の型（整数・数値・日付）・先頭の0の消失、キーで対応付けた行の差分。PPTX：python-pptxで、zipの展開の上限つき、スライドのID・レイアウト・プレースホルダー・テキスト・要素の差分、エージェントが編集した候補で画像・グラフ・SmartArt等・レイアウトが変わったら誤り）。Draftの資料と版の資料に検証の条件（`checks`）と結果（`validation`）を持たせ、資料を加える・置き換える・条件を変えるたびに検証する。誤りのある資料（元の版から変えたもの）を含むDraftは公開できない。条件の変更は公開の役割だけ（`drafts/{id}/assets/{key}/checks/`）。同じ中身・名前の置換では資料の版を増やさない。SkillChangeと編集のRunの変更に、置き換えた資料の差分の数（`assetDiffs`）。`stage_skill_asset` は検証の結果と差分を返し、`checks` を受け取る。`get_skill` に資料ごとの検証の結果。画面：Draftと版の資料の検証の状態・差分の数、「検証・差分」のダイアログ（MDの本文、CSVの行、PPTXのスライド）、CSVの「検証の条件」のダイアログ、変更の記録と会話の変えたSkillに差分の数。依存に python-pptx |
 
 確認済みのこと：
 
@@ -58,6 +59,7 @@
 - 成果物とファイルは、手元のqcluster・偽のLLM（shellで `/workspace/input` を読み、`/workspace/output` に書く）・ブラウザ（Playwright）で、会話を始めるフォームでの添付 → Run → 成果物の欄 → ダウンロード（HTMLも添付として返る）→ 同じ名前の添付の2回目の依頼（「(2)」に分かれ、変わったファイルだけが新しい成果物になる）→ 狭い画面のドロワー、まで確かめた。S3はmotoで確かめただけで、実際のS3・S3互換のストレージでは試していない。nginxの `X-Accel-Redirect` は、Composeの構成ではまだ試していない。
 - #36 の会話でのSkillは、手元のqcluster・手元のレジストリのRuntime Profile（runc）・偽のLLM・ブラウザ（Playwright）で、`/` の一覧から部門のSkillを選んで送る → 最初の発言にSkillの本文 → 実際のSandboxで `/workspace/master` の資料を `read` → 業務結果のSchemaがあるので `submit_result` を促して `no_result`、と、次の依頼で指定せずに送る → `<skills>` からエージェントが `skill` で読み込む → 完了、まで確かめた。実際のプロバイダのモデルがSkillを選ぶかは、まだ試していない。
 - #37 の会話からのSkill更新は、手元のqcluster・手元のレジストリのRuntime Profile（runc）・偽のLLM・ブラウザ（Playwright）で、基盤管理者が `/` の「編集」から部門のSkillを編集 → `get_skill` → `update_skill_draft` → `publish_skill_draft` で第4版を公開（Runに「第4版を公開・次の依頼から反映」）、業務の会話で「Skillも直しておいて」→ `request_skill_edit` の確認 →「Skillを編集する」→ 業務のRunの完了後に編集のRunが始まって第5版を公開、部門の「編集」の役割の社員では公開されず「変更案を保存（未公開）」、狭い画面、まで確かめた。実際のプロバイダのモデルが「今回だけ」と「今後も」を区別して `request_skill_edit` を呼ぶかは、まだ試していない。
+- #40 の資料の検証は、開発サーバーでブラウザ（Playwright）から、部門のSkill「請求書の照合」のDraftの `vendor-master.csv` を先頭の0が消えたファイルで置き換える → 「誤り1件」と行の差分 → 公開が止まり理由が出る → 「検証の条件」でキーの列 `code` を設定 → 正しいファイルで置き換える → キーで対応付けた「1行追加・1行変更」、狭い画面、まで確かめた（このDraftは開発用のDBにそのまま残っている）。エージェントが実際のSandboxでCSV・PPTXを編集して `stage_skill_asset` する流れは、テストの偽のSandboxで確かめただけで、実際のプロバイダのモデルでは試していない。
 - #30 のSandboxは、手元のqcluster（fork）・手元のレジストリのRuntime Profile（platformのdigest）・Toolを呼ぶ偽のLLMで、shell → read → 確認待ち（Checkpointを保存してSandboxを消す）→ 回答 → 戻したWorkspaceで edit → 完了、まで確かめた。画面での表示は、ブラウザではまだ確かめていない。Linuxのホスト（本番の構成のqcluster・userns-remap）では、まだ試していない。
 
 ## 2 実装の中で決めたこと
@@ -83,8 +85,9 @@
 - Compose：channel-listener（Channelの受信を実装するとき）。
 - 管理コマンド：`drain_workers`・`resume_workers`（Workerの実行を実装するとき）。
 - 業務のアプリは `llm`、`conversation`、`run`、`harness`、`stream`、`usage`、`runtime`（Runtime Profile、Launcher）、`artifact`、`skill`・`resources`（土台だけ）まで。`plugin`、`task`、`delivery`、`connector` 等（backend-conventions.md §1.2）は、まだない。
-- Skillで後回しにしたもの：実行中のRunでSkillを最新の公開版へ切り替える依頼（design.md §3.2）、機密の制限によるSkillの絞り込み（Connectorの段階）、Draftの評価（SkillEvaluation、`test_skill_draft`）、Resource Collection、Connectorの宣言、資料の形式ごとの検証（MD・CSV・PPTX。今は大きさだけを確かめる）、版の差分の表示（今はSkillChangeに変わった項目と資料のkeyだけを記録）、公開せずに捨てたDraftの資料の原本の回収、共通Skillから個人用を派生させる操作、Draftを開いた後に別の版が公開されたときの取り込み（今は破棄して開き直す）、画面のToolの選択肢と説明（今はフロントエンドに `harness.tools.ALL_TOOLS` と同じ一覧を持つ。APIで返すようにする）。
-- 会話からのSkill更新で後回しにしたもの：中身が前の版と同じDraftの公開を止めない（版が増える）、Draftに他の人の未公開の変更があっても一緒に公開する（`get_skill` の説明で、公開の前に利用者へ伝えさせるだけ）、編集のRunの対象は1つだけ（複数のSkillをまとめて直す依頼は分ける）、別のAttemptで再開すると `/workspace/master` のDraftの資料が置き直されない（`get_skill` を呼び直せば置く）、資料の形式ごとの検証（⑤）。
+- Skillで後回しにしたもの：実行中のRunでSkillを最新の公開版へ切り替える依頼（design.md §3.2）、機密の制限によるSkillの絞り込み（Connectorの段階）、Draftの評価（SkillEvaluation、`test_skill_draft`）、Resource Collection、Connectorの宣言、MD・CSV・PPTX以外の形式（XLSX・DOCX・PDF等）の検証、PPTXの画像としてのプレビュー（LibreOfficeを使わない方法が未決。design.md §7.6）、本文（説明・手順・Schema）の版の差分の表示（今は変わった項目名だけ。資料の差分は #40 で表示）、切戻しの版の資料の差分（切戻しでは差分を記録しない）、公開せずに捨てたDraftの資料の原本の回収、共通Skillから個人用を派生させる操作、Draftを開いた後に別の版が公開されたときの取り込み（今は破棄して開き直す）、画面のToolの選択肢と説明（今はフロントエンドに `harness.tools.ALL_TOOLS` と同じ一覧を持つ。APIで返すようにする）。
+- 会話からのSkill更新で後回しにしたもの：中身が前の版と同じDraftの公開を止めない（版が増える）、Draftに他の人の未公開の変更があっても一緒に公開する（`get_skill` の説明で、公開の前に利用者へ伝えさせるだけ）、編集のRunの対象は1つだけ（複数のSkillをまとめて直す依頼は分ける）、別のAttemptで再開すると `/workspace/master` のDraftの資料が置き直されない（`get_skill` を呼び直せば置く）。
+- 資料の検証で後回しにしたもの：検証の結果に検証の仕組みの版を持たせていない（検証の規則を変えても、保存した結果は取り直すまで古いまま）、MDの差分は2MBまで、PPTXの「編集した候補」かどうかは置いた場所（`/workspace/input` か）だけで決める、CSVの行の差分はキーの列がなければ行の組合せの増減だけ。
 - Sandboxで後回しにしたもの：`/workspace/master` のmount（Skillの段階）、`install_python_packages` と `/packages`（PackageBundle・EnvironmentRevision）、ステップごとのCheckpoint（今はAttemptを終えるときだけ。障害で落ちると、最後のCheckpointより後の変更は失われ、モデルに知らせる）、snapshotの保持期限と削除、非公開のレジストリからのpullの認証。
 - 引き継いだ文脈が、それだけでモデルの文脈に収まらないほど大きいとき（前の依頼が文脈の上限で失敗した等）は、要約の要求も収まらず、次の依頼も失敗する。前の依頼の中で圧縮が働くので通常は起きない。
 - 成果物とファイルで後回しにしたもの：Storage Backendの `validate_config`・`healthcheck`（セットアップ時の確認。design.md §7.8）、既存のファイルを新しい保存先へ移すコマンド（design.md §7.10。以前の保存先を読む設定 `YORIKI_STORAGE_PREVIOUS` はある）、WorkspaceSnapshotのModel（今はCheckpointが保存先・key・hashを持つ）、保持期限での清掃（`cleanup_artifacts`。期限 `expires` は記録している）と、DBに記録する前に失敗した参照のないobjectの回収、S3の期限付きURL（今はapiが読んで返す）、送らずに残った添付の削除、画像のプレビュー、エージェントの `present_files`（harness.md §10.5）。
@@ -104,8 +107,8 @@
 
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。上から順に着手する（利用者から別の指示がなければ、1から始める）。提案する順番：
 
-1. **Skill（`skill`、`resources`）**：利用者と合意したPRの分け方は「① 土台（backend。済み） → ② 管理画面（frontend） → ③ 会話での利用 → ④ 会話からのSkill更新 → ⑤ 評価とCSV・PPTXの検証・編集」。④まで済み。次は⑤：Draftの評価（SkillEvaluation、`test_skill_draft`。評価のRunにはSkill公開のToolを出さない）と、資料の形式ごとの検証・編集（MD・CSV・PPTX。design.md §3.7・§3.9・§12）。
-   - 読む章：design.md §3.7（差分と競合と評価）、§3.8・§3.9（参照ファイルと形式ごとの検証）、§11.8、§12（受入条件）、harness.md §7.5（評価のRunのTool）・§10.9（Skillの編集のRun）。
+1. **Skill（`skill`、`resources`）**：利用者と合意したPRの分け方は「① 土台（backend。済み） → ② 管理画面（frontend） → ③ 会話での利用 → ④ 会話からのSkill更新 → ⑤ 評価とCSV・PPTXの検証・編集」。④まで済み。⑤は利用者と合意して「⑤a 資料の形式ごとの検証と差分（#40。済み） → ⑤b Draftの評価」に分けた。次は⑤b：Draftの評価（SkillEvaluation、`test_skill_draft`。業務例に対する公開中の版とDraftの比較を独立した評価のRunで行い、利用量を記録する。評価のRunにはSkill公開のToolを出さない。必須の評価ケースは範囲の設定で決める）。評価のModel・ケース・画面は設計書に概要しかないので、着手の前に設計を詰めて利用者と合意する。
+   - 読む章：design.md §3.7（差分と競合と評価）、§11.7（評価ケース）、§12（受入条件「評価と切戻し」）、harness.md §7.5（評価のRunのTool）・§10.9（Skillの編集のRun）。
 2. **Connector（`connector`）とタスク・配信（`task`、`delivery`）**：読取り専用のDB Connector、Connectorを使える利用者・役割と操作（ConnectorPermission。design.md §4.9.1）、入力欄の `@` での指定、Task Definition（使うSkill・モデル・許可する操作）、Webhook・Zapierの通知、Trigger。DB Connector（種別：PostgreSQL・MySQL・SQL Server、ホスト、DB名、ユーザー、パスワード等）とHTTP Connector（ホスト、ヘッダー、認証情報等）の設定は管理画面で登録し、資格情報は `utils/crypto.py` で暗号化してDBに保存する（backend-conventions.md §6.4）。個人情報を主な中身とする接続先には機密のフラグを付けられるようにし、フラグの付いたConnectorはローカルLLMのモデルを使うタスク・会話にだけ割り当てる（design.md §4冒頭、§4.9.1）。
 3. **最初の2つの業務**（design.md §13。Skillとタスクとして作る）：請求書PDF → 社内DBと照合 → 取込用のCSV、契約書レビュー → Zapierへ結果。
 4. **Channel Plugin**（Teams・Slack・Discord。`plugin` のRegistry）。

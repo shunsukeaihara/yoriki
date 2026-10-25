@@ -2,9 +2,11 @@
 /**
  * Draftの資料の一覧。追加・変更（ファイルの置換）・外す。
  * 操作が通れば Draft の revision はちょうど1つ増える（サーバーが編集を始めた時点の revision を確かめている）ので、
- * v-model の Draft の revision と資料だけを書き換え、入力中の本文は残す
+ * v-model の Draft の revision と資料だけを書き換え、入力中の本文は残す。
+ * 資料は形式ごとに検証し（design.md §3.9）、誤りがあれば公開できない。差分は公開中の版の同じ資料とのもの。
+ * CSVの検証の条件は、公開の権限を持つ人だけが変えられる（canChangeChecks）
  */
-const props = defineProps<{ skillId: string }>()
+const props = defineProps<{ skillId: string; canChangeChecks?: boolean }>()
 const draft = defineModel<SkillDraft>({ required: true })
 const emit = defineEmits<{ failed: [error: unknown] }>()
 const api = useAPI()
@@ -63,8 +65,31 @@ const onRemove = async (asset: SkillDraftAsset) => {
           </div>
           <p v-if="asset.description" class="text-xs text-muted">{{ asset.description }}</p>
           <SkillFileLink :skill-id="skillId" :file="asset.fileInfo" />
+          <SkillAssetCheckSummary :validation="asset.validation" />
         </div>
-        <div class="flex gap-1">
+        <div class="flex flex-wrap gap-1">
+          <SkillAssetCheckDialog :asset-key="asset.key" :validation="asset.validation" :base-label="$t('公開中の版')">
+            <template #trigger="{ on }">
+              <DBtn size="sm" color="neutral" variant="ghost" icon="i-lucide-file-diff" v-on="on">
+                {{ $t('検証・差分') }}
+              </DBtn>
+            </template>
+          </SkillAssetCheckDialog>
+          <SkillAssetChecksDialog
+            v-if="canChangeChecks && asset.validation?.format === 'csv'"
+            :skill-id="skillId"
+            :draft-id="draft.id"
+            :revision="draft.revision"
+            :asset="asset"
+            @saved="replaceAsset"
+            @failed="(err) => emit('failed', err)"
+          >
+            <template #trigger="{ on }">
+              <DBtn size="sm" color="neutral" variant="ghost" icon="i-lucide-list-checks" v-on="on">
+                {{ $t('検証の条件') }}
+              </DBtn>
+            </template>
+          </SkillAssetChecksDialog>
           <SkillAssetDialog
             :skill-id="skillId"
             :draft-id="draft.id"

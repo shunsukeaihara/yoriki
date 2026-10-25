@@ -36,7 +36,23 @@ const draft: SkillDraft = {
   inputSchema: null,
   outputSchema: { type: 'object' },
   assets: [
-    { key: 'vendor-master', role: 2, roleDisplay: 'マスターデータ', description: '', fileInfo: file, draftRevision: 3 },
+    {
+      key: 'vendor-master',
+      role: 2,
+      roleDisplay: 'マスターデータ',
+      description: '',
+      fileInfo: file,
+      draftRevision: 3,
+      checks: { encoding: '', delimiter: '', requiredColumns: [], keyColumns: ['code'], columnTypes: [] },
+      validation: {
+        format: 'csv',
+        edited: true,
+        errors: ['キーが重複しています：001'],
+        warnings: [],
+        info: { columns: ['code', 'name'], rows: 2 },
+        diff: { rowsAdded: 1, rowsRemoved: 0, rowsChanged: 2, rows: [] },
+      },
+    },
   ],
   updatedByInfo: user,
   created: '2026-10-24T00:00:00Z',
@@ -132,6 +148,15 @@ describe('SkillDraftForm', () => {
 describe('SkillDraftAssetList', () => {
   beforeEach(() => {
     assetDelete.mockReset().mockResolvedValue(undefined)
+  })
+
+  it('検証の状態と公開中の版との差分の数を出し、条件の変更は公開の権限があるときだけ出す', async () => {
+    const wrapper = await mountSuspended(SkillDraftAssetList, { props: { modelValue: draft, skillId: 's1' } })
+    expect(wrapper.text()).toContain('誤り1件')
+    expect(wrapper.text()).toContain('1行追加・2行変更')
+    expect(wrapper.text()).not.toContain('検証の条件')
+    await wrapper.setProps({ canChangeChecks: true })
+    expect(wrapper.text()).toContain('検証の条件')
   })
 
   it('資料を外すと、revision を1つ進めて一覧から除く', async () => {

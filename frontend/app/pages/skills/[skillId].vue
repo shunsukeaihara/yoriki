@@ -249,7 +249,12 @@ const onDelete = async () => {
                   :can-change-tools="canPublish"
                   @failed="onFailed"
                 />
-                <SkillDraftAssetList v-model="draft" :skill-id="skillId" @failed="onFailed" />
+                <SkillDraftAssetList
+                  v-model="draft"
+                  :skill-id="skillId"
+                  :can-change-checks="canPublish"
+                  @failed="onFailed"
+                />
                 <UAlert
                   v-if="conflicted"
                   color="warning"

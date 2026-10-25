@@ -1284,6 +1284,48 @@ paths:
           description: No response body
         '409':
           description: 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった）
+  /api/app/v1/skills/{skill}/drafts/{draft}/assets/{key}/checks/:
+    put:
+      operationId: app_v1_skills_drafts_assets_checks_update
+      description: 資料の検証の条件（CSVの必須列・キー列・型等）を変え、検証し直す（公開の権限が要る）
+      parameters:
+      - in: path
+        name: draft
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: key
+        schema:
+          type: string
+          title: 資料のkey
+        required: true
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/skill/draft/asset
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillDraftAssetChecksRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillDraftAsset'
+          description: ''
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった）
   /api/app/v1/skills/{skill}/drafts/{uid}/:
     get:
       operationId: app_v1_skills_drafts_retrieve
@@ -3548,6 +3590,195 @@ components:
           description: 添付するファイル
       required:
       - file
+    AssetChecks:
+      type: object
+      description: 資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の役割だけが変えられる
+      properties:
+        encoding:
+          description: "空なら自動で判別する\n\n* `` - \n* `utf-8` - utf-8\n* `utf-8-sig` -
+            utf-8-sig\n* `cp932` - cp932"
+          oneOf:
+          - $ref: '#/components/schemas/CsvEncodingEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        delimiter:
+          description: "空なら自動で判別する\n\n* `` - \n* `,` - ,\n* `\t` - \t\n* `;` - ;"
+          oneOf:
+          - $ref: '#/components/schemas/CsvDelimiterEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        required_columns:
+          type: array
+          items:
+            type: string
+            maxLength: 200
+          maxItems: 100
+        key_columns:
+          type: array
+          items:
+            type: string
+            maxLength: 200
+          description: 行を識別する列。重複・空を誤りにし、差分を行ごとに取る
+          maxItems: 10
+        column_types:
+          type: array
+          items:
+            $ref: '#/components/schemas/ColumnType'
+          description: 列ごとの値の型（文字列なら省く）
+    AssetChecksRequest:
+      type: object
+      description: 資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の役割だけが変えられる
+      properties:
+        encoding:
+          description: "空なら自動で判別する\n\n* `` - \n* `utf-8` - utf-8\n* `utf-8-sig` -
+            utf-8-sig\n* `cp932` - cp932"
+          oneOf:
+          - $ref: '#/components/schemas/CsvEncodingEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        delimiter:
+          description: "空なら自動で判別する\n\n* `` - \n* `,` - ,\n* `\t` - \t\n* `;` - ;"
+          oneOf:
+          - $ref: '#/components/schemas/CsvDelimiterEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+        required_columns:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+          maxItems: 100
+        key_columns:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+          description: 行を識別する列。重複・空を誤りにし、差分を行ごとに取る
+          maxItems: 10
+        column_types:
+          type: array
+          items:
+            $ref: '#/components/schemas/ColumnTypeRequest'
+          description: 列ごとの値の型（文字列なら省く）
+    AssetDiff:
+      type: object
+      description: 前の版の同じ資料との差分。形式（MD・CSV・PPTX）によって持つ項目が違う
+      properties:
+        identical:
+          type: boolean
+        truncated:
+          type: boolean
+          description: 多すぎて一部だけを載せた
+        lines_added:
+          type: integer
+        lines_removed:
+          type: integer
+        text:
+          type: array
+          items:
+            type: string
+          description: MDの本文の差分（unified diff）
+        columns_added:
+          type: array
+          items:
+            type: string
+        columns_removed:
+          type: array
+          items:
+            type: string
+        rows_added:
+          type: integer
+        rows_removed:
+          type: integer
+        rows_changed:
+          type: integer
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/RowDiff'
+        slides_added:
+          type: integer
+        slides_removed:
+          type: integer
+        slides_changed:
+          type: integer
+        reordered:
+          type: boolean
+        slides:
+          type: array
+          items:
+            $ref: '#/components/schemas/SlideDiff'
+    AssetDiffChangeEnum:
+      enum:
+      - added
+      - removed
+      - changed
+      type: string
+      description: |-
+        * `added` - added
+        * `removed` - removed
+        * `changed` - changed
+    AssetDiffCount:
+      type: object
+      description: 置き換えた資料の差分の数（形式によって持つ項目が違う）
+      properties:
+        key:
+          type: string
+          description: 資料のkey
+        lines_added:
+          type: integer
+        lines_removed:
+          type: integer
+        rows_added:
+          type: integer
+        rows_removed:
+          type: integer
+        rows_changed:
+          type: integer
+        slides_added:
+          type: integer
+        slides_removed:
+          type: integer
+        slides_changed:
+          type: integer
+      required:
+      - key
+    AssetFormatEnum:
+      enum:
+      - md
+      - csv
+      - pptx
+      - other
+      type: string
+      description: |-
+        * `md` - md
+        * `csv` - csv
+        * `pptx` - pptx
+        * `other` - other
+    AssetValidation:
+      type: object
+      description: 資料の検証の結果（resources.formats.inspect()）。検証する前に公開した資料では空
+      properties:
+        format:
+          $ref: '#/components/schemas/AssetFormatEnum'
+        edited:
+          type: boolean
+          description: エージェントが元の資料を編集して作った候補か
+        errors:
+          type: array
+          items:
+            type: string
+          description: 誤り。あれば公開できない
+        warnings:
+          type: array
+          items:
+            type: string
+        info:
+          type: object
+          additionalProperties: {}
+          description: 中身の概要（文字コード・列・行数・スライド数等）
+        diff:
+          allOf:
+          - $ref: '#/components/schemas/AssetDiff'
+          nullable: true
     AuthMethods:
       type: object
       description: ログイン画面に出すログインの方法
@@ -3582,6 +3813,24 @@ components:
       - id
       - login_url
       - name
+    BlankEnum:
+      enum:
+      - ''
+    CellDiff:
+      type: object
+      properties:
+        column:
+          type: string
+        before:
+          type: string
+          nullable: true
+        after:
+          type: string
+          nullable: true
+      required:
+      - after
+      - before
+      - column
     ClarificationAnswerItem:
       type: object
       properties:
@@ -3798,6 +4047,29 @@ components:
         * `2` - 回答済み
         * `3` - 期限切れ
         * `4` - 取消
+    ColumnType:
+      type: object
+      properties:
+        column:
+          type: string
+          maxLength: 200
+        type:
+          $ref: '#/components/schemas/CsvColumnTypeEnum'
+      required:
+      - column
+      - type
+    ColumnTypeRequest:
+      type: object
+      properties:
+        column:
+          type: string
+          minLength: 1
+          maxLength: 200
+        type:
+          $ref: '#/components/schemas/CsvColumnTypeEnum'
+      required:
+      - column
+      - type
     Conversation:
       type: object
       description: 自分の会話。モデル設定を省くと既定のモデル設定にする。実行中に変えると、次のステップから切り替わる
@@ -3866,6 +4138,33 @@ components:
           type: string
           title: タイトル
           maxLength: 200
+    CsvColumnTypeEnum:
+      enum:
+      - string
+      - integer
+      - decimal
+      - date
+      type: string
+      description: |-
+        * `string` - string
+        * `integer` - integer
+        * `decimal` - decimal
+        * `date` - date
+    CsvDelimiterEnum:
+      enum:
+      - ','
+      - "\t"
+      - ;
+      type: string
+      description: "* `` - \n* `,` - ,\n* `\t` - \t\n* `;` - ;"
+    CsvEncodingEnum:
+      enum:
+      - utf-8
+      - utf-8-sig
+      - cp932
+      type: string
+      description: "* `` - \n* `utf-8` - utf-8\n* `utf-8-sig` - utf-8-sig\n* `cp932`
+        - cp932"
     Department:
       type: object
       properties:
@@ -3980,6 +4279,19 @@ components:
         * `1` - 利用
         * `2` - 編集
         * `3` - 公開
+    ElementDiff:
+      type: object
+      properties:
+        kind:
+          type: string
+        before:
+          type: integer
+        after:
+          type: integer
+      required:
+      - after
+      - before
+      - kind
     Group:
       type: object
       description: 役割（Group）。ユーザーへの割り当てでは名前で指定する
@@ -5876,6 +6188,27 @@ components:
       - resource
       - sha256
       - size
+    RowDiff:
+      type: object
+      properties:
+        change:
+          $ref: '#/components/schemas/AssetDiffChangeEnum'
+        key:
+          type: string
+          description: キーの列の値。キーがなければ空
+        line:
+          type: integer
+          nullable: true
+          description: 行番号（追加・変更は新しい版、削除は前の版）
+        cells:
+          type: array
+          items:
+            $ref: '#/components/schemas/CellDiff'
+      required:
+      - cells
+      - change
+      - key
+      - line
     Run:
       type: object
       properties:
@@ -6211,7 +6544,14 @@ components:
           readOnly: true
           nullable: true
           description: 変わった項目と資料のkey
+        asset_diffs:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetDiffCount'
+          readOnly: true
+          description: 置き換えた資料の差分の数
       required:
+      - asset_diffs
       - name
       - revision
       - scope
@@ -6873,12 +7213,22 @@ components:
           allOf:
           - $ref: '#/components/schemas/ResourceVersion'
           readOnly: true
+        checks:
+          allOf:
+          - $ref: '#/components/schemas/AssetChecks'
+          readOnly: true
+        validation:
+          allOf:
+          - $ref: '#/components/schemas/AssetValidation'
+          readOnly: true
       required:
+      - checks
       - description
       - file
       - key
       - role
       - role_display
+      - validation
     SkillAssetRoleEnum:
       enum:
       - 1
@@ -6928,12 +7278,18 @@ components:
             items:
               type: string
           readOnly: true
+        asset_diffs:
+          type: array
+          items:
+            $ref: '#/components/schemas/AssetDiffCount'
+          readOnly: true
         created:
           type: string
           format: date-time
           readOnly: true
       required:
       - actor_info
+      - asset_diffs
       - created
       - id
       - kind
@@ -7083,12 +7439,35 @@ components:
           type: integer
           readOnly: true
           description: 変更した後のDraftのrevision
+        checks:
+          allOf:
+          - $ref: '#/components/schemas/AssetChecks'
+          readOnly: true
+        validation:
+          allOf:
+          - $ref: '#/components/schemas/AssetValidation'
+          readOnly: true
       required:
+      - checks
       - draft_revision
       - file_info
       - key
       - role
       - role_display
+      - validation
+    SkillDraftAssetChecksRequest:
+      type: object
+      description: 資料の検証の条件を変える（公開の役割だけ）。変えると検証し直す
+      properties:
+        revision:
+          type: integer
+          minimum: 1
+          description: 編集を始めた時点のDraftのrevision
+        checks:
+          $ref: '#/components/schemas/AssetChecksRequest'
+      required:
+      - checks
+      - revision
     SkillDraftAssetRequest:
       type: object
       description: Draftの資料。作成ではファイルを送る（multipart/form-data）。更新でファイルを送ると、同じ資料の新しい版で置き換える
@@ -7348,6 +7727,50 @@ components:
       - requires
       - rolled_back_from
       - tools
+    SlideDiff:
+      type: object
+      properties:
+        slide:
+          type: integer
+          description: スライドの番号（削除は前の版）
+        change:
+          $ref: '#/components/schemas/AssetDiffChangeEnum'
+        layout_before:
+          type: string
+          nullable: true
+        layout_after:
+          type: string
+          nullable: true
+        texts:
+          type: array
+          items:
+            $ref: '#/components/schemas/TextDiff'
+        elements:
+          type: array
+          items:
+            $ref: '#/components/schemas/ElementDiff'
+      required:
+      - change
+      - elements
+      - layout_after
+      - layout_before
+      - slide
+      - texts
+    TextDiff:
+      type: object
+      properties:
+        shape:
+          type: string
+        before:
+          type: string
+          nullable: true
+        after:
+          type: string
+          nullable: true
+      required:
+      - after
+      - before
+      - shape
     Todo:
       type: object
       description: 作業の計画の1項目（harness/tools/todo_write.py）

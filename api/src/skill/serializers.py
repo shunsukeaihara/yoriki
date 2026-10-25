@@ -12,6 +12,7 @@ from rest_framework.exceptions import PermissionDenied
 
 from harness.tools import ALL_TOOLS
 from harness.tools.base import schema_problem
+from resources import formats
 from resources.models import ResourceVersion
 from user.models import Department
 from user.serializers import MinimumUserSerializer
@@ -74,15 +75,138 @@ class ResourceVersionSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class ColumnTypeSerializer(serializers.Serializer):
+    column = serializers.CharField(max_length=200)
+    type = serializers.ChoiceField(choices=formats.COLUMN_TYPES)
+
+
+class AssetChecksSerializer(serializers.Serializer):
+    """資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の役割だけが変えられる"""
+
+    encoding = serializers.ChoiceField(
+        choices=["", *formats.CSV_ENCODINGS], required=False, allow_blank=True, help_text=_("空なら自動で判別する")
+    )
+    delimiter = serializers.ChoiceField(
+        choices=["", *formats.CSV_DELIMITER_CHOICES],
+        required=False,
+        allow_blank=True,
+        help_text=_("空なら自動で判別する"),
+    )
+    required_columns = serializers.ListField(
+        child=serializers.CharField(max_length=200), required=False, max_length=100
+    )
+    key_columns = serializers.ListField(
+        child=serializers.CharField(max_length=200),
+        required=False,
+        max_length=10,
+        help_text=_("行を識別する列。重複・空を誤りにし、差分を行ごとに取る"),
+    )
+    column_types = ColumnTypeSerializer(many=True, required=False, help_text=_("列ごとの値の型（文字列なら省く）"))
+
+    def validate(self, attrs):
+        return formats.normalize_checks(attrs)
+
+
+class CellDiffSerializer(serializers.Serializer):
+    column = serializers.CharField()
+    before = serializers.CharField(allow_null=True)
+    after = serializers.CharField(allow_null=True)
+
+
+class RowDiffSerializer(serializers.Serializer):
+    change = serializers.ChoiceField(choices=formats.DIFF_CHANGES)
+    key = serializers.CharField(help_text=_("キーの列の値。キーがなければ空"))
+    line = serializers.IntegerField(allow_null=True, help_text=_("行番号（追加・変更は新しい版、削除は前の版）"))
+    cells = CellDiffSerializer(many=True)
+
+
+class TextDiffSerializer(serializers.Serializer):
+    shape = serializers.CharField()
+    before = serializers.CharField(allow_null=True)
+    after = serializers.CharField(allow_null=True)
+
+
+class ElementDiffSerializer(serializers.Serializer):
+    kind = serializers.CharField()
+    before = serializers.IntegerField()
+    after = serializers.IntegerField()
+
+
+class SlideDiffSerializer(serializers.Serializer):
+    slide = serializers.IntegerField(help_text=_("スライドの番号（削除は前の版）"))
+    change = serializers.ChoiceField(choices=formats.DIFF_CHANGES)
+    layout_before = serializers.CharField(allow_null=True)
+    layout_after = serializers.CharField(allow_null=True)
+    texts = TextDiffSerializer(many=True)
+    elements = ElementDiffSerializer(many=True)
+
+
+class AssetDiffSerializer(serializers.Serializer):
+    """前の版の同じ資料との差分。形式（MD・CSV・PPTX）によって持つ項目が違う"""
+
+    identical = serializers.BooleanField(required=False)
+    truncated = serializers.BooleanField(required=False, help_text=_("多すぎて一部だけを載せた"))
+    lines_added = serializers.IntegerField(required=False)
+    lines_removed = serializers.IntegerField(required=False)
+    text = serializers.ListField(
+        child=serializers.CharField(allow_blank=True), required=False, help_text=_("MDの本文の差分（unified diff）")
+    )
+    columns_added = serializers.ListField(child=serializers.CharField(), required=False)
+    columns_removed = serializers.ListField(child=serializers.CharField(), required=False)
+    rows_added = serializers.IntegerField(required=False)
+    rows_removed = serializers.IntegerField(required=False)
+    rows_changed = serializers.IntegerField(required=False)
+    rows = RowDiffSerializer(many=True, required=False)
+    slides_added = serializers.IntegerField(required=False)
+    slides_removed = serializers.IntegerField(required=False)
+    slides_changed = serializers.IntegerField(required=False)
+    reordered = serializers.BooleanField(required=False)
+    slides = SlideDiffSerializer(many=True, required=False)
+
+
+class AssetDiffCountSerializer(serializers.Serializer):
+    """置き換えた資料の差分の数（形式によって持つ項目が違う）"""
+
+    key = serializers.CharField(help_text=_("資料のkey"))
+    lines_added = serializers.IntegerField(required=False)
+    lines_removed = serializers.IntegerField(required=False)
+    rows_added = serializers.IntegerField(required=False)
+    rows_removed = serializers.IntegerField(required=False)
+    rows_changed = serializers.IntegerField(required=False)
+    slides_added = serializers.IntegerField(required=False)
+    slides_removed = serializers.IntegerField(required=False)
+    slides_changed = serializers.IntegerField(required=False)
+
+
+def asset_diff_items(diffs: dict[str, dict[str, int]] | None) -> list[dict[str, Any]]:
+    """資料のkeyごとの差分の数を、keyを値に持つ並びにする（資料のkeyを辞書のキーのままAPIに出さない）"""
+    return list(AssetDiffCountSerializer([{"key": k, **v} for k, v in sorted((diffs or {}).items())], many=True).data)
+
+
+class AssetValidationSerializer(serializers.Serializer):
+    """資料の検証の結果（resources.formats.inspect()）。検証する前に公開した資料では空"""
+
+    format = serializers.ChoiceField(choices=formats.FORMATS, required=False)
+    edited = serializers.BooleanField(required=False, help_text=_("エージェントが元の資料を編集して作った候補か"))
+    errors = serializers.ListField(  # type: ignore[assignment]
+        child=serializers.CharField(), required=False, help_text=_("誤り。あれば公開できない")
+    )
+    warnings = serializers.ListField(child=serializers.CharField(), required=False)
+    info = serializers.DictField(required=False, help_text=_("中身の概要（文字コード・列・行数・スライド数等）"))
+    diff = AssetDiffSerializer(required=False, allow_null=True)
+
+
 class SkillAssetSerializer(serializers.ModelSerializer):
     """版の資料（表示）"""
 
     role_display = serializers.CharField(source="get_role_display", read_only=True)
     file = ResourceVersionSerializer(source="resource_version", read_only=True)
+    checks = AssetChecksSerializer(read_only=True)
+    validation = AssetValidationSerializer(read_only=True)
 
     class Meta:
         model = SkillAssetBinding
-        fields = ["key", "role", "role_display", "description", "file"]
+        fields = ["key", "role", "role_display", "description", "file", "checks", "validation"]
         read_only_fields = fields
 
 
@@ -374,6 +498,7 @@ class SkillChangeSerializer(serializers.ModelSerializer):
     previous_version = serializers.IntegerField(source="previous_version.number", read_only=True, allow_null=True)
     actor_info = MinimumUserSerializer(source="actor", read_only=True)
     summary = serializers.SerializerMethodField()
+    asset_diffs = serializers.SerializerMethodField()
 
     class Meta:
         model = SkillChange
@@ -386,6 +511,7 @@ class SkillChangeSerializer(serializers.ModelSerializer):
             "actor_info",
             "reason",
             "summary",
+            "asset_diffs",
             "created",
         ]
         read_only_fields = fields
@@ -393,7 +519,12 @@ class SkillChangeSerializer(serializers.ModelSerializer):
     @extend_schema_field(serializers.DictField(child=serializers.ListField(child=serializers.CharField())))
     def get_summary(self, obj: SkillChange) -> dict[str, list[str]]:
         """変わった項目（fields）と資料のkey（assets_added・assets_removed・assets_replaced・assets_changed）"""
-        return obj.summary
+        return {k: v for k, v in obj.summary.items() if k != "asset_diffs"}
+
+    @extend_schema_field(AssetDiffCountSerializer(many=True))
+    def get_asset_diffs(self, obj: SkillChange) -> list[dict[str, Any]]:
+        """置き換えた資料の差分の数"""
+        return asset_diff_items(obj.summary.get("asset_diffs"))
 
 
 # --- Draft ---
@@ -413,10 +544,34 @@ class SkillDraftAssetSerializer(serializers.ModelSerializer):
     draft_revision = serializers.IntegerField(
         source="draft.revision", read_only=True, help_text=_("変更した後のDraftのrevision")
     )
+    checks = serializers.SerializerMethodField()
+    validation = serializers.SerializerMethodField()
 
     class Meta:
         model = SkillDraftAsset
-        fields = ["key", "role", "role_display", "description", "file", "file_info", "revision", "draft_revision"]
+        fields = [
+            "key",
+            "role",
+            "role_display",
+            "description",
+            "file",
+            "file_info",
+            "revision",
+            "draft_revision",
+            "checks",
+            "validation",
+        ]
+
+    # 入力にも使うSerializerなので、表示だけの入れ子はメソッドで出す（入力用の型を作らせない）
+    @extend_schema_field(AssetChecksSerializer)
+    def get_checks(self, obj: SkillDraftAsset) -> dict[str, Any]:
+        """検証の条件。変えるには checks の操作を使う（公開の権限が要る）"""
+        return AssetChecksSerializer(formats.normalize_checks(obj.checks)).data
+
+    @extend_schema_field(AssetValidationSerializer)
+    def get_validation(self, obj: SkillDraftAsset) -> dict[str, Any]:
+        """検証の結果と、Draftの元の版の同じ資料との差分"""
+        return AssetValidationSerializer(obj.validation).data
 
     def validate_key(self, value: str) -> str:
         if not ASSET_KEY_RE.match(value):
@@ -467,6 +622,40 @@ class SkillDraftAssetSerializer(serializers.ModelSerializer):
             )
         except VersionConflict as exc:
             raise Conflict() from exc
+
+
+class SkillDraftAssetChecksSerializer(serializers.Serializer):
+    """資料の検証の条件を変える（公開の役割だけ）。変えると検証し直す"""
+
+    revision = serializers.IntegerField(min_value=1, help_text=_("編集を始めた時点のDraftのrevision"))
+    checks = AssetChecksSerializer()
+
+    def validate(self, attrs):
+        asset: SkillDraftAsset = self.instance  # type: ignore[assignment]
+        if (
+            attrs["checks"] != formats.normalize_checks(asset.checks)
+            and _access(asset.draft.skill, self.context) < SkillAccess.PUBLISH
+        ):
+            # 条件を緩めて誤りを隠せないように、本文を編集できる人でも条件は変えられない（design.md §3.9）
+            raise PermissionDenied(_("検証の条件を変えるには、この範囲の公開の権限が要ります"))
+        return attrs
+
+    def update(self, instance: SkillDraftAsset, validated_data) -> SkillDraftAsset:
+        try:
+            return instance.draft.change_asset(
+                instance,
+                actor=validated_data["actor"],
+                expected_revision=validated_data["revision"],
+                checks=validated_data["checks"],
+            )
+        except VersionConflict as exc:
+            raise Conflict() from exc
+
+    def create(self, validated_data):
+        raise NotImplementedError("instanceを渡して使う")
+
+    def to_representation(self, instance: SkillDraftAsset):
+        return SkillDraftAssetSerializer(instance, context=self.context).data
 
 
 class SkillDraftRevisionSerializer(serializers.Serializer):

@@ -75,6 +75,14 @@ export type SkillDraftWrite = Api<'SkillDraftRequest'>
 export type SkillDraftOpen = Api<'SkillDraftOpenRequest'>
 export type SkillDraftAsset = Api<'SkillDraftAsset'>
 export type ResourceVersion = Api<'ResourceVersion'>
+export type AssetChecks = Api<'AssetChecks'>
+export type AssetValidation = Api<'AssetValidation'>
+export type AssetDiff = Api<'AssetDiff'>
+export type AssetDiffCount = Api<'AssetDiffCount'>
+export type SkillDraftAssetChecks = Api<'SkillDraftAssetChecksRequest'>
+export type CsvEncodingEnum = Schemas['CsvEncodingEnum']
+export type CsvDelimiterEnum = Schemas['CsvDelimiterEnum']
+export type CsvColumnTypeEnum = Schemas['CsvColumnTypeEnum']
 // 資料は multipart で送るので、file は File にする（生成した型は binary の string）
 export type SkillDraftAssetWrite = Omit<Api<'SkillDraftAssetRequest'>, 'file'> & { file: File }
 export type SkillDraftAssetUpdate = Omit<Api<'SkillDraftAssetUpdateRequest'>, 'file'> & { file?: File | null }

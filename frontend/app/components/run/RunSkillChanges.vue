@@ -23,7 +23,11 @@ const stateOf = (change: RunSkillChange) => {
 }
 
 const items = computed(() =>
-  props.changes.map((change) => ({ change, state: stateOf(change), lines: skillChangeLines(change.summary, t) })),
+  props.changes.map((change) => ({
+    change,
+    state: stateOf(change),
+    lines: [...skillChangeLines(change.summary, t), ...assetDiffLines(change.assetDiffs, t)],
+  })),
 )
 </script>
 

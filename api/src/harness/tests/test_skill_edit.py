@@ -19,7 +19,7 @@ from run.models import (
     RunKind,
     RunStatus,
 )
-from run.serializers import skill_changes
+from run.serializers import RunSerializer, skill_changes
 from run.tasks import claim_run
 from skill.factories import SkillFactory, SkillVersionFactory
 from skill.models import (
@@ -180,6 +180,62 @@ def test_edit_run_updates_stages_and_publishes_the_skill(conversation, app_user)
     assert summary["version"] == 2
     assert summary["summary"]["fields"] == ["instructions"]
     assert summary["summary"]["assets_replaced"] == ["vendor-master"]
+
+
+@pytest.mark.django_db
+def test_staged_files_are_checked_against_the_published_version(conversation, app_user):
+    skill = publish(app_user)
+    master = ResourceVersionFactory.create(name="vendor-master.csv", content=b"code,name\n001,A\n002,B\n")
+    assert skill.current_version is not None
+    SkillAssetBinding.objects.create(
+        version=skill.current_version, key="vendor-master", role=SkillAssetRole.MASTER, resource_version=master
+    )
+    FileSession.files = {
+        # 表計算ソフトで保存して先頭の0が消えたもの
+        "/workspace/work/broken.csv": b"code,name\n1,A\n2,Bee\n",
+        "/workspace/work/vendor-master.csv": b"code,name\n001,A\n002,Bee\n",
+    }
+    run = post(conversation, "マスターの002の名前をBeeにして", skill_edit=edit(skill))
+    stage = {"expected_revision": 0, "key": "vendor-master", "path": "/workspace/work/broken.csv"}
+    adapter = FakeAdapter(
+        [
+            calls(("c1", "stage_skill_asset", stage)),
+            calls(("c2", "publish_skill_draft", {"expected_revision": 2, "change_reason": "名前を直す"})),
+            calls(
+                (
+                    "c3",
+                    "stage_skill_asset",
+                    {
+                        "expected_revision": 2,
+                        "key": "vendor-master",
+                        "path": "/workspace/work/vendor-master.csv",
+                        "checks": {"key_columns": ["code"]},
+                    },
+                )
+            ),
+            calls(("c4", "publish_skill_draft", {"expected_revision": 3, "change_reason": "名前を直す"})),
+            reply("第2版を公開しました。"),
+        ]
+    )
+    run = execute(run, adapter)
+
+    first, fixed = results(run, "stage_skill_asset")
+    assert "cannot be published" in text_of(first)
+    assert "先頭の0が消えています" in text_of(first)
+    blocked = results(run, "publish_skill_draft")[0]
+    assert blocked["is_error"] and "検証の誤り" in text_of(blocked)
+    # キーの列を決めると、行ごとの差分をエージェントに見せる
+    assert "changed 002 name: 'B' -> 'Bee'" in text_of(fixed)
+    skill.refresh_from_db()
+    assert skill.current_version is not None
+    binding = skill.current_version.assets.get(key="vendor-master")
+    assert binding.checks["key_columns"] == ["code"]
+    assert binding.validation["edited"] is True
+    [summary] = skill_changes(run)
+    assert summary["state"] == "published"
+    assert summary["asset_diffs"] == {"vendor-master": {"rows_added": 0, "rows_removed": 0, "rows_changed": 1}}
+    [shown] = RunSerializer(run).data["skill_changes"]
+    assert shown["asset_diffs"] == [{"key": "vendor-master", "rows_added": 0, "rows_removed": 0, "rows_changed": 1}]
 
 
 @pytest.mark.django_db

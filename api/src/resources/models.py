@@ -94,6 +94,11 @@ class ResourceVersion(models.Model):
     def sha256(self) -> str:
         return self.blob.sha256
 
+    def read(self) -> bytes:
+        """原本のbytes（検証と差分に使う。大きさはアップロードの上限まで）"""
+        with self.blob.open() as src:
+            return src.read()
+
 
 auditlog.register(Resource, exclude_fields=["updated"])
 auditlog.register(ResourceVersion)

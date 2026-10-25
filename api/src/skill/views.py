@@ -6,7 +6,7 @@ from rest_framework import mixins, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.generics import get_object_or_404
-from rest_framework.parsers import MultiPartParser
+from rest_framework.parsers import JSONParser, MultiPartParser
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet, ReadOnlyModelViewSet
@@ -34,6 +34,7 @@ from .serializers import (
     ResourceVersionSerializer,
     SkillChangeSerializer,
     SkillCreateSerializer,
+    SkillDraftAssetChecksSerializer,
     SkillDraftAssetSerializer,
     SkillDraftAssetUpdateSerializer,
     SkillDraftOpenSerializer,
@@ -318,6 +319,18 @@ class AppSkillDraftAssetViewSet(
 
     def perform_update(self, serializer):
         serializer.save(actor=self.request.user)
+
+    @extend_schema(
+        description="資料の検証の条件（CSVの必須列・キー列・型等）を変え、検証し直す（公開の権限が要る）",
+        request=SkillDraftAssetChecksSerializer,
+        responses={200: SkillDraftAssetSerializer, 409: CONFLICT},
+    )
+    @action(detail=True, methods=["put"], parser_classes=[JSONParser], serializer_class=SkillDraftAssetChecksSerializer)
+    def checks(self, request, *args, **kwargs):
+        serializer = self.get_serializer(instance=self.get_object(), data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(actor=request.user)
+        return Response(serializer.data)
 
     @extend_schema(
         description="資料をDraftから外す（原本は残る）",

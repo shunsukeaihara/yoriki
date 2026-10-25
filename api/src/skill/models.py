@@ -9,6 +9,8 @@ DraftはSkillごとに1つで、revisionで同時の編集を検出し、公開�
 Skillの本文は権限の根拠にしない。実行するときのToolの許可は、利用者・Skill・Runの範囲をサーバーで照合して決める。
 """
 
+import hashlib
+import io
 from collections.abc import Callable
 from enum import IntEnum
 from typing import IO, Any
@@ -20,6 +22,8 @@ from django.db import models, transaction
 from django.db.models import Max, Q
 from django.utils.translation import gettext_lazy as _
 
+from artifact.models import clean_filename
+from resources import formats
 from resources.models import Resource, ResourceVersion
 from user.models import Department, DepartmentRole
 from utils.fields import NanoidField
@@ -348,10 +352,18 @@ class Skill(models.Model):
                 role=a.role,
                 description=a.description,
                 resource_version=a.resource_version,
+                checks=a.checks,
+                validation=a.validation,
             )
             for a in draft.assets.all()
         )
         summary = summarize_changes(previous, draft.content(), _asset_map(draft.assets.all()))
+        # 置き換えた資料の差分の数（CSVの変更行数、MDの行数、PPTXのスライド数。design.md §11.8）
+        summary["asset_diffs"] = {
+            a.key: counts
+            for a in draft.assets.all()
+            if a.key in summary["assets_replaced"] and (counts := formats.diff_counts(a.validation))
+        }
         current._make_current(version)
         SkillChange.objects.create(
             skill=current,
@@ -416,6 +428,9 @@ class Skill(models.Model):
                 role=a.role,
                 description=a.description,
                 resource_version=a.resource_version,
+                checks=a.checks,
+                # 差分は元の版の公開時のもので、この版の前の版とのものではないので写さない
+                validation=_without_diff(a.validation),
             )
             for a in source.assets.all()
         )
@@ -510,6 +525,9 @@ class SkillAssetBinding(models.Model):
     resource_version = models.ForeignKey(
         ResourceVersion, on_delete=models.PROTECT, related_name="+", verbose_name=_("資料の版")
     )
+    # 検証の条件（CSVの必須列・キー列・型等。formats.normalize_checks()）と、公開したときの検証の結果
+    checks = models.JSONField(_("検証の条件"), default=dict, blank=True)
+    validation = models.JSONField(_("検証の結果"), default=dict, blank=True)
 
     class Meta:
         verbose_name = _("Skillの版の資料")
@@ -574,8 +592,12 @@ class SkillDraft(SkillContent):
                     role=a.role,
                     description=a.description,
                     resource_version_id=a.resource_version_id,
+                    checks=formats.normalize_checks(a.checks),
+                    # 検証する前に公開した資料は、ここで検証する
+                    validation=_without_diff(a.validation)
+                    or formats.inspect(a.resource_version.read(), a.resource_version.name, checks=a.checks),
                 )
-                for a in base.assets.all()
+                for a in base.assets.select_related("resource_version__blob")
             )
         return draft
 
@@ -614,17 +636,47 @@ class SkillDraft(SkillContent):
         filename: str,
         actor,
         expected_revision: int,
+        checks: dict[str, Any] | None = None,
+        edited: bool = False,
     ) -> "SkillDraftAsset":
-        """アップロードしたファイルを新しい資料としてDraftに加える。原本のbytesをそのまま保存する"""
+        """アップロードしたファイルを新しい資料としてDraftに加える。原本のbytesをそのまま保存し、検証する。
+
+        edited は、エージェントが元の資料を編集して作った候補か（formats.inspect()）
+        """
         current = self._lock(expected_revision)
         if current.assets.filter(key=key).exists():
             raise InvalidDraft(_("同じkeyの資料があります"))
-        resource_version = Resource.create_from_upload(src, filename, actor=actor)
+        data = src.read()
+        resource_version = Resource.create_from_upload(io.BytesIO(data), filename, actor=actor)
+        checks = formats.normalize_checks(checks)
         asset = SkillDraftAsset.objects.create(
-            draft=current, key=key, role=role, description=description, resource_version=resource_version
+            draft=current,
+            key=key,
+            role=role,
+            description=description,
+            resource_version=resource_version,
+            checks=checks,
+            validation=current._inspect(key, resource_version, data, checks, edited),
         )
         self._bump(current, actor, [])
         return asset
+
+    def _base_asset(self, key: str) -> "SkillAssetBinding | None":
+        if self.base_version_id is None:
+            return None
+        return (
+            SkillAssetBinding.objects.select_related("resource_version__blob")
+            .filter(version_id=self.base_version_id, key=key)
+            .first()
+        )
+
+    def _inspect(
+        self, key: str, resource_version: ResourceVersion, data: bytes, checks: dict[str, Any], edited: bool
+    ) -> dict[str, Any]:
+        """資料を検証し、Draftの元の版の同じkeyの資料との差分を取る"""
+        base = self._base_asset(key)
+        before = (base.resource_version.read(), base.resource_version.name) if base else None
+        return formats.inspect(data, resource_version.name, checks=checks, before=before, edited=edited)
 
     @transaction.atomic
     def change_asset(
@@ -637,11 +689,14 @@ class SkillDraft(SkillContent):
         description: str | None = None,
         src: IO[bytes] | None = None,
         filename: str = "",
+        checks: dict[str, Any] | None = None,
+        edited: bool = False,
     ) -> "SkillDraftAsset":
-        """資料の用途・説明を変える。ファイルを送れば、同じ資料の新しい版として置き換える（keyと資料のIDは保つ）"""
+        """資料の用途・説明・検証の条件を変える。ファイルを送れば、同じ資料の新しい版として置き換える（keyと資料のIDは
+        保つ。中身とファイル名が今の版と同じなら版を増やさない）。原本か検証の条件が変われば検証し直す"""
         current = self._lock(expected_revision)
         locked = (
-            SkillDraftAsset.objects.select_related("resource_version__resource")
+            SkillDraftAsset.objects.select_related("resource_version__resource", "resource_version__blob")
             .filter(pk=asset.pk, draft=current)
             .first()
         )
@@ -651,10 +706,27 @@ class SkillDraft(SkillContent):
             locked.role = role
         if description is not None:
             locked.description = description
+        data: bytes | None = None
         if src is not None:
-            locked.resource_version = locked.resource_version.resource.add_version(
-                src, filename or locked.resource_version.name, actor=actor
+            data = src.read()
+            name = clean_filename(filename or locked.resource_version.name)
+            same = (
+                name == locked.resource_version.name
+                and hashlib.sha256(data).hexdigest() == locked.resource_version.sha256
             )
+            if not same:
+                locked.resource_version = locked.resource_version.resource.add_version(
+                    io.BytesIO(data), name, actor=actor
+                )
+        else:
+            edited = bool(locked.validation.get("edited"))
+        if checks is not None and (checks := formats.normalize_checks(checks)) != formats.normalize_checks(
+            locked.checks
+        ):
+            locked.checks = checks
+            data = data if data is not None else locked.resource_version.read()
+        if data is not None:
+            locked.validation = current._inspect(locked.key, locked.resource_version, data, locked.checks, edited)
         locked.save()
         self._bump(current, actor, [])
         return locked
@@ -675,6 +747,22 @@ class SkillDraft(SkillContent):
             raise InvalidDraft(_("説明を入力してください（エージェントと社員がSkillを選ぶのに使います）"))
         if not self.instructions.strip():
             raise InvalidDraft(_("手順を入力してください"))
+        base = {a.key: a for a in self.base_version.assets.all()} if self.base_version else {}
+        for asset in self.assets.all():
+            errors = asset.validation.get("errors")
+            if not errors:
+                continue
+            # 元の版から原本も条件も変えていない資料は、公開済みのものなので止めない
+            prior = base.get(asset.key)
+            if (
+                prior
+                and prior.resource_version_id == asset.resource_version_id
+                and formats.normalize_checks(prior.checks) == formats.normalize_checks(asset.checks)
+            ):
+                continue
+            raise InvalidDraft(
+                _("資料「%(key)s」に検証の誤りがあります：%(errors)s") % {"key": asset.key, "errors": "／".join(errors)}
+            )
 
 
 class SkillDraftAsset(models.Model):
@@ -687,6 +775,10 @@ class SkillDraftAsset(models.Model):
     resource_version = models.ForeignKey(
         ResourceVersion, on_delete=models.PROTECT, related_name="+", verbose_name=_("資料の版")
     )
+    # 検証の条件は公開の役割だけが変える。検証の結果（formats.inspect()）は、原本か条件を変えるたびに取り直す。
+    # 差分は、Draftの元の版の同じkeyの資料とのもの
+    checks = models.JSONField(_("検証の条件"), default=dict, blank=True)
+    validation = models.JSONField(_("検証の結果"), default=dict, blank=True)
 
     class Meta:
         verbose_name = _("SkillのDraftの資料")
@@ -740,12 +832,16 @@ class SkillChange(models.Model):
         return f"{self.skill} {self.get_kind_display()}"
 
 
-def _asset_map(assets) -> dict[str, tuple[int, str, int]]:
-    return {a.key: (a.role, a.description, a.resource_version_id) for a in assets}
+def _asset_map(assets) -> dict[str, tuple[int, str, int, dict[str, Any]]]:
+    return {a.key: (a.role, a.description, a.resource_version_id, formats.normalize_checks(a.checks)) for a in assets}
+
+
+def _without_diff(validation: dict[str, Any]) -> dict[str, Any]:
+    return {**validation, "diff": None} if validation else {}
 
 
 def summarize_changes(
-    before: SkillVersion | None, content: dict[str, Any], assets: dict[str, tuple[int, str, int]]
+    before: SkillVersion | None, content: dict[str, Any], assets: dict[str, tuple[int, str, int, dict[str, Any]]]
 ) -> dict[str, Any]:
     """前の版から変わった項目と資料のkey（SkillChangeの記録と画面の表示に使う）"""
     # 最初の版は、空のDraftからの変更として数える（空のToolや未指定のSchemaを変わった項目にしない）

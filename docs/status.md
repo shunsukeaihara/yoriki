@@ -102,8 +102,6 @@
 
 ## 4 次の作業
 
-**進行中**：#37（会話からのSkill更新。ブランチ `feature/skill-edit-runs`）はPRを作成済みで、CIの結果とマージの指示を待っている。再開したら `gh pr checks 37` でCIを確かめ、失敗していれば直してpushする。マージは利用者の指示があったときだけ行い（squash merge、`[skip ci]` は development.md §4.1）、マージの後は手元とGitHubのブランチを消す。マージの前に本書を変えるときは、このPRの中でコミットする。
-
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。上から順に着手する（利用者から別の指示がなければ、1から始める）。提案する順番：
 
 1. **Skill（`skill`、`resources`）**：利用者と合意したPRの分け方は「① 土台（backend。済み） → ② 管理画面（frontend） → ③ 会話での利用 → ④ 会話からのSkill更新 → ⑤ 評価とCSV・PPTXの検証・編集」。④まで済み。次は⑤：Draftの評価（SkillEvaluation、`test_skill_draft`。評価のRunにはSkill公開のToolを出さない）と、資料の形式ごとの検証・編集（MD・CSV・PPTX。design.md §3.7・§3.9・§12）。

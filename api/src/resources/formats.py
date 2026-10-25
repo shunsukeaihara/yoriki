@@ -756,12 +756,20 @@ def _check_edited_deck(result: _Result, before: dict[str, Any], after: dict[str,
         result.error(_("スライドのレイアウトが変わっています。レイアウトの変更は編集では扱えません"))
     old = {s["id"]: s for s in before["slides"]}
     broken = []
+    relaid = []
     for index, slide in enumerate(after["slides"], 1):
         previous = old.get(slide["id"])
         if previous is None:
             continue
+        if previous["layout"] != slide["layout"] or previous["placeholders"] != slide["placeholders"]:
+            relaid.append(str(index))
         if previous["fingerprints"] != slide["fingerprints"]:
             broken.append(str(index))
+    if relaid:
+        result.error(
+            _("%(slides)s枚目のスライドのレイアウトが変わっています。レイアウトの変更は編集では扱えません")
+            % {"slides": _examples(relaid)}
+        )
     if broken:
         result.error(
             _(

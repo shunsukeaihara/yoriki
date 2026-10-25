@@ -4,6 +4,7 @@ import io
 import zipfile
 
 from pptx import Presentation
+from pptx.opc.constants import RELATIONSHIP_TYPE as RT
 from pptx.util import Inches
 
 from resources import formats
@@ -247,6 +248,22 @@ class TestPptx:
         presentation.save(out)
         result = formats.inspect(out.getvalue(), "deck.pptx", before=(before, "deck.pptx"), edited=True)
         assert any("レイアウトが変わっています" in e for e in result["errors"])
+
+    def test_edited_deck_must_keep_slide_layouts(self):
+        before = _deck("表紙", "概要")
+        presentation = Presentation(io.BytesIO(before))
+        presentation.slides[1].part.relate_to(presentation.slide_layouts[5].part, RT.SLIDE_LAYOUT)
+        slide = presentation.slides[1]
+        rel = next(
+            r
+            for r in slide.part.rels.values()
+            if r.reltype == RT.SLIDE_LAYOUT and r.target_part is not presentation.slide_layouts[5].part
+        )
+        slide.part.drop_rel(rel.rId)
+        out = io.BytesIO()
+        presentation.save(out)
+        result = formats.inspect(out.getvalue(), "deck.pptx", before=(before, "deck.pptx"), edited=True)
+        assert any("2枚目のスライドのレイアウトが変わっています" in e for e in result["errors"])
 
     def test_broken_and_huge_files(self, monkeypatch):
         assert formats.inspect(b"not a zip", "deck.pptx")["errors"]

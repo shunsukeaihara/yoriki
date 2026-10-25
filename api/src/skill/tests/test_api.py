@@ -604,6 +604,13 @@ class TestAssetValidation:
         change = api_client.get(f"{SKILLS}{skill_id}/changes/").json()["results"][0]
         assert change["asset_diffs"][0]["rows_removed"] == 1
 
+        # 資料の違う版への切戻しも、切戻しの前の版との差分の数を残す
+        res = api_client.post(f"{SKILLS}{skill_id}/rollback/", {"number": 2, "expected_version": 3}, format="json")
+        assert res.status_code == 201, res.json()
+        assert res.json()["assets"][0]["validation"]["diff"]["rows_added"] == 1
+        change = api_client.get(f"{SKILLS}{skill_id}/changes/").json()["results"][0]
+        assert change["asset_diffs"] == [{"key": "vendors", "rows_added": 1, "rows_removed": 0, "rows_changed": 1}]
+
     @pytest.mark.django_db
     def test_editor_cannot_change_checks(self, api_client, app_user, other_user):
         department = DepartmentFactory.create()

@@ -421,6 +421,8 @@ class Skill(models.Model):
             rolled_back_from=source,
             **source.content(),
         )
+        before = {a.key: a for a in previous.assets.select_related("resource_version__blob")} if previous else {}
+        validations = {a.key: _rolled_back_validation(a, before.get(a.key)) for a in source.assets.all()}
         SkillAssetBinding.objects.bulk_create(
             SkillAssetBinding(
                 version=version,
@@ -429,12 +431,16 @@ class Skill(models.Model):
                 description=a.description,
                 resource_version=a.resource_version,
                 checks=a.checks,
-                # 差分は元の版の公開時のもので、この版の前の版とのものではないので写さない
-                validation=_without_diff(a.validation),
+                validation=validations[a.key],
             )
             for a in source.assets.all()
         )
         summary = summarize_changes(previous, source.content(), _asset_map(source.assets.all()))
+        summary["asset_diffs"] = {
+            key: counts
+            for key in summary["assets_replaced"]
+            if (counts := formats.diff_counts(validations.get(key) or {}))
+        }
         current._make_current(version)
         SkillChange.objects.create(
             skill=current,
@@ -851,6 +857,20 @@ class SkillChange(models.Model):
 
 def _asset_map(assets) -> dict[str, tuple[int, str, int, dict[str, Any]]]:
     return {a.key: (a.role, a.description, a.resource_version_id, formats.normalize_checks(a.checks)) for a in assets}
+
+
+def _rolled_back_validation(asset: "SkillAssetBinding", before: "SkillAssetBinding | None") -> dict[str, Any]:
+    """切戻しの版の資料の検証の結果。切戻しの前の版と原本が違えば、その版と比べて差分を取り直す（元の版の差分は、
+    元の版の前の版とのものなので写さない）"""
+    if before is None or before.resource_version_id == asset.resource_version_id:
+        return _without_diff(asset.validation)
+    resource = asset.resource_version
+    return formats.inspect(
+        resource.read(),
+        resource.name,
+        checks=asset.checks,
+        before=(before.resource_version.read(), before.resource_version.name),
+    )
 
 
 def _without_diff(validation: dict[str, Any]) -> dict[str, Any]:

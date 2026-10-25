@@ -311,6 +311,16 @@ def test_required_case_must_pass_with_the_current_draft_before_publishing(api_cl
     evaluation = start_evaluation(skill, cases=[required], actor=app_user, model_version=model.current_version)
     _finish(evaluation, monkeypatch)
 
+    # 後の評価で失敗したら、前の通過では満たさない
+    evaluation = start_evaluation(skill, cases=[required], actor=app_user, model_version=model.current_version)
+    for run in (r for result in evaluation.results.all() for r in (result.base_run, result.draft_run)):
+        execute(run, FakeAdapter([reply("できました"), reply("できました")]))
+    progress_evaluation(evaluation.pk)
+    assert [c.pk for c in draft.unevaluated_cases()] == [required.pk]
+    evaluation = start_evaluation(skill, cases=[required], actor=app_user, model_version=model.current_version)
+    _finish(evaluation, monkeypatch)
+    assert draft.unevaluated_cases() == []
+
     # Draftを変えたら（revisionが進んだら）、評価し直すまで満たさない
     draft.revise(actor=app_user, expected_revision=1, instructions="1. さらに新しい手順")
     res = api_client.post(f"{SKILLS}{skill.uid}/publish/", {**body, "revision": 2}, format="json")

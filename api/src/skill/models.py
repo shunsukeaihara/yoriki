@@ -798,16 +798,20 @@ class SkillDraft(SkillContent):
         required = list(SkillEvaluationCase.objects.filter(skill_id=self.skill_id, required=True).order_by("name"))
         if not required:
             return []
-        passed = SkillEvaluationResult.objects.filter(
+        # ケースごとに、今の中身で試した直近の結果で決める（後で失敗したら、前の通過で公開させない）
+        results = SkillEvaluationResult.objects.filter(
             evaluation__skill_id=self.skill_id,
             evaluation__draft_uid=self.uid,
             evaluation__draft_revision=self.revision,
             evaluation__status=EvaluationStatus.FINISHED,
             case__in=required,
-            passed=True,
-        ).values_list("case_id", "case_updated")
-        satisfied = {(case_id, updated) for case_id, updated in passed}
-        return [c for c in required if (c.pk, c.updated) not in satisfied]
+        ).order_by("-evaluation__created", "-evaluation_id")
+        latest: dict[int, bool] = {}
+        updated = {c.pk: c.updated for c in required}
+        for case_id, case_updated, passed in results.values_list("case_id", "case_updated", "passed"):
+            if case_updated == updated[case_id]:
+                latest.setdefault(case_id, bool(passed))
+        return [c for c in required if not latest.get(c.pk)]
 
     def check_evaluated(self) -> None:
         if cases := self.unevaluated_cases():

@@ -59,6 +59,7 @@ MAX_ATTEMPTS = 3
 class RunTrigger(models.IntegerChoices):
     CONVERSATION = 1, _("会話")
     TASK = 2, _("タスク")
+    EVALUATION = 3, _("Skillの評価")
 
 
 class RunKind(models.IntegerChoices):
@@ -66,6 +67,7 @@ class RunKind(models.IntegerChoices):
 
     WORK = 1, _("業務")
     SKILL_EDIT = 2, _("Skillの編集")
+    EVALUATION = 3, _("Draftの評価")
 
 
 class RunEndReason(models.IntegerChoices):
@@ -199,6 +201,11 @@ class Run(models.Model):
                 run=self, kind=InstructionKind.CURRENT, state=InstructionState.RECEIVED
             ).update(kind=InstructionKind.NEXT, run=None, updated=timezone.now())
             start_next_request(self.conversation)
+            if self.kind in (RunKind.EVALUATION, RunKind.SKILL_EDIT):
+                # 評価のRunが終わったら評価を進め、編集のRunが終わったら待っている評価を止める（design.md §3.7.1）
+                from conversation.evaluation import on_run_finished  # noqa: PLC0415
+
+                on_run_finished(self)
         return event
 
     @transaction.atomic
@@ -362,6 +369,8 @@ class ClarificationKind(models.IntegerChoices):
     QUESTION = 1, _("エージェントからの質問")
     MODEL_SWITCH = 2, _("モデルの切り替えの確認")
     SKILL_EDIT = 3, _("Skillの編集の確認")
+    # test_skill_draft で評価の完了を待つ。利用者が答えるものではなく、評価が終わるとサーバーが結果を返す
+    EVALUATION = 4, _("Draftの評価")
 
 
 class ClarificationStatus(models.IntegerChoices):
@@ -433,6 +442,14 @@ class ClarificationRequest(models.Model):
             ToolInvocation.objects.filter(run=run, call_id=self.tool_call_id).update(
                 status=ToolStatus.SUCCEEDED, ended=timezone.now()
             )
+        elif self.kind == ClarificationKind.EVALUATION:
+            # 評価が終わった。結果を test_skill_draft の呼出しへの結果として記録する（harness.md §10.9）
+            from harness.tools.test_skill_draft import answer_result as evaluation_result  # noqa: PLC0415
+
+            RunEvent.record(run, RunEventKind.TOOL_RESULT, evaluation_result(self))
+            ToolInvocation.objects.filter(run=run, call_id=self.tool_call_id).update(
+                status=ToolStatus.SUCCEEDED, ended=timezone.now()
+            )
         elif self.kind == ClarificationKind.SKILL_EDIT:
             # 承認されたら、Skillの編集のRunを次の依頼として受け付ける（harness.md §10.9）
             from conversation.dispatch import accept_skill_edit  # noqa: PLC0415  conversationがrunをimportするため
@@ -447,7 +464,12 @@ class ClarificationRequest(models.Model):
             from harness.recovery import apply_model_switch_answer  # noqa: PLC0415
 
             apply_model_switch_answer(run, self, actor)
-        run.set_status(RunStatus.QUEUED, comment=str(_("確認への回答を受け付けました")), actor=actor)
+        comment = (
+            str(_("Draftの評価が終わりました"))
+            if self.kind == ClarificationKind.EVALUATION
+            else str(_("確認への回答を受け付けました"))
+        )
+        run.set_status(RunStatus.QUEUED, comment=str(comment), actor=actor)
         enqueue_run(run)
 
 

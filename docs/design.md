@@ -2,7 +2,7 @@
 
 作成日：2026年10月2日  
 更新日：2026年10月25日  
-版：0.29 設計案  
+版：0.30 設計案  
 対象：サービス企画、開発、運用担当
 
 プロダクト名はYoriki（よりき）とする（0.16でYuhitsuから変更）。同名の製品・サービスがあることは承知の上で、検索での見つけやすさは重視しない。名称の商標・ドメイン等の確認は本設計の対象外とする。
@@ -182,7 +182,7 @@ Skill編集はDjango側の管理Toolとして提供する。エージェント�
 | list_skills / get_skill | 利用者が閲覧できるSkillと現在版を取得 |
 | create_skill_draft | 新規Skillまたは既存Skillの指定版からDraftを作る |
 | update_skill_draft | Draftの本文等を期待revision付きで変更 |
-| test_skill_draft | Draftと既存版を指定した入力で試行する |
+| test_skill_draft | Draftと公開中の版を評価ケースで試し、比べる（§3.7.1） |
 | publish_skill_draft | Skill Versionを作り、権限があれば公開範囲の最新の公開版にする |
 | rollback_skill | 公開範囲の最新の公開版を、選択した過去の版へ戻す |
 
@@ -229,6 +229,21 @@ SkillChangeには依頼ユーザー、Run ID、元の版、変更理由、差分
 評価は、Schema等の機械的検証と、業務例に対する旧版・新版の比較を使う。必須ケースはscopeの設定で定め、単純な文言修正まで一律に重い試験を要求しない。エージェントによる評価だけで正しさが保証されるとは扱わない。共有Skillに個別顧客の添付内容を不用意に転記しないよう、例示は公開先に適した内容へ一般化する。
 
 Draftの試行は独立した評価Runで行い、利用量を記録する。評価対象のDraftにはSkill公開Toolを渡さず、Skill編集の再帰実行を防ぐ。Skillを元に戻す場合は、旧版の本文とファイル参照を新しいDraftの基にして公開する（公開範囲の最新の公開版を旧版へ戻す操作も監査する）。公開履歴は削除しない。
+
+#### 3.7.1 Draftの評価
+
+**評価ケース（SkillEvaluationCase）**：Skillごとに持ち、版をまたいで使う（1つのSkillに20件まで）。名前、依頼の文、添付（資料と同じResourceVersionで原本を持つ）、確認する観点（文。LLMの判定に使う）、期待する業務結果（任意。`submit_result` の値と、書いた項目だけを一致で照合する）、「公開の前に必須」の印を持つ。作成・変更・削除は編集の役割以上。必須の印を付ける・外すこと、必須のケースを変更・削除することは公開の役割だけにする（編集の役割で公開の条件を緩められないように）。個人のSkillには必須の印を付けない。
+
+**評価（SkillEvaluation）**：画面の「Draftを評価」か、Skillの編集のRunの `test_skill_draft`（harness.md §10.9）で始める。選んだケース（1回に10件まで）ごとに、公開中の版とDraftで1つずつ評価のRunを動かし、結果を並べて比べる（最初の公開の前はDraftだけ）。
+
+- 始めた時点のDraftの中身（本文・Tool・必要な能力・Schema・資料の版）を評価に写して固定する。評価中にDraftが変わっても混ざらない。後でDraftが変わったら、画面には「前のrevisionの評価」と示す。
+- 使うモデルは、画面では評価のたびに選び、`test_skill_draft` では編集のRunのモデルを使う。モデルがDraftの必要な能力を持たなければ始めない。停止中のSkillは評価しない。同じSkillで評価中のものがあれば、新しい評価は始めない。
+- 評価のRun（`Run.kind` が評価、起動方法も評価）は、答える人がいないRunとして動く（`ask_user` を出さず、確認が要る場面では仮定を置いて進め、最後の応答にその仮定を書く）。Skillは `/` で指定したときと同じく、Toolをその `tools` と `submit_result` に限り、資料は同じ `skills/<Skill>/<key>/` に置く。Skillの読込み（`skill`）、編集の提案（`request_skill_edit`）、Skill管理のToolは出さない。Runごとに一覧に出さない会話を作り、ケースの添付を `/workspace/input` に置く。利用量は依頼した人のRunとして記録する。
+- **機械的な検証**：Runが完了したか、業務結果のSchemaがあれば `submit_result` で確定したか、期待する業務結果と一致したか。Draftの側がすべて通ればそのケースは「通過」。
+- **LLMの判定**：両方のRunが終わったら、評価のモデルに、依頼・確認する観点・両方の最後の応答と業務結果を渡し、Draftが「良くなった・同じ・悪くなった」と理由を返させる（Toolの呼出しで受け取る。Toolに対応しないモデルでは判定しない）。判定の利用量はDraftの側のRunに記録する。判定は参考として表示し、公開の条件には使わない（エージェントによる評価だけで正しさが保証されるとは扱わない）。
+- 評価は停止できる（動いている評価のRunを止める）。
+
+**公開の条件**：部門・全社のSkillで必須のケースがあれば、今のDraftのrevisionで、必須のケースそれぞれの直近の（終わった）評価の結果が「通過」でなければ公開できない（画面・`publish_skill_draft` とも）。必須のケースは複数の評価に分けて試してよい（1回の評価のケースの数に上限があるため）が、後の評価で通過しなければ、前の通過では満たさない。評価の後に変えた必須のケースは、評価し直すまで満たさない。必須のケースを作らなければ、文言の修正は評価なしで公開できる。切戻しには評価を求めない。
 
 ### 3.8 Skillごとの参照ファイル
 
@@ -817,7 +832,8 @@ Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプ�
 | Resource / ResourceVersion | 論理ファイルID、不変の原本Artifact参照、hash、形式、サイズ、検証結果、保持条件 |
 | SkillAssetBinding | Skill Version、asset ID、表示名、用途、Resource Version、期待Schema、参照方法 |
 | SkillAssetDraftChange | Draft、対象asset、元の版、候補Artifactまたは添付ID、差分、検証状態 |
-| SkillChange / SkillEvaluation | 依頼元、編集Run、本文・ファイルの差分、理由、評価結果、公開結果、operation key |
+| SkillChange | 依頼元、編集Run、本文・ファイルの差分、理由、公開結果、operation key |
+| SkillEvaluationCase / SkillEvaluation | 評価ケース（依頼の文、添付、確認する観点、期待する業務結果、公開の前に必須か）。評価は、写したDraftの中身とrevision、比べた公開中の版、モデル、依頼者・編集Run、ケースごとの評価Run・機械的な検証・LLMの判定（§3.7.1） |
 | RuntimeProfile / RuntimeProfileVersion | 名前・説明、有効か、既定か（1つだけ）。版はimage（repositoryとindex＝manifest listのdigest。Workerは自分のplatformのmanifestを解決し、そのdigestをAttemptに記録する）、契約番号、対応platform、Python版、資源上限（メモリ、CPU、pids、tmpfsの大きさ、コマンド・ジョブの時間）。中身を変えると新しい版を作る（§7.3） |
 | EnvironmentRevision / PackageBundle | 完全な依存lock、wheelのhash、対応ABIとplatform、保管参照、元revision |
 | TaskDefinition / TaskDefinitionRevision | フローの起動・対話・結果通知Binding、使うSkill、モデル設定とeffort（固定か自動か）、許可したConnectorの操作、プロンプト、公開版 |
@@ -1750,3 +1766,4 @@ Sandboxイメージの定義は本体と同じリポジトリの `sandbox/` で�
 | 0.27 | 2026年10月23日 | Skillの部門の範囲を、役割（Group）とは別の部門（Department）と所属（部門の中の役割：利用・編集・公開）で表すことにした。個人・部門・全社の範囲ごとに、使える人、Draftを変更できる人、公開・切戻し・Toolの変更・緊急停止ができる人を定めた。Skillの公開範囲は作成時に決めて変えないこと、DraftはSkillごとに1つとし公開で閉じることを決めた（§3.6、§3.7） |
 | 0.28 | 2026年10月25日 | 会話でSkillを使う形を決めた。エージェントに見せるSkillの一覧はRunを始めるときに決めて固定し、実行中にSkillを指定したメッセージは次の依頼として受け付ける。途中で読み込んだSkillのためにToolの一覧は変えないので、業務結果を確定させる（`submit_result`）のは、`/` かTask DefinitionでSkillを指定したRunだけにする（§11.4、harness.md §7.5・§10.1） |
 | 0.29 | 2026年10月25日 | Skillの編集のRun（関連Run）の始め方を決めた。入力欄の `/` で「編集」「新しいSkillを作る」を選んで送るか、業務のRunでエージェントが提案した編集を利用者が確認で承認したときだけ始まる。編集のRunは対象のSkillを1つだけ持ってManifestに固定し、Skill管理のToolはそのSkillにだけ働く（§11.6、harness.md §10.9） |
+| 0.30 | 2026年10月25日 | Draftの評価の形を決めた。評価ケースをSkillごとに持ち、公開中の版とDraftを独立した評価のRunで動かして、機械的な検証（完了・業務結果・期待値）とLLMの判定（参考）で比べる。部門・全社のSkillでは、公開の役割が必須の印を付けたケースが、今のDraftで通過するまで公開できない（§3.7.1、harness.md §10.9） |

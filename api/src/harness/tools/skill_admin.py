@@ -17,7 +17,7 @@ from rest_framework import exceptions as drf_exceptions
 
 from resources import formats
 from run.models import ToolInvocation
-from skill.errors import DraftExists, InvalidDraft, VersionConflict
+from skill.errors import DraftExists, EvaluationRequired, InvalidDraft, VersionConflict
 from skill.models import (
     Skill,
     SkillAccess,
@@ -727,6 +727,12 @@ def _publish(skill: Skill, arguments: dict[str, Any], context: ToolContext, key:
             "user to review the draft on the skill's page."
             if stale
             else DRAFT_CHANGED.format(revision=draft.revision)
+        )
+    except EvaluationRequired as exc:
+        names = ", ".join(f'"{name}"' for name in exc.cases)
+        return ToolResult.error(
+            f"The draft cannot be published: the required test cases {names} have not passed with the current draft. "
+            "Test it with test_skill_draft, and fix the draft if a case fails."
         )
     except InvalidDraft as exc:
         return ToolResult.error(f"The draft cannot be published: {exc} Fix it with update_skill_draft.")

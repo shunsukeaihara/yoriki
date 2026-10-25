@@ -11,7 +11,7 @@ from run.models import CANCELLABLE_STATUSES, Run
 from utils.permissions import AppUser
 from utils.views import SoftDeleteMixin
 
-from .models import Conversation, ConversationMessage
+from .models import Conversation, ConversationMessage, ConversationPurpose
 from .serializers import ConversationSerializer, MessageSerializer
 
 
@@ -44,7 +44,7 @@ class AppConversationViewSet(SoftDeleteMixin, ModelViewSet):
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]  # PUTは使わない
 
     def get_queryset(self):
-        return super().get_queryset().filter(owner=self.request.user)
+        return super().get_queryset().filter(owner=self.request.user, purpose=ConversationPurpose.CHAT)
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)

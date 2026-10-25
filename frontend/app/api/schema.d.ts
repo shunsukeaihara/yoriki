@@ -479,6 +479,96 @@ export interface paths {
         patch: operations["app_v1_skills_drafts_partial_update"];
         trace?: never;
     };
+    "/api/app/v1/skills/{skill}/evaluation_cases/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Skillの評価ケース（design.md §3.7.1） */
+        get: operations["app_v1_skills_evaluation_cases_list"];
+        put?: never;
+        /** @description Skillの評価ケース（design.md §3.7.1） */
+        post: operations["app_v1_skills_evaluation_cases_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/skills/{skill}/evaluation_cases/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Skillの評価ケース（design.md §3.7.1） */
+        get: operations["app_v1_skills_evaluation_cases_retrieve"];
+        /** @description Skillの評価ケース（design.md §3.7.1） */
+        put: operations["app_v1_skills_evaluation_cases_update"];
+        post?: never;
+        /** @description Skillの評価ケース（design.md §3.7.1） */
+        delete: operations["app_v1_skills_evaluation_cases_destroy"];
+        options?: never;
+        head?: never;
+        /** @description Skillの評価ケース（design.md §3.7.1） */
+        patch: operations["app_v1_skills_evaluation_cases_partial_update"];
+        trace?: never;
+    };
+    "/api/app/v1/skills/{skill}/evaluations/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description SkillのDraftの評価（design.md §3.7.1） */
+        get: operations["app_v1_skills_evaluations_list"];
+        put?: never;
+        /** @description 今のDraftを、選んだケースで評価し始める */
+        post: operations["app_v1_skills_evaluations_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/skills/{skill}/evaluations/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description SkillのDraftの評価（design.md §3.7.1） */
+        get: operations["app_v1_skills_evaluations_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/skills/{skill}/evaluations/{uid}/cancel/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 評価を止める（動いている評価のRunを止める） */
+        post: operations["app_v1_skills_evaluations_cancel_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/app/v1/skills/{skill}/files/{uid}/": {
         parameters: {
             query?: never;
@@ -1342,12 +1432,18 @@ export interface components {
             /** @default  */
             comment: string;
         };
-        /** @description 確認の対象。Skillの編集の確認で、対象のSkill（新しいSkillならskillが空）と変更の要約 */
+        /**
+         * @description 確認の対象。Skillの編集の確認で、対象のSkill（新しいSkillならskillが空）と変更の要約。Draftの評価では、
+         *     評価のIDと対象のSkill・Draftのrevision・ケースの数
+         */
         ClarificationContext: {
             readonly skill: string;
             readonly name: string;
             readonly scope: string;
             readonly summary: string;
+            readonly evaluation: string;
+            readonly revision: number;
+            readonly cases: number;
         };
         /** @description エージェントからの確認（回答待ち） */
         ClarificationEvent: {
@@ -1367,9 +1463,10 @@ export interface components {
          * @description * `1` - エージェントからの質問
          *     * `2` - モデルの切り替えの確認
          *     * `3` - Skillの編集の確認
+         *     * `4` - Draftの評価
          * @enum {integer}
          */
-        ClarificationKindEnum: 1 | 2 | 3;
+        ClarificationKindEnum: 1 | 2 | 3 | 4;
         ClarificationOption: {
             readonly label: string;
             readonly description: string;
@@ -1527,6 +1624,52 @@ export interface components {
             before: number;
             after: number;
         };
+        EvaluationCaseData: {
+            readonly prompt: string;
+            readonly criteria: string;
+            readonly expected_result: unknown;
+            readonly files: {
+                [key: string]: unknown;
+            }[];
+        };
+        /** @description 機械的な検証（conversation/evaluation.check_run()） */
+        EvaluationCheck: {
+            readonly completed: boolean;
+            readonly status_display: string;
+            readonly error: string;
+            readonly result_required: boolean;
+            readonly result_submitted: boolean;
+            readonly expected_checked: boolean;
+            readonly mismatches: unknown[];
+            readonly passed: boolean;
+            /** @description 最後の応答 */
+            readonly reply: string;
+            /** @description 業務結果 */
+            readonly result: unknown;
+            /** @description 利用額 */
+            readonly cost: string;
+        };
+        /**
+         * @description * `1` - 実行中
+         *     * `2` - 判定中
+         *     * `10` - 完了
+         * @enum {integer}
+         */
+        EvaluationResultStateEnum: 1 | 2 | 10;
+        /**
+         * @description * `1` - 評価中
+         *     * `10` - 完了
+         *     * `30` - 停止
+         * @enum {integer}
+         */
+        EvaluationStatusEnum: 1 | 10 | 30;
+        /**
+         * @description * `1` - 良くなった
+         *     * `2` - 同じ
+         *     * `3` - 悪くなった
+         * @enum {integer}
+         */
+        EvaluationVerdictEnum: 1 | 2 | 3;
         /** @description 役割（Group）。ユーザーへの割り当てでは名前で指定する */
         Group: {
             /** 名前 */
@@ -1800,6 +1943,11 @@ export interface components {
             /** 名前 */
             readonly name: string;
         };
+        MinimumEvaluationCase: {
+            readonly id: string;
+            /** 名前 */
+            readonly name: string;
+        };
         MinimumLLMConnection: {
             readonly id: string;
             /** 名前 */
@@ -1809,6 +1957,35 @@ export interface components {
             readonly kind_display: string;
             /** 有効 */
             readonly is_active: boolean;
+        };
+        /** @description 評価の1回。`current` は今のDraftの今のrevisionを評価したものか */
+        MinimumSkillEvaluation: {
+            readonly id: string;
+            /** 状態 */
+            readonly status: components["schemas"]["EvaluationStatusEnum"];
+            readonly status_display: string;
+            /** 評価したDraft */
+            readonly draft_uid: string;
+            /** Draftのrevision */
+            readonly draft_revision: number;
+            readonly base_version: number | null;
+            readonly model_profile_name: string;
+            readonly effort: string;
+            readonly requested_by_info: components["schemas"]["MinimumUser"];
+            /** @description 会話のSkillの編集から始めた */
+            readonly from_conversation: boolean;
+            readonly current: boolean;
+            /** @description 通過したケースの数 */
+            readonly passed: number;
+            /** @description ケースの数 */
+            readonly total: number;
+            /** Format: date-time */
+            readonly created: string;
+            /**
+             * 終了日時
+             * Format: date-time
+             */
+            readonly finished: string | null;
         };
         /** @description 版の一覧（中身は出さない） */
         MinimumSkillVersion: {
@@ -2135,6 +2312,19 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["Message"][];
         };
+        PaginatedMinimumSkillEvaluationList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["MinimumSkillEvaluation"][];
+        };
         PaginatedMinimumSkillVersionList: {
             /**
              * Format: uri
@@ -2431,6 +2621,26 @@ export interface components {
             input_schema?: unknown;
             output_schema?: unknown;
         };
+        /**
+         * @description 評価ケース。添付はファイルを送る（multipart/form-data）。`expected_result` はJSONの文字列でもよい。
+         *
+         *     必須の印の付け外しと、必須のケースの変更・削除は公開の権限が要る（編集の権限で公開の条件を緩めないため）
+         */
+        PatchedSkillEvaluationCaseRequest: {
+            name?: string;
+            /** @description 依頼の文。評価のRunの最初の発言になる */
+            prompt?: string;
+            /** @description LLMの判定に使う、確認する観点 */
+            criteria?: string;
+            /** @description 期待する業務結果。書いた項目だけを submit_result の値と照合する */
+            expected_result?: unknown;
+            /** 公開の前に必須 */
+            required?: boolean;
+            /** @description 加える添付 */
+            add_files?: string[];
+            /** @description 外す添付のID */
+            remove_files?: string[];
+        };
         /** @description Skillと公開中の版の概要。中身は版（versions）とDraft（drafts）で扱う */
         PatchedSkillRequest: {
             /** 名前 */
@@ -2555,9 +2765,10 @@ export interface components {
         /**
          * @description * `1` - 業務
          *     * `2` - Skillの編集
+         *     * `3` - Draftの評価
          * @enum {integer}
          */
-        RunKindEnum: 1 | 2;
+        RunKindEnum: 1 | 2 | 3;
         /** @description 確定したメッセージとTool実行（利用者の発言、エージェントの応答、Toolの結果） */
         RunMessageEvent: {
             /**
@@ -2594,8 +2805,8 @@ export interface components {
             /** @description SkillのID */
             readonly skill: string;
             readonly name: string;
-            /** @description 版 */
-            readonly number: number;
+            /** @description 版（Draftの評価のRunのDraftでは空） */
+            readonly number: number | null;
             /** @description 利用者が `/` で指定した */
             readonly chosen: boolean;
         };
@@ -2932,6 +3143,8 @@ export interface components {
             output_schema?: unknown;
             readonly assets: components["schemas"]["SkillDraftAsset"][];
             readonly updated_by_info: components["schemas"]["MinimumUser"];
+            /** @description 公開の前に必須の評価ケースのうち、今のrevisionで通過していないもの（あれば公開できない） */
+            readonly unevaluated_cases: components["schemas"]["MinimumEvaluationCase"][];
             /** Format: date-time */
             readonly created: string;
             /** Format: date-time */
@@ -3000,6 +3213,114 @@ export interface components {
             requires?: components["schemas"]["SkillRequirementEnum"][];
             input_schema?: unknown;
             output_schema?: unknown;
+        };
+        /** @description 評価の1回。`current` は今のDraftの今のrevisionを評価したものか */
+        SkillEvaluation: {
+            readonly id: string;
+            /** 状態 */
+            readonly status: components["schemas"]["EvaluationStatusEnum"];
+            readonly status_display: string;
+            /** 評価したDraft */
+            readonly draft_uid: string;
+            /** Draftのrevision */
+            readonly draft_revision: number;
+            readonly base_version: number | null;
+            readonly model_profile_name: string;
+            readonly effort: string;
+            readonly requested_by_info: components["schemas"]["MinimumUser"];
+            /** @description 会話のSkillの編集から始めた */
+            readonly from_conversation: boolean;
+            readonly current: boolean;
+            /** @description 通過したケースの数 */
+            readonly passed: number;
+            /** @description ケースの数 */
+            readonly total: number;
+            readonly results: components["schemas"]["SkillEvaluationResult"][];
+            /** Format: date-time */
+            readonly created: string;
+            /**
+             * 終了日時
+             * Format: date-time
+             */
+            readonly finished: string | null;
+        };
+        /**
+         * @description 評価ケース。添付はファイルを送る（multipart/form-data）。`expected_result` はJSONの文字列でもよい。
+         *
+         *     必須の印の付け外しと、必須のケースの変更・削除は公開の権限が要る（編集の権限で公開の条件を緩めないため）
+         */
+        SkillEvaluationCase: {
+            readonly id: string;
+            name: string;
+            /** @description 依頼の文。評価のRunの最初の発言になる */
+            prompt: string;
+            /** @description LLMの判定に使う、確認する観点 */
+            criteria?: string;
+            /** @description 期待する業務結果。書いた項目だけを submit_result の値と照合する */
+            expected_result?: unknown;
+            /** 公開の前に必須 */
+            required?: boolean;
+            readonly files_info: components["schemas"]["ResourceVersion"][];
+            readonly updated_by_info: components["schemas"]["MinimumUser"];
+            /** Format: date-time */
+            readonly created: string;
+            /** Format: date-time */
+            readonly updated: string;
+        };
+        /**
+         * @description 評価ケース。添付はファイルを送る（multipart/form-data）。`expected_result` はJSONの文字列でもよい。
+         *
+         *     必須の印の付け外しと、必須のケースの変更・削除は公開の権限が要る（編集の権限で公開の条件を緩めないため）
+         */
+        SkillEvaluationCaseRequest: {
+            name: string;
+            /** @description 依頼の文。評価のRunの最初の発言になる */
+            prompt: string;
+            /** @description LLMの判定に使う、確認する観点 */
+            criteria?: string;
+            /** @description 期待する業務結果。書いた項目だけを submit_result の値と照合する */
+            expected_result?: unknown;
+            /** 公開の前に必須 */
+            required?: boolean;
+            /** @description 加える添付 */
+            add_files?: string[];
+            /** @description 外す添付のID */
+            remove_files?: string[];
+        };
+        SkillEvaluationCreateRequest: {
+            /** @description 評価するケースのID */
+            cases: string[];
+            model_profile: string;
+            effort?: string;
+        };
+        SkillEvaluationResult: {
+            /** 順番 */
+            readonly order: number;
+            readonly case: string | null;
+            /** ケースの名前 */
+            readonly case_name: string;
+            /** 公開の前に必須 */
+            readonly required: boolean;
+            /** @description 評価を始めた時点のケースの中身 */
+            readonly case_data: components["schemas"]["EvaluationCaseData"];
+            /** 状態 */
+            readonly state: components["schemas"]["EvaluationResultStateEnum"];
+            readonly state_display: string;
+            /** @description 公開中の版のRunの状態（公開前のSkillでは空） */
+            readonly base_status: string | null;
+            /** @description DraftのRunの状態 */
+            readonly draft_status: string | null;
+            readonly base_check: components["schemas"]["EvaluationCheck"] | null;
+            readonly draft_check: components["schemas"]["EvaluationCheck"] | null;
+            /** 通過 */
+            readonly passed: boolean | null;
+            /** LLMの判定 */
+            readonly verdict: (components["schemas"]["EvaluationVerdictEnum"] | components["schemas"]["NullEnum"]) | null;
+            readonly verdict_display: string | null;
+            /** 判定の理由 */
+            readonly judge_reason: string;
+            /** 判定の補足 */
+            readonly judge_note: string;
         };
         SkillPublishRequest: {
             /** @description 公開するDraftのID */
@@ -4328,6 +4649,256 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    app_v1_skills_evaluation_cases_list: {
+        parameters: {
+            query?: {
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                skill: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillEvaluationCase"][];
+                };
+            };
+        };
+    };
+    app_v1_skills_evaluation_cases_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["SkillEvaluationCaseRequest"];
+                "application/json": components["schemas"]["SkillEvaluationCaseRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillEvaluationCase"];
+                };
+            };
+        };
+    };
+    app_v1_skills_evaluation_cases_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillEvaluationCase"];
+                };
+            };
+        };
+    };
+    app_v1_skills_evaluation_cases_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["SkillEvaluationCaseRequest"];
+                "application/json": components["schemas"]["SkillEvaluationCaseRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillEvaluationCase"];
+                };
+            };
+        };
+    };
+    app_v1_skills_evaluation_cases_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    app_v1_skills_evaluation_cases_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "multipart/form-data": components["schemas"]["PatchedSkillEvaluationCaseRequest"];
+                "application/json": components["schemas"]["PatchedSkillEvaluationCaseRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillEvaluationCase"];
+                };
+            };
+        };
+    };
+    app_v1_skills_evaluations_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                skill: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedMinimumSkillEvaluationList"];
+                };
+            };
+        };
+    };
+    app_v1_skills_evaluations_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillEvaluationCreateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["SkillEvaluationCreateRequest"];
+                "multipart/form-data": components["schemas"]["SkillEvaluationCreateRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillEvaluation"];
+                };
+            };
+        };
+    };
+    app_v1_skills_evaluations_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillEvaluation"];
+                };
+            };
+        };
+    };
+    app_v1_skills_evaluations_cancel_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                skill: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillEvaluation"];
+                };
             };
         };
     };

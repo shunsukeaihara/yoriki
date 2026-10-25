@@ -5,6 +5,7 @@ from typing import Any
 
 import jsonschema
 from django.conf import settings
+from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
@@ -12,22 +13,28 @@ from rest_framework.exceptions import PermissionDenied
 
 from harness.tools import ALL_TOOLS
 from harness.tools.base import schema_problem
+from llm.models import ModelProfile
 from resources import formats
-from resources.models import ResourceVersion
+from resources.models import Resource, ResourceVersion
 from user.models import Department
 from user.serializers import MinimumUserSerializer
 from utils.exceptions import Conflict
 from utils.fields import NormalizedTextField
 from utils.serializers import ReadOnlyModelSerializer
 
-from .errors import DraftExists, InvalidDraft, VersionConflict
+from .errors import CannotEvaluate, DraftExists, InvalidDraft, VersionConflict
 from .models import (
+    MAX_CASES_PER_EVALUATION,
+    MAX_EVALUATION_CASES,
     Skill,
     SkillAccess,
     SkillAssetBinding,
     SkillChange,
     SkillDraft,
     SkillDraftAsset,
+    SkillEvaluation,
+    SkillEvaluationCase,
+    SkillEvaluationResult,
     SkillRequirement,
     SkillScope,
     SkillVersion,
@@ -672,6 +679,15 @@ class SkillDraftAssetUpdateSerializer(SkillDraftAssetSerializer):
     file = serializers.FileField(write_only=True, required=False, help_text=_("置き換えるファイル"))
 
 
+class MinimumEvaluationCaseSerializer(serializers.ModelSerializer):
+    id = serializers.CharField(source="uid", read_only=True)
+
+    class Meta:
+        model = SkillEvaluationCase
+        fields = ["id", "name"]
+        read_only_fields = fields
+
+
 class SkillDraftSerializer(SkillContentSerializer):
     """編集中のSkill。更新では、編集を始めた時点の `revision` を送り、その間に変わっていたら409になる"""
 
@@ -685,6 +701,9 @@ class SkillDraftSerializer(SkillContentSerializer):
     revision = serializers.IntegerField(min_value=1, help_text=_("更新では、編集を始めた時点の値を送る"))
     assets = SkillDraftAssetSerializer(many=True, read_only=True)
     updated_by_info = MinimumUserSerializer(source="updated_by", read_only=True)
+    unevaluated_cases = serializers.SerializerMethodField(
+        help_text=_("公開の前に必須の評価ケースのうち、今のrevisionで通過していないもの（あれば公開できない）")
+    )
 
     class Meta:
         model = SkillDraft
@@ -700,10 +719,15 @@ class SkillDraftSerializer(SkillContentSerializer):
             "output_schema",
             "assets",
             "updated_by_info",
+            "unevaluated_cases",
             "created",
             "updated",
         ]
         read_only_fields = ["created", "updated"]
+
+    @extend_schema_field(MinimumEvaluationCaseSerializer(many=True))
+    def get_unevaluated_cases(self, obj: SkillDraft) -> list[dict[str, Any]]:
+        return list(MinimumEvaluationCaseSerializer(obj.unevaluated_cases(), many=True).data)
 
     def validate(self, attrs):
         draft = self.instance
@@ -762,3 +786,311 @@ class SkillDraftOpenSerializer(serializers.Serializer):
 
     def to_representation(self, instance: SkillDraft):
         return SkillDraftSerializer(instance, context=self.context).data
+
+
+# --- 評価（design.md §3.7.1） ---
+
+# 1つの評価ケースに添付できるファイルの数
+MAX_CASE_FILES = 5
+
+
+class SkillEvaluationCaseSerializer(serializers.ModelSerializer):
+    """評価ケース。添付はファイルを送る（multipart/form-data）。`expected_result` はJSONの文字列でもよい。
+
+    必須の印の付け外しと、必須のケースの変更・削除は公開の権限が要る（編集の権限で公開の条件を緩めないため）
+    """
+
+    id = serializers.CharField(source="uid", read_only=True)
+    name = NormalizedTextField(max_length=100)
+    prompt = serializers.CharField(max_length=MAX_INSTRUCTIONS, help_text=_("依頼の文。評価のRunの最初の発言になる"))
+    criteria = serializers.CharField(
+        max_length=10_000, required=False, allow_blank=True, help_text=_("LLMの判定に使う、確認する観点")
+    )
+    expected_result = serializers.JSONField(
+        required=False,
+        allow_null=True,
+        help_text=_("期待する業務結果。書いた項目だけを submit_result の値と照合する"),
+    )
+    files_info = ResourceVersionSerializer(source="files", many=True, read_only=True)
+    add_files = serializers.ListField(
+        child=serializers.FileField(), write_only=True, required=False, help_text=_("加える添付")
+    )
+    remove_files = serializers.ListField(
+        child=serializers.CharField(max_length=30), write_only=True, required=False, help_text=_("外す添付のID")
+    )
+    updated_by_info = MinimumUserSerializer(source="updated_by", read_only=True)
+
+    class Meta:
+        model = SkillEvaluationCase
+        fields = [
+            "id",
+            "name",
+            "prompt",
+            "criteria",
+            "expected_result",
+            "required",
+            "files_info",
+            "add_files",
+            "remove_files",
+            "updated_by_info",
+            "created",
+            "updated",
+        ]
+        read_only_fields = ["created", "updated"]
+
+    def validate_expected_result(self, value: Any) -> Any:
+        if value is not None and not isinstance(value, dict):
+            raise serializers.ValidationError(_("JSONのオブジェクトで入力してください"))
+        return value
+
+    def validate_add_files(self, value: list[Any]) -> list[Any]:
+        limit = settings.YORIKI_UPLOAD_MAX_MB
+        if any(f.size > limit * 1024 * 1024 for f in value):
+            raise serializers.ValidationError(_("ファイルが大きすぎます（%(limit)sMBまで）") % {"limit": limit})
+        return value
+
+    def validate(self, attrs):
+        skill: Skill = self.context["skill"]
+        case: SkillEvaluationCase | None = self.instance
+        publisher = _access(skill, self.context) >= SkillAccess.PUBLISH
+        required = attrs.get("required", case.required if case else False)
+        if required and skill.scope == SkillScope.PERSONAL:
+            raise serializers.ValidationError({"required": _("個人のSkillには、公開の前に必須の印を付けません")})
+        if not publisher and (required or (case is not None and case.required)):
+            raise PermissionDenied(_("公開の前に必須の評価ケースを作る・変えるには、この範囲の公開の権限が要ります"))
+        name = attrs.get("name")
+        if name is not None:
+            same = SkillEvaluationCase.objects.filter(skill=skill, name=name)
+            if case is not None:
+                same = same.exclude(pk=case.pk)
+            if same.exists():
+                raise serializers.ValidationError({"name": _("同じ名前の評価ケースがあります")})
+        if case is None and SkillEvaluationCase.objects.filter(skill=skill).count() >= MAX_EVALUATION_CASES:
+            raise serializers.ValidationError(
+                {"non_field_errors": [_("評価ケースは%(limit)s件までです") % {"limit": MAX_EVALUATION_CASES}]}
+            )
+        kept = list(case.files.all()) if case is not None else []
+        removed = set(attrs.get("remove_files", []))
+        if len([f for f in kept if f.uid not in removed]) + len(attrs.get("add_files", [])) > MAX_CASE_FILES:
+            raise serializers.ValidationError({"add_files": _("添付は%(limit)s個までです") % {"limit": MAX_CASE_FILES}})
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data) -> SkillEvaluationCase:
+        actor = validated_data.pop("actor")
+        add_files = validated_data.pop("add_files", [])
+        validated_data.pop("remove_files", None)
+        # 同時の作成で上限を超えないよう、Skillの行をロックして数え直す
+        skill = Skill.objects.select_for_update().get(pk=self.context["skill"].pk)
+        if SkillEvaluationCase.objects.filter(skill=skill).count() >= MAX_EVALUATION_CASES:
+            raise serializers.ValidationError(
+                {"non_field_errors": [_("評価ケースは%(limit)s件までです") % {"limit": MAX_EVALUATION_CASES}]}
+            )
+        case = SkillEvaluationCase.objects.create(skill=skill, created_by=actor, updated_by=actor, **validated_data)
+        case.files.add(*_upload(add_files, actor))
+        return case
+
+    @transaction.atomic
+    def update(self, instance: SkillEvaluationCase, validated_data) -> SkillEvaluationCase:
+        actor = validated_data.pop("actor")
+        # 評価の開始（ケースの中身と添付を写す）とも重ならない
+        # 公開の判定（Skillの行をロックする）と重ならないよう、Skill → ケースの順にロックしてから変える
+        Skill.objects.select_for_update().filter(pk=instance.skill_id).first()
+        instance = SkillEvaluationCase.objects.select_for_update().get(pk=instance.pk)
+        if instance.required and _access(instance.skill, self.context) < SkillAccess.PUBLISH:
+            # 確かめた後に、公開の権限を持つ人が必須にした
+            raise PermissionDenied(_("公開の前に必須の評価ケースを作る・変えるには、この範囲の公開の権限が要ります"))
+        add_files = validated_data.pop("add_files", [])
+        removed = set(validated_data.pop("remove_files", []))
+        changed = [name for name, value in validated_data.items() if getattr(instance, name) != value]
+        removing = [f for f in instance.files.all() if f.uid in removed]
+        if not (changed or add_files or removing):
+            return instance  # 中身を変えなければ更新日時も変えない（評価の結果との照合に使う）
+        for name in changed:
+            setattr(instance, name, validated_data[name])
+        instance.updated_by = actor
+        instance.save()
+        instance.files.remove(*removing)
+        instance.files.add(*_upload(add_files, actor))
+        return instance
+
+
+def _upload(files: list[Any], actor) -> list[ResourceVersion]:
+    return [Resource.create_from_upload(f, f.name or "file", actor=actor) for f in files]
+
+
+class EvaluationCheckSerializer(serializers.Serializer):
+    """機械的な検証（conversation/evaluation.check_run()）"""
+
+    completed = serializers.BooleanField(read_only=True)
+    status_display = serializers.CharField(read_only=True, required=False)
+    error = serializers.CharField(read_only=True, required=False)
+    result_required = serializers.BooleanField(read_only=True, required=False)
+    result_submitted = serializers.BooleanField(read_only=True, required=False)
+    expected_checked = serializers.BooleanField(read_only=True, required=False)
+    mismatches = serializers.ListField(child=serializers.JSONField(), read_only=True, required=False)
+    passed = serializers.BooleanField(read_only=True)
+    reply = serializers.CharField(read_only=True, required=False, help_text=_("最後の応答"))
+    result = serializers.JSONField(read_only=True, required=False, allow_null=True, help_text=_("業務結果"))
+    cost = serializers.CharField(read_only=True, required=False, help_text=_("利用額"))
+
+
+class EvaluationCaseDataSerializer(serializers.Serializer):
+    prompt = serializers.CharField(read_only=True)
+    criteria = serializers.CharField(read_only=True)
+    expected_result = serializers.JSONField(read_only=True, allow_null=True)
+    files = serializers.ListField(child=serializers.DictField(), read_only=True)
+
+
+class SkillEvaluationResultSerializer(serializers.ModelSerializer):
+    case: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(
+        slug_field="uid", read_only=True, allow_null=True
+    )
+    case_data = EvaluationCaseDataSerializer(read_only=True, help_text=_("評価を始めた時点のケースの中身"))
+    state_display = serializers.CharField(source="get_state_display", read_only=True)
+    base_status = serializers.SerializerMethodField(help_text=_("公開中の版のRunの状態（公開前のSkillでは空）"))
+    draft_status = serializers.SerializerMethodField(help_text=_("DraftのRunの状態"))
+    base_check = EvaluationCheckSerializer(read_only=True, allow_null=True)
+    draft_check = EvaluationCheckSerializer(read_only=True, allow_null=True)
+    verdict_display = serializers.CharField(source="get_verdict_display", read_only=True, allow_null=True)
+
+    class Meta:
+        model = SkillEvaluationResult
+        fields = [
+            "order",
+            "case",
+            "case_name",
+            "required",
+            "case_data",
+            "state",
+            "state_display",
+            "base_status",
+            "draft_status",
+            "base_check",
+            "draft_check",
+            "passed",
+            "verdict",
+            "verdict_display",
+            "judge_reason",
+            "judge_note",
+        ]
+        read_only_fields = fields
+
+    def get_base_status(self, obj: SkillEvaluationResult) -> str | None:
+        return obj.base_run.get_status_display() if obj.base_run else None
+
+    def get_draft_status(self, obj: SkillEvaluationResult) -> str | None:
+        return obj.draft_run.get_status_display() if obj.draft_run else None
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        for side in ("base_check", "draft_check"):
+            data[side] = data[side] if getattr(instance, side) else None
+        return data
+
+
+class SkillEvaluationSerializer(serializers.ModelSerializer):
+    """評価の1回。`current` は今のDraftの今のrevisionを評価したものか"""
+
+    id = serializers.CharField(source="uid", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    base_version = serializers.IntegerField(source="base_version.number", read_only=True, allow_null=True)
+    model_profile_name = serializers.CharField(source="model_version.profile.name", read_only=True)
+    requested_by_info = MinimumUserSerializer(source="requested_by", read_only=True)
+    from_conversation = serializers.SerializerMethodField(help_text=_("会話のSkillの編集から始めた"))
+    current = serializers.SerializerMethodField()
+    passed = serializers.SerializerMethodField(help_text=_("通過したケースの数"))
+    total = serializers.SerializerMethodField(help_text=_("ケースの数"))
+    results = SkillEvaluationResultSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = SkillEvaluation
+        fields = [
+            "id",
+            "status",
+            "status_display",
+            "draft_uid",
+            "draft_revision",
+            "base_version",
+            "model_profile_name",
+            "effort",
+            "requested_by_info",
+            "from_conversation",
+            "current",
+            "passed",
+            "total",
+            "results",
+            "created",
+            "finished",
+        ]
+        read_only_fields = fields
+
+    def get_from_conversation(self, obj: SkillEvaluation) -> bool:
+        return obj.run_id is not None
+
+    def get_current(self, obj: SkillEvaluation) -> bool:
+        draft = self.context.get("current_draft")
+        return draft is not None and draft.uid == obj.draft_uid and draft.revision == obj.draft_revision
+
+    def get_passed(self, obj: SkillEvaluation) -> int:
+        return sum(1 for r in obj.results.all() if r.passed)
+
+    def get_total(self, obj: SkillEvaluation) -> int:
+        return len(obj.results.all())
+
+
+class MinimumSkillEvaluationSerializer(SkillEvaluationSerializer):
+    class Meta(SkillEvaluationSerializer.Meta):
+        fields = [f for f in SkillEvaluationSerializer.Meta.fields if f != "results"]
+        read_only_fields = fields
+
+
+class SkillEvaluationCreateSerializer(serializers.Serializer):
+    cases = serializers.ListField(
+        child=serializers.CharField(max_length=30),
+        min_length=1,
+        max_length=MAX_CASES_PER_EVALUATION,
+        help_text=_("評価するケースのID"),
+    )
+    model_profile: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(
+        slug_field="uid",
+        queryset=ModelProfile.objects.filter(
+            deleted=False, is_active=True, current_version__connection__is_active=True
+        ).select_related("current_version__connection"),
+    )
+    effort = serializers.CharField(max_length=50, required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        skill: Skill = self.context["skill"]
+        found = {c.uid: c for c in SkillEvaluationCase.objects.filter(skill=skill, uid__in=attrs["cases"])}
+        if missing := [uid for uid in attrs["cases"] if uid not in found]:
+            raise serializers.ValidationError(
+                {"cases": _("評価ケースが見つかりません：%(ids)s") % {"ids": ", ".join(missing)}}
+            )
+        attrs["cases"] = [found[uid] for uid in dict.fromkeys(attrs["cases"])]
+        if attrs["model_profile"].current_version is None:
+            raise serializers.ValidationError({"model_profile": _("このモデル設定は使えません")})
+        effort = attrs.get("effort", "")
+        if effort and effort not in attrs["model_profile"].current_version.effort_values:
+            raise serializers.ValidationError({"effort": _("このモデルが受け付けるeffortの値から選んでください")})
+        return attrs
+
+    def create(self, validated_data) -> SkillEvaluation:
+        from conversation.evaluation import start_evaluation  # noqa: PLC0415  conversationがskillをimportするため
+
+        try:
+            return start_evaluation(
+                self.context["skill"],
+                cases=validated_data["cases"],
+                actor=validated_data["actor"],
+                model_version=validated_data["model_profile"].current_version,
+                effort=validated_data.get("effort", ""),
+            )
+        except CannotEvaluate as exc:
+            raise serializers.ValidationError({"non_field_errors": [str(exc)]}) from exc
+
+    def update(self, instance, validated_data):
+        raise NotImplementedError("評価は更新しない")
+
+    def to_representation(self, instance: SkillEvaluation):
+        return SkillEvaluationSerializer(instance, context=self.context).data

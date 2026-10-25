@@ -55,6 +55,7 @@ const draft: SkillDraft = {
     },
   ],
   updatedByInfo: user,
+  unevaluatedCases: [],
   created: '2026-10-24T00:00:00Z',
   updated: '2026-10-24T00:00:00Z',
 }

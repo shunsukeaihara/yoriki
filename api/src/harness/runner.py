@@ -11,14 +11,17 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
+from functools import partial
 from typing import Any
 
+from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from artifact.models import Artifact, BlobObject
 from conversation.dispatch import user_message_data
+from conversation.evaluation import deliver as deliver_evaluation
 from conversation.models import (
     ConversationMessage,
     InstructionKind,
@@ -63,6 +66,7 @@ from run.models import (
 )
 from run.tasks import CLARIFICATION_TTL
 from runtime.launcher import SandboxUnavailable
+from skill.models import SkillEvaluation
 from stream.notifier import notify_delta
 from usage.models import UsageLedger, UsagePurpose
 
@@ -89,6 +93,7 @@ from .tools.skill_admin import CREATE_SKILL, SKILL_ADMIN_TOOLS
 from .tools.skill_tool import make_skill_tool
 from .tools.submit_result import NAME as SUBMIT_RESULT
 from .tools.submit_result import make_submit_result_tool
+from .tools.test_skill_draft import TEST_SKILL_DRAFT
 
 logger = logging.getLogger(__name__)
 
@@ -105,8 +110,8 @@ REPEAT_WARN, REPEAT_STOP = 3, 5
 MAX_NUDGES = 3
 # 並べて実行するToolの数の上限（harness.md §7.6）
 MAX_PARALLEL = 4
-# Tool呼出し（ask_user・request_skill_edit）に対応する確認。結果はその呼出しへの結果として記録する
-TOOL_CLARIFICATIONS = (ClarificationKind.QUESTION, ClarificationKind.SKILL_EDIT)
+# Tool呼出し（ask_user・request_skill_edit・test_skill_draft）に対応する確認。結果はその呼出しへの結果として記録する
+TOOL_CLARIFICATIONS = (ClarificationKind.QUESTION, ClarificationKind.SKILL_EDIT, ClarificationKind.EVALUATION)
 
 REPEAT_NOTICE = (
     "\n\n[You are repeating the same tool call with identical arguments. Check the previous result and try a "
@@ -489,7 +494,7 @@ class Runner:
         if self.run_obj.kind == RunKind.SKILL_EDIT:
             # Skillの編集のRun：Skill管理のToolを出し、Skillを使う・提案するToolは出さない（harness.md §10.9）。
             # 新しいSkillを作る依頼でだけ create_skill を出す
-            tools = (*ALL_TOOLS, *SKILL_ADMIN_TOOLS)
+            tools = (*ALL_TOOLS, *SKILL_ADMIN_TOOLS, TEST_SKILL_DRAFT)
             if not ((self.run_obj.manifest or {}).get("fixed") or {}).get("skill_edit", {}).get("skill"):
                 tools += (CREATE_SKILL,)
         elif explicit:
@@ -998,7 +1003,8 @@ class Runner:
             self._record_tool_result(call.id, call.name, ToolResult.error(text), ToolStatus.CANCELLED)
 
     def _wait_for_user(self, call: ToolCall, rest: list[ToolCall]) -> bool:
-        """ask_user・request_skill_edit の結果は記録せずにWAITING_USERにし、Attemptを終える（harness.md §10.3）"""
+        """ask_user・request_skill_edit・test_skill_draft の結果は記録せずにWAITING_USERにし、Attemptを終える
+        （harness.md §10.3・§10.9）"""
         self._close_calls(rest, "Not executed: waiting for the user's answer. Call again after the answer if needed.")
         invocation = ToolInvocation.objects.get(run=self.run_obj, call_id=call.id)
         self._checkpoint()
@@ -1020,7 +1026,13 @@ class Runner:
                 RunEventKind.CLARIFICATION_REQUESTED,
                 {"clarification": clarification.uid, "kind": clarification.kind, "questions": clarification.questions},
             )
-            run.set_status(RunStatus.WAITING_USER, comment=_("確認をお願いしています。"))
+            if clarification.kind == ClarificationKind.EVALUATION:
+                # 評価が先に終わっていれば、ここで結果を返す（harness.md §10.9）
+                evaluation = SkillEvaluation.objects.get(uid=clarification.context["evaluation"])
+                transaction.on_commit(partial(deliver_evaluation, evaluation.pk))
+                run.set_status(RunStatus.WAITING_USER, comment=_("Draftの評価を待っています。"))
+            else:
+                run.set_status(RunStatus.WAITING_USER, comment=_("確認をお願いしています。"))
         return False
 
     # --- 圧縮 ---

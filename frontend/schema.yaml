@@ -1462,6 +1462,323 @@ paths:
           description: No response body
         '409':
           description: 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった）
+  /api/app/v1/skills/{skill}/evaluation_cases/:
+    get:
+      operationId: app_v1_skills_evaluation_cases_list
+      description: Skillの評価ケース（design.md §3.7.1）
+      parameters:
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/skill/evaluation_case
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SkillEvaluationCase'
+          description: ''
+    post:
+      operationId: app_v1_skills_evaluation_cases_create
+      description: Skillの評価ケース（design.md §3.7.1）
+      parameters:
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/skill/evaluation_case
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SkillEvaluationCaseRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillEvaluationCaseRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillEvaluationCase'
+          description: ''
+  /api/app/v1/skills/{skill}/evaluation_cases/{uid}/:
+    get:
+      operationId: app_v1_skills_evaluation_cases_retrieve
+      description: Skillの評価ケース（design.md §3.7.1）
+      parameters:
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/skill/evaluation_case
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillEvaluationCase'
+          description: ''
+    put:
+      operationId: app_v1_skills_evaluation_cases_update
+      description: Skillの評価ケース（design.md §3.7.1）
+      parameters:
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/skill/evaluation_case
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SkillEvaluationCaseRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillEvaluationCaseRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillEvaluationCase'
+          description: ''
+    patch:
+      operationId: app_v1_skills_evaluation_cases_partial_update
+      description: Skillの評価ケース（design.md §3.7.1）
+      parameters:
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/skill/evaluation_case
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedSkillEvaluationCaseRequest'
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedSkillEvaluationCaseRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillEvaluationCase'
+          description: ''
+    delete:
+      operationId: app_v1_skills_evaluation_cases_destroy
+      description: Skillの評価ケース（design.md §3.7.1）
+      parameters:
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/skill/evaluation_case
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/app/v1/skills/{skill}/evaluations/:
+    get:
+      operationId: app_v1_skills_evaluations_list
+      description: SkillのDraftの評価（design.md §3.7.1）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/skill/evaluation
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedMinimumSkillEvaluationList'
+          description: ''
+    post:
+      operationId: app_v1_skills_evaluations_create
+      description: 今のDraftを、選んだケースで評価し始める
+      parameters:
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/skill/evaluation
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SkillEvaluationCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/SkillEvaluationCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/SkillEvaluationCreateRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillEvaluation'
+          description: ''
+  /api/app/v1/skills/{skill}/evaluations/{uid}/:
+    get:
+      operationId: app_v1_skills_evaluations_retrieve
+      description: SkillのDraftの評価（design.md §3.7.1）
+      parameters:
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/skill/evaluation
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillEvaluation'
+          description: ''
+  /api/app/v1/skills/{skill}/evaluations/{uid}/cancel/:
+    post:
+      operationId: app_v1_skills_evaluations_cancel_create
+      description: 評価を止める（動いている評価のRunを止める）
+      parameters:
+      - in: path
+        name: skill
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/skill/evaluation
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SkillEvaluation'
+          description: ''
   /api/app/v1/skills/{skill}/files/{uid}/:
     get:
       operationId: app_v1_skills_files_retrieve
@@ -3872,7 +4189,9 @@ components:
           maxLength: 5000
     ClarificationContext:
       type: object
-      description: 確認の対象。Skillの編集の確認で、対象のSkill（新しいSkillならskillが空）と変更の要約
+      description: |-
+        確認の対象。Skillの編集の確認で、対象のSkill（新しいSkillならskillが空）と変更の要約。Draftの評価では、
+        評価のIDと対象のSkill・Draftのrevision・ケースの数
       properties:
         skill:
           type: string
@@ -3886,8 +4205,20 @@ components:
         summary:
           type: string
           readOnly: true
+        evaluation:
+          type: string
+          readOnly: true
+        revision:
+          type: integer
+          readOnly: true
+        cases:
+          type: integer
+          readOnly: true
       required:
+      - cases
+      - evaluation
       - name
+      - revision
       - scope
       - skill
       - summary
@@ -3927,11 +4258,13 @@ components:
       - 1
       - 2
       - 3
+      - 4
       type: integer
       description: |-
         * `1` - エージェントからの質問
         * `2` - モデルの切り替えの確認
         * `3` - Skillの編集の確認
+        * `4` - Draftの評価
     ClarificationOption:
       type: object
       properties:
@@ -4292,6 +4625,112 @@ components:
       - after
       - before
       - kind
+    EvaluationCaseData:
+      type: object
+      properties:
+        prompt:
+          type: string
+          readOnly: true
+        criteria:
+          type: string
+          readOnly: true
+        expected_result:
+          readOnly: true
+          nullable: true
+        files:
+          type: array
+          items:
+            type: object
+            additionalProperties: {}
+          readOnly: true
+      required:
+      - criteria
+      - expected_result
+      - files
+      - prompt
+    EvaluationCheck:
+      type: object
+      description: 機械的な検証（conversation/evaluation.check_run()）
+      properties:
+        completed:
+          type: boolean
+          readOnly: true
+        status_display:
+          type: string
+          readOnly: true
+        error:
+          type: string
+          readOnly: true
+        result_required:
+          type: boolean
+          readOnly: true
+        result_submitted:
+          type: boolean
+          readOnly: true
+        expected_checked:
+          type: boolean
+          readOnly: true
+        mismatches:
+          type: array
+          items: {}
+          readOnly: true
+        passed:
+          type: boolean
+          readOnly: true
+        reply:
+          type: string
+          readOnly: true
+          description: 最後の応答
+        result:
+          readOnly: true
+          nullable: true
+          description: 業務結果
+        cost:
+          type: string
+          readOnly: true
+          description: 利用額
+      required:
+      - completed
+      - cost
+      - error
+      - expected_checked
+      - mismatches
+      - passed
+      - reply
+      - result
+      - result_required
+      - result_submitted
+      - status_display
+    EvaluationResultStateEnum:
+      enum:
+      - 1
+      - 2
+      - 10
+      type: integer
+      description: |-
+        * `1` - 実行中
+        * `2` - 判定中
+        * `10` - 完了
+    EvaluationStatusEnum:
+      enum:
+      - 1
+      - 10
+      - 30
+      type: integer
+      description: |-
+        * `1` - 評価中
+        * `10` - 完了
+        * `30` - 停止
+    EvaluationVerdictEnum:
+      enum:
+      - 1
+      - 2
+      - 3
+      type: integer
+      description: |-
+        * `1` - 良くなった
+        * `2` - 同じ
+        * `3` - 悪くなった
     Group:
       type: object
       description: 役割（Group）。ユーザーへの割り当てでは名前で指定する
@@ -4945,6 +5384,19 @@ components:
       required:
       - id
       - name
+    MinimumEvaluationCase:
+      type: object
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+          title: 名前
+      required:
+      - id
+      - name
     MinimumLLMConnection:
       type: object
       properties:
@@ -4973,6 +5425,84 @@ components:
       - kind
       - kind_display
       - name
+    MinimumSkillEvaluation:
+      type: object
+      description: 評価の1回。`current` は今のDraftの今のrevisionを評価したものか
+      properties:
+        id:
+          type: string
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/EvaluationStatusEnum'
+          readOnly: true
+          title: 状態
+        status_display:
+          type: string
+          readOnly: true
+        draft_uid:
+          type: string
+          readOnly: true
+          title: 評価したDraft
+        draft_revision:
+          type: integer
+          readOnly: true
+          title: Draftのrevision
+        base_version:
+          type: integer
+          readOnly: true
+          nullable: true
+        model_profile_name:
+          type: string
+          readOnly: true
+        effort:
+          type: string
+          readOnly: true
+        requested_by_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+        from_conversation:
+          type: boolean
+          readOnly: true
+          description: 会話のSkillの編集から始めた
+        current:
+          type: boolean
+          readOnly: true
+        passed:
+          type: integer
+          readOnly: true
+          description: 通過したケースの数
+        total:
+          type: integer
+          readOnly: true
+          description: ケースの数
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        finished:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 終了日時
+      required:
+      - base_version
+      - created
+      - current
+      - draft_revision
+      - draft_uid
+      - effort
+      - finished
+      - from_conversation
+      - id
+      - model_profile_name
+      - passed
+      - requested_by_info
+      - status
+      - status_display
+      - total
     MinimumSkillVersion:
       type: object
       description: 版の一覧（中身は出さない）
@@ -5600,6 +6130,25 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Message'
+    PaginatedMinimumSkillEvaluationList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/MinimumSkillEvaluation'
     PaginatedMinimumSkillVersionList:
       type: object
       required:
@@ -6115,6 +6664,47 @@ components:
           nullable: true
         output_schema:
           nullable: true
+    PatchedSkillEvaluationCaseRequest:
+      type: object
+      description: |-
+        評価ケース。添付はファイルを送る（multipart/form-data）。`expected_result` はJSONの文字列でもよい。
+
+        必須の印の付け外しと、必須のケースの変更・削除は公開の権限が要る（編集の権限で公開の条件を緩めないため）
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        prompt:
+          type: string
+          minLength: 1
+          description: 依頼の文。評価のRunの最初の発言になる
+          maxLength: 100000
+        criteria:
+          type: string
+          description: LLMの判定に使う、確認する観点
+          maxLength: 10000
+        expected_result:
+          nullable: true
+          description: 期待する業務結果。書いた項目だけを submit_result の値と照合する
+        required:
+          type: boolean
+          title: 公開の前に必須
+        add_files:
+          type: array
+          items:
+            type: string
+            format: binary
+          writeOnly: true
+          description: 加える添付
+        remove_files:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 30
+          writeOnly: true
+          description: 外す添付のID
     PatchedSkillRequest:
       type: object
       description: Skillと公開中の版の概要。中身は版（versions）とDraft（drafts）で扱う
@@ -6403,10 +6993,12 @@ components:
       enum:
       - 1
       - 2
+      - 3
       type: integer
       description: |-
         * `1` - 業務
         * `2` - Skillの編集
+        * `3` - Draftの評価
     RunMessageEvent:
       type: object
       description: 確定したメッセージとTool実行（利用者の発言、エージェントの応答、Toolの結果）
@@ -6499,7 +7091,8 @@ components:
         number:
           type: integer
           readOnly: true
-          description: 版
+          nullable: true
+          description: 版（Draftの評価のRunのDraftでは空）
         chosen:
           type: boolean
           readOnly: true
@@ -7395,6 +7988,12 @@ components:
           allOf:
           - $ref: '#/components/schemas/MinimumUser'
           readOnly: true
+        unevaluated_cases:
+          type: array
+          items:
+            $ref: '#/components/schemas/MinimumEvaluationCase'
+          readOnly: true
+          description: 公開の前に必須の評価ケースのうち、今のrevisionで通過していないもの（あれば公開できない）
         created:
           type: string
           format: date-time
@@ -7409,6 +8008,7 @@ components:
       - created
       - id
       - revision
+      - unevaluated_cases
       - updated
       - updated_by_info
     SkillDraftAsset:
@@ -7565,6 +8165,300 @@ components:
           nullable: true
       required:
       - revision
+    SkillEvaluation:
+      type: object
+      description: 評価の1回。`current` は今のDraftの今のrevisionを評価したものか
+      properties:
+        id:
+          type: string
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/EvaluationStatusEnum'
+          readOnly: true
+          title: 状態
+        status_display:
+          type: string
+          readOnly: true
+        draft_uid:
+          type: string
+          readOnly: true
+          title: 評価したDraft
+        draft_revision:
+          type: integer
+          readOnly: true
+          title: Draftのrevision
+        base_version:
+          type: integer
+          readOnly: true
+          nullable: true
+        model_profile_name:
+          type: string
+          readOnly: true
+        effort:
+          type: string
+          readOnly: true
+        requested_by_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+        from_conversation:
+          type: boolean
+          readOnly: true
+          description: 会話のSkillの編集から始めた
+        current:
+          type: boolean
+          readOnly: true
+        passed:
+          type: integer
+          readOnly: true
+          description: 通過したケースの数
+        total:
+          type: integer
+          readOnly: true
+          description: ケースの数
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/SkillEvaluationResult'
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        finished:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 終了日時
+      required:
+      - base_version
+      - created
+      - current
+      - draft_revision
+      - draft_uid
+      - effort
+      - finished
+      - from_conversation
+      - id
+      - model_profile_name
+      - passed
+      - requested_by_info
+      - results
+      - status
+      - status_display
+      - total
+    SkillEvaluationCase:
+      type: object
+      description: |-
+        評価ケース。添付はファイルを送る（multipart/form-data）。`expected_result` はJSONの文字列でもよい。
+
+        必須の印の付け外しと、必須のケースの変更・削除は公開の権限が要る（編集の権限で公開の条件を緩めないため）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        prompt:
+          type: string
+          description: 依頼の文。評価のRunの最初の発言になる
+          maxLength: 100000
+        criteria:
+          type: string
+          description: LLMの判定に使う、確認する観点
+          maxLength: 10000
+        expected_result:
+          nullable: true
+          description: 期待する業務結果。書いた項目だけを submit_result の値と照合する
+        required:
+          type: boolean
+          title: 公開の前に必須
+        files_info:
+          type: array
+          items:
+            $ref: '#/components/schemas/ResourceVersion'
+          readOnly: true
+        updated_by_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created
+      - files_info
+      - id
+      - name
+      - prompt
+      - updated
+      - updated_by_info
+    SkillEvaluationCaseRequest:
+      type: object
+      description: |-
+        評価ケース。添付はファイルを送る（multipart/form-data）。`expected_result` はJSONの文字列でもよい。
+
+        必須の印の付け外しと、必須のケースの変更・削除は公開の権限が要る（編集の権限で公開の条件を緩めないため）
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        prompt:
+          type: string
+          minLength: 1
+          description: 依頼の文。評価のRunの最初の発言になる
+          maxLength: 100000
+        criteria:
+          type: string
+          description: LLMの判定に使う、確認する観点
+          maxLength: 10000
+        expected_result:
+          nullable: true
+          description: 期待する業務結果。書いた項目だけを submit_result の値と照合する
+        required:
+          type: boolean
+          title: 公開の前に必須
+        add_files:
+          type: array
+          items:
+            type: string
+            format: binary
+          writeOnly: true
+          description: 加える添付
+        remove_files:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 30
+          writeOnly: true
+          description: 外す添付のID
+      required:
+      - name
+      - prompt
+    SkillEvaluationCreateRequest:
+      type: object
+      properties:
+        cases:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 30
+          description: 評価するケースのID
+          maxItems: 10
+          minItems: 1
+        model_profile:
+          type: string
+          minLength: 1
+        effort:
+          type: string
+          maxLength: 50
+      required:
+      - cases
+      - model_profile
+    SkillEvaluationResult:
+      type: object
+      properties:
+        order:
+          type: integer
+          readOnly: true
+          title: 順番
+        case:
+          type: string
+          readOnly: true
+          nullable: true
+        case_name:
+          type: string
+          readOnly: true
+          title: ケースの名前
+        required:
+          type: boolean
+          readOnly: true
+          title: 公開の前に必須
+        case_data:
+          allOf:
+          - $ref: '#/components/schemas/EvaluationCaseData'
+          readOnly: true
+          description: 評価を始めた時点のケースの中身
+        state:
+          allOf:
+          - $ref: '#/components/schemas/EvaluationResultStateEnum'
+          readOnly: true
+          title: 状態
+        state_display:
+          type: string
+          readOnly: true
+        base_status:
+          type: string
+          nullable: true
+          readOnly: true
+          description: 公開中の版のRunの状態（公開前のSkillでは空）
+        draft_status:
+          type: string
+          nullable: true
+          readOnly: true
+          description: DraftのRunの状態
+        base_check:
+          allOf:
+          - $ref: '#/components/schemas/EvaluationCheck'
+          readOnly: true
+          nullable: true
+        draft_check:
+          allOf:
+          - $ref: '#/components/schemas/EvaluationCheck'
+          readOnly: true
+          nullable: true
+        passed:
+          type: boolean
+          readOnly: true
+          nullable: true
+          title: 通過
+        verdict:
+          readOnly: true
+          nullable: true
+          title: LLMの判定
+          oneOf:
+          - $ref: '#/components/schemas/EvaluationVerdictEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        verdict_display:
+          type: string
+          readOnly: true
+          nullable: true
+        judge_reason:
+          type: string
+          readOnly: true
+          title: 判定の理由
+        judge_note:
+          type: string
+          readOnly: true
+          title: 判定の補足
+      required:
+      - base_check
+      - base_status
+      - case
+      - case_data
+      - case_name
+      - draft_check
+      - draft_status
+      - judge_note
+      - judge_reason
+      - order
+      - passed
+      - required
+      - state
+      - state_display
+      - verdict
+      - verdict_display
     SkillPublishRequest:
       type: object
       properties:

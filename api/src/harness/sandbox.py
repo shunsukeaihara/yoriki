@@ -40,9 +40,9 @@ from runtime.launcher import (
     SandboxSpec,
     SandboxUnavailable,
 )
-from skill.models import Skill, SkillVersion
+from skill.models import Skill, SkillEvaluation
 
-from .skills import asset_path, draft_asset_path, loaded_entries
+from .skills import asset_path, content_key, draft_asset_path, load_contents, loaded_entries
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -195,9 +195,9 @@ class SandboxSession:
         self.dir = Path(settings.YORIKI_WORKSPACES_DIR) / "attempts" / f"{run.uid}-{attempt.number}"
         # 戻したCheckpoint。このRunのものなら、その時点までの読んだファイルの版の記録を使える（harness.md §11.1）
         self.restored: Checkpoint | None = None
-        # /workspace/input に置いた添付（ArtifactのID）と、/workspace/master に置いたSkillの版（SkillVersionのID）
+        # /workspace/input に置いた添付（ArtifactのID）と、/workspace/master に置いたSkillの中身（content_key()）
         self.inputs: set[int] = set()
-        self.skill_versions: set[int] = set()
+        self.skill_versions: set[str] = set()
         # 最初のSandboxのToolの結果に添える知らせ
         self.notice = ""
         # DBに触ってよいスレッド（Runner）
@@ -251,26 +251,26 @@ class SandboxSession:
         self.master_dir.mkdir(parents=True, exist_ok=True)
         self.master_dir.chmod(0o755)
         run = Run.objects.only("manifest").get(pk=self.run.pk)
-        entries = [e for e in loaded_entries(run) if e["version"] not in self.skill_versions]
+        entries = [e for e in loaded_entries(run) if content_key(e) not in self.skill_versions]
         if not entries:
             return
         skills = {s.uid: s for s in Skill.objects.filter(uid__in=[e["skill"] for e in entries])}
-        versions = SkillVersion.objects.prefetch_related("assets__resource_version__blob").in_bulk(
-            [e["version"] for e in entries]
-        )
+        contents = load_contents(entries)
         for entry in entries:
-            self.place_skill_assets(skills[entry["skill"]], versions[entry["version"]])
+            self.place_skill_assets(skills[entry["skill"]], contents[content_key(entry)])
 
     def place_skill_assets(self, skill, version) -> None:
         """Skillの版の資料を /workspace/master/skills/<Skill>/<key>/ に置く。bind mountなので、動いているSandboxにも
-        そのまま見える（harness.md §10.1）。置けなければ SandboxUnavailable"""
-        if version.pk in self.skill_versions:
+        そのまま見える（harness.md §10.1）。Draftの評価のRunでは、評価に写したDraftの資料を同じ場所に置く
+        （design.md §3.7.1）。置けなければ SandboxUnavailable"""
+        key = f"evaluation:{version.pk}" if isinstance(version, SkillEvaluation) else f"version:{version.pk}"
+        if key in self.skill_versions:
             return
         self._place_assets(
             self.master_dir / "skills" / skill.uid,
             [(asset_path(skill.uid, a.key, a.resource_version.name), a.resource_version) for a in version.assets.all()],
         )
-        self.skill_versions.add(version.pk)
+        self.skill_versions.add(key)
 
     def place_draft_assets(self, skill, draft) -> None:
         """SkillのDraftの資料を /workspace/master/drafts/<Skill>/r<revision>/<key>/ に置く（Skillの編集のRun。

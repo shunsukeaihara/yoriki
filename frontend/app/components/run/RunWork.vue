@@ -110,12 +110,35 @@ const formattedResult = computed(() => (props.run.result == null ? '' : JSON.str
       </template>
     </UCollapsible>
 
-    <RunClarificationForm
-      v-for="clarification in clarifications"
-      :key="clarification.id"
-      :run-id="run.id"
-      :clarification="clarification"
-      @answered="emit('answered', $event)"
-    />
+    <template v-for="clarification in clarifications" :key="clarification.id">
+      <!-- test_skill_draft の評価を待っている。利用者は答えず、評価が終わると作業が再開する（design.md §3.7.1） -->
+      <UAlert
+        v-if="clarification.kind === ClarificationKind.EVALUATION"
+        color="primary"
+        variant="subtle"
+        icon="i-lucide-flask-conical"
+        :title="
+          $t('SkillのDraftを評価しています（{n}件）。終わると作業を再開します', { n: clarification.target?.cases ?? 0 })
+        "
+        :actions="
+          clarification.target?.skill && clarification.target?.evaluation
+            ? [
+                {
+                  label: $t('評価を見る'),
+                  color: 'primary',
+                  variant: 'outline',
+                  to: `/skills/${clarification.target.skill}/evaluations/${clarification.target.evaluation}`,
+                },
+              ]
+            : []
+        "
+      />
+      <RunClarificationForm
+        v-else
+        :run-id="run.id"
+        :clarification="clarification"
+        @answered="emit('answered', $event)"
+      />
+    </template>
   </div>
 </template>

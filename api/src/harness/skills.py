@@ -12,7 +12,18 @@ from django.db.models import Case, IntegerField, Value, When
 from django.utils.translation import gettext as _
 
 from run.models import Run
-from skill.models import Skill, SkillAccess, SkillScope, SkillVersion
+from skill.models import (
+    Skill,
+    SkillAccess,
+    SkillAssetBinding,
+    SkillEvaluation,
+    SkillEvaluationAsset,
+    SkillScope,
+    SkillVersion,
+)
+
+# Runが使うSkillの中身。公開した版か、Draftの評価に写したDraftの中身（design.md §3.7.1）
+SkillContentSource = SkillVersion | SkillEvaluation
 
 MASTER_DIR = "/workspace/master"
 # 一覧に使う文脈の割合と、説明を短くする段階（文字数。日本語は1文字を1 tokenとして数える）
@@ -136,6 +147,36 @@ def manifest_entry(skill: Skill, version: SkillVersion, name: str = "") -> dict[
     return {"skill": skill.uid, "name": name or skill.name, "version": version.pk, "number": version.number}
 
 
+def evaluation_entry(evaluation: SkillEvaluation) -> dict[str, Any]:
+    """Draftの評価のRunで、評価に写したDraftの中身を指すManifestの項目（版はない）"""
+    skill = evaluation.skill
+    return {"skill": skill.uid, "name": skill.name, "version": None, "number": None, "evaluation": evaluation.pk}
+
+
+def content_key(entry: dict[str, Any]) -> str:
+    """Manifestの項目が指す中身を区別するkey（同じ中身の資料を置き直さないために使う）"""
+    if entry.get("evaluation"):
+        return f"evaluation:{entry['evaluation']}"
+    return f"version:{entry['version']}"
+
+
+def load_contents(entries: list[dict[str, Any]]) -> dict[str, SkillContentSource]:
+    """Manifestの項目が指す中身（content_key() ごと。資料の版も読む）。消えたものは含まない"""
+    versions = (
+        SkillVersion.objects.filter(pk__in=[e["version"] for e in entries if e.get("version")])
+        .select_related("skill")
+        .prefetch_related("assets__resource_version__blob")
+    )
+    evaluations = (
+        SkillEvaluation.objects.filter(pk__in=[e["evaluation"] for e in entries if e.get("evaluation")])
+        .select_related("skill")
+        .prefetch_related("assets__resource_version__blob")
+    )
+    contents: dict[str, SkillContentSource] = {f"version:{v.pk}": v for v in versions}
+    contents |= {f"evaluation:{e.pk}": e for e in evaluations}
+    return contents
+
+
 def loaded_entries(run: Run) -> list[dict[str, Any]]:
     """Runが使うSkill（`/` で指定して固定したものと、エージェントが読み込んで追記したもの）。同じSkillは最後のもの"""
     manifest = run.manifest or {}
@@ -147,14 +188,14 @@ def loaded_entries(run: Run) -> list[dict[str, Any]]:
     return list(latest.values())
 
 
-def explicit_versions(run: Run) -> list[SkillVersion]:
-    """`/` で指定して固定したSkillの版（Runの中では変わらない）"""
-    pks = [e["version"] for e in ((run.manifest or {}).get("fixed") or {}).get("skills", [])]
-    versions = {v.pk: v for v in SkillVersion.objects.filter(pk__in=pks).select_related("skill")}
-    return [versions[pk] for pk in pks if pk in versions]
+def explicit_versions(run: Run) -> list[SkillContentSource]:
+    """`/` で指定して固定したSkillの版（Draftの評価のRunでは、評価に写したDraftの中身）。Runの中では変わらない"""
+    entries = list(((run.manifest or {}).get("fixed") or {}).get("skills", []))
+    contents = load_contents(entries)
+    return [contents[key] for e in entries if (key := content_key(e)) in contents]
 
 
-def loaded_skills(run: Run) -> list[tuple[dict[str, Any], Skill | None, SkillVersion | None]]:
+def loaded_skills(run: Run) -> list[tuple[dict[str, Any], Skill | None, SkillContentSource | None]]:
     """Runが使うSkill（Manifestの記録、今のSkill、固定した版）。Skillが消えていればNone"""
     entries = loaded_entries(run)
     skills = {
@@ -163,8 +204,8 @@ def loaded_skills(run: Run) -> list[tuple[dict[str, Any], Skill | None, SkillVer
             "department", "current_version"
         )
     }
-    versions = SkillVersion.objects.in_bulk([e["version"] for e in entries])
-    return [(e, skills.get(e["skill"]), versions.get(e["version"])) for e in entries]
+    contents = load_contents(entries)
+    return [(e, skills.get(e["skill"]), contents.get(content_key(e))) for e in entries]
 
 
 def revoked_skill(run: Run) -> str:
@@ -195,7 +236,7 @@ def unsupported_skills(run: Run, model_version) -> list[str]:
     ]
 
 
-def render(skill: Skill, version: SkillVersion, *, name: str = "", result_tool: bool = True) -> str:
+def render(skill: Skill, version: SkillContentSource, *, name: str = "", result_tool: bool = True) -> str:
     """Skillの本文と資料の場所（harness.md §10.1）。`skill` の結果と、`/` で指定したときの最初の発言に入れる。
 
     `result_tool` は、このRunに submit_result があるか。途中で読み込んだSkillにはない（Toolの一覧はRun開始時に
@@ -203,7 +244,7 @@ def render(skill: Skill, version: SkillVersion, *, name: str = "", result_tool: 
     """
     lines = [f'<skill name="{_escape(name or skill.name)}" version="{version.number}">']
     lines.append(f"<instructions>\n{version.instructions.strip()}\n</instructions>")
-    assets = sorted(version.assets.all(), key=lambda a: a.key)
+    assets: list[SkillAssetBinding | SkillEvaluationAsset] = sorted(version.assets.all(), key=lambda a: a.key)
     if assets:
         lines.append("<assets>")
         for asset in assets:
@@ -232,13 +273,8 @@ def render(skill: Skill, version: SkillVersion, *, name: str = "", result_tool: 
 
 def explicit_text(entries: list[dict[str, Any]]) -> str:
     """`/` で指定したSkillの本文。最初の発言に添える（モデルに `skill` を呼ばせない）"""
-    versions = {
-        v.pk: v
-        for v in SkillVersion.objects.filter(pk__in=[e["version"] for e in entries])
-        .select_related("skill")
-        .prefetch_related("assets__resource_version")
-    }
-    blocks = [render(versions[e["version"]].skill, versions[e["version"]]) for e in entries]
+    contents = load_contents(entries)
+    blocks = [render(contents[content_key(e)].skill, contents[content_key(e)]) for e in entries]
     head = "The user chose these skills for this request. Follow them:"
     return head + "\n" + "\n\n".join(blocks)
 

@@ -116,6 +116,15 @@ class TestCsv:
         assert diff["rows_changed"] == 1
         assert diff["rows"][0]["cells"] == [{"column": "amount", "before": None, "after": "100"}]
 
+    def test_large_files_are_read_without_keeping_rows(self, monkeypatch):
+        monkeypatch.setattr(formats, "MAX_CSV_DETAIL_BYTES", 10)
+        data = _csv("code,name\n001,A\n001\n002,C\n")
+        result = formats.inspect(data, "v.csv", checks=KEYED, before=(data, "v.csv"))
+        assert result["info"]["rows"] == 3
+        assert result["errors"] == ["列の数が見出しと違う行があります：3行目"]
+        assert any("ファイルが大きい" in w for w in result["warnings"])
+        assert result["diff"] == {"identical": True}
+
     def test_diff_without_key_counts_rows(self):
         before = _csv("code,name\n001,A\n002,B\n")
         after = _csv("code,name\n001,A\n002,B\n002,B\n")

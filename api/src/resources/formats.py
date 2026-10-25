@@ -47,6 +47,8 @@ SNIFF_ROWS = 50
 MAX_COLUMNS = 100
 # MDの差分を取る大きさの上限（difflibは長い文書で遅くなる）
 MAX_DIFF_BYTES = 2 * 1024 * 1024
+# CSVの行を持ってキー・型・差分まで調べる大きさの上限。超えれば行を持たずに流して読む（APIのメモリを使いすぎない）
+MAX_CSV_DETAIL_BYTES = 10 * 1024 * 1024
 # PPTX（zip）の展開の上限。小さいファイルが大きく展開されるもの（zip bomb）を読まない
 MAX_ZIP_ENTRIES = 5000
 MAX_ZIP_UNCOMPRESSED = 300 * 1024 * 1024
@@ -251,6 +253,10 @@ class _Table:
         self.delimiter = delimiter
         self.header = header
         self.rows = rows  # (行番号, 値)。値はすべて文字列のまま扱い、数値に変えない（先頭の0を落とさない）
+        # 大きいファイルは行を持たずに流して読み（detailed=False）、行数と列の数の違う行だけを数える
+        self.detailed = True
+        self.row_count = len(rows)
+        self.bad_lines: list[str] = []
 
     def records(self) -> list[tuple[int, dict[str, str]]]:
         return [(line, dict(zip(self.header, values, strict=False))) for line, values in self.rows]
@@ -298,19 +304,33 @@ def _read_csv(data: bytes, checks: dict[str, Any], result: _Result | None) -> _T
         fail(_("区切り文字を判別できません。検証の条件で区切り文字を指定してください"))
         return None
     reader = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter, strict=True)
+    detailed = len(data) <= MAX_CSV_DETAIL_BYTES
+    header: list[str] | None = None
     rows: list[tuple[int, list[str]]] = []
+    count = 0
+    bad: list[str] = []
     try:
         for values in reader:
-            if values:  # 空の行は読み飛ばす
+            if not values:  # 空の行は読み飛ばす
+                continue
+            if header is None:
+                header = [h.strip() for h in values]
+            elif detailed:
                 rows.append((reader.line_num, values))
+            else:
+                count += 1
+                if len(values) != len(header) and len(bad) <= MAX_EXAMPLES:
+                    bad.append(str(reader.line_num))
     except csv.Error as exc:
         fail(_("CSVとして読めません（%(line)s行目：%(error)s）") % {"line": reader.line_num, "error": exc})
         return None
-    if not rows:
+    if header is None:
         fail(_("CSVに見出しの行がありません"))
         return None
-    header = [h.strip() for h in rows[0][1]]
-    return _Table(encoding, delimiter, header, rows[1:])
+    table = _Table(encoding, delimiter, header, rows)
+    if not detailed:
+        table.detailed, table.row_count, table.bad_lines = False, count, bad
+    return table
 
 
 def _type_ok(kind: str, value: str) -> bool:
@@ -335,7 +355,8 @@ def _check_table(result: _Result, table: _Table, checks: dict[str, Any]) -> None
         result.error(_("見出しが空の列があります"))
     if duplicated := [h for h, n in Counter(header).items() if n > 1 and h]:
         result.error(_("同じ見出しの列があります：%(columns)s") % {"columns": _examples(duplicated)})
-    if bad := [str(line) for line, values in table.rows if len(values) != len(header)]:
+    bad = table.bad_lines or [str(line) for line, values in table.rows if len(values) != len(header)]
+    if bad:
         result.error(_("列の数が見出しと違う行があります：%(lines)s行目") % {"lines": _examples(bad)})
     if missing := [c for c in checks["required_columns"] if c not in header]:
         result.error(_("必須の列がありません：%(columns)s") % {"columns": _examples(missing)})
@@ -388,16 +409,24 @@ def _inspect_csv(result: _Result, data: bytes, checks: dict[str, Any], before: b
         "encoding": table.encoding,
         "delimiter": CSV_DELIMITERS.get(table.delimiter, table.delimiter),
         "columns": table.header[:MAX_COLUMNS],
-        "rows": len(table.rows),
+        "rows": table.row_count,
     }
     _check_table(result, table, checks)
+    if not table.detailed:
+        result.warn(
+            _("ファイルが大きい（%(limit)sMBを超える）ため、キー・列の型・先頭の0の検証と、行の差分は行いません")
+            % {"limit": MAX_CSV_DETAIL_BYTES // (1024 * 1024)}
+        )
+        if before is not None:
+            result.diff = {"identical": data == before}
+        return
     if before is None:
         return
     # 前の版は文字コード・区切りを判別して読む（条件を変えた後でも、前の版を前の形のまま読めるように）
     previous = _read_csv(before, {**checks, "encoding": "", "delimiter": ""}, None) or _read_csv(
         before, {**checks, "encoding": "", "delimiter": table.delimiter}, None
     )
-    if previous is None:
+    if previous is None or not previous.detailed:
         return
     if previous.encoding != table.encoding:
         result.warn(

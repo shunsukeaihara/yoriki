@@ -512,7 +512,9 @@ def execute_stage_skill_asset(arguments: dict[str, Any], context: ToolContext) -
 
     def change(draft: SkillDraft, expected: int) -> ToolResult:
         existing = draft.assets.filter(key=key).first()
-        current_checks = formats.normalize_checks(existing.checks if existing is not None else None)
+        # 外した資料を同じkeyで加え直すときは、元の版の条件と比べる
+        base = draft.base_asset(key) if existing is None else None
+        current_checks = formats.normalize_checks(existing.checks if existing else base.checks if base else None)
         if checks is not None and checks != current_checks and skill.scope_access_of(actor) < SkillAccess.PUBLISH:
             return ToolResult.error(
                 "Changing the checks needs the publish role for this skill. Call again without checks."

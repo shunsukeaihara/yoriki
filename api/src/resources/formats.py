@@ -451,30 +451,41 @@ def _inspect_csv(result: _Result, data: bytes, checks: dict[str, Any], before: b
 
 
 def _check_leading_zeros(result: _Result, before: _Table, after: _Table, checks: dict[str, Any]) -> None:
-    """前の版に先頭が0の値（コード等）があった列から、先頭の0が消えていないか（表計算ソフトでの保存で起きやすい）"""
+    """前の版に先頭が0の値（コード等）があった列から、先頭の0が消えていないか（表計算ソフトでの保存で起きやすい）。
+    キーの列があれば同じキーの行どうしで、なければ列の値の集まりで比べる"""
     numeric = {c for c, kind in _column_types(checks).items() if kind in ("integer", "decimal")}
     before_records = [r for _l, r in before.records()]
     after_records = [r for _l, r in after.records()]
+    keys = checks["key_columns"]
+    pairs: list[tuple[dict[str, str], dict[str, str]]] | None = None
+    if keys and all(k in before.header and k in after.header for k in keys):
+        old = {_key(r, keys): r for r in before_records}
+        pairs = [(old[k], r) for r in after_records if (k := _key(r, keys)) in old]
     for column in after.header:
         if column in numeric or column not in before.header:
             continue
-        zeros = {r[column] for r in before_records if LEADING_ZERO_RE.fullmatch(r.get(column, ""))}
-        if not zeros:
-            continue
-        # 0付きの値が消え、0を取った値が新しく現れたもの（行を消しただけ・別の行の値と取り違えない）だけを数える
-        values = {r.get(column, "") for r in after_records}
-        previous = {r.get(column, "") for r in before_records}
-        examples = sorted(
-            v
-            for v in zeros
-            if v not in values and (stripped := v.lstrip("0") or "0") in values and stripped not in previous
-        )
-        if examples:
+        if pairs is not None:
+            lost = [
+                a[column]
+                for a, b in pairs
+                if LEADING_ZERO_RE.fullmatch(a.get(column, "")) and b.get(column) == (a[column].lstrip("0") or "0")
+            ]
+        else:
+            # 0付きの値が消え、0を取った値が新しく現れたもの（行を消しただけ・別の行の値と取り違えない）だけを数える
+            zeros = {r[column] for r in before_records if LEADING_ZERO_RE.fullmatch(r.get(column, ""))}
+            values = {r.get(column, "") for r in after_records}
+            previous = {r.get(column, "") for r in before_records}
+            lost = [
+                v
+                for v in zeros
+                if v not in values and (stripped := v.lstrip("0") or "0") in values and stripped not in previous
+            ]
+        if lost:
             result.error(
                 _(
                     "列「%(column)s」の先頭の0が消えています（前の版の例：「%(example)s」）。値を文字列のまま保存してください"
                 )
-                % {"column": column, "example": examples[0]}
+                % {"column": column, "example": sorted(lost)[0]}
             )
 
 

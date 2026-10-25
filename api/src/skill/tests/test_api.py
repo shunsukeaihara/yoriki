@@ -612,6 +612,23 @@ class TestAssetValidation:
         assert change["asset_diffs"] == [{"key": "vendors", "rows_added": 1, "rows_removed": 0, "rows_changed": 1}]
 
     @pytest.mark.django_db
+    def test_readded_asset_keeps_the_published_checks(self, api_client, app_user):
+        skill_id = _create(api_client, app_user, instructions="1. 読む")["id"]
+        draft = _draft(api_client, skill_id)
+        asset = self._add(api_client, skill_id, draft, "vendors.csv", b"code\n001\n")
+        url = f"{SKILLS}{skill_id}/drafts/{draft['id']}/assets/vendors/"
+        body = {"revision": asset["draft_revision"], "checks": {"key_columns": ["code"]}}
+        api_client.put(f"{url}checks/", body, format="json")
+        _publish(api_client, skill_id, _draft(api_client, skill_id))
+        # 外してから同じkeyで加え直しても、公開中の版の条件のまま
+        draft = api_client.post(f"{SKILLS}{skill_id}/drafts/", {}, format="json").json()
+        api_client.delete(f"{SKILLS}{skill_id}/drafts/{draft['id']}/assets/vendors/?revision={draft['revision']}")
+        draft = _draft(api_client, skill_id)
+        asset = self._add(api_client, skill_id, draft, "vendors.csv", b"code\n001\n001\n")
+        assert asset["checks"]["key_columns"] == ["code"]
+        assert asset["validation"]["errors"] == ["キーが重複しています：001"]
+
+    @pytest.mark.django_db
     def test_editor_cannot_change_checks(self, api_client, app_user, other_user):
         department = DepartmentFactory.create()
         DepartmentMembershipFactory.create(department=department, user=app_user, role=DepartmentRole.EDITOR)

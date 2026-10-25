@@ -608,7 +608,7 @@ class SkillDraft(SkillContent):
     def _opened_validation(self, asset: "SkillAssetBinding") -> dict[str, Any]:
         """開いたDraftの資料の検証の結果。公開中の版と同じ原本なら、その版の結果を差分なしで使う。過去の版から開いて
         原本が違えば（検証する前に公開した資料も）、公開中の版の同じ資料と比べて検証し直す"""
-        current = self._base_asset(asset.key)
+        current = self.base_asset(asset.key)
         if (
             asset.validation
             and current is not None
@@ -666,7 +666,9 @@ class SkillDraft(SkillContent):
             raise InvalidDraft(_("同じkeyの資料があります"))
         data = src.read()
         resource_version = Resource.create_from_upload(io.BytesIO(data), filename, actor=actor)
-        checks = formats.normalize_checks(checks)
+        # 外してから同じkeyで加え直しても、元の版の検証の条件を引き継ぐ（条件を変えるのは公開の役割だけ）
+        base = current.base_asset(key)
+        checks = formats.normalize_checks(checks if checks is not None else base.checks if base else None)
         asset = SkillDraftAsset.objects.create(
             draft=current,
             key=key,
@@ -679,7 +681,7 @@ class SkillDraft(SkillContent):
         self._bump(current, actor, [])
         return asset
 
-    def _base_asset(self, key: str) -> "SkillAssetBinding | None":
+    def base_asset(self, key: str) -> "SkillAssetBinding | None":
         if self.base_version_id is None:
             return None
         return (
@@ -692,7 +694,7 @@ class SkillDraft(SkillContent):
         self, key: str, resource_version: ResourceVersion, data: bytes, checks: dict[str, Any], edited: bool
     ) -> dict[str, Any]:
         """資料を検証し、Draftの元の版の同じkeyの資料との差分を取る"""
-        base = self._base_asset(key)
+        base = self.base_asset(key)
         before = (base.resource_version.read(), base.resource_version.name) if base else None
         return formats.inspect(data, resource_version.name, checks=checks, before=before, edited=edited)
 

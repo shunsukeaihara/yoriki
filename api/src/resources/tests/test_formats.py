@@ -152,6 +152,12 @@ class TestCsv:
         before = _csv("code,name\n001,A\n1,B\n")
         assert formats.inspect(_csv("code,name\n1,B\n"), "v.csv", before=(before, "v.csv"))["errors"] == []
 
+    def test_lost_zero_is_found_by_key(self):
+        before = _csv("id,code\na,001\nb,1\n")
+        after = _csv("id,code\na,1\nb,1\n")
+        result = formats.inspect(after, "v.csv", checks={"key_columns": ["id"]}, before=(before, "v.csv"))
+        assert any("先頭の0が消えています" in e for e in result["errors"])
+
     def test_previous_version_is_read_by_its_own_encoding(self):
         before = _csv("code,name\n001,東京\n", "cp932")
         after = _csv("code,name\n001,東京本社\n")

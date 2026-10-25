@@ -160,6 +160,15 @@ class TestCsv:
         quoted = formats.inspect(_csv('"姓, 名";code\n"山田, 太郎";001\n'), "v.csv")
         assert quoted["info"]["delimiter"] == "semicolon"
         assert quoted["info"]["columns"] == ["姓, 名", "code"]
+        # カンマでもセミコロンでも列がそろい、決められなければ、区切り文字の指定を求める
+        ambiguous = _csv("id;description, details\n1;foo, bar\n")
+        assert formats.inspect(ambiguous, "v.csv")["errors"] == [
+            "区切り文字を判別できません。検証の条件で区切り文字を指定してください"
+        ]
+        assert formats.inspect(ambiguous, "v.csv", checks={"delimiter": ";"})["info"]["columns"] == [
+            "id",
+            "description, details",
+        ]
         tab = formats.inspect(_csv("a\tb\n1\t2\n"), "v.csv")
         assert tab["info"]["delimiter"] == "tab"
         assert tab["info"]["columns"] == ["a", "b"]

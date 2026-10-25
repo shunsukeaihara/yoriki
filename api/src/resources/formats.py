@@ -42,6 +42,8 @@ MAX_DIFF_ROWS = 50
 MAX_DIFF_SLIDES = 50
 MAX_TEXT = 300
 MAX_EXAMPLES = 5
+# 区切り文字を判別するときに読む先頭の行数
+SNIFF_ROWS = 50
 MAX_COLUMNS = 100
 # MDの差分を取る大きさの上限（difflibは長い文書で遅くなる）
 MAX_DIFF_BYTES = 2 * 1024 * 1024
@@ -50,6 +52,7 @@ MAX_ZIP_ENTRIES = 5000
 MAX_ZIP_UNCOMPRESSED = 300 * 1024 * 1024
 # 編集した資料で変わってはいけない要素（python-pptxで正しく編集できないもの）
 UNEDITABLE_ELEMENTS = ("picture", "chart", "graphic", "media")
+RELATIONSHIP_NS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
 
 INTEGER_RE = re.compile(r"-?\d+")
 DECIMAL_RE = re.compile(r"-?\d+(\.\d+)?")
@@ -253,19 +256,25 @@ class _Table:
         return [(line, dict(zip(self.header, values, strict=False))) for line, values in self.rows]
 
 
-def _sniff_delimiter(text: str) -> str:
-    """見出しの行で、引用符の外にいちばん多く現れる区切り文字（引用符の中の改行も見出しの続きとして扱う）"""
-    counts = dict.fromkeys(CSV_DELIMITERS, 0)
-    quoted = False
-    for char in text:
-        if char == '"':
-            quoted = not quoted  # "" は閉じてすぐ開くので、引用の中のままになる
-        elif not quoted and char == "\n":
-            break
-        elif not quoted and char in counts:
-            counts[char] += 1
-    best = max(counts, key=lambda d: counts[d])
-    return best if counts[best] else ","
+def _sniff_delimiter(text: str) -> str | None:
+    """先頭の行（SNIFF_ROWS行まで）を候補ごとに読み、どの行も同じ2列以上になる区切り文字。そろう候補が複数あって
+    決められなければNone（検証の条件で指定してもらう）。どの候補もそろわなければ、見出しの列がいちばん多いもの"""
+    widths: dict[str, int] = {}
+    consistent = []
+    for delimiter in CSV_DELIMITERS:
+        reader = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter)
+        try:
+            lengths = {len(row) for row in itertools.islice(reader, SNIFF_ROWS) if row}
+        except csv.Error:
+            continue
+        widths[delimiter] = max(lengths, default=0)
+        if len(lengths) == 1 and widths[delimiter] > 1:
+            consistent.append(delimiter)
+    if len(consistent) == 1:
+        return consistent[0]
+    if consistent:
+        return None
+    return max(widths, key=lambda d: widths[d], default=",") if any(w > 1 for w in widths.values()) else ","
 
 
 def _read_csv(data: bytes, checks: dict[str, Any], result: _Result | None) -> _Table | None:
@@ -285,6 +294,9 @@ def _read_csv(data: bytes, checks: dict[str, Any], result: _Result | None) -> _T
         return None
     text, encoding = decoded
     delimiter = checks["delimiter"] or _sniff_delimiter(text)
+    if delimiter is None:
+        fail(_("区切り文字を判別できません。検証の条件で区切り文字を指定してください"))
+        return None
     reader = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter, strict=True)
     rows: list[tuple[int, list[str]]] = []
     try:
@@ -382,7 +394,9 @@ def _inspect_csv(result: _Result, data: bytes, checks: dict[str, Any], before: b
     if before is None:
         return
     # 前の版は文字コード・区切りを判別して読む（条件を変えた後でも、前の版を前の形のまま読めるように）
-    previous = _read_csv(before, {**checks, "encoding": "", "delimiter": ""}, None)
+    previous = _read_csv(before, {**checks, "encoding": "", "delimiter": ""}, None) or _read_csv(
+        before, {**checks, "encoding": "", "delimiter": table.delimiter}, None
+    )
     if previous is None:
         return
     if previous.encoding != table.encoding:
@@ -525,18 +539,19 @@ def _walk(shapes, prefix: str = ""):
             yield from _walk(shape.shapes, f"{prefix}{shape.shape_id}/")
 
 
-def _fingerprint(shape, kind: str) -> str:
+def _fingerprint(shape) -> str:
     """正しく編集できない要素のhash。数が同じでも、差し替え・移動・拡大・トリミングが分かるように、要素のXML
-    （位置・大きさ・トリミング・参照する部品のID）と、画像・グラフはその中身も比べる"""
-    content = ""
-    try:
-        if kind == "picture":
-            content = shape.image.sha1
-        elif kind == "chart":
-            content = hashlib.sha256(shape.chart_part.blob).hexdigest()
-    except (AttributeError, KeyError, ValueError):
-        pass
-    return hashlib.sha256(shape._element.xml.encode() + content.encode()).hexdigest()
+    （位置・大きさ・トリミング・参照する部品のID）と、参照する部品（画像・グラフ・SmartArtのデータ・動画等）の中身を比べる"""
+    digest = hashlib.sha256(shape._element.xml.encode())
+    for node in shape._element.iter():
+        for name, value in sorted(node.attrib.items()):
+            if not name.startswith(RELATIONSHIP_NS):
+                continue
+            try:
+                digest.update(shape.part.related_part(value).blob)
+            except (KeyError, AttributeError, ValueError):
+                digest.update(f"{name}={value}".encode())  # 外部へのリンク等は、参照の値だけを比べる
+    return digest.hexdigest()
 
 
 def _slide_structure(slide) -> dict[str, Any]:
@@ -547,7 +562,7 @@ def _slide_structure(slide) -> dict[str, Any]:
         kind = _shape_kind(shape)
         elements[kind] += 1
         if kind in UNEDITABLE_ELEMENTS:
-            fingerprints.append(f"{kind}:{_fingerprint(shape, kind)}")
+            fingerprints.append(f"{kind}:{_fingerprint(shape)}")
         text = _shape_text(shape)
         if text is not None:
             texts[f"{prefix}{shape.shape_id}"] = {"name": shape.name, "text": text}

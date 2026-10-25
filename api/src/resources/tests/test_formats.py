@@ -111,6 +111,10 @@ class TestCsv:
         assert formats.inspect(data, "v.csv")["info"]["encoding"] == "cp932"
         result = formats.inspect(data, "v.csv", checks={"encoding": "utf-8"})
         assert result["errors"] == ["文字コード（utf-8）として読めません"]
+        # 引用符の中のカンマは区切りとして数えない
+        quoted = formats.inspect(_csv('"姓, 名";code\n"山田, 太郎";001\n'), "v.csv")
+        assert quoted["info"]["delimiter"] == "semicolon"
+        assert quoted["info"]["columns"] == ["姓, 名", "code"]
         tab = formats.inspect(_csv("a\tb\n1\t2\n"), "v.csv")
         assert tab["info"]["delimiter"] == "tab"
         assert tab["info"]["columns"] == ["a", "b"]
@@ -139,6 +143,24 @@ class TestPptx:
         replaced = formats.inspect(after, "deck.pptx", before=(before, "deck.pptx"))
         assert replaced["errors"] == []
         assert replaced["diff"]["slides"][0]["elements"] == [{"kind": "picture", "before": 1, "after": 0}]
+
+    def test_edited_deck_must_keep_the_same_pictures(self):
+        before = _deck("表紙", picture=True)
+        presentation = Presentation(io.BytesIO(before))
+        slide = presentation.slides[0]
+        [picture] = [shape for shape in slide.shapes if shape.shape_type == 13]
+        picture._element.getparent().remove(picture._element)
+        other = (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x02\x00\x00\x00\x02\x08\x02\x00\x00\x00\xfd\xd4\x9as"
+            b"\x00\x00\x00\x0fIDATx\x9cc\xf8\xcf\xc0\x00\x02\x0c\x0c\x00\x00\x0e\x00\x01\xe6\xa0\x9fV\x00\x00\x00\x00IEND"
+            b"\xaeB`\x82"
+        )
+        slide.shapes.add_picture(io.BytesIO(other), Inches(1), Inches(1))
+        out = io.BytesIO()
+        presentation.save(out)
+        # 画像の数が同じでも、差し替えれば誤り
+        result = formats.inspect(out.getvalue(), "deck.pptx", before=(before, "deck.pptx"), edited=True)
+        assert any("画像・グラフ・SmartArt" in e for e in result["errors"])
 
     def test_broken_and_huge_files(self, monkeypatch):
         assert formats.inspect(b"not a zip", "deck.pptx")["errors"]

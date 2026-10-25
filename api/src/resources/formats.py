@@ -8,6 +8,7 @@ MD・CSV・PPTXの原本を読み、形式の誤り（errors）・注意（warni
 import csv
 import datetime
 import difflib
+import hashlib
 import io
 import posixpath
 import re
@@ -251,8 +252,16 @@ class _Table:
 
 
 def _sniff_delimiter(text: str) -> str:
-    first = text.split("\n", 1)[0]
-    counts = {d: first.count(d) for d in CSV_DELIMITERS}
+    """見出しの行で、引用符の外にいちばん多く現れる区切り文字（引用符の中の改行も見出しの続きとして扱う）"""
+    counts = dict.fromkeys(CSV_DELIMITERS, 0)
+    quoted = False
+    for char in text:
+        if char == '"':
+            quoted = not quoted  # "" は閉じてすぐ開くので、引用の中のままになる
+        elif not quoted and char == "\n":
+            break
+        elif not quoted and char in counts:
+            counts[char] += 1
     best = max(counts, key=lambda d: counts[d])
     return best if counts[best] else ","
 
@@ -491,11 +500,28 @@ def _walk(shapes, prefix: str = ""):
             yield from _walk(shape.shapes, f"{prefix}{shape.shape_id}/")
 
 
+def _fingerprint(shape, kind: str) -> str:
+    """正しく編集できない要素の中身のhash。数が同じでも、差し替えたことが分かるように比べる"""
+    try:
+        if kind == "picture":
+            return shape.image.sha1
+        if kind == "chart":
+            return hashlib.sha256(shape.chart_part.blob).hexdigest()
+    except (AttributeError, KeyError, ValueError):
+        pass
+    # SmartArt・OLE・動画等は、要素のXML（参照する部品のIDを含む）で比べる
+    return hashlib.sha256(shape._element.xml.encode()).hexdigest()
+
+
 def _slide_structure(slide) -> dict[str, Any]:
     texts: dict[str, dict[str, str]] = {}
     elements: Counter[str] = Counter()
+    fingerprints: list[str] = []
     for prefix, shape in _walk(slide.shapes):
-        elements[_shape_kind(shape)] += 1
+        kind = _shape_kind(shape)
+        elements[kind] += 1
+        if kind in UNEDITABLE_ELEMENTS:
+            fingerprints.append(f"{kind}:{_fingerprint(shape, kind)}")
         text = _shape_text(shape)
         if text is not None:
             texts[f"{prefix}{shape.shape_id}"] = {"name": shape.name, "text": text}
@@ -506,6 +532,7 @@ def _slide_structure(slide) -> dict[str, Any]:
         "placeholders": placeholders,
         "texts": texts,
         "elements": dict(elements),
+        "fingerprints": sorted(fingerprints),
     }
 
 
@@ -636,7 +663,7 @@ def _check_edited_deck(result: _Result, before: dict[str, Any], after: dict[str,
         previous = old.get(slide["id"])
         if previous is None:
             continue
-        if any(previous["elements"].get(k, 0) != slide["elements"].get(k, 0) for k in UNEDITABLE_ELEMENTS):
+        if previous["fingerprints"] != slide["fingerprints"]:
             broken.append(str(index))
     if broken:
         result.error(

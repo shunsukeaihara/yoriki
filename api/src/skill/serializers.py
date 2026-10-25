@@ -880,9 +880,13 @@ class SkillEvaluationCaseSerializer(serializers.ModelSerializer):
         actor = validated_data.pop("actor")
         add_files = validated_data.pop("add_files", [])
         validated_data.pop("remove_files", None)
-        case = SkillEvaluationCase.objects.create(
-            skill=self.context["skill"], created_by=actor, updated_by=actor, **validated_data
-        )
+        # 同時の作成で上限を超えないよう、Skillの行をロックして数え直す
+        skill = Skill.objects.select_for_update().get(pk=self.context["skill"].pk)
+        if SkillEvaluationCase.objects.filter(skill=skill).count() >= MAX_EVALUATION_CASES:
+            raise serializers.ValidationError(
+                {"non_field_errors": [_("評価ケースは%(limit)s件までです") % {"limit": MAX_EVALUATION_CASES}]}
+            )
+        case = SkillEvaluationCase.objects.create(skill=skill, created_by=actor, updated_by=actor, **validated_data)
         case.files.add(*_upload(add_files, actor))
         return case
 
@@ -891,6 +895,9 @@ class SkillEvaluationCaseSerializer(serializers.ModelSerializer):
         actor = validated_data.pop("actor")
         # 評価の開始（ケースの中身と添付を写す）と重ならないよう、行をロックしてから変える
         instance = SkillEvaluationCase.objects.select_for_update().get(pk=instance.pk)
+        if instance.required and _access(instance.skill, self.context) < SkillAccess.PUBLISH:
+            # 確かめた後に、公開の権限を持つ人が必須にした
+            raise PermissionDenied(_("公開の前に必須の評価ケースを作る・変えるには、この範囲の公開の権限が要ります"))
         add_files = validated_data.pop("add_files", [])
         removed = set(validated_data.pop("remove_files", []))
         changed = [name for name, value in validated_data.items() if getattr(instance, name) != value]

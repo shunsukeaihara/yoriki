@@ -21,7 +21,8 @@ const onOpen = async (open: boolean) => {
   // 必須のケースを先に、上限まで選んでおく（一覧は必須が先に並ぶ）
   form.value = { cases: props.cases.slice(0, MAX_CASES_PER_EVALUATION).map((c) => c.id), modelProfile: '' }
   try {
-    models.value = (await api.modelProfiles.list()).filter((m) => m.supportsTools)
+    // Draftの必要な能力を持つかはサーバーが確かめる（ToolもSchemaも使わないDraftは、Tool非対応のモデルでも評価できる）
+    models.value = await api.modelProfiles.list()
     form.value.modelProfile = (models.value.find((m) => m.isDefault) ?? models.value[0])?.id ?? ''
   } catch (err) {
     toast.add({ title: t('エラー'), description: makeErrorMsg(err), color: 'error' })

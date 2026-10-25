@@ -893,7 +893,9 @@ class SkillEvaluationCaseSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def update(self, instance: SkillEvaluationCase, validated_data) -> SkillEvaluationCase:
         actor = validated_data.pop("actor")
-        # 評価の開始（ケースの中身と添付を写す）と重ならないよう、行をロックしてから変える
+        # 評価の開始（ケースの中身と添付を写す）とも重ならない
+        # 公開の判定（Skillの行をロックする）と重ならないよう、Skill → ケースの順にロックしてから変える
+        Skill.objects.select_for_update().filter(pk=instance.skill_id).first()
         instance = SkillEvaluationCase.objects.select_for_update().get(pk=instance.pk)
         if instance.required and _access(instance.skill, self.context) < SkillAccess.PUBLISH:
             # 確かめた後に、公開の権限を持つ人が必須にした

@@ -1,3 +1,4 @@
+from django.db import transaction
 from django.db.models import Prefetch, Q
 from django.utils.translation import gettext_lazy as _
 from django_filters import rest_framework as filters
@@ -418,7 +419,11 @@ class AppSkillEvaluationCaseViewSet(
     def perform_update(self, serializer):
         serializer.save(actor=self.request.user)
 
+    @transaction.atomic
     def perform_destroy(self, instance: SkillEvaluationCase):
+        # 公開の判定（Skillの行をロックする）と重ならないよう、Skill → ケースの順にロックしてから消す
+        Skill.objects.select_for_update().filter(pk=instance.skill_id).first()
+        instance = SkillEvaluationCase.objects.select_for_update().get(pk=instance.pk)
         if instance.required and self.skill.access_of(self.request.user) < SkillAccess.PUBLISH:
             raise PermissionDenied(_("公開の前に必須の評価ケースを消すには、この範囲の公開の権限が要ります"))
         instance.delete()

@@ -596,6 +596,14 @@ class TestAssetValidation:
         assert change["summary"]["assets_replaced"] == ["vendors"]
         assert change["asset_diffs"] == [{"key": "vendors", "rows_added": 1, "rows_removed": 0, "rows_changed": 1}]
 
+        # 過去の版から開いたDraftは、公開中の版との差分を持つ
+        draft = api_client.post(f"{SKILLS}{skill_id}/drafts/", {"base_version": 1}, format="json").json()
+        diff = draft["assets"][0]["validation"]["diff"]
+        assert (diff["rows_removed"], diff["rows_changed"]) == (1, 1)
+        _publish(api_client, skill_id, draft)
+        change = api_client.get(f"{SKILLS}{skill_id}/changes/").json()["results"][0]
+        assert change["asset_diffs"][0]["rows_removed"] == 1
+
     @pytest.mark.django_db
     def test_editor_cannot_change_checks(self, api_client, app_user, other_user):
         department = DepartmentFactory.create()

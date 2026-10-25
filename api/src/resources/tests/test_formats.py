@@ -124,6 +124,9 @@ class TestCsv:
         result = formats.inspect(after, "v.csv", before=(before, "v.csv"))
         assert result["errors"] == []
         assert result["diff"]["identical"] is False
+        # 0を取った値が別の行に元からあれば、行を消しただけとして扱う
+        before = _csv("code,name\n001,A\n1,B\n")
+        assert formats.inspect(_csv("code,name\n1,B\n"), "v.csv", before=(before, "v.csv"))["errors"] == []
 
     def test_previous_version_is_read_by_its_own_encoding(self):
         before = _csv("code,name\n001,東京\n", "cp932")

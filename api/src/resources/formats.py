@@ -407,9 +407,14 @@ def _check_leading_zeros(result: _Result, before: _Table, after: _Table, checks:
         zeros = {r[column] for r in before_records if LEADING_ZERO_RE.fullmatch(r.get(column, ""))}
         if not zeros:
             continue
-        # 0付きの値が消え、0を取った値に変わったものだけを数える（行を消しただけなら誤りにしない）
+        # 0付きの値が消え、0を取った値が新しく現れたもの（行を消しただけ・別の行の値と取り違えない）だけを数える
         values = {r.get(column, "") for r in after_records}
-        examples = sorted(v for v in zeros if v not in values and (v.lstrip("0") or "0") in values)
+        previous = {r.get(column, "") for r in before_records}
+        examples = sorted(
+            v
+            for v in zeros
+            if v not in values and (stripped := v.lstrip("0") or "0") in values and stripped not in previous
+        )
         if examples:
             result.error(
                 _(

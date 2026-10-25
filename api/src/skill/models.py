@@ -593,13 +593,20 @@ class SkillDraft(SkillContent):
                     description=a.description,
                     resource_version_id=a.resource_version_id,
                     checks=formats.normalize_checks(a.checks),
-                    # 検証する前に公開した資料は、ここで検証する
-                    validation=_without_diff(a.validation)
-                    or formats.inspect(a.resource_version.read(), a.resource_version.name, checks=a.checks),
+                    validation=draft._opened_validation(a),
                 )
                 for a in base.assets.select_related("resource_version__blob")
             )
         return draft
+
+    def _opened_validation(self, asset: "SkillAssetBinding") -> dict[str, Any]:
+        """開いたDraftの資料の検証の結果。公開中の版と同じ原本なら、その版の結果を差分なしで使う。過去の版から開いて
+        原本が違えば（検証する前に公開した資料も）、公開中の版の同じ資料と比べて検証し直す"""
+        current = self._base_asset(asset.key)
+        if asset.validation and current is not None and current.resource_version_id == asset.resource_version_id:
+            return _without_diff(asset.validation)
+        resource = asset.resource_version
+        return self._inspect(asset.key, resource, resource.read(), asset.checks, False)
 
     def _lock(self, expected_revision: int) -> "SkillDraft":
         """行をロックし、編集を始めた後にDraftが変わっていない（公開で閉じてもいない）ことを確かめる"""

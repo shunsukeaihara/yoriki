@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * Skillの詳細。公開中の版の中身、Draftの編集と資料・公開、版の履歴と切戻し、変更の記録。
+ * Skillの詳細。公開中の版の中身、Draftの編集と資料・公開、評価ケースとDraftの評価、版の履歴と切戻し、変更の記録。
  * 何ができるかは Skill.access で決まり（design.md §3.6）、ボタンを隠すだけで、サーバーでも必ず確かめる（403）
  */
 import { AxiosError } from 'axios'
@@ -31,17 +31,45 @@ const loadDraft = async () => {
   const draftId = skill.value?.draft
   draft.value = draftId ? await api.skills(skillId).drafts(draftId).get() : null
 }
-await Promise.all([loadCurrent(), loadDraft()])
+// 評価ケース（Draftを編集できる人だけが見られる。design.md §3.7.1）
+const cases = ref<SkillEvaluationCase[]>([])
+const loadCases = async () => {
+  cases.value = canEdit.value ? await api.skills(skillId).evaluationCases().list() : []
+}
+await Promise.all([loadCurrent(), loadDraft(), loadCases()])
 
-const tab = ref(draft.value ? 'draft' : 'current')
 const tabs = computed(() => [
   { label: t('公開中の版'), value: 'current', slot: 'current' as const },
-  ...(canEdit.value ? [{ label: t('編集中のDraft'), value: 'draft', slot: 'draft' as const }] : []),
+  ...(canEdit.value
+    ? [
+        { label: t('編集中のDraft'), value: 'draft', slot: 'draft' as const },
+        { label: t('評価'), value: 'evaluation', slot: 'evaluation' as const },
+      ]
+    : []),
   { label: t('版の履歴'), value: 'versions', slot: 'versions' as const },
   { label: t('変更の記録'), value: 'changes', slot: 'changes' as const },
 ])
+// 評価の結果のページから戻るときは ?tab=evaluation で開く
+const queryTab = route.query.tab as string | undefined
+const tab = ref(tabs.value.some((item) => item.value === queryTab) ? queryTab! : draft.value ? 'draft' : 'current')
 const versionsReloadKey = ref(0)
 const changesReloadKey = ref(0)
+const evaluationsReloadKey = ref(0)
+// 公開の前に必須の評価ケースのうち、今のDraftで通過していないもの（あれば公開できない）
+const unevaluated = computed(() => draft.value?.unevaluatedCases ?? [])
+// 評価ケースを変えたら、必須のケースの状態だけを読み直す（入力中のDraftの本文は残す）
+const onCasesChanged = async () => {
+  if (!draft.value) return
+  try {
+    const fresh = await api.skills(skillId).drafts(draft.value.id).get()
+    if (draft.value) draft.value = { ...draft.value, unevaluatedCases: fresh.unevaluatedCases }
+  } catch {
+    // Draftが閉じた等。次に読み込むときに分かる
+  }
+}
+const onEvaluationStarted = async (value: SkillEvaluation) => {
+  await navigateTo(`/skills/${skillId}/evaluations/${value.id}`)
+}
 
 const formRef = ref<InstanceType<typeof SkillDraftForm> | null>(null)
 // 編集の間に他の人がDraftを変えた・公開した（409・404）。最新の状態を読み込んでから編集し直す
@@ -65,6 +93,7 @@ const reloadAll = async () => {
   conflicted.value = false
   versionsReloadKey.value = Date.now()
   changesReloadKey.value = Date.now()
+  evaluationsReloadKey.value = Date.now()
 }
 const reloadLatest = async () => {
   if (formRef.value?.dirty) {
@@ -233,6 +262,17 @@ const onDelete = async () => {
                     )
                   "
                 />
+                <UAlert
+                  v-if="unevaluated.length"
+                  color="warning"
+                  variant="subtle"
+                  icon="i-lucide-shield-alert"
+                  :title="$t('公開の前に必須の評価ケースが、今のDraftで通過していません')"
+                  :description="unevaluated.map((c) => c.name).join('、')"
+                  :actions="[
+                    { label: $t('評価へ'), color: 'warning', variant: 'outline', onClick: () => (tab = 'evaluation') },
+                  ]"
+                />
                 <p class="text-xs text-muted">
                   {{
                     $t('版 {base} から編集中・最後の保存 {updated}（{user}）', {
@@ -289,7 +329,11 @@ const onDelete = async () => {
                     @failed="onFailed"
                   >
                     <template #trigger="{ on }">
-                      <DBtn icon="i-lucide-upload" :disabled="formRef?.dirty || staleDraft" v-on="on">
+                      <DBtn
+                        icon="i-lucide-upload"
+                        :disabled="formRef?.dirty || staleDraft || unevaluated.length > 0"
+                        v-on="on"
+                      >
                         {{ $t('公開') }}
                       </DBtn>
                     </template>
@@ -311,6 +355,36 @@ const onDelete = async () => {
                 </p>
                 <DBtn icon="i-lucide-pencil" :loading="opening" @click="openDraft()">{{ $t('編集を始める') }}</DBtn>
               </div>
+            </div>
+          </template>
+
+          <template #evaluation>
+            <div class="grid gap-6 pt-4">
+              <SkillEvaluationCaseList v-model="cases" :skill="skill" @update:model-value="onCasesChanged" />
+              <div class="flex flex-wrap items-center gap-2">
+                <SkillEvaluateDialog
+                  v-if="draft && cases.length"
+                  :skill="skill"
+                  :cases="cases"
+                  @started="onEvaluationStarted"
+                >
+                  <template #trigger="{ on }">
+                    <DBtn icon="i-lucide-flask-conical" :disabled="formRef?.dirty" v-on="on">
+                      {{ $t('Draftを評価') }}
+                    </DBtn>
+                  </template>
+                </SkillEvaluateDialog>
+                <p v-if="!draft" class="text-sm text-muted">
+                  {{ $t('評価するには、編集を始めてDraftを開いてください') }}
+                </p>
+                <p v-else-if="!cases.length" class="text-sm text-muted">
+                  {{ $t('評価するには、評価ケースを追加してください') }}
+                </p>
+                <p v-else-if="formRef?.dirty" class="text-xs text-warning">
+                  {{ $t('Draftに保存していない変更があります。保存してから評価してください') }}
+                </p>
+              </div>
+              <SkillEvaluationList v-model:reload-key="evaluationsReloadKey" :skill-id="skillId" />
             </div>
           </template>
 

@@ -425,6 +425,32 @@ def test_test_skill_draft_waits_for_the_evaluation_and_resumes(app_user, monkeyp
 
 
 @pytest.mark.django_db
+def test_evaluation_finished_before_the_wait_is_delivered_after_commit(
+    app_user, monkeypatch, django_capture_on_commit_callbacks
+):
+    skill = skill_with_draft(app_user)
+    case(skill)
+    conversation = ConversationFactory.create(owner=app_user)
+    run = _edit_run(conversation, skill)
+    started = evaluation_module.start_evaluation
+
+    def start_and_finish(*args, **kwargs):
+        # 編集のRunが確認待ちになる前に評価が終わった場合
+        evaluation = started(*args, **kwargs)
+        _finish(evaluation, monkeypatch)
+        return evaluation
+
+    monkeypatch.setattr(evaluation_module, "start_evaluation", start_and_finish)
+    monkeypatch.setattr(evaluation_module, "async_task", lambda *args, **kwargs: None)
+    with django_capture_on_commit_callbacks(execute=True):
+        run = execute(run, FakeAdapter([calls(("t1", "test_skill_draft", {}))]))
+    run.refresh_from_db()
+    # 確認待ちにした直後のcommitで結果を返し、再開を待つ
+    assert run.status == RunStatus.QUEUED
+    assert ClarificationRequest.objects.get(run=run).status == ClarificationStatus.ANSWERED
+
+
+@pytest.mark.django_db
 def test_test_skill_draft_without_cases_tells_the_user(app_user):
     skill = skill_with_draft(app_user)
     conversation = ConversationFactory.create(owner=app_user)
@@ -480,3 +506,18 @@ def test_replayed_call_waits_for_the_running_evaluation(app_user):
     evaluation.refresh_from_db()
     assert evaluation.tool_call_id == "t2"
     assert ClarificationRequest.objects.get(run=run).context["evaluation"] == evaluation.uid
+
+
+@pytest.mark.django_db
+def test_user_cannot_answer_the_evaluation_wait(api_client, app_user):
+    skill = skill_with_draft(app_user)
+    case(skill)
+    conversation = ConversationFactory.create(owner=app_user)
+    run = execute(_edit_run(conversation, skill), FakeAdapter([calls(("t1", "test_skill_draft", {}))]))
+    clarification = ClarificationRequest.objects.get(run=run)
+    api_client.force_login(app_user)
+    url = f"/api/app/v1/runs/{run.uid}/clarifications/{clarification.uid}/"
+    shown = api_client.get(url).json()
+    assert shown["target"]["evaluation"] == SkillEvaluation.objects.get(run=run).uid
+    assert shown["target"]["cases"] == 1
+    assert api_client.post(f"{url}answer/", {"comment": "まだ？"}, format="json").status_code == 400

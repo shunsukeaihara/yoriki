@@ -14,6 +14,7 @@ export const RunStatus = {
 export const RunKind = {
   WORK: 1,
   SKILL_EDIT: 2,
+  EVALUATION: 3,
 } as const satisfies Record<string, RunKindEnum>
 
 // バックエンドの CANCELLABLE_STATUSES・ACTIVE_STATUSES と同じ
@@ -74,6 +75,8 @@ export const ClarificationKind = {
   QUESTION: 1,
   MODEL_SWITCH: 2,
   SKILL_EDIT: 3,
+  // test_skill_draft で評価の完了を待つ。利用者は答えない（評価が終わるとサーバーが返す）
+  EVALUATION: 4,
 } as const satisfies Record<string, ClarificationKindEnum>
 
 export const ClarificationStatus = {
@@ -141,6 +144,8 @@ export const toolLabel = (
       return t('Skillを公開')
     case 'rollback_skill':
       return t('Skillを切り戻す')
+    case 'test_skill_draft':
+      return t('SkillのDraftを評価')
     default:
       return call.name
   }

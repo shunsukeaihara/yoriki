@@ -86,6 +86,19 @@ export type CsvColumnTypeEnum = Schemas['CsvColumnTypeEnum']
 // 資料は multipart で送るので、file は File にする（生成した型は binary の string）
 export type SkillDraftAssetWrite = Omit<Api<'SkillDraftAssetRequest'>, 'file'> & { file: File }
 export type SkillDraftAssetUpdate = Omit<Api<'SkillDraftAssetUpdateRequest'>, 'file'> & { file?: File | null }
+export type EvaluationStatusEnum = Schemas['EvaluationStatusEnum']
+export type EvaluationVerdictEnum = Schemas['EvaluationVerdictEnum']
+export type SkillEvaluationCase = Api<'SkillEvaluationCase'>
+// 評価ケースは multipart で送る（添付のファイル）。expectedResult はJSONの値
+export type SkillEvaluationCaseWrite = Omit<Api<'SkillEvaluationCaseRequest'>, 'addFiles' | 'expectedResult'> & {
+  expectedResult?: unknown
+  addFiles?: File[]
+}
+export type SkillEvaluation = Api<'SkillEvaluation'>
+export type MinimumSkillEvaluation = Api<'MinimumSkillEvaluation'>
+export type SkillEvaluationResult = Api<'SkillEvaluationResult'>
+export type SkillEvaluationCreate = Api<'SkillEvaluationCreateRequest'>
+export type EvaluationCheck = Api<'EvaluationCheck'>
 export type SkillListParams = ListParams & {
   name?: string
   scope?: SkillScopeEnum

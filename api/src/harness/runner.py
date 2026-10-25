@@ -11,6 +11,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
+from functools import partial
 from typing import Any
 
 from django.db import transaction
@@ -65,6 +66,7 @@ from run.models import (
 )
 from run.tasks import CLARIFICATION_TTL
 from runtime.launcher import SandboxUnavailable
+from skill.models import SkillEvaluation
 from stream.notifier import notify_delta
 from usage.models import UsageLedger, UsagePurpose
 
@@ -1026,8 +1028,8 @@ class Runner:
             )
             if clarification.kind == ClarificationKind.EVALUATION:
                 # 評価が先に終わっていれば、ここで結果を返す（harness.md §10.9）
-                evaluation = clarification.context["evaluation"]
-                transaction.on_commit(lambda: deliver_evaluation(evaluation))
+                evaluation = SkillEvaluation.objects.get(uid=clarification.context["evaluation"])
+                transaction.on_commit(partial(deliver_evaluation, evaluation.pk))
                 run.set_status(RunStatus.WAITING_USER, comment=_("Draftの評価を待っています。"))
             else:
                 run.set_status(RunStatus.WAITING_USER, comment=_("確認をお願いしています。"))

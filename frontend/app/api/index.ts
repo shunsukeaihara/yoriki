@@ -119,6 +119,36 @@ const createAPI = () => {
             }),
         }),
       }),
+      // 評価ケース（ページングしない）。添付は multipart で送る（design.md §3.7.1）
+      evaluationCases: (caseId?: string) => ({
+        list: () => http.get<SkillEvaluationCase[], SkillEvaluationCase[]>(`app/v1/skills/${id}/evaluation_cases/`),
+        create: (data: SkillEvaluationCaseWrite) =>
+          http.post<SkillEvaluationCase, SkillEvaluationCase>(
+            `app/v1/skills/${id}/evaluation_cases/`,
+            evaluationCaseForm(data),
+            { timeout: UPLOAD_TIMEOUT },
+          ),
+        patch: (data: Partial<SkillEvaluationCaseWrite>) =>
+          http.patch<SkillEvaluationCase, SkillEvaluationCase>(
+            `app/v1/skills/${id}/evaluation_cases/${caseId}/`,
+            evaluationCaseForm(data),
+            { timeout: UPLOAD_TIMEOUT },
+          ),
+        delete: () => http.delete<undefined, undefined>(`app/v1/skills/${id}/evaluation_cases/${caseId}/`),
+      }),
+      // Draftの評価。一覧は結果を含まない
+      evaluations: (evaluationId?: string) => ({
+        list: (params?: ListParams) =>
+          http.get<Paginated<MinimumSkillEvaluation>, Paginated<MinimumSkillEvaluation>>(
+            `app/v1/skills/${id}/evaluations/`,
+            { params },
+          ),
+        get: () => http.get<SkillEvaluation, SkillEvaluation>(`app/v1/skills/${id}/evaluations/${evaluationId}/`),
+        create: (data: SkillEvaluationCreate) =>
+          http.post<SkillEvaluation, SkillEvaluation>(`app/v1/skills/${id}/evaluations/`, data),
+        cancel: () =>
+          http.post<SkillEvaluation, SkillEvaluation>(`app/v1/skills/${id}/evaluations/${evaluationId}/cancel/`),
+      }),
       // 資料の原本。ブラウザのリンクで開く（ダウンロードとして返る）
       fileUrl: (fileId: string) => `${config.public.apiEndpoint}app/v1/skills/${id}/files/${fileId}/download/`,
     }),
@@ -202,6 +232,22 @@ const toFormData = (data: Record<string, string | number | Blob | null | undefin
     if (value === null || value === undefined) continue
     form.append(key, value instanceof Blob ? value : String(value))
   }
+  return form
+}
+
+/** 評価ケースの multipart の本文（キーは snake_case）。省いた項目は送らない（部分更新） */
+const evaluationCaseForm = (data: Partial<SkillEvaluationCaseWrite>) => {
+  const form = new FormData()
+  const text: [string, string | undefined][] = [
+    ['name', data.name],
+    ['prompt', data.prompt],
+    ['criteria', data.criteria],
+  ]
+  for (const [key, value] of text) if (value !== undefined) form.append(key, value)
+  if (data.required !== undefined) form.append('required', String(data.required))
+  if (data.expectedResult !== undefined) form.append('expected_result', JSON.stringify(data.expectedResult))
+  for (const file of data.addFiles ?? []) form.append('add_files', file)
+  for (const fileId of data.removeFiles ?? []) form.append('remove_files', fileId)
   return form
 }
 

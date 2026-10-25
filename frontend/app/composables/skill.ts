@@ -221,3 +221,42 @@ export const csvColumnTypeItems = (t: T) =>
     { value: 'decimal', title: t('数値') },
     { value: 'date', title: t('日付') },
   ] satisfies { value: CsvColumnTypeEnum; title: string }[]
+
+// skill.models.EvaluationStatus と同じ値
+export const EvaluationStatus = {
+  RUNNING: 1,
+  FINISHED: 10,
+  CANCELLED: 30,
+} as const satisfies Record<string, EvaluationStatusEnum>
+
+// skill.models.EvaluationVerdict と同じ値（公開中の版と比べたDraft）
+export const EvaluationVerdict = {
+  BETTER: 1,
+  SAME: 2,
+  WORSE: 3,
+} as const satisfies Record<string, EvaluationVerdictEnum>
+
+// 1回の評価で動かすケースの数の上限（skill.models.MAX_CASES_PER_EVALUATION）
+export const MAX_CASES_PER_EVALUATION = 10
+
+export const evaluationStatusColor = (status: EvaluationStatusEnum) =>
+  status === EvaluationStatus.RUNNING ? 'primary' : status === EvaluationStatus.FINISHED ? 'success' : 'neutral'
+
+export const evaluationVerdictColor = (verdict: EvaluationVerdictEnum | null | undefined) => {
+  if (verdict === EvaluationVerdict.BETTER) return 'success' as const
+  if (verdict === EvaluationVerdict.WORSE) return 'error' as const
+  return 'neutral' as const
+}
+
+/** 評価の結果のまとめ（「2件中2件が通過」）。評価中は「評価中」 */
+export const evaluationSummary = (evaluation: Pick<MinimumSkillEvaluation, 'status' | 'passed' | 'total'>, t: T) =>
+  evaluation.status === EvaluationStatus.RUNNING
+    ? t('評価中（{total}件）', { total: evaluation.total })
+    : t('{total}件中{passed}件が通過', { total: evaluation.total, passed: evaluation.passed })
+
+// skill.models.EvaluationResultState と同じ値
+export const EvaluationResultState = {
+  RUNNING: 1,
+  JUDGING: 2,
+  DONE: 10,
+} as const

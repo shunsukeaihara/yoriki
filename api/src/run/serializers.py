@@ -218,12 +218,16 @@ class ClarificationAnswerItemSerializer(serializers.Serializer):
 
 
 class ClarificationContextSerializer(serializers.Serializer):
-    """確認の対象。Skillの編集の確認で、対象のSkill（新しいSkillならskillが空）と変更の要約"""
+    """確認の対象。Skillの編集の確認で、対象のSkill（新しいSkillならskillが空）と変更の要約。Draftの評価では、
+    評価のIDと対象のSkill・Draftのrevision・ケースの数"""
 
     skill = serializers.CharField(read_only=True, required=False)
     name = serializers.CharField(read_only=True, required=False)
     scope = serializers.CharField(read_only=True, required=False)
     summary = serializers.CharField(read_only=True, required=False)
+    evaluation = serializers.CharField(read_only=True, required=False)
+    revision = serializers.IntegerField(read_only=True, required=False)
+    cases = serializers.IntegerField(read_only=True, required=False)
 
 
 class ClarificationRequestSerializer(serializers.ModelSerializer):
@@ -270,7 +274,11 @@ class ClarificationAnswerSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         clarification = self.instance
-        if clarification is None or clarification.status != ClarificationStatus.OPEN:
+        if (
+            clarification is None
+            or clarification.status != ClarificationStatus.OPEN
+            or clarification.kind == ClarificationKind.EVALUATION  # 評価が終わるとサーバーが返す
+        ):
             raise serializers.ValidationError({"non_field_errors": _("この確認には回答できません")})
         questions = clarification.questions
         answers = attrs["answers"] or [{"selected": [], "text": ""} for _q in questions]

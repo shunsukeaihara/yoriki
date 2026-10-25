@@ -109,7 +109,8 @@ def start_evaluation(
         found = SkillEvaluationCase.objects.in_bulk([c.pk for c in cases])
         cases = [found[c.pk] for c in cases if c.pk in found]
         _check_startable(skill, cases, actor, model_version)
-        draft = SkillDraft.objects.filter(skill=skill).prefetch_related("assets").first()
+        # 資料の変更はDraftの行をロックして行うので、写し終えるまでDraftの行をロックする（本文と資料を混ぜない）
+        draft = SkillDraft.objects.select_for_update().filter(skill=skill).prefetch_related("assets").first()
         if draft is None:
             raise CannotEvaluate(_("評価するDraftがありません。"))
         if reason := draft.unsupported_by(model_version):

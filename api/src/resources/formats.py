@@ -425,7 +425,8 @@ def _check_leading_zeros(result: _Result, before: _Table, after: _Table, checks:
 
 
 def _diff_tables(before: _Table, after: _Table, keys: list[str]) -> dict[str, Any]:
-    columns = [c for c in after.header if c in before.header]
+    # 足した・消した列の値も比べる（ない列は空として比べる）
+    compared = [*after.header, *(c for c in before.header if c not in after.header)]
     diff: dict[str, Any] = {
         "columns_added": [c for c in after.header if c not in before.header][:MAX_COLUMNS],
         "columns_removed": [c for c in before.header if c not in after.header][:MAX_COLUMNS],
@@ -435,8 +436,6 @@ def _diff_tables(before: _Table, after: _Table, keys: list[str]) -> dict[str, An
     if keys and all(k in before.header and k in after.header for k in keys):
         old = {_key(r, keys): (line, r) for line, r in before.records()}
         new = {_key(r, keys): (line, r) for line, r in after.records()}
-        # 足した・消した列の値も、同じキーの行の変更として数える（ない列は空として比べる）
-        compared = [*after.header, *(c for c in before.header if c not in after.header)]
         added = [k for k in new if k not in old]
         removed = [k for k in old if k not in new]
         changed = sorted(
@@ -470,13 +469,13 @@ def _diff_tables(before: _Table, after: _Table, keys: list[str]) -> dict[str, An
         counts = {"rows_added": len(added), "rows_removed": len(removed), "rows_changed": len(changed)}
     else:
         # キーがなければ、行の組合せの増減だけを数える
-        old_rows = Counter(tuple(r.get(c, "") for c in columns) for _l, r in before.records())
-        new_rows = Counter(tuple(r.get(c, "") for c in columns) for _l, r in after.records())
+        old_rows = Counter(tuple(r.get(c, "") for c in compared) for _l, r in before.records())
+        new_rows = Counter(tuple(r.get(c, "") for c in compared) for _l, r in after.records())
         added_rows, removed_rows = new_rows - old_rows, old_rows - new_rows
         for change, counter in (("added", added_rows), ("removed", removed_rows)):
             side = "after" if change == "added" else "before"
             for values in itertools.islice(counter.elements(), MAX_DIFF_ROWS - len(rows)):
-                cells = _cells(dict(zip(columns, values, strict=True)), columns, side)
+                cells = _cells(dict(zip(compared, values, strict=True)), compared, side)
                 rows.append({"change": change, "key": "", "line": None, "cells": cells})
         counts = {"rows_added": added_rows.total(), "rows_removed": removed_rows.total(), "rows_changed": 0}
     total = sum(counts.values())

@@ -121,6 +121,10 @@ class TestCsv:
         after = _csv("code,name\n001,A\n002,B\n002,B\n")
         diff = formats.inspect(after, "v.csv", before=(before, "v.csv"))["diff"]
         assert (diff["rows_added"], diff["rows_removed"]) == (1, 0)
+        # 列を足せば、値の入った行は入れ替わったものとして数える
+        widened = _csv("code,name,kana\n001,A,エー\n002,B,ビー\n")
+        diff = formats.inspect(widened, "v.csv", before=(before, "v.csv"))["diff"]
+        assert (diff["rows_added"], diff["rows_removed"]) == (2, 2)
 
     def test_lost_leading_zeros_are_an_error(self):
         before = _csv("code,name\n001,A\n010,B\n")

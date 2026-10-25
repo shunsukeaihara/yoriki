@@ -118,6 +118,22 @@ class TestCsv:
         result = formats.inspect(after, "v.csv", before=(before, "v.csv"))
         assert any("先頭の0が消えています" in e for e in result["errors"])
 
+    def test_removing_rows_is_not_a_lost_zero(self):
+        before = _csv("code,name\n001,A\n2,B\n")
+        after = _csv("code,name\n2,B\n")
+        result = formats.inspect(after, "v.csv", before=(before, "v.csv"))
+        assert result["errors"] == []
+        assert result["diff"]["identical"] is False
+
+    def test_previous_version_is_read_by_its_own_encoding(self):
+        before = _csv("code,name\n001,東京\n", "cp932")
+        after = _csv("code,name\n001,東京本社\n")
+        checks = {"encoding": "utf-8", "key_columns": ["code"]}
+        result = formats.inspect(after, "v.csv", checks=checks, before=(before, "v.csv"))
+        assert result["errors"] == []
+        assert any("文字コードが変わりました" in w for w in result["warnings"])
+        assert result["diff"]["rows_changed"] == 1
+
     def test_shift_jis_and_explicit_encoding(self):
         data = _csv("コード,名前\n001,東京\n", "cp932")
         assert formats.inspect(data, "v.csv")["info"]["encoding"] == "cp932"

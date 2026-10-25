@@ -6,7 +6,7 @@ const state = computed(() => assetCheckState(props.validation, t))
 const diff = computed(() => {
   const value = props.validation?.diff
   if (!value) return ''
-  return value.identical ? t('中身の変更なし') : assetDiffText(value, t)
+  return assetDiffText(value, t)
 })
 </script>
 

@@ -98,7 +98,7 @@ const lineClass = (line: string) => {
             {{ $t('比べる前の版がありません（新しく加えた資料か、{base}と同じ原本です）', { base: baseLabel }) }}
           </p>
           <template v-else>
-            <p class="text-sm">{{ diff.identical ? $t('中身の変更なし') : assetDiffText(diff, $t) }}</p>
+            <p class="text-sm">{{ assetDiffText(diff, $t) }}</p>
 
             <!-- MD -->
             <pre
@@ -149,7 +149,6 @@ const lineClass = (line: string) => {
             </div>
 
             <!-- PPTX -->
-            <p v-if="diff.reordered" class="text-xs">{{ $t('スライドの順番が変わっています') }}</p>
             <div v-for="slide in diff.slides ?? []" :key="`${slide.change}-${slide.slide}`" class="grid gap-1">
               <div class="flex flex-wrap items-center gap-2 text-sm">
                 <UBadge :color="changeColor(slide.change)" variant="subtle" size="sm">

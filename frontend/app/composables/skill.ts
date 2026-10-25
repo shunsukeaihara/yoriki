@@ -151,9 +151,16 @@ export const skillOwnerLabel = (skill: Skill, t: T): string => {
   return t('全社')
 }
 
-/** 資料の差分の数の文（「1行追加・2行変更」「1枚変更」等）。asset_diffs の要素か、検証の結果の diff */
-export const assetDiffText = (counts: Partial<AssetDiffCount> | null | undefined, t: T): string => {
+/**
+ * 資料の差分の数の文（「1行追加・2行変更」「1枚変更」等）。asset_diffs の要素か、検証の結果の diff。
+ * 中身が同じ（identical）なら「中身の変更なし」。数で表せない変更（PDF等の置換、スライドの並べ替え）は「中身が変わりました」
+ */
+export const assetDiffText = (
+  counts: (Partial<AssetDiffCount> & { identical?: boolean; reordered?: boolean }) | null | undefined,
+  t: T,
+): string => {
   if (!counts) return ''
+  if (counts.identical) return t('中身の変更なし')
   const { linesAdded: la, linesRemoved: lr, rowsAdded: ra, rowsRemoved: rr, rowsChanged: rc } = counts
   const { slidesAdded: sa, slidesRemoved: sr, slidesChanged: sc } = counts
   const texts = [
@@ -165,8 +172,9 @@ export const assetDiffText = (counts: Partial<AssetDiffCount> | null | undefined
     sa && t('{n}枚追加', { n: sa }),
     sr && t('{n}枚削除', { n: sr }),
     sc && t('{n}枚変更', { n: sc }),
+    counts.reordered && t('スライドの順番を変更'),
   ].filter((text): text is string => Boolean(text))
-  return texts.length ? texts.join('・') : t('中身の変更なし')
+  return texts.length ? texts.join('・') : t('中身が変わりました')
 }
 
 /** 置き換えた資料の差分の行（「vendor-master：1行追加・2行変更」） */

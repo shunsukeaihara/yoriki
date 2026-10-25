@@ -172,3 +172,14 @@ describe('SkillDraftAssetList', () => {
 })
 
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve))
+
+describe('assetDiffText', () => {
+  const t = (key: string, params?: Record<string, unknown>) => key.replace('{n}', String(params?.n ?? ''))
+
+  it('中身が同じときと、数で表せない変更とを分ける', () => {
+    expect(assetDiffText({ identical: true }, t)).toBe('中身の変更なし')
+    expect(assetDiffText({ identical: false }, t)).toBe('中身が変わりました')
+    expect(assetDiffText({ identical: false, slidesChanged: 0, reordered: true }, t)).toBe('スライドの順番を変更')
+    expect(assetDiffText({ rowsAdded: 1, rowsChanged: 2 }, t)).toBe('1行追加・2行変更')
+  })
+})

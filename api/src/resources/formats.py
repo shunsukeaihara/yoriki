@@ -55,7 +55,6 @@ INTEGER_RE = re.compile(r"-?\d+")
 DECIMAL_RE = re.compile(r"-?\d+(\.\d+)?")
 DATE_RE = re.compile(r"(\d{4})[-/](\d{1,2})[-/](\d{1,2})")
 LEADING_ZERO_RE = re.compile(r"0\d+")
-DIGITS_RE = re.compile(r"\d+")
 
 
 def format_of(name: str) -> str:
@@ -106,6 +105,8 @@ def inspect(
         _inspect_pptx(result, data, previous[0] if previous else None)
     elif before is not None:
         result.diff = {"identical": data == before[0]}
+    if result.diff is not None and previous is not None:
+        result.diff["identical"] = data == previous[0]
     return result.as_dict()
 
 
@@ -380,8 +381,8 @@ def _inspect_csv(result: _Result, data: bytes, checks: dict[str, Any], before: b
     _check_table(result, table, checks)
     if before is None:
         return
-    # 前の版は、今の条件で読む（文字コード・区切りの指定がなければ、前の版のものを判別する）
-    previous = _read_csv(before, checks, None)
+    # 前の版は文字コード・区切りを判別して読む（条件を変えた後でも、前の版を前の形のまま読めるように）
+    previous = _read_csv(before, {**checks, "encoding": "", "delimiter": ""}, None)
     if previous is None:
         return
     if previous.encoding != table.encoding:
@@ -403,11 +404,13 @@ def _check_leading_zeros(result: _Result, before: _Table, after: _Table, checks:
     for column in after.header:
         if column in numeric or column not in before.header:
             continue
-        examples = [r[column] for r in before_records if LEADING_ZERO_RE.fullmatch(r.get(column, ""))]
-        if not examples:
+        zeros = {r[column] for r in before_records if LEADING_ZERO_RE.fullmatch(r.get(column, ""))}
+        if not zeros:
             continue
-        values = [r.get(column, "") for r in after_records]
-        if not any(LEADING_ZERO_RE.fullmatch(v) for v in values) and any(DIGITS_RE.fullmatch(v) for v in values):
+        # 0付きの値が消え、0を取った値に変わったものだけを数える（行を消しただけなら誤りにしない）
+        values = {r.get(column, "") for r in after_records}
+        examples = sorted(v for v in zeros if v not in values and (v.lstrip("0") or "0") in values)
+        if examples:
             result.error(
                 _(
                     "列「%(column)s」の先頭の0が消えています（前の版の例：「%(example)s」）。値を文字列のまま保存してください"

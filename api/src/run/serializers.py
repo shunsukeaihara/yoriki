@@ -99,7 +99,11 @@ def skill_changes(run: Run) -> list[dict[str, Any]]:
             merged: dict[str, list[str]] = {k: list(v) for k, v in (before.get("summary") or {}).items()}
             for key, names in (value.get("summary") or {}).items():
                 merged[key] = list(dict.fromkeys([*merged.get(key, []), *names]))
-            diffs = {**(before.get("asset_diffs") or {}), **(value.get("asset_diffs") or {})}
+            # 後で外した・置き換え直した資料は、後の操作の差分だけにする
+            touched = ("assets_added", "assets_replaced", "assets_removed")
+            later = {k for name in touched for k in (value.get("summary") or {}).get(name) or []}
+            diffs = {k: v for k, v in (before.get("asset_diffs") or {}).items() if k not in later}
+            diffs |= value.get("asset_diffs") or {}
             value = {**value, "summary": merged, "asset_diffs": diffs}
         changes[value["skill"]] = value
     return list(changes.values())

@@ -10,6 +10,7 @@ import datetime
 import difflib
 import hashlib
 import io
+import itertools
 import posixpath
 import re
 import zipfile
@@ -335,7 +336,9 @@ def _check_table(result: _Result, table: _Table, checks: dict[str, Any]) -> None
             result.error(_("キーが空の行があります：%(lines)s行目") % {"lines": _examples(empty)})
         counted = Counter(_key(record, keys) for _line, record in records)
         if duplicated_keys := [k for k, n in counted.items() if n > 1]:
-            result.error(_("キーが重複しています：%(keys)s") % {"keys": _examples(duplicated_keys)})
+            result.error(
+                _("キーが重複しています：%(keys)s") % {"keys": _examples(_key_text(k) for k in duplicated_keys)}
+            )
     for column, kind in _column_types(checks).items():
         if column not in header or kind == "string":
             continue
@@ -355,8 +358,13 @@ def _type_label(kind: str) -> str:
     return {"integer": _("整数"), "decimal": _("数値"), "date": _("日付")}.get(kind, kind)
 
 
-def _key(record: dict[str, str], keys: list[str]) -> str:
-    return " / ".join(record.get(c, "") for c in keys)
+def _key(record: dict[str, str], keys: list[str]) -> tuple[str, ...]:
+    """キーの列の値の組。比べるときは組のまま使い、表示するときだけ _key_text() で文字列にする"""
+    return tuple(record.get(c, "") for c in keys)
+
+
+def _key_text(key: tuple[str, ...]) -> str:
+    return " / ".join(key)
 
 
 def _inspect_csv(result: _Result, data: bytes, checks: dict[str, Any], before: bytes | None) -> None:
@@ -414,48 +422,56 @@ def _diff_tables(before: _Table, after: _Table, keys: list[str]) -> dict[str, An
         "columns_added": [c for c in after.header if c not in before.header][:MAX_COLUMNS],
         "columns_removed": [c for c in before.header if c not in after.header][:MAX_COLUMNS],
     }
+    # 件数はすべて数え、差分の行は上限の数だけ組み立てる（大きいCSVでメモリを使いすぎない）
     rows: list[dict[str, Any]] = []
     if keys and all(k in before.header and k in after.header for k in keys):
         old = {_key(r, keys): (line, r) for line, r in before.records()}
         new = {_key(r, keys): (line, r) for line, r in after.records()}
         added = [k for k in new if k not in old]
         removed = [k for k in old if k not in new]
-        changed = []
-        for k in new.keys() & old.keys():
-            cells = [
-                {"column": c, "before": _clip(old[k][1].get(c)), "after": _clip(new[k][1].get(c))}
-                for c in columns
-                if old[k][1].get(c) != new[k][1].get(c)
-            ]
-            if cells:
-                changed.append((new[k][0], k, cells))
-        for k in added:
+        changed = sorted(
+            (new[k][0], k)
+            for k in new.keys() & old.keys()
+            if any(old[k][1].get(c) != new[k][1].get(c) for c in columns)
+        )
+        for k in added[:MAX_DIFF_ROWS]:
             line, record = new[k]
-            rows.append({"change": "added", "key": k, "line": line, "cells": _cells(record, after.header, "after")})
-        for k in removed:
+            rows.append(
+                {"change": "added", "key": _key_text(k), "line": line, "cells": _cells(record, after.header, "after")}
+            )
+        for k in removed[: MAX_DIFF_ROWS - len(rows)]:
             line, record = old[k]
-            rows.append({"change": "removed", "key": k, "line": line, "cells": _cells(record, before.header, "before")})
-        for line, k, cells in sorted(changed):
-            rows.append({"change": "changed", "key": k, "line": line, "cells": cells})
-        diff |= {"rows_added": len(added), "rows_removed": len(removed), "rows_changed": len(changed)}
+            rows.append(
+                {
+                    "change": "removed",
+                    "key": _key_text(k),
+                    "line": line,
+                    "cells": _cells(record, before.header, "before"),
+                }
+            )
+        for line, k in changed[: MAX_DIFF_ROWS - len(rows)]:
+            a, b = old[k][1], new[k][1]
+            cells = [
+                {"column": c, "before": _clip(a.get(c)), "after": _clip(b.get(c))}
+                for c in columns
+                if a.get(c) != b.get(c)
+            ]
+            rows.append({"change": "changed", "key": _key_text(k), "line": line, "cells": cells})
+        counts = {"rows_added": len(added), "rows_removed": len(removed), "rows_changed": len(changed)}
     else:
         # キーがなければ、行の組合せの増減だけを数える
         old_rows = Counter(tuple(r.get(c, "") for c in columns) for _l, r in before.records())
         new_rows = Counter(tuple(r.get(c, "") for c in columns) for _l, r in after.records())
         added_rows, removed_rows = new_rows - old_rows, old_rows - new_rows
         for change, counter in (("added", added_rows), ("removed", removed_rows)):
-            for values in counter.elements():
-                side = "after" if change == "added" else "before"
-                rows.append(
-                    {
-                        "change": change,
-                        "key": "",
-                        "line": None,
-                        "cells": _cells(dict(zip(columns, values, strict=True)), columns, side),
-                    }
-                )
-        diff |= {"rows_added": added_rows.total(), "rows_removed": removed_rows.total(), "rows_changed": 0}
-    diff |= {"rows": rows[:MAX_DIFF_ROWS], "truncated": len(rows) > MAX_DIFF_ROWS}
+            side = "after" if change == "added" else "before"
+            for values in itertools.islice(counter.elements(), MAX_DIFF_ROWS - len(rows)):
+                cells = _cells(dict(zip(columns, values, strict=True)), columns, side)
+                rows.append({"change": change, "key": "", "line": None, "cells": cells})
+        counts = {"rows_added": added_rows.total(), "rows_removed": removed_rows.total(), "rows_changed": 0}
+    total = sum(counts.values())
+    diff |= counts
+    diff |= {"rows": rows, "truncated": total > len(rows)}
     return diff
 
 

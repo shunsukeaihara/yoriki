@@ -94,6 +94,18 @@ class TestCsv:
         assert changed["key"] == "002"
         assert changed["cells"] == [{"column": "name", "before": "B", "after": "Bee"}]
 
+    def test_composite_keys_and_large_diffs(self, monkeypatch):
+        # 値に「 / 」を含んでも、別のキーとして扱う
+        data = _csv('a,b\n"x / y",z\nx,"y / z"\n')
+        assert formats.inspect(data, "v.csv", checks={"key_columns": ["a", "b"]})["errors"] == []
+        monkeypatch.setattr(formats, "MAX_DIFF_ROWS", 2)
+        before = _csv("code,name\n" + "".join(f"{i:03},A\n" for i in range(10)))
+        after = _csv("code,name\n" + "".join(f"{i:03},B\n" for i in range(10)))
+        diff = formats.inspect(after, "v.csv", checks=KEYED, before=(before, "v.csv"))["diff"]
+        assert diff["rows_changed"] == 10
+        assert len(diff["rows"]) == 2
+        assert diff["truncated"] is True
+
     def test_diff_without_key_counts_rows(self):
         before = _csv("code,name\n001,A\n002,B\n")
         after = _csv("code,name\n001,A\n002,B\n002,B\n")

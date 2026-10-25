@@ -463,3 +463,26 @@ def test_edit_run_does_not_start_without_edit_access(conversation, app_user, oth
     assert not Run.objects.filter(kind=RunKind.SKILL_EDIT).exists()
     system = ConversationMessage.objects.get(conversation=conversation, role=MessageRole.SYSTEM)
     assert "編集する権限がありません" in system.body
+
+
+@pytest.mark.django_db
+def test_removed_asset_drops_its_earlier_diff_counts(conversation, app_user):
+    skill = publish(app_user)
+    run = post(conversation, skill_edit=edit(skill))
+    base = {"skill": skill.uid, "name": skill.name, "scope": "個人", "version": None}
+    for value in (
+        {
+            **base,
+            "state": "draft_saved",
+            "revision": 2,
+            "summary": {"assets_replaced": ["a", "b"]},
+            "asset_diffs": {"a": {"rows_changed": 1}, "b": {"rows_changed": 2}},
+        },
+        {**base, "state": "draft_saved", "revision": 3, "summary": {"assets_removed": ["a"]}, "asset_diffs": {}},
+        # 公開中の版と同じ中身で置き換え直すと、差分はなくなる
+        {**base, "state": "draft_saved", "revision": 4, "summary": {"assets_replaced": ["b"]}, "asset_diffs": {}},
+    ):
+        RunEvent.record(run, RunEventKind.TOOL_RESULT, {"name": "stage_skill_asset", "is_error": False, "value": value})
+    [summary] = skill_changes(run)
+    assert summary["summary"] == {"assets_replaced": ["a", "b"], "assets_removed": ["a"]}
+    assert summary["asset_diffs"] == {}

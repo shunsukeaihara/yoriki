@@ -301,8 +301,18 @@ def _check_and_judge(evaluation: SkillEvaluation, result: SkillEvaluationResult)
     result.base_check = check_run(result.base_run, schema=base_schema, expected=expected) if result.base_run else {}
     result.passed = bool(result.draft_check.get("passed"))
     result.verdict, result.judge_reason, result.judge_note = _judge(evaluation, result)
-    result.state = EvaluationResultState.DONE
-    result.save(update_fields=["draft_check", "base_check", "passed", "verdict", "judge_reason", "judge_note", "state"])
+    # 判定の間に評価が止められていれば（cancel_evaluation() がケースを閉じた）、結果を上書きしない
+    SkillEvaluationResult.objects.filter(
+        pk=result.pk, state=EvaluationResultState.JUDGING, evaluation__status=EvaluationStatus.RUNNING
+    ).update(
+        draft_check=result.draft_check,
+        base_check=result.base_check,
+        passed=result.passed,
+        verdict=result.verdict,
+        judge_reason=result.judge_reason,
+        judge_note=result.judge_note,
+        state=EvaluationResultState.DONE,
+    )
 
 
 def check_run(run: Run | None, *, schema: dict[str, Any] | None, expected: Any) -> dict[str, Any]:

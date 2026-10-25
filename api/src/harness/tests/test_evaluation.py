@@ -239,6 +239,27 @@ def test_cancel_stops_the_runs_and_closes_the_cases(app_user, model):
 
 
 @pytest.mark.django_db
+def test_cancel_during_the_judge_keeps_the_case_closed(app_user, model, monkeypatch):
+    skill = skill_with_draft(app_user)
+    evaluation = start_evaluation(skill, cases=[case(skill)], actor=app_user, model_version=model.current_version)
+    result = evaluation.results.get()
+    execute(result.base_run, submit(True))
+    execute(result.draft_run, submit(True))
+
+    def judge_after_cancel(*_args):
+        cancel_evaluation(evaluation.pk)  # 判定の間に止められた
+        return EvaluationVerdict.SAME, "同じ", ""
+
+    monkeypatch.setattr(evaluation_module, "_judge", judge_after_cancel)
+    progress_evaluation(evaluation.pk)
+    result.refresh_from_db()
+    evaluation.refresh_from_db()
+    assert evaluation.status == EvaluationStatus.CANCELLED
+    assert result.passed is False and result.verdict is None
+    assert result.judge_note == "評価を止めました。"
+
+
+@pytest.mark.django_db
 def test_evaluation_conversations_are_not_listed(api_client, app_user, model):
     ConversationFactory.create(owner=app_user)
     skill = skill_with_draft(app_user)

@@ -207,6 +207,19 @@ class TestPptx:
         result = formats.inspect(out.getvalue(), "deck.pptx", before=(before, "deck.pptx"), edited=True)
         assert any("画像・グラフ・SmartArt" in e for e in result["errors"])
 
+    def test_edited_deck_must_keep_picture_positions(self):
+        before = _deck("表紙", picture=True)
+        presentation = Presentation(io.BytesIO(before))
+        [picture] = [shape for shape in presentation.slides[0].shapes if shape.shape_type == 13]
+        picture.left = Inches(3)
+        out = io.BytesIO()
+        presentation.save(out)
+        result = formats.inspect(out.getvalue(), "deck.pptx", before=(before, "deck.pptx"), edited=True)
+        assert any("画像・グラフ・SmartArt" in e for e in result["errors"])
+        # テキストだけの編集は通す
+        text_only = _edit_title(before, 0, "新しい表紙")
+        assert formats.inspect(text_only, "deck.pptx", before=(before, "deck.pptx"), edited=True)["errors"] == []
+
     def test_broken_and_huge_files(self, monkeypatch):
         assert formats.inspect(b"not a zip", "deck.pptx")["errors"]
         monkeypatch.setattr(formats, "MAX_ZIP_UNCOMPRESSED", 1024)

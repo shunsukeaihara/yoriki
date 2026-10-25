@@ -526,16 +526,17 @@ def _walk(shapes, prefix: str = ""):
 
 
 def _fingerprint(shape, kind: str) -> str:
-    """正しく編集できない要素の中身のhash。数が同じでも、差し替えたことが分かるように比べる"""
+    """正しく編集できない要素のhash。数が同じでも、差し替え・移動・拡大・トリミングが分かるように、要素のXML
+    （位置・大きさ・トリミング・参照する部品のID）と、画像・グラフはその中身も比べる"""
+    content = ""
     try:
         if kind == "picture":
-            return shape.image.sha1
-        if kind == "chart":
-            return hashlib.sha256(shape.chart_part.blob).hexdigest()
+            content = shape.image.sha1
+        elif kind == "chart":
+            content = hashlib.sha256(shape.chart_part.blob).hexdigest()
     except (AttributeError, KeyError, ValueError):
         pass
-    # SmartArt・OLE・動画等は、要素のXML（参照する部品のIDを含む）で比べる
-    return hashlib.sha256(shape._element.xml.encode()).hexdigest()
+    return hashlib.sha256(shape._element.xml.encode() + content.encode()).hexdigest()
 
 
 def _slide_structure(slide) -> dict[str, Any]:

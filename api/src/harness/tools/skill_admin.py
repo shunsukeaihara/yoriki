@@ -15,6 +15,7 @@ from django.conf import settings
 from django.db import transaction
 from rest_framework import exceptions as drf_exceptions
 
+from resources import formats
 from run.models import ToolInvocation
 from skill.errors import DraftExists, InvalidDraft, VersionConflict
 from skill.models import (
@@ -27,7 +28,7 @@ from skill.models import (
     SkillRequirement,
     SkillScope,
 )
-from skill.serializers import ASSET_KEY_RE, SkillCreateSerializer, SkillDraftSerializer
+from skill.serializers import ASSET_KEY_RE, AssetChecksSerializer, SkillCreateSerializer, SkillDraftSerializer
 from user.models import Department
 from utils.exceptions import Conflict
 
@@ -100,8 +101,10 @@ def change_value(
     version: int | None = None,
     revision: int | None = None,
     summary: dict[str, Any] | None = None,
+    asset_diffs: dict[str, dict[str, int]] | None = None,
 ) -> dict[str, Any]:
-    """画面に出すSkillの変更（design.md §11.6）。state は created・draft_saved・published・rolled_back"""
+    """画面に出すSkillの変更（design.md §11.6）。state は created・draft_saved・published・rolled_back。
+    asset_diffs は置き換えた資料の差分の数（資料のkeyごと）"""
     return {
         "skill": skill.uid,
         "name": skill.name,
@@ -110,6 +113,7 @@ def change_value(
         "version": version,
         "revision": revision,
         "summary": summary,
+        "asset_diffs": asset_diffs or {},
     }
 
 
@@ -180,6 +184,10 @@ def _content_lines(content: SkillContent, assets: list[tuple[str, Any]]) -> list
                 f'  key="{asset.key}" role={role} file version {resource.number}, {resource.size} bytes: '
                 f"{path}{description}"
             )
+            if asset.checks:
+                lines.append(f"    checks: {json.dumps(asset.checks, ensure_ascii=False)}")
+            if asset.validation:
+                lines.append(f"    validation: {formats.describe(asset.validation)}")
         lines.append("</assets>")
     else:
         lines.append("<assets>none</assets>")
@@ -409,7 +417,16 @@ same key. The bytes are stored exactly as they are.
 /workspace/input. Do not regenerate it.
 - key: the file's stable name in the skill (lowercase letters, digits, - and _). Use the existing key to replace a \
 file; a new key adds a file. role is required for a new file.
-- expected_revision: as in update_skill_draft (0 opens a draft)."""
+- expected_revision: as in update_skill_draft (0 opens a draft).
+- The file is checked by its format, and the result shows the errors and the changes from the published version \
+(MD: lines, CSV: rows by the key columns, PPTX: text and structure per slide). Check that the changes are what the \
+user asked for. A draft with errors in a changed file cannot be published: fix the file and stage it again.
+- CSV: keep the encoding, delimiter and header. Read and write every value as a string (in pandas, dtype=str and \
+keep_default_na=False) so that codes keep their leading zeros, and change only the rows asked for.
+- PPTX: edit a copy of the original with python-pptx and change text only. Pictures, charts, SmartArt, media and \
+layouts cannot be changed by editing; ask the user to upload the finished file instead.
+- checks: the CSV checks (required columns, key columns, column types, encoding, delimiter). Changing them needs \
+the publish role; omit it to keep the current checks."""
 
 STAGE_ASSET_PARAMETERS: dict[str, Any] = {
     "type": "object",
@@ -419,6 +436,29 @@ STAGE_ASSET_PARAMETERS: dict[str, Any] = {
         "path": {"type": "string", "description": "Absolute path of the file, e.g. /workspace/work/vendor-master.csv."},
         "role": {"type": "string", "enum": list(ROLES)},
         "description": {"type": "string", "maxLength": 500, "description": "What the file is for."},
+        "checks": {
+            "type": "object",
+            "properties": {
+                "encoding": {"type": "string", "enum": ["", *formats.CSV_ENCODINGS], "description": "Empty: detect."},
+                "delimiter": {"type": "string", "enum": ["", *formats.CSV_DELIMITERS], "description": "Empty: detect."},
+                "required_columns": {"type": "array", "items": {"type": "string"}, "maxItems": 100},
+                "key_columns": {"type": "array", "items": {"type": "string"}, "maxItems": 10},
+                "column_types": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "column": {"type": "string"},
+                            "type": {"type": "string", "enum": list(formats.COLUMN_TYPES)},
+                        },
+                        "required": ["column", "type"],
+                        "additionalProperties": False,
+                    },
+                    "maxItems": 100,
+                },
+            },
+            "additionalProperties": False,
+        },
     },
     "required": ["expected_revision", "key", "path"],
     "additionalProperties": False,
@@ -460,10 +500,25 @@ def execute_stage_skill_asset(arguments: dict[str, Any], context: ToolContext) -
     filename = posixpath.basename(path)
     role = ROLES[arguments["role"]] if "role" in arguments else None
     description = arguments.get("description")
+    checks: dict[str, Any] | None = None
+    if "checks" in arguments:
+        serializer = AssetChecksSerializer(data=arguments["checks"])
+        if not serializer.is_valid():
+            return _invalid(serializer.errors)
+        checks = dict(serializer.validated_data)
+    # 添付（/workspace/input）からはそのままの置換、それ以外はエージェントが編集した候補として検証する
+    edited = not path.startswith("/workspace/input/")
     actor = context.run.owner
 
     def change(draft: SkillDraft, expected: int) -> ToolResult:
         existing = draft.assets.filter(key=key).first()
+        # 外した資料を同じkeyで加え直すときは、元の版の条件と比べる
+        base = draft.base_asset(key) if existing is None else None
+        current_checks = formats.normalize_checks(existing.checks if existing else base.checks if base else None)
+        if checks is not None and checks != current_checks and skill.scope_access_of(actor) < SkillAccess.PUBLISH:
+            return ToolResult.error(
+                "Changing the checks needs the publish role for this skill. Call again without checks."
+            )
         try:
             if existing is not None:
                 asset = draft.change_asset(
@@ -474,6 +529,8 @@ def execute_stage_skill_asset(arguments: dict[str, Any], context: ToolContext) -
                     description=description,
                     src=io.BytesIO(body),
                     filename=filename,
+                    checks=checks,
+                    edited=edited,
                 )
                 action = "Replaced"
             else:
@@ -487,24 +544,51 @@ def execute_stage_skill_asset(arguments: dict[str, Any], context: ToolContext) -
                     filename=filename,
                     actor=actor,
                     expected_revision=expected,
+                    checks=checks,
+                    edited=edited,
                 )
                 action = "Added"
         except InvalidDraft as exc:
             return ToolResult.error(str(exc))
         resource = asset.resource_version
+        errors = asset.validation.get("errors")
+        status = (
+            "It has errors, so the draft cannot be published until the file is fixed and staged again."
+            if errors
+            else "It is not published yet."
+        )
         return ToolResult.text(
             f'{action} the file "{key}" ({filename}, file version {resource.number}, {resource.size} bytes) in the '
-            f"draft (now revision {draft.revision}). It is not published yet.",
+            f"draft (now revision {draft.revision}). {status}\n"
+            f"Check: {formats.describe(asset.validation)}{_diff_lines(asset.validation)}",
             value=change_value(
                 skill,
                 "draft_saved",
                 revision=draft.revision,
                 summary={"assets_replaced" if existing else "assets_added": [key]},
+                asset_diffs={key: counts} if (counts := formats.diff_counts(asset.validation)) else None,
             ),
             meta={"skill": skill.name, "path": path},
         )
 
     return _with_draft(skill, arguments["expected_revision"], actor, change)
+
+
+def _diff_lines(validation: dict[str, Any], limit: int = 40) -> str:
+    """差分の中身の一部（エージェントが意図した変更かを確かめるため）"""
+    diff = validation.get("diff") or {}
+    lines: list[str] = list(diff.get("text") or [])
+    for row in diff.get("rows") or []:
+        cells = ", ".join(f"{c['column']}: {c['before']!r} -> {c['after']!r}" for c in row["cells"])
+        lines.append(f"{row['change']} {row['key'] or ''} {cells}".strip())
+    for slide in diff.get("slides") or []:
+        lines.append(f"slide {slide['slide']} {slide['change']}")
+        lines += [f"  {t['shape']}: {t['before']!r} -> {t['after']!r}" for t in slide["texts"]]
+        lines += [f"  {e['kind']}: {e['before']} -> {e['after']}" for e in slide["elements"]]
+    if not lines:
+        return ""
+    more = "\n..." if len(lines) > limit or diff.get("truncated") else ""
+    return "\n<diff>\n" + "\n".join(lines[:limit]) + more + "\n</diff>"
 
 
 STAGE_SKILL_ASSET = Tool(
@@ -595,7 +679,13 @@ def _published(skill: Skill, change: SkillChange, state: str) -> ToolResult:
     return ToolResult.text(
         f'{verb} version {number} of "{skill.name}" ({scope_label(skill)}). New requests use it from now on; work '
         "already running keeps its version.",
-        value=change_value(skill, state, version=number, summary=change.summary),
+        value=change_value(
+            skill,
+            state,
+            version=number,
+            summary={k: v for k, v in change.summary.items() if k != "asset_diffs"},
+            asset_diffs=change.summary.get("asset_diffs"),
+        ),
         meta={"skill": skill.name},
     )
 

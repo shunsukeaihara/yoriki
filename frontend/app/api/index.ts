@@ -107,6 +107,12 @@ const createAPI = () => {
               toFormData(data),
               { timeout: UPLOAD_TIMEOUT },
             ),
+          // 検証の条件（CSVの必須列・キー列・型等）を変える。公開の権限が要る
+          checks: (data: SkillDraftAssetChecks) =>
+            http.put<SkillDraftAsset, SkillDraftAsset>(
+              `app/v1/skills/${id}/drafts/${draftId}/assets/${key}/checks/`,
+              data,
+            ),
           delete: (revision: number) =>
             http.delete<undefined, undefined>(`app/v1/skills/${id}/drafts/${draftId}/assets/${key}/`, {
               params: { revision },

@@ -717,7 +717,7 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 | `get_skill` | なし | 公開中の版とDraft（あれば）の中身・revision・資料を返し、資料を `/workspace/master` に置く（公開中の版は `skills/{skill_id}/{key}/{ファイル名}`、Draftは `drafts/{skill_id}/r{revision}/{key}/{ファイル名}`） |
 | `create_skill` | `name`、`scope`（`personal`・`department`・`company`）、`department`、`description`、`instructions` | 新しいSkillとDraftを作る（新規の依頼のときだけ） |
 | `update_skill_draft` | `expected_revision`、`change_summary`、変える項目（`description`・`instructions`・`requires`・`input_schema`・`output_schema`・`tools`） | Draftを変える。Draftがなければ公開中の版から開く（`expected_revision` は0） |
-| `stage_skill_asset` | `expected_revision`、`key`、`path`（Sandboxの中のファイル）、`role`、`description` | Sandboxのファイルを、Draftの資料として追加・置換する（原本のbytesのまま。添付の `/workspace/input` のファイルもそのまま置換に使える） |
+| `stage_skill_asset` | `expected_revision`、`key`、`path`（Sandboxの中のファイル）、`role`、`description`、`checks`（CSVの検証の条件。変えるのは公開の役割だけ） | Sandboxのファイルを、Draftの資料として追加・置換する（原本のbytesのまま。添付の `/workspace/input` のファイルもそのまま置換に使える）。形式ごとに検証し、結果に誤りと公開中の版との差分（MDの本文、CSVの行、PPTXのスライドごとのテキストと構造）を返す（design.md §3.9）。`/workspace/input` 以外のファイルは、エージェントが編集した候補として検証する |
 | `remove_skill_asset` | `expected_revision`、`key` | Draftから資料を外す |
 | `publish_skill_draft` | `expected_revision`、`change_reason` | Draftを公開する。公開の役割がなければ公開せず「変更案を保存」と返す |
 | `rollback_skill` | `number`、`expected_version`、`change_reason` | 公開中の版を過去の版に戻す（公開の役割だけ） |

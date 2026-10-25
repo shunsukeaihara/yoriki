@@ -442,6 +442,23 @@ export interface paths {
         patch: operations["app_v1_skills_drafts_assets_partial_update"];
         trace?: never;
     };
+    "/api/app/v1/skills/{skill}/drafts/{draft}/assets/{key}/checks/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** @description 資料の検証の条件（CSVの必須列・キー列・型等）を変え、検証し直す（公開の権限が要る） */
+        put: operations["app_v1_skills_drafts_assets_checks_update"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/app/v1/skills/{skill}/drafts/{uid}/": {
         parameters: {
             query?: never;
@@ -1175,6 +1192,121 @@ export interface components {
              */
             file: string;
         };
+        /** @description 資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の役割だけが変えられる */
+        AssetChecks: {
+            /**
+             * @description 空なら自動で判別する
+             *
+             *     * `` -
+             *     * `utf-8` - utf-8
+             *     * `utf-8-sig` - utf-8-sig
+             *     * `cp932` - cp932
+             */
+            encoding?: components["schemas"]["CsvEncodingEnum"] | components["schemas"]["BlankEnum"];
+            /**
+             * @description 空なら自動で判別する
+             *
+             *     * `` -
+             *     * `,` - ,
+             *     * `	` -
+             *     * `;` - ;
+             */
+            delimiter?: components["schemas"]["CsvDelimiterEnum"] | components["schemas"]["BlankEnum"];
+            required_columns?: string[];
+            /** @description 行を識別する列。重複・空を誤りにし、差分を行ごとに取る */
+            key_columns?: string[];
+            /** @description 列ごとの値の型（文字列なら省く） */
+            column_types?: components["schemas"]["ColumnType"][];
+        };
+        /** @description 資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の役割だけが変えられる */
+        AssetChecksRequest: {
+            /**
+             * @description 空なら自動で判別する
+             *
+             *     * `` -
+             *     * `utf-8` - utf-8
+             *     * `utf-8-sig` - utf-8-sig
+             *     * `cp932` - cp932
+             */
+            encoding?: components["schemas"]["CsvEncodingEnum"] | components["schemas"]["BlankEnum"];
+            /**
+             * @description 空なら自動で判別する
+             *
+             *     * `` -
+             *     * `,` - ,
+             *     * `	` -
+             *     * `;` - ;
+             */
+            delimiter?: components["schemas"]["CsvDelimiterEnum"] | components["schemas"]["BlankEnum"];
+            required_columns?: string[];
+            /** @description 行を識別する列。重複・空を誤りにし、差分を行ごとに取る */
+            key_columns?: string[];
+            /** @description 列ごとの値の型（文字列なら省く） */
+            column_types?: components["schemas"]["ColumnTypeRequest"][];
+        };
+        /** @description 前の版の同じ資料との差分。形式（MD・CSV・PPTX）によって持つ項目が違う */
+        AssetDiff: {
+            identical?: boolean;
+            /** @description 多すぎて一部だけを載せた */
+            truncated?: boolean;
+            lines_added?: number;
+            lines_removed?: number;
+            /** @description MDの本文の差分（unified diff） */
+            text?: string[];
+            columns_added?: string[];
+            columns_removed?: string[];
+            rows_added?: number;
+            rows_removed?: number;
+            rows_changed?: number;
+            rows?: components["schemas"]["RowDiff"][];
+            slides_added?: number;
+            slides_removed?: number;
+            slides_changed?: number;
+            reordered?: boolean;
+            slides?: components["schemas"]["SlideDiff"][];
+        };
+        /**
+         * @description * `added` - added
+         *     * `removed` - removed
+         *     * `changed` - changed
+         * @enum {string}
+         */
+        AssetDiffChangeEnum: "added" | "removed" | "changed";
+        /** @description 置き換えた資料の差分の数（形式によって持つ項目が違う） */
+        AssetDiffCount: {
+            /** @description 資料のkey */
+            key: string;
+            lines_added?: number;
+            lines_removed?: number;
+            rows_added?: number;
+            rows_removed?: number;
+            rows_changed?: number;
+            slides_added?: number;
+            slides_removed?: number;
+            slides_changed?: number;
+        };
+        /**
+         * @description * `md` - md
+         *     * `csv` - csv
+         *     * `pptx` - pptx
+         *     * `other` - other
+         * @enum {string}
+         */
+        AssetFormatEnum: "md" | "csv" | "pptx" | "other";
+        /** @description 資料の検証の結果（resources.formats.inspect()）。検証する前に公開した資料では空 */
+        AssetValidation: {
+            format?: components["schemas"]["AssetFormatEnum"];
+            /** @description エージェントが元の資料を編集して作った候補か */
+            edited?: boolean;
+            /** @description 誤り。あれば公開できない */
+            errors?: string[];
+            warnings?: string[];
+            /** @description 中身の概要（文字コード・列・行数・スライド数等） */
+            info?: {
+                [key: string]: unknown;
+            };
+            diff?: components["schemas"]["AssetDiff"] | null;
+        };
         /** @description ログイン画面に出すログインの方法 */
         AuthMethods: {
             readonly providers: components["schemas"]["AuthProvider"][];
@@ -1186,6 +1318,13 @@ export interface components {
             readonly id: string;
             readonly name: string;
             readonly login_url: string;
+        };
+        /** @enum {unknown} */
+        BlankEnum: "";
+        CellDiff: {
+            column: string;
+            before: string | null;
+            after: string | null;
         };
         ClarificationAnswerItem: {
             selected?: string[];
@@ -1273,6 +1412,14 @@ export interface components {
          * @enum {integer}
          */
         ClarificationStatusEnum: 1 | 2 | 3 | 4;
+        ColumnType: {
+            column: string;
+            type: components["schemas"]["CsvColumnTypeEnum"];
+        };
+        ColumnTypeRequest: {
+            column: string;
+            type: components["schemas"]["CsvColumnTypeEnum"];
+        };
         /** @description 自分の会話。モデル設定を省くと既定のモデル設定にする。実行中に変えると、次のステップから切り替わる */
         Conversation: {
             readonly id: string;
@@ -1305,6 +1452,30 @@ export interface components {
             /** タイトル */
             title?: string;
         };
+        /**
+         * @description * `string` - string
+         *     * `integer` - integer
+         *     * `decimal` - decimal
+         *     * `date` - date
+         * @enum {string}
+         */
+        CsvColumnTypeEnum: "string" | "integer" | "decimal" | "date";
+        /**
+         * @description * `` -
+         *     * `,` - ,
+         *     * `	` -
+         *     * `;` - ;
+         * @enum {string}
+         */
+        CsvDelimiterEnum: "," | "\t" | ";";
+        /**
+         * @description * `` -
+         *     * `utf-8` - utf-8
+         *     * `utf-8-sig` - utf-8-sig
+         *     * `cp932` - cp932
+         * @enum {string}
+         */
+        CsvEncodingEnum: "utf-8" | "utf-8-sig" | "cp932";
         Department: {
             readonly id: string;
             /** 名前 */
@@ -1351,6 +1522,11 @@ export interface components {
          * @enum {integer}
          */
         DepartmentRoleEnum: 1 | 2 | 3;
+        ElementDiff: {
+            kind: string;
+            before: number;
+            after: number;
+        };
         /** @description 役割（Group）。ユーザーへの割り当てでは名前で指定する */
         Group: {
             /** 名前 */
@@ -2286,6 +2462,14 @@ export interface components {
             /** Format: date-time */
             readonly created: string;
         };
+        RowDiff: {
+            change: components["schemas"]["AssetDiffChangeEnum"];
+            /** @description キーの列の値。キーがなければ空 */
+            key: string;
+            /** @description 行番号（追加・変更は新しい版、削除は前の版） */
+            line: number | null;
+            cells: components["schemas"]["CellDiff"][];
+        };
         Run: {
             readonly id: string;
             readonly conversation: string;
@@ -2429,6 +2613,8 @@ export interface components {
             readonly revision: number | null;
             /** @description 変わった項目と資料のkey */
             readonly summary: components["schemas"]["RunSkillChangeSummary"] | null;
+            /** @description 置き換えた資料の差分の数 */
+            readonly asset_diffs: components["schemas"]["AssetDiffCount"][];
         };
         /**
          * @description * `created` - 作成
@@ -2680,6 +2866,8 @@ export interface components {
             /** 説明 */
             readonly description: string;
             readonly file: components["schemas"]["ResourceVersion"];
+            readonly checks: components["schemas"]["AssetChecks"];
+            readonly validation: components["schemas"]["AssetValidation"];
         };
         /**
          * @description * `1` - 参照資料
@@ -2702,6 +2890,7 @@ export interface components {
             readonly summary: {
                 [key: string]: string[];
             };
+            readonly asset_diffs: components["schemas"]["AssetDiffCount"][];
             /** Format: date-time */
             readonly created: string;
         };
@@ -2759,6 +2948,14 @@ export interface components {
             readonly file_info: components["schemas"]["ResourceVersion"];
             /** @description 変更した後のDraftのrevision */
             readonly draft_revision: number;
+            readonly checks: components["schemas"]["AssetChecks"];
+            readonly validation: components["schemas"]["AssetValidation"];
+        };
+        /** @description 資料の検証の条件を変える（公開の役割だけ）。変えると検証し直す */
+        SkillDraftAssetChecksRequest: {
+            /** @description 編集を始めた時点のDraftのrevision */
+            revision: number;
+            checks: components["schemas"]["AssetChecksRequest"];
         };
         /** @description Draftの資料。作成ではファイルを送る（multipart/form-data）。更新でファイルを送ると、同じ資料の新しい版で置き換える */
         SkillDraftAssetRequest: {
@@ -2868,6 +3065,20 @@ export interface components {
             readonly created_by_info: components["schemas"]["MinimumUser"];
             /** Format: date-time */
             readonly created: string;
+        };
+        SlideDiff: {
+            /** @description スライドの番号（削除は前の版） */
+            slide: number;
+            change: components["schemas"]["AssetDiffChangeEnum"];
+            layout_before: string | null;
+            layout_after: string | null;
+            texts: components["schemas"]["TextDiff"][];
+            elements: components["schemas"]["ElementDiff"][];
+        };
+        TextDiff: {
+            shape: string;
+            before: string | null;
+            after: string | null;
         };
         /** @description 作業の計画の1項目（harness/tools/todo_write.py） */
         Todo: {
@@ -3944,6 +4155,40 @@ export interface operations {
         requestBody?: {
             content: {
                 "multipart/form-data": components["schemas"]["PatchedSkillDraftAssetUpdateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SkillDraftAsset"];
+                };
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、Draftか公開中の版が変わった） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    app_v1_skills_drafts_assets_checks_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                draft: string;
+                key: string;
+                skill: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SkillDraftAssetChecksRequest"];
             };
         };
         responses: {

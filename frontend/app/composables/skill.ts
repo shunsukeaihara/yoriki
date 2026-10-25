@@ -150,3 +150,74 @@ export const skillOwnerLabel = (skill: Skill, t: T): string => {
   if (skill.scope === SkillScope.PERSONAL) return skill.ownerInfo?.displayName || skill.ownerInfo?.email || ''
   return t('全社')
 }
+
+/**
+ * 資料の差分の数の文（「1行追加・2行変更」「1枚変更」等）。asset_diffs の要素か、検証の結果の diff。
+ * 中身が同じ（identical）なら「中身の変更なし」。数で表せない変更（PDF等の置換、スライドの並べ替え）は「中身が変わりました」
+ */
+export const assetDiffText = (
+  counts: (Partial<AssetDiffCount> & { identical?: boolean; reordered?: boolean }) | null | undefined,
+  t: T,
+): string => {
+  if (!counts) return ''
+  if (counts.identical) return t('中身の変更なし')
+  const { linesAdded: la, linesRemoved: lr, rowsAdded: ra, rowsRemoved: rr, rowsChanged: rc } = counts
+  const { slidesAdded: sa, slidesRemoved: sr, slidesChanged: sc } = counts
+  const texts = [
+    la && t('{n}行追加', { n: la }),
+    lr && t('{n}行削除', { n: lr }),
+    ra && t('{n}行追加', { n: ra }),
+    rr && t('{n}行削除', { n: rr }),
+    rc && t('{n}行変更', { n: rc }),
+    sa && t('{n}枚追加', { n: sa }),
+    sr && t('{n}枚削除', { n: sr }),
+    sc && t('{n}枚変更', { n: sc }),
+    counts.reordered && t('スライドの順番を変更'),
+  ].filter((text): text is string => Boolean(text))
+  return texts.length ? texts.join('・') : t('中身が変わりました')
+}
+
+/** 置き換えた資料の差分の行（「vendor-master：1行追加・2行変更」） */
+export const assetDiffLines = (items: readonly AssetDiffCount[] | null | undefined, t: T): string[] =>
+  (items ?? []).map((item) => t('{key}：{diff}', { key: item.key, diff: assetDiffText(item, t) }))
+
+/** 資料の検証の状態（誤り・注意・問題なし・未検証） */
+export const assetCheckState = (validation: AssetValidation | null | undefined, t: T) => {
+  if (!validation?.format) return { label: t('未検証'), color: 'neutral' as const, icon: 'i-lucide-circle-dashed' }
+  if (validation.errors?.length)
+    return {
+      label: t('誤り{n}件', { n: validation.errors.length }),
+      color: 'error' as const,
+      icon: 'i-lucide-circle-x',
+    }
+  if (validation.warnings?.length)
+    return {
+      label: t('注意{n}件', { n: validation.warnings.length }),
+      color: 'warning' as const,
+      icon: 'i-lucide-triangle-alert',
+    }
+  return { label: t('検証済み'), color: 'success' as const, icon: 'i-lucide-circle-check' }
+}
+
+/** CSVの検証の条件の選択肢（resources.formats） */
+export const csvEncodingItems = (t: T) => [
+  { value: '', title: t('自動で判別') },
+  { value: 'utf-8', title: 'UTF-8' },
+  { value: 'utf-8-sig', title: t('UTF-8（BOM付き）') },
+  { value: 'cp932', title: 'Shift_JIS（cp932）' },
+]
+
+export const csvDelimiterItems = (t: T) => [
+  { value: '', title: t('自動で判別') },
+  { value: ',', title: t('カンマ') },
+  { value: '\t', title: t('タブ') },
+  { value: ';', title: t('セミコロン') },
+]
+
+export const csvColumnTypeItems = (t: T) =>
+  [
+    { value: 'string', title: t('文字列') },
+    { value: 'integer', title: t('整数') },
+    { value: 'decimal', title: t('数値') },
+    { value: 'date', title: t('日付') },
+  ] satisfies { value: CsvColumnTypeEnum; title: string }[]

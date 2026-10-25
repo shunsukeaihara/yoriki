@@ -16,7 +16,10 @@ const columns: TableColumn<SkillChange>[] = [
   { accessorKey: 'actorInfo', header: t('操作者') },
 ]
 
-const summaryLines = (change: SkillChange): string[] => skillChangeLines(change.summary, t)
+const summaryLines = (change: SkillChange): string[] => [
+  ...skillChangeLines(change.summary, t),
+  ...assetDiffLines(change.assetDiffs, t),
+]
 </script>
 
 <template>

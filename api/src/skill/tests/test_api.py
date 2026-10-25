@@ -541,3 +541,143 @@ class TestOtherUsersSkill:
             api_client.get(_url(skill, "changes/")),
         ):
             assert res.status_code == 404
+
+
+class TestAssetValidation:
+    def _add(self, api_client, skill_id: str, draft: dict, name: str, content: bytes) -> dict:
+        res = api_client.post(
+            f"{SKILLS}{skill_id}/drafts/{draft['id']}/assets/",
+            {"key": "vendors", "role": 2, "file": _upload(name, content), "revision": draft["revision"]},
+            format="multipart",
+        )
+        assert res.status_code == 201, res.json()
+        return res.json()
+
+    @pytest.mark.django_db
+    def test_checks_block_publishing_until_fixed(self, api_client, app_user):
+        skill_id = _create(api_client, app_user, instructions="1. 読む")["id"]
+        draft = _draft(api_client, skill_id)
+        asset = self._add(api_client, skill_id, draft, "vendors.csv", b"code,name\n001,A\n001,B\n")
+        assert asset["validation"]["format"] == "csv"
+        assert asset["validation"]["errors"] == []
+        assert asset["validation"]["info"]["rows"] == 2
+
+        # キーの列を決めると検証し直し、重複が誤りになる。誤りがあれば公開できない
+        url = f"{SKILLS}{skill_id}/drafts/{draft['id']}/assets/vendors/checks/"
+        res = api_client.put(
+            url, {"revision": asset["draft_revision"], "checks": {"key_columns": ["code"]}}, format="json"
+        )
+        assert res.status_code == 200, res.json()
+        assert res.json()["checks"]["key_columns"] == ["code"]
+        assert res.json()["validation"]["errors"] == ["キーが重複しています：001"]
+        draft = _draft(api_client, skill_id)
+        res = _publish(api_client, skill_id, draft)
+        assert res.status_code == 400
+        assert "資料「vendors」に検証の誤りがあります" in res.json()["non_field_errors"][0]
+
+        # 直したファイルで置き換えれば公開でき、版に条件と検証の結果が残る
+        patch = {"file": _upload("vendors.csv", b"code,name\n001,A\n002,B\n"), "revision": draft["revision"]}
+        res = api_client.patch(f"{SKILLS}{skill_id}/drafts/{draft['id']}/assets/vendors/", patch, format="multipart")
+        assert res.json()["validation"]["errors"] == []
+        version = _publish(api_client, skill_id, _draft(api_client, skill_id)).json()
+        assert version["assets"][0]["checks"]["key_columns"] == ["code"]
+        assert version["assets"][0]["validation"]["errors"] == []
+
+        # 次の版での置換は、公開中の版との差分を行ごとに示し、変更の記録に数を残す
+        draft = api_client.post(f"{SKILLS}{skill_id}/drafts/", {}, format="json").json()
+        assert draft["assets"][0]["validation"]["diff"] is None
+        patch = {"file": _upload("vendors.csv", b"code,name\n001,A\n002,Bee\n003,C\n"), "revision": draft["revision"]}
+        res = api_client.patch(f"{SKILLS}{skill_id}/drafts/{draft['id']}/assets/vendors/", patch, format="multipart")
+        diff = res.json()["validation"]["diff"]
+        assert (diff["rows_added"], diff["rows_changed"]) == (1, 1)
+        assert diff["rows"][0]["key"] == "003"
+        _publish(api_client, skill_id, _draft(api_client, skill_id))
+        change = api_client.get(f"{SKILLS}{skill_id}/changes/").json()["results"][0]
+        assert change["summary"]["assets_replaced"] == ["vendors"]
+        assert change["asset_diffs"] == [{"key": "vendors", "rows_added": 1, "rows_removed": 0, "rows_changed": 1}]
+
+        # 過去の版から開いたDraftは、公開中の版との差分を持つ
+        draft = api_client.post(f"{SKILLS}{skill_id}/drafts/", {"base_version": 1}, format="json").json()
+        diff = draft["assets"][0]["validation"]["diff"]
+        assert (diff["rows_removed"], diff["rows_changed"]) == (1, 1)
+        _publish(api_client, skill_id, draft)
+        change = api_client.get(f"{SKILLS}{skill_id}/changes/").json()["results"][0]
+        assert change["asset_diffs"][0]["rows_removed"] == 1
+
+        # 資料の違う版への切戻しも、切戻しの前の版との差分の数を残す
+        res = api_client.post(f"{SKILLS}{skill_id}/rollback/", {"number": 2, "expected_version": 3}, format="json")
+        assert res.status_code == 201, res.json()
+        assert res.json()["assets"][0]["validation"]["diff"]["rows_added"] == 1
+        change = api_client.get(f"{SKILLS}{skill_id}/changes/").json()["results"][0]
+        assert change["asset_diffs"] == [{"key": "vendors", "rows_added": 1, "rows_removed": 0, "rows_changed": 1}]
+
+    @pytest.mark.django_db
+    def test_readded_asset_keeps_the_published_checks(self, api_client, app_user):
+        skill_id = _create(api_client, app_user, instructions="1. 読む")["id"]
+        draft = _draft(api_client, skill_id)
+        asset = self._add(api_client, skill_id, draft, "vendors.csv", b"code\n001\n")
+        url = f"{SKILLS}{skill_id}/drafts/{draft['id']}/assets/vendors/"
+        body = {"revision": asset["draft_revision"], "checks": {"key_columns": ["code"]}}
+        api_client.put(f"{url}checks/", body, format="json")
+        _publish(api_client, skill_id, _draft(api_client, skill_id))
+        # 外してから同じkeyで加え直しても、公開中の版の条件のまま
+        draft = api_client.post(f"{SKILLS}{skill_id}/drafts/", {}, format="json").json()
+        api_client.delete(f"{SKILLS}{skill_id}/drafts/{draft['id']}/assets/vendors/?revision={draft['revision']}")
+        draft = _draft(api_client, skill_id)
+        asset = self._add(api_client, skill_id, draft, "vendors.csv", b"code\n001\n001\n")
+        assert asset["checks"]["key_columns"] == ["code"]
+        assert asset["validation"]["errors"] == ["キーが重複しています：001"]
+
+    @pytest.mark.django_db
+    def test_editor_cannot_change_checks(self, api_client, app_user, other_user):
+        department = DepartmentFactory.create()
+        DepartmentMembershipFactory.create(department=department, user=app_user, role=DepartmentRole.EDITOR)
+        skill = SkillFactory.create(scope=SkillScope.DEPARTMENT, department=department, created_by=other_user)
+        draft = SkillDraftFactory.create(skill=skill, created_by=other_user, updated_by=other_user)
+        api_client.force_login(app_user)
+        draft_body = _draft(api_client, skill.uid)
+        asset = self._add(api_client, skill.uid, draft_body, "vendors.csv", b"code\n1\n")
+        url = _url(skill, f"drafts/{draft.uid}/assets/vendors/checks/")
+        body = {"revision": asset["draft_revision"], "checks": {"required_columns": []}}
+        # 条件を変えない送信は通し、変える送信は公開の権限がなければ403
+        assert api_client.put(url, body, format="json").status_code == 200
+        body = {"revision": asset["draft_revision"] + 1, "checks": {"required_columns": ["name"]}}
+        assert api_client.put(url, body, format="json").status_code == 403
+
+    @pytest.mark.django_db
+    def test_same_file_keeps_the_version_and_unchanged_errors_do_not_block(self, api_client, app_user):
+        skill_id = _create(api_client, app_user, instructions="1. 読む")["id"]
+        draft = _draft(api_client, skill_id)
+        content = b"code\n001\n001\n"
+        asset = self._add(api_client, skill_id, draft, "vendors.csv", content)
+        url = f"{SKILLS}{skill_id}/drafts/{draft['id']}/assets/vendors/"
+        res = api_client.patch(
+            url, {"file": _upload("vendors.csv", content), "revision": asset["draft_revision"]}, format="multipart"
+        )
+        assert res.json()["file_info"]["number"] == 1
+        _publish(api_client, skill_id, _draft(api_client, skill_id))
+        # 公開した後に条件を厳しくした版を作る（検証する前に公開した資料と同じ状況）
+        skill = Skill.objects.get(uid=skill_id)
+        assert skill.current_version is not None
+        skill.current_version.assets.update(checks={"key_columns": ["code"]}, validation={})
+        draft = api_client.post(f"{SKILLS}{skill_id}/drafts/", {}, format="json").json()
+        # 開くときに検証し、誤りは見せるが、原本も条件も変えていなければ公開は止めない
+        assert draft["assets"][0]["validation"]["errors"] == ["キーが重複しています：001"]
+        res = api_client.patch(
+            f"{SKILLS}{skill_id}/drafts/{draft['id']}/",
+            {"description": "直した", "revision": draft["revision"]},
+            format="json",
+        )
+        assert res.status_code == 200
+        assert _publish(api_client, skill_id, _draft(api_client, skill_id)).status_code == 201
+
+    @pytest.mark.django_db
+    def test_changed_files_without_validation_are_checked_when_publishing(self, api_client, app_user):
+        skill_id = _create(api_client, app_user, instructions="1. 読む")["id"]
+        draft = _draft(api_client, skill_id)
+        self._add(api_client, skill_id, draft, "vendors.csv", b"code\n001\n001\n")
+        # 検証の仕組みを入れる前に置き換えた資料（検証の結果がない）
+        SkillDraft.objects.get(uid=draft["id"]).assets.update(checks={"key_columns": ["code"]}, validation={})
+        res = _publish(api_client, skill_id, _draft(api_client, skill_id))
+        assert res.status_code == 400
+        assert "キーが重複しています" in res.json()["non_field_errors"][0]

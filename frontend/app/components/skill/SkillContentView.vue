@@ -48,6 +48,16 @@ const requirementLabel = (value: number) => skillRequirementItems(t).find((i) =>
         </div>
         <p v-if="asset.description" class="text-xs text-muted">{{ asset.description }}</p>
         <SkillFileLink :skill-id="skillId" :file="asset.file" />
+        <div class="flex flex-wrap items-center gap-2">
+          <SkillAssetCheckSummary :validation="asset.validation" />
+          <SkillAssetCheckDialog :asset-key="asset.key" :validation="asset.validation" :base-label="$t('前の版')">
+            <template #trigger="{ on }">
+              <DBtn size="xs" color="neutral" variant="link" icon="i-lucide-file-diff" v-on="on">
+                {{ $t('検証・差分') }}
+              </DBtn>
+            </template>
+          </SkillAssetCheckDialog>
+        </div>
       </div>
     </section>
     <section v-if="version.inputSchema" class="grid gap-1">

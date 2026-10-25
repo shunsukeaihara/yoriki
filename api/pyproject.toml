@@ -22,6 +22,7 @@ dependencies = [
     "nanoid>=2.0.0",
     "openai>=3.26.1",
     "psycopg[binary,pool]>=3.3.6",
+    "python-pptx>=1.0.2",
     "uvicorn>=0.54.0",
 ]
 

@@ -235,6 +235,11 @@ SPECTACULAR_SETTINGS = {
         "SkillRequirementEnum": "skill.models.SkillRequirement",
         "SkillAssetRoleEnum": "skill.models.SkillAssetRole",
         "SkillChangeKindEnum": "skill.models.SkillChangeKind",
+        "AssetFormatEnum": "resources.formats.FORMATS",
+        "AssetDiffChangeEnum": "resources.formats.DIFF_CHANGES",
+        "CsvEncodingEnum": "resources.formats.CSV_ENCODINGS",
+        "CsvDelimiterEnum": "resources.formats.CSV_DELIMITER_CHOICES",
+        "CsvColumnTypeEnum": "resources.formats.COLUMN_TYPES",
     },
 }
 

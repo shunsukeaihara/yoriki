@@ -49,6 +49,10 @@ TOOL_GUIDANCE = {
         "(used from the next request) or saved as a draft for a publisher. To change another skill, the user needs "
         "to start a separate request."
     ),
+    "test_skill_draft": (
+        "- When the skill has test cases, test the draft with `test_skill_draft` before publishing, and include the "
+        "result in the final reply. If a case fails because of your change, fix the draft and test again."
+    ),
     "create_skill": (
         "- This request makes a new skill: first create it with `create_skill` (personal scope unless the user named "
         "a department or the whole company)."

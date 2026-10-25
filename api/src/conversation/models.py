@@ -20,9 +20,15 @@ class MessageRole(models.IntegerChoices):
     SYSTEM = 3, _("システム")
 
 
+class ConversationPurpose(models.IntegerChoices):
+    CHAT = 1, _("会話")
+    # Draftの評価のRunごとに作る会話（design.md §3.7.1）。会話の一覧には出さない
+    EVALUATION = 2, _("Skillの評価")
+
+
 class ConversationQuerySet(models.QuerySet):
     def owned_by(self, user) -> Self:
-        return self.filter(owner=user, deleted=False)
+        return self.filter(owner=user, deleted=False, purpose=ConversationPurpose.CHAT)
 
 
 class Conversation(models.Model):
@@ -38,6 +44,9 @@ class Conversation(models.Model):
     # 個人情報や機密情報を扱う会話は、ローカルLLMのモデルだけを使う（design.md §4冒頭）
     handles_sensitive_data = models.BooleanField(_("個人情報・機密情報を扱う"), default=False)
     title = models.CharField(_("タイトル"), max_length=200, blank=True)
+    purpose = models.PositiveSmallIntegerField(
+        _("用途"), choices=ConversationPurpose.choices, default=ConversationPurpose.CHAT
+    )
     last_posted = models.DateTimeField(_("最終投稿日時"), null=True, blank=True)
 
     created = models.DateTimeField(auto_now_add=True, db_index=True)

@@ -75,6 +75,10 @@ def reconcile_runs() -> None:
     _expire_clarifications(now)
     _redispatch_waiting(now)
     dispatch_pending()
+    # Draftの評価の取りこぼした進行（design.md §3.7.1）
+    from conversation.evaluation import reconcile_evaluations  # noqa: PLC0415  conversationがrunをimportするため
+
+    reconcile_evaluations()
 
 
 @transaction.atomic

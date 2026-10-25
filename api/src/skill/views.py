@@ -20,16 +20,22 @@ from utils.views import SoftDeleteMixin
 
 from .errors import VersionConflict
 from .models import (
+    EvaluationStatus,
     Skill,
     SkillAccess,
     SkillAssetBinding,
     SkillChange,
     SkillDraft,
     SkillDraftAsset,
+    SkillEvaluation,
+    SkillEvaluationAsset,
+    SkillEvaluationCase,
+    SkillEvaluationResult,
     SkillScope,
     SkillVersion,
 )
 from .serializers import (
+    MinimumSkillEvaluationSerializer,
     MinimumSkillVersionSerializer,
     ResourceVersionSerializer,
     SkillChangeSerializer,
@@ -40,6 +46,9 @@ from .serializers import (
     SkillDraftOpenSerializer,
     SkillDraftRevisionSerializer,
     SkillDraftSerializer,
+    SkillEvaluationCaseSerializer,
+    SkillEvaluationCreateSerializer,
+    SkillEvaluationSerializer,
     SkillPublishSerializer,
     SkillRollbackSerializer,
     SkillSerializer,
@@ -363,9 +372,106 @@ class AppSkillFileViewSet(SkillMixin, mixins.RetrieveModelMixin, GenericViewSet)
         used = Q(pk__in=SkillAssetBinding.objects.filter(version__skill=self.skill).values("resource_version"))
         if self.skill.access_of(self.request.user) >= SkillAccess.EDIT:
             used |= Q(pk__in=SkillDraftAsset.objects.filter(draft__skill=self.skill).values("resource_version"))
+            # 評価に写したDraftの資料と、評価ケースの添付
+            used |= Q(
+                pk__in=SkillEvaluationAsset.objects.filter(evaluation__skill=self.skill).values("resource_version")
+            )
+            used |= Q(
+                pk__in=SkillEvaluationCase.files.through.objects.filter(skillevaluationcase__skill=self.skill).values(
+                    "resourceversion"
+                )
+            )
         return ResourceVersion.objects.filter(used).select_related("resource", "blob", "created_by")
 
     @extend_schema(description="ファイルを取得する（ダウンロードとして返す）", request=None, responses=FILE_RESPONSE)
     @action(detail=True, methods=["get"], serializer_class=None)
     def download(self, request, *args, **kwargs):
         return file_response(self.get_object())
+
+
+@extend_schema(description="Skillの評価ケース（design.md §3.7.1）", tags=["app/skill/evaluation_case"])
+class AppSkillEvaluationCaseViewSet(
+    SkillMixin,
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.CreateModelMixin,
+    mixins.UpdateModelMixin,
+    mixins.DestroyModelMixin,
+    GenericViewSet,
+):
+    """作成・変更・削除はDraftを編集できる人。公開の前に必須のケースは、公開の権限が要る"""
+
+    permission_classes = [AppUser]
+    skill_access = SkillAccess.EDIT
+    lookup_field = "uid"
+    queryset = SkillEvaluationCase.objects.select_related("updated_by").prefetch_related(
+        "files__resource", "files__blob", "files__created_by"
+    )
+    serializer_class = SkillEvaluationCaseSerializer
+    parser_classes = [MultiPartParser, JSONParser]
+    pagination_class = None  # 1つのSkillに20件まで
+    ordering = ("-required", "name", "pk")
+
+    def perform_create(self, serializer):
+        serializer.save(actor=self.request.user)
+
+    def perform_update(self, serializer):
+        serializer.save(actor=self.request.user)
+
+    def perform_destroy(self, instance: SkillEvaluationCase):
+        if instance.required and self.skill.access_of(self.request.user) < SkillAccess.PUBLISH:
+            raise PermissionDenied(_("公開の前に必須の評価ケースを消すには、この範囲の公開の権限が要ります"))
+        instance.delete()
+
+
+@extend_schema(description="SkillのDraftの評価（design.md §3.7.1）", tags=["app/skill/evaluation"])
+@extend_schema_view(
+    create=extend_schema(
+        description="今のDraftを、選んだケースで評価し始める",
+        request=SkillEvaluationCreateSerializer,
+        responses={201: SkillEvaluationSerializer},
+    ),
+)
+class AppSkillEvaluationViewSet(
+    SkillMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.CreateModelMixin, GenericViewSet
+):
+    permission_classes = [AppUser]
+    skill_access = SkillAccess.EDIT
+    lookup_field = "uid"
+    queryset = SkillEvaluation.objects.select_related(
+        "base_version", "model_version__profile", "requested_by"
+    ).prefetch_related(
+        Prefetch(
+            "results",
+            queryset=SkillEvaluationResult.objects.select_related("case", "base_run", "draft_run").order_by("order"),
+        )
+    )
+    serializer_class = SkillEvaluationSerializer
+    ordering = ("-created", "-pk")
+
+    def get_serializer_class(self):
+        if self.action == "list":
+            return MinimumSkillEvaluationSerializer
+        if self.action == "create":
+            return SkillEvaluationCreateSerializer
+        return super().get_serializer_class()
+
+    def get_serializer_context(self):
+        draft = SkillDraft.objects.filter(skill=self.skill).only("uid", "revision").first()
+        return {**super().get_serializer_context(), "current_draft": draft}
+
+    def perform_create(self, serializer):
+        # 評価のRunは start_evaluation() の transaction で作る
+        serializer.save(actor=self.request.user)
+
+    @extend_schema(
+        description="評価を止める（動いている評価のRunを止める）", request=None, responses=SkillEvaluationSerializer
+    )
+    @action(detail=True, methods=["post"])
+    def cancel(self, request, *args, **kwargs):
+        from conversation.evaluation import cancel_evaluation  # noqa: PLC0415  conversationがskillをimportするため
+
+        evaluation = self.get_object()
+        if evaluation.status == EvaluationStatus.RUNNING:
+            cancel_evaluation(evaluation.pk, actor=request.user)
+        return Response(self.get_serializer(self.get_queryset().get(pk=evaluation.pk)).data)

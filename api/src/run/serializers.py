@@ -36,7 +36,9 @@ class RunSkillSerializer(serializers.Serializer):
 
     skill = serializers.CharField(read_only=True, help_text=_("SkillのID"))
     name = serializers.CharField(read_only=True)
-    number = serializers.IntegerField(read_only=True, help_text=_("版"))
+    number = serializers.IntegerField(
+        read_only=True, allow_null=True, help_text=_("版（Draftの評価のRunのDraftでは空）")
+    )
     chosen = serializers.BooleanField(read_only=True, help_text=_("利用者が `/` で指定した"))
 
 

@@ -29,7 +29,7 @@ from user.models import Department, DepartmentRole
 from utils.fields import NanoidField
 from utils.permissions import AppPermission
 
-from .errors import DraftExists, InvalidDraft, VersionConflict
+from .errors import DraftExists, EvaluationRequired, InvalidDraft, VersionConflict
 
 
 class SkillScope(models.IntegerChoices):
@@ -111,6 +111,21 @@ class SkillContent(models.Model):
 
     def content(self) -> dict[str, Any]:
         return {name: getattr(self, name) for name in CONTENT_FIELDS}
+
+    def unsupported_by(self, model_version) -> str:
+        """使うモデルが、この版の必要な能力を持たない理由（持てば空文字）。Toolを使うSkillと、業務結果を
+        submit_result で確定するSkillは、Tool呼出しも要る"""
+        requires = set(self.requires)
+        if self.tools or self.output_schema:
+            requires.add(SkillRequirement.TOOL_CALLING)
+        missing = [
+            str(SkillRequirement(r).label)
+            for r in sorted(requires)
+            if not getattr(model_version, REQUIREMENT_CAPABILITIES[SkillRequirement(r)])
+        ]
+        if not missing:
+            return ""
+        return str(_("このモデルは、Skillに必要な能力（%(missing)s）を持ちません") % {"missing": "、".join(missing)})
 
 
 class SkillQuerySet(models.QuerySet):
@@ -336,6 +351,7 @@ class Skill(models.Model):
         if draft.base_version_id != current.current_version_id:
             raise VersionConflict("another version was published after the draft was opened")
         draft.check_publishable()
+        draft.check_evaluated()
 
         previous = current.current_version
         version = SkillVersion.objects.create(
@@ -503,21 +519,6 @@ class SkillVersion(SkillContent):
 
     def __str__(self):
         return f"{self.skill} v{self.number}"
-
-    def unsupported_by(self, model_version) -> str:
-        """使うモデルが、この版の必要な能力を持たない理由（持てば空文字）。Toolを使うSkillと、業務結果を
-        submit_result で確定するSkillは、Tool呼出しも要る"""
-        requires = set(self.requires)
-        if self.tools or self.output_schema:
-            requires.add(SkillRequirement.TOOL_CALLING)
-        missing = [
-            str(SkillRequirement(r).label)
-            for r in sorted(requires)
-            if not getattr(model_version, REQUIREMENT_CAPABILITIES[SkillRequirement(r)])
-        ]
-        if not missing:
-            return ""
-        return str(_("このモデルは、Skillに必要な能力（%(missing)s）を持ちません") % {"missing": "、".join(missing)})
 
 
 class SkillAssetBinding(models.Model):
@@ -789,6 +790,33 @@ class SkillDraft(SkillContent):
                 _("資料「%(key)s」に検証の誤りがあります：%(errors)s") % {"key": asset.key, "errors": "／".join(errors)}
             )
 
+    def unevaluated_cases(self) -> list["SkillEvaluationCase"]:
+        """公開の前に必須の評価ケースのうち、今のrevisionで通過していないもの（design.md §3.7.1）。
+        個人のSkillには必須のケースを求めない。評価の後に変えたケースは、評価し直すまで満たさない"""
+        if self.skill.scope == SkillScope.PERSONAL:
+            return []
+        required = list(SkillEvaluationCase.objects.filter(skill_id=self.skill_id, required=True).order_by("name"))
+        if not required:
+            return []
+        passed = SkillEvaluationResult.objects.filter(
+            evaluation__skill_id=self.skill_id,
+            evaluation__draft_uid=self.uid,
+            evaluation__draft_revision=self.revision,
+            evaluation__status=EvaluationStatus.FINISHED,
+            case__in=required,
+            passed=True,
+        ).values_list("case_id", "case_updated")
+        satisfied = {(case_id, updated) for case_id, updated in passed}
+        return [c for c in required if (c.pk, c.updated) not in satisfied]
+
+    def check_evaluated(self) -> None:
+        if cases := self.unevaluated_cases():
+            names = [c.name for c in cases]
+            raise EvaluationRequired(
+                _("公開の前に必須の評価ケースが、今のDraftで通過していません：%(names)s") % {"names": "、".join(names)},
+                names,
+            )
+
 
 class SkillDraftAsset(models.Model):
     """Draftの資料。公開するとSkillAssetBindingに写す"""
@@ -902,7 +930,189 @@ def summarize_changes(
     }
 
 
+class EvaluationStatus(models.IntegerChoices):
+    RUNNING = 1, _("評価中")
+    FINISHED = 10, _("完了")
+    CANCELLED = 30, _("停止")
+
+
+class EvaluationVerdict(models.IntegerChoices):
+    """LLMの判定。公開中の版と比べたDraft（design.md §3.7.1）"""
+
+    BETTER = 1, _("良くなった")
+    SAME = 2, _("同じ")
+    WORSE = 3, _("悪くなった")
+
+
+class EvaluationResultState(models.IntegerChoices):
+    RUNNING = 1, _("実行中")
+    JUDGING = 2, _("判定中")
+    DONE = 10, _("完了")
+
+
+# 1つのSkillの評価ケースの数と、1回の評価で動かすケースの数の上限（design.md §3.7.1）
+MAX_EVALUATION_CASES = 20
+MAX_CASES_PER_EVALUATION = 10
+
+
+class SkillEvaluationCase(models.Model):
+    """評価ケース（design.md §3.7.1）。Skillごとに持ち、版をまたいで使う。
+
+    `updated` は中身を変えたときだけ変わる。評価の結果はそのときの値を持ち、後で変えたケースは評価し直すまで
+    公開の条件を満たさない
+    """
+
+    uid = NanoidField(unique=True)
+    skill = models.ForeignKey(Skill, on_delete=models.CASCADE, related_name="evaluation_cases", verbose_name=_("Skill"))
+    name = models.CharField(_("名前"), max_length=100)
+    prompt = models.TextField(_("依頼の文"))
+    files = models.ManyToManyField(ResourceVersion, blank=True, related_name="+", verbose_name=_("添付"))
+    # LLMの判定に使う、確認する観点
+    criteria = models.TextField(_("確認する観点"), blank=True)
+    # 業務結果（submit_result の値）のうち、一致を確かめる項目
+    expected_result = models.JSONField(_("期待する業務結果"), null=True, blank=True)
+    # 部門・全社のSkillで、公開の前に今のDraftで通過していることを求める。付け外しと変更は公開の役割だけ
+    required = models.BooleanField(_("公開の前に必須"), default=False)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+", verbose_name=_("作成者")
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+", verbose_name=_("更新者")
+    )
+
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _("Skillの評価ケース")
+        verbose_name_plural = verbose_name
+        constraints = [models.UniqueConstraint(fields=["skill", "name"], name="uniq_skill_evaluation_case_name")]
+
+    def __str__(self):
+        return f"{self.skill} {self.name}"
+
+
+class SkillEvaluation(SkillContent):
+    """Draftの評価の1回（design.md §3.7.1）。始めた時点のDraftの中身と資料の版を写して固定する。
+
+    ケースごとに、公開中の版（base_version）とこの中身で評価のRunを動かし、SkillEvaluationResultで比べる
+    """
+
+    uid = NanoidField(unique=True)
+    skill = models.ForeignKey(Skill, on_delete=models.PROTECT, related_name="evaluations", verbose_name=_("Skill"))
+    draft_uid = models.CharField(_("評価したDraft"), max_length=22)
+    draft_revision = models.PositiveIntegerField(_("Draftのrevision"))
+    # 比べた公開中の版。最初の公開の前はNone（Draftだけを動かす）
+    base_version = models.ForeignKey(
+        SkillVersion, on_delete=models.PROTECT, null=True, blank=True, related_name="+", verbose_name=_("公開中の版")
+    )
+    model_version = models.ForeignKey(
+        "llm.ModelProfileVersion", on_delete=models.PROTECT, related_name="+", verbose_name=_("モデル設定の版")
+    )
+    effort = models.CharField(_("effort"), max_length=50, blank=True)
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+", verbose_name=_("依頼者")
+    )
+    # test_skill_draft で始めたときの、Skillの編集のRunと呼出し。終わったら結果を返して再開する
+    run = models.ForeignKey(
+        "run.Run", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("編集のRun")
+    )
+    tool_call_id = models.CharField(_("Tool呼出しのID"), max_length=200, blank=True)
+    status = models.PositiveSmallIntegerField(
+        _("状態"), choices=EvaluationStatus.choices, default=EvaluationStatus.RUNNING
+    )
+
+    created = models.DateTimeField(auto_now_add=True, db_index=True)
+    finished = models.DateTimeField(_("終了日時"), null=True, blank=True)
+
+    class Meta:
+        verbose_name = _("Skillの評価")
+        verbose_name_plural = verbose_name
+
+    def __str__(self):
+        return self.uid
+
+    @property
+    def number(self) -> str:
+        """Skillの本文（harness/skills.render()）で版の代わりに示すもの"""
+        return "draft"
+
+
+class SkillEvaluationAsset(models.Model):
+    """評価に写したDraftの資料"""
+
+    evaluation = models.ForeignKey(
+        SkillEvaluation, on_delete=models.CASCADE, related_name="assets", verbose_name=_("評価")
+    )
+    key = models.CharField(_("資料のkey"), max_length=63)
+    role = models.PositiveSmallIntegerField(_("用途"), choices=SkillAssetRole.choices)
+    description = models.CharField(_("説明"), max_length=500, blank=True)
+    resource_version = models.ForeignKey(
+        ResourceVersion, on_delete=models.PROTECT, related_name="+", verbose_name=_("資料の版")
+    )
+
+    class Meta:
+        verbose_name = _("Skillの評価の資料")
+        verbose_name_plural = verbose_name
+        constraints = [models.UniqueConstraint(fields=["evaluation", "key"], name="uniq_skill_evaluation_asset_key")]
+
+    def __str__(self):
+        return f"{self.evaluation} {self.key}"
+
+
+class SkillEvaluationResult(models.Model):
+    """評価の中の1つのケース。公開中の版とDraftのRun、機械的な検証、LLMの判定を持つ（design.md §3.7.1）。
+
+    ケースの中身は評価を始めた時点のものを写す（後でケースを変えても、この評価が何を確かめたかを残す）
+    """
+
+    evaluation = models.ForeignKey(
+        SkillEvaluation, on_delete=models.CASCADE, related_name="results", verbose_name=_("評価")
+    )
+    case = models.ForeignKey(
+        SkillEvaluationCase,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="results",
+        verbose_name=_("評価ケース"),
+    )
+    order = models.PositiveSmallIntegerField(_("順番"))
+    case_name = models.CharField(_("ケースの名前"), max_length=100)
+    required = models.BooleanField(_("公開の前に必須"), default=False)
+    # {"prompt", "criteria", "expected_result", "files": [{"id", "name"}]}
+    case_data = models.JSONField(_("ケースの中身"), default=dict)
+    case_updated = models.DateTimeField(_("ケースの更新日時"))
+    base_run = models.ForeignKey(
+        "run.Run", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("公開中の版のRun")
+    )
+    draft_run = models.ForeignKey(
+        "run.Run", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("DraftのRun")
+    )
+    state = models.PositiveSmallIntegerField(
+        _("状態"), choices=EvaluationResultState.choices, default=EvaluationResultState.RUNNING
+    )
+    # 機械的な検証（conversation/evaluation.check_run()）。Draftの側がすべて通れば passed
+    base_check = models.JSONField(_("公開中の版の検証"), default=dict, blank=True)
+    draft_check = models.JSONField(_("Draftの検証"), default=dict, blank=True)
+    passed = models.BooleanField(_("通過"), null=True, blank=True)
+    verdict = models.PositiveSmallIntegerField(_("LLMの判定"), choices=EvaluationVerdict.choices, null=True, blank=True)
+    judge_reason = models.TextField(_("判定の理由"), blank=True)
+    # 判定しなかった・できなかった理由（公開中の版がない、モデルがToolに対応しない、判定の失敗）
+    judge_note = models.CharField(_("判定の補足"), max_length=500, blank=True)
+    judging_started = models.DateTimeField(_("判定の開始日時"), null=True, blank=True)
+
+    class Meta:
+        verbose_name = _("Skillの評価の結果")
+        verbose_name_plural = verbose_name
+        constraints = [models.UniqueConstraint(fields=["evaluation", "order"], name="uniq_skill_evaluation_order")]
+
+    def __str__(self):
+        return f"{self.evaluation} {self.case_name}"
+
+
 auditlog.register(Skill, exclude_fields=["updated"])
 auditlog.register(SkillVersion)
 auditlog.register(SkillAssetBinding)
 auditlog.register(SkillChange)
+auditlog.register(SkillEvaluationCase, exclude_fields=["updated"])

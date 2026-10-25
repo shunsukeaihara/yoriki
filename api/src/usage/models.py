@@ -12,6 +12,7 @@ MILLION = Decimal(1_000_000)
 class UsagePurpose(models.IntegerChoices):
     STEP = 1, _("エージェントのステップ")
     COMPACTION = 2, _("文脈の圧縮")
+    EVALUATION_JUDGE = 3, _("評価の判定")
 
 
 class UsageLedger(models.Model):

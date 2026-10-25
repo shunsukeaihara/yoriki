@@ -889,6 +889,8 @@ class SkillEvaluationCaseSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def update(self, instance: SkillEvaluationCase, validated_data) -> SkillEvaluationCase:
         actor = validated_data.pop("actor")
+        # 評価の開始（ケースの中身と添付を写す）と重ならないよう、行をロックしてから変える
+        instance = SkillEvaluationCase.objects.select_for_update().get(pk=instance.pk)
         add_files = validated_data.pop("add_files", [])
         removed = set(validated_data.pop("remove_files", []))
         changed = [name for name, value in validated_data.items() if getattr(instance, name) != value]

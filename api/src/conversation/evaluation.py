@@ -106,7 +106,8 @@ def start_evaluation(
     with transaction.atomic():
         skill = Skill.objects.select_for_update(of=("self",)).select_related("current_version").get(pk=skill.pk)
         # ケースは読み直して、今の中身と更新日時を写す（公開の条件の照合に使う）
-        found = SkillEvaluationCase.objects.in_bulk([c.pk for c in cases])
+        # ケースの変更も行をロックして行うので、本文と添付を同じ時点のものにする
+        found = SkillEvaluationCase.objects.select_for_update().in_bulk([c.pk for c in cases])
         cases = [found[c.pk] for c in cases if c.pk in found]
         _check_startable(skill, cases, actor, model_version)
         # 資料の変更はDraftの行をロックして行うので、写し終えるまでDraftの行をロックする（本文と資料を混ぜない）

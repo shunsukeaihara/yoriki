@@ -354,7 +354,7 @@ class ToolResult:
 
 **Runに出すToolの一覧**は、Run開始時に次から決め、`request.header` に記録する。Runの中では変えない（prompt cacheを保つため）。
 
-1. Runの種類：業務のRun、Skillの編集のRun、Draftの評価のRun（design.md §3.6・§3.7）。Skill管理のToolは編集のRunだけ、Skill公開のToolは評価のRunには出さない。
+1. Runの種類：業務のRun、Skillの編集のRun、Draftの評価のRun（design.md §3.6・§3.7）。Skill管理のToolは編集のRunだけ、Skill公開のToolは評価のRunには出さない。評価のRunは、評価するSkill（公開中の版か、評価に写したDraft）を `/` で指定したRunと同じに扱い、`skill`・`request_skill_edit` は出さない（design.md §3.7.1）。
 2. Skill：`/` かTask DefinitionでSkillを指定したRunでは、そのSkillの `tools` に限り、業務結果のSchemaがあれば `submit_result` を加える（`skill` は出さない）。答える人がいる業務のRunには、Skillの指定にかかわらず `request_skill_edit` を加える（編集を提案するだけで、作業の権限を増やさないため）。指定がなく、エージェントが探して使う会話では、利用者が使えるToolの全体と `skill` を出す。
 3. 利用者の権限と組織のポリシー：Connectorの操作は、ConnectorPermissionで使えるものだけ（design.md §4.9.1）。
 4. モデルの能力：Tool呼出しに対応しないモデルでは、Toolを出さない（Skillも、Toolが要るものは候補にしない。design.md §4.8）。
@@ -721,8 +721,10 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 | `remove_skill_asset` | `expected_revision`、`key` | Draftから資料を外す |
 | `publish_skill_draft` | `expected_revision`、`change_reason` | Draftを公開する。公開の役割がなければ公開せず「変更案を保存」と返す |
 | `rollback_skill` | `number`、`expected_version`、`change_reason` | 公開中の版を過去の版に戻す（公開の役割だけ） |
+| `test_skill_draft` | `cases`（評価ケースの名前。省けば全部。10件まで） | Draftを評価する（design.md §3.7.1）。`ask_user` と同じく単独で呼び、評価が終わるまで編集のRunは確認待ち（確認の種類「Draftの評価」。利用者が答えるものではない）になってAttemptを終える。評価が終わるとサーバーがケースごとの結果（通過か、LLMの判定と理由、Draftの側の最後の応答と業務結果の抜粋）を結果として記録し、Runを再開する。編集のRunを止めたら評価も止める。1つの編集のRunで3回まで |
 
 - 権限は管理APIと同じ判定（`Skill.access_of()`）を、呼ぶたびにサーバーで確かめる。Toolの変更・公開・切戻しは公開の役割だけ。
+- `publish_skill_draft` は、画面と同じ公開の条件（必須の評価ケース。design.md §3.7.1）を確かめる。満たさなければ、足りないケースを示して `test_skill_draft` を呼ぶよう返す。評価ケースはエージェントからは作らない（利用者がSkillの画面で作る）。
 - 公開・切戻しは、ToolInvocationのoperation keyをSkillChangeに渡し、再試行で版を重ねない。SkillChangeには編集のRunを記録する。
 - 結果の `value` に、Skillの名前・範囲・状態（変更案を保存・公開・切戻し）・版・変更点を持たせ、画面はそれを会話に表示し、Skillの画面（版の中身・切戻し）へのリンクを置く（design.md §11.6）。
 - 編集のRunで公開しても、進行中・確認待ちの業務のRunは元の版を使い続ける。次の依頼から新しい版を使う。

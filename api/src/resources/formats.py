@@ -435,12 +435,14 @@ def _diff_tables(before: _Table, after: _Table, keys: list[str]) -> dict[str, An
     if keys and all(k in before.header and k in after.header for k in keys):
         old = {_key(r, keys): (line, r) for line, r in before.records()}
         new = {_key(r, keys): (line, r) for line, r in after.records()}
+        # 足した・消した列の値も、同じキーの行の変更として数える（ない列は空として比べる）
+        compared = [*after.header, *(c for c in before.header if c not in after.header)]
         added = [k for k in new if k not in old]
         removed = [k for k in old if k not in new]
         changed = sorted(
             (new[k][0], k)
             for k in new.keys() & old.keys()
-            if any(old[k][1].get(c) != new[k][1].get(c) for c in columns)
+            if any(old[k][1].get(c, "") != new[k][1].get(c, "") for c in compared)
         )
         for k in added[:MAX_DIFF_ROWS]:
             line, record = new[k]
@@ -461,8 +463,8 @@ def _diff_tables(before: _Table, after: _Table, keys: list[str]) -> dict[str, An
             a, b = old[k][1], new[k][1]
             cells = [
                 {"column": c, "before": _clip(a.get(c)), "after": _clip(b.get(c))}
-                for c in columns
-                if a.get(c) != b.get(c)
+                for c in compared
+                if a.get(c, "") != b.get(c, "")
             ]
             rows.append({"change": "changed", "key": _key_text(k), "line": line, "cells": cells})
         counts = {"rows_added": len(added), "rows_removed": len(removed), "rows_changed": len(changed)}

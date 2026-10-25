@@ -646,3 +646,14 @@ class TestAssetValidation:
         )
         assert res.status_code == 200
         assert _publish(api_client, skill_id, _draft(api_client, skill_id)).status_code == 201
+
+    @pytest.mark.django_db
+    def test_changed_files_without_validation_are_checked_when_publishing(self, api_client, app_user):
+        skill_id = _create(api_client, app_user, instructions="1. 読む")["id"]
+        draft = _draft(api_client, skill_id)
+        self._add(api_client, skill_id, draft, "vendors.csv", b"code\n001\n001\n")
+        # 検証の仕組みを入れる前に置き換えた資料（検証の結果がない）
+        SkillDraft.objects.get(uid=draft["id"]).assets.update(checks={"key_columns": ["code"]}, validation={})
+        res = _publish(api_client, skill_id, _draft(api_client, skill_id))
+        assert res.status_code == 400
+        assert "キーが重複しています" in res.json()["non_field_errors"][0]

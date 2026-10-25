@@ -88,11 +88,14 @@ class TestCsv:
         result = formats.inspect(after, "vendors.csv", checks=KEYED, before=(before, "vendors.csv"))
         diff = result["diff"]
         assert result["errors"] == []
-        assert (diff["rows_added"], diff["rows_removed"], diff["rows_changed"]) == (1, 1, 1)
+        # 足した列「kana」の値も変更として数える
+        assert (diff["rows_added"], diff["rows_removed"], diff["rows_changed"]) == (1, 1, 2)
         assert diff["columns_added"] == ["kana"]
-        changed = next(r for r in diff["rows"] if r["change"] == "changed")
-        assert changed["key"] == "002"
-        assert changed["cells"] == [{"column": "name", "before": "B", "after": "Bee"}]
+        changed = {r["key"]: r["cells"] for r in diff["rows"] if r["change"] == "changed"}
+        assert changed["002"] == [
+            {"column": "name", "before": "B", "after": "Bee"},
+            {"column": "kana", "before": None, "after": "ビー"},
+        ]
 
     def test_composite_keys_and_large_diffs(self, monkeypatch):
         # 値に「 / 」を含んでも、別のキーとして扱う
@@ -105,6 +108,13 @@ class TestCsv:
         assert diff["rows_changed"] == 10
         assert len(diff["rows"]) == 2
         assert diff["truncated"] is True
+
+    def test_values_in_added_columns_are_row_changes(self):
+        before = _csv("code,name\n001,A\n002,B\n")
+        after = _csv("code,name,amount\n001,A,100\n002,B,\n")
+        diff = formats.inspect(after, "v.csv", checks=KEYED, before=(before, "v.csv"))["diff"]
+        assert diff["rows_changed"] == 1
+        assert diff["rows"][0]["cells"] == [{"column": "amount", "before": None, "after": "100"}]
 
     def test_diff_without_key_counts_rows(self):
         before = _csv("code,name\n001,A\n002,B\n")

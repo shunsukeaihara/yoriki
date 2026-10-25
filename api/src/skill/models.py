@@ -756,9 +756,6 @@ class SkillDraft(SkillContent):
             raise InvalidDraft(_("手順を入力してください"))
         base = {a.key: a for a in self.base_version.assets.all()} if self.base_version else {}
         for asset in self.assets.all():
-            errors = asset.validation.get("errors")
-            if not errors:
-                continue
             # 元の版から原本も条件も変えていない資料は、公開済みのものなので止めない
             prior = base.get(asset.key)
             if (
@@ -766,6 +763,14 @@ class SkillDraft(SkillContent):
                 and prior.resource_version_id == asset.resource_version_id
                 and formats.normalize_checks(prior.checks) == formats.normalize_checks(asset.checks)
             ):
+                continue
+            if not asset.validation:
+                # 検証の仕組みを入れる前から開いていたDraftで変えた資料は、ここで検証する（版にも写す）
+                resource = asset.resource_version
+                asset.validation = self._inspect(asset.key, resource, resource.read(), asset.checks, False)
+                asset.save(update_fields=["validation"])
+            errors = asset.validation.get("errors")
+            if not errors:
                 continue
             raise InvalidDraft(
                 _("資料「%(key)s」に検証の誤りがあります：%(errors)s") % {"key": asset.key, "errors": "／".join(errors)}

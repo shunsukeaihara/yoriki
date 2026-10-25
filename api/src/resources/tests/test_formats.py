@@ -257,6 +257,13 @@ class TestPptx:
         assert formats.inspect(out.getvalue(), "deck.pptx")["errors"] == ["展開すると大きすぎるため、読みません"]
 
 
+def test_identical_files_have_no_diff_counts():
+    data = _csv("code\n001\n")
+    result = formats.inspect(data, "renamed.csv", checks=KEYED, before=(data, "v.csv"))
+    assert result["diff"]["identical"] is True
+    assert formats.diff_counts(result) == {}
+
+
 def test_other_formats_are_only_compared():
     result = formats.inspect(b"%PDF", "a.pdf", before=(b"%PDF", "a.pdf"))
     assert result["format"] == "other"

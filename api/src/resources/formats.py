@@ -116,8 +116,10 @@ def inspect(
 
 
 def diff_counts(validation: dict[str, Any]) -> dict[str, int]:
-    """差分の数だけ（SkillChangeの記録と、エージェントへの短い報告に使う）"""
+    """差分の数だけ（SkillChangeの記録と、エージェントへの短い報告に使う）。中身が同じなら空"""
     diff = validation.get("diff") or {}
+    if diff.get("identical"):
+        return {}
     return {k: v for k, v in diff.items() if isinstance(v, int) and not isinstance(v, bool)}
 
 

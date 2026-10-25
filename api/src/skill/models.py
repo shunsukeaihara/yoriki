@@ -603,7 +603,12 @@ class SkillDraft(SkillContent):
         """開いたDraftの資料の検証の結果。公開中の版と同じ原本なら、その版の結果を差分なしで使う。過去の版から開いて
         原本が違えば（検証する前に公開した資料も）、公開中の版の同じ資料と比べて検証し直す"""
         current = self._base_asset(asset.key)
-        if asset.validation and current is not None and current.resource_version_id == asset.resource_version_id:
+        if (
+            asset.validation
+            and current is not None
+            and current.resource_version_id == asset.resource_version_id
+            and formats.normalize_checks(current.checks) == formats.normalize_checks(asset.checks)
+        ):
             return _without_diff(asset.validation)
         resource = asset.resource_version
         return self._inspect(asset.key, resource, resource.read(), asset.checks, False)

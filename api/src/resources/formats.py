@@ -170,10 +170,12 @@ def _clip(value: str | None) -> str | None:
     return value[: MAX_TEXT - 1] + "…"
 
 
-def _examples(items: Iterable[str]) -> str:
+def _examples(items: Iterable[str], total: int | None = None) -> str:
+    """例を MAX_EXAMPLES 件まで並べる。total（全体の件数）を渡せば、items は例だけでよい"""
     items = list(items)
+    total = len(items) if total is None else total
     text = "、".join(items[:MAX_EXAMPLES])
-    return text + (_(" ほか%(n)s件") % {"n": len(items) - MAX_EXAMPLES} if len(items) > MAX_EXAMPLES else "")
+    return text + (_(" ほか%(n)s件") % {"n": total - MAX_EXAMPLES} if total > MAX_EXAMPLES else "")
 
 
 # --- テキスト ---
@@ -373,18 +375,25 @@ def _check_table(result: _Result, table: _Table, checks: dict[str, Any]) -> None
             result.error(
                 _("キーが重複しています：%(keys)s") % {"keys": _examples(_key_text(k) for k in duplicated_keys)}
             )
+    _check_types(result, header, records, checks)
+
+
+def _check_types(result: _Result, header: list[str], records: list[tuple[int, dict[str, str]]], checks) -> None:
     for column, kind in _column_types(checks).items():
         if column not in header or kind == "string":
             continue
-        wrong = [
-            _("%(line)s行目「%(value)s」") % {"line": line, "value": _clip(record[column])}
-            for line, record in records
-            if record.get(column) and not _type_ok(kind, record[column])
-        ]
-        if wrong:
+        # 件数を数えながら、表示する例だけを持つ
+        wrong: list[str] = []
+        count = 0
+        for line, record in records:
+            if record.get(column) and not _type_ok(kind, record[column]):
+                count += 1
+                if len(wrong) < MAX_EXAMPLES:
+                    wrong.append(_("%(line)s行目「%(value)s」") % {"line": line, "value": _clip(record[column])})
+        if count:
             result.error(
                 _("列「%(column)s」に%(kind)sでない値があります：%(values)s")
-                % {"column": column, "kind": _type_label(kind), "values": _examples(wrong)}
+                % {"column": column, "kind": _type_label(kind), "values": _examples(wrong, count)}
             )
 
 
@@ -624,10 +633,26 @@ def _read_pptx(data: bytes, result: _Result | None) -> dict[str, Any] | None:
         presentation = Presentation(io.BytesIO(data))
         slides = [_slide_structure(slide) for slide in presentation.slides]
         layouts = [layout.name for master in presentation.slide_masters for layout in master.slide_layouts]
+        designs = sorted(
+            _part_fingerprint(part)
+            for master in presentation.slide_masters
+            for part in (master.part, *(layout.part for layout in master.slide_layouts))
+        )
     except Exception as exc:  # python-pptxは壊れたファイルで様々な例外を出す
         fail(_("PPTXとして読めません（%(error)s）") % {"error": exc.__class__.__name__})
         return None
-    return {"slides": slides, "layouts": layouts}
+    return {"slides": slides, "layouts": layouts, "designs": designs}
+
+
+def _part_fingerprint(part) -> str:
+    """マスター・レイアウトの部品と、それが参照する部品（画像等）の中身のhash。マスターとレイアウトの間の参照は
+    たどらない（それぞれを別に数える）"""
+    digest = hashlib.sha256(part.blob)
+    for rel in sorted(part.rels.values(), key=lambda r: r.rId):
+        if rel.is_external or rel.reltype.endswith(("/slideMaster", "/slideLayout")):
+            continue
+        digest.update(rel.target_part.blob)
+    return digest.hexdigest()
 
 
 def _inspect_pptx(result: _Result, data: bytes, before: bytes | None) -> None:
@@ -725,7 +750,7 @@ def _diff_decks(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]
 def _check_edited_deck(result: _Result, before: dict[str, Any], after: dict[str, Any]) -> None:
     """編集した候補で、正しく編集できない要素（画像・グラフ・SmartArt・動画等）とレイアウトが変わっていないか。
     変わっていれば編集した資料として公開させず、原本のままの置換を案内する（design.md §3.9）"""
-    if Counter(before["layouts"]) != Counter(after["layouts"]):
+    if Counter(before["layouts"]) != Counter(after["layouts"]) or before["designs"] != after["designs"]:
         result.error(_("スライドのレイアウトが変わっています。レイアウトの変更は編集では扱えません"))
     old = {s["id"]: s for s in before["slides"]}
     broken = []

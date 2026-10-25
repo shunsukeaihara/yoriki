@@ -238,6 +238,16 @@ class TestPptx:
         text_only = _edit_title(before, 0, "新しい表紙")
         assert formats.inspect(text_only, "deck.pptx", before=(before, "deck.pptx"), edited=True)["errors"] == []
 
+    def test_edited_deck_must_keep_layouts(self):
+        before = _deck("表紙")
+        presentation = Presentation(io.BytesIO(before))
+        layout = presentation.slide_layouts[5]
+        layout.placeholders[0].left = Inches(3)  # 名前は同じまま、レイアウトの中身だけを変える
+        out = io.BytesIO()
+        presentation.save(out)
+        result = formats.inspect(out.getvalue(), "deck.pptx", before=(before, "deck.pptx"), edited=True)
+        assert any("レイアウトが変わっています" in e for e in result["errors"])
+
     def test_broken_and_huge_files(self, monkeypatch):
         assert formats.inspect(b"not a zip", "deck.pptx")["errors"]
         monkeypatch.setattr(formats, "MAX_ZIP_UNCOMPRESSED", 1024)

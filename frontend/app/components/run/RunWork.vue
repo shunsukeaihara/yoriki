@@ -44,6 +44,9 @@ const formattedResult = computed(() => (props.run.result == null ? '' : JSON.str
   <div class="grid gap-3">
     <div class="flex flex-wrap items-center gap-2 text-sm">
       <RunStatusBadge :run="run" />
+      <UBadge v-if="run.kind === RunKind.SKILL_EDIT" color="warning" variant="subtle" icon="i-lucide-pencil">
+        {{ $t('Skillの編集') }}
+      </UBadge>
       <UChatShimmer v-if="run.status === RunStatus.RUNNING && !streamingText" :text="$t('作業しています')" />
       <span class="text-xs text-dimmed"
         >{{ run.modelProfileName }}<template v-if="run.effort"> · {{ run.effort }}</template></span
@@ -69,6 +72,9 @@ const formattedResult = computed(() => (props.run.result == null ? '' : JSON.str
         </UTooltip>
       </li>
     </ul>
+
+    <!-- Skill の編集の Run で変えた Skill（design.md §11.6） -->
+    <RunSkillChanges v-if="run.skillChanges.length" :changes="run.skillChanges" />
 
     <RunTodoList v-if="run.todos.length" :todos="run.todos" />
 

@@ -16,6 +16,7 @@ from .models import (
     RunEndReason,
     RunEvent,
     RunEventKind,
+    RunKind,
     RunStatus,
 )
 
@@ -38,9 +39,69 @@ class RunSkillSerializer(serializers.Serializer):
     chosen = serializers.BooleanField(read_only=True, help_text=_("利用者が `/` で指定した"))
 
 
+class RunSkillChangeSummarySerializer(serializers.Serializer):
+    fields = serializers.ListField(child=serializers.CharField(), read_only=True, required=False)  # type: ignore[assignment]
+    assets_added = serializers.ListField(child=serializers.CharField(), read_only=True, required=False)
+    assets_removed = serializers.ListField(child=serializers.CharField(), read_only=True, required=False)
+    assets_replaced = serializers.ListField(child=serializers.CharField(), read_only=True, required=False)
+    assets_changed = serializers.ListField(child=serializers.CharField(), read_only=True, required=False)
+
+
+class RunSkillChangeSerializer(serializers.Serializer):
+    """Skillの編集のRunで変えたSkill（Skill管理のToolの結果。harness.md §10.9）。Skillごとに最後の状態"""
+
+    skill = serializers.CharField(read_only=True, help_text=_("SkillのID"))
+    name = serializers.CharField(read_only=True)
+    scope = serializers.CharField(read_only=True, help_text=_("範囲（「部門 経理部」等）"))
+    state = serializers.ChoiceField(
+        choices=[
+            ("created", _("作成")),
+            ("draft_saved", _("変更案を保存")),
+            ("published", _("公開")),
+            ("rolled_back", _("切戻し")),
+        ],
+        read_only=True,
+    )
+    version = serializers.IntegerField(read_only=True, allow_null=True, help_text=_("公開・切戻しでできた版"))
+    revision = serializers.IntegerField(read_only=True, allow_null=True, help_text=_("保存したDraftのrevision"))
+    summary = RunSkillChangeSummarySerializer(read_only=True, allow_null=True, help_text=_("変わった項目と資料のkey"))
+
+
+# 結果の値がSkillの変更（RunSkillChangeSerializer）になるTool
+SKILL_CHANGE_TOOLS = (
+    "create_skill",
+    "update_skill_draft",
+    "stage_skill_asset",
+    "remove_skill_asset",
+    "publish_skill_draft",
+    "rollback_skill",
+)
+
+
+def skill_changes(run: Run) -> list[dict[str, Any]]:
+    """Skillの編集のRunで変えたSkillの、Skillごとの最後の状態。公開していない変更は、前の公開の後の変更点をまとめる"""
+    events = RunEvent.objects.filter(
+        run=run, kind=RunEventKind.TOOL_RESULT, data__name__in=SKILL_CHANGE_TOOLS, data__is_error=False
+    ).order_by("sequence")
+    changes: dict[str, dict[str, Any]] = {}
+    for event in events:
+        value = event.data.get("value") or {}
+        if "skill" not in value:
+            continue
+        before = changes.get(value["skill"])
+        if value["state"] == "draft_saved" and before is not None and before["state"] in ("draft_saved", "created"):
+            merged: dict[str, list[str]] = {k: list(v) for k, v in (before.get("summary") or {}).items()}
+            for key, names in (value.get("summary") or {}).items():
+                merged[key] = list(dict.fromkeys([*merged.get(key, []), *names]))
+            value = {**value, "summary": merged}
+        changes[value["skill"]] = value
+    return list(changes.values())
+
+
 class RunSerializer(serializers.ModelSerializer):
     id = serializers.CharField(source="uid", read_only=True)
     conversation: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(slug_field="uid", read_only=True)
+    kind = serializers.ChoiceField(choices=RunKind.choices, read_only=True)
     status = serializers.ChoiceField(choices=RunStatus.choices, read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     end_reason = serializers.ChoiceField(choices=RunEndReason.choices, read_only=True, allow_null=True)
@@ -49,12 +110,14 @@ class RunSerializer(serializers.ModelSerializer):
     todos = serializers.SerializerMethodField(help_text=_("作業の計画（todo_write の最新の内容）"))
     skills = serializers.SerializerMethodField(help_text=_("使っているSkillと版"))
     result = serializers.JSONField(read_only=True, allow_null=True, help_text=_("業務結果（submit_result の内容）"))
+    skill_changes = serializers.SerializerMethodField(help_text=_("Skillの編集のRunで変えたSkill"))
 
     class Meta:
         model = Run
         fields = [
             "id",
             "conversation",
+            "kind",
             "status",
             "status_display",
             "end_reason",
@@ -66,6 +129,7 @@ class RunSerializer(serializers.ModelSerializer):
             "todos",
             "skills",
             "result",
+            "skill_changes",
             "created",
             "updated",
             "finished",
@@ -89,6 +153,12 @@ class RunSerializer(serializers.ModelSerializer):
         chosen = [{**e, "chosen": True} for e in (manifest.get("fixed") or {}).get("skills") or []]
         loaded = [{**e, "chosen": False} for e in manifest.get("appended", []) if e.get("kind") == "skill"]
         return list(RunSkillSerializer([*chosen, *loaded], many=True).data)
+
+    @extend_schema_field(RunSkillChangeSerializer(many=True))
+    def get_skill_changes(self, obj: Run) -> list[dict[str, Any]]:
+        if obj.kind != RunKind.SKILL_EDIT:
+            return []
+        return list(RunSkillChangeSerializer(skill_changes(obj), many=True).data)
 
 
 class RunCancelSerializer(serializers.Serializer):
@@ -134,6 +204,15 @@ class ClarificationAnswerItemSerializer(serializers.Serializer):
     text = serializers.CharField(max_length=5000, required=False, allow_blank=True, default="")
 
 
+class ClarificationContextSerializer(serializers.Serializer):
+    """確認の対象。Skillの編集の確認で、対象のSkill（新しいSkillならskillが空）と変更の要約"""
+
+    skill = serializers.CharField(read_only=True, required=False)
+    name = serializers.CharField(read_only=True, required=False)
+    scope = serializers.CharField(read_only=True, required=False)
+    summary = serializers.CharField(read_only=True, required=False)
+
+
 class ClarificationRequestSerializer(serializers.ModelSerializer):
     id = serializers.CharField(source="uid", read_only=True)
     run: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(slug_field="uid", read_only=True)
@@ -144,6 +223,7 @@ class ClarificationRequestSerializer(serializers.ModelSerializer):
     answered_by: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(
         slug_field="uid", read_only=True, allow_null=True
     )
+    target = ClarificationContextSerializer(source="context", read_only=True, allow_null=True)
 
     class Meta:
         model = ClarificationRequest
@@ -152,6 +232,7 @@ class ClarificationRequestSerializer(serializers.ModelSerializer):
             "run",
             "kind",
             "status",
+            "target",
             "questions",
             "answers",
             "comment",
@@ -161,6 +242,11 @@ class ClarificationRequestSerializer(serializers.ModelSerializer):
             "created",
         ]
         read_only_fields = fields
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["target"] = data["target"] or None  # 対象のない確認（ask_user・モデルの切り替え）
+        return data
 
 
 class ClarificationAnswerSerializer(serializers.Serializer):

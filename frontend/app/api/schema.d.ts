@@ -1203,6 +1203,13 @@ export interface components {
             /** @default  */
             comment: string;
         };
+        /** @description 確認の対象。Skillの編集の確認で、対象のSkill（新しいSkillならskillが空）と変更の要約 */
+        ClarificationContext: {
+            readonly skill: string;
+            readonly name: string;
+            readonly scope: string;
+            readonly summary: string;
+        };
         /** @description エージェントからの確認（回答待ち） */
         ClarificationEvent: {
             /**
@@ -1220,9 +1227,10 @@ export interface components {
         /**
          * @description * `1` - エージェントからの質問
          *     * `2` - モデルの切り替えの確認
+         *     * `3` - Skillの編集の確認
          * @enum {integer}
          */
-        ClarificationKindEnum: 1 | 2;
+        ClarificationKindEnum: 1 | 2 | 3;
         ClarificationOption: {
             readonly label: string;
             readonly description: string;
@@ -1238,6 +1246,7 @@ export interface components {
             readonly run: string;
             readonly kind: components["schemas"]["ClarificationKindEnum"];
             readonly status: components["schemas"]["ClarificationStatusEnum"];
+            readonly target: components["schemas"]["ClarificationContext"] | null;
             readonly questions: components["schemas"]["ClarificationQuestion"][];
             readonly answers: components["schemas"]["ClarificationAnswerItem"][];
             /** 補足 */
@@ -1563,6 +1572,7 @@ export interface components {
             attachments?: string[];
             readonly attachments_info: components["schemas"]["Artifact"][];
             readonly skills_info: components["schemas"]["MessageSkill"][];
+            readonly skill_edit: components["schemas"]["MessageSkillEdit"] | null;
             readonly instruction: components["schemas"]["InstructionInfo"] | null;
             /** Format: date-time */
             readonly created: string;
@@ -1575,6 +1585,13 @@ export interface components {
             attachments?: string[];
             /** @description 入力欄の `/` で指定したSkill。実行中なら次の依頼になる（Skillの版は依頼を始めるときに決める） */
             skills?: string[];
+            /** @description 入力欄の `/` で「編集」を選んだSkill。このメッセージはSkillの編集の依頼になる（別のRunで行う） */
+            edit_skill?: string | null;
+            /**
+             * @description 入力欄の `/` で「新しいSkillを作る」を選んだ。このメッセージは新しいSkillを作る依頼になる
+             * @default false
+             */
+            create_skill: boolean;
             client_message_id?: string;
             /**
              * @description auto：実行中なら今の作業への追加指示、確認待ちなら回答。next：今の作業の後に始める
@@ -1594,6 +1611,11 @@ export interface components {
         MessageRoleEnum: 1 | 2 | 3;
         /** @description メッセージで指定したSkill（送ったときの名前） */
         MessageSkill: {
+            readonly id: string;
+            readonly name: string;
+        };
+        /** @description メッセージのSkillの編集の依頼（送ったときの名前）。新しいSkillを作る依頼ではidが空 */
+        MessageSkillEdit: {
             readonly id: string;
             readonly name: string;
         };
@@ -2267,6 +2289,7 @@ export interface components {
         Run: {
             readonly id: string;
             readonly conversation: string;
+            readonly kind: components["schemas"]["RunKindEnum"];
             readonly status: components["schemas"]["RunStatusEnum"];
             readonly status_display: string;
             readonly end_reason: (components["schemas"]["RunEndReasonEnum"] | components["schemas"]["NullEnum"]) | null;
@@ -2283,6 +2306,8 @@ export interface components {
             readonly skills: components["schemas"]["RunSkill"][];
             /** @description 業務結果（submit_result の内容） */
             readonly result: unknown;
+            /** @description Skillの編集のRunで変えたSkill */
+            readonly skill_changes: components["schemas"]["RunSkillChange"][];
             /** Format: date-time */
             readonly created: string;
             /** Format: date-time */
@@ -2343,6 +2368,12 @@ export interface components {
          * @enum {integer}
          */
         RunEventKindEnum: 1 | 10 | 11 | 12 | 21 | 22 | 30 | 31 | 32 | 40 | 41 | 50 | 51 | 60 | 90;
+        /**
+         * @description * `1` - 業務
+         *     * `2` - Skillの編集
+         * @enum {integer}
+         */
+        RunKindEnum: 1 | 2;
         /** @description 確定したメッセージとTool実行（利用者の発言、エージェントの応答、Toolの結果） */
         RunMessageEvent: {
             /**
@@ -2383,6 +2414,36 @@ export interface components {
             readonly number: number;
             /** @description 利用者が `/` で指定した */
             readonly chosen: boolean;
+        };
+        /** @description Skillの編集のRunで変えたSkill（Skill管理のToolの結果。harness.md §10.9）。Skillごとに最後の状態 */
+        RunSkillChange: {
+            /** @description SkillのID */
+            readonly skill: string;
+            readonly name: string;
+            /** @description 範囲（「部門 経理部」等） */
+            readonly scope: string;
+            readonly state: components["schemas"]["RunSkillChangeStateEnum"];
+            /** @description 公開・切戻しでできた版 */
+            readonly version: number | null;
+            /** @description 保存したDraftのrevision */
+            readonly revision: number | null;
+            /** @description 変わった項目と資料のkey */
+            readonly summary: components["schemas"]["RunSkillChangeSummary"] | null;
+        };
+        /**
+         * @description * `created` - 作成
+         *     * `draft_saved` - 変更案を保存
+         *     * `published` - 公開
+         *     * `rolled_back` - 切戻し
+         * @enum {string}
+         */
+        RunSkillChangeStateEnum: "created" | "draft_saved" | "published" | "rolled_back";
+        RunSkillChangeSummary: {
+            readonly fields: string[];
+            readonly assets_added: string[];
+            readonly assets_removed: string[];
+            readonly assets_replaced: string[];
+            readonly assets_changed: string[];
         };
         /**
          * @description * `1` - 順番待ち

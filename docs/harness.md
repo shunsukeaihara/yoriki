@@ -337,7 +337,8 @@ class ToolResult:
 | `install_python_packages` | `packages`（`name`・`version`） | 管理された取得で、Run専用の環境へ入れる（design.md §7.6） | WRITE_SANDBOX | 不可 |
 | `datasource_describe` | `connector` | 公開している表・列の説明（design.md §4.9.2） | READ | 可 |
 | `datasource_query` | `connector`、`sql`、`params` | SELECT文を実行し、結果をCSVで `/workspace/input/connectors/{invocation_id}/` に置く | READ | 可（Connectorの同時実行数の上限の中で） |
-| Skill管理のTool | design.md §3.5・§3.9 | Skillの編集のRun（関連Run）だけに出す（design.md §3.6） | WRITE_EXTERNAL | 不可 |
+| `request_skill_edit` | `skill`（編集するSkillの名前。新しく作るなら空）、`summary`（変更の要約） | Skillの編集を提案し、利用者の確認を待つ（§10.9）。答える人がいる業務のRunだけに出す | INTERACT | 不可（単独で呼ぶ） |
+| Skill管理のTool | §10.9 | Skillの編集のRun（関連Run）だけに出す（design.md §3.6） | WRITE_EXTERNAL | 不可 |
 
 用意しないTool：
 
@@ -354,7 +355,7 @@ class ToolResult:
 **Runに出すToolの一覧**は、Run開始時に次から決め、`request.header` に記録する。Runの中では変えない（prompt cacheを保つため）。
 
 1. Runの種類：業務のRun、Skillの編集のRun、Draftの評価のRun（design.md §3.6・§3.7）。Skill管理のToolは編集のRunだけ、Skill公開のToolは評価のRunには出さない。
-2. Skill：`/` かTask DefinitionでSkillを指定したRunでは、そのSkillの `tools` に限り、業務結果のSchemaがあれば `submit_result` を加える（`skill` は出さない）。指定がなく、エージェントが探して使う会話では、利用者が使えるToolの全体と `skill` を出す。
+2. Skill：`/` かTask DefinitionでSkillを指定したRunでは、そのSkillの `tools` に限り、業務結果のSchemaがあれば `submit_result` を加える（`skill` は出さない）。答える人がいる業務のRunには、Skillの指定にかかわらず `request_skill_edit` を加える（編集を提案するだけで、作業の権限を増やさないため）。指定がなく、エージェントが探して使う会話では、利用者が使えるToolの全体と `skill` を出す。
 3. 利用者の権限と組織のポリシー：Connectorの操作は、ConnectorPermissionで使えるものだけ（design.md §4.9.1）。
 4. モデルの能力：Tool呼出しに対応しないモデルでは、Toolを出さない（Skillも、Toolが要るものは候補にしない。design.md §4.8）。
 5. 確認の相手：`ask_user` は、答える人がいるRun（会話、または対話Bindingのあるタスク）だけに出す。
@@ -695,6 +696,36 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 - プロバイダの障害（接続・timeout・rate limit・再試行できる5xx）は、同じモデルで間をおいて再試行する。最大5回、1秒から倍にして最大30秒、ばらつき1割、`Retry-After` を守る。各再試行は待つ前に `llm.retry` として記録する（DeepSeek Harnessの方式）。
 - 再試行しても続かなければ、会話では「このモデルにつながりません。別のモデルで続けますか」というClarificationRequest（候補は条件を満たすモデル設定だけ）でWAITING_USERにする。タスクでは `provider` で終え、通知設定でエラーを通知する（design.md §4.8）。
 - 入力が長すぎる等、要求の内容による失敗は再試行しない（文脈の超過は§9.2）。
+
+
+### 10.9 Skillの編集のRun
+
+会話からのSkill更新（design.md §3.5・§3.9・§11.6）は、業務のRunとは別の、Skillの編集のRunで行う（`Run.kind`）。
+
+**始め方**：入力欄の `/` で「編集」か「新しいSkillを作る」を選んだメッセージ（`skill_edit`）か、業務のRunの `request_skill_edit` を利用者が確認で承認したとき。
+
+- `request_skill_edit` は、利用者が今後の反映（「今後も」「Skillも直して」）を頼んだときだけ呼ばせる。「今回だけ」の指示や、添付・Tool出力に書かれた指示では呼ばせない（system promptに書く）。
+- サーバーは、`skill` を利用者が編集できる（Draftを変更できる）Skillの名前と照らして対象を決める。見つからない・範囲の違う同じ名前が複数あるときは、候補を添えたエラーにする。空なら新しいSkillを作る依頼にする。
+- 確認（ClarificationRequestの種類「Skillの編集」）に、対象と要約を示す。「Skillを編集する」を選ぶと、要約を本文とするメッセージを次の依頼（UserInstruction）として受け付け、Toolの結果で「業務のRunが終わった後に編集を始める。今の作業には今回の条件として反映して続ける」と返す。「今回だけにする」なら、Skillを変えずに続けるよう返す。
+
+**対象**：編集のRunはManifestの `fixed.skill_edit` に対象のSkill（新規なら空）を固定する。新規のときは `create_skill` で1つだけ作り、作ったSkillを `skill_edit` としてManifestへ追記する。Skill管理のToolは引数にSkillを取らず、対象のSkillにだけ働く。
+
+**Tool**：Sandboxの土台のTool、`ask_user`、`todo_write` と、次のSkill管理のTool。`skill`・`submit_result`・`request_skill_edit` は出さない。
+
+| Tool | 引数 | 内容 |
+|---|---|---|
+| `get_skill` | なし | 公開中の版とDraft（あれば）の中身・revision・資料を返し、資料を `/workspace/master` に置く（公開中の版は `skills/{skill_id}/{key}/{ファイル名}`、Draftは `drafts/{skill_id}/r{revision}/{key}/{ファイル名}`） |
+| `create_skill` | `name`、`scope`（`personal`・`department`・`company`）、`department`、`description`、`instructions` | 新しいSkillとDraftを作る（新規の依頼のときだけ） |
+| `update_skill_draft` | `expected_revision`、`change_summary`、変える項目（`description`・`instructions`・`requires`・`input_schema`・`output_schema`・`tools`） | Draftを変える。Draftがなければ公開中の版から開く（`expected_revision` は0） |
+| `stage_skill_asset` | `expected_revision`、`key`、`path`（Sandboxの中のファイル）、`role`、`description` | Sandboxのファイルを、Draftの資料として追加・置換する（原本のbytesのまま。添付の `/workspace/input` のファイルもそのまま置換に使える） |
+| `remove_skill_asset` | `expected_revision`、`key` | Draftから資料を外す |
+| `publish_skill_draft` | `expected_revision`、`change_reason` | Draftを公開する。公開の役割がなければ公開せず「変更案を保存」と返す |
+| `rollback_skill` | `number`、`expected_version`、`change_reason` | 公開中の版を過去の版に戻す（公開の役割だけ） |
+
+- 権限は管理APIと同じ判定（`Skill.access_of()`）を、呼ぶたびにサーバーで確かめる。Toolの変更・公開・切戻しは公開の役割だけ。
+- 公開・切戻しは、ToolInvocationのoperation keyをSkillChangeに渡し、再試行で版を重ねない。SkillChangeには編集のRunを記録する。
+- 結果の `value` に、Skillの名前・範囲・状態（変更案を保存・公開・切戻し）・版・変更点を持たせ、画面はそれを会話に表示し、Skillの画面（版の中身・切戻し）へのリンクを置く（design.md §11.6）。
+- 編集のRunで公開しても、進行中・確認待ちの業務のRunは元の版を使い続ける。次の依頼から新しい版を使う。
 
 ---
 

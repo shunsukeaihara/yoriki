@@ -35,7 +35,12 @@ def asset_path(skill_uid: str, key: str, name: str) -> str:
     return f"{skill_dir(skill_uid)}/{key}/{name}"
 
 
-def _scope_label(skill: Skill) -> str:
+def draft_asset_path(skill_uid: str, revision: int, key: str, name: str) -> str:
+    """Skillの編集のRunで、Draftの資料を置くSandboxの中のパス（harness.md §10.9）"""
+    return f"{MASTER_DIR}/drafts/{skill_uid}/r{revision}/{key}/{name}"
+
+
+def scope_label(skill: Skill) -> str:
     if skill.scope == SkillScope.DEPARTMENT and skill.department is not None:
         return f"{skill.get_scope_display()} {skill.department.name}"
     return str(skill.get_scope_display())
@@ -73,7 +78,7 @@ def build_catalog(user, model_version) -> dict[str, Any]:
     entries = []
     taken: set[str] = set()
     for skill in usable:
-        name = skill.name if counts[skill.name] == 1 else f"{skill.name} ({_scope_label(skill)})"
+        name = skill.name if counts[skill.name] == 1 else f"{skill.name} ({scope_label(skill)})"
         # 範囲を添えても別のSkillの名前と重なれば（「X (個人)」という名前のSkill等）、番号を足す
         base, number = name, 2
         while name in taken:

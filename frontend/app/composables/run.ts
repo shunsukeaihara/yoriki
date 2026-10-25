@@ -10,6 +10,12 @@ export const RunStatus = {
   CANCELLED: 30,
 } as const satisfies Record<string, RunStatusEnum>
 
+// バックエンドの run.models.RunKind と同じ値
+export const RunKind = {
+  WORK: 1,
+  SKILL_EDIT: 2,
+} as const satisfies Record<string, RunKindEnum>
+
 // バックエンドの CANCELLABLE_STATUSES・ACTIVE_STATUSES と同じ
 const CANCELLABLE: RunStatusEnum[] = [RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.WAITING_USER, RunStatus.RETRY_WAIT]
 const ACTIVE: RunStatusEnum[] = [...CANCELLABLE, RunStatus.CANCELLING]
@@ -24,7 +30,8 @@ export const hasWorkToShow = (run: Run) =>
   run.stepCount > 1 ||
   run.todos.length > 0 ||
   run.skills.length > 0 ||
-  run.result != null
+  run.result != null ||
+  run.kind === RunKind.SKILL_EDIT
 
 export const runStatusColor = (status: RunStatusEnum) => {
   switch (status) {
@@ -66,6 +73,7 @@ export const NOTABLE_EVENT_KINDS: RunEventKindEnum[] = [
 export const ClarificationKind = {
   QUESTION: 1,
   MODEL_SWITCH: 2,
+  SKILL_EDIT: 3,
 } as const satisfies Record<string, ClarificationKindEnum>
 
 export const ClarificationStatus = {
@@ -117,6 +125,22 @@ export const toolLabel = (
       return t('Skillを読み込む：{name}', { name: arg('name') })
     case 'submit_result':
       return t('業務結果を確定')
+    case 'request_skill_edit':
+      return t('Skillの編集を提案')
+    case 'get_skill':
+      return t('Skillを読む')
+    case 'create_skill':
+      return t('Skillを作る：{name}', { name: arg('name') })
+    case 'update_skill_draft':
+      return t('SkillのDraftを変更')
+    case 'stage_skill_asset':
+      return t('Skillの資料を登録：{key}', { key: arg('key') })
+    case 'remove_skill_asset':
+      return t('Skillの資料を外す：{key}', { key: arg('key') })
+    case 'publish_skill_draft':
+      return t('Skillを公開')
+    case 'rollback_skill':
+      return t('Skillを切り戻す')
     default:
       return call.name
   }

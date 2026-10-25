@@ -66,6 +66,7 @@ const clarification: Clarification = {
   run: 'r1',
   kind: ClarificationKind.QUESTION,
   status: ClarificationStatus.OPEN,
+  target: null,
   questions: [
     {
       header: '取引先',

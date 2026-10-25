@@ -4,9 +4,9 @@
 評価が終わると、サーバー（conversation/evaluation.deliver()）が結果をこの呼出しの結果として記録し、Runを再開する。
 """
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from run.models import ClarificationKind
+from run.models import ClarificationKind, ClarificationRequest
 from skill.errors import CannotEvaluate
 from skill.models import (
     MAX_CASES_PER_EVALUATION,
@@ -18,9 +18,6 @@ from skill.models import (
 
 from .base import Effect, Tool, ToolContext, ToolResult
 from .skill_admin import NO_TARGET, _target
-
-if TYPE_CHECKING:
-    from run.models import ClarificationRequest
 
 NAME = "test_skill_draft"
 # 1つの編集のRunで評価できる回数（design.md §9。エージェントが評価と修正を繰り返す場合の上限）
@@ -63,11 +60,16 @@ def execute(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     if skill is None:
         return error or ToolResult.error(NO_TARGET)
     run = context.run
-    # 前の試みが評価を始めた後に中断した呼出しのやり直しなら、その評価の終わりを待つ
-    running = SkillEvaluation.objects.filter(run=run, status=EvaluationStatus.RUNNING).first()
-    if running is not None:
-        SkillEvaluation.objects.filter(pk=running.pk).update(tool_call_id=context.call.id)
-        return _waiting(running)
+    # 前の試みが評価を始めた後、確認待ちにする前に中断していれば（確認のない評価があれば）、評価を重ねて始めずに
+    # その評価の結果を待つ。その間に評価が終わっていれば、確認待ちにした直後に結果が返る
+    waited = [
+        c.context.get("evaluation")
+        for c in ClarificationRequest.objects.filter(run=run, kind=ClarificationKind.EVALUATION).only("context")
+    ]
+    orphan = SkillEvaluation.objects.filter(run=run).exclude(uid__in=waited).order_by("-pk").first()
+    if orphan is not None:
+        SkillEvaluation.objects.filter(pk=orphan.pk).update(tool_call_id=context.call.id)
+        return _waiting(orphan)
     if SkillEvaluation.objects.filter(run=run).count() >= MAX_EVALUATIONS_PER_RUN:
         return ToolResult.error(
             f"The draft was already tested {MAX_EVALUATIONS_PER_RUN} times in this work. Do not test it again; tell "

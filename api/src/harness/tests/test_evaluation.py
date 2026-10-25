@@ -540,6 +540,21 @@ def test_replayed_call_waits_for_the_running_evaluation(app_user):
 
 
 @pytest.mark.django_db
+def test_replayed_call_reuses_an_evaluation_that_finished_meanwhile(app_user, monkeypatch):
+    skill = skill_with_draft(app_user)
+    case(skill)
+    conversation = ConversationFactory.create(owner=app_user)
+    run = _edit_run(conversation, skill)
+    evaluation = start_evaluation(
+        skill, cases=list(skill.evaluation_cases.all()), actor=app_user, model_version=run.model_version, run=run
+    )
+    _finish(evaluation, monkeypatch)
+    run = execute(run, FakeAdapter([calls(("t2", "test_skill_draft", {}))]))
+    assert SkillEvaluation.objects.filter(run=run).count() == 1
+    assert ClarificationRequest.objects.get(run=run).context["evaluation"] == evaluation.uid
+
+
+@pytest.mark.django_db
 def test_user_cannot_answer_the_evaluation_wait(api_client, app_user):
     skill = skill_with_draft(app_user)
     case(skill)

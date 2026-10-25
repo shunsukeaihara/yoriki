@@ -245,7 +245,8 @@ class GeminiAdapter(ProviderAdapter):
 
     def stream(self, request: ChatRequest) -> Iterator[ChatEvent]:
         config = _config(request)
-        contents = _contents(request.messages)
+        # list は不変なので、SDKの引数の要素の型の list に入れ直す（list[Content] のままでは渡せない）
+        contents: list[types.ContentUnionDict] = [*_contents(request.messages)]
 
         parts = _Parts()
         usage: Usage | None = None

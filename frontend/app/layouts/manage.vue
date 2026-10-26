@@ -26,7 +26,14 @@ const title = computed(() => links.value.find((link) => route.path.startsWith(li
       </template>
 
       <template #default="{ collapsed }">
-        <UNavigationMenu :items="items" :collapsed="collapsed" orientation="vertical" tooltip />
+        <!-- 入れ子のメニューの字下げを、既定（ms-5）より浅くする -->
+        <UNavigationMenu
+          :items="items"
+          :collapsed="collapsed"
+          orientation="vertical"
+          tooltip
+          :ui="{ childList: 'ms-3' }"
+        />
       </template>
 
       <template #footer="{ collapsed }">

@@ -113,11 +113,17 @@
 
 ## 4 次の作業
 
-**今の状態（2026-10-27）**：Skillの段階（下の1）は #41 までで揃った。下の2（Connectorとタスク・配信）は、①（Connectorの土台）が #42、②（Connectorの管理画面）が #44。#44 はCIが通り、マージの指示を待っている。合意した方針：Connectorを先に作る（最初の業務の1つ目が先に動く）、Connectorの種類は今回は社内DBだけ（HTTP Connectorは後回し）、MySQLのドライバはPyMySQL、Webhook等で起動したRunの実行主体はタスクに設定した社員（既定は作成者）にする（design.md 0.31）。
+**今の状態（2026-10-27）**：Skillの段階（下の1）は #41 までで揃った。下の2（Connectorとタスク・配信）は、①（Connectorの土台）が #42、②（Connectorの管理画面）が #44 で済んだ。合意した方針：Connectorを先に作る（最初の業務の1つ目が先に動く）、Connectorの種類は今回は社内DBだけ（HTTP Connectorは後回し）、MySQLのドライバはPyMySQL、Webhook等で起動したRunの実行主体はタスクに設定した社員（既定は作成者）にする（design.md 0.31）。
 
 #44 で利用者と合意したこと（design.md 0.32）：接続先と資格情報をDB接続（画面では「接続先」）としてConnectorから分ける。権限は「所属」と「permission」の2軸で判定し、Groupは判定に使わない（Groupはpermissionをまとめる入れ物で、後からいくらでも変えられること）。Connectorを見る・使うのは所属だけ（使える部門。空なら全社向け）、作成・編集・削除は所属＋permission、接続先はpermissionだけ。全部を見る人は、部門の「すべての部門の範囲を含む」印で管理する。SkillとConnectorは同じ所属の判定にする（Skill側は次の段階）。管理画面のメニューは「Connector → DB Connector → 接続先・Connector」。
 
-**次の候補**（利用者に順番を確かめてから着手する）：下の2の③（会話でのConnector）か、§3の「権限の2軸に合わせる残り」（Skillの部門の範囲を共通の所属の判定にする、`user/roles.py` の作り直しをやめる、他の管理APIを `ModelPermissions` にするか決める）。
+**次の作業**：利用者の指示（2026-10-27）で、下の2の③より先に、§3の「権限の2軸に合わせる残り」を1つのPRで行う。着手の前に、次の点を利用者と決め、design.md を直してから実装する（2026-10-27に提案し、返事を待っている）。
+- Skillの部門の範囲：部門の中の役割（`DepartmentMembership.role`。利用・編集・公開）をやめ、使うのは所属だけ、Draftの変更は所属＋`skill.can_edit_department_skills`、公開・切戻し・停止・削除・Toolの変更は所属＋`skill.can_publish_department_skills` にする案。役割は人ごとのpermissionに移せないので、移行の後に基盤管理者がpermissionを付け直す。全社の範囲は今のpermissionのまま、個人は本人。
+- `user/roles.py`：`migrate` のたびに役割（Group）を作り直すのをやめ、最初に一度だけ作るデータのマイグレーションにする（合意済み）。
+- LLMの接続・モデル設定・Runtime Profile・ユーザー・部門・SSOの設定の管理API（今は `PlatformAdmin`）を `ModelPermissions` にそろえるか。SSOの設定とユーザーは基盤管理者だけのまま残す選択もある。
+- 管理画面の入口を、今のまま「メニューに出せる項目があるか」で決めてよいか。
+
+その後に、下の2の③（会話でのConnector）へ進む。
 
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。上から順に着手する（利用者から別の指示がなければ、上から）。提案する順番：
 

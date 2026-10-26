@@ -107,7 +107,9 @@ class EncryptedSecretField(_EncryptedSecretFieldBase):
 
     def contribute_to_class(self, cls, name, private_only=False):
         super().contribute_to_class(cls, name, private_only=private_only)
-        if not cls._meta.abstract:
+        # マイグレーションの中で作る過去の形のモデル（モジュールが "__fake__"）は登録しない。
+        # 今のDBにない列を持ちうるので、鍵の入れ替え（rotate_secret_encryption）で読むと失敗する
+        if not cls._meta.abstract and cls.__module__ != "__fake__":
             ENCRYPTED_SECRET_FIELDS.append((cls, name))
 
     def from_db_value(self, value, expression, connection) -> SecretValue:

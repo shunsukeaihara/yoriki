@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 
-definePageMeta({ permission: PermissionCode.CHANGE_CONNECTOR })
+// 一覧はAPIが所属で絞る。管理画面のページには、作成・編集・削除のいずれかができる人だけが入れる
+definePageMeta({ permission: CONNECTOR_EDIT_PERMISSIONS })
 
 const api = useAPI()
+const { hasPermission } = usePermission()
 const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
@@ -26,8 +28,9 @@ const params = ref<ConnectorListParams>({
 const { data: initialConnection } = await useAsyncData('connectors-initial-connection', () =>
   params.value.connection
     ? api.manage
-        .databaseConnections(params.value.connection)
-        .get()
+        .connectors()
+        .connections({ pageSize: 1000 })
+        .then((page) => page.results.find((c) => c.id === params.value.connection) ?? null)
         .catch(() => null)
     : Promise.resolve(null),
 )
@@ -40,7 +43,7 @@ const columns: TableColumn<Connector>[] = [
   { accessorKey: 'name', header: t('名前') },
   { accessorKey: 'connection', header: t('接続先') },
   { accessorKey: 'kindDisplay', header: t('種別') },
-  { accessorKey: 'tables', header: t('公開する表・ビュー') },
+  { accessorKey: 'tables', header: t('公開する表') },
   { accessorKey: 'version', header: t('版') },
   { accessorKey: 'isActive', header: t('有効') },
   { accessorKey: 'updated', header: t('更新日時') },
@@ -60,12 +63,13 @@ const onCreated = (connector: Connector) => {
         :title="$t('Connector')"
         :description="
           $t(
-            '社内DBのうち、エージェントが読み取れる範囲です。接続先の上で公開する表・ビューと使える役割・部門を決め、使える社員の依頼で読み取ります。範囲や上限を変えて保存すると新しい版になります',
+            '社内DBのうち、エージェントが読み取れる範囲です。接続先の上で公開する表・ビューと使える部門を決め、その部門の社員の依頼で読み取ります（部門を指定しなければ全社向け）。範囲や上限を変えて保存すると新しい版になります',
           )
         "
       >
         <template #end>
-          <ConnectorDialog @saved="onCreated">
+          <!-- 作成はサーバー側でも権限と所属を確認し、足りなければ403・400になる -->
+          <ConnectorDialog v-if="hasPermission(PermissionCode.ADD_CONNECTOR)" @saved="onCreated">
             <template #trigger="{ on }">
               <DBtn icon="i-lucide-plus" v-on="on">{{ $t('Connectorを追加') }}</DBtn>
             </template>
@@ -78,7 +82,7 @@ const onCreated = (connector: Connector) => {
         <DAutocomplete
           v-model="params.connection"
           :label="$t('接続先')"
-          :search-fn="api.manage.databaseConnections().list"
+          :search-fn="api.manage.connectors().connections"
           item-description="kindDisplay"
           :initial-selected="initialConnection"
         />

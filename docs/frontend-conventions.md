@@ -347,7 +347,7 @@ export const usePermission = defineStore('permission', () => {
 
 - 権限コードはDjangoの `app_label.codename` の形で、`app/v1/my/` の `allPermissions` から判定する（`usePermission`）。
 - 使う権限コードは `PermissionCode` に定数として追加し、画面のコードに文字列を直接書かない（`Permissions` はDOMの型名と衝突するので使わない）。
-- 基盤管理者だけが使える画面（LLMの接続等）は、そのModelのDjango標準のpermission（`llm.change_llmconnection` 等）で出し分ける。基盤管理者はすべてのpermissionを持つ。APIは `PlatformAdmin` で守っている（backend-conventions.md §6.3）。`isPlatformAdmin` では判定しない。
+- 接続先・Connectorの画面は、APIと同じDjango標準のpermission（`connector.view_databaseconnection`・`add_*`・`change_*`・`delete_*`）で、ページ・追加・更新・削除のボタンを出し分ける。Connectorの一覧はAPIが所属で絞る。基盤管理者だけが使える画面（LLMの接続等）は、そのModelのDjango標準のpermission（`llm.change_llmconnection` 等）で出し分ける。基盤管理者はすべてのpermissionを持つ。APIは `PlatformAdmin` で守っている（backend-conventions.md §6.3）。`isPlatformAdmin` では判定しない。
 - 役割（業務管理者・Skill公開者等）の名前では判定しない。役割はpermissionをまとめたGroupで、`allPermissions` にはGroupから得たpermissionも含まれる。基盤管理者はすべてのpermissionを持つ（backend-conventions.md §6.3）。
 
 ### 6.2 画面・メニュー・ボタン

@@ -11,6 +11,13 @@ export type ManageMenuLink = NavigationMenuItem & {
 export type ManageMenuGroup = NavigationMenuItem & { label: string; children: ManageMenuItem[] }
 export type ManageMenuItem = ManageMenuLink | ManageMenuGroup
 
+/** Connectorの管理画面に入れるpermission（作成・編集・削除のいずれか） */
+export const CONNECTOR_EDIT_PERMISSIONS: PermissionCode[] = [
+  PermissionCode.ADD_CONNECTOR,
+  PermissionCode.CHANGE_CONNECTOR,
+  PermissionCode.DELETE_CONNECTOR,
+]
+
 const isGroup = (item: ManageMenuItem): item is ManageMenuGroup => 'children' in item && Array.isArray(item.children)
 
 /**
@@ -55,13 +62,14 @@ export const useManageMenu = () => {
               label: $i18n.t('接続先'),
               icon: 'i-lucide-server',
               to: '/manage/database_connections',
-              permission: PermissionCode.CHANGE_DATABASE_CONNECTION,
+              permission: PermissionCode.VIEW_DATABASE_CONNECTION,
             },
             {
               label: $i18n.t('Connector'),
               icon: 'i-lucide-table-2',
               to: '/manage/connectors',
-              permission: PermissionCode.CHANGE_CONNECTOR,
+              // 一覧は所属で絞る。管理画面のメニューには、作成・編集・削除のいずれかができる人にだけ出す
+              permission: CONNECTOR_EDIT_PERMISSIONS,
             },
           ],
         },

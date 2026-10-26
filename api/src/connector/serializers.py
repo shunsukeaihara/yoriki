@@ -1,13 +1,12 @@
 from collections import defaultdict
 from typing import Any
 
-from django.contrib.auth.models import Group
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
-from user.models import Department
+from user.models import Department, covers_all_departments
 from user.serializers import MinimumDepartmentSerializer
 from utils.crypto import is_encryption_configured
 from utils.exceptions import Conflict
@@ -15,14 +14,11 @@ from utils.exceptions import Conflict
 from .adapters.base import Param, QueryResult, TableInfo, to_text
 from .errors import VersionConflict
 from .models import (
-    DATASOURCE_OPERATIONS,
     VERSION_FIELDS,
     Connector,
     ConnectorKind,
-    ConnectorPermission,
     ConnectorVersion,
     DatabaseConnection,
-    Operation,
 )
 
 MAX_TABLES = 500
@@ -49,39 +45,6 @@ class ConnectorTableEntrySerializer(serializers.Serializer):
 
     def update(self, instance, validated_data):
         raise NotImplementedError("版の一部として保存する")
-
-
-class ConnectorPermissionSerializer(serializers.ModelSerializer):
-    """Connectorを使える役割か部門（どちらか一方）と、使える操作"""
-
-    id = serializers.CharField(source="uid", read_only=True)
-    group: "serializers.SlugRelatedField[Group]" = serializers.SlugRelatedField(
-        slug_field="name", queryset=Group.objects.all(), required=False, allow_null=True, help_text=_("役割の名前")
-    )
-    department: "serializers.SlugRelatedField[Department]" = serializers.SlugRelatedField(
-        slug_field="uid", queryset=Department.objects.filter(deleted=False), required=False, allow_null=True
-    )
-    department_info = MinimumDepartmentSerializer(source="department", read_only=True, allow_null=True)
-    operations = serializers.ListField(
-        child=serializers.ChoiceField(choices=Operation.choices),
-        required=False,
-        default=lambda: list(DATASOURCE_OPERATIONS),
-        help_text=_("使える操作。省略するとすべて（社内DBの操作はどれも読取り）"),
-    )
-
-    class Meta:
-        model = ConnectorPermission
-        fields = ["id", "group", "department", "department_info", "operations"]
-
-    def validate(self, attrs):
-        if bool(attrs.get("group")) == bool(attrs.get("department")):
-            raise serializers.ValidationError({"non_field_errors": _("役割か部門のどちらか一方を選んでください")})
-        # 部分更新（PATCH）では入れ子の既定値が入らないので、ここで補う
-        operations = list(dict.fromkeys(attrs.get("operations", DATASOURCE_OPERATIONS)))
-        if not operations:
-            raise serializers.ValidationError({"operations": _("使える操作を1つ以上選んでください")})
-        attrs["operations"] = operations
-        return attrs
 
 
 class DatabaseConnectionSerializer(serializers.ModelSerializer):
@@ -240,7 +203,11 @@ class ConnectorSerializer(serializers.ModelSerializer):
     """Connectorの作成と表示。境界（公開する表、上限、機密のフラグ）は現在の版の値を平らに出す。
 
     境界を変えて保存すると、サーバーが新しい版を作る。更新では、編集を始めた時点の `version` を送り、
-    その間に他の人が版を作っていたら409になる。使うDB接続は作成した後は変えられない
+    その間に他の人が版を作っていたら409になる。使うDB接続は作成した後は変えられない。
+
+    使える部門（所属の軸）は版に入れない。指定しなければ全社向け。足し引きできるのは自分が所属している部門だけで、
+    全社向けにする・やめる（部門を空にする・空から指定する）のは、すべての部門の範囲を持つ人（基盤管理者か、
+    印のある部門の所属者）だけ
     """
 
     id = serializers.CharField(source="uid", read_only=True)
@@ -293,9 +260,14 @@ class ConnectorSerializer(serializers.ModelSerializer):
         help_text=_("個人情報を主な中身とする範囲。ローカルLLMのモデルを使うタスク・会話にだけ割り当てる"),
     )
     change_reason = serializers.CharField(max_length=500, required=False, allow_blank=True, write_only=True)
-    permissions = ConnectorPermissionSerializer(
-        many=True, required=False, help_text=_("使える役割・部門。更新では、送ると全体を置き換える")
+    departments: "serializers.SlugRelatedField[Department]" = serializers.SlugRelatedField(
+        many=True,
+        slug_field="uid",
+        queryset=Department.objects.filter(deleted=False),
+        required=False,
+        help_text=_("使える部門。空なら全社向け。更新では、送ると全体を置き換える"),
     )
+    department_infos = MinimumDepartmentSerializer(source="departments", many=True, read_only=True)
     created_by: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(slug_field="uid", read_only=True)
 
     class Meta:
@@ -311,7 +283,8 @@ class ConnectorSerializer(serializers.ModelSerializer):
             "version",
             *VERSION_FIELDS,
             "change_reason",
-            "permissions",
+            "departments",
+            "department_infos",
             "created_by",
             "created",
             "updated",
@@ -335,15 +308,27 @@ class ConnectorSerializer(serializers.ModelSerializer):
             entry["name"] = entry["name"].strip()
         return value
 
-    def validate_permissions(self, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        grantees = [p.get("group") or p.get("department") for p in value]
-        if len(set(grantees)) != len(grantees):
-            raise serializers.ValidationError(_("同じ役割・部門が2回あります"))
-        return value
+    def _validate_scope(self, attrs) -> None:
+        """自分の所属の範囲の外の部門を足し引きさせない。全社向け（部門の指定なし）にする・やめるのは、すべての部門の
+        範囲を持つ人だけ"""
+        if self.instance is not None and "departments" not in attrs:
+            return
+        user = self.context["request"].user
+        if covers_all_departments(user):
+            return
+        current = set(self.instance.departments.all()) if self.instance else set()
+        departments = set(attrs.get("departments", []))
+        if not departments or (self.instance is not None and not current):
+            raise serializers.ValidationError(
+                {"departments": _("全社向け（部門の指定なし）にする・やめるのは、すべての部門の範囲を持つ人だけです")}
+            )
+        if (departments ^ current) - set(Department.objects.of(user)):
+            raise serializers.ValidationError({"departments": _("所属していない部門は、足し引きできません")})
 
     def validate(self, attrs):
         if self.instance is not None and "version_number" not in attrs:
             raise serializers.ValidationError({"version": _("編集を始めた時点の版を送ってください")})
+        self._validate_scope(attrs)
         connection = attrs["connection"] if self.instance is None else self.instance.connection
         kind = ConnectorKind(connection.kind)
         errors: defaultdict[str, list[Any]] = defaultdict(list)
@@ -375,17 +360,10 @@ class ConnectorSerializer(serializers.ModelSerializer):
         sent = validated_data.pop("current_version", {})
         return {name: sent[name] if name in sent else getattr(current, name) for name in VERSION_FIELDS}
 
-    def _save_permissions(self, connector: Connector, permissions: list[dict[str, Any]]) -> None:
-        # 監査ログに残すため、1件ずつ削除・作成する（bulk_create は保存のシグナルを送らない）
-        for permission in connector.permissions.all():
-            permission.delete()
-        for p in permissions:
-            ConnectorPermission.objects.create(connector=connector, **p)
-
     @transaction.atomic
     def create(self, validated_data) -> Connector:
         validated_data.pop("version_number", None)
-        permissions = validated_data.pop("permissions", [])
+        departments = validated_data.pop("departments", [])
         actor = validated_data.pop("created_by")
         change_reason = validated_data.pop("change_reason", "")
         # 同時にDB接続が削除されていないことを、行をロックして確かめる（削除の側も同じ行をロックする）
@@ -396,7 +374,7 @@ class ConnectorSerializer(serializers.ModelSerializer):
         connector = Connector.create_with_version(
             actor=actor, change_reason=change_reason, content=content, **validated_data
         )
-        self._save_permissions(connector, permissions)
+        connector.departments.set(departments)
         return connector
 
     @transaction.atomic
@@ -410,9 +388,9 @@ class ConnectorSerializer(serializers.ModelSerializer):
             )
         except VersionConflict as exc:
             raise Conflict() from exc
-        permissions = validated_data.pop("permissions", None)
-        if permissions is not None:
-            self._save_permissions(instance, permissions)
+        departments = validated_data.pop("departments", None)
+        if departments is not None:
+            instance.departments.set(departments)
         for name, value in validated_data.items():
             setattr(instance, name, value)
         # 変えた項目だけを保存する（取得した後に他の要求が変えた項目を書き戻さない。行は revise() でロックしている）

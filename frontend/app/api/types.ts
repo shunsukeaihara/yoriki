@@ -30,7 +30,6 @@ export type RuntimeProfileListParams = ListParams & { name?: string; isActive?: 
 
 export type ConnectorKindEnum = Schemas['ConnectorKindEnum']
 export type TlsEnum = Schemas['TlsEnum']
-export type ConnectorOperationEnum = Schemas['OperationsEnum']
 export type DatabaseConnection = Api<'DatabaseConnection'>
 export type DatabaseConnectionWrite = Api<'DatabaseConnectionRequest'>
 export type DatabaseConnectionUpdate = Api<'DatabaseConnectionUpdateRequest'>
@@ -39,8 +38,6 @@ export type Connector = Api<'Connector'>
 export type ConnectorWrite = Api<'ConnectorRequest'>
 export type ConnectorUpdate = Api<'ConnectorUpdateRequest'>
 export type ConnectorTableEntry = Api<'ConnectorTableEntry'>
-export type ConnectorPermission = Api<'ConnectorPermission'>
-export type ConnectorPermissionWrite = Api<'ConnectorPermissionRequest'>
 export type ConnectorCheck = Api<'ConnectorCheck'>
 export type ConnectorTable = Api<'ConnectorTable'>
 export type ConnectorTables = Api<'ConnectorTables'>

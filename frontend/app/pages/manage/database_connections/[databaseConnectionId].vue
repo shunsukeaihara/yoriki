@@ -57,7 +57,7 @@ const onDelete = async () => {
     <template #footer>
       <!-- 削除はサーバー側でも権限を確認し、権限がなければ403になる -->
       <DBtn
-        v-if="hasPermission(PermissionCode.CHANGE_DATABASE_CONNECTION)"
+        v-if="hasPermission(PermissionCode.DELETE_DATABASE_CONNECTION)"
         color="error"
         variant="ghost"
         @click="onDelete"
@@ -65,7 +65,12 @@ const onDelete = async () => {
         {{ $t('削除') }}
       </DBtn>
       <div class="flex-1" />
-      <DBtn :disabled="!formRef?.canPost" :loading="formRef?.loading" @click="formRef?.onSubmit()">
+      <DBtn
+        v-if="hasPermission(PermissionCode.CHANGE_DATABASE_CONNECTION)"
+        :disabled="!formRef?.canPost"
+        :loading="formRef?.loading"
+        @click="formRef?.onSubmit()"
+      >
         {{ $t('更新') }}
       </DBtn>
     </template>

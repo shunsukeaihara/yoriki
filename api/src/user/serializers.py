@@ -462,8 +462,13 @@ class DepartmentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Department
-        fields = ["id", "name", "member_count", "created", "updated"]
+        fields = ["id", "name", "covers_all_departments", "member_count", "created", "updated"]
         read_only_fields = ["created", "updated"]
+        extra_kwargs = {
+            "covers_all_departments": {
+                "help_text": _("所属する人を、すべての部門に所属しているものとして扱う（すべてを見る人の管理に使う）")
+            }
+        }
 
     def get_member_count(self, obj: Department) -> int:
         # 一覧・詳細は件数を注釈で付けて読む（DepartmentViewSet）。作成・更新の応答では数える

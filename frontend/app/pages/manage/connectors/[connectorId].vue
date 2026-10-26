@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { AxiosError } from 'axios'
 import ConnectorForm from '~/components/connector/ConnectorForm.vue'
-import ConnectorPermissionsForm from '~/components/connector/ConnectorPermissionsForm.vue'
+import ConnectorDepartmentsForm from '~/components/connector/ConnectorDepartmentsForm.vue'
 import ConnectorTablesForm from '~/components/connector/ConnectorTablesForm.vue'
 
 const emit = defineEmits<{ changed: [] }>()
@@ -23,20 +23,25 @@ if (error.value) throw createError(error.value) // 404 / 403 はエラー画面�
 
 const formRef = ref<InstanceType<typeof ConnectorForm> | null>(null)
 const tablesRef = ref<InstanceType<typeof ConnectorTablesForm> | null>(null)
-const permissionsRef = ref<InstanceType<typeof ConnectorPermissionsForm> | null>(null)
+const departmentsRef = ref<InstanceType<typeof ConnectorDepartmentsForm> | null>(null)
 const tab = ref('settings')
 const versionsReloadKey = ref(0)
 // 編集の間に他の人が版を作っていた（409）。最新の状態を読み込んでから編集し直す
 const conflicted = ref(false)
 
-// 公開する表のタブを初めて開いたときに、接続先の表・ビューの一覧を読む
+// 編集はサーバー側でも権限と所属を確認し、足りなければ403・404になる。権限がなければ保存のボタンを出さない
+const canChange = computed(() => hasPermission(PermissionCode.CHANGE_CONNECTOR))
+
+// 公開する表のタブを初めて開いたときに、接続先の表・ビューの一覧を読む（編集する人だけ）
 watch(tab, (value) => {
-  if (value === 'tables') tablesRef.value?.loadOnce()
+  if (value === 'tables' && canChange.value) tablesRef.value?.loadOnce()
 })
 
 // 保存の対象はタブごとのフォーム。試し実行と版の履歴のタブでは保存しない
-const activeForm = computed(
-  () => ({ settings: formRef.value, tables: tablesRef.value, permissions: permissionsRef.value })[tab.value] ?? null,
+const activeForm = computed(() =>
+  canChange.value
+    ? ({ settings: formRef.value, tables: tablesRef.value, departments: departmentsRef.value }[tab.value] ?? null)
+    : null,
 )
 
 const close = () => router.push('/manage/connectors')
@@ -52,7 +57,7 @@ const onFailed = (err: unknown) => {
 // 他の人の版を読み込み、すべてのタブの未保存の入力を捨てて合わせ直す
 const reloadLatest = async () => {
   await refresh()
-  for (const form of [formRef.value, tablesRef.value, permissionsRef.value]) form?.reset()
+  for (const form of [formRef.value, tablesRef.value, departmentsRef.value]) form?.reset()
   conflicted.value = false
   versionsReloadKey.value = Date.now()
 }
@@ -78,7 +83,7 @@ const onDelete = async () => {
 const tabs = computed(() => [
   { label: t('設定'), value: 'settings', slot: 'settings' as const },
   { label: t('公開する表'), value: 'tables', slot: 'tables' as const },
-  { label: t('利用の許可'), value: 'permissions', slot: 'permissions' as const },
+  { label: t('使える部門'), value: 'departments', slot: 'departments' as const },
   { label: t('試し実行'), value: 'query', slot: 'query' as const },
   { label: t('版の履歴'), value: 'versions', slot: 'versions' as const },
 ])
@@ -113,10 +118,10 @@ const tabs = computed(() => [
             <ConnectorTablesForm ref="tablesRef" v-model="connector" @updated="onUpdated" @failed="onFailed" />
           </div>
         </template>
-        <template #permissions>
+        <template #departments>
           <div class="pt-4">
-            <ConnectorPermissionsForm
-              ref="permissionsRef"
+            <ConnectorDepartmentsForm
+              ref="departmentsRef"
               v-model="connector"
               @updated="emit('changed')"
               @failed="onFailed"
@@ -137,7 +142,7 @@ const tabs = computed(() => [
     </template>
     <template #footer>
       <!-- 削除はサーバー側でも権限を確認し、権限がなければ403になる -->
-      <DBtn v-if="hasPermission(PermissionCode.CHANGE_CONNECTOR)" color="error" variant="ghost" @click="onDelete">
+      <DBtn v-if="hasPermission(PermissionCode.DELETE_CONNECTOR)" color="error" variant="ghost" @click="onDelete">
         {{ $t('削除') }}
       </DBtn>
       <div class="flex-1" />

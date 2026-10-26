@@ -16,13 +16,6 @@ export const TlsMode = {
 } as const satisfies Record<string, TlsEnum>
 export type TlsMode = (typeof TlsMode)[keyof typeof TlsMode]
 
-// バックエンドの connector.models.Operation と同じ値（Toolの名前）
-export const ConnectorOperation = {
-  DATASOURCE_DESCRIBE: 'datasource_describe',
-  DATASOURCE_QUERY: 'datasource_query',
-} as const satisfies Record<string, ConnectorOperationEnum>
-export type ConnectorOperation = (typeof ConnectorOperation)[keyof typeof ConnectorOperation]
-
 /** 種別の既定のポート（ConnectorKind.default_port）。ポートを空欄で作成すると、サーバーがこの値にする */
 export const defaultPort = (kind: ConnectorKind): number =>
   ({ [ConnectorKind.POSTGRESQL]: 5432, [ConnectorKind.MYSQL]: 3306, [ConnectorKind.SQLSERVER]: 1433 })[kind]
@@ -42,15 +35,6 @@ export const tlsItems = (t: T) => [
   { value: TlsMode.VERIFY, title: t('暗号化して証明書を確かめる') },
   { value: TlsMode.REQUIRE, title: t('暗号化する（証明書を確かめない）') },
   { value: TlsMode.DISABLE, title: t('暗号化しない') },
-]
-
-export const connectorOperationItems = (t: T) => [
-  {
-    value: ConnectorOperation.DATASOURCE_DESCRIBE,
-    title: t('表・列の説明を見る'),
-    description: 'datasource_describe',
-  },
-  { value: ConnectorOperation.DATASOURCE_QUERY, title: t('SELECT文で読み取る'), description: 'datasource_query' },
 ]
 
 export const sensitiveItems = (t: T) => [

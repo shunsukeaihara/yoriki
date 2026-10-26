@@ -244,6 +244,19 @@ const createAPI = () => {
         // 更新では使うDB接続を送れない
         update: (data: ConnectorUpdate) => http.put<Connector, Connector>(`v1/connectors/${id}/`, data),
         patch: (data: Partial<ConnectorUpdate>) => http.patch<Connector, Connector>(`v1/connectors/${id}/`, data),
+        // 作成・編集で選ぶ接続先と部門（部門は自分の所属の範囲）。接続先・部門の管理の権限がなくても選べる
+        connections: (params?: ListParams) =>
+          http.get<Paginated<MinimumDatabaseConnection>, Paginated<MinimumDatabaseConnection>>(
+            'v1/connectors/connections/',
+            { params },
+          ),
+        departments: (params?: ListParams) =>
+          http.get<Paginated<MinimumDepartment>, Paginated<MinimumDepartment>>('v1/connectors/departments/', {
+            params,
+          }),
+        // 公開する表を選ぶための、使う接続先の表・ビューの一覧
+        tables: (waitSeconds: number) =>
+          http.get<ConnectorTables, ConnectorTables>(`v1/connectors/${id}/tables/`, waitFor(waitSeconds)),
         // 公開している表・ビューの説明（エージェントに見せる内容）と試し実行。接続先のDBにつなぐので、
         // 接続と実行のタイムアウト（waitSeconds。connectorWaitSeconds()）まで待つ
         describe: (waitSeconds: number) =>

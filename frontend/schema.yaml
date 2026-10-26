@@ -2186,13 +2186,13 @@ paths:
   /api/v1/connectors/:
     get:
       operationId: v1_connectors_list
-      description: Connectorの管理API（基盤管理者だけ）
+      description: Connectorの管理API（所属とpermissionで判定する）
       parameters:
       - in: query
         name: connection
         schema:
           type: string
-        description: DB接続
+        description: 接続先
       - name: cursor
         required: false
         in: query
@@ -2259,7 +2259,7 @@ paths:
           description: ''
     post:
       operationId: v1_connectors_create
-      description: Connectorの管理API（基盤管理者だけ）
+      description: Connectorの管理API（所属とpermissionで判定する）
       tags:
       - manage/connector
       requestBody:
@@ -2286,7 +2286,7 @@ paths:
   /api/v1/connectors/{connector}/versions/:
     get:
       operationId: v1_connectors_versions_list
-      description: Connectorの版の履歴（基盤管理者だけ）
+      description: Connectorの版の履歴（所属で判定する）
       parameters:
       - in: path
         name: connector
@@ -2332,7 +2332,7 @@ paths:
   /api/v1/connectors/{connector}/versions/{number}/:
     get:
       operationId: v1_connectors_versions_retrieve
-      description: Connectorの版の履歴（基盤管理者だけ）
+      description: Connectorの版の履歴（所属で判定する）
       parameters:
       - in: path
         name: connector
@@ -2362,7 +2362,7 @@ paths:
   /api/v1/connectors/{uid}/:
     get:
       operationId: v1_connectors_retrieve
-      description: Connectorの管理API（基盤管理者だけ）
+      description: Connectorの管理API（所属とpermissionで判定する）
       parameters:
       - in: path
         name: uid
@@ -2382,7 +2382,7 @@ paths:
           description: ''
     put:
       operationId: v1_connectors_update
-      description: Connectorの管理API（基盤管理者だけ）
+      description: Connectorの管理API（所属とpermissionで判定する）
       parameters:
       - in: path
         name: uid
@@ -2416,7 +2416,7 @@ paths:
           description: 他の変更と競合した（編集を始めた後に、別の版ができている）
     patch:
       operationId: v1_connectors_partial_update
-      description: Connectorの管理API（基盤管理者だけ）
+      description: Connectorの管理API（所属とpermissionで判定する）
       parameters:
       - in: path
         name: uid
@@ -2449,7 +2449,7 @@ paths:
           description: 他の変更と競合した（編集を始めた後に、別の版ができている）
     delete:
       operationId: v1_connectors_destroy
-      description: Connectorの管理API（基盤管理者だけ）
+      description: Connectorの管理API（所属とpermissionで判定する）
       parameters:
       - in: path
         name: uid
@@ -2517,10 +2517,109 @@ paths:
               schema:
                 $ref: '#/components/schemas/ConnectorQueryResult'
           description: ''
+  /api/v1/connectors/{uid}/tables/:
+    get:
+      operationId: v1_connectors_tables_retrieve
+      description: 使う接続先のアカウントが読める表・ビューと列の一覧。公開する表を選ぶために使う
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/connector
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorTables'
+          description: ''
+  /api/v1/connectors/connections/:
+    get:
+      operationId: v1_connectors_connections_list
+      description: Connectorの作成で選べる、有効な接続先の一覧（`search` で名前を絞り込む）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: 名前の一部
+      tags:
+      - manage/connector
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedMinimumDatabaseConnectionList'
+          description: ''
+  /api/v1/connectors/departments/:
+    get:
+      operationId: v1_connectors_departments_list
+      description: 使える部門として選べる部門（自分の所属の範囲。すべての部門の範囲を持つ人はすべて）。`search` で名前を絞り込む
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: 名前の一部
+      tags:
+      - manage/connector
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedMinimumDepartmentList'
+          description: ''
   /api/v1/database_connections/:
     get:
       operationId: v1_database_connections_list
-      description: DB接続の管理API（基盤管理者だけ）
+      description: DB接続の管理API（DB接続の標準のpermissionで判定する）
       parameters:
       - name: cursor
         required: false
@@ -2583,7 +2682,7 @@ paths:
           description: ''
     post:
       operationId: v1_database_connections_create
-      description: DB接続の管理API（基盤管理者だけ）
+      description: DB接続の管理API（DB接続の標準のpermissionで判定する）
       tags:
       - manage/connector/database_connection
       requestBody:
@@ -2610,7 +2709,7 @@ paths:
   /api/v1/database_connections/{uid}/:
     get:
       operationId: v1_database_connections_retrieve
-      description: DB接続の管理API（基盤管理者だけ）
+      description: DB接続の管理API（DB接続の標準のpermissionで判定する）
       parameters:
       - in: path
         name: uid
@@ -2630,7 +2729,7 @@ paths:
           description: ''
     put:
       operationId: v1_database_connections_update
-      description: DB接続の管理API（基盤管理者だけ）
+      description: DB接続の管理API（DB接続の標準のpermissionで判定する）
       parameters:
       - in: path
         name: uid
@@ -2662,7 +2761,7 @@ paths:
           description: ''
     patch:
       operationId: v1_database_connections_partial_update
-      description: DB接続の管理API（基盤管理者だけ）
+      description: DB接続の管理API（DB接続の標準のpermissionで判定する）
       parameters:
       - in: path
         name: uid
@@ -2693,7 +2792,7 @@ paths:
           description: ''
     delete:
       operationId: v1_database_connections_destroy
-      description: DB接続の管理API（基盤管理者だけ）
+      description: DB接続の管理API（DB接続の標準のpermissionで判定する）
       parameters:
       - in: path
         name: uid
@@ -4975,7 +5074,11 @@ components:
         Connectorの作成と表示。境界（公開する表、上限、機密のフラグ）は現在の版の値を平らに出す。
 
         境界を変えて保存すると、サーバーが新しい版を作る。更新では、編集を始めた時点の `version` を送り、
-        その間に他の人が版を作っていたら409になる。使うDB接続は作成した後は変えられない
+        その間に他の人が版を作っていたら409になる。使うDB接続は作成した後は変えられない。
+
+        使える部門（所属の軸）は版に入れない。指定しなければ全社向け。足し引きできるのは自分が所属している部門だけで、
+        全社向けにする・やめる（部門を空にする・空から指定する）のは、すべての部門の範囲を持つ人（基盤管理者か、
+        印のある部門の所属者）だけ
       properties:
         id:
           type: string
@@ -4986,7 +5089,7 @@ components:
           maxLength: 100
         connection:
           type: string
-          description: 使うDB接続
+          description: 使う接続先
         connection_info:
           allOf:
           - $ref: '#/components/schemas/MinimumDatabaseConnection'
@@ -5037,11 +5140,16 @@ components:
           type: boolean
           default: false
           description: 個人情報を主な中身とする範囲。ローカルLLMのモデルを使うタスク・会話にだけ割り当てる
-        permissions:
+        departments:
           type: array
           items:
-            $ref: '#/components/schemas/ConnectorPermission'
-          description: 使える役割・部門。更新では、送ると全体を置き換える
+            type: string
+          description: 使える部門。空なら全社向け。更新では、送ると全体を置き換える
+        department_infos:
+          type: array
+          items:
+            $ref: '#/components/schemas/MinimumDepartment'
+          readOnly: true
         created_by:
           type: string
           readOnly: true
@@ -5058,6 +5166,7 @@ components:
       - connection_info
       - created
       - created_by
+      - department_infos
       - id
       - kind
       - kind_display
@@ -5103,53 +5212,6 @@ components:
         * `1` - PostgreSQL
         * `2` - MySQL
         * `3` - SQL Server
-    ConnectorPermission:
-      type: object
-      description: Connectorを使える役割か部門（どちらか一方）と、使える操作
-      properties:
-        id:
-          type: string
-          readOnly: true
-        group:
-          type: string
-          title: 名前
-          nullable: true
-          description: 役割の名前
-        department:
-          type: string
-          nullable: true
-        department_info:
-          allOf:
-          - $ref: '#/components/schemas/MinimumDepartment'
-          readOnly: true
-          nullable: true
-        operations:
-          type: array
-          items:
-            $ref: '#/components/schemas/OperationsEnum'
-          description: 使える操作。省略するとすべて（社内DBの操作はどれも読取り）
-      required:
-      - department_info
-      - id
-    ConnectorPermissionRequest:
-      type: object
-      description: Connectorを使える役割か部門（どちらか一方）と、使える操作
-      properties:
-        group:
-          type: string
-          minLength: 1
-          title: 名前
-          nullable: true
-          description: 役割の名前
-        department:
-          type: string
-          minLength: 1
-          nullable: true
-        operations:
-          type: array
-          items:
-            $ref: '#/components/schemas/OperationsEnum'
-          description: 使える操作。省略するとすべて（社内DBの操作はどれも読取り）
     ConnectorQueryRequest:
       type: object
       description: SELECT文の試し実行（管理画面）。エージェントと同じ検査・上限を通る
@@ -5237,7 +5299,11 @@ components:
         Connectorの作成と表示。境界（公開する表、上限、機密のフラグ）は現在の版の値を平らに出す。
 
         境界を変えて保存すると、サーバーが新しい版を作る。更新では、編集を始めた時点の `version` を送り、
-        その間に他の人が版を作っていたら409になる。使うDB接続は作成した後は変えられない
+        その間に他の人が版を作っていたら409になる。使うDB接続は作成した後は変えられない。
+
+        使える部門（所属の軸）は版に入れない。指定しなければ全社向け。足し引きできるのは自分が所属している部門だけで、
+        全社向けにする・やめる（部門を空にする・空から指定する）のは、すべての部門の範囲を持つ人（基盤管理者か、
+        印のある部門の所属者）だけ
       properties:
         name:
           type: string
@@ -5247,7 +5313,7 @@ components:
         connection:
           type: string
           minLength: 1
-          description: 使うDB接続
+          description: 使う接続先
         is_active:
           type: boolean
           title: 有効
@@ -5291,11 +5357,12 @@ components:
           type: string
           writeOnly: true
           maxLength: 500
-        permissions:
+        departments:
           type: array
           items:
-            $ref: '#/components/schemas/ConnectorPermissionRequest'
-          description: 使える役割・部門。更新では、送ると全体を置き換える
+            type: string
+            minLength: 1
+          description: 使える部門。空なら全社向け。更新では、送ると全体を置き換える
       required:
       - connection
       - name
@@ -5456,11 +5523,12 @@ components:
           type: string
           writeOnly: true
           maxLength: 500
-        permissions:
+        departments:
           type: array
           items:
-            $ref: '#/components/schemas/ConnectorPermissionRequest'
-          description: 使える役割・部門。更新では、送ると全体を置き換える
+            type: string
+            minLength: 1
+          description: 使える部門。空なら全社向け。更新では、送ると全体を置き換える
       required:
       - name
     ConnectorVersion:
@@ -5751,7 +5819,7 @@ components:
         password:
           type: string
           writeOnly: true
-          description: 更新では、送らなければ変更しない（接続先を変えるときは必須）
+          description: 更新では、送らなければ変更しない（ホスト・ポート・DB名を変えるときは必須）
           maxLength: 1000
         tls:
           allOf:
@@ -5810,7 +5878,7 @@ components:
         password:
           type: string
           writeOnly: true
-          description: 更新では、送らなければ変更しない（接続先を変えるときは必須）
+          description: 更新では、送らなければ変更しない（ホスト・ポート・DB名を変えるときは必須）
           maxLength: 1000
         tls:
           allOf:
@@ -5846,6 +5914,10 @@ components:
           type: string
           title: 名前
           maxLength: 100
+        covers_all_departments:
+          type: boolean
+          title: すべての部門の範囲を含む
+          description: 所属する人を、すべての部門に所属しているものとして扱う（すべてを見る人の管理に使う）
         member_count:
           type: integer
           readOnly: true
@@ -5938,6 +6010,10 @@ components:
           minLength: 1
           title: 名前
           maxLength: 100
+        covers_all_departments:
+          type: boolean
+          title: すべての部門の範囲を含む
+          description: 所属する人を、すべての部門に所属しているものとして扱う（すべてを見る人の管理に使う）
       required:
       - name
     DepartmentRoleEnum:
@@ -7364,14 +7440,6 @@ components:
     NullEnum:
       enum:
       - null
-    OperationsEnum:
-      enum:
-      - datasource_describe
-      - datasource_query
-      type: string
-      description: |-
-        * `datasource_describe` - 表・列の説明を見る
-        * `datasource_query` - SELECT文で読み取る
     PaginatedArtifactList:
       type: object
       required:
@@ -7581,6 +7649,44 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Message'
+    PaginatedMinimumDatabaseConnectionList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/MinimumDatabaseConnection'
+    PaginatedMinimumDepartmentList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/MinimumDepartment'
     PaginatedMinimumSkillEvaluationList:
       type: object
       required:
@@ -7842,11 +7948,12 @@ components:
           type: string
           writeOnly: true
           maxLength: 500
-        permissions:
+        departments:
           type: array
           items:
-            $ref: '#/components/schemas/ConnectorPermissionRequest'
-          description: 使える役割・部門。更新では、送ると全体を置き換える
+            type: string
+            minLength: 1
+          description: 使える部門。空なら全社向け。更新では、送ると全体を置き換える
     PatchedConversationRequest:
       type: object
       description: 自分の会話。モデル設定を省くと既定のモデル設定にする。実行中に変えると、次のステップから切り替わる
@@ -7897,7 +8004,7 @@ components:
         password:
           type: string
           writeOnly: true
-          description: 更新では、送らなければ変更しない（接続先を変えるときは必須）
+          description: 更新では、送らなければ変更しない（ホスト・ポート・DB名を変えるときは必須）
           maxLength: 1000
         tls:
           allOf:
@@ -7936,6 +8043,10 @@ components:
           minLength: 1
           title: 名前
           maxLength: 100
+        covers_all_departments:
+          type: boolean
+          title: すべての部門の範囲を含む
+          description: 所属する人を、すべての部門に所属しているものとして扱う（すべてを見る人の管理に使う）
     PatchedLLMConnectionUpdateRequest:
       type: object
       description: プロバイダ接続の更新。種別とbase URL（接続先）は変えられないので、読み取り専用にする

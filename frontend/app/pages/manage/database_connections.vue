@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 
-definePageMeta({ permission: PermissionCode.CHANGE_DATABASE_CONNECTION })
+definePageMeta({ permission: PermissionCode.VIEW_DATABASE_CONNECTION })
 
 const api = useAPI()
 const { t } = useI18n()
+const { hasPermission } = usePermission()
 const reloadKey = ref(0)
 const reload = () => (reloadKey.value = Date.now())
 
@@ -37,7 +38,8 @@ const columns: TableColumn<DatabaseConnection>[] = [
         "
       >
         <template #end>
-          <DatabaseConnectionDialog @saved="reload">
+          <!-- 作成はサーバー側でも権限を確認し、なければ403になる -->
+          <DatabaseConnectionDialog v-if="hasPermission(PermissionCode.ADD_DATABASE_CONNECTION)" @saved="reload">
             <template #trigger="{ on }">
               <DBtn icon="i-lucide-plus" v-on="on">{{ $t('接続先を追加') }}</DBtn>
             </template>

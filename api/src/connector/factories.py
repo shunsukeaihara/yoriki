@@ -3,7 +3,7 @@ from factory.django import DjangoModelFactory
 
 from user.factories import UserFactory
 
-from .models import Connector, ConnectorKind, ConnectorPermission, DatabaseConnection, TLSMode
+from .models import Connector, ConnectorKind, DatabaseConnection, TLSMode
 
 
 class DatabaseConnectionFactory(DjangoModelFactory[DatabaseConnection]):
@@ -31,7 +31,7 @@ class ConnectorFactory(DjangoModelFactory[Connector]):
         skip_postgeneration_save = True  # version() の revise() で保存する
 
     name = factory.Sequence(lambda n: f"社内DB{n}")
-    connection = factory.SubFactory(DatabaseConnectionFactory)
+    connection = factory.SubFactory(DatabaseConnectionFactory)  # 使える部門なし（全社向け）
     created_by = factory.SubFactory(UserFactory)
 
     @factory.post_generation
@@ -46,11 +46,3 @@ class ConnectorFactory(DjangoModelFactory[Connector]):
         kwargs.setdefault("timeout_seconds", 30)
         kwargs.setdefault("is_sensitive", False)
         obj.revise(actor=obj.created_by, expected_version=0, **kwargs)
-
-
-class ConnectorPermissionFactory(DjangoModelFactory[ConnectorPermission]):
-    class Meta:
-        model = ConnectorPermission
-
-    connector = factory.SubFactory(ConnectorFactory)
-    operations = factory.LazyFunction(lambda: ["datasource_describe", "datasource_query"])

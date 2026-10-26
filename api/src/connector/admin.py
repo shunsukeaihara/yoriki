@@ -2,7 +2,7 @@ from django.contrib import admin
 
 from utils.admin import ReadOnlyAdmin
 
-from .models import Connector, ConnectorPermission, ConnectorVersion, DatabaseConnection
+from .models import Connector, ConnectorVersion, DatabaseConnection
 
 
 @admin.register(DatabaseConnection)
@@ -33,11 +33,3 @@ class ConnectorVersionAdmin(ReadOnlyAdmin):
 
     readonly_fields = ("uid", "connector", "created_by", "created")
     list_display = ("id", "connector", "number", "is_sensitive", "created")
-
-
-@admin.register(ConnectorPermission)
-class ConnectorPermissionAdmin(ReadOnlyAdmin):
-    """利用の許可は ConnectorSerializer で保存する（役割か部門のどちらか一方の検証がある）"""
-
-    readonly_fields = ("uid", "connector", "group", "department", "created", "updated")
-    list_display = ("id", "connector", "group", "department", "operations", "updated")

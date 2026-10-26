@@ -3,32 +3,26 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AxiosError, AxiosHeaders } from 'axios'
 import {
   ConnectorForm,
-  ConnectorPermissionsForm,
+  ConnectorDepartmentsForm,
   ConnectorQueryPanel,
   ConnectorTablesForm,
   DatabaseConnectionForm,
 } from '#components'
 
-const { create, patch, tables, groups, query, connectionCreate, connectionPatch } = vi.hoisted(() => ({
+const { create, patch, tables, query, emptyList, connectionCreate, connectionPatch } = vi.hoisted(() => ({
   create: vi.fn(),
   patch: vi.fn(),
   tables: vi.fn(),
-  groups: vi.fn(),
   query: vi.fn(),
+  emptyList: vi.fn().mockResolvedValue({ results: [], next: null, previous: null }),
   connectionCreate: vi.fn(),
   connectionPatch: vi.fn(),
 }))
 
 mockNuxtImport('useAPI', () => () => ({
   manage: {
-    connectors: () => ({ create, patch, query }),
-    databaseConnections: () => ({
-      create: connectionCreate,
-      patch: connectionPatch,
-      tables,
-      list: vi.fn().mockResolvedValue({ results: [], next: null, previous: null }),
-    }),
-    groups: { list: groups },
+    connectors: () => ({ create, patch, query, tables, connections: emptyList, departments: emptyList }),
+    databaseConnections: () => ({ create: connectionCreate, patch: connectionPatch }),
     departments: () => ({ list: vi.fn().mockResolvedValue({ results: [], next: null, previous: null }) }),
   },
 }))
@@ -80,15 +74,8 @@ const connector: Connector = {
   maxResultBytes: 1_500_000,
   timeoutSeconds: 30,
   isSensitive: false,
-  permissions: [
-    {
-      id: 'p1',
-      group: null,
-      department: 'd1',
-      departmentInfo: { id: 'd1', name: '経理部' },
-      operations: ['datasource_describe', 'datasource_query'],
-    },
-  ],
+  departments: ['d1'],
+  departmentInfos: [{ id: 'd1', name: '経理部' }],
   createdBy: 'u1',
   created: '2026-10-26T00:00:00Z',
   updated: '2026-10-26T00:00:00Z',
@@ -160,10 +147,16 @@ describe('ConnectorForm', () => {
     await nextTick()
     expect(vm.canPost).toBe(false)
     vm.form.connection = 'd1'
+    ;(vm.form as unknown as { departments: string[] }).departments = ['dep1']
     await nextTick()
     await vm.onSubmit()
     const data = create.mock.calls[0]![0]
-    expect(data).toMatchObject({ name: '受注実績', connection: 'd1', maxResultBytes: 10 * 1024 * 1024 })
+    expect(data).toMatchObject({
+      name: '受注実績',
+      connection: 'd1',
+      departments: ['dep1'],
+      maxResultBytes: 10 * 1024 * 1024,
+    })
     expect(data.defaultSchema).toBe('')
   })
 
@@ -242,35 +235,24 @@ describe('ConnectorTablesForm', () => {
   })
 })
 
-describe('ConnectorPermissionsForm', () => {
+describe('ConnectorDepartmentsForm', () => {
   beforeEach(() => {
     patch.mockReset().mockResolvedValue(connector)
-    groups.mockReset().mockResolvedValue([{ name: '業務管理者' }])
   })
 
-  type Form = Exposed & {
-    addRow: () => void
-    form: { permissions: { grantee: string; group: string | null; operations: string[] }[] }
-  }
+  type Form = Exposed & { form: { departments: string[] } }
 
-  it('役割を選ぶまでは保存できず、役割と部門のどちらか一方だけを送る', async () => {
-    const wrapper = await mountSuspended(ConnectorPermissionsForm, { props: { modelValue: connector } })
+  it('部門を変えたら、編集を始めた時点の版と使える部門を送る。空なら全社向けと示す', async () => {
+    const wrapper = await mountSuspended(ConnectorDepartmentsForm, { props: { modelValue: connector } })
     const vm = wrapper.vm as unknown as Form
-    vm.addRow()
-    await nextTick()
     expect(vm.canPost).toBe(false)
-    vm.form.permissions[1]!.group = '業務管理者'
-    vm.form.permissions[1]!.operations = ['datasource_describe']
+    vm.form.departments = []
     await nextTick()
     expect(vm.canPost).toBe(true)
+    expect(wrapper.text()).toContain('全社向けです。すべての社員が使えます')
+    vm.form.departments = ['d1', 'd2']
     await vm.onSubmit()
-    expect(patch.mock.calls[0]![0]).toEqual({
-      version: 2,
-      permissions: [
-        { group: null, department: 'd1', operations: ['datasource_describe', 'datasource_query'] },
-        { group: '業務管理者', department: null, operations: ['datasource_describe'] },
-      ],
-    })
+    expect(patch.mock.calls[0]![0]).toEqual({ version: 2, departments: ['d1', 'd2'] })
   })
 })
 

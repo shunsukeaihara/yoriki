@@ -28,6 +28,28 @@ export type LLMConnectionListParams = ListParams & { name?: string; kind?: Provi
 export type ModelProfileListParams = ListParams & { name?: string; connection?: string; isActive?: boolean }
 export type RuntimeProfileListParams = ListParams & { name?: string; isActive?: boolean }
 
+export type ConnectorKindEnum = Schemas['ConnectorKindEnum']
+export type TlsEnum = Schemas['TlsEnum']
+export type ConnectorOperationEnum = Schemas['OperationsEnum']
+export type Connector = Api<'Connector'>
+export type ConnectorWrite = Api<'ConnectorRequest'>
+export type ConnectorUpdate = Api<'ConnectorUpdateRequest'>
+export type ConnectorTableEntry = Api<'ConnectorTableEntry'>
+export type ConnectorPermission = Api<'ConnectorPermission'>
+export type ConnectorPermissionWrite = Api<'ConnectorPermissionRequest'>
+export type ConnectorCheck = Api<'ConnectorCheck'>
+export type ConnectorTable = Api<'ConnectorTable'>
+export type ConnectorTables = Api<'ConnectorTables'>
+export type ConnectorQuery = Api<'ConnectorQueryRequest'>
+export type ConnectorQueryResult = Api<'ConnectorQueryResult'>
+export type ConnectorVersion = Api<'ConnectorVersion'>
+export type ConnectorListParams = ListParams & {
+  name?: string
+  kind?: ConnectorKindEnum
+  isActive?: boolean
+  isSensitive?: boolean
+}
+
 export type SSOProviderKindEnum = Schemas['SSOProviderKindEnum']
 export type SSOProvider = Api<'SSOProvider'>
 export type SSOProviderWrite = Api<'SSOProviderRequest'>
@@ -49,6 +71,7 @@ export type ManageUserListParams = ListParams & { isActive?: boolean; isSuperuse
 export type MyDepartment = Api<'MyDepartment'>
 export type DepartmentRoleEnum = Schemas['DepartmentRoleEnum']
 export type Department = Api<'Department'>
+export type MinimumDepartment = Api<'MinimumDepartment'>
 export type DepartmentWrite = Api<'DepartmentRequest'>
 export type DepartmentMembership = Api<'DepartmentMembership'>
 export type DepartmentMembershipWrite = Api<'DepartmentMembershipRequest'>

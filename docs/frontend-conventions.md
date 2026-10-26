@@ -96,7 +96,7 @@ frontend/
     ├── components/
     │   ├── common/             # D*ラッパー（prefixなしで自動import）
     │   └── <domain>/           # 業務コンポーネント（例：run/RunCancelDialog.vue）
-    ├── composables/            # field, date, form, list, confirm, account, permission, manage, locale, markdown, stream, llm, sso, user, conversation, run, artifact, skill
+    ├── composables/            # field, date, form, list, confirm, account, permission, manage, locale, markdown, stream, llm, sso, user, conversation, run, artifact, skill, connector
     ├── layouts/                # default（社員。サイドバーに会話の一覧）、anonymous（ログイン・開発用）、manage（管理）
     ├── middleware/             # auth.global.ts、permission.global.ts、manage.ts（/manage の入口）
     ├── pages/                  # 社員向けはルート直下、管理向けは manage/ 以下、dev/ は開発用
@@ -148,6 +148,7 @@ export default defineNuxtConfig({
 `api/client.ts` の `createHttp()` は、axiosのインスタンスを作り、認証にセッションCookieとCSRFを使う。
 
 - リクエストのbodyは `snakeProps()`、クエリは `qs.stringify(snakeProps(params), { indices: false })` で変換する。
+- 利用者・エージェント・DBがキーを決めるJSON（SkillのJSON Schema、期待する業務結果・業務結果、Toolの引数、Connectorの列名 → 説明、platform → digest）は、項目の名前だけを変換し、値の中のキーは変換しない（`client.ts` の `RAW_VALUE_KEYS`）。変換すると `invoice_no` が `invoiceNo` に、`VendorCode` が `vendor_code` に変わるため。このような項目をAPIに足したら、名前を `RAW_VALUE_KEYS` に加える。
 - レスポンスがJSONなら `camelProps()` で変換し、`data` だけを返す（`AxiosResponse` は返さない）。
 - 認証はDjangoのセッションCookieで行う（`withCredentials: true`）。トークンを画面側で持たず、`Authorization` ヘッダーも付けない。
 - 書き込みの要求には、Cookieの `csrftoken` を `X-CSRFToken` ヘッダーに付ける（axiosの `xsrfCookieName` / `xsrfHeaderName`）。

@@ -13,6 +13,20 @@ describe('camelProps', () => {
       items: { '1': { unitPrice: ['必須'] } },
     })
   })
+
+  it('利用者が決めるキーを持つJSON（Schema・業務結果・Toolの引数・列名）の中は変えない', () => {
+    expect(
+      camelProps({
+        output_schema: { properties: { invoice_no: { type: 'string' } } },
+        tool_call: { arguments: { file_path: 'a.txt' } },
+        tables: [{ schema: 'dbo', columns: { VendorCode: '取引先コード' } }],
+      }),
+    ).toEqual({
+      outputSchema: { properties: { invoice_no: { type: 'string' } } },
+      toolCall: { arguments: { file_path: 'a.txt' } },
+      tables: [{ schema: 'dbo', columns: { VendorCode: '取引先コード' } }],
+    })
+  })
 })
 
 describe('snakeProps', () => {
@@ -20,6 +34,20 @@ describe('snakeProps', () => {
     expect(snakeProps({ displayName: 'a', items: [{ unitPrice: '1.00' }] })).toEqual({
       display_name: 'a',
       items: [{ unit_price: '1.00' }],
+    })
+  })
+
+  it('利用者が決めるキーを持つJSONの中は変えない', () => {
+    expect(
+      snakeProps({
+        outputSchema: { properties: { invoiceNo: { type: 'string' } } },
+        expectedResult: { VendorCode: 'A01' },
+        tables: [{ columns: { vendorName: '取引先名' } }],
+      }),
+    ).toEqual({
+      output_schema: { properties: { invoiceNo: { type: 'string' } } },
+      expected_result: { VendorCode: 'A01' },
+      tables: [{ columns: { vendorName: '取引先名' } }],
     })
   })
 

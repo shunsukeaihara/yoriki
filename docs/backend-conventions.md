@@ -124,7 +124,7 @@ design.md §5.1の永続オブジェクトを、次の単位で分ける。実�
 | `worker` | Workerの登録情報 |
 | `usage` | UsageLedger、クオータ |
 | `llm` | LLMConnection、ModelProfile、Provider Adapter（design.md §4.8） |
-| `connector` | DatabaseConnection（社内DBの接続先と資格情報）、Connector（1つの接続の上の範囲）、ConnectorVersion（境界の版）、ConnectorPermission（使える役割・部門と操作）、操作のAdapter（社内DB、SharePoint、Google Drive、MCP。design.md §4.9） |
+| `connector` | DatabaseConnection（社内DBの接続先と資格情報）、Connector（1つの接続の上の範囲）、ConnectorVersion（境界の版）、使える部門（所属の軸。空なら全社向け）、操作のAdapter（社内DB、SharePoint、Google Drive、MCP。design.md §4.9） |
 | `stream` | SSEのストリームview、イベントのSerializer（realtime.md） |
 | `harness` | Modelなし。Runner（実行のループ）、Tool、RunEventからの文脈の組立、圧縮、Sandboxの操作（harness.md §3） |
 

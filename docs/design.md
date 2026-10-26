@@ -823,7 +823,7 @@ Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプ�
 | ConversationMessage | 送信元、本文、添付参照、順序、関連Run、client message ID。外部投稿はproviderのユーザーID・表示名・message IDを持ち、社内ユーザーIDは必須にしない |
 | UserInstruction | 対象Runまたは次の依頼、種類、受付順序、反映状態、適用したCheckpoint、結果参照 |
 | ClarificationRequest | 対象Run、質問ID・世代、本文・選択肢、期限、回答状態、採用した回答と外部message参照 |
-| Run | 共通実行要求、起動Binding版、タスク版、固定したModelProfileの版とSkill Version・Connectorの利用の許可、実行主体、状態、Manifest、予算、親Run、適用済み指示sequence |
+| Run | 共通実行要求、起動Binding版、タスク版、固定したModelProfileの版とSkill Version・使えるConnector（所属で決まる。§4.9.1）、実行主体、状態、Manifest、予算、親Run、適用済み指示sequence |
 | ExecutionAttempt | Worker、試行番号、lease、fencing token、開始・終了、失敗理由 |
 | RunEvent | 単調なsequence、イベント種別、表示用内容、モデル用の内容とモデルの履歴への効き方（harness.md §5）、時刻 |
 | Checkpoint | メッセージ参照（対応するRunEventのsequence）、Tool結果、再開状態、ファイルsnapshot参照、schema version |

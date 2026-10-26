@@ -434,12 +434,15 @@ Task Definitionは「起動方法＋実行プロンプト＋使うSkillとモデ
 - タスクのRunは会話の文脈を引き継がない。Webhookの入口とタスクは1対1にする。
 
 ```yaml
-# 本基盤独自の設定案。参照版は公開時・Run受付時に解決して記録する。
+# 本基盤独自の設定案。Skillの版はタスクの変更で決め、次の変更まで変えない（Skillを公開しても切り替わらない）。
+# Run受付時には、このタスクの版を固定して記録する。
 task_id: invoice-check
 name: 請求書チェック
 skills:
   - id: invoice-check          # 請求書の確認手順と基準
+    version: 5
   - id: expense-saas-webhook   # 経費精算SaaSのWebhookのpayloadの読み方
+    version: 2
 model_profile: standard-model
 effort: auto
 trigger:
@@ -1306,7 +1309,7 @@ Artifact Storeはサーバー設定でLocalまたはS3 Backendを選べるよう
 
 **基盤管理者のパスワードでのログイン**：最初の基盤管理者はSSOに依存しない手順（`createsuperuser`）で作る。SSOの設定の誤りや認証基盤の停止に備え、基盤管理者はSSOの有無に関係なくパスワードでログインできる。SSOが有効な間は、ログイン画面にパスワードの欄を出さず、`/login?method=password` を開いたときだけ出す（URLを知っている人だけが使う入口）。基盤管理者以外がこの欄でログインしようとしても拒否する。試行回数の制限は同じく適用する。
 
-ユーザーは、SSOでは初回のログイン時に、Yorikiのアカウントでは基盤管理者の作成時に作り、通常社員から始める。Group（permissionの集まり）と所属はYorikiの管理画面で割り当てる。IdPのグループからの自動割当は、必要になった時点で追加する。
+ユーザーは、SSOでは初回のログイン時に、Yorikiのアカウントではユーザー管理者の作成時に作り、通常社員から始める。Group（permissionの集まり）と所属はYorikiの管理画面で割り当てる。IdPのグループからの自動割当は、必要になった時点で追加する。
 
 管理画面の操作（Connector・接続、LLMの接続・モデル設定、Runtime Profile、SSOの設定、ユーザー、部門と所属等）は、すべてpermissionで判定する（authorization.md §10）。Djangoの標準のpermissionを付ければ、基盤管理者でない人（Connector管理者・ユーザー管理者等の信頼された強い役割）に管理を任せられる。permissionの指定を書き忘れた操作は誰も通さない。基盤管理者（`is_superuser`）はアプリの判定に持ち込まず（すべてのpermissionを持つ人として扱う）、`is_superuser` を見るのはDjango管理画面とパスワードでの非常口のログインだけにする。`is_superuser` はフロントエンドに渡さない。
 

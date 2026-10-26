@@ -508,7 +508,7 @@ Trigger Adapterは、チャット、HTTP、将来のスケジュールやメッ�
 | acknowledge | 保存結果に応じてHTTP応答やキューack等を返す | 受付・Run・予算予約・実行Outboxを確定 |
 | activate / deactivate | 必要な購読・定時処理等を登録／解除 | Bindingの有効状態と旧版の停止を管理 |
 
-ExecutionRequestには契約版、request_id、trigger_binding_idとrevision、起動元の検証済み主体、外部event ID、入力とhash、Artifact参照、受信時刻、必要なConversation参照を含める。認証済みという自己申告を外部payloadから採用しない。タスク（Webhookの入口とタスクは1対1）とその版、実行許可（タスクの範囲で決まる。authorization.md §6）、Skill・モデル・通知先は、認証済みBindingと公開設定から解決する。必要な返信情報を持つ場合も、任意のcallback URLや送信権限として扱わない。
+ExecutionRequestには契約版、request_id、trigger_binding_idとrevision、起動元の検証済み主体、外部event ID、入力とhash、Artifact参照、受信時刻、必要なConversation参照を含める。認証済みという自己申告を外部payloadから採用しない。タスク（Webhookの入口とタスクは1対1）とその版、実行許可（起動のしかたで決まる。入口と手動実行はタスクに固定したもの、チャットからの起動はそれと起動した人の今の権限の共通部分。authorization.md §6）、Skill・モデル・通知先は、認証済みBindingと公開設定から解決する。必要な返信情報を持つ場合も、任意のcallback URLや送信権限として扱わない。
 
 Control Planeがタスクの有効性、権限、Schema、ファイルへのアクセス、利用枠を検証し、TriggerReceipt・Run・Manifest・予算予約・実行Outboxを同じDB transactionで保存する。外部に受付完了を返すのはこの保存後とする。Webhookでは202とrun_idを返し、エージェントの完了までHTTP接続を保持しない。キュー型Adapterでは保存後にackする。完了後の通知方法は受信方式から独立する。
 

@@ -206,7 +206,7 @@ cd frontend && pnpm dev
 - CSPは、NuxtのSPAがHTMLにインラインのスクリプト（色モードの初期化、`window.__NUXT__` の設定）を含むため、`script-src` に `'unsafe-inline'` を許可している。インラインのスクリプトのハッシュかnonceで絞るのは今後の課題とする。
 - nginxの設定は2種類ある。nginxでTLSを終端して直接公開する `sites/tls.conf`（`compose.yaml`）と、前段（Cloudflare Tunnel、認証プロキシ、エッジのnginx）がTLSを終端し、80番で受ける `sites/http.conf`（`compose.app.yaml`、`compose.cloudflare.yaml`）。`http.conf` は前段が付けた `X-Forwarded-For`・`X-Forwarded-Proto` を、私設のアドレスからのものだけ信頼するので、インターネットへ直接公開しない。
 - `client_max_body_size` はパスごとに決める（通常のAPIは小さく、添付のアップロードだけ大きくする）。
-- 成果物のダウンロード（Local保存）は、apiが権限と期限付きtokenを確認した後、`X-Accel-Redirect` でnginxの内部location（`location /_protected/ { internal; }`）からファイルを返す。nginxから保存先のディレクトリを直接公開しない。
+- 成果物のダウンロード（Local保存）は、apiが権限（社員はセッションで、取得のたびに結果を見られるかを判定する。出口は期限付きtokenと出口の有効性・範囲）を確認した後、`X-Accel-Redirect` でnginxの内部location（`location /_protected/ { internal; }`）からファイルを返す。nginxから保存先のディレクトリを直接公開しない。
 
 ### 4.2 SSE
 

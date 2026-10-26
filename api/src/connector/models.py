@@ -203,7 +203,7 @@ class ConnectorVersion(models.Model):
     )
     number = models.PositiveIntegerField(_("版"))
     description = models.TextField(_("説明"), blank=True)
-    # 表の名前にスキーマを書かなかったときのスキーマ。PostgreSQLでは接続のsearch_pathにもする
+    # 表の名前にスキーマを書かなかったときのスキーマ。実行するSQLでは、表の名前にこのスキーマを付ける
     default_schema = models.CharField(_("既定のスキーマ"), max_length=128, blank=True)
     tables = models.JSONField(_("公開する表・ビュー"), default=list)
     max_rows = models.PositiveIntegerField(_("行数の上限"), default=1000)

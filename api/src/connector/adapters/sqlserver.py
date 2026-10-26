@@ -75,19 +75,6 @@ class SQLServerAdapter(DatasourceAdapter):
             conn.timeout = timeout
             cur = conn.cursor()
             cur.execute(f"SET LOCK_TIMEOUT {int(timeout) * 1000}")
-            if self.version and self.default_schema:
-                # スキーマを書かない表の名前は、ログインしたユーザーの既定のスキーマで解決される。検査と同じにするため、
-                # 違えば使わない（接続ごとに変える方法がない）
-                cur.execute("SELECT SCHEMA_NAME()")
-                actual = cur.fetchone()[0]
-                if (actual or "").casefold() != self.default_schema.casefold():
-                    raise ConnectorError(
-                        ConnectorErrorKind.CONNECTION,
-                        _(
-                            "ユーザーの既定のスキーマ（%(actual)s）が、Connectorの既定のスキーマ（%(expected)s）と違います"
-                        )
-                        % {"actual": actual, "expected": self.default_schema},
-                    )
             yield conn
         finally:
             # commitせずに閉じるので、transactionは取り消される

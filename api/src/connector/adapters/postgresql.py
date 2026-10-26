@@ -4,7 +4,7 @@ from typing import Any
 
 import psycopg
 from django.utils.translation import gettext as _
-from psycopg import errors, sql
+from psycopg import errors
 
 from ..errors import ConnectorError, ConnectorErrorKind
 from ..models import TLSMode
@@ -47,9 +47,6 @@ class PostgreSQLAdapter(DatasourceAdapter):
             raise ConnectorError(ConnectorErrorKind.CONNECTION, _message(exc)) from exc
         try:
             conn.read_only = True
-            if self.version and self.default_schema:
-                # スキーマを書かない表の名前を既定のスキーマで解決させる（検査と同じ解決にする）
-                conn.execute(sql.SQL("SET search_path TO {}, pg_catalog").format(sql.Identifier(self.default_schema)))
             yield conn
         finally:
             # commitせずに閉じるので、transactionは取り消される

@@ -762,7 +762,7 @@ Connectorは「境界」と「使い方」の2層に分けて管理する。
 | MySQL | PyMySQL | `MAX_EXECUTION_TIME` | 読取り専用のtransaction（`START TRANSACTION READ ONLY`）で実行する。PyMySQLはPythonだけで書かれたMITのドライバで、クライアントライブラリのビルドが要らない |
 
 - SQLの検査（上の3）は、sqlglotで各DBの方言（`tsql`、`postgres`、`mysql`）として構文解析して行う。文の中のすべての表が、同じ文のCTEか公開した表・ビューであること（スコープごとに解決する）、書込み・`SELECT INTO`・ロックを取る読取り・表のヒント・表を返す関数・別のDBやサーバーの表がないこと、ファイルの入出力や文字列のSQLを実行する関数（`pg_read_file`、`query_to_xml`、`LOAD_FILE`、`OPENROWSET` 等）を使っていないことを確かめる。実行するSQLは、検査した構文木から作り直したもの（コメントを外す）にし、検査したものと実行するものを食い違わせない。引数の場所は、どの種別でも `?` で書く。
-- 表の名前にスキーマを書かなければ、Connectorの既定のスキーマ（PostgreSQLは `public`、SQL Serverは `dbo`）として検査する。PostgreSQLは接続ごとに `search_path` をそのスキーマにし、SQL Serverはログインしたユーザーの既定のスキーマが違えば接続を使わない（検査と同じ解決にするため）。MySQLはDB名がスキーマで、別のDBの表は使えない。
+- 表の名前にスキーマを書かなければ、Connectorの既定のスキーマ（PostgreSQLは `public`、SQL Serverは `dbo`）として検査する。実行するSQLでは、その表の名前に検査したスキーマを付ける（DBが別のスキーマで解決しないようにするため。SQL Serverの `dbo`、PostgreSQLの `pg_catalog` への読み替え）。MySQLはDB名がスキーマで、別のDBの表は使えない。
 - 結果は、サーバー側のcursor（MySQLはバッファしないcursor）で少しずつ取り出し、行数・サイズの上限で打ち切る（残りの行は読まない）。
 - `datasource.describe` は、公開しているビュー・表の列名・型と、管理者が付けた説明を返す。列の意味の詳しい説明やSQLのひな形は、SkillのResource（データ辞書）に置く（§4.9.1の「使い方」）。
 - 3種類とも同じAdapterの契約（§4.9.4）で実装し、種別ごとの違いはドライバ、読取り専用の設定、実行時間の上限、SQLの方言だけに閉じ込める。

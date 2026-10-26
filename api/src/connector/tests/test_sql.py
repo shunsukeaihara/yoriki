@@ -29,17 +29,17 @@ def _check(dialect: Dialect, sql: str, params_count: int = 0):
             POSTGRES,
             "SELECT * FROM vendors WHERE code = ? AND name LIKE 'a%'",
             1,
-            "SELECT * FROM vendors WHERE code = %s AND name LIKE 'a%%'",
+            "SELECT * FROM \"public\".vendors WHERE code = %s AND name LIKE 'a%%'",
             ("public.vendors",),
         ),
         (POSTGRES, "SELECT * FROM core.public.vendors", 0, "SELECT * FROM core.public.vendors", ("public.vendors",)),
-        (POSTGRES, 'SELECT * FROM "Items"', 0, 'SELECT * FROM "Items"', ("public.Items",)),
+        (POSTGRES, 'SELECT * FROM "Items"', 0, 'SELECT * FROM "public"."Items"', ("public.Items",)),
         # CTEはその文の中で定義した名前なので、公開した表でなくてよい
         (
             POSTGRES,
             "WITH s AS (SELECT * FROM vendors) SELECT * FROM s",
             0,
-            "WITH s AS (SELECT * FROM vendors) SELECT * FROM s",
+            'WITH s AS (SELECT * FROM "public".vendors) SELECT * FROM s',
             ("public.vendors",),
         ),
         (POSTGRES, "SELECT 1 AS a UNION ALL SELECT 2", 0, "SELECT 1 AS a UNION ALL SELECT 2", ()),
@@ -48,14 +48,14 @@ def _check(dialect: Dialect, sql: str, params_count: int = 0):
             POSTGRES,
             "SELECT * FROM vendors -- ?\n WHERE a = ?",
             1,
-            "SELECT * FROM vendors WHERE a = %s",
+            "SELECT * FROM \"public\".vendors WHERE a = %s",
             ("public.vendors",),
         ),
         (
             MYSQL,
             "SELECT * FROM `vendors` WHERE a = ? AND DATE_FORMAT(d, '%Y') = ?",
             2,
-            "SELECT * FROM `vendors` WHERE a = %s AND DATE_FORMAT(d, '%%Y') = %s",
+            "SELECT * FROM `core`.`vendors` WHERE a = %s AND DATE_FORMAT(d, '%%Y') = %s",
             ("core.vendors",),
         ),
         (MYSQL, "SELECT * FROM CORE.Vendors", 0, "SELECT * FROM CORE.Vendors", ("core.vendors",)),
@@ -63,7 +63,7 @@ def _check(dialect: Dialect, sql: str, params_count: int = 0):
             TSQL,
             "SELECT TOP 5 * FROM vendors WHERE a = ?",
             1,
-            "SELECT TOP 5 * FROM vendors WHERE a = ?",
+            "SELECT TOP 5 * FROM [dbo].vendors WHERE a = ?",
             ("dbo.vendors",),
         ),
         (TSQL, "SELECT * FROM [core].[dbo].[Vendors]", 0, "SELECT * FROM [core].[dbo].[Vendors]", ("dbo.vendors",)),
@@ -129,6 +129,19 @@ def test_rejects(dialect, sql, params_count, message):
         _check(dialect, sql, params_count)
     assert exc_info.value.kind == ConnectorErrorKind.REJECTED
     assert message in exc_info.value.message
+
+
+def test_unqualified_tables_get_checked_schema():
+    # DBが別のスキーマで解決しないよう、検査したスキーマを付ける（SQL Serverの dbo への読み替え等）
+    checked = check_query(
+        "SELECT v.code FROM vendors v JOIN (SELECT 1 AS x) s ON 1 = 1",
+        0,
+        dialect=TSQL,
+        database="core",
+        default_schema="sales",
+        exposed=[("sales", "vendors")],
+    )
+    assert checked.sql == "SELECT v.code FROM [sales].vendors AS v JOIN (SELECT 1 AS x) AS s ON 1 = 1"
 
 
 def test_rejects_too_long_sql():

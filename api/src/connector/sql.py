@@ -209,6 +209,10 @@ def _check_tables(
         schema, name = _resolve(table, dialect=dialect, database_key=database_key, default_key=default_key)
         if (schema, name) not in allowed:
             raise _reject(_("公開していない表・ビューです：%(name)s") % {"name": table.sql(dialect.name)})
+        if not table.args.get("db"):
+            # スキーマを書かない名前は、DBが別のスキーマで解決することがある（SQL Serverの dbo、PostgreSQLの
+            # pg_catalog への読み替え）。検査したスキーマを付けて、実行時の解決を固定する
+            table.set("db", exp.to_identifier(database if dialect.schema_is_database else default_schema, quoted=True))
         used.append(f"{schema}.{name}")
     return tuple(dict.fromkeys(used))
 

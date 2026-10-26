@@ -17,6 +17,8 @@ const skillId = route.params.skillId as string
 const { data: skill, error, refresh } = await useAsyncData(`skill-${skillId}`, () => api.skills(skillId).get())
 if (error.value) throw createError(error.value) // 404 / 403 はエラー画面にする
 
+// システムのSkillは管理画面の一覧から開く
+const listPath = computed(() => (skill.value?.scope === SkillScope.SYSTEM ? '/manage/system_skills' : '/skills'))
 const canEdit = computed(() => Boolean(skill.value?.canEdit))
 const canPublish = computed(() => Boolean(skill.value?.canPublish))
 
@@ -169,7 +171,7 @@ const onDelete = async () => {
   try {
     await api.skills(skillId).delete()
     toast.add({ title: t('削除しました'), color: 'success' })
-    await navigateTo('/skills')
+    await navigateTo(listPath.value)
   } catch (err) {
     toast.add({ title: t('エラー'), description: makeErrorMsg(err), color: 'error' })
   }
@@ -181,7 +183,7 @@ const onDelete = async () => {
     <template #header>
       <UDashboardNavbar :title="skill?.name">
         <template #leading>
-          <DBtn to="/skills" color="neutral" variant="ghost" icon="i-lucide-arrow-left" :aria-label="$t('一覧へ')" />
+          <DBtn :to="listPath" color="neutral" variant="ghost" icon="i-lucide-arrow-left" :aria-label="$t('一覧へ')" />
         </template>
         <template #right>
           <!-- 名前の変更・停止・削除は公開の権限が要る。サーバー側でも確認し、権限がなければ403になる -->

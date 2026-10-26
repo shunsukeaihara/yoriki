@@ -72,7 +72,11 @@ defineExpose({ onSubmit, loading, canPost })
       v-model="form.name"
       :label="$t('名前')"
       required
-      :hint="$t('会話の入力欄の / で指定するときに使います')"
+      :hint="
+        form.scope === SkillScope.SYSTEM
+          ? $t('システムのタスクで指定するときに使います')
+          : $t('会話の入力欄の / で指定するときに使います')
+      "
       :error-messages="errors.name"
     />
     <DTextarea

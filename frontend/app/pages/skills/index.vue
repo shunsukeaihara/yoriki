@@ -92,7 +92,7 @@ const onCreated = (skill: Skill) => navigateTo(`/skills/${skill.id}`)
             )
           }}
         </p>
-        <div class="mb-4 flex flex-wrap items-end gap-4">
+        <div class="mb-4 flex flex-wrap items-center gap-4">
           <DSelectButton v-model="scopeTab" :label="$t('範囲')" :show-label="false" :items="scopeTabs" />
           <DSelect
             v-if="params.scope === SkillScope.DEPARTMENT"

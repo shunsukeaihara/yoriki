@@ -111,7 +111,7 @@ design.md §5.1の永続オブジェクトを、次の単位で分ける。実�
 
 | アプリ | 主なModel |
 |---|---|
-| `user` | User、役割と権限、SSOのログイン（django-allauth）、Department・DepartmentMembership（部門と所属。Skillの部門の範囲に使う。design.md §3.6） |
+| `user` | User、Groupとpermission、SSOのログイン（django-allauth）、Department・DepartmentMembership（部門と所属。使える部門・管理できる部門の判定。authorization.md §4） |
 | `plugin` | PluginExtension（サーバーに配備する拡張のRegistry。design.md §3.11） |
 | `skill` | Skill、SkillVersion、SkillDraft、SkillChange、SkillEvaluation、SkillAssetBinding（Skillが使うTool・資料・Connector・必要な能力も版で持つ。実行環境はRunの単位で決める。design.md §3.2、§7.3） |
 | `resources` | Resource、ResourceVersion（Pythonの標準ライブラリの `resource` と名前が重なるので、複数形にする） |
@@ -124,7 +124,7 @@ design.md §5.1の永続オブジェクトを、次の単位で分ける。実�
 | `worker` | Workerの登録情報 |
 | `usage` | UsageLedger、クオータ |
 | `llm` | LLMConnection、ModelProfile、Provider Adapter（design.md §4.8） |
-| `connector` | DatabaseConnection（社内DBの接続先と資格情報）、Connector（1つの接続の上の範囲）、ConnectorVersion（境界の版）、使える部門（所属の軸。空なら全社向け）、操作のAdapter（社内DB、SharePoint、Google Drive、MCP。design.md §4.9） |
+| `connector` | DatabaseConnection（社内DBの接続先と資格情報）、Connector（1つの接続の上の範囲。範囲（個人・部門・全社・システム）と部門を持つ）、ConnectorVersion（境界の版）、操作のAdapter（社内DB、SharePoint、Google Drive、MCP。design.md §4.9） |
 | `stream` | SSEのストリームview、イベントのSerializer（realtime.md） |
 | `harness` | Modelなし。Runner（実行のループ）、Tool、RunEventからの文脈の組立、圧縮、Sandboxの操作（harness.md §3） |
 
@@ -408,11 +408,11 @@ class AppConversationMessageViewSet(MyConversationMixin, ListModelMixin, CreateM
 
 | 接頭辞 | 利用者 | 認証 | permission |
 |---|---|---|---|
-| `App*` | 通常社員（自分の会話・Run・Skill） | 既定（セッション） | `AppUser` |
-| （接頭辞なし） | 業務管理者・Skill公開者・基盤管理者 | 既定（セッション） | `require_permission(AppPermission.XXX)`、基盤管理者だけの操作は `PlatformAdmin` |
+| `App*` | 業務画面（利用と業務の管理。自分の会話・Run、Skill、タスク） | 既定（セッション） | `AppUser`。対象はQuerySetの絞り込みとModelの判定（§6.3）で決める |
+| （接頭辞なし） | 管理画面（基盤の管理） | 既定（セッション） | `ModelPermissions`、または `require_permission(AppPermission.XXX)` |
 | `Hook*` | Trigger・Channelの受信endpoint | ViewSetで `authentication_classes` を指定する（連携ごとの署名・token） | 認証した連携に対象を限るpermissionを指定する |
 
-- `DEFAULT_PERMISSION_CLASSES` は `PlatformAdmin` なので（§6.1）、`permission_classes` を書き忘れたViewSetは基盤管理者しか使えない。すべてのViewSetで明示する。
+- `DEFAULT_PERMISSION_CLASSES` は `DenyAll` なので（§6.1）、`permission_classes` を書き忘れたViewSetは誰も使えない（基盤管理者も）。すべてのViewSetで明示する。
 - 利用者の範囲で絞り込む処理はMixinにまとめる。URLに含まれる親IDは、Mixinのpropertyで `get_object_or_404` によって取得し、`hasattr` で結果をキャッシュする。
 
 ```python
@@ -562,7 +562,7 @@ REST_FRAMEWORK = {
         "rest_framework.filters.SearchFilter",
     ),
     "DEFAULT_AUTHENTICATION_CLASSES": ("utils.authentication.SessionAuthentication",),  # §6.2
-    "DEFAULT_PERMISSION_CLASSES": ("utils.permissions.PlatformAdmin",),  # 指定漏れは最も厳しい権限で閉じる
+    "DEFAULT_PERMISSION_CLASSES": ("utils.permissions.DenyAll",),  # 指定漏れは誰も通さない
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "EXCEPTION_HANDLER": "utils.handlers.exception_handler",
 }
@@ -601,12 +601,12 @@ DATABASES = {
 
 - ログインはバックエンドで処理し、Djangoのセッションでログイン状態を保つ。フロントエンドにトークンを持たせない（frontend-conventions.md §4）。ログインの方法は社内SSOとYorikiのアカウント（メールアドレスとパスワード）の2つで、どちらを使うかは有効なSSOの設定があるかで決まる（design.md §10.0）。
 - SSOはdjango-allauthのsocialaccountで実装する。最初に対応するのはGoogle WorkspaceとMicrosoft 365（Entra ID）とする。Auth0やその他のOpenID Connectの認証基盤は、必要になったときに同じ仕組みで追加する。
-- SSOの設定（種別、client ID、client secret、テナントID、Workspaceのドメイン、許可するメールドメイン、有効・無効）は、`user` アプリのModel（`SSOProvider`）に持たせ、基盤管理者が管理画面（`v1/sso_providers`、`PlatformAdmin`）で登録する。環境変数では設定しない。client secretは `EncryptedSecretField`（§6.4）にし、種別は作成した後は変えない（更新用のSerializerで読み取り専用）。
+- SSOの設定（種別、client ID、client secret、テナントID、Workspaceのドメイン、許可するメールドメイン、有効・無効）は、`user` アプリのModel（`SSOProvider`）に持たせ、管理画面（`v1/sso_providers`、`ModelPermissions`）で登録する。環境変数では設定しない。client secretは `EncryptedSecretField`（§6.4）にし、種別は作成した後は変えない（更新用のSerializerで読み取り専用）。
 - django-allauthへは、`SocialAccountAdapter.list_apps()` で有効な `SSOProvider` から保存しない `SocialApp` を作って渡し、client secretはその中でだけ復号する。allauthの `SocialApp` のテーブルとDjango管理画面のその画面は使わない（client secretが平文で保存されるため）。
 - 前段に認証プロキシ（oauth2-proxy等）を置く場合も、ログインは常にYoriki自身で行う。認証プロキシはバリアとして扱い、プロキシが付けるヘッダーやIDトークンで利用者を決めない（前段の構成は deployment.md §8.6）。
 - 自社のアカウントだけを受け付ける。Entra IDはテナントID、Google Workspaceは `hd`（ドメイン。Googleの設定では必須にする。IDトークンの `hd` が一致しないアカウントは、個人のGoogleアカウントとみなして拒否する）、後から追加する認証基盤はissuerで確認する。どの認証基盤でも、メールアドレスのドメインがその設定の許可するドメインにあることを確認する（`user/adapters.py`）。許可しないアカウントは `/login?error=not_allowed`、認証の失敗は `/login?error=failed` へ戻す。
-- SSOで初めてログインしたとき、同じメールアドレス（大文字・小文字を区別しない）のユーザーがいれば、そのユーザーに紐付ける（`pre_social_login` で `sociallogin.connect()`）。いなければ作成し、通常社員の役割から始める。業務管理者・Skill公開者などの役割はGroupとして管理画面で割り当て、基盤管理者は `is_superuser` にする（§6.3。IdPのグループとの連携は必要になってから追加する）。
-- Yorikiのアカウントは、基盤管理者が管理画面（`v1/users`。役割の選択肢は `v1/groups`）で作る。ユーザーは削除せず、無効にする。作成と再設定では、期限付きで1回だけ使える招待のtoken（既定は7日。DBにはハッシュだけを保存する）を発行し、そのURLを応答に一度だけ含めて画面に表示する。tokenはアクセスログに残らないよう、URLのフラグメント（`/invitation#<token>`）に置く。本人の画面は本文でtokenを送り、`POST app/v1/auth/invitations/verify/`（宛先のメールアドレスと期限を返す）と `POST app/v1/auth/invitations/accept/`（パスワードを設定してログインする）を呼ぶ。Yorikiからメールは送らない。
+- SSOで初めてログインしたとき、同じメールアドレス（大文字・小文字を区別しない）のユーザーがいれば、そのユーザーに紐付ける（`pre_social_login` で `sociallogin.connect()`）。いなければ作成し、通常社員（所属もGroupもない）から始める。Group（permissionの集まり）と所属は管理画面で割り当て、基盤管理者は `is_superuser` にする（§6.3。IdPのグループとの連携は必要になってから追加する）。
+- Yorikiのアカウントは、ユーザー管理者（`user.add_user` 等を持つ人）が管理画面（`v1/users`。Groupの選択肢は `v1/groups`）で作る。ユーザーは削除せず、無効にする。作成と再設定では、期限付きで1回だけ使える招待のtoken（既定は7日。DBにはハッシュだけを保存する）を発行し、そのURLを応答に一度だけ含めて画面に表示する。tokenはアクセスログに残らないよう、URLのフラグメント（`/invitation#<token>`）に置く。本人の画面は本文でtokenを送り、`POST app/v1/auth/invitations/verify/`（宛先のメールアドレスと期限を返す）と `POST app/v1/auth/invitations/accept/`（パスワードを設定してログインする）を呼ぶ。Yorikiからメールは送らない。
 - 有効なSSOの設定がある間は、招待・再設定のtokenを基盤管理者以外に発行せず、`verify`・`accept` でも対象が基盤管理者でなければ断る（ログインの判定と同じ `PasswordBackend` の規則を使い、セッションを作る前に確かめる）。SSOの設定が有効になった時点（作成・有効への変更）で、基盤管理者以外の未使用のtokenを同じtransactionで無効にする。
 - パスワードでのログインは `POST app/v1/auth/session/`（メールアドレス、パスワード）で行う。判定は認証バックエンド（`utils.backends.PasswordBackend`）に置き、有効なSSOの設定があれば基盤管理者（`is_superuser`）だけに、なければ有効なユーザーすべてに許可する。パスワードは `AUTH_PASSWORD_VALIDATORS` で検証する。allauthのメール・パスワードのログインとアカウント作成は使わない（`SOCIALACCOUNT_ONLY`）。
 - ログインの試行回数の制限は django-axes で行う（記録はPostgreSQL）。失敗はアカウント（`username`）ごとと送信元のIPアドレスごとに別々に数える（`AXES_LOCKOUT_PARAMETERS = ["username", "ip_address"]`）。アカウントと送信元のIPアドレスの組だけで数えると、多数のIPアドレスから同じアカウントを推測できるため。止める時間は短くし（`AXES_COOLOFF_TIME` は15分）、解除は `axes_reset_username` 等の管理コマンドで行う。止めたことはログに残し、運用の通知に流す。送信元のIPアドレスは `REMOTE_ADDR` を使う（nginxの `set_real_ip_from` とUvicornの `--proxy-headers`・`--forwarded-allow-ips` で利用者のIPアドレスになる。deployment.md §8）。Django管理画面のログインも同じ制限を受ける。
@@ -627,7 +627,7 @@ DATABASES = {
 | `utils/admin.py` | `ReadOnlyAdmin`（Django管理画面で見るだけにするModelAdmin。§7） |
 | `utils/views.py` | `SoftDeleteMixin`、利用者範囲のMixin、`PingAPIView` |
 | `utils/serializers.py` | `CountSerializer`、`PingSerializer`、`ReadOnlyModelSerializer`、複数アプリで使う最小Serializer |
-| `utils/permissions.py` | `AppPermission`（Yorikiで定義するpermissionの一覧）、`AppUser`（ログインしている社員）、`PlatformAdmin`（基盤管理者）、`require_permission()` |
+| `utils/permissions.py` | `AppPermission`（Yorikiで定義するpermissionの一覧）、`AppUser`（ログインしている社員）、`ModelPermissions`（管理のModelの標準のpermission）、`require_permission()`、`DenyAll`（書き忘れを閉じる既定） |
 | `utils/authentication.py` | 401を返す `SessionAuthentication`（とそのOpenAPIの定義）、`Hook*` 用の認証クラス |
 | `utils/backends.py` | パスワードでのログインの認証バックエンド（有効なSSOの設定があれば基盤管理者だけに許可する） |
 | `utils/exceptions.py` | `Conflict`（409）等、DRFの `APIException` のサブクラス |
@@ -638,18 +638,27 @@ DATABASES = {
 | `common/management/commands/` | 複数アプリにまたがる管理コマンド（`rotate_secret_encryption`） |
 | `common/choices.py` | 複数アプリで使うChoices |
 
-- 権限は「所属」と「permission」の2軸で判定する（design.md §3.6）。所属（部門。`Department.objects.of(user)`・`covers_all_departments(user)`）はどの部門のものを扱えるか、permissionは何ができるかを表す。判定にGroupを使わない（`user.groups` や Groupの名前で絞らない）。Groupはpermissionをまとめて付けるための入れ物で、後から自由に名前・構成を変えられるようにする。
-- permissionはDjangoのpermissionで判定する。Userのフラグや役割の名前では判定しない。流れは「permissionを定義する → Groupに割り当てる → Groupをユーザーに割り当てる」とする。
+- 権限の設計（範囲、3つの層、実行許可）は [authorization.md](authorization.md) を正とする。ここではDjangoでの書き方を定める。
+- 権限は「所属」と「permission」の2軸で判定する。判定にGroupを使わない（`user.groups` やGroupの名前で絞らない）。Userのフラグも判定に使わない。
+- **所属**は、`Department.objects.usable_by(user)`（使える部門）と `Department.objects.manageable_by(user)`（管理できる部門）だけで判定する。ほかの場所で `DepartmentMembership` を直接引かない。permission `user.can_use_all_departments`・`user.can_manage_all_departments` を持てば、すべての部門を返す。1つのリクエストの中では結果を `request.user` に持たせて使い回し、所属・Groupを変える処理の後では使わない。
+- **permission**はDjangoのpermissionで判定する。
   1. Yorikiで定義するpermissionは `utils.permissions.AppPermission` に（app_label、codename、表示名）として1か所にまとめる。codenameは `can_<動詞>_<対象>` にする（例：`skill.can_publish_company_skills`）。
   2. 対象アプリのModelの `Meta.permissions` に `AppPermission.XXX.meta` を書き、マイグレーションでpermissionを作る。
-  3. 役割（業務管理者・Skill公開者等）はGroupで表す。初期の役割と、それに含めるpermissionは `user/roles.py` の `ROLES` に書く。`migrate` のたびに同名のGroupを作り、定義したpermissionを追加する（管理画面でGroupに足したpermissionは消さない）。post_migrateはアプリごとに順に送られるので、同期の中で参照するアプリのpermissionを先に作り、アプリの順番に依存しないようにしている。
-  4. Groupは、基盤管理者がDjangoの管理画面でユーザーに割り当てる。個別のpermissionを直接付けてもよい。
-- 基盤管理者は `is_superuser` で表し、すべてのpermissionを持つ。基盤管理者だけに許す操作（基盤の設定等）は `PlatformAdmin` で判定する。
-- 管理のModelのViewSetは `ModelPermissions` で、操作ごとにそのModelの標準のpermission（一覧・詳細は `view_*`、作成は `add_*`、更新は `change_*`、削除は `delete_*`）を確かめる。`@action` は `action_permissions = {"check": "view"}` のように種類を書き（書いていない操作は断る）、所属で `get_queryset` を絞るだけの操作は `"login"` にする。Djangoの管理画面と同じく、`change_*` を持つ人は `view` の操作もできる。対象のModelが違うとき（版の履歴等）は `permission_model` で指定する。
-- ViewSetでは `require_permission(AppPermission.XXX)` で確認する。`require_permission` は、ログイン済みで `user.has_perm()` が真の場合に許可するpermissionクラスを返す。Django標準のpermissionは `"<app_label>.<codename>"` の文字列で渡す。
+  3. Groupは「permissionの集まり」。初期のGroup（authorization.md §11）は、`user` のデータのマイグレーションで最初に一度だけ作る（`migrate` のたびに作り直さない。消したGroupや外したpermissionを戻さないため）。マイグレーションの中では、初期のGroupに入れるpermissionを `create_permissions` を `apps` 付きで呼んで先に作る。
+  4. Groupの中身はDjangoの管理画面（`/api/admin/`）で編集する。ユーザーへの割り当ては、Yorikiの管理画面（`v1/users`）かDjangoの管理画面で行う。
+- **`is_superuser` はアプリの判定に使わない**。Djangoの `has_perm()` は有効なsuperuserにすべてのpermissionを返すので、アプリはいつもpermissionで判定すればよい。`is_superuser` を見るのは、Django管理画面と、パスワードでのログインの判定（`utils.backends.PasswordBackend`。SSOが有効でも基盤管理者だけはパスワードでログインできる）だけにする。APIの応答（`app/v1/my/` やユーザーの管理API）に `is_superuser` を出さない。
+- **範囲を持つもの**（Skill・Connector・タスク・入口・出口）の判定は、各アプリのQuerySetとModelに置き、Viewに条件を書かない。
+  - 一覧の絞り込みはQuerySetのメソッド（`visible_to(user)`・`manageable_by(user)` 等）、1件の判定はModelの `can(user, 操作)` にする。操作は「見る・使う・管理・起動・結果を見る・ログを見る・候補に出す」等を区別する。範囲ごとの規則は1つの表に書き、QuerySetとModelの両方がそれを読む。
+  - Viewは `get_queryset` でQuerySetのメソッドを使い、操作の前にModelの `can()` を呼ぶ。一覧では隠れるのにIDを指定すると読める、という食い違いを作らない。
+  - Serializerの関連の項目（Skill・Connector・入口・出口のID）の `queryset` も同じメソッドで絞り、保存の直前（`validate`）にも `can()` で確かめる。
+  - Worker（Django Q2）と管理コマンドでも同じ判定を呼ぶ。Q2にはIDだけを渡し、WorkerはユーザーとRunをDBから読み直して判定する（§8.4）。
+  - 一覧は部門・範囲・持ち主・有効の条件でSQLで絞り、1件ずつ判定しない。
+- **管理のModel**（基盤の管理。Connector・接続、LLMの接続・モデル設定、Runtime Profile、SSOの設定、ユーザー、部門と所属、入口・出口等）のViewSetは `ModelPermissions` で、操作ごとにそのModelの標準のpermission（一覧・詳細は `view_*`、作成は `add_*`、更新は `change_*`、削除は `delete_*`）を確かめる。所属は問わない。`@action` は `action_permissions = {"check": "view"}` のように種類を書く（書いていない操作は断る）。Djangoの管理画面と同じく、`change_*` を持つ人は `view` の操作もできる。対象のModelが違うとき（版の履歴等）は `permission_model` で指定する。
+- Yorikiで定義したpermissionだけで決まる操作は `require_permission(AppPermission.XXX)` で確認する。`require_permission` は、ログイン済みで `user.has_perm()` が真の場合に許可するpermissionクラスを返す。Django標準のpermissionは `"<app_label>.<codename>"` の文字列で渡す。
 - permissionを持つユーザーの一覧（通知の宛先等）は `User.objects.with_permission(AppPermission.XXX)` で取得する（直接・Group経由・基盤管理者を含む）。
-- `AppUser`・`PlatformAdmin` は `_Xxx(BasePermission)` を定義し、公開名を `Xxx = IsAuthenticated & _Xxx` にする。
-- 接続先とConnector（design.md §4.9.1）は `ModelPermissions` で守り、画面もそのpermissionで出し分ける。基盤管理者だけが使う管理画面（LLMの接続等）は、APIを `PlatformAdmin` で守り、画面のメニューはそのModelのDjango標準のpermission（`llm.change_llmconnection` 等）で出し分ける。基盤管理者はすべてのpermissionを持つので表示される。標準のpermissionを他の人に付けても、APIは403になる（frontend-conventions.md §6.2）。
+- `AppUser` は `_AppUser(BasePermission)` を定義し、公開名を `AppUser = IsAuthenticated & _AppUser` にする。`DenyAll` はどの要求も通さない。
+- 管理を委任したときの防止策（authorization.md §10）：ユーザーの更新APIで書ける項目は表示名・有効・Group・所属だけにする。自分の所属・Groupは変えられない。自分の持たないpermissionを含むGroupは付け外しできない。自分の持たないpermissionを持つアカウントは、変更も招待・再設定のリンクの発行もできない。画面には、操作する人から見た可否（`can_change`・`can_issue_invitation`）を返す。
+- `app/v1/my/` は、本人の `all_permissions`（Group経由と直接を含む）、`departments`（実際の所属）、`usable_departments`、`manageable_departments` を返す（authorization.md §4.1.1）。1件ごとの操作の可否は、詳細のAPIで返す。
 
 ### 6.4 Secret
 
@@ -758,7 +767,7 @@ class Command(BaseCommand):
 - pytestとpytest-djangoを使う。`pyproject.toml` の `addopts` で `--ds=app.settings_test` を指定し、`python_files = ["tests.py", "test_*.py", "*_test.py"]` を設定する。
 - テストはローカルでもCIでも、本番と同じPostgreSQLで実行する（`select_for_update` の行ロック、advisory lock、LISTEN/NOTIFY、JSONの検索等に依存するため）。SQLiteは使わない。ローカルでは `deploy/compose.dev.yaml` のPostgreSQLを起動しておく。
 - テストデータは各アプリの `factories.py` に `DjangoModelFactory` で定義する。
-- 複数アプリで使うfixtureはルートの `conftest.py` に置き、`@pytest.fixture(name="xxx")` で名前を付ける。ユーザーのfixtureは役割を表す名前にする（例：`app_user`、`other_user`、`platform_admin`）。
+- 複数アプリで使うfixtureはルートの `conftest.py` に置き、`@pytest.fixture(name="xxx")` で名前を付ける。ユーザーのfixtureは役割を表す名前にする（例：`app_user`、`other_user`、`platform_admin`）。権限の判定のテストは、必要なpermissionと所属だけを付けたユーザーで行い、superuser（`platform_admin`）では行わない（存在しないpermissionの名前でも通り、書き間違いを隠すため）。`platform_admin` は、Django管理画面とパスワードでのログインのテストに使う。
 - APIを呼ぶクライアントのfixtureは `api_client` とする。`client` はpytest-djangoの同名のfixtureを隠してしまうので使わない。
 - DBを使うテストには `@pytest.mark.django_db` を付ける。
 - Serializerの検証は、Serializerを直接使ってテストする。

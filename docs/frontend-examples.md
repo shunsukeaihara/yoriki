@@ -202,7 +202,7 @@ const all = computed<ManageMenuItem[]>(() => [
     icon: 'i-lucide-send',
     to: '/manage/destinations',
     // リンク先のページの definePageMeta と同じ権限
-    permission: PermissionCode.MANAGE_DESTINATIONS,
+    permission: PermissionCode.CHANGE_DESTINATION,
   },
 ])
 ```
@@ -213,7 +213,7 @@ const all = computed<ManageMenuItem[]>(() => [
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 
-definePageMeta({ permission: PermissionCode.MANAGE_DESTINATIONS })
+definePageMeta({ permission: PermissionCode.CHANGE_DESTINATION })
 
 const api = useAPI()
 const { t } = useI18n()
@@ -327,7 +327,7 @@ const onDelete = async () => {
     <template #footer>
       <!-- 削除はサーバー側でも権限を確認し、権限がなければ403になる -->
       <DBtn
-        v-if="hasPermission(PermissionCode.MANAGE_DESTINATIONS)"
+        v-if="hasPermission(PermissionCode.DELETE_DESTINATION)"
         color="error"
         variant="ghost"
         @click="onDelete"

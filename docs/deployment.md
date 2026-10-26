@@ -46,7 +46,7 @@ yoriki/
 | `<org>/yoriki-sandbox-<profile>` | `sandbox/images/<profile>/` | Runごとに動的に起動 | 公開Docker Hub（design.md §10.1） |
 
 - `yoriki-api` は1つのイメージを、起動コマンドを変えて複数のサービスで使う（design.md §10）。
-- 本体のイメージ（`yoriki-api`、`yoriki-frontend`）は配布しない。導入する人がソースからビルドする。`yoriki-api` には、ライセンス上そのまま再配布できないもの（SQL Server用のMicrosoft ODBC Driver、GPL-2.0のmysqlclient）が入るため（design.md §4.9.2）。
+- 本体のイメージ（`yoriki-api`、`yoriki-frontend`）は配布しない。導入する人がソースからビルドする。`yoriki-api` には、ライセンス上そのまま再配布できないもの（SQL Server用のMicrosoft ODBC Driver。ビルド時にMicrosoftのリポジトリから取得し、ビルドする人がライセンスに同意する）が入るため（design.md §4.9.2）。
 - 本体のイメージには、ビルド時に秘密情報を入れない。`collectstatic` はビルド時に行う。
 - Djangoの静的ファイル（管理画面等）はnginxが `/api/static/` で配る。apiのイメージに入れた静的ファイルを、一度だけ動く `static` サービスが共有のボリュームへコピーし、nginxはそれを読み取り専用でmountする。イメージを更新すると `up -d` のたびにコピーし直す（古い版のファイルは、開いたままの画面が使うので消さない）。ファイル名に内容のハッシュが付くので、長くキャッシュさせる。
 - Dockerfileは `api/Dockerfile`、`frontend/Dockerfile`。apiは依存をuv（`uv sync --locked --no-dev`）で入れ、root以外のユーザーで動かす。frontendはNode 25以降にcorepackが同梱されないので、pnpmを `mise.toml` と同じ版でnpmから入れる。

@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-25（#41）
+- 最終更新：2026-10-26（#42）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -43,6 +43,7 @@
 | #37 | 会話からのSkill更新（design.md 0.29 §11.6、harness.md §10.9）：Skillの編集のRun（`Run.kind`。対象のSkillを1つだけManifestの `fixed.skill_edit` に固定し、新しいSkillは `create_skill` で作って追記する）。始め方は、入力欄の `/` の「編集」「新しいSkillを作る」（メッセージの `edit_skill`・`create_skill`。実行中なら次の依頼）と、業務のRunの `request_skill_edit`（対象を利用者が編集できるSkillから名前で決め、確認（種類「Skillの編集」）で承認されたら要約を本文とする編集の依頼を次の依頼として受け付ける。自由記述の回答は承認にしない）。Skill管理のTool（`get_skill`（公開中の版とDraftの資料を `/workspace/master/skills`・`drafts` に置く）、`create_skill`、`update_skill_draft`、`stage_skill_asset`（Sandboxのファイルを原本のbytesのままDraftの資料に追加・置換。添付の置換も兼ねる）、`remove_skill_asset`、`publish_skill_draft`（公開の役割がなければ変更案として保存）、`rollback_skill`）は、管理APIと同じSerializer・Modelのメソッドで検証と権限を確かめ、公開・切戻しはToolInvocationのoperation keyで重ねない。SkillChangeに編集のRunを記録。画面：`/` の一覧の「使う」「編集する」「新しいSkillを作る」、編集の依頼のメッセージ、提案の確認、Runの「Skillの編集」と変えたSkill（状態・版・変更点・Skillの画面へのリンク）。APIは `Run.kind`・`skillChanges`、確認の `target`、メッセージの `skillEdit` |
 | #40 | Skillの資料の形式ごとの検証と差分（design.md §3.9）：`resources/formats.py`（MD：文字コード（UTF-8・BOM付き・cp932）・改行・本文の差分。CSV：文字コード・区切り・見出し・列の数・必須列・キーの空と重複・列の型（整数・数値・日付）・先頭の0の消失、キーで対応付けた行の差分。PPTX：python-pptxで、zipの展開の上限つき、スライドのID・レイアウト・プレースホルダー・テキスト・要素の差分、エージェントが編集した候補で画像・グラフ・SmartArt等・レイアウトが変わったら誤り）。Draftの資料と版の資料に検証の条件（`checks`）と結果（`validation`）を持たせ、資料を加える・置き換える・条件を変えるたびに検証する。誤りのある資料（元の版から変えたもの）を含むDraftは公開できない。条件の変更は公開の役割だけ（`drafts/{id}/assets/{key}/checks/`）。同じ中身・名前の置換では資料の版を増やさない。SkillChangeと編集のRunの変更に、置き換えた資料の差分の数（`assetDiffs`）。`stage_skill_asset` は検証の結果と差分を返し、`checks` を受け取る。`get_skill` に資料ごとの検証の結果。画面：Draftと版の資料の検証の状態・差分の数、「検証・差分」のダイアログ（MDの本文、CSVの行、PPTXのスライド）、CSVの「検証の条件」のダイアログ、変更の記録と会話の変えたSkillに差分の数。依存に python-pptx。google-genaiの型の変更でmypyが落ちていた `gemini.py` を直した |
 | #41 | Draftの評価（design.md §3.7.1、harness.md §10.9）：`skill` に評価ケース（SkillEvaluationCase。依頼の文・添付・確認する観点・期待する業務結果・公開の前に必須の印。Skillごとに20件まで）、評価（SkillEvaluation。開始時にDraftの中身と資料の版を写して固定）、ケースごとの結果（SkillEvaluationResult）。`conversation/evaluation.py`：ケースごとに公開中の版とDraftで評価のRun（`Run.kind`・起動方法とも評価。答える人がいないRunで、Toolは `/` で指定したときと同じくSkillの `tools` と `submit_result`）を、一覧に出さない会話（`Conversation.purpose`）で動かし、両方が終わったら機械的な検証（完了・業務結果・期待値の項目の一致）とLLMの判定（`report_verdict` を強制。参考。利用量は `EVALUATION_JUDGE` でDraftの側のRunに記録）。Runの終了・Reconcilerから進め、評価の停止と、編集のRunを止めたときの停止。公開の条件：部門・全社のSkillで必須のケースが今のDraftのrevisionで通過していなければ、画面でも `publish_skill_draft` でも公開できない（評価の後に変えたケースは評価し直す）。必須の印の付け外しと必須のケースの変更・削除は公開の役割だけ。編集のRunの `test_skill_draft`（確認の種類「Draftの評価」で待ち、評価が終わるとサーバーが結果を返して再開。1つの編集のRunで3回まで）。API：`skills/{id}/evaluation_cases`（multipartで添付）・`evaluations`（開始・一覧・詳細・`cancel`）、Draftの `unevaluatedCases`。画面：Skillの「評価」のタブ（評価ケースの一覧・追加・変更・削除、「Draftを評価」、評価の履歴）、評価の結果のページ `/skills/[skillId]/evaluations/[evaluationId]`（ケースごとに公開中の版とDraftの結果・検証・判定を並べる。評価中は読み直す・停止）、Draftのタブの必須の評価の表示と公開の制限、会話の「Draftを評価しています」。Skillの詳細のページを `pages/skills/[skillId]/index.vue` に移した |
+| #42 | Connectorの土台（design.md §4.9.1・§4.9.2）：`connector` アプリ。Connector（種別はPostgreSQL・MySQL・SQL Server。接続先（種別・ホスト・ポート・DB名）は作成後は変えない。パスワードは `EncryptedSecretField`、通信の暗号化、接続のタイムアウト、同時実行数の上限（項目だけ））、境界の不変の版 ConnectorVersion（説明、既定のスキーマ、公開する表・ビューと列の説明、行数・サイズ・実行時間の上限、機密のフラグ。中身を変えると版が増える）、ConnectorPermission（役割（Group）か部門と、使える操作。`Connector.objects.usable_by()`・`operations_for()`。基盤管理者はすべて）。Adapter（`connector/adapters/`。psycopg 3・PyMySQL・pyodbc。読取り専用のtransaction、実行時間の上限、サーバー側のcursorで行数・サイズの上限で打ち切り）。SQLの検査（`connector/sql.py`。sqlglotで1つのSELECT文、スコープごとに公開した表・CTEだけ、書込み・ロック・ヒント・危険な関数・別のDBを拒否、検査した構文木から作り直したSQLを実行、引数は `?`）。管理API（`v1/connectors`（`check`・`tables`・`describe`・`query`（試し実行））、版の履歴）。本体のイメージにMicrosoft ODBC Driver 18。CIの `connector-db`（実際のMySQL・SQL Serverで確かめる） |
 
 確認済みのこと：
 
@@ -62,6 +63,7 @@
 - #37 の会話からのSkill更新は、手元のqcluster・手元のレジストリのRuntime Profile（runc）・偽のLLM・ブラウザ（Playwright）で、基盤管理者が `/` の「編集」から部門のSkillを編集 → `get_skill` → `update_skill_draft` → `publish_skill_draft` で第4版を公開（Runに「第4版を公開・次の依頼から反映」）、業務の会話で「Skillも直しておいて」→ `request_skill_edit` の確認 →「Skillを編集する」→ 業務のRunの完了後に編集のRunが始まって第5版を公開、部門の「編集」の役割の社員では公開されず「変更案を保存（未公開）」、狭い画面、まで確かめた。実際のプロバイダのモデルが「今回だけ」と「今後も」を区別して `request_skill_edit` を呼ぶかは、まだ試していない。
 - #40 の資料の検証は、開発サーバーでブラウザ（Playwright）から、部門のSkill「請求書の照合」のDraftの `vendor-master.csv` を先頭の0が消えたファイルで置き換える → 「誤り1件」と行の差分 → 公開が止まり理由が出る → 「検証の条件」でキーの列 `code` を設定 → 正しいファイルで置き換える → キーで対応付けた「1行追加・1行変更」、狭い画面、まで確かめた（このDraftは開発用のDBにそのまま残っている）。エージェントが実際のSandboxでCSV・PPTXを編集して `stage_skill_asset` する流れは、テストの偽のSandboxで確かめただけで、実際のプロバイダのモデルでは試していない。
 - #41 のDraftの評価は、手元のqcluster・手元のレジストリのRuntime Profile（runc）・偽のLLM・ブラウザ（Playwright）で、部門のSkill「請求書の照合」に評価ケースを2つ（添付つき・期待する業務結果つき・公開の前に必須のものと、任意のもの）追加 → Draftのタブに「必須の評価ケースが通過していません」と公開の制限 →「Draftを評価」→ 4つの評価のRunと判定が動いて「2件中2件が通過」→ 公開の制限が消える、狭い画面、会話の `/` の「編集」→ `test_skill_draft` →「SkillのDraftを評価しています」→ 評価の完了で編集のRunが再開して完了、まで確かめた（評価ケースと評価は開発用のDBに残っている）。偽のLLMは、要求の `tools` に `report_verdict` があれば判定、`test_skill_draft` があれば呼んでから文で答え、`submit_result` があれば `{"ok": true}` で呼ぶ形にした。実際のプロバイダのモデルでの評価と判定の質は、まだ試していない。
+- #42 のConnectorは、Adapterのテストを、テストのPostgreSQLの別のスキーマ・ロール、一時のコンテナのMySQL 8.0、SQL Server 2022（手元では本体のイメージの中から接続）で動かし、3種類とも同じ27件（接続の確認、表の一覧、describe、引数つきの問い合わせ、行数・サイズでの打ち切り、実行時間の上限、検査で断る、アカウントの権限で止まる、検査をすり抜けた書込みが残らない）が通るのを確かめた。管理画面とエージェントのToolはまだないので、実際の社内DBでは試していない。
 - #30 のSandboxは、手元のqcluster（fork）・手元のレジストリのRuntime Profile（platformのdigest）・Toolを呼ぶ偽のLLMで、shell → read → 確認待ち（Checkpointを保存してSandboxを消す）→ 回答 → 戻したWorkspaceで edit → 完了、まで確かめた。画面での表示は、ブラウザではまだ確かめていない。Linuxのホスト（本番の構成のqcluster・userns-remap）では、まだ試していない。
 
 ## 2 実装の中で決めたこと
@@ -86,7 +88,8 @@
 - CI：e2e、本体のイメージのレジストリへのpush（使うレジストリが未決。design.md §13）、Sandboxのイメージのmulti-arch（arm64）のビルドとDocker Hubへのpush・脆弱性スキャン（公開先のorgが未決）。
 - Compose：channel-listener（Channelの受信を実装するとき）。
 - 管理コマンド：`drain_workers`・`resume_workers`（Workerの実行を実装するとき）。
-- 業務のアプリは `llm`、`conversation`、`run`、`harness`、`stream`、`usage`、`runtime`（Runtime Profile、Launcher）、`artifact`、`skill`・`resources`（土台だけ）まで。`plugin`、`task`、`delivery`、`connector` 等（backend-conventions.md §1.2）は、まだない。
+- 業務のアプリは `llm`、`conversation`、`run`、`harness`、`stream`、`usage`、`runtime`（Runtime Profile、Launcher）、`artifact`、`skill`・`resources`、`connector`（土台だけ）まで。`plugin`、`task`、`delivery` 等（backend-conventions.md §1.2）は、まだない。
+- Connectorで後回しにしたもの：Plugin Registry（`plugin` アプリ。今は種別からAdapterをコードで選ぶ。タスク・配信のPluginとあわせて作る）、同時実行数の上限を守らせる（会話でのConnectorの段階。DBで全Workerを通して数える）、SQL ServerのSNAPSHOT分離（DB側で有効なら使う。design.md §4.9.2）、MariaDB（MySQLの `MAX_EXECUTION_TIME` がない。試していない）、HTTP・SharePoint・Google Drive・MCPのConnector、書込みの操作。PostgreSQLの証明書の確認（`verify-full`）は、OSの証明書（`sslrootcert=system`。libpq 16以降）を使い、社内のCAの証明書を指定する項目はまだない。PyMySQLは1.2.1〜1.2.3の不具合（作ったばかりのユーザーがTLSなしで初めてログインすると失敗する）を避けて1.2.0に固定している（`api/pyproject.toml`）。直った版が出たら上げる。
 - Skillで後回しにしたもの：実行中のRunでSkillを最新の公開版へ切り替える依頼（design.md §3.2）、機密の制限によるSkillの絞り込み（Connectorの段階）、Resource Collection、Connectorの宣言、MD・CSV・PPTX以外の形式（XLSX・DOCX・PDF等）の検証、PPTXの画像としてのプレビュー（LibreOfficeを使わない方法が未決。design.md §7.6）、本文（説明・手順・Schema）の版の差分の表示（今は変わった項目名だけ。資料の差分は #40 で表示）、公開せずに捨てたDraftの資料の原本の回収、共通Skillから個人用を派生させる操作、Draftを開いた後に別の版が公開されたときの取り込み（今は破棄して開き直す）、画面のToolの選択肢と説明（今はフロントエンドに `harness.tools.ALL_TOOLS` と同じ一覧を持つ。APIで返すようにする）。
 - 会話からのSkill更新で後回しにしたもの：中身が前の版と同じDraftの公開を止めない（版が増える）、Draftに他の人の未公開の変更があっても一緒に公開する（`get_skill` の説明で、公開の前に利用者へ伝えさせるだけ）、編集のRunの対象は1つだけ（複数のSkillをまとめて直す依頼は分ける）、別のAttemptで再開すると `/workspace/master` のDraftの資料が置き直されない（`get_skill` を呼び直せば置く）。
 - 資料の検証で後回しにしたもの：検証の結果に検証の仕組みの版を持たせていない（検証の規則を変えても、保存した結果は取り直すまで古いまま）、MDの差分は2MBまで、PPTXの「編集した候補」かどうかは置いた場所（`/workspace/input` か）だけで決める、CSVの行の差分はキーの列がなければ行の組合せの増減だけ、10MBを超えるCSVはキー・型・先頭の0・差分を調べない（全行を持たない方法が要る）。
@@ -108,12 +111,20 @@
 
 ## 4 次の作業
 
-**今の状態（2026-10-25）**：⑤b（Draftの評価）は #41 でマージ済み。これでSkillの段階（下の1）の①〜⑤が揃った。次は下の2（Connectorとタスク・配信）。設計書に概要しかない部分が多いので、着手の前に設計とPRの分け方を利用者と合意する。#41 では、Codexのレビューを受けて公開の条件を「必須のケースそれぞれの直近の評価の結果が通過」に改めた（design.md §3.7.1。1回の評価は10件まで・ケースは20件までのため）。
+**今の状態（2026-10-26）**：Skillの段階（下の1）は #41 までで揃った。下の2（Connectorとタスク・配信）について、利用者と次のPRの分け方と方針を合意し（2026-10-26）、①（Connectorの土台）を #42 で進めている。合意した方針：Connectorを先に作る（最初の業務の1つ目が先に動く）、Connectorの種類は今回は社内DBだけ（HTTP Connectorは後回し）、使える人は役割と部門で指定する、MySQLのドライバはPyMySQL、Webhook等で起動したRunの実行主体はタスクに設定した社員（既定は作成者）にする（design.md 0.31）。
 
-design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。上から順に着手する（利用者から別の指示がなければ、1から始める）。提案する順番：
+design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。上から順に着手する（利用者から別の指示がなければ、上から）。提案する順番：
 
 1. **Skill（`skill`、`resources`）**：利用者と合意したPRの分け方は「① 土台（backend。済み） → ② 管理画面（frontend） → ③ 会話での利用 → ④ 会話からのSkill更新 → ⑤ 評価とCSV・PPTXの検証・編集」。⑤は「⑤a 資料の形式ごとの検証と差分（#40） → ⑤b Draftの評価（#41）」に分けた。①〜⑤ 済み。後回しにしたものは §3。
-2. **Connector（`connector`）とタスク・配信（`task`、`delivery`）**：読取り専用のDB Connector、Connectorを使える利用者・役割と操作（ConnectorPermission。design.md §4.9.1）、入力欄の `@` での指定、Task Definition（使うSkill・モデル・許可する操作）、Webhook・Zapierの通知、Trigger。DB Connector（種別：PostgreSQL・MySQL・SQL Server、ホスト、DB名、ユーザー、パスワード等）とHTTP Connector（ホスト、ヘッダー、認証情報等）の設定は管理画面で登録し、資格情報は `utils/crypto.py` で暗号化してDBに保存する（backend-conventions.md §6.4）。個人情報を主な中身とする接続先には機密のフラグを付けられるようにし、フラグの付いたConnectorはローカルLLMのモデルを使うタスク・会話にだけ割り当てる（design.md §4冒頭、§4.9.1）。
+2. **Connector（`connector`）とタスク・配信（`task`、`delivery`）**：利用者と合意したPRの分け方は次のとおり。
+   - ① Connectorの土台（backend。#42）：Connector・版・ConnectorPermission、社内DBの3種類のAdapter、SQLの検査、管理API（接続の確認・表の一覧・describe・試し実行）。
+   - ② Connectorの管理画面（frontend）：`/manage/connectors`（登録、接続の確認、表の一覧から公開する表を選んで説明を付ける、試し実行、利用の許可、版の履歴）。
+   - ③ 会話でのConnector：Tool `datasource_describe`・`datasource_query`（結果はCSVのArtifactにして `/workspace/input/connectors/{id}/`、モデルには要約）、Run開始時に使える操作を固定して `<connectors>` で見せる、入力欄の `@`、機密のConnectorはローカルLLMのRunだけ（使ったRunに印、モデルの切り替えの制限）、Skillが宣言した操作の公開時の検証、同時実行数の上限（harness.md §10.2）。
+   - ④ Skillのスクリプトからの呼出し（`yoriki_connector` とUnixドメインソケット。design.md §4.9.6）。後回しにしてもよい（最初の業務は `datasource_query` で動く）。
+   - ⑤ タスクとWebhookでの起動（backend）：TaskDefinition・TriggerBindingと不変の版、Webhookの受け口（APIキーで認証、送り元のイベントIDか `Idempotency-Key` での重複の判定、項目の取り出し、payloadのファイル化、202とrun_id、状態を確かめる口）、TriggerReceipt・Runを同じtransactionで作る。
+   - ⑥ 配信：Destination・NotificationBinding・Delivery・DeliveryAttempt、完了時の配信Outbox、再試行のDispatcher、in_app・webhook・zapierのAdapter、標準の形式へのフォールバック、期限付きのファイルURL、`prepare_notification`・`request_delivery`。
+   - ⑦ タスク・Destinationの画面：一覧と編集（サンプルのpayloadで取り出しを試す）、自動実行の履歴と配信の状態、「通知を再試行」、チャットから指定したタスクを起動する。
+   - 範囲の外：HTTP・SharePoint・MCPのConnector、Teams・Slack・DiscordのInteraction Binding（下の4）。
 3. **最初の2つの業務**（design.md §13。Skillとタスクとして作る）：請求書PDF → 社内DBと照合 → 取込用のCSV、契約書レビュー → Zapierへ結果。
 4. **Channel Plugin**（Teams・Slack・Discord。`plugin` のRegistry）。
 
@@ -140,6 +151,7 @@ cd frontend && pnpm install
 - 手元のDocker Desktopの仮想ディスク（37GB）が満杯になると、PostgreSQLが `No space left on device` で止まり、テストが大量にエラーになる。#36 ではビルドキャッシュ（`docker builder prune -f`）を消して空けた。`docker system df` で確かめる。
 - 環境変数はリポジトリルートの `.envrc`（direnv）。テストやmypyは、`.envrc` を読み込んだ状態で実行する。エージェントが `.envrc` を読めない設定のときは、`.envrc.example` の `export` の行と、新しく生成した `YORIKI_SECRET_ENCRYPTION_KEYS`（Fernet）・`YORIKI_SANDBOX_RUNTIME=runc` を一時ファイルに書き、リポジトリのルートでコマンドごとに `source` する（`$PWD` を使う行があるため）。`api/` で `source` すると保存先が `api/.objects` になり、既存の資料・添付の原本が見つからない（Sandboxの起動が「cannot prepare ... not found」で失敗する）。
 - Sandboxの補助コマンド（`sandbox/helper/`）を変えたら、イメージをビルドし直す（#33で `read` の画像の符号化を変えた）。手元のレジストリのRuntime Profileで会話を動かすときは、pushし直して管理画面で新しいdigestに更新する。`pytest -m sandbox` は `YORIKI_SANDBOX_TEST_IMAGE=yoriki-sandbox-docs:dev` を付けて動かす。
+- ConnectorのAdapterのテスト（`connector/tests/test_adapters.py`）は、PostgreSQLの分はいつも動き、MySQL・SQL Serverの分は管理者の接続先（`YORIKI_CONNECTOR_TEST_MYSQL`・`YORIKI_CONNECTOR_TEST_SQLSERVER`。`.envrc.example`）を渡したときだけ動く。#42 では一時のコンテナ（`docker run -d --rm --name yoriki-connector-mysql -p 127.0.0.1:3307:3306 -e MYSQL_ROOT_PASSWORD=... mysql:8.0`、`docker run -d --rm --platform linux/amd64 --name yoriki-connector-mssql -p 127.0.0.1:1434:1433 -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD=... mcr.microsoft.com/mssql/server:2022-latest`）で試した。手元のmacOSのODBC Driver 18（18.7.1.1まで）は `/opt/homebrew/opt/openssl/lib/` のOpenSSL 3以前を探すので、Homebrewの `openssl` が4系だと読み込めない。`export DYLD_LIBRARY_PATH=/opt/homebrew/opt/openssl@3/lib` を付け、`uv run` ではなく `.venv/bin/python -m pytest ...` で動かす（`uv run` を通すと `DYLD_LIBRARY_PATH` がPythonに届かない）。本体のイメージ（`docker build -t yoriki-api:dev api`）の中で、リポジトリを読取り専用でmountして動かしてもよい（`--user root` で `pip install uv`・`UV_PROJECT_ENVIRONMENT=/tmp/venv uv sync --locked`・`uv run --no-sync pytest ...`。DBのホストは `host.docker.internal`）。手元の `mysql@8.4`（Homebrew）は利用者のものなので使わない。
 - 画面をブラウザで確かめるときは、api（上記）と `cd frontend && pnpm dev` を起動し、Playwright（Python）で操作する。手元のブラウザのキャッシュ（chromium-1208）に合う版は `uv run --no-project --with playwright==1.58.0 python <script>`。基盤管理者は `/login?method=password` でログインし、`storage_state` を保存して使い回す。SSOの社員はパスワードでログインできないので、`manage.py shell` でその社員のセッションを作り（`BACKEND_SESSION_KEY` は `utils.backends.PasswordBackend`）、Cookie `sessionid` に入れる。開発用のDBには、#35 で使った基盤管理者 `skill-admin@example.co.jp`（パスワード `check-pass-123`）、社員 `skill-member@example.co.jp`（部門「経理部」の編集の役割）、部門のSkill「請求書の照合」（版3まで）が残っている。
 - 変更前に、AGENTS.md と、触る範囲の規約を読む。作業の進め方（ブランチ、コミット、Pull Request、CI、マージ）は development.md に従う。
 - 作業の区切りでは、本書の §1・§3・§4 を更新する。Pull Requestで進めた作業は、マージの前にそのPull Requestの中で更新する（マージの後に `main` へ別にコミットしない）。

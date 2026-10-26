@@ -447,6 +447,15 @@ class SSOProviderUpdateSerializer(SSOProviderSerializer):
 # --- 部門 ---
 
 
+class MinimumDepartmentSerializer(serializers.ModelSerializer):
+    id = serializers.CharField(source="uid", read_only=True)
+
+    class Meta:
+        model = Department
+        fields = ["id", "name"]
+        read_only_fields = fields
+
+
 class DepartmentSerializer(serializers.ModelSerializer):
     id = serializers.CharField(source="uid", read_only=True)
     member_count = serializers.SerializerMethodField(help_text=_("所属する人数"))

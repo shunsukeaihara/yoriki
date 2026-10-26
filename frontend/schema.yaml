@@ -2183,6 +2183,377 @@ paths:
               schema:
                 $ref: '#/components/schemas/Ping'
           description: ''
+  /api/v1/connectors/:
+    get:
+      operationId: v1_connectors_list
+      description: Connectorの管理API（基盤管理者だけ）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+      - in: query
+        name: is_sensitive
+        schema:
+          type: boolean
+        description: 機密
+      - in: query
+        name: kind
+        schema:
+          type: integer
+          title: 種別
+          enum:
+          - 1
+          - 2
+          - 3
+        description: |-
+          種別
+
+          * `1` - PostgreSQL
+          * `2` - MySQL
+          * `3` - SQL Server
+      - in: query
+        name: name
+        schema:
+          type: string
+        description: 名前
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - manage/connector
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedConnectorList'
+          description: ''
+    post:
+      operationId: v1_connectors_create
+      description: Connectorの管理API（基盤管理者だけ）
+      tags:
+      - manage/connector
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectorRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ConnectorRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ConnectorRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Connector'
+          description: ''
+  /api/v1/connectors/{connector}/versions/:
+    get:
+      operationId: v1_connectors_versions_list
+      description: Connectorの版の履歴（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: connector
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - manage/connector/version
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedConnectorVersionList'
+          description: ''
+  /api/v1/connectors/{connector}/versions/{number}/:
+    get:
+      operationId: v1_connectors_versions_retrieve
+      description: Connectorの版の履歴（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: connector
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: number
+        schema:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          title: 版
+        required: true
+      tags:
+      - manage/connector/version
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorVersion'
+          description: ''
+  /api/v1/connectors/{uid}/:
+    get:
+      operationId: v1_connectors_retrieve
+      description: Connectorの管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/connector
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Connector'
+          description: ''
+    put:
+      operationId: v1_connectors_update
+      description: Connectorの管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/connector
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectorUpdateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ConnectorUpdateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ConnectorUpdateRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Connector'
+          description: ''
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、別の版ができている）
+    patch:
+      operationId: v1_connectors_partial_update
+      description: Connectorの管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/connector
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedConnectorUpdateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedConnectorUpdateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedConnectorUpdateRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Connector'
+          description: ''
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、別の版ができている）
+    delete:
+      operationId: v1_connectors_destroy
+      description: Connectorの管理API（基盤管理者だけ）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/connector
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/connectors/{uid}/check/:
+    post:
+      operationId: v1_connectors_check_create
+      description: 接続先に接続して、ホスト・認証・DB名が正しいかを確かめる
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/connector
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorCheck'
+          description: ''
+  /api/v1/connectors/{uid}/describe/:
+    get:
+      operationId: v1_connectors_describe_retrieve
+      description: 公開している表・ビューの列と説明。エージェントの `datasource_describe` と同じ内容
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/connector
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorTables'
+          description: ''
+  /api/v1/connectors/{uid}/query/:
+    post:
+      operationId: v1_connectors_query_create
+      description: SELECT文を試しに実行する。エージェントの `datasource_query` と同じ検査・上限を通る。応答の行は先頭の200行まで
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/connector
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConnectorQueryRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ConnectorQueryRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ConnectorQueryRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorQueryResult'
+          description: ''
+  /api/v1/connectors/{uid}/tables/:
+    get:
+      operationId: v1_connectors_tables_retrieve
+      description: 接続先のアカウントが読める表・ビューと列の一覧。公開する表を選ぶために使う
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/connector
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConnectorTables'
+          description: ''
   /api/v1/departments/:
     get:
       operationId: v1_departments_list
@@ -4403,6 +4774,674 @@ components:
       required:
       - column
       - type
+    Connector:
+      type: object
+      description: |-
+        Connectorの作成と表示。境界（公開する表、上限、機密のフラグ）は現在の版の値を平らに出す。
+
+        境界を変えて保存すると、サーバーが新しい版を作る。更新では、編集を始めた時点の `version` を送り、
+        その間に他の人が版を作っていたら409になる。パスワードは書き込み専用で、応答には末尾の4文字だけを出す
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          title: 名前
+          maxLength: 100
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/ConnectorKindEnum'
+          title: 種別
+          minimum: 0
+          maximum: 32767
+        kind_display:
+          type: string
+          readOnly: true
+        host:
+          type: string
+          title: ホスト
+          maxLength: 255
+        port:
+          type: integer
+          maximum: 65535
+          minimum: 1
+          description: 省略すると種別の既定のポート
+        database:
+          type: string
+          title: DB名
+          maxLength: 128
+        username:
+          type: string
+          title: ユーザー名
+          maxLength: 128
+        has_password:
+          type: boolean
+          readOnly: true
+        password_hint:
+          type: string
+          readOnly: true
+        tls:
+          allOf:
+          - $ref: '#/components/schemas/TlsEnum'
+          title: 通信の暗号化
+          minimum: 0
+          maximum: 32767
+        connect_timeout_seconds:
+          type: integer
+          maximum: 300
+          minimum: 1
+          title: 接続のタイムアウト（秒）
+        max_concurrency:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          title: 同時実行数の上限
+        is_active:
+          type: boolean
+          title: 有効
+        version:
+          type: integer
+          minimum: 0
+          description: 現在の版。更新では、編集を始めた時点の値を送る（作成では送らない）
+        description:
+          type: string
+          default: ''
+          description: エージェントに見せる、このConnectorの説明
+          maxLength: 5000
+        default_schema:
+          type: string
+          description: 表の名前にスキーマを書かなかったときのスキーマ。省略すると種別の既定（public、dbo）
+          maxLength: 128
+        tables:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorTableEntry'
+        max_rows:
+          type: integer
+          maximum: 1000000
+          minimum: 1
+          default: 1000
+        max_result_bytes:
+          type: integer
+          maximum: 1073741824
+          minimum: 1024
+          default: 10485760
+        timeout_seconds:
+          type: integer
+          maximum: 3600
+          minimum: 1
+          default: 30
+        is_sensitive:
+          type: boolean
+          default: false
+          description: 個人情報を主な中身とする接続先。ローカルLLMのモデルを使うタスク・会話にだけ割り当てる
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorPermission'
+          description: 使える役割・部門。更新では、送ると全体を置き換える
+        created_by:
+          type: string
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created
+      - created_by
+      - database
+      - has_password
+      - host
+      - id
+      - kind
+      - kind_display
+      - name
+      - password_hint
+      - updated
+      - username
+    ConnectorCheck:
+      type: object
+      description: 接続の確認の結果
+      properties:
+        ok:
+          type: boolean
+          readOnly: true
+        detail:
+          type: string
+          readOnly: true
+          description: 失敗の理由。成功したら空文字
+      required:
+      - detail
+      - ok
+    ConnectorColumn:
+      type: object
+      properties:
+        name:
+          type: string
+          readOnly: true
+        type:
+          type: string
+          readOnly: true
+        description:
+          type: string
+          readOnly: true
+      required:
+      - description
+      - name
+      - type
+    ConnectorKindEnum:
+      enum:
+      - 1
+      - 2
+      - 3
+      type: integer
+      description: |-
+        * `1` - PostgreSQL
+        * `2` - MySQL
+        * `3` - SQL Server
+    ConnectorPermission:
+      type: object
+      description: Connectorを使える役割か部門（どちらか一方）と、使える操作
+      properties:
+        id:
+          type: string
+          readOnly: true
+        group:
+          type: string
+          title: 名前
+          nullable: true
+          description: 役割の名前
+        department:
+          type: string
+          nullable: true
+        department_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumDepartment'
+          readOnly: true
+          nullable: true
+        operations:
+          type: array
+          items:
+            $ref: '#/components/schemas/OperationsEnum'
+          description: 使える操作。省略するとすべて（社内DBの操作はどれも読取り）
+      required:
+      - department_info
+      - id
+    ConnectorPermissionRequest:
+      type: object
+      description: Connectorを使える役割か部門（どちらか一方）と、使える操作
+      properties:
+        group:
+          type: string
+          minLength: 1
+          title: 名前
+          nullable: true
+          description: 役割の名前
+        department:
+          type: string
+          minLength: 1
+          nullable: true
+        operations:
+          type: array
+          items:
+            $ref: '#/components/schemas/OperationsEnum'
+          description: 使える操作。省略するとすべて（社内DBの操作はどれも読取り）
+    ConnectorQueryRequest:
+      type: object
+      description: SELECT文の試し実行（管理画面）。エージェントと同じ検査・上限を通る
+      properties:
+        sql:
+          type: string
+          minLength: 1
+          description: SELECT文。引数の場所は ? で書く
+          maxLength: 100000
+        params:
+          type: array
+          items: {}
+          maxItems: 100
+      required:
+      - sql
+    ConnectorQueryResult:
+      type: object
+      properties:
+        ok:
+          type: boolean
+          readOnly: true
+        error_kind:
+          type: string
+          readOnly: true
+          description: 失敗の種類。成功したら空文字
+        detail:
+          type: string
+          readOnly: true
+          description: 失敗の理由。成功したら空文字
+        sql:
+          type: string
+          readOnly: true
+          description: 実際に実行したSQL（検査した構文木から作り直したもの）
+        columns:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        rows:
+          type: array
+          items:
+            type: array
+            items:
+              type: string
+          readOnly: true
+          description: 値は文字列にしたもの（NULLは空文字）
+        row_count:
+          type: integer
+          readOnly: true
+        truncated:
+          type: boolean
+          readOnly: true
+          description: 行数・サイズの上限で打ち切った
+        preview_truncated:
+          type: boolean
+          readOnly: true
+          description: 取得した行のうち、応答には先頭の行だけを載せた（row_count が取得した行数）
+        csv_bytes:
+          type: integer
+          readOnly: true
+        elapsed_ms:
+          type: integer
+          readOnly: true
+        tables:
+          type: array
+          items:
+            type: string
+          readOnly: true
+      required:
+      - columns
+      - csv_bytes
+      - detail
+      - elapsed_ms
+      - error_kind
+      - ok
+      - preview_truncated
+      - row_count
+      - rows
+      - sql
+      - tables
+      - truncated
+    ConnectorRequest:
+      type: object
+      description: |-
+        Connectorの作成と表示。境界（公開する表、上限、機密のフラグ）は現在の版の値を平らに出す。
+
+        境界を変えて保存すると、サーバーが新しい版を作る。更新では、編集を始めた時点の `version` を送り、
+        その間に他の人が版を作っていたら409になる。パスワードは書き込み専用で、応答には末尾の4文字だけを出す
+      properties:
+        name:
+          type: string
+          minLength: 1
+          title: 名前
+          maxLength: 100
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/ConnectorKindEnum'
+          title: 種別
+          minimum: 0
+          maximum: 32767
+        host:
+          type: string
+          minLength: 1
+          title: ホスト
+          maxLength: 255
+        port:
+          type: integer
+          maximum: 65535
+          minimum: 1
+          description: 省略すると種別の既定のポート
+        database:
+          type: string
+          minLength: 1
+          title: DB名
+          maxLength: 128
+        username:
+          type: string
+          minLength: 1
+          title: ユーザー名
+          maxLength: 128
+        password:
+          type: string
+          writeOnly: true
+          description: 更新では、送らなければ変更しない
+          maxLength: 1000
+        tls:
+          allOf:
+          - $ref: '#/components/schemas/TlsEnum'
+          title: 通信の暗号化
+          minimum: 0
+          maximum: 32767
+        connect_timeout_seconds:
+          type: integer
+          maximum: 300
+          minimum: 1
+          title: 接続のタイムアウト（秒）
+        max_concurrency:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          title: 同時実行数の上限
+        is_active:
+          type: boolean
+          title: 有効
+        version:
+          type: integer
+          minimum: 0
+          description: 現在の版。更新では、編集を始めた時点の値を送る（作成では送らない）
+        description:
+          type: string
+          default: ''
+          description: エージェントに見せる、このConnectorの説明
+          maxLength: 5000
+        default_schema:
+          type: string
+          description: 表の名前にスキーマを書かなかったときのスキーマ。省略すると種別の既定（public、dbo）
+          maxLength: 128
+        tables:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorTableEntryRequest'
+        max_rows:
+          type: integer
+          maximum: 1000000
+          minimum: 1
+          default: 1000
+        max_result_bytes:
+          type: integer
+          maximum: 1073741824
+          minimum: 1024
+          default: 10485760
+        timeout_seconds:
+          type: integer
+          maximum: 3600
+          minimum: 1
+          default: 30
+        is_sensitive:
+          type: boolean
+          default: false
+          description: 個人情報を主な中身とする接続先。ローカルLLMのモデルを使うタスク・会話にだけ割り当てる
+        change_reason:
+          type: string
+          writeOnly: true
+          maxLength: 500
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorPermissionRequest'
+          description: 使える役割・部門。更新では、送ると全体を置き換える
+      required:
+      - database
+      - host
+      - kind
+      - name
+      - username
+    ConnectorTable:
+      type: object
+      description: DBの表・ビューと列
+      properties:
+        schema:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/ConnectorTableKindEnum'
+          readOnly: true
+        description:
+          type: string
+          readOnly: true
+        columns:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorColumn'
+          readOnly: true
+      required:
+      - columns
+      - description
+      - kind
+      - name
+      - schema
+    ConnectorTableEntry:
+      type: object
+      description: 公開する表・ビュー（版の `tables` の1件）
+      properties:
+        schema:
+          type: string
+          default: ''
+          description: MySQLでは空（DB名がスキーマ）
+          maxLength: 128
+        name:
+          type: string
+          maxLength: 128
+        description:
+          type: string
+          default: ''
+          maxLength: 2000
+        columns:
+          type: object
+          additionalProperties:
+            type: string
+            maxLength: 1000
+          description: 列の説明（列名 → 説明）。任意
+      required:
+      - name
+    ConnectorTableEntryRequest:
+      type: object
+      description: 公開する表・ビュー（版の `tables` の1件）
+      properties:
+        schema:
+          type: string
+          default: ''
+          description: MySQLでは空（DB名がスキーマ）
+          maxLength: 128
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        description:
+          type: string
+          default: ''
+          maxLength: 2000
+        columns:
+          type: object
+          additionalProperties:
+            type: string
+            maxLength: 1000
+          description: 列の説明（列名 → 説明）。任意
+      required:
+      - name
+    ConnectorTableKindEnum:
+      enum:
+      - table
+      - view
+      type: string
+      description: |-
+        * `table` - table
+        * `view` - view
+    ConnectorTables:
+      type: object
+      description: 表・ビューの一覧の取得の結果
+      properties:
+        ok:
+          type: boolean
+          readOnly: true
+        detail:
+          type: string
+          readOnly: true
+          description: 失敗の理由。成功したら空文字
+        tables:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorTable'
+          readOnly: true
+      required:
+      - detail
+      - ok
+      - tables
+    ConnectorUpdateRequest:
+      type: object
+      description: Connectorの更新。種別と接続先（ホスト・ポート・DB名）は変えられないので、読み取り専用にする
+      properties:
+        name:
+          type: string
+          minLength: 1
+          title: 名前
+          maxLength: 100
+        username:
+          type: string
+          minLength: 1
+          title: ユーザー名
+          maxLength: 128
+        password:
+          type: string
+          writeOnly: true
+          description: 更新では、送らなければ変更しない
+          maxLength: 1000
+        tls:
+          allOf:
+          - $ref: '#/components/schemas/TlsEnum'
+          title: 通信の暗号化
+          minimum: 0
+          maximum: 32767
+        connect_timeout_seconds:
+          type: integer
+          maximum: 300
+          minimum: 1
+          title: 接続のタイムアウト（秒）
+        max_concurrency:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          title: 同時実行数の上限
+        is_active:
+          type: boolean
+          title: 有効
+        version:
+          type: integer
+          minimum: 0
+          description: 現在の版。更新では、編集を始めた時点の値を送る（作成では送らない）
+        description:
+          type: string
+          default: ''
+          description: エージェントに見せる、このConnectorの説明
+          maxLength: 5000
+        default_schema:
+          type: string
+          description: 表の名前にスキーマを書かなかったときのスキーマ。省略すると種別の既定（public、dbo）
+          maxLength: 128
+        tables:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorTableEntryRequest'
+        max_rows:
+          type: integer
+          maximum: 1000000
+          minimum: 1
+          default: 1000
+        max_result_bytes:
+          type: integer
+          maximum: 1073741824
+          minimum: 1024
+          default: 10485760
+        timeout_seconds:
+          type: integer
+          maximum: 3600
+          minimum: 1
+          default: 30
+        is_sensitive:
+          type: boolean
+          default: false
+          description: 個人情報を主な中身とする接続先。ローカルLLMのモデルを使うタスク・会話にだけ割り当てる
+        change_reason:
+          type: string
+          writeOnly: true
+          maxLength: 500
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorPermissionRequest'
+          description: 使える役割・部門。更新では、送ると全体を置き換える
+      required:
+      - name
+      - username
+    ConnectorVersion:
+      type: object
+      description: 版の表示（履歴）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        number:
+          type: integer
+          readOnly: true
+          title: 版
+        description:
+          type: string
+          readOnly: true
+          title: 説明
+        default_schema:
+          type: string
+          readOnly: true
+          title: 既定のスキーマ
+        tables:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorTableEntry'
+          readOnly: true
+        max_rows:
+          type: integer
+          readOnly: true
+          title: 行数の上限
+        max_result_bytes:
+          type: integer
+          readOnly: true
+          title: 結果のサイズの上限（バイト）
+        timeout_seconds:
+          type: integer
+          readOnly: true
+          title: 実行時間の上限（秒）
+        is_sensitive:
+          type: boolean
+          readOnly: true
+          title: 機密
+        change_reason:
+          type: string
+          readOnly: true
+          title: 変更理由
+        created_by:
+          type: string
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - change_reason
+      - created
+      - created_by
+      - default_schema
+      - description
+      - id
+      - is_sensitive
+      - max_result_bytes
+      - max_rows
+      - number
+      - tables
+      - timeout_seconds
     Conversation:
       type: object
       description: 自分の会話。モデル設定を省くと既定のモデル設定にする。実行中に変えると、次のステップから切り替わる
@@ -5978,6 +7017,14 @@ components:
     NullEnum:
       enum:
       - null
+    OperationsEnum:
+      enum:
+      - datasource_describe
+      - datasource_query
+      type: string
+      description: |-
+        * `datasource_describe` - 表・列の説明を見る
+        * `datasource_query` - SELECT文で読み取る
     PaginatedArtifactList:
       type: object
       required:
@@ -6016,6 +7063,44 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ClarificationRequest'
+    PaginatedConnectorList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Connector'
+    PaginatedConnectorVersionList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorVersion'
     PaginatedConversationList:
       type: object
       required:
@@ -6339,6 +7424,89 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Skill'
+    PatchedConnectorUpdateRequest:
+      type: object
+      description: Connectorの更新。種別と接続先（ホスト・ポート・DB名）は変えられないので、読み取り専用にする
+      properties:
+        name:
+          type: string
+          minLength: 1
+          title: 名前
+          maxLength: 100
+        username:
+          type: string
+          minLength: 1
+          title: ユーザー名
+          maxLength: 128
+        password:
+          type: string
+          writeOnly: true
+          description: 更新では、送らなければ変更しない
+          maxLength: 1000
+        tls:
+          allOf:
+          - $ref: '#/components/schemas/TlsEnum'
+          title: 通信の暗号化
+          minimum: 0
+          maximum: 32767
+        connect_timeout_seconds:
+          type: integer
+          maximum: 300
+          minimum: 1
+          title: 接続のタイムアウト（秒）
+        max_concurrency:
+          type: integer
+          maximum: 1000
+          minimum: 1
+          title: 同時実行数の上限
+        is_active:
+          type: boolean
+          title: 有効
+        version:
+          type: integer
+          minimum: 0
+          description: 現在の版。更新では、編集を始めた時点の値を送る（作成では送らない）
+        description:
+          type: string
+          default: ''
+          description: エージェントに見せる、このConnectorの説明
+          maxLength: 5000
+        default_schema:
+          type: string
+          description: 表の名前にスキーマを書かなかったときのスキーマ。省略すると種別の既定（public、dbo）
+          maxLength: 128
+        tables:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorTableEntryRequest'
+        max_rows:
+          type: integer
+          maximum: 1000000
+          minimum: 1
+          default: 1000
+        max_result_bytes:
+          type: integer
+          maximum: 1073741824
+          minimum: 1024
+          default: 10485760
+        timeout_seconds:
+          type: integer
+          maximum: 3600
+          minimum: 1
+          default: 30
+        is_sensitive:
+          type: boolean
+          default: false
+          description: 個人情報を主な中身とする接続先。ローカルLLMのモデルを使うタスク・会話にだけ割り当てる
+        change_reason:
+          type: string
+          writeOnly: true
+          maxLength: 500
+        permissions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorPermissionRequest'
+          description: 使える役割・部門。更新では、送ると全体を置き換える
     PatchedConversationRequest:
       type: object
       description: 自分の会話。モデル設定を省くと既定のモデル設定にする。実行中に変えると、次のステップから切り替わる
@@ -8665,6 +9833,16 @@ components:
       - after
       - before
       - shape
+    TlsEnum:
+      enum:
+      - 1
+      - 2
+      - 3
+      type: integer
+      description: |-
+        * `1` - 暗号化しない
+        * `2` - 暗号化する（証明書を確かめない）
+        * `3` - 暗号化して証明書を確かめる
     Todo:
       type: object
       description: 作業の計画の1項目（harness/tools/todo_write.py）

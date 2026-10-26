@@ -19,6 +19,17 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev --no-install-project
 
 FROM base
+# SQL ServerのConnector（pyodbc）が使うMicrosoft ODBC Driver 18。Microsoftのライセンスのためリポジトリには含めず、
+# ビルド時にMicrosoftのリポジトリから取得する。ACCEPT_EULA=Y により、ビルドする人がライセンスに同意する
+# （https://aka.ms/odbc18eula。design.md §4.9.2）。このイメージは配布しない（deployment.md §2）
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && . /etc/os-release \
+    && python -c "import urllib.request as r; r.urlretrieve('https://packages.microsoft.com/config/debian/${VERSION_ID}/packages-microsoft-prod.deb', '/tmp/ms.deb')" \
+    && dpkg -i /tmp/ms.deb && rm /tmp/ms.deb \
+    && apt-get update \
+    && ACCEPT_EULA=Y apt-get install -y --no-install-recommends msodbcsql18 unixodbc libgssapi-krb5-2
 RUN useradd --system --uid 10001 --user-group --home-dir /app --no-create-home yoriki
 COPY --from=builder /opt/venv /opt/venv
 WORKDIR /app

@@ -17,7 +17,7 @@ from llm.models import ModelProfile
 from resources import formats
 from resources.models import Resource, ResourceVersion
 from user.models import Department
-from user.serializers import MinimumUserSerializer
+from user.serializers import MinimumDepartmentSerializer, MinimumUserSerializer
 from utils.exceptions import Conflict
 from utils.fields import NormalizedTextField
 from utils.serializers import ReadOnlyModelSerializer
@@ -292,15 +292,6 @@ class MinimumSkillVersionSerializer(serializers.ModelSerializer):
 
 
 # --- Skill ---
-
-
-class MinimumDepartmentSerializer(serializers.ModelSerializer):
-    id = serializers.CharField(source="uid", read_only=True)
-
-    class Meta:
-        model = Department
-        fields = ["id", "name"]
-        read_only_fields = fields
 
 
 class SkillSerializer(serializers.ModelSerializer):

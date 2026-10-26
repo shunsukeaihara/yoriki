@@ -22,7 +22,11 @@ dependencies = [
     "nanoid>=2.0.0",
     "openai>=3.26.1",
     "psycopg[binary,pool]>=3.3.6",
+    # 1.2.1〜1.2.3は、作ったばかりのユーザーがTLSなしで初めてログインすると AttributeError になる（caching_sha2_password）
+    "pymysql>=1.2.0,<1.2.1",
+    "pyodbc>=5.3.0",
     "python-pptx>=1.0.2",
+    "sqlglot>=30.22.0",
     "uvicorn>=0.54.0",
 ]
 
@@ -39,6 +43,7 @@ dev = [
     "types-boto3[s3]>=1.43.111",
     "types-docker>=7.2.0.20261006",
     "types-jsonschema>=4.26.0.20261006",
+    "types-pymysql>=1.2.0.20260923",
 ]
 
 [tool.uv]
@@ -53,7 +58,7 @@ warn_unused_ignores = true
 exclude = ["/migrations/"]
 
 [[tool.mypy.overrides]]
-module = ["allauth.*", "auditlog.*", "axes.*", "django_filters.*", "django_q.*", "nanoid.*"]
+module = ["allauth.*", "auditlog.*", "axes.*", "django_filters.*", "django_q.*", "nanoid.*", "pyodbc"]
 ignore_missing_imports = true
 
 [tool.django-stubs]

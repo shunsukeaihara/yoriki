@@ -58,6 +58,13 @@ export YORIKI_STORAGE_LOCAL_ROOT="$PWD/.objects"
 # 添付の1つのファイルの上限（MB）
 # export YORIKI_UPLOAD_MAX_MB=50
 
+# --- Connector（社内DB。design.md §4.9.2） ---
+# SQL ServerのODBC Driverの名前（既定は ODBC Driver 18 for SQL Server）
+# export YORIKI_CONNECTOR_ODBC_DRIVER="ODBC Driver 18 for SQL Server"
+# MySQL・SQL ServerのAdapterのテスト（connector/tests/test_adapters.py）を手元で動かすときの管理者の接続先
+# export YORIKI_CONNECTOR_TEST_MYSQL=mysql://root:<password>@127.0.0.1:3307
+# export YORIKI_CONNECTOR_TEST_SQLSERVER=mssql://sa:<password>@127.0.0.1:1434
+
 # --- フロントエンド（Nuxt） ---
 # 開発サーバーが /api を転送する先（既定は http://localhost:8000）
 # export YORIKI_DEV_API_ORIGIN=http://localhost:8000

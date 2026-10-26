@@ -193,7 +193,7 @@ cd frontend && pnpm dev
 | `/api/hooks/` | api:8000 | Webhook・Channelの受信。bodyの上限を小さくし、rate limitを強くする |
 | `/api/admin/`、`/api/schema/` | api:8000 | ログインとpermissionで守る（Django管理画面は基盤管理者、スキーマとSwagger UIはどの環境でもログインした利用者）。IPの制限は導入先が任意で追加する |
 | `/api/accounts/` | api:8000 | SSOのログイン開始と認証基盤からのコールバック |
-| `/api/files/<token>/` | api:8000 | 成果物の期限付き取得。セッションを使わずtokenを確認する。rate limitを付ける |
+| `/api/files/<token>/` | api:8000 | 出口（Zapier等）へ渡した成果物の期限付き取得。セッションを使わずtokenを確認する。rate limitを付ける。社員向けのダウンロードには使わない（セッションで認証し、取得のたびに閲覧の判定をし直す。authorization.md §7.1） |
 | `/_protected/` | （nginxの内部location） | `internal;` を付け、apiの `X-Accel-Redirect` からだけ使う。外から直接は取得できない |
 | `/api/ping/` | api:8000 | ヘルスチェック（認証なし） |
 | `/api/static/` | （nginxが直接返す） | Djangoの静的ファイル（§2）。長くキャッシュさせる |

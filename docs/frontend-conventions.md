@@ -350,7 +350,7 @@ export const usePermission = defineStore('permission', () => {
 - 権限の設計は [authorization.md](authorization.md) を正とする。
 - 権限コードはDjangoの `app_label.codename` の形で、`app/v1/my/` の `allPermissions`（Group経由と直接を含む本人のすべてのpermission）から判定する（`usePermission`）。所属は、同じ応答の `departments`（実際の所属）・`usableDepartments`（使える部門）・`manageableDepartments`（管理できる部門）を使い、フロントエンドで所属やpermissionの規則を作り直さない（authorization.md §4.1.1）。
 - 使う権限コードは `PermissionCode` に定数として追加し、画面のコードに文字列を直接書かない（`Permissions` はDOMの型名と衝突するので使わない）。
-- 管理画面（基盤の管理）は、APIと同じDjango標準のpermission（`<app_label>.view_<model>`・`add_*`・`change_*`・`delete_*`）で、ページ・メニュー・追加・更新・削除のボタンを出し分ける。ページとメニューは `view_*` か `change_*` のどちらかを持てば出す（変更できる人は閲覧もできる）。管理画面の一覧は所属で絞らない。
+- 管理画面（基盤の管理）は、APIと同じDjango標準のpermission（`<app_label>.view_<model>`・`add_*`・`change_*`・`delete_*`）で、ページ・メニュー・追加・更新・削除のボタンを出し分ける。ページとメニューは `view_*` か `change_*` のどちらかを持てば出す（一覧のAPIと同じ。変更できる人は閲覧もできる）。追加・削除だけを任せることはしない（`add_*`・`delete_*` は `view_*` か `change_*` と一緒に付ける。authorization.md §10）。ボタンはそれぞれのpermissionで出し分ける。管理画面の一覧は所属で絞らない。
 - 業務画面の範囲を持つもの（Skill・タスク）は、1件ごとの操作の可否を詳細・一覧のAPIが返す（例：Skillの `access`）。ボタンはそれで出し分け、permissionと所属から自分で計算しない。作成ボタンと、作成で選べる範囲・部門は、`allPermissions` と `manageableDepartments` で決める。
 - 基盤管理者かどうか（`is_superuser`）はAPIが返さない。基盤管理者はすべてのpermissionを持つので、permissionで出し分ければ足りる。
 - Groupの名前では判定しない。Groupはpermissionの集まりで、`allPermissions` にはGroupから得たpermissionも含まれる。

@@ -333,7 +333,7 @@ Runの中身が外へ出る経路をすべて列挙し、どれにも「結果�
 
 ## 10 基盤の管理
 
-- 管理APIはすべてpermissionで判定する。対象：部門・全社・システムのConnector・入口・出口、接続、システムのSkill・タスク、LLMの接続・モデル設定、Runtime Profile、SSOの設定、ユーザー（招待のリンクの発行を含む）、Groupの一覧（割り当ての選択肢）、部門と所属。Django標準のpermission（view・add・change・delete。changeを持てばviewもできる）か、範囲ごとのpermissionを使う。
+- 管理APIはすべてpermissionで判定する。対象：部門・全社・システムのConnector・入口・出口、接続、システムのSkill・タスク、LLMの接続・モデル設定、Runtime Profile、SSOの設定、ユーザー（招待のリンクの発行を含む）、Groupの一覧（割り当ての選択肢）、部門と所属。Django標準のpermission（view・add・change・delete。changeを持てばviewもできる）か、範囲ごとのpermissionを使う。追加・削除だけを任せることはせず、add・deleteはviewかchangeと一緒に付ける（一覧を見られないと、任せた操作にたどり着けないため）。
 - permissionの指定を書き忘れた操作を閉じる既定（`DEFAULT_PERMISSION_CLASSES`）は、誰も通さないものにする（superuserも通さない。書き忘れはテストですぐ分かる）。`PlatformAdmin`はなくす。
 - 委任したときの防止策（強い役割の中での事故を減らすためのもの）：
   - ユーザーの更新APIで書ける項目は、表示名・有効・Group・所属だけ。permissionの直接付与、`is_superuser`、SSOの識別子はAPIに出さない。

@@ -357,7 +357,7 @@ Teams・Slack・DiscordのChannel Pluginは、Triggerの受信AdapterとNotifica
 
 Channel Pluginにはcreate_thread、send_thread_message、receive_thread_reply等のcapabilitiesと対応チャネル種別を宣言する。Interaction BindingはPlugin・接続設定・Destination・入力モードを参照し、Run開始時にそのRevisionを固定する。返信受付はConversationInputへ正規化し、共通の会話処理へ渡す。スレッドIDは設定に直接書くのではなく、Runごとの実行結果として保存する。
 
-通知Pluginは、通知Adapterと合わせて既定の通知Skill（連携用の要約、出力Schema）を同梱してよい。同梱した通知Skillは全社の公開範囲のSkillとして登録し、通常のSkillと同じく版を持つ。共通Registry上で依存・対応版・有効状態を管理する。エージェントにStorage Backendの選択Toolを渡す必要はない。
+通知Pluginは、通知Adapterと合わせて既定の通知Skill（連携用の要約、出力Schema）を同梱してよい。同梱した通知Skillは全社の範囲のSkillとして登録し、通常のSkillと同じく版を持つ。通知Skillも、タスクに登録できるSkillの規則（authorization.md §5.4）に従う。システムタスクで使うときは、システムSkillとして登録したものを使う（全社Skillの公開者が、強い文脈で動く手順を変えられないように）。共通Registry上で依存・対応版・有効状態を管理する。エージェントにStorage Backendの選択Toolを渡す必要はない。
 
 共通Manifestにはplugin_id、plugin_version、extension_id、extension_type、api_version、config_schema、capabilities、必要な権限・Secretの種別を持たせる。通知Skillを含む場合はその固定版も参照する。サーバー起動時に配備済み実装をRegistryへ登録し、契約版、必須設定、接続確認を検証する。未知のPlugin ID、未対応の設定、必要能力がない組合せは設定段階で拒否する。失敗時に別の通知経路や保存先へ黙って切り替えない。
 
@@ -569,7 +569,7 @@ Adapterはvalidate_config、validate_destination、prepare_payload、deliverを�
 | webhook | 設定したendpointへ共通イベントをPOST | JSON結果と許可済みファイルの取得URL |
 | zapier | Catch Hook向けの形式に整形して送信 | 結果項目と、後続Zapが取得できるファイルURL |
 
-Zapier Adapterは汎用Webhook Adapterの送信処理を再利用できる。Teams・Slack・Discordは4.6〜4.7節の双方向Channel Pluginを初期対象とし、その送信部分も同じNotification Adapter契約で動かす。将来メール等を追加するときも、Runの完了処理を変更せずAdapterと設定Schemaを追加する。通知先はendpointに限定せず、登録済みユーザー・channel・宛先等をDestinationとして表す。最初から全経路の実装や多宛先配信を要求しない。
+Zapier Adapterは汎用Webhook Adapterの送信処理を再利用できる。Teams・Slack・Discordは4.6〜4.7節の双方向Channel Pluginを初期対象とし、その送信部分も同じNotification Adapter契約で動かす。将来ほかの送り先を追加するときも、Runの完了処理を変更せずAdapterと設定Schemaを追加する。通知先はendpointに限定せず、登録済みユーザー・channel・宛先等をDestinationとして表す。最初から全経路の実装や多宛先配信を要求しない。
 
 ResultEnvelopeはresult_id、run_id、タスク版、結果Schema版、確定データ、Artifact ID・ファイル名・MIME・サイズ・SHA-256を持つ。共通イベントには安定したevent_id、event_type、発生時刻、結果参照を持たせる。有効期限付きURLは配信時にArtifact Serviceへ発行を依頼し、永続的なArtifact IDと区別する。内部ログ、会話全体、Skillの原本は自動的に結果へ含めない。
 
@@ -581,11 +581,11 @@ Destinationは接続情報、Secret参照、許可scope、対応内容、timeout
 
 RunのCOMPLETEDは業務結果と成果物の確定を表す。Deliveryは配信待ち、配信中、受付確認済み、再試行待ち、失敗、取消を別に保持し、「処理完了・通知失敗」を表現する。保存済み結果を使って配信だけ再試行し、エージェントの実行や通知SkillのLLM処理をやり直さない。通信ごとの送信内容・URL有効期限はDeliveryAttemptへ記録し、再送でURLを更新してもevent_idと業務結果は維持する。
 
-配信キーはrun_event_id、Notification Binding Revision、Destination Revisionから作る。同じ完了イベントの自動通知とTool候補を統合でき、確認待ちが複数回発生しても別のRunEventとして通知できる。対話用の送信もInteraction Bindingから解決した送信Bindingとthread参照を使い、同じDelivery／Outboxで管理する。質問ごとにClarificationRequestのID・世代を持つ別イベントとする。同じイベントを同じ対話スレッドへ送る設定が重複した場合は一つの配信へ正規化する。手動送信は別のoperation keyを持つ。外部送信はat-least-onceであり、受付後に応答が失われた場合は重複し得る。受信側のevent_idによる重複処理を前提にし、exactly-onceとは表現しない。
+配信キーはrun_event_id、Notification Binding Revision、Destination Revisionから作る。同じ完了イベントの自動通知とTool候補を統合でき、確認待ちが複数回発生しても別のRunEventとして通知できる。対話用の送信もInteraction Bindingから解決した送信Bindingとthread参照を使い、同じDelivery／Outboxで管理する。質問ごとにClarificationRequestのID・世代を持つ別イベントとする。同じイベントを同じ対話スレッドへ送る設定が重複した場合は一つの配信へ正規化する。手動送信は別のoperation keyを持つ。外部送信で、受付後に応答が失われる等、送ったかどうか分からない障害では、自動で送り直さず確認待ちにする（authorization.md §6）。受信側のevent_idによる重複処理は補助として使い、exactly-onceとは表現しない。
 
 Adapterが分類した一時的な障害、timeout、429、再試行可能な5xx等は上限付きbackoffで扱う。権限・設定・形式エラー等は原因を表示する。通知Pluginの停止や未対応版の検出時は対象Deliveryを保持し、別方式へ勝手に送らない。通知設定を変更して過去結果を送り直す場合は、管理権限を検証した新しい配信操作として元の履歴と関連付ける。
 
-Webhookの2xxは送信先の受付確認であり、後続Zap等の業務完了ではない。in_appは通知欄への保存、メール等の将来Adapterはそのサービスの受付を、それぞれ明示する。外部の処理完了まで追う場合は別の認証済み結果返却経路を設計する。
+Webhookの2xxは送信先の受付確認であり、後続Zap等の業務完了ではない。in_appは通知欄への保存、将来のAdapterはそのサービスの受付を、それぞれ明示する。外部の処理完了まで追う場合は別の認証済み結果返却経路を設計する。
 
 run.failed、run.cancelled、run.waiting_user等はBindingで選んだイベントだけを同じDestinationへ送る。Conversationのリンクには通常の社内認証を要求し、外部配信用のファイルURLとは分ける。完了通知と結果配信を同じイベントで扱う場合、初期構成では一つのDeliveryで両方を届ける。
 
@@ -599,7 +599,7 @@ run.failed、run.cancelled、run.waiting_user等はBindingで選んだイベン�
 | Slack | 接続先Workspace・channel | channel IDと親メッセージのthread_ts |
 | Discord | 接続先guild（サーバー）・channel | thread channel IDと必要な親メッセージID |
 
-接続アプリ、資格情報、API権限は管理者が登録する。フロー編集者は利用を許可された接続とチャネルを選択し、LLMや外部payloadが宛先を指定し直すことはできない。初期検証対象はTeamsの標準チャネル、Slackのアプリが参加したチャネル、Discordのテキストチャネル内スレッドとする。共有・特殊・非公開チャネル等はPluginが対応能力と必要条件を明示し、未検証の種類を選択できないようにする。
+接続アプリ、資格情報、API権限は連携の管理者が登録する。チャネルも、連携の管理者が受信者を確かめて、範囲付きの出口（対話の連携を含む）として登録する（authorization.md §5.5）。フロー編集者は、タスクの範囲に許された出口から選ぶだけで、接続やチャネルを直接指定しない。LLMや外部payloadが宛先を指定し直すことはできない。初期検証対象はTeamsの標準チャネル、Slackのアプリが参加したチャネル、Discordのテキストチャネル内スレッドとする。共有・特殊・非公開チャネル等はPluginが対応能力と必要条件を明示し、未検証の種類を選択できないようにする。
 
 4.1節のdestination_idが参照する登録情報の概念例を示す。IDは例示であり、実際の宛先は接続アプリで確認したものを登録する。
 

@@ -993,27 +993,92 @@ class VersionConflict(Exception):
 from auditlog.registry import auditlog
 from django.conf import settings
 from django.db import models, transaction
+from django.db.models import Q
 from django.utils.translation import gettext_lazy as _
 
+from user.models import Department
 from utils.fields import NanoidField
 from utils.permissions import AppPermission
 from .errors import VersionConflict
 
 
+class SkillScope(models.IntegerChoices):
+    PERSONAL = 1, _("個人")
+    DEPARTMENT = 2, _("部門")
+    COMPANY = 3, _("全社")
+    SYSTEM = 4, _("システム")
+
+
+class SkillAction(models.TextChoices):
+    VIEW = "view", _("見る・使う")
+    EDIT = "edit", _("Draftを変更する")
+    PUBLISH = "publish", _("公開・切戻し・Toolの変更")
+    DELETE = "delete", _("削除")
+
+
+# 範囲ごとの規則表（authorization.md §5.1）。QuerySetとModelの両方がこれを読む。値は（編集、公開）のpermission
+SCOPE_PERMISSIONS = {
+    SkillScope.DEPARTMENT: (AppPermission.EDIT_DEPARTMENT_SKILLS, AppPermission.PUBLISH_DEPARTMENT_SKILLS),
+    SkillScope.COMPANY: (AppPermission.EDIT_COMPANY_SKILLS, AppPermission.PUBLISH_COMPANY_SKILLS),
+    SkillScope.SYSTEM: (AppPermission.EDIT_SYSTEM_SKILLS, AppPermission.PUBLISH_SYSTEM_SKILLS),
+}
+
+
+def _has_scope_permission(user, scope: SkillScope, action: SkillAction) -> bool:
+    edit, publish = SCOPE_PERMISSIONS[scope]
+    if action == SkillAction.EDIT:
+        return user.has_perm(edit.perm) or user.has_perm(publish.perm)  # 公開の権限は編集を含む
+    return user.has_perm(publish.perm)
+
+
+class SkillQuerySet(models.QuerySet):
+    def visible_to(self, user) -> "SkillQuerySet":
+        """見る・使えるSkill。個人は本人、部門は使える部門、全社は全員、システムはシステムSkillを編集できる人"""
+        q = (
+            Q(scope=SkillScope.PERSONAL, owner=user)
+            | Q(scope=SkillScope.DEPARTMENT, department__in=Department.objects.usable_by(user))
+            | Q(scope=SkillScope.COMPANY)
+        )
+        if _has_scope_permission(user, SkillScope.SYSTEM, SkillAction.EDIT):
+            q |= Q(scope=SkillScope.SYSTEM)
+        return self.filter(q, deleted=False)
+
+
 class Skill(models.Model):
     uid = NanoidField(unique=True)
     name = models.CharField(_("名前"), max_length=100)
-    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, verbose_name=_("所有者"))
+    scope = models.PositiveSmallIntegerField(_("範囲"), choices=SkillScope.choices)
+    # 個人は作成者、部門は1つの部門。全社・システムはどちらもない
+    owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True,
+                              verbose_name=_("作成者"))
+    department = models.ForeignKey(Department, on_delete=models.PROTECT, null=True, blank=True, related_name="+",
+                                   verbose_name=_("部門"))
     latest_version = models.PositiveIntegerField(_("最新の版"), default=0)
 
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)
     deleted = models.BooleanField(default=False)
 
+    objects = SkillQuerySet.as_manager()
+
     class Meta:
         verbose_name = _("Skill")
         verbose_name_plural = verbose_name
-        permissions = [AppPermission.PUBLISH_COMPANY_SKILLS.meta]
+        permissions = [p.meta for pair in SCOPE_PERMISSIONS.values() for p in pair]
+
+    def can(self, user, action: SkillAction) -> bool:
+        """このSkillに対して操作できるか。一覧（visible_to）と同じ規則表で判定する"""
+        if self.deleted or not user.is_active:
+            return False
+        if self.scope == SkillScope.PERSONAL:
+            return self.owner_id == user.pk  # 個人は本人だけ（permissionを見ない）
+        if action == SkillAction.VIEW:
+            return Skill.objects.visible_to(user).filter(pk=self.pk).exists()
+        if self.scope == SkillScope.DEPARTMENT and not (
+            Department.objects.manageable_by(user).filter(pk=self.department_id).exists()
+        ):
+            return False
+        return _has_scope_permission(user, SkillScope(self.scope), action)
 
     def __str__(self):
         return self.name

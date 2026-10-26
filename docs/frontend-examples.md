@@ -193,6 +193,9 @@ const saved = (value: Destination) => {
 `pages/manage.vue` と `middleware/manage.ts` は実装済みで、変更しない。ページを追加したら、メニューの項目を足す。`/manage` に入れるかどうかは、表示できる項目があるかで決まる。
 
 ```ts
+// 通知先の管理画面に入れるpermission（一覧のAPIと同じ、閲覧か変更）
+export const DESTINATION_PERMISSIONS: PermissionCode[] = [PermissionCode.VIEW_DESTINATION, PermissionCode.CHANGE_DESTINATION]
+
 const { $i18n } = useNuxtApp()
 const all = computed<ManageMenuItem[]>(() => [
   {
@@ -200,7 +203,7 @@ const all = computed<ManageMenuItem[]>(() => [
     icon: 'i-lucide-send',
     to: '/manage/destinations',
     // リンク先のページの definePageMeta と同じ権限
-    permission: [PermissionCode.VIEW_DESTINATION, PermissionCode.CHANGE_DESTINATION],
+    permission: DESTINATION_PERMISSIONS,
   },
 ])
 ```
@@ -211,7 +214,7 @@ const all = computed<ManageMenuItem[]>(() => [
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 
-definePageMeta({ permission: [PermissionCode.VIEW_DESTINATION, PermissionCode.CHANGE_DESTINATION] })
+definePageMeta({ permission: DESTINATION_PERMISSIONS })
 
 const api = useAPI()
 const { t } = useI18n()

@@ -175,6 +175,13 @@ class ConnectorViewSet(SoftDeleteMixin, ModelViewSet):
         # 所属の軸：全社向けか、使える部門に所属しているConnectorだけ（それ以外は404）
         return super().get_queryset().filter(pk__in=Connector.objects.visible_to(self.request.user).values("pk"))
 
+    def get_usable_object(self) -> Connector:
+        """接続先のDBにつなぐ操作（説明、試し実行）の対象。無効なConnector・接続先、版のないものでは断る"""
+        connector = self.get_object()
+        if not Connector.objects.usable_by(self.request.user).filter(pk=connector.pk).exists():
+            raise Conflict(_("このConnectorか接続先が無効なため、使えません"))
+        return connector
+
     def get_serializer_class(self):
         # 更新では使うDB接続を変えられない
         if self.action in ("update", "partial_update"):
@@ -250,7 +257,7 @@ class ConnectorViewSet(SoftDeleteMixin, ModelViewSet):
     @action(detail=True, methods=["get"], serializer_class=ConnectorTablesSerializer)
     def describe(self, request, *args, **kwargs):
         try:
-            result = ConnectorTablesSerializer.build(get_adapter(self.get_object()).describe())
+            result = ConnectorTablesSerializer.build(get_adapter(self.get_usable_object()).describe())
         except ConnectorError as exc:
             result = ConnectorTablesSerializer.build(None, exc.message)
         return Response(self.get_serializer(result).data)
@@ -265,7 +272,7 @@ class ConnectorViewSet(SoftDeleteMixin, ModelViewSet):
     def query(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        adapter = get_adapter(self.get_object())
+        adapter = get_adapter(self.get_usable_object())
         sql, params = serializer.validated_data["sql"], serializer.validated_data["params"]
         try:
             # 応答に載せる行だけをメモリに残す（上限までの全体を貯めない）

@@ -383,9 +383,13 @@ class ConnectorSerializer(serializers.ModelSerializer):
         if departments is not None:
             # validate() は取得した時点の部門で確かめた。Connectorの行は revise() でロックしているので、最新の部門で
             # 確かめ直す（その間に別の部門が足されていたら、所属していない部門を外すことになる）
-            check_department_change(
-                self.context["request"].user, set(instance.departments.all()), set(departments), creating=False
+            # 先読み（prefetch_related）した取得時の一覧ではなく、DBから読み直す
+            latest = set(
+                Department.objects.filter(
+                    pk__in=instance.departments.through.objects.filter(connector_id=instance.pk).values("department_id")
+                )
             )
+            check_department_change(self.context["request"].user, latest, set(departments), creating=False)
             instance.departments.set(departments)
         for name, value in validated_data.items():
             setattr(instance, name, value)

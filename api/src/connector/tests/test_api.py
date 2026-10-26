@@ -187,7 +187,8 @@ class TestDepartmentScope:
         other = Department.objects.create(name="営業部")
         connector = ConnectorFactory.create()
         connector.departments.set([department])
-        stale = Connector.objects.get(pk=connector.pk)
+        # ViewSetと同じく、取得時に部門を先読みしておく
+        stale = Connector.objects.prefetch_related("departments").get(pk=connector.pk)
         request = APIRequestFactory().patch("/")
         request.user = editor
         serializer = ConnectorUpdateSerializer(
@@ -609,6 +610,23 @@ class TestOperations:
         assert body["row_count"] == 250
         assert body["preview_truncated"] is True
         assert body["truncated"] is False
+
+    @pytest.mark.django_db
+    def test_inactive_connector_does_not_connect(self, admin_client, monkeypatch):
+        connector = ConnectorFactory.create(version__tables=[{"schema": "public", "name": "vendors"}])
+
+        def connect(self):
+            raise AssertionError("無効なConnectorでは接続しない")
+
+        monkeypatch.setattr("connector.adapters.postgresql.PostgreSQLAdapter.connect", connect)
+        for target in (connector, connector.connection):
+            target.is_active = False
+            target.save()
+            assert admin_client.get(f"{CONNECTORS}{connector.uid}/describe/").status_code == 409
+            res = admin_client.post(f"{CONNECTORS}{connector.uid}/query/", {"sql": "SELECT 1"}, format="json")
+            assert res.status_code == 409
+            target.is_active = True
+            target.save()
 
     @pytest.mark.django_db
     def test_query_params_must_be_scalars(self, admin_client):

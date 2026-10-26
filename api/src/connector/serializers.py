@@ -161,11 +161,12 @@ class DatabaseConnectionSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"password": _("ホスト・ポート・DB名を変えるときは、パスワードを入力し直してください")}
             )
+        # ロックした最新の行に当てて保存し、それを返す（取得した後に他の要求が変えた項目を、応答でも古くしない）
         for name, value in validated_data.items():
-            setattr(instance, name, value)
-        # 変えた項目だけを保存する（取得した後に他の要求が変えた項目を書き戻さない）
-        instance.save(update_fields=[*validated_data, "updated"])
-        return instance
+            setattr(latest, name, value)
+        latest.save(update_fields=[*validated_data, "updated"])
+        latest.connector_count = getattr(instance, "connector_count", None)  # 一覧の注釈を引き継ぐ
+        return latest
 
 
 # 接続先。変えるときはパスワードを入れ直す

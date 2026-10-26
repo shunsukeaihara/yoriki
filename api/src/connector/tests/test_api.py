@@ -377,6 +377,18 @@ class TestDatabaseConnection:
         assert connection.host == "db2.example.co.jp"
 
     @pytest.mark.django_db
+    def test_response_reflects_concurrent_change(self, admin_client):
+        # 取得した後に別の要求が変えたホストも、応答では最新の値になる
+        connection = DatabaseConnectionFactory.create(host="db.example.co.jp")
+        stale = DatabaseConnection.objects.get(pk=connection.pk)
+        DatabaseConnection.objects.filter(pk=connection.pk).update(host="db2.example.co.jp")
+        serializer = DatabaseConnectionUpdateSerializer(stale, data={"username": "reader2"}, partial=True)
+        assert serializer.is_valid(), serializer.errors
+        saved = serializer.save()
+        assert (saved.host, saved.username) == ("db2.example.co.jp", "reader2")
+        assert serializer.data["host"] == "db2.example.co.jp"
+
+    @pytest.mark.django_db
     def test_update_serializer_keeps_kind(self):
         assert "kind" in DatabaseConnectionUpdateSerializer.Meta.read_only_fields
 

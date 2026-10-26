@@ -71,7 +71,7 @@ Skillは指示文に加え、その業務で使うファイル一式を保持で
 | 運用 | 中間生成物を自動削除し、停止Workerや孤立コンテナを回収する |
 | 将来の拡張 | 共通の実行・保存契約を使ってWorkerサーバーを追加し、同じ私設ネットワーク内の別ホストでの実行を可能にする |
 
-MVPは社内文書・表計算・PDF等の分析や作成、会話によるSkillの改善、チャット／Webhookの起動Plugin、画面内／Webhook・Zapierの通知Plugin、Teams・Slack・Discordの双方向Channel Plugin、ローカル／S3のStorage Backend、ファイルsnapshotによる退避・復元、社内DB（PostgreSQL・MySQL・SQL Server）を読取り専用で照会するデータソースのConnectorを対象とする。SharePoint・Google Drive・MCPサーバー・Web検索とWeb取得へのConnectorは初期段階の後に追加する。定時実行、メール等の別経路は同じ拡張契約へ追加できるようにするが、すべてのAdapterを初期実装する必要はない。実行コードを持つPluginは基盤管理者が配備時に導入する。利用者やエージェントによる管理サーバー上への任意コードの動的導入、Sandboxからの直接通信、未登録の相手への外部送信は対象外とする。エージェントがそのRunで使うスクリプトをSandbox内に生成することは許可する。
+MVPは社内文書・表計算・PDF等の分析や作成、会話によるSkillの改善、チャット／Webhookの起動Plugin、画面内／Webhook・Zapierの通知Plugin、Teams・Slack・Discordの双方向Channel Plugin、ローカル／S3のStorage Backend、ファイルsnapshotによる退避・復元、社内DB（PostgreSQL・MySQL・SQL Server）を読取り専用で照会するデータソースのConnectorを対象とする。SharePoint・Google Drive・MCPサーバー・Web検索とWeb取得へのConnectorは初期段階の後に追加する。定時実行等の別経路は同じ拡張契約へ追加できるようにするが（メールの送信は持たない。authorization.md §5.5）、すべてのAdapterを初期実装する必要はない。実行コードを持つPluginは基盤管理者が配備時に導入する。利用者やエージェントによる管理サーバー上への任意コードの動的導入、Sandboxからの直接通信、未登録の相手への外部送信は対象外とする。エージェントがそのRunで使うスクリプトをSandbox内に生成することは許可する。
 
 ## 3 エージェントとSkillのモデル
 
@@ -747,8 +747,9 @@ Connectorは「接続」「境界」「使い方」の3層に分けて管理す�
 
 認証は、用途によって次のどちらかにする。
 
-- **利用者の権限で接続する**：チャットでの利用では、SSOのログイン時に利用者の同意を得たOAuthのtoken（Microsoft Graph、Google Drive等）で接続し、その利用者が見られる範囲だけを扱う。ログイン時にtokenを得られない構成（Auth0等でのログイン）では、Connectorの利用時に別途同意を得る（§10.0）。tokenはControl Planeで暗号化して保持する。
-- **アプリの権限で接続する**：Webhook等の自動実行では利用者がいないため、アプリとして登録した資格情報を使う。権限は対象のサイト・フォルダに限定する（例：Microsoft Graphの `Sites.Selected`）。Google Workspaceのドメイン全体の委任のような広い権限は使わない。
+- **資格情報はConnectorの範囲で決まる**（authorization.md §5.2）。起動のしかたでは変えない。
+- **利用者の権限で接続する（個人のConnector）**：SSOのログイン時に利用者の同意を得たOAuthのtoken（Microsoft Graph、Google Drive等）で接続し、その利用者が見られる範囲だけを扱う。本人だけが使い、会話と本人の個人のタスクで使う。ログイン時にtokenを得られない構成（Auth0等でのログイン）では、Connectorの利用時に別途同意を得る（§10.0）。tokenはControl Planeで暗号化して保持する。
+- **アプリの権限で接続する（部門・全社・システムのConnector）**：会話でもタスクでも、Connector管理者がアプリとして登録した共有の資格情報を使う。権限は対象のサイト・フォルダに限定する（例：Microsoft Graphの `Sites.Selected`）。Google Workspaceのドメイン全体の委任のような広い権限は使わない。
 
 #### 4.9.2 社内DB（データソース）
 
@@ -1309,7 +1310,7 @@ Artifact Storeはサーバー設定でLocalまたはS3 Backendを選べるよう
 
 管理画面の操作（Connector・接続、LLMの接続・モデル設定、Runtime Profile、SSOの設定、ユーザー、部門と所属等）は、すべてpermissionで判定する（authorization.md §10）。Djangoの標準のpermissionを付ければ、基盤管理者でない人（Connector管理者・ユーザー管理者等の信頼された強い役割）に管理を任せられる。permissionの指定を書き忘れた操作は誰も通さない。基盤管理者（`is_superuser`）はアプリの判定に持ち込まず（すべてのpermissionを持つ人として扱う）、`is_superuser` を見るのはDjango管理画面とパスワードでの非常口のログインだけにする。`is_superuser` はフロントエンドに渡さない。
 
-Connectorを利用者の権限で使う場合（§4.9.1）は、ログイン時に追加のscope（Microsoft Graphの `Files.Read`・`Sites.Read.All`、Google Driveの `drive.readonly` 等）と `offline_access` を要求し、refresh tokenを暗号化して保存する。Auth0やその他のOIDCでログインする場合は、ログイン時にMicrosoft Graph・Google Driveに使うtokenを得られないため、Connectorの利用時に別途OAuthの同意を得る。
+個人のConnector（利用者の権限で使うもの。§4.9.1）では、ログイン時に追加のscope（Microsoft Graphの `Files.Read`・`Sites.Read.All`、Google Driveの `drive.readonly` 等）と `offline_access` を要求し、refresh tokenを暗号化して保存する。Auth0やその他のOIDCでログインする場合は、ログイン時にMicrosoft Graph・Google Driveに使うtokenを得られないため、Connectorの利用時に別途OAuthの同意を得る。
 
 前段に認証プロキシ（oauth2-proxy等）がある環境でも、Yorikiは常に自身でログインを行い（社内SSOかYorikiのアカウント）、Djangoのセッションを作る。認証プロキシは社員以外を通さないためのバリアとして扱い、プロキシのIDトークンやヘッダーをYorikiへ転送させず、利用者の判定にも使わない。社員はプロキシとYorikiで2回ログインすることになるが、同じIdPを使っていれば2回目は通常、操作なしのSSOで済む。Webhook・期限付きの成果物取得・ヘルスチェックは前段の認証プロキシを通さない（deployment.md §8.6）。
 
@@ -1542,7 +1543,7 @@ Skillの画面（部門・全社・個人は業務画面、システムは管理
 
 通知内容は「完了状態」「作業結果」「完了状態と作業結果」から選び、必要なら通知Skillを指定する。対話チャネルと結果連携先は初期仕様ではそれぞれフローごとに最大一つとし、選択したPluginとDestinationの互換性を保存前に検証する。プレビューには通知先、対象イベント、送信する項目・成果物を示す。
 
-追加設定として入力項目・添付（型と取りうる値）、出力項目・成果物、連携元認証、予算、回答期限、通知イベントを設ける。誰の権限で動くかは設定せず、タスクの範囲と起動のしかたで決まる（authorization.md §6）。Destinationの接続先と認証情報は連携の管理者が管理画面で管理し、タスクでは選ぶだけにする。タスクのプロンプト編集権限だけでは、外部通知先や共有範囲を変更できない。
+追加設定として入力項目・添付（型と取りうる値）、出力項目・成果物、連携元認証、予算、回答期限、通知イベントを設ける。誰の権限で動くかは設定せず、タスクの範囲と起動のしかたで決まる（authorization.md §6）。Destinationの接続先と認証情報は連携の管理者が管理画面で管理し、タスクでは選ぶだけにする。タスクを管理できる人は、タスクの範囲に許された出口を選べるが、出口の接続先・受信者や、出口・入口を使ってよい範囲は変えられない（連携の管理者だけ。authorization.md §5.5）。
 
 自動実行の履歴にはタスク名、起動方法と起動元、処理状態、確認事項、成果物、通知方法と通知先の表示名、配信状態を表示する。「処理完了・通知失敗」の場合は結果を保持したまま「通知を再試行」を操作できるようにし、「処理を再実行」と分ける。通知が受け付けられた場合も、Zapier等での後続処理完了を表示したことにはしない。
 

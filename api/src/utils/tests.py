@@ -1,4 +1,5 @@
 import pytest
+from django.apps import apps
 from django.contrib.auth.models import AnonymousUser, Group, Permission
 from django.core.exceptions import ImproperlyConfigured
 from django.test import RequestFactory
@@ -8,6 +9,7 @@ from user.factories import SSOProviderFactory, UserFactory
 
 from .backends import PasswordBackend
 from .crypto import encrypt_secret
+from .fields import ENCRYPTED_SECRET_FIELDS
 from .lock import lock
 from .permissions import AppUser, PlatformAdmin, require_permission
 
@@ -124,3 +126,11 @@ class TestSecretField:
         settings.YORIKI_SECRET_ENCRYPTION_KEYS = ["not-a-fernet-key"]
         with pytest.raises(ImproperlyConfigured):
             encrypt_secret("x")
+
+
+@pytest.mark.django_db
+def test_encrypted_secret_fields_are_current_models():
+    # マイグレーションを当てた後でも、鍵の入れ替えの対象は今のモデルだけ（過去の形のモデルを含めない）
+    assert ENCRYPTED_SECRET_FIELDS
+    for model, _name in ENCRYPTED_SECRET_FIELDS:
+        assert apps.get_model(model._meta.label) is model

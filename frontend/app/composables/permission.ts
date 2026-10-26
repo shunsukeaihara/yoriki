@@ -9,6 +9,14 @@ export const PermissionCode = {
   CHANGE_LLM_CONNECTION: 'llm.change_llmconnection',
   CHANGE_MODEL_PROFILE: 'llm.change_modelprofile',
   CHANGE_RUNTIME_PROFILE: 'runtime.change_runtimeprofile',
+  // 接続先はpermissionだけで判定する。Connectorの作成・編集・削除は、所属（使える部門）とpermissionの両方で判定する
+  VIEW_DATABASE_CONNECTION: 'connector.view_databaseconnection',
+  ADD_DATABASE_CONNECTION: 'connector.add_databaseconnection',
+  CHANGE_DATABASE_CONNECTION: 'connector.change_databaseconnection',
+  DELETE_DATABASE_CONNECTION: 'connector.delete_databaseconnection',
+  ADD_CONNECTOR: 'connector.add_connector',
+  CHANGE_CONNECTOR: 'connector.change_connector',
+  DELETE_CONNECTOR: 'connector.delete_connector',
   // 部門と所属も基盤管理者だけが管理する
   CHANGE_DEPARTMENT: 'user.change_department',
   // 全社の範囲のSkill（役割「Skill公開者」）。個人・部門の範囲は、本人・部門の中の役割で決まる（Skill.access）

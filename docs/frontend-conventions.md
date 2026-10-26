@@ -96,7 +96,7 @@ frontend/
     ├── components/
     │   ├── common/             # D*ラッパー（prefixなしで自動import）
     │   └── <domain>/           # 業務コンポーネント（例：run/RunCancelDialog.vue）
-    ├── composables/            # field, date, form, list, confirm, account, permission, manage, locale, markdown, stream, llm, sso, user, conversation, run, artifact, skill
+    ├── composables/            # field, date, form, list, confirm, account, permission, manage, locale, markdown, stream, llm, sso, user, conversation, run, artifact, skill, connector
     ├── layouts/                # default（社員。サイドバーに会話の一覧）、anonymous（ログイン・開発用）、manage（管理）
     ├── middleware/             # auth.global.ts、permission.global.ts、manage.ts（/manage の入口）
     ├── pages/                  # 社員向けはルート直下、管理向けは manage/ 以下、dev/ は開発用
@@ -148,6 +148,7 @@ export default defineNuxtConfig({
 `api/client.ts` の `createHttp()` は、axiosのインスタンスを作り、認証にセッションCookieとCSRFを使う。
 
 - リクエストのbodyは `snakeProps()`、クエリは `qs.stringify(snakeProps(params), { indices: false })` で変換する。
+- 利用者・エージェント・DBがキーを決めるJSON（SkillのJSON Schema、期待する業務結果・業務結果、Toolの引数、Connectorの列名 → 説明、platform → digest）は、項目の名前だけを変換し、値の中のキーは変換しない（`client.ts` の `RAW_VALUE_KEYS`）。変換すると `invoice_no` が `invoiceNo` に、`VendorCode` が `vendor_code` に変わるため。このような項目をAPIに足したら、名前を `RAW_VALUE_KEYS` に加える。
 - レスポンスがJSONなら `camelProps()` で変換し、`data` だけを返す（`AxiosResponse` は返さない）。
 - 認証はDjangoのセッションCookieで行う（`withCredentials: true`）。トークンを画面側で持たず、`Authorization` ヘッダーも付けない。
 - 書き込みの要求には、Cookieの `csrftoken` を `X-CSRFToken` ヘッダーに付ける（axiosの `xsrfCookieName` / `xsrfHeaderName`）。
@@ -346,7 +347,7 @@ export const usePermission = defineStore('permission', () => {
 
 - 権限コードはDjangoの `app_label.codename` の形で、`app/v1/my/` の `allPermissions` から判定する（`usePermission`）。
 - 使う権限コードは `PermissionCode` に定数として追加し、画面のコードに文字列を直接書かない（`Permissions` はDOMの型名と衝突するので使わない）。
-- 基盤管理者だけが使える画面（LLMの接続等）は、そのModelのDjango標準のpermission（`llm.change_llmconnection` 等）で出し分ける。基盤管理者はすべてのpermissionを持つ。APIは `PlatformAdmin` で守っている（backend-conventions.md §6.3）。`isPlatformAdmin` では判定しない。
+- 接続先・Connectorの画面は、APIと同じDjango標準のpermission（`connector.view_databaseconnection`・`add_*`・`change_*`・`delete_*`）で、ページ・追加・更新・削除のボタンを出し分ける。Connectorの一覧はAPIが所属で絞る。基盤管理者だけが使える画面（LLMの接続等）は、そのModelのDjango標準のpermission（`llm.change_llmconnection` 等）で出し分ける。基盤管理者はすべてのpermissionを持つ。APIは `PlatformAdmin` で守っている（backend-conventions.md §6.3）。`isPlatformAdmin` では判定しない。
 - 役割（業務管理者・Skill公開者等）の名前では判定しない。役割はpermissionをまとめたGroupで、`allPermissions` にはGroupから得たpermissionも含まれる。基盤管理者はすべてのpermissionを持つ（backend-conventions.md §6.3）。
 
 ### 6.2 画面・メニュー・ボタン
@@ -354,8 +355,8 @@ export const usePermission = defineStore('permission', () => {
 - ページの権限は `definePageMeta({ permission: PermissionCode.X })` で宣言し、`middleware/permission.global.ts` で確認する。権限がなければ403のエラー画面にする。
 - `permission` に配列を指定した場合は、いずれか1つを持っていればよい（`hasAny`）。
 - `definePageMeta` で `permission`・`auth` を型付きで書けるよう、`app/types/page-meta.d.ts` で `PageMeta` を拡張している。
-- 管理画面のサイドメニューは `composables/manage.ts` の `useManageMenu()` に1か所で定義する。各項目に `permission`（リンク先のページの `definePageMeta` と同じもの）を持たせ、権限のない項目は表示しない。
-- `pages/manage.vue` の `definePageMeta({ layout: 'manage', middleware: 'manage' })` は `/manage` 以下の全ページに適用される（route metaは親から子に引き継がれる）。`middleware/manage.ts` は、表示できるメニュー項目が1つもなければ403にする。`/manage` に入れる権限の一覧を別に持たず、メニューの定義から決める。`/manage` 自体はメニューの最初の項目へ移動する。
+- 管理画面のサイドメニューは `composables/manage.ts` の `useManageMenu()` に1か所で定義する。各リンクに `permission`（リンク先のページの `definePageMeta` と同じもの）を持たせ、権限のない項目は表示しない。見出し（`children` を持つ項目。例：Connector → DB Connector → 接続先・Connector）で入れ子にでき、表示できるリンクが1つもない見出しは出さない。`items` はメニューの木、`links` は表示できるリンクを平らにしたもので、見出しの文字・`/manage` の最初の移動先・入口の判定には `links` を使う。
+- `pages/manage.vue` の `definePageMeta({ layout: 'manage', middleware: 'manage' })` は `/manage` 以下の全ページに適用される（route metaは親から子に引き継がれる）。`middleware/manage.ts` は、表示できるリンクが1つもなければ403にする。`/manage` に入れる権限の一覧を別に持たず、メニューの定義から決める。`/manage` 自体はメニューの最初の項目へ移動する。
 - 社員向けのlayoutの「管理」の入口も、表示できるメニュー項目があるときだけ出す。
 - ボタンや操作は `v-if="hasPermission(PermissionCode.X)"` で出し分ける。コメントで「サーバー側でも403で弾かれる」ことを書いておく。
 - 特定の組織IDやユーザーIDをフロントエンドに直接書いて機能を出し分けない。出し分けが必要なら、サーバーが権限か設定値として返す。

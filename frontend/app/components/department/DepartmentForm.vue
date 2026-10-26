@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** 部門の作成と名前の変更。所属は部門の詳細（DepartmentMemberList）で管理する */
+/** 部門の作成と変更。所属は部門の詳細（DepartmentMemberList）で管理する */
 const api = useAPI()
 const toast = useToast()
 const { t } = useI18n()
@@ -10,13 +10,15 @@ const emit = defineEmits<{
   failed: [error: unknown]
 }>()
 
-const emptyForm = () => ({ id: null as string | null, name: '' })
+const emptyForm = () => ({ id: null as string | null, name: '', coversAllDepartments: false })
 const form = ref(emptyForm())
 
 watch(
   modelValue,
   (value) => {
-    form.value = value ? { id: value.id, name: value.name } : emptyForm()
+    form.value = value
+      ? { id: value.id, name: value.name, coversAllDepartments: value.coversAllDepartments ?? false }
+      : emptyForm()
   },
   { immediate: true },
 )
@@ -45,5 +47,15 @@ defineExpose({ onSubmit, loading, canPost })
   <DFormStack>
     <DFormAlert :errors="errors" />
     <DTextField v-model="form.name" :label="$t('名前')" required :error-messages="errors.name" />
+    <DSwitch
+      v-model="form.coversAllDepartments"
+      :label="$t('すべての部門の範囲を含む')"
+      :hint="
+        $t(
+          'この部門に所属する人を、すべての部門に所属しているものとして扱います。すべての部門のConnectorを見る人の管理に使います',
+        )
+      "
+      :error-messages="errors.coversAllDepartments"
+    />
   </DFormStack>
 </template>

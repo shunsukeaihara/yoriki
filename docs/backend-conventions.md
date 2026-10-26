@@ -124,7 +124,7 @@ design.md §5.1の永続オブジェクトを、次の単位で分ける。実�
 | `worker` | Workerの登録情報 |
 | `usage` | UsageLedger、クオータ |
 | `llm` | LLMConnection、ModelProfile、Provider Adapter（design.md §4.8） |
-| `connector` | Connector、ConnectorVersion（境界の版）、ConnectorPermission（使える役割・部門と操作）、操作のAdapter（社内DB、SharePoint、Google Drive、MCP。design.md §4.9） |
+| `connector` | DatabaseConnection（社内DBの接続先と資格情報）、Connector（1つの接続の上の範囲）、ConnectorVersion（境界の版）、使える部門（所属の軸。空なら全社向け）、操作のAdapter（社内DB、SharePoint、Google Drive、MCP。design.md §4.9） |
 | `stream` | SSEのストリームview、イベントのSerializer（realtime.md） |
 | `harness` | Modelなし。Runner（実行のループ）、Tool、RunEventからの文脈の組立、圧縮、Sandboxの操作（harness.md §3） |
 
@@ -638,16 +638,18 @@ DATABASES = {
 | `common/management/commands/` | 複数アプリにまたがる管理コマンド（`rotate_secret_encryption`） |
 | `common/choices.py` | 複数アプリで使うChoices |
 
-- 権限はDjangoのpermissionで判定する。Userのフラグや役割の名前では判定しない。流れは「permissionを定義する → Groupに割り当てる → Groupをユーザーに割り当てる」とする。
+- 権限は「所属」と「permission」の2軸で判定する（design.md §3.6）。所属（部門。`Department.objects.of(user)`・`covers_all_departments(user)`）はどの部門のものを扱えるか、permissionは何ができるかを表す。判定にGroupを使わない（`user.groups` や Groupの名前で絞らない）。Groupはpermissionをまとめて付けるための入れ物で、後から自由に名前・構成を変えられるようにする。
+- permissionはDjangoのpermissionで判定する。Userのフラグや役割の名前では判定しない。流れは「permissionを定義する → Groupに割り当てる → Groupをユーザーに割り当てる」とする。
   1. Yorikiで定義するpermissionは `utils.permissions.AppPermission` に（app_label、codename、表示名）として1か所にまとめる。codenameは `can_<動詞>_<対象>` にする（例：`skill.can_publish_company_skills`）。
   2. 対象アプリのModelの `Meta.permissions` に `AppPermission.XXX.meta` を書き、マイグレーションでpermissionを作る。
   3. 役割（業務管理者・Skill公開者等）はGroupで表す。初期の役割と、それに含めるpermissionは `user/roles.py` の `ROLES` に書く。`migrate` のたびに同名のGroupを作り、定義したpermissionを追加する（管理画面でGroupに足したpermissionは消さない）。post_migrateはアプリごとに順に送られるので、同期の中で参照するアプリのpermissionを先に作り、アプリの順番に依存しないようにしている。
   4. Groupは、基盤管理者がDjangoの管理画面でユーザーに割り当てる。個別のpermissionを直接付けてもよい。
 - 基盤管理者は `is_superuser` で表し、すべてのpermissionを持つ。基盤管理者だけに許す操作（基盤の設定等）は `PlatformAdmin` で判定する。
+- 管理のModelのViewSetは `ModelPermissions` で、操作ごとにそのModelの標準のpermission（一覧・詳細は `view_*`、作成は `add_*`、更新は `change_*`、削除は `delete_*`）を確かめる。`@action` は `action_permissions = {"check": "view"}` のように種類を書き（書いていない操作は断る）、所属で `get_queryset` を絞るだけの操作は `"login"` にする。Djangoの管理画面と同じく、`change_*` を持つ人は `view` の操作もできる。対象のModelが違うとき（版の履歴等）は `permission_model` で指定する。
 - ViewSetでは `require_permission(AppPermission.XXX)` で確認する。`require_permission` は、ログイン済みで `user.has_perm()` が真の場合に許可するpermissionクラスを返す。Django標準のpermissionは `"<app_label>.<codename>"` の文字列で渡す。
 - permissionを持つユーザーの一覧（通知の宛先等）は `User.objects.with_permission(AppPermission.XXX)` で取得する（直接・Group経由・基盤管理者を含む）。
 - `AppUser`・`PlatformAdmin` は `_Xxx(BasePermission)` を定義し、公開名を `Xxx = IsAuthenticated & _Xxx` にする。
-- 基盤管理者だけが使う管理画面（LLMの接続等）は、APIを `PlatformAdmin` で守り、画面のメニューはそのModelのDjango標準のpermission（`llm.change_llmconnection` 等）で出し分ける。基盤管理者はすべてのpermissionを持つので表示される。標準のpermissionを他の人に付けても、APIは403になる（frontend-conventions.md §6.2）。
+- 接続先とConnector（design.md §4.9.1）は `ModelPermissions` で守り、画面もそのpermissionで出し分ける。基盤管理者だけが使う管理画面（LLMの接続等）は、APIを `PlatformAdmin` で守り、画面のメニューはそのModelのDjango標準のpermission（`llm.change_llmconnection` 等）で出し分ける。基盤管理者はすべてのpermissionを持つので表示される。標準のpermissionを他の人に付けても、APIは403になる（frontend-conventions.md §6.2）。
 
 ### 6.4 Secret
 

@@ -1,13 +1,12 @@
 from collections import defaultdict
 from typing import Any
 
-from django.contrib.auth.models import Group
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
-from user.models import Department
+from user.models import Department, covers_all_departments
 from user.serializers import MinimumDepartmentSerializer
 from utils.crypto import is_encryption_configured
 from utils.exceptions import Conflict
@@ -15,13 +14,11 @@ from utils.exceptions import Conflict
 from .adapters.base import Param, QueryResult, TableInfo, to_text
 from .errors import VersionConflict
 from .models import (
-    DATASOURCE_OPERATIONS,
     VERSION_FIELDS,
     Connector,
     ConnectorKind,
-    ConnectorPermission,
     ConnectorVersion,
-    Operation,
+    DatabaseConnection,
 )
 
 MAX_TABLES = 500
@@ -50,45 +47,8 @@ class ConnectorTableEntrySerializer(serializers.Serializer):
         raise NotImplementedError("版の一部として保存する")
 
 
-class ConnectorPermissionSerializer(serializers.ModelSerializer):
-    """Connectorを使える役割か部門（どちらか一方）と、使える操作"""
-
-    id = serializers.CharField(source="uid", read_only=True)
-    group: "serializers.SlugRelatedField[Group]" = serializers.SlugRelatedField(
-        slug_field="name", queryset=Group.objects.all(), required=False, allow_null=True, help_text=_("役割の名前")
-    )
-    department: "serializers.SlugRelatedField[Department]" = serializers.SlugRelatedField(
-        slug_field="uid", queryset=Department.objects.filter(deleted=False), required=False, allow_null=True
-    )
-    department_info = MinimumDepartmentSerializer(source="department", read_only=True, allow_null=True)
-    operations = serializers.ListField(
-        child=serializers.ChoiceField(choices=Operation.choices),
-        required=False,
-        default=lambda: list(DATASOURCE_OPERATIONS),
-        help_text=_("使える操作。省略するとすべて（社内DBの操作はどれも読取り）"),
-    )
-
-    class Meta:
-        model = ConnectorPermission
-        fields = ["id", "group", "department", "department_info", "operations"]
-
-    def validate(self, attrs):
-        if bool(attrs.get("group")) == bool(attrs.get("department")):
-            raise serializers.ValidationError({"non_field_errors": _("役割か部門のどちらか一方を選んでください")})
-        # 部分更新（PATCH）では入れ子の既定値が入らないので、ここで補う
-        operations = list(dict.fromkeys(attrs.get("operations", DATASOURCE_OPERATIONS)))
-        if not operations:
-            raise serializers.ValidationError({"operations": _("使える操作を1つ以上選んでください")})
-        attrs["operations"] = operations
-        return attrs
-
-
-class ConnectorSerializer(serializers.ModelSerializer):
-    """Connectorの作成と表示。境界（公開する表、上限、機密のフラグ）は現在の版の値を平らに出す。
-
-    境界を変えて保存すると、サーバーが新しい版を作る。更新では、編集を始めた時点の `version` を送り、
-    その間に他の人が版を作っていたら409になる。パスワードは書き込み専用で、応答には末尾の4文字だけを出す
-    """
+class DatabaseConnectionSerializer(serializers.ModelSerializer):
+    """DB接続の作成と表示。パスワードは書き込み専用で、応答には末尾の4文字だけを出す"""
 
     id = serializers.CharField(source="uid", read_only=True)
     kind_display = serializers.CharField(source="get_kind_display", read_only=True)
@@ -100,11 +60,179 @@ class ConnectorSerializer(serializers.ModelSerializer):
         required=False,
         allow_blank=True,
         max_length=1000,
-        help_text=_("更新では、送らなければ変更しない"),
+        help_text=_("更新では、送らなければ変更しない（ホスト・ポート・DB名を変えるときは必須）"),
         style={"input_type": "password"},
     )
     has_password = serializers.SerializerMethodField()
     password_hint = serializers.SerializerMethodField()
+    connector_count = serializers.SerializerMethodField(help_text=_("この接続を使うConnectorの数"))
+    created_by: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(slug_field="uid", read_only=True)
+
+    class Meta:
+        model = DatabaseConnection
+        fields = [
+            "id",
+            "name",
+            "kind",
+            "kind_display",
+            "host",
+            "port",
+            "database",
+            "username",
+            "password",
+            "has_password",
+            "password_hint",
+            "tls",
+            "connect_timeout_seconds",
+            "max_concurrency",
+            "is_active",
+            "connector_count",
+            "created_by",
+            "created",
+            "updated",
+        ]
+        read_only_fields = ["created", "updated"]
+        extra_kwargs = {
+            "connect_timeout_seconds": {"min_value": 1, "max_value": 300},
+            "max_concurrency": {"min_value": 1, "max_value": 1000},
+        }
+
+    def get_has_password(self, obj: DatabaseConnection) -> bool:
+        return bool(obj.password)
+
+    def get_password_hint(self, obj: DatabaseConnection) -> str:
+        return obj.password.hint
+
+    def get_connector_count(self, obj: DatabaseConnection) -> int:
+        # 一覧・詳細は件数を注釈で付けて読む（DatabaseConnectionViewSet）。作成・更新の応答では数える
+        count = getattr(obj, "connector_count", None)
+        return count if count is not None else obj.connectors.filter(deleted=False).count()
+
+    def validate_name(self, value: str) -> str:
+        value = value.strip()
+        others = DatabaseConnection.objects.filter(deleted=False, name=value)
+        if self.instance:
+            others = others.exclude(pk=self.instance.pk)
+        if others.exists():
+            raise serializers.ValidationError(_("同じ名前の接続先があります"))
+        return value
+
+    def validate_host(self, value: str) -> str:
+        value = value.strip()
+        if not value or any(ch.isspace() or ch in ",;{}/" for ch in value):
+            raise serializers.ValidationError(_("ホスト名かIPアドレスを入力してください"))
+        return value
+
+    def validate_database(self, value: str) -> str:
+        return value.strip()
+
+    def validate_password(self, value: str) -> str:
+        if value and not is_encryption_configured():
+            raise serializers.ValidationError(
+                _("パスワードを保存するための暗号化の鍵（YORIKI_SECRET_ENCRYPTION_KEYS）が設定されていません")
+            )
+        return value
+
+    def validate(self, attrs):
+        if self.instance is None:
+            attrs.setdefault("port", ConnectorKind(attrs["kind"]).default_port)
+            if not attrs.get("password"):
+                raise serializers.ValidationError({"password": _("パスワードを入力してください")})
+            return attrs
+        # 登録済みのパスワードを別のサーバーへ送らないよう、接続先を変えるときは入れ直してもらう
+        moved = any(name in attrs and attrs[name] != getattr(self.instance, name) for name in ADDRESS_FIELDS)
+        if moved and not attrs.get("password"):
+            raise serializers.ValidationError(
+                {"password": _("ホスト・ポート・DB名を変えるときは、パスワードを入力し直してください")}
+            )
+        if not attrs.get("password", True):
+            attrs.pop("password")  # 空文字は「変更しない」
+        return attrs
+
+    @transaction.atomic
+    def update(self, instance: DatabaseConnection, validated_data) -> DatabaseConnection:
+        # validate() は取得した時点の値で比べている。同時に別の要求が接続先を変えていても、パスワードなしで
+        # 接続先を変えさせないよう、行をロックして最新の値で比べ直す
+        latest = DatabaseConnection.objects.select_for_update().get(pk=instance.pk)
+        if latest.deleted:
+            raise Conflict()
+        moved = any(name in validated_data and validated_data[name] != getattr(latest, name) for name in ADDRESS_FIELDS)
+        if moved and "password" not in validated_data:
+            raise serializers.ValidationError(
+                {"password": _("ホスト・ポート・DB名を変えるときは、パスワードを入力し直してください")}
+            )
+        # ロックした最新の行に当てて保存し、それを返す（取得した後に他の要求が変えた項目を、応答でも古くしない）
+        for name, value in validated_data.items():
+            setattr(latest, name, value)
+        latest.save(update_fields=[*validated_data, "updated"])
+        return latest
+
+
+# 接続先。変えるときはパスワードを入れ直す
+ADDRESS_FIELDS = ("host", "port", "database")
+
+
+class DatabaseConnectionUpdateSerializer(DatabaseConnectionSerializer):
+    """DB接続の更新。種別は変えられない（SQLの方言と既定のスキーマの意味が変わるため）"""
+
+    class Meta(DatabaseConnectionSerializer.Meta):
+        read_only_fields = ["kind", "created", "updated"]
+
+
+class MinimumDatabaseConnectionSerializer(serializers.ModelSerializer):
+    """Connectorの応答に載せる接続先。ホスト・ポート・DB名は、接続先を見る（か変える）permissionを持つ人にだけ出す
+    （Connectorは所属だけで見られるので、接続先の詳細をpermissionの判定を通さずに出さない）"""
+
+    id = serializers.CharField(source="uid", read_only=True)
+    kind_display = serializers.CharField(source="get_kind_display", read_only=True)
+    host = serializers.CharField(read_only=True, allow_null=True, help_text=_("接続先を見る権限がなければnull"))
+    port = serializers.IntegerField(read_only=True, allow_null=True, help_text=_("接続先を見る権限がなければnull"))
+    database = serializers.CharField(read_only=True, allow_null=True, help_text=_("接続先を見る権限がなければnull"))
+
+    ADDRESS = ("host", "port", "database")
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not (user and any(user.has_perm(f"connector.{k}_databaseconnection") for k in ("view", "change"))):
+            data.update(dict.fromkeys(self.ADDRESS))
+        return data
+
+    class Meta:
+        model = DatabaseConnection
+        fields = [
+            "id",
+            "name",
+            "kind",
+            "kind_display",
+            "host",
+            "port",
+            "database",
+            "connect_timeout_seconds",
+            "is_active",
+        ]
+        read_only_fields = fields
+
+
+class ConnectorSerializer(serializers.ModelSerializer):
+    """Connectorの作成と表示。境界（公開する表、上限、機密のフラグ）は現在の版の値を平らに出す。
+
+    境界を変えて保存すると、サーバーが新しい版を作る。更新では、編集を始めた時点の `version` を送り、
+    その間に他の人が版を作っていたら409になる。使うDB接続は作成した後は変えられない。
+
+    使える部門（所属の軸）は版に入れない。指定しなければ全社向け。足し引きできるのは自分が所属している部門だけで、
+    全社向けにする・やめる（部門を空にする・空から指定する）のは、すべての部門の範囲を持つ人（基盤管理者か、
+    印のある部門の所属者）だけ
+    """
+
+    id = serializers.CharField(source="uid", read_only=True)
+    connection: "serializers.SlugRelatedField[DatabaseConnection]" = serializers.SlugRelatedField(
+        slug_field="uid", queryset=DatabaseConnection.objects.filter(deleted=False), help_text=_("使う接続先")
+    )
+    connection_info = MinimumDatabaseConnectionSerializer(source="connection", read_only=True)
+    kind = serializers.ChoiceField(source="connection.kind", choices=ConnectorKind.choices, read_only=True)
+    kind_display = serializers.CharField(source="get_kind_display", read_only=True)
     version = serializers.IntegerField(
         source="version_number",
         min_value=0,
@@ -145,12 +273,17 @@ class ConnectorSerializer(serializers.ModelSerializer):
         source="current_version.is_sensitive",
         required=False,
         default=False,
-        help_text=_("個人情報を主な中身とする接続先。ローカルLLMのモデルを使うタスク・会話にだけ割り当てる"),
+        help_text=_("個人情報を主な中身とする範囲。ローカルLLMのモデルを使うタスク・会話にだけ割り当てる"),
     )
     change_reason = serializers.CharField(max_length=500, required=False, allow_blank=True, write_only=True)
-    permissions = ConnectorPermissionSerializer(
-        many=True, required=False, help_text=_("使える役割・部門。更新では、送ると全体を置き換える")
+    departments: "serializers.SlugRelatedField[Department]" = serializers.SlugRelatedField(
+        many=True,
+        slug_field="uid",
+        queryset=Department.objects.filter(deleted=False),
+        required=False,
+        help_text=_("使える部門。空なら全社向け。更新では、送ると全体を置き換える"),
     )
+    department_infos = MinimumDepartmentSerializer(source="departments", many=True, read_only=True)
     created_by: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(slug_field="uid", read_only=True)
 
     class Meta:
@@ -158,38 +291,21 @@ class ConnectorSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "name",
+            "connection",
+            "connection_info",
             "kind",
             "kind_display",
-            "host",
-            "port",
-            "database",
-            "username",
-            "password",
-            "has_password",
-            "password_hint",
-            "tls",
-            "connect_timeout_seconds",
-            "max_concurrency",
             "is_active",
             "version",
             *VERSION_FIELDS,
             "change_reason",
-            "permissions",
+            "departments",
+            "department_infos",
             "created_by",
             "created",
             "updated",
         ]
         read_only_fields = ["created", "updated"]
-        extra_kwargs = {
-            "connect_timeout_seconds": {"min_value": 1, "max_value": 300},
-            "max_concurrency": {"min_value": 1, "max_value": 1000},
-        }
-
-    def get_has_password(self, obj: Connector) -> bool:
-        return bool(obj.password)
-
-    def get_password_hint(self, obj: Connector) -> str:
-        return obj.password.hint
 
     def validate_name(self, value: str) -> str:
         value = value.strip()
@@ -200,19 +316,6 @@ class ConnectorSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(_("同じ名前のConnectorがあります"))
         return value
 
-    def validate_host(self, value: str) -> str:
-        value = value.strip()
-        if not value or any(ch.isspace() or ch in ",;{}/" for ch in value):
-            raise serializers.ValidationError(_("ホスト名かIPアドレスを入力してください"))
-        return value
-
-    def validate_password(self, value: str) -> str:
-        if value and not is_encryption_configured():
-            raise serializers.ValidationError(
-                _("パスワードを保存するための暗号化の鍵（YORIKI_SECRET_ENCRYPTION_KEYS）が設定されていません")
-            )
-        return value
-
     def validate_tables(self, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if len(value) > MAX_TABLES:
             raise serializers.ValidationError(_("公開する表・ビューは%(max)d件までです") % {"max": MAX_TABLES})
@@ -221,21 +324,21 @@ class ConnectorSerializer(serializers.ModelSerializer):
             entry["name"] = entry["name"].strip()
         return value
 
-    def validate_permissions(self, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        grantees = [p.get("group") or p.get("department") for p in value]
-        if len(set(grantees)) != len(grantees):
-            raise serializers.ValidationError(_("同じ役割・部門が2回あります"))
-        return value
+    def _validate_scope(self, attrs) -> None:
+        if self.instance is not None and "departments" not in attrs:
+            return
+        current = set(self.instance.departments.all()) if self.instance else set()
+        check_department_change(
+            self.context["request"].user, current, set(attrs.get("departments", [])), self.instance is None
+        )
 
     def validate(self, attrs):
         if self.instance is not None and "version_number" not in attrs:
             raise serializers.ValidationError({"version": _("編集を始めた時点の版を送ってください")})
-        kind = ConnectorKind(attrs.get("kind", getattr(self.instance, "kind", ConnectorKind.POSTGRESQL)))
+        self._validate_scope(attrs)
+        connection = attrs["connection"] if self.instance is None else self.instance.connection
+        kind = ConnectorKind(connection.kind)
         errors: defaultdict[str, list[Any]] = defaultdict(list)
-        if self.instance is None:
-            attrs.setdefault("port", kind.default_port)
-            if not attrs.get("password"):
-                errors["password"].append(_("パスワードを入力してください"))
         content = attrs.get("current_version", {})
         if self.instance is None or "default_schema" in content:
             schema = content.get("default_schema", "").strip()
@@ -264,24 +367,21 @@ class ConnectorSerializer(serializers.ModelSerializer):
         sent = validated_data.pop("current_version", {})
         return {name: sent[name] if name in sent else getattr(current, name) for name in VERSION_FIELDS}
 
-    def _save_permissions(self, connector: Connector, permissions: list[dict[str, Any]]) -> None:
-        # 監査ログに残すため、1件ずつ削除・作成する（bulk_create は保存のシグナルを送らない）
-        for permission in connector.permissions.all():
-            permission.delete()
-        for p in permissions:
-            ConnectorPermission.objects.create(connector=connector, **p)
-
     @transaction.atomic
     def create(self, validated_data) -> Connector:
         validated_data.pop("version_number", None)
-        permissions = validated_data.pop("permissions", [])
+        departments = validated_data.pop("departments", [])
         actor = validated_data.pop("created_by")
         change_reason = validated_data.pop("change_reason", "")
+        # 同時にDB接続が削除されていないことを、行をロックして確かめる（削除の側も同じ行をロックする）
+        connection = DatabaseConnection.objects.select_for_update().get(pk=validated_data["connection"].pk)
+        if connection.deleted:
+            raise serializers.ValidationError({"connection": _("接続先が削除されています")})
         content = self._content(validated_data, None)
         connector = Connector.create_with_version(
             actor=actor, change_reason=change_reason, content=content, **validated_data
         )
-        self._save_permissions(connector, permissions)
+        connector.departments.set(departments)
         return connector
 
     @transaction.atomic
@@ -295,11 +395,18 @@ class ConnectorSerializer(serializers.ModelSerializer):
             )
         except VersionConflict as exc:
             raise Conflict() from exc
-        permissions = validated_data.pop("permissions", None)
-        if permissions is not None:
-            self._save_permissions(instance, permissions)
-        if not validated_data.get("password", True):
-            validated_data.pop("password")  # 空文字は「変更しない」
+        departments = validated_data.pop("departments", None)
+        if departments is not None:
+            # validate() は取得した時点の部門で確かめた。Connectorの行は revise() でロックしているので、最新の部門で
+            # 確かめ直す（その間に別の部門が足されていたら、所属していない部門を外すことになる）
+            # 先読み（prefetch_related）した取得時の一覧ではなく、DBから読み直す
+            latest = set(
+                Department.objects.filter(
+                    pk__in=instance.departments.through.objects.filter(connector_id=instance.pk).values("department_id")
+                )
+            )
+            check_department_change(self.context["request"].user, latest, set(departments), creating=False)
+            instance.departments.set(departments)
         for name, value in validated_data.items():
             setattr(instance, name, value)
         # 変えた項目だけを保存する（取得した後に他の要求が変えた項目を書き戻さない。行は revise() でロックしている）
@@ -307,17 +414,31 @@ class ConnectorSerializer(serializers.ModelSerializer):
         return instance
 
 
-class ConnectorUpdateSerializer(ConnectorSerializer):
-    """Connectorの更新。種別と接続先（ホスト・ポート・DB名）は変えられないので、読み取り専用にする"""
+def check_department_change(user, current: set[Department], departments: set[Department], creating: bool) -> None:
+    """使える部門の変更を、利用者の所属の範囲で確かめる。足し引きできるのは自分が所属している部門だけで、
+    全社向け（部門の指定なし）にする・やめるのは、すべての部門の範囲を持つ人だけ"""
+    if covers_all_departments(user):
+        return
+    if not departments or (not creating and not current):
+        raise serializers.ValidationError(
+            {"departments": _("全社向け（部門の指定なし）にする・やめるのは、すべての部門の範囲を持つ人だけです")}
+        )
+    if (departments ^ current) - set(Department.objects.of(user)):
+        raise serializers.ValidationError({"departments": _("所属していない部門は、足し引きできません")})
 
-    port = serializers.IntegerField(read_only=True)
+
+class ConnectorUpdateSerializer(ConnectorSerializer):
+    """Connectorの更新。使うDB接続は変えられないので、読み取り専用にする"""
+
+    connection = serializers.SlugRelatedField(slug_field="uid", read_only=True)
 
     class Meta(ConnectorSerializer.Meta):
-        read_only_fields = ["kind", "host", "database", "created", "updated"]
+        pass
 
 
 class MinimumConnectorSerializer(serializers.ModelSerializer):
     id = serializers.CharField(source="uid", read_only=True)
+    kind = serializers.ChoiceField(source="connection.kind", choices=ConnectorKind.choices, read_only=True)
     kind_display = serializers.CharField(source="get_kind_display", read_only=True)
 
     class Meta:

@@ -244,6 +244,7 @@ SPECTACULAR_SETTINGS = {
         "CsvEncodingEnum": "resources.formats.CSV_ENCODINGS",
         "CsvDelimiterEnum": "resources.formats.CSV_DELIMITER_CHOICES",
         "CsvColumnTypeEnum": "resources.formats.COLUMN_TYPES",
+        "ConnectorKindEnum": "connector.models.ConnectorKind",
     },
 }
 

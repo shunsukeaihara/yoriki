@@ -7,7 +7,16 @@ from rest_framework.test import APIClient
 
 from .adapters import SocialAccountAdapter, is_allowed_account
 from .factories import DepartmentFactory, DepartmentMembershipFactory, SSOProviderFactory, UserFactory
-from .models import DepartmentMembership, DepartmentRole, SSOKind, SSOProvider, User, is_sso_enabled
+from .models import (
+    Department,
+    DepartmentMembership,
+    DepartmentRole,
+    SSOKind,
+    SSOProvider,
+    User,
+    covers_all_departments,
+    is_sso_enabled,
+)
 from .roles import ROLES, sync_role_groups
 
 
@@ -459,6 +468,22 @@ class TestDepartmentAPI:
         membership = DepartmentMembership.objects.get()
         assert membership.user == app_user
         assert membership.role == DepartmentRole.PUBLISHER
+
+    @pytest.mark.django_db
+    def test_covers_all_departments(self, api_client, platform_admin, app_user):
+        api_client.force_login(platform_admin)
+        res = api_client.post(self.url, {"name": "監査室", "covers_all_departments": True}, format="json")
+        assert res.status_code == 201, res.json()
+        assert res.json()["covers_all_departments"] is True
+        sales = DepartmentFactory.create(name="営業部")
+        assert covers_all_departments(app_user) is False
+        assert list(Department.objects.of(app_user)) == []
+        DepartmentMembershipFactory.create(
+            user=app_user, department=Department.objects.get(uid=res.json()["id"]), role=DepartmentRole.MEMBER
+        )
+        # 印のある部門の所属者は、すべての部門に所属しているものとして扱う
+        assert covers_all_departments(app_user) is True
+        assert sales in set(Department.objects.of(app_user))
 
     @pytest.mark.django_db
     def test_my_departments(self, api_client, app_user):

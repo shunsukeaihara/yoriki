@@ -9,11 +9,30 @@ export const UPLOAD_TIMEOUT = 60 * 1000
 
 type KeyConverter = (key: string) => string
 
+/**
+ * 値の中のキーを変換しない項目（snake_case の名前）。利用者・エージェント・DBが決めるキーを持つJSON（Skillの
+ * JSON Schema、業務結果、Toolの引数、Connectorの列名 → 説明、platform → digest）は、変換すると別の名前になる
+ * （invoice_no → invoiceNo、VendorCode → vendor_code）。項目の名前そのものは変換する
+ */
+const RAW_VALUE_KEYS = new Set([
+  'input_schema',
+  'output_schema',
+  'expected_result',
+  'result',
+  'mismatches',
+  'arguments',
+  'params',
+  'columns',
+  'platform_digests',
+])
+
 const convertKeys = (value: unknown, fn: KeyConverter): unknown => {
   if (Array.isArray(value)) return value.map((v) => convertKeys(v, fn))
   // File / Blob / Date / FormData はそのまま送る
   if (value && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
-    return Object.fromEntries(Object.entries(value).map(([k, v]) => [fn(k), convertKeys(v, fn)]))
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [fn(k), RAW_VALUE_KEYS.has(snakeCase(k)) ? v : convertKeys(v, fn)]),
+    )
   }
   return value
 }

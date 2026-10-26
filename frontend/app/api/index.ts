@@ -221,9 +221,61 @@ const createAPI = () => {
         versions: (number?: number) =>
           readOnlyResource<RuntimeProfileVersion>(http, `v1/runtime_profiles/${id}/versions`, number?.toString()),
       }),
+      // 社内DBの接続先と資格情報。確認と表の一覧は接続先のDBにつなぐので、接続のタイムアウトまで待つ（waitSeconds）
+      databaseConnections: (id?: string) => ({
+        ...resource<DatabaseConnection, DatabaseConnectionWrite, DatabaseConnectionListParams>(
+          http,
+          'v1/database_connections',
+          id,
+        ),
+        // 更新では種別を送れない
+        update: (data: DatabaseConnectionUpdate) =>
+          http.put<DatabaseConnection, DatabaseConnection>(`v1/database_connections/${id}/`, data),
+        patch: (data: Partial<DatabaseConnectionUpdate>) =>
+          http.patch<DatabaseConnection, DatabaseConnection>(`v1/database_connections/${id}/`, data),
+        check: (waitSeconds: number) =>
+          http.post<ConnectorCheck, ConnectorCheck>(`v1/database_connections/${id}/check/`, null, waitFor(waitSeconds)),
+        // 接続先のアカウントが読める表・ビューの一覧（Connectorで公開する表を選ぶ）
+        tables: (waitSeconds: number) =>
+          http.get<ConnectorTables, ConnectorTables>(`v1/database_connections/${id}/tables/`, waitFor(waitSeconds)),
+      }),
+      connectors: (id?: string) => ({
+        ...resource<Connector, ConnectorWrite, ConnectorListParams>(http, 'v1/connectors', id),
+        // 更新では使うDB接続を送れない
+        update: (data: ConnectorUpdate) => http.put<Connector, Connector>(`v1/connectors/${id}/`, data),
+        patch: (data: Partial<ConnectorUpdate>) => http.patch<Connector, Connector>(`v1/connectors/${id}/`, data),
+        // 作成・編集で選ぶ接続先と部門（部門は自分の所属の範囲）。接続先・部門の管理の権限がなくても選べる
+        connections: (params?: ListParams) =>
+          http.get<Paginated<MinimumDatabaseConnection>, Paginated<MinimumDatabaseConnection>>(
+            'v1/connectors/connections/',
+            { params },
+          ),
+        departments: (params?: ListParams) =>
+          http.get<Paginated<MinimumDepartment>, Paginated<MinimumDepartment>>('v1/connectors/departments/', {
+            params,
+          }),
+        // 公開する表を選ぶための、使う接続先の表・ビューの一覧
+        tables: (waitSeconds: number) =>
+          http.get<ConnectorTables, ConnectorTables>(`v1/connectors/${id}/tables/`, waitFor(waitSeconds)),
+        // 公開している表・ビューの説明（エージェントに見せる内容）と試し実行。接続先のDBにつなぐので、
+        // 接続と実行のタイムアウト（waitSeconds。connectorWaitSeconds()）まで待つ
+        describe: (waitSeconds: number) =>
+          http.get<ConnectorTables, ConnectorTables>(`v1/connectors/${id}/describe/`, waitFor(waitSeconds)),
+        query: (data: ConnectorQuery, waitSeconds: number) =>
+          http.post<ConnectorQueryResult, ConnectorQueryResult>(
+            `v1/connectors/${id}/query/`,
+            data,
+            waitFor(waitSeconds),
+          ),
+        versions: (number?: number) =>
+          readOnlyResource<ConnectorVersion>(http, `v1/connectors/${id}/versions`, number?.toString()),
+      }),
     },
   }
 }
+
+/** サーバーが外へつなぐ要求の待ち時間。サーバー側のタイムアウトより少し長く待ち、通常のタイムアウトより短くしない */
+const waitFor = (seconds: number) => ({ timeout: Math.max(API_TIMEOUT, (seconds + 15) * 1000) })
 
 /** multipart で送る本文。null・undefined の項目は送らない（キーは snake_case に変換されないので、1語の項目だけに使う） */
 const toFormData = (data: Record<string, string | number | Blob | null | undefined>) => {

@@ -22,7 +22,7 @@ class PostgreSQLAdapter(DatasourceAdapter):
 
     @contextmanager
     def connect(self) -> Iterator[psycopg.Connection]:
-        c = self.connector
+        c = self.connection
         timeout_ms = (self.version.timeout_seconds if self.version else 30) * 1000
         options: dict[str, Any] = {}
         if c.tls == TLSMode.VERIFY:

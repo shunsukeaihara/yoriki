@@ -336,7 +336,7 @@ class ToolResult:
 | `submit_result` | 業務結果のSchema（SkillかTask Definitionのもの） | 業務結果を確定する（§10.5） | READ | 不可（単独で呼ぶ） |
 | `install_python_packages` | `packages`（`name`・`version`） | 管理された取得で、Run専用の環境へ入れる（design.md §7.6） | WRITE_SANDBOX | 不可 |
 | `datasource_describe` | `connector` | 公開している表・列の説明（design.md §4.9.2） | READ | 可 |
-| `datasource_query` | `connector`、`sql`、`params` | SELECT文（引数の場所は `?`）を実行し、結果をCSVで `/workspace/input/connectors/{invocation_id}/` に置く | READ | 可（Connectorの同時実行数の上限の中で） |
+| `datasource_query` | `connector`、`sql`、`params` | SELECT文（引数の場所は `?`）を実行し、結果をCSVで `/workspace/input/connectors/{invocation_id}/` に置く | READ | 可（接続の同時実行数の上限の中で） |
 | `request_skill_edit` | `skill`（編集するSkillの名前。新しく作るなら空）、`summary`（変更の要約） | Skillの編集を提案し、利用者の確認を待つ（§10.9）。答える人がいる業務のRunだけに出す | INTERACT | 不可（単独で呼ぶ） |
 | Skill管理のTool | §10.9 | Skillの編集のRun（関連Run）だけに出す（design.md §3.6） | WRITE_EXTERNAL | 不可 |
 
@@ -356,7 +356,7 @@ class ToolResult:
 
 1. Runの種類：業務のRun、Skillの編集のRun、Draftの評価のRun（design.md §3.6・§3.7）。Skill管理のToolは編集のRunだけ、Skill公開のToolは評価のRunには出さない。評価のRunは、評価するSkill（公開中の版か、評価に写したDraft）を `/` で指定したRunと同じに扱い、`skill`・`request_skill_edit` は出さない（design.md §3.7.1）。
 2. Skill：`/` かTask DefinitionでSkillを指定したRunでは、そのSkillの `tools` に限り、業務結果のSchemaがあれば `submit_result` を加える（`skill` は出さない）。答える人がいる業務のRunには、Skillの指定にかかわらず `request_skill_edit` を加える（編集を提案するだけで、作業の権限を増やさないため）。指定がなく、エージェントが探して使う会話では、利用者が使えるToolの全体と `skill` を出す。
-3. 利用者の権限と組織のポリシー：Connectorの操作は、ConnectorPermissionで使えるものだけ（design.md §4.9.1）。
+3. 利用者の権限と組織のポリシー：Connectorは、使える部門に所属している（か全社向けの）ものだけ（design.md §4.9.1）。
 4. モデルの能力：Tool呼出しに対応しないモデルでは、Toolを出さない（Skillも、Toolが要るものは候補にしない。design.md §4.8）。
 5. 確認の相手：`ask_user` は、答える人がいるRun（会話、または対話Bindingのあるタスク）だけに出す。
 6. Sandbox：SkillかTask DefinitionがSandboxを使うToolを許さないコマンド不要のRun（design.md §3.4）では、Sandboxを使うToolを出さない。Runtime ProfileはRunの単位で決まり、既定がなければRunを始めない（design.md §7.3）。Sandboxを使うToolがあるRunでも、Sandboxは最初に呼ばれた時点で起動する（design.md §4）。

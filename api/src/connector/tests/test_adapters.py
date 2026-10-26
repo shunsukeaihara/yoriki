@@ -222,13 +222,13 @@ def _connector(source: Source, **version: Any) -> Connector:
     version.setdefault("tables", tables)
     version.setdefault("default_schema", source.schema)
     return ConnectorFactory.create(
-        kind=source.kind,
-        host=source.host,
-        port=source.port,
-        database=source.database,
-        username=source.username,
-        password=READER_PASSWORD,
-        tls=TLSMode.DISABLE if source.kind != ConnectorKind.SQLSERVER else TLSMode.REQUIRE,
+        connection__kind=source.kind,
+        connection__host=source.host,
+        connection__port=source.port,
+        connection__database=source.database,
+        connection__username=source.username,
+        connection__password=READER_PASSWORD,
+        connection__tls=TLSMode.DISABLE if source.kind != ConnectorKind.SQLSERVER else TLSMode.REQUIRE,
         **{f"version__{k}": v for k, v in version.items()},
     )
 
@@ -245,7 +245,7 @@ class TestDatasource:
         connector = _connector(source)
         get_adapter(connector).check()
 
-        connector.password = "wrong-password"
+        connector.connection.password = "wrong-password"
         with pytest.raises(ConnectorError) as exc_info:
             get_adapter(connector).check()
         assert exc_info.value.kind == ConnectorErrorKind.CONNECTION

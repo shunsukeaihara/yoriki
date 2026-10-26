@@ -5,7 +5,7 @@ from typing import ClassVar
 
 from auditlog.registry import auditlog
 from django.conf import settings
-from django.contrib.auth.models import AbstractUser, Permission, UserManager
+from django.contrib.auth.models import AbstractUser, Group, Permission, UserManager
 from django.contrib.postgres.fields import ArrayField
 from django.db import models, transaction
 from django.utils import timezone
@@ -257,14 +257,41 @@ class DepartmentRole(models.IntegerChoices):
     PUBLISHER = 3, _("公開")  # 部門のSkillを公開・切戻し・停止する。Toolを変える
 
 
-class Department(models.Model):
-    """部門。Skillの部門の範囲（誰が使えて、誰が編集・公開できるか）に使う（design.md §3.6）。
+class DepartmentQuerySet(models.QuerySet):
+    def of(self, user) -> "DepartmentQuerySet":
+        """利用者が所属している部門（所属の軸の判定はここに集める）。
 
-    役割（Group。permissionの組）とは別に管理する。基盤管理者が管理画面で登録し、所属を割り当てる
+        「すべての部門の範囲を含む」部門に所属していれば、すべての部門に所属しているものとして扱う。基盤管理者もすべて
+        """
+        qs = self.filter(deleted=False)
+        if not user.is_active:
+            return qs.none()
+        if covers_all_departments(user):
+            return qs
+        return qs.filter(memberships__user=user)
+
+
+def covers_all_departments(user) -> bool:
+    """利用者が、すべての部門に所属しているものとして扱われるか（基盤管理者か、印のある部門に所属している）"""
+    if not user.is_active:
+        return False
+    if user.is_superuser:
+        return True
+    return DepartmentMembership.objects.filter(
+        user=user, department__deleted=False, department__covers_all_departments=True
+    ).exists()
+
+
+class Department(models.Model):
+    """部門。Skill・Connectorの部門の範囲（所属の軸。誰が使えるか）に使う（design.md §3.6、§4.9.1）。
+
+    役割（Group。permissionの組）とは別に管理する。基盤管理者が管理画面で登録し、所属を割り当てる。
+    「すべての部門の範囲を含む」部門の所属者は、すべての部門に所属しているものとして扱う（全部を見る人の管理）
     """
 
     uid = NanoidField(unique=True)
     name = models.CharField(_("名前"), max_length=100)
+    covers_all_departments = models.BooleanField(_("すべての部門の範囲を含む"), default=False)
     members = models.ManyToManyField(
         settings.AUTH_USER_MODEL, through="DepartmentMembership", related_name="departments", verbose_name=_("所属")
     )
@@ -272,6 +299,8 @@ class Department(models.Model):
     created = models.DateTimeField(auto_now_add=True, db_index=True)
     updated = models.DateTimeField(auto_now=True)
     deleted = models.BooleanField(default=False)
+
+    objects = DepartmentQuerySet.as_manager()
 
     class Meta:
         verbose_name = _("部門")
@@ -322,7 +351,9 @@ class DepartmentMembership(models.Model):
         return f"{self.department} {self.user}"
 
 
-auditlog.register(User, exclude_fields=["password", "last_login", "updated"])
+# 権限はpermissionで判定するので、その付け外し（直接・Group経由）も監査ログに残す
+auditlog.register(User, exclude_fields=["password", "last_login", "updated"], m2m_fields={"groups", "user_permissions"})
+auditlog.register(Group, m2m_fields={"permissions"})
 # client secretは暗号化した値でも監査ログに残さない
 auditlog.register(SSOProvider, exclude_fields=["client_secret", "updated"])
 auditlog.register(Invitation, exclude_fields=["token_hash"])

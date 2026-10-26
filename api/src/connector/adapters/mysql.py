@@ -35,7 +35,7 @@ class MySQLAdapter(DatasourceAdapter):
 
     @contextmanager
     def connect(self) -> Iterator[pymysql.connections.Connection]:
-        c = self.connector
+        c = self.connection
         timeout = self.version.timeout_seconds if self.version else 30
         tls = TLSMode(c.tls)
         try:

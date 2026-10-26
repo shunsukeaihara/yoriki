@@ -127,7 +127,7 @@ describe('DatabaseConnectionForm', () => {
     expect(data.port).toBeUndefined()
   })
 
-  it('更新では空のパスワードを送らず、接続先を変えたらパスワードを入れるまで保存できない', async () => {
+  it('更新では空のパスワードを送らず、ホスト等を変えたらパスワードを入れるまで保存できない', async () => {
     const wrapper = await mountSuspended(DatabaseConnectionForm, { props: { modelValue: connection } })
     const vm = wrapper.vm as unknown as Form
     expect(wrapper.text()).toContain('末尾 word')
@@ -138,7 +138,7 @@ describe('DatabaseConnectionForm', () => {
     vm.form.host = 'sales-db2.internal'
     await nextTick()
     expect(vm.canPost).toBe(false)
-    expect(wrapper.text()).toContain('接続先を変えるときは、パスワードを入力し直します')
+    expect(wrapper.text()).toContain('ホスト・ポート・DB名を変えるときは、パスワードを入力し直します')
     vm.form.password = 'new-pass'
     await nextTick()
     expect(vm.canPost).toBe(true)

@@ -98,7 +98,7 @@ const canPost = computed(() => {
 
 const passwordHint = computed(() => {
   const current = modelValue.value
-  if (moved.value) return t('接続先を変えるときは、パスワードを入力し直します')
+  if (moved.value) return t('ホスト・ポート・DB名を変えるときは、パスワードを入力し直します')
   if (current?.hasPassword)
     return t('登録済み（末尾 {hint}）。差し替えるときだけ入力します', { hint: current.passwordHint })
   return t('SELECT権限だけを持つ専用のアカウントを使います')

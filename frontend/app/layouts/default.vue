@@ -2,7 +2,7 @@
 // 社員の画面の layout。サイドバーに会話の一覧を出す
 const account = useAccountStore()
 // 管理画面のメニューに表示できる項目があるときだけ、管理画面への入口を出す
-const { items: manageItems } = useManageMenu()
+const { links: manageLinks } = useManageMenu()
 </script>
 
 <template>
@@ -39,7 +39,7 @@ const { items: manageItems } = useManageMenu()
             {{ account.user.displayName || account.user.email }}
           </span>
           <DBtn
-            v-if="manageItems.length > 0"
+            v-if="manageLinks.length > 0"
             to="/manage"
             variant="ghost"
             color="neutral"

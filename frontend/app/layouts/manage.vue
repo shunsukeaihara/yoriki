@@ -2,15 +2,22 @@
 // 管理画面（/manage 以下）の layout。サイドメニューは権限のある項目だけを出す（composables/manage.ts）
 const account = useAccountStore()
 const route = useRoute()
-const { items } = useManageMenu()
+const { items, links } = useManageMenu()
 
 // 表示中のページに対応するメニュー項目の名前を、上部の見出しにする
-const title = computed(() => items.value.find((item) => route.path.startsWith(item.to))?.label ?? '')
+const title = computed(() => links.value.find((link) => route.path.startsWith(link.to))?.label ?? '')
 </script>
 
 <template>
   <UDashboardGroup>
-    <UDashboardSidebar collapsible :ui="{ footer: 'border-t border-default' }">
+    <!-- メニューが入れ子（Connector → DB Connector → 接続先）なので、既定より広くする -->
+    <UDashboardSidebar
+      collapsible
+      resizable
+      :default-size="20"
+      :max-size="30"
+      :ui="{ footer: 'border-t border-default' }"
+    >
       <template #header="{ collapsed }">
         <NuxtLink to="/manage" class="flex items-center gap-2 font-bold">
           <span>Yoriki</span>

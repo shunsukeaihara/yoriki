@@ -97,7 +97,7 @@ class DatabaseConnectionSerializer(serializers.ModelSerializer):
         required=False,
         allow_blank=True,
         max_length=1000,
-        help_text=_("更新では、送らなければ変更しない（接続先を変えるときは必須）"),
+        help_text=_("更新では、送らなければ変更しない（ホスト・ポート・DB名を変えるときは必須）"),
         style={"input_type": "password"},
     )
     has_password = serializers.SerializerMethodField()
@@ -146,7 +146,7 @@ class DatabaseConnectionSerializer(serializers.ModelSerializer):
         if self.instance:
             others = others.exclude(pk=self.instance.pk)
         if others.exists():
-            raise serializers.ValidationError(_("同じ名前のDB接続があります"))
+            raise serializers.ValidationError(_("同じ名前の接続先があります"))
         return value
 
     def validate_host(self, value: str) -> str:
@@ -175,7 +175,7 @@ class DatabaseConnectionSerializer(serializers.ModelSerializer):
         moved = any(name in attrs and attrs[name] != getattr(self.instance, name) for name in ADDRESS_FIELDS)
         if moved and not attrs.get("password"):
             raise serializers.ValidationError(
-                {"password": _("接続先（ホスト・ポート・DB名）を変えるときは、パスワードを入力し直してください")}
+                {"password": _("ホスト・ポート・DB名を変えるときは、パスワードを入力し直してください")}
             )
         if not attrs.get("password", True):
             attrs.pop("password")  # 空文字は「変更しない」
@@ -196,7 +196,7 @@ class DatabaseConnectionSerializer(serializers.ModelSerializer):
         moved = any(name in validated_data and validated_data[name] != getattr(latest, name) for name in ADDRESS_FIELDS)
         if moved and "password" not in validated_data:
             raise serializers.ValidationError(
-                {"password": _("接続先（ホスト・ポート・DB名）を変えるときは、パスワードを入力し直してください")}
+                {"password": _("ホスト・ポート・DB名を変えるときは、パスワードを入力し直してください")}
             )
         for name, value in validated_data.items():
             setattr(instance, name, value)
@@ -245,7 +245,7 @@ class ConnectorSerializer(serializers.ModelSerializer):
 
     id = serializers.CharField(source="uid", read_only=True)
     connection: "serializers.SlugRelatedField[DatabaseConnection]" = serializers.SlugRelatedField(
-        slug_field="uid", queryset=DatabaseConnection.objects.filter(deleted=False), help_text=_("使うDB接続")
+        slug_field="uid", queryset=DatabaseConnection.objects.filter(deleted=False), help_text=_("使う接続先")
     )
     connection_info = MinimumDatabaseConnectionSerializer(source="connection", read_only=True)
     kind = serializers.ChoiceField(source="connection.kind", choices=ConnectorKind.choices, read_only=True)
@@ -391,7 +391,7 @@ class ConnectorSerializer(serializers.ModelSerializer):
         # 同時にDB接続が削除されていないことを、行をロックして確かめる（削除の側も同じ行をロックする）
         connection = DatabaseConnection.objects.select_for_update().get(pk=validated_data["connection"].pk)
         if connection.deleted:
-            raise serializers.ValidationError({"connection": _("DB接続が削除されています")})
+            raise serializers.ValidationError({"connection": _("接続先が削除されています")})
         content = self._content(validated_data, None)
         connector = Connector.create_with_version(
             actor=actor, change_reason=change_reason, content=content, **validated_data

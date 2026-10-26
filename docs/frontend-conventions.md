@@ -355,8 +355,8 @@ export const usePermission = defineStore('permission', () => {
 - ページの権限は `definePageMeta({ permission: PermissionCode.X })` で宣言し、`middleware/permission.global.ts` で確認する。権限がなければ403のエラー画面にする。
 - `permission` に配列を指定した場合は、いずれか1つを持っていればよい（`hasAny`）。
 - `definePageMeta` で `permission`・`auth` を型付きで書けるよう、`app/types/page-meta.d.ts` で `PageMeta` を拡張している。
-- 管理画面のサイドメニューは `composables/manage.ts` の `useManageMenu()` に1か所で定義する。各項目に `permission`（リンク先のページの `definePageMeta` と同じもの）を持たせ、権限のない項目は表示しない。
-- `pages/manage.vue` の `definePageMeta({ layout: 'manage', middleware: 'manage' })` は `/manage` 以下の全ページに適用される（route metaは親から子に引き継がれる）。`middleware/manage.ts` は、表示できるメニュー項目が1つもなければ403にする。`/manage` に入れる権限の一覧を別に持たず、メニューの定義から決める。`/manage` 自体はメニューの最初の項目へ移動する。
+- 管理画面のサイドメニューは `composables/manage.ts` の `useManageMenu()` に1か所で定義する。各リンクに `permission`（リンク先のページの `definePageMeta` と同じもの）を持たせ、権限のない項目は表示しない。見出し（`children` を持つ項目。例：Connector → DB Connector → 接続先・Connector）で入れ子にでき、表示できるリンクが1つもない見出しは出さない。`items` はメニューの木、`links` は表示できるリンクを平らにしたもので、見出しの文字・`/manage` の最初の移動先・入口の判定には `links` を使う。
+- `pages/manage.vue` の `definePageMeta({ layout: 'manage', middleware: 'manage' })` は `/manage` 以下の全ページに適用される（route metaは親から子に引き継がれる）。`middleware/manage.ts` は、表示できるリンクが1つもなければ403にする。`/manage` に入れる権限の一覧を別に持たず、メニューの定義から決める。`/manage` 自体はメニューの最初の項目へ移動する。
 - 社員向けのlayoutの「管理」の入口も、表示できるメニュー項目があるときだけ出す。
 - ボタンや操作は `v-if="hasPermission(PermissionCode.X)"` で出し分ける。コメントで「サーバー側でも403で弾かれる」ことを書いておく。
 - 特定の組織IDやユーザーIDをフロントエンドに直接書いて機能を出し分けない。出し分けが必要なら、サーバーが権限か設定値として返す。

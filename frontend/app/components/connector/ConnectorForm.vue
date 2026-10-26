@@ -104,19 +104,19 @@ defineExpose({ onSubmit, loading, canPost, reset })
     <DAutocomplete
       v-if="!isEdit"
       v-model="form.connection"
-      :label="$t('DB接続')"
+      :label="$t('接続先')"
       required
       :search-fn="api.manage.databaseConnections().list"
       :query-params="{ isActive: true }"
       item-description="kindDisplay"
       :clearable="false"
-      :hint="$t('作成した後は変更できません。接続先と資格情報は、DB接続の画面で変えます')"
+      :hint="$t('作成した後は変更できません。ホスト・DB名と資格情報は、接続先の画面で変えます')"
       :error-messages="errors.connection"
       @selected="(item) => (selectedConnection = item as MinimumDatabaseConnection | null)"
     />
     <!-- 使うDB接続は作成した後は変えられない（公開した表は、そのDBのものなので） -->
     <div v-else class="grid gap-1 text-sm">
-      <span class="text-muted">{{ $t('DB接続') }}</span>
+      <span class="text-muted">{{ $t('接続先') }}</span>
       <NuxtLink :to="`/manage/database_connections/${modelValue?.connection}`" class="text-primary">
         {{ modelValue?.connectionInfo.name }}
       </NuxtLink>

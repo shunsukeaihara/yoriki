@@ -18,7 +18,7 @@ const clearParams = () => {
 const columns: TableColumn<DatabaseConnection>[] = [
   { accessorKey: 'name', header: t('名前') },
   { accessorKey: 'kindDisplay', header: t('種別') },
-  { accessorKey: 'host', header: t('接続先') },
+  { accessorKey: 'host', header: t('ホスト・DB名') },
   { accessorKey: 'connectorCount', header: t('Connector') },
   { accessorKey: 'isActive', header: t('有効') },
   { accessorKey: 'updated', header: t('更新日時') },
@@ -29,17 +29,17 @@ const columns: TableColumn<DatabaseConnection>[] = [
   <div>
     <UContainer>
       <ListPageTitle
-        :title="$t('DB接続')"
+        :title="$t('接続先')"
         :description="
           $t(
-            '社内DBの接続先と資格情報です。エージェントには見せません。1つのDB接続の上に、公開する表と使える人の違うConnectorを複数作れます',
+            '社内DBのホスト・DB名と資格情報です。エージェントには見せません。1つの接続先の上に、公開する表と使える人の違うConnectorを複数作れます',
           )
         "
       >
         <template #end>
           <DatabaseConnectionDialog @saved="reload">
             <template #trigger="{ on }">
-              <DBtn icon="i-lucide-plus" v-on="on">{{ $t('DB接続を追加') }}</DBtn>
+              <DBtn icon="i-lucide-plus" v-on="on">{{ $t('接続先を追加') }}</DBtn>
             </template>
           </DatabaseConnectionDialog>
         </template>

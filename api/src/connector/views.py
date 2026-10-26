@@ -42,7 +42,7 @@ class DatabaseConnectionFilter(filters.FilterSet):
 
 class ConnectorFilter(filters.FilterSet):
     name = filters.CharFilter(label=_("名前"), lookup_expr="icontains")
-    connection = filters.CharFilter(label=_("DB接続"), field_name="connection__uid")
+    connection = filters.CharFilter(label=_("接続先"), field_name="connection__uid")
     kind = filters.ChoiceFilter(label=_("種別"), field_name="connection__kind", choices=ConnectorKind.choices)
     is_sensitive = filters.BooleanFilter(label=_("機密"), field_name="current_version__is_sensitive")
 
@@ -90,7 +90,7 @@ class DatabaseConnectionViewSet(SoftDeleteMixin, ModelViewSet):
         # Connectorの作成と同じ行をロックし、削除と同時に作られたConnectorを見落とさない
         locked = DatabaseConnection.objects.select_for_update().get(pk=instance.pk)
         if locked.connectors.filter(deleted=False).exists():
-            raise Conflict(_("このDB接続を使っているConnectorがあるため、削除できません"))
+            raise Conflict(_("この接続先を使っているConnectorがあるため、削除できません"))
         super().perform_destroy(locked)
 
     @extend_schema(

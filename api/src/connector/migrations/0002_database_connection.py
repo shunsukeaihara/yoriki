@@ -90,8 +90,8 @@ class Migration(migrations.Migration):
                 ),
             ],
             options={
-                "verbose_name": "DB接続",
-                "verbose_name_plural": "DB接続",
+                "verbose_name": "接続先",
+                "verbose_name_plural": "接続先",
             },
         ),
         migrations.AddField(
@@ -102,7 +102,7 @@ class Migration(migrations.Migration):
                 on_delete=django.db.models.deletion.PROTECT,
                 related_name="connectors",
                 to="connector.databaseconnection",
-                verbose_name="DB接続",
+                verbose_name="接続先",
             ),
         ),
         migrations.AddConstraint(
@@ -119,7 +119,7 @@ class Migration(migrations.Migration):
                 on_delete=django.db.models.deletion.PROTECT,
                 related_name="connectors",
                 to="connector.databaseconnection",
-                verbose_name="DB接続",
+                verbose_name="接続先",
             ),
         ),
         migrations.RemoveField(

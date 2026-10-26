@@ -38,7 +38,7 @@ const clearParams = () => {
 
 const columns: TableColumn<Connector>[] = [
   { accessorKey: 'name', header: t('名前') },
-  { accessorKey: 'connection', header: t('DB接続') },
+  { accessorKey: 'connection', header: t('接続先') },
   { accessorKey: 'kindDisplay', header: t('種別') },
   { accessorKey: 'tables', header: t('公開する表・ビュー') },
   { accessorKey: 'version', header: t('版') },
@@ -60,7 +60,7 @@ const onCreated = (connector: Connector) => {
         :title="$t('Connector')"
         :description="
           $t(
-            '社内DBのうち、エージェントが読み取れる範囲です。DB接続の上で公開する表・ビューと使える役割・部門を決め、使える社員の依頼で読み取ります。範囲や上限を変えて保存すると新しい版になります',
+            '社内DBのうち、エージェントが読み取れる範囲です。接続先の上で公開する表・ビューと使える役割・部門を決め、使える社員の依頼で読み取ります。範囲や上限を変えて保存すると新しい版になります',
           )
         "
       >
@@ -77,7 +77,7 @@ const onCreated = (connector: Connector) => {
         <DTextField v-model="params.name" :label="$t('名前')" />
         <DAutocomplete
           v-model="params.connection"
-          :label="$t('DB接続')"
+          :label="$t('接続先')"
           :search-fn="api.manage.databaseConnections().list"
           item-description="kindDisplay"
           :initial-selected="initialConnection"

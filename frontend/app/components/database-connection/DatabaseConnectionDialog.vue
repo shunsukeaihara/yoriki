@@ -24,7 +24,7 @@ const saved = (value: DatabaseConnection) => {
     <template #trigger="{ on }">
       <slot name="trigger" :on="on" />
     </template>
-    <template #header>{{ $t('DB接続を追加') }}</template>
+    <template #header>{{ $t('接続先を追加') }}</template>
     <template #content>
       <DatabaseConnectionForm ref="formRef" v-model="editing" @created="saved" />
     </template>

@@ -20,7 +20,7 @@ const formRef = ref<InstanceType<typeof DatabaseConnectionForm> | null>(null)
 const close = () => router.push('/manage/database_connections')
 
 const onDelete = async () => {
-  const ok = await confirm({ title: t('DB接続を削除しますか？'), confirmLabel: t('削除'), color: 'error' })
+  const ok = await confirm({ title: t('接続先を削除しますか？'), confirmLabel: t('削除'), color: 'error' })
   if (!ok) return
   try {
     await api.manage.databaseConnections(databaseConnectionId).delete()
@@ -35,7 +35,7 @@ const onDelete = async () => {
 </script>
 
 <template>
-  <DDrawer :open="true" :title="$t('DB接続')" @update:open="(open) => !open && close()">
+  <DDrawer :open="true" :title="$t('接続先')" @update:open="(open) => !open && close()">
     <template #content>
       <div class="grid gap-6">
         <UAlert

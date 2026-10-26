@@ -92,7 +92,7 @@ class DatabaseConnection(models.Model):
     deleted = models.BooleanField(default=False)
 
     class Meta:
-        verbose_name = _("DB接続")
+        verbose_name = _("接続先")
         verbose_name_plural = verbose_name
         constraints = [
             models.UniqueConstraint(
@@ -134,7 +134,7 @@ class Connector(models.Model):
     uid = NanoidField(unique=True)
     name = models.CharField(_("名前"), max_length=100)
     connection = models.ForeignKey(
-        DatabaseConnection, on_delete=models.PROTECT, related_name="connectors", verbose_name=_("DB接続")
+        DatabaseConnection, on_delete=models.PROTECT, related_name="connectors", verbose_name=_("接続先")
     )
     current_version = models.ForeignKey(
         "ConnectorVersion",

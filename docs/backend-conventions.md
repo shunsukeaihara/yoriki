@@ -671,7 +671,8 @@ class LLMConnection(models.Model):
 
 - フィールドの値は `SecretValue`。平文の文字列を代入するとその場で暗号化し、インスタンスに平文を残さない。`str()`・`repr()` は末尾の4文字だけ（`****abcd`）なので、ログやSerializerに紛れても平文は出ない。平文は `.reveal()` でだけ取り出し、外部へ接続する処理（Provider Adapter、Connector）の中でだけ呼ぶ。`bool()` でSecretの有無、`.hint` で末尾の4文字が分かる。
 - Serializerでは、Secretを `write_only=True` の `CharField` で受け、応答には `has_<名前>` と `<名前>_hint` だけを出す。送られなければ変更しない。暗号化の鍵が設定されていなければ、保存時ではなく検証で入力エラーにする（`utils.crypto.is_encryption_configured()`）。
-- 接続先（種別、ホスト、base URL等）は、作成した後は変えられないようにする。接続先ごとに接続を作り、Secretは差し替えられるようにする。登録済みのSecretを別のサーバーへ送らせないためと、接続を参照する版（`*Version`）の意味が後から変わらないようにするため。更新用のSerializer（`<名前>UpdateSerializer`）でその項目を `read_only_fields` にする。
+- 版（`*Version`）が参照する接続（LLMの接続等）は、接続先（種別、base URL等）を作成した後は変えられないようにする。接続先ごとに接続を作り、Secretは差し替えられるようにする。登録済みのSecretを別のサーバーへ送らせないためと、接続を参照する版の意味が後から変わらないようにするため。更新用のSerializer（`<名前>UpdateSerializer`）でその項目を `read_only_fields` にする。
+- 版を持たない接続（ConnectorのDB接続。design.md §4.9.1）は、種別だけを変えられないようにし、ホスト等の接続先は資格情報を入れ直すことを条件に変えられる（接続先を変える更新でSecretが送られなければ入力エラーにする）。
 - 監査ログ（auditlog）では、Secretの列を `exclude_fields` に入れる。Django管理画面には `editable=False` により出ない。
 - Secretを持つModelは、Django管理画面では見るだけにする（§7）。管理画面のフォームにはSecretが出ないので、そこで作るとSecretのない有効な接続ができ、Serializerの検証（種別ごとの必須項目等）も通らないため。
 - 鍵の交換は `rotate_secret_encryption` コマンド（`common`）で行う。`EncryptedSecretField` は自分を登録するので（`utils.fields.ENCRYPTED_SECRET_FIELDS`）、Secretを持つModelを追加してもコマンドの変更は要らない。

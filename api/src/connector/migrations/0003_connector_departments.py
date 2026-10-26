@@ -3,23 +3,27 @@
 from django.db import migrations, models
 
 
-def move_department_grants(apps, schema_editor):
-    """部門での利用の許可を、使える部門に移す。
+ALL_OPERATIONS = {"datasource_describe", "datasource_query"}
 
-    部門の許可がないConnector（役割（Group）の許可だけ、または誰にも許可していない）は、使える部門が空になると
-    全社向けに広がってしまうので、無効にする。基盤管理者が使える部門を選んでから有効にし直す
+
+def move_department_grants(apps, schema_editor):
+    """部門での利用の許可を、使える部門に移す。移した後は、所属していればすべての操作を使える。
+
+    範囲が広がらないよう、次のConnectorは無効にする（基盤管理者が使える部門を確かめてから有効にし直す）：
+    部門の許可がない（役割（Group）の許可だけ、または誰にも許可していない。使える部門が空だと全社向けになる）、
+    部門の許可が一部の操作に限られている（移すと、許可していなかった操作も使えるようになる）
     """
     Connector = apps.get_model("connector", "Connector")
     ConnectorPermission = apps.get_model("connector", "ConnectorPermission")
     for connector in Connector.objects.all():
-        department_ids = set(
+        grants = list(
             ConnectorPermission.objects.filter(
                 connector=connector, department__isnull=False, department__deleted=False
-            ).values_list("department_id", flat=True)
+            ).values_list("department_id", "operations")
         )
-        if department_ids:
-            connector.departments.set(department_ids)
-        else:
+        if grants:
+            connector.departments.set({department_id for department_id, _ops in grants})
+        if not grants or any(not set(ops) >= ALL_OPERATIONS for _department_id, ops in grants):
             connector.is_active = False
             connector.save(update_fields=["is_active"])
 

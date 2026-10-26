@@ -336,7 +336,7 @@ class ToolResult:
 | `submit_result` | 業務結果のSchema（SkillかTask Definitionのもの） | 業務結果を確定する（§10.5） | READ | 不可（単独で呼ぶ） |
 | `install_python_packages` | `packages`（`name`・`version`） | 管理された取得で、Run専用の環境へ入れる（design.md §7.6） | WRITE_SANDBOX | 不可 |
 | `datasource_describe` | `connector` | 公開している表・列の説明（design.md §4.9.2） | READ | 可 |
-| `datasource_query` | `connector`、`sql`、`params` | SELECT文を実行し、結果をCSVで `/workspace/input/connectors/{invocation_id}/` に置く | READ | 可（Connectorの同時実行数の上限の中で） |
+| `datasource_query` | `connector`、`sql`、`params` | SELECT文（引数の場所は `?`）を実行し、結果をCSVで `/workspace/input/connectors/{invocation_id}/` に置く | READ | 可（Connectorの同時実行数の上限の中で） |
 | `request_skill_edit` | `skill`（編集するSkillの名前。新しく作るなら空）、`summary`（変更の要約） | Skillの編集を提案し、利用者の確認を待つ（§10.9）。答える人がいる業務のRunだけに出す | INTERACT | 不可（単独で呼ぶ） |
 | Skill管理のTool | §10.9 | Skillの編集のRun（関連Run）だけに出す（design.md §3.6） | WRITE_EXTERNAL | 不可 |
 
@@ -829,7 +829,7 @@ Skill「請求書の照合」：手順（明細の読取り → 取引先・品�
 1. Run開始時に、Skillを第7版へ解決してManifestに固定し、Skillの本文と資料の一覧を最初の `message.user` に入れる。添付は `/workspace/input/` に置く（一覧も同じ発言に入れる）。
 2. `todo_write`：3件の読取り・突合・検算・CSVの作成を計画にする。画面の「現在の作業」に出る。
 3. `read`（3つのPDFを並列に）：2件はテキストで読める。1件はスキャンで、テキストのないページを画像として返す（モデルは画像入力に対応）。
-4. `datasource_describe(core-db)` → `datasource_query(core-db, "SELECT … FROM vendors WHERE name LIKE %s", …)`：取引先の候補をCSVで受け取る。
+4. `datasource_describe(core-db)` → `datasource_query(core-db, "SELECT … FROM vendors WHERE name LIKE ?", …)`：取引先の候補をCSVで受け取る。
 5. `shell`：`python /workspace/master/skills/inv-check/check-script/reconcile.py …` で、明細と品目マスター・取引先を突合し、明細の合計と請求書の合計額を検算する。1件で取引先が2つの候補に分かれた。
 6. `ask_user`：「取引先『山田商事』に2つの候補があります。どちらですか」（選択肢：本社〔推奨〕・大阪支店）。RunはWAITING_USERになり、Workerを手放す。
 7. 社員が「本社」と答える。新しいAttemptで、Workspaceをsnapshotから戻して続ける。

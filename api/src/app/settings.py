@@ -65,6 +65,7 @@ INSTALLED_APPS = [
     "artifact",
     "resources",
     "skill",
+    "connector",
 ]
 
 MIDDLEWARE = [

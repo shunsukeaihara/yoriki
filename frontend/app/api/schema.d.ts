@@ -759,6 +759,146 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/connectors/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Connectorの管理API（基盤管理者だけ） */
+        get: operations["v1_connectors_list"];
+        put?: never;
+        /** @description Connectorの管理API（基盤管理者だけ） */
+        post: operations["v1_connectors_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/connectors/{connector}/versions/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Connectorの版の履歴（基盤管理者だけ） */
+        get: operations["v1_connectors_versions_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/connectors/{connector}/versions/{number}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Connectorの版の履歴（基盤管理者だけ） */
+        get: operations["v1_connectors_versions_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/connectors/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Connectorの管理API（基盤管理者だけ） */
+        get: operations["v1_connectors_retrieve"];
+        /** @description Connectorの管理API（基盤管理者だけ） */
+        put: operations["v1_connectors_update"];
+        post?: never;
+        /** @description Connectorの管理API（基盤管理者だけ） */
+        delete: operations["v1_connectors_destroy"];
+        options?: never;
+        head?: never;
+        /** @description Connectorの管理API（基盤管理者だけ） */
+        patch: operations["v1_connectors_partial_update"];
+        trace?: never;
+    };
+    "/api/v1/connectors/{uid}/check/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 接続先に接続して、ホスト・認証・DB名が正しいかを確かめる */
+        post: operations["v1_connectors_check_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/connectors/{uid}/describe/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 公開している表・ビューの列と説明。エージェントの `datasource_describe` と同じ内容 */
+        get: operations["v1_connectors_describe_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/connectors/{uid}/query/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description SELECT文を試しに実行する。エージェントの `datasource_query` と同じ検査・上限を通る。応答の行は先頭の200行まで */
+        post: operations["v1_connectors_query_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/connectors/{uid}/tables/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 接続先のアカウントが読める表・ビューと列の一覧。公開する表を選ぶために使う */
+        get: operations["v1_connectors_tables_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/departments/": {
         parameters: {
             query?: never;
@@ -1517,6 +1657,302 @@ export interface components {
             column: string;
             type: components["schemas"]["CsvColumnTypeEnum"];
         };
+        /**
+         * @description Connectorの作成と表示。境界（公開する表、上限、機密のフラグ）は現在の版の値を平らに出す。
+         *
+         *     境界を変えて保存すると、サーバーが新しい版を作る。更新では、編集を始めた時点の `version` を送り、
+         *     その間に他の人が版を作っていたら409になる。パスワードは書き込み専用で、応答には末尾の4文字だけを出す
+         */
+        Connector: {
+            readonly id: string;
+            /** 名前 */
+            name: string;
+            /** 種別 */
+            kind: components["schemas"]["ConnectorKindEnum"];
+            readonly kind_display: string;
+            /** ホスト */
+            host: string;
+            /** @description 省略すると種別の既定のポート */
+            port?: number;
+            /** DB名 */
+            database: string;
+            /** ユーザー名 */
+            username: string;
+            readonly has_password: boolean;
+            readonly password_hint: string;
+            /** 通信の暗号化 */
+            tls?: components["schemas"]["TlsEnum"];
+            /** 接続のタイムアウト（秒） */
+            connect_timeout_seconds?: number;
+            /** 同時実行数の上限 */
+            max_concurrency?: number;
+            /** 有効 */
+            is_active?: boolean;
+            /** @description 現在の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
+            version?: number;
+            /**
+             * @description エージェントに見せる、このConnectorの説明
+             * @default
+             */
+            description: string;
+            /** @description 表の名前にスキーマを書かなかったときのスキーマ。省略すると種別の既定（public、dbo） */
+            default_schema?: string;
+            tables?: components["schemas"]["ConnectorTableEntry"][];
+            /** @default 1000 */
+            max_rows: number;
+            /** @default 10485760 */
+            max_result_bytes: number;
+            /** @default 30 */
+            timeout_seconds: number;
+            /**
+             * @description 個人情報を主な中身とする接続先。ローカルLLMのモデルを使うタスク・会話にだけ割り当てる
+             * @default false
+             */
+            is_sensitive: boolean;
+            /** @description 使える役割・部門。更新では、送ると全体を置き換える */
+            permissions?: components["schemas"]["ConnectorPermission"][];
+            readonly created_by: string;
+            /** Format: date-time */
+            readonly created: string;
+            /** Format: date-time */
+            readonly updated: string;
+        };
+        /** @description 接続の確認の結果 */
+        ConnectorCheck: {
+            readonly ok: boolean;
+            /** @description 失敗の理由。成功したら空文字 */
+            readonly detail: string;
+        };
+        ConnectorColumn: {
+            readonly name: string;
+            readonly type: string;
+            readonly description: string;
+        };
+        /**
+         * @description * `1` - PostgreSQL
+         *     * `2` - MySQL
+         *     * `3` - SQL Server
+         * @enum {integer}
+         */
+        ConnectorKindEnum: 1 | 2 | 3;
+        /** @description Connectorを使える役割か部門（どちらか一方）と、使える操作 */
+        ConnectorPermission: {
+            readonly id: string;
+            /**
+             * 名前
+             * @description 役割の名前
+             */
+            group?: string | null;
+            department?: string | null;
+            readonly department_info: components["schemas"]["MinimumDepartment"] | null;
+            /** @description 使える操作。省略するとすべて（社内DBの操作はどれも読取り） */
+            operations?: components["schemas"]["OperationsEnum"][];
+        };
+        /** @description Connectorを使える役割か部門（どちらか一方）と、使える操作 */
+        ConnectorPermissionRequest: {
+            /**
+             * 名前
+             * @description 役割の名前
+             */
+            group?: string | null;
+            department?: string | null;
+            /** @description 使える操作。省略するとすべて（社内DBの操作はどれも読取り） */
+            operations?: components["schemas"]["OperationsEnum"][];
+        };
+        /** @description SELECT文の試し実行（管理画面）。エージェントと同じ検査・上限を通る */
+        ConnectorQueryRequest: {
+            /** @description SELECT文。引数の場所は ? で書く */
+            sql: string;
+            params?: unknown[];
+        };
+        ConnectorQueryResult: {
+            readonly ok: boolean;
+            /** @description 失敗の種類。成功したら空文字 */
+            readonly error_kind: string;
+            /** @description 失敗の理由。成功したら空文字 */
+            readonly detail: string;
+            /** @description 実際に実行したSQL（検査した構文木から作り直したもの） */
+            readonly sql: string;
+            readonly columns: string[];
+            /** @description 値は文字列にしたもの（NULLは空文字） */
+            readonly rows: string[][];
+            readonly row_count: number;
+            /** @description 行数・サイズの上限で打ち切った */
+            readonly truncated: boolean;
+            readonly csv_bytes: number;
+            readonly elapsed_ms: number;
+            readonly tables: string[];
+        };
+        /**
+         * @description Connectorの作成と表示。境界（公開する表、上限、機密のフラグ）は現在の版の値を平らに出す。
+         *
+         *     境界を変えて保存すると、サーバーが新しい版を作る。更新では、編集を始めた時点の `version` を送り、
+         *     その間に他の人が版を作っていたら409になる。パスワードは書き込み専用で、応答には末尾の4文字だけを出す
+         */
+        ConnectorRequest: {
+            /** 名前 */
+            name: string;
+            /** 種別 */
+            kind: components["schemas"]["ConnectorKindEnum"];
+            /** ホスト */
+            host: string;
+            /** @description 省略すると種別の既定のポート */
+            port?: number;
+            /** DB名 */
+            database: string;
+            /** ユーザー名 */
+            username: string;
+            /** @description 更新では、送らなければ変更しない */
+            password?: string;
+            /** 通信の暗号化 */
+            tls?: components["schemas"]["TlsEnum"];
+            /** 接続のタイムアウト（秒） */
+            connect_timeout_seconds?: number;
+            /** 同時実行数の上限 */
+            max_concurrency?: number;
+            /** 有効 */
+            is_active?: boolean;
+            /** @description 現在の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
+            version?: number;
+            /**
+             * @description エージェントに見せる、このConnectorの説明
+             * @default
+             */
+            description: string;
+            /** @description 表の名前にスキーマを書かなかったときのスキーマ。省略すると種別の既定（public、dbo） */
+            default_schema?: string;
+            tables?: components["schemas"]["ConnectorTableEntryRequest"][];
+            /** @default 1000 */
+            max_rows: number;
+            /** @default 10485760 */
+            max_result_bytes: number;
+            /** @default 30 */
+            timeout_seconds: number;
+            /**
+             * @description 個人情報を主な中身とする接続先。ローカルLLMのモデルを使うタスク・会話にだけ割り当てる
+             * @default false
+             */
+            is_sensitive: boolean;
+            change_reason?: string;
+            /** @description 使える役割・部門。更新では、送ると全体を置き換える */
+            permissions?: components["schemas"]["ConnectorPermissionRequest"][];
+        };
+        /** @description DBの表・ビューと列 */
+        ConnectorTable: {
+            readonly schema: string;
+            readonly name: string;
+            readonly kind: components["schemas"]["ConnectorTableKindEnum"];
+            readonly description: string;
+            readonly columns: components["schemas"]["ConnectorColumn"][];
+        };
+        /** @description 公開する表・ビュー（版の `tables` の1件） */
+        ConnectorTableEntry: {
+            /**
+             * @description MySQLでは空（DB名がスキーマ）
+             * @default
+             */
+            schema: string;
+            name: string;
+            /** @default  */
+            description: string;
+            /** @description 列の説明（列名 → 説明）。任意 */
+            columns?: {
+                [key: string]: string;
+            };
+        };
+        /** @description 公開する表・ビュー（版の `tables` の1件） */
+        ConnectorTableEntryRequest: {
+            /**
+             * @description MySQLでは空（DB名がスキーマ）
+             * @default
+             */
+            schema: string;
+            name: string;
+            /** @default  */
+            description: string;
+            /** @description 列の説明（列名 → 説明）。任意 */
+            columns?: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * @description * `table` - table
+         *     * `view` - view
+         * @enum {string}
+         */
+        ConnectorTableKindEnum: "table" | "view";
+        /** @description 表・ビューの一覧の取得の結果 */
+        ConnectorTables: {
+            readonly ok: boolean;
+            /** @description 失敗の理由。成功したら空文字 */
+            readonly detail: string;
+            readonly tables: components["schemas"]["ConnectorTable"][];
+        };
+        /** @description Connectorの更新。種別と接続先（ホスト・ポート・DB名）は変えられないので、読み取り専用にする */
+        ConnectorUpdateRequest: {
+            /** 名前 */
+            name: string;
+            /** ユーザー名 */
+            username: string;
+            /** @description 更新では、送らなければ変更しない */
+            password?: string;
+            /** 通信の暗号化 */
+            tls?: components["schemas"]["TlsEnum"];
+            /** 接続のタイムアウト（秒） */
+            connect_timeout_seconds?: number;
+            /** 同時実行数の上限 */
+            max_concurrency?: number;
+            /** 有効 */
+            is_active?: boolean;
+            /** @description 現在の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
+            version?: number;
+            /**
+             * @description エージェントに見せる、このConnectorの説明
+             * @default
+             */
+            description: string;
+            /** @description 表の名前にスキーマを書かなかったときのスキーマ。省略すると種別の既定（public、dbo） */
+            default_schema?: string;
+            tables?: components["schemas"]["ConnectorTableEntryRequest"][];
+            /** @default 1000 */
+            max_rows: number;
+            /** @default 10485760 */
+            max_result_bytes: number;
+            /** @default 30 */
+            timeout_seconds: number;
+            /**
+             * @description 個人情報を主な中身とする接続先。ローカルLLMのモデルを使うタスク・会話にだけ割り当てる
+             * @default false
+             */
+            is_sensitive: boolean;
+            change_reason?: string;
+            /** @description 使える役割・部門。更新では、送ると全体を置き換える */
+            permissions?: components["schemas"]["ConnectorPermissionRequest"][];
+        };
+        /** @description 版の表示（履歴） */
+        ConnectorVersion: {
+            readonly id: string;
+            /** 版 */
+            readonly number: number;
+            /** 説明 */
+            readonly description: string;
+            /** 既定のスキーマ */
+            readonly default_schema: string;
+            readonly tables: components["schemas"]["ConnectorTableEntry"][];
+            /** 行数の上限 */
+            readonly max_rows: number;
+            /** 結果のサイズの上限（バイト） */
+            readonly max_result_bytes: number;
+            /** 実行時間の上限（秒） */
+            readonly timeout_seconds: number;
+            /** 機密 */
+            readonly is_sensitive: boolean;
+            /** 変更理由 */
+            readonly change_reason: string;
+            readonly created_by: string;
+            /** Format: date-time */
+            readonly created: string;
+        };
         /** @description 自分の会話。モデル設定を省くと既定のモデル設定にする。実行中に変えると、次のステップから切り替わる */
         Conversation: {
             readonly id: string;
@@ -2208,6 +2644,12 @@ export interface components {
         };
         /** @enum {unknown} */
         NullEnum: null;
+        /**
+         * @description * `datasource_describe` - 表・列の説明を見る
+         *     * `datasource_query` - SELECT文で読み取る
+         * @enum {string}
+         */
+        OperationsEnum: "datasource_describe" | "datasource_query";
         PaginatedArtifactList: {
             /**
              * Format: uri
@@ -2233,6 +2675,32 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["ClarificationRequest"][];
+        };
+        PaginatedConnectorList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["Connector"][];
+        };
+        PaginatedConnectorVersionList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["ConnectorVersion"][];
         };
         PaginatedConversationList: {
             /**
@@ -2454,6 +2922,47 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["Skill"][];
+        };
+        /** @description Connectorの更新。種別と接続先（ホスト・ポート・DB名）は変えられないので、読み取り専用にする */
+        PatchedConnectorUpdateRequest: {
+            /** 名前 */
+            name?: string;
+            /** ユーザー名 */
+            username?: string;
+            /** @description 更新では、送らなければ変更しない */
+            password?: string;
+            /** 通信の暗号化 */
+            tls?: components["schemas"]["TlsEnum"];
+            /** 接続のタイムアウト（秒） */
+            connect_timeout_seconds?: number;
+            /** 同時実行数の上限 */
+            max_concurrency?: number;
+            /** 有効 */
+            is_active?: boolean;
+            /** @description 現在の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
+            version?: number;
+            /**
+             * @description エージェントに見せる、このConnectorの説明
+             * @default
+             */
+            description: string;
+            /** @description 表の名前にスキーマを書かなかったときのスキーマ。省略すると種別の既定（public、dbo） */
+            default_schema?: string;
+            tables?: components["schemas"]["ConnectorTableEntryRequest"][];
+            /** @default 1000 */
+            max_rows: number;
+            /** @default 10485760 */
+            max_result_bytes: number;
+            /** @default 30 */
+            timeout_seconds: number;
+            /**
+             * @description 個人情報を主な中身とする接続先。ローカルLLMのモデルを使うタスク・会話にだけ割り当てる
+             * @default false
+             */
+            is_sensitive: boolean;
+            change_reason?: string;
+            /** @description 使える役割・部門。更新では、送ると全体を置き換える */
+            permissions?: components["schemas"]["ConnectorPermissionRequest"][];
         };
         /** @description 自分の会話。モデル設定を省くと既定のモデル設定にする。実行中に変えると、次のステップから切り替わる */
         PatchedConversationRequest: {
@@ -3401,6 +3910,13 @@ export interface components {
             before: string | null;
             after: string | null;
         };
+        /**
+         * @description * `1` - 暗号化しない
+         *     * `2` - 暗号化する（証明書を確かめない）
+         *     * `3` - 暗号化して証明書を確かめる
+         * @enum {integer}
+         */
+        TlsEnum: 1 | 2 | 3;
         /** @description 作業の計画の1項目（harness/tools/todo_write.py） */
         Todo: {
             readonly content: string;
@@ -5260,6 +5776,323 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Ping"];
+                };
+            };
+        };
+    };
+    v1_connectors_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                is_active?: boolean;
+                /** @description 機密 */
+                is_sensitive?: boolean;
+                /**
+                 * @description 種別
+                 *
+                 *     * `1` - PostgreSQL
+                 *     * `2` - MySQL
+                 *     * `3` - SQL Server
+                 */
+                kind?: 1 | 2 | 3;
+                /** @description 名前 */
+                name?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedConnectorList"];
+                };
+            };
+        };
+    };
+    v1_connectors_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectorRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["ConnectorRequest"];
+                "multipart/form-data": components["schemas"]["ConnectorRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Connector"];
+                };
+            };
+        };
+    };
+    v1_connectors_versions_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                connector: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedConnectorVersionList"];
+                };
+            };
+        };
+    };
+    v1_connectors_versions_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                connector: string;
+                number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorVersion"];
+                };
+            };
+        };
+    };
+    v1_connectors_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Connector"];
+                };
+            };
+        };
+    };
+    v1_connectors_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectorUpdateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["ConnectorUpdateRequest"];
+                "multipart/form-data": components["schemas"]["ConnectorUpdateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Connector"];
+                };
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、別の版ができている） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_connectors_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_connectors_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedConnectorUpdateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedConnectorUpdateRequest"];
+                "multipart/form-data": components["schemas"]["PatchedConnectorUpdateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Connector"];
+                };
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、別の版ができている） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_connectors_check_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorCheck"];
+                };
+            };
+        };
+    };
+    v1_connectors_describe_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorTables"];
+                };
+            };
+        };
+    };
+    v1_connectors_query_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectorQueryRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["ConnectorQueryRequest"];
+                "multipart/form-data": components["schemas"]["ConnectorQueryRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorQueryResult"];
+                };
+            };
+        };
+    };
+    v1_connectors_tables_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectorTables"];
                 };
             };
         };

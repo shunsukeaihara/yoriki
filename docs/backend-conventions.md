@@ -124,7 +124,7 @@ design.md §5.1の永続オブジェクトを、次の単位で分ける。実�
 | `worker` | Workerの登録情報 |
 | `usage` | UsageLedger、クオータ |
 | `llm` | LLMConnection、ModelProfile、Provider Adapter（design.md §4.8） |
-| `connector` | Connector、ConnectorPermission（使える利用者・役割と操作）、操作のAdapter（社内DB、SharePoint、Google Drive、MCP。design.md §4.9） |
+| `connector` | Connector、ConnectorVersion（境界の版）、ConnectorPermission（使える役割・部門と操作）、操作のAdapter（社内DB、SharePoint、Google Drive、MCP。design.md §4.9） |
 | `stream` | SSEのストリームview、イベントのSerializer（realtime.md） |
 | `harness` | Modelなし。Runner（実行のループ）、Tool、RunEventからの文脈の組立、圧縮、Sandboxの操作（harness.md §3） |
 
@@ -595,7 +595,7 @@ DATABASES = {
 - DBへの接続数は、およそ「Uvicornのワーカー数 × プールの最大数 ＋ qclusterのプロセス数 ＋ SSEのLISTEN（プロセスごとに1本）」になる。サーバーを増やすときは、PostgreSQLの `max_connections` に収まるか確認する。PgBouncerを入れる場合、transactionモードではLISTENが使えないので、LISTENの接続はPgBouncerを通さない（realtime.md §4.1）。
 - SSEのLISTENには、ORMのプールとは別に、psycopg 3の非同期接続（`AsyncConnection`）をプロセスごとに1本持つ（realtime.md §4）。
 - Djangoの非同期ORM（`aget`、`afilter` 等）は、内部では同期の接続をスレッドで使う。非同期のview（SSE）でイベントループを止めずにDBを読むために使い、非同期のviewから同期のORMを直接呼ばない。
-- Connector（design.md §4.9）のドライバ（pyodbc、psycopg 3、mysqlclient）は、Yoriki自身のDBとは別に、同期で使う。Connectorを呼ぶのはqclusterと同期のviewだけなので、非同期のドライバは使わない。
+- Connector（design.md §4.9）のドライバ（pyodbc、psycopg 3、PyMySQL）は、Yoriki自身のDBとは別に、同期で使う。Connectorを呼ぶのはqclusterと同期のviewだけなので、非同期のドライバは使わない。
 
 ### 6.2 認証（社内SSOとYorikiのアカウント）
 

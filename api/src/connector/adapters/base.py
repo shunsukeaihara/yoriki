@@ -1,0 +1,241 @@
+"""ConnectorのAdapterの共通の型（design.md §4.9.4）。
+
+社内DBの3種類（PostgreSQL・MySQL・SQL Server）は同じ契約で実装し、種別ごとの違いは、ドライバ、読取り専用の設定、
+実行時間の上限、SQLの方言、表の一覧の取り方だけに閉じ込める（design.md §4.9.2）。
+接続はControl Planeと同じ信頼範囲のプロセス（apiかqcluster）の中だけで開き、操作ごとに開いて閉じる。
+"""
+
+import csv
+import io
+import time
+from abc import ABC, abstractmethod
+from collections.abc import Iterator, Sequence
+from contextlib import AbstractContextManager
+from dataclasses import dataclass, field
+from datetime import date, datetime, timedelta
+from datetime import time as dt_time
+from decimal import Decimal
+from typing import Any
+from uuid import UUID
+
+from django.utils.translation import gettext as _
+
+from ..errors import ConnectorError, ConnectorErrorKind
+from ..models import Connector, ConnectorVersion
+from ..sql import CheckedQuery, Dialect, check_query, table_key
+
+# 管理画面で表を選ぶための一覧の上限
+MAX_LISTED_TABLES = 5000
+FETCH_SIZE = 500
+
+Param = str | int | float | bool | None
+
+
+@dataclass(frozen=True)
+class ColumnInfo:
+    name: str
+    type: str
+    description: str = ""
+
+
+@dataclass(frozen=True)
+class TableInfo:
+    schema: str
+    name: str
+    kind: str  # "table" か "view"
+    columns: tuple[ColumnInfo, ...] = ()
+    description: str = ""
+
+
+@dataclass
+class QueryResult:
+    columns: list[str]
+    rows: list[tuple[Any, ...]]
+    # 行数・サイズの上限で打ち切った（打ち切った後の行は読んでいない）
+    truncated: bool = False
+    # CSVにしたときのバイト数（打ち切った場合は、打ち切るまで）
+    csv_bytes: int = 0
+    elapsed_ms: int = 0
+    tables: tuple[str, ...] = field(default_factory=tuple)
+    sql: str = ""  # 実際に実行したSQL（検査した構文木から作り直したもの）
+
+    def to_csv(self) -> str:
+        buffer = io.StringIO()
+        writer = csv.writer(buffer, lineterminator="\n")
+        writer.writerow(self.columns)
+        writer.writerows([to_text(v) for v in row] for row in self.rows)
+        return buffer.getvalue()
+
+
+def to_text(value: Any) -> str:
+    """結果の値を、CSVと画面に出す文字列にする"""
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, datetime | date | dt_time):
+        return value.isoformat()
+    if isinstance(value, bytes | bytearray | memoryview):
+        return bytes(value).hex()
+    if isinstance(value, Decimal | UUID | timedelta):
+        return str(value)
+    return str(value)
+
+
+class DatasourceAdapter(ABC):
+    """読取り専用の社内DB。管理画面での接続確認・表の一覧と、エージェントの describe・query を受け持つ"""
+
+    dialect: Dialect
+
+    def __init__(self, connector: Connector, version: ConnectorVersion | None = None):
+        self.connector = connector
+        self.version = version or connector.current_version
+
+    # --- 種別ごとに実装する ---
+
+    @abstractmethod
+    def connect(self) -> AbstractContextManager[Any]:
+        """読取り専用で、実行時間の上限を設定した接続（DB-API 2.0のconnection）を開く。閉じるときにrollbackする"""
+
+    @abstractmethod
+    def open_cursor(self, conn: Any) -> Any:
+        """結果を少しずつ取り出すcursor（全行をメモリに読まない）"""
+
+    @abstractmethod
+    def tables_sql(self) -> str:
+        """表・ビューの一覧（スキーマ、名前、種類）を返すSQL。アカウントが読める範囲"""
+
+    @abstractmethod
+    def columns_sql(self) -> str:
+        """列の一覧（スキーマ、表、列、型）を返すSQL"""
+
+    @abstractmethod
+    def translate_error(self, exc: Exception) -> ConnectorError | None:
+        """ドライバの例外を ConnectorError にする。ドライバの例外でなければNone"""
+
+    # --- 共通 ---
+
+    @property
+    def default_schema(self) -> str:
+        assert self.version is not None
+        return self.version.default_schema
+
+    def _run(self, fn):
+        try:
+            return fn()
+        except ConnectorError:
+            raise
+        except Exception as exc:
+            error = self.translate_error(exc)
+            if error is None:
+                raise
+            raise error from exc
+
+    def check(self) -> None:
+        """接続できるか（ホスト、認証、DB名）を確かめる"""
+
+        def run():
+            with self.connect() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT 1")
+                cur.fetchall()
+
+        self._run(run)
+
+    def list_tables(self) -> list[TableInfo]:
+        """アカウントが読める表・ビューと列の一覧。管理者が公開する表を選ぶために使う"""
+
+        def run() -> list[TableInfo]:
+            with self.connect() as conn:
+                cur = conn.cursor()
+                cur.execute(self.tables_sql())
+                tables = [(s, n, k) for s, n, k in cur.fetchmany(MAX_LISTED_TABLES)]
+                cur.execute(self.columns_sql())
+                columns: dict[tuple[str, str], list[ColumnInfo]] = {}
+                for schema, table, column, type_ in cur.fetchall():
+                    columns.setdefault((schema, table), []).append(ColumnInfo(column, type_))
+            return [
+                TableInfo(
+                    schema=s,
+                    name=n,
+                    kind="view" if "VIEW" in k.upper() else "table",
+                    columns=tuple(columns.get((s, n), ())),
+                )
+                for s, n, k in tables
+            ]
+
+        return self._run(run)
+
+    def describe(self) -> list[TableInfo]:
+        """公開している表・ビューの列と、管理者が付けた説明（`datasource_describe`）。
+
+        DBにない表（公開した後に消された等）は、列を空にして返す
+        """
+        assert self.version is not None
+        found = {self._key(t.schema, t.name): t for t in self.list_tables()}
+        result = []
+        for entry in self.version.tables:
+            schema, name = entry.get("schema", ""), entry["name"]
+            table = found.get(self._key(schema, name))
+            descriptions: dict[str, str] = entry.get("columns") or {}
+            columns = tuple(
+                ColumnInfo(c.name, c.type, descriptions.get(c.name, "")) for c in (table.columns if table else ())
+            )
+            kind = table.kind if table else "table"
+            result.append(TableInfo(schema, name, kind, columns, entry.get("description", "")))
+        return result
+
+    def _key(self, schema: str, name: str) -> tuple[str, str]:
+        # MySQLのスキーマはDB名（公開する表はスキーマを持たない）
+        return table_key(self.connector.database if self.dialect.schema_is_database else schema, name, self.dialect)
+
+    def check_query(self, sql: str, params: Sequence[Param]) -> CheckedQuery:
+        assert self.version is not None
+        return check_query(
+            sql,
+            len(params),
+            dialect=self.dialect,
+            database=self.connector.database,
+            default_schema=self.default_schema,
+            exposed=[(t.get("schema", ""), t["name"]) for t in self.version.tables],
+        )
+
+    def query(self, sql: str, params: Sequence[Param] = ()) -> QueryResult:
+        """公開している表・ビューへのSELECT文を実行する（`datasource_query`）。行数・サイズの上限で打ち切る"""
+        assert self.version is not None
+        checked = self.check_query(sql, params)
+        max_rows = self.version.max_rows
+        max_bytes = self.version.max_result_bytes
+
+        def run() -> QueryResult:
+            started = time.monotonic()
+            with self.connect() as conn:
+                cur = self.open_cursor(conn)
+                cur.execute(checked.sql, tuple(params))
+                if cur.description is None:
+                    raise ConnectorError(ConnectorErrorKind.REJECTED, _("結果を返さない文は実行できません"))
+                columns = [d[0] for d in cur.description]
+                result = QueryResult(columns=columns, rows=[], tables=checked.tables, sql=checked.sql)
+                result.csv_bytes = _csv_size(columns)
+                for row in _fetch(cur):
+                    size = _csv_size([to_text(v) for v in row])
+                    if len(result.rows) >= max_rows or result.csv_bytes + size > max_bytes:
+                        result.truncated = True
+                        break
+                    result.rows.append(tuple(row))
+                    result.csv_bytes += size
+            result.elapsed_ms = int((time.monotonic() - started) * 1000)
+            return result
+
+        return self._run(run)
+
+
+def _fetch(cur) -> Iterator[Sequence[Any]]:
+    while rows := cur.fetchmany(FETCH_SIZE):
+        yield from rows
+
+
+def _csv_size(values: Sequence[Any]) -> int:
+    buffer = io.StringIO()
+    csv.writer(buffer, lineterminator="\n").writerow(values)
+    return len(buffer.getvalue().encode())

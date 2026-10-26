@@ -191,7 +191,7 @@ cd frontend && pnpm dev
 | `/api/` | api:8000（パスはそのまま転送。Djangoは `/api/` の下にURLを置く） | 通常のAPI |
 | `/api/app/v1/stream/`、`/api/app/v1/runs/{id}/stream/` | api:8000 | SSE用（§4.2）。`location ~ ^/api/app/v1/(runs/[^/]+/)?stream/$` で両方に合わせる |
 | `/api/hooks/` | api:8000 | Webhook・Channelの受信。bodyの上限を小さくし、rate limitを強くする |
-| `/api/admin/`、`/api/schema/` | api:8000 | ログインと役割で守る（管理画面は基盤管理者、スキーマとSwagger UIはどの環境でもログインした利用者）。IPの制限は導入先が任意で追加する |
+| `/api/admin/`、`/api/schema/` | api:8000 | ログインとpermissionで守る（Django管理画面は基盤管理者、スキーマとSwagger UIはどの環境でもログインした利用者）。IPの制限は導入先が任意で追加する |
 | `/api/accounts/` | api:8000 | SSOのログイン開始と認証基盤からのコールバック |
 | `/api/files/<token>/` | api:8000 | 成果物の期限付き取得。セッションを使わずtokenを確認する。rate limitを付ける |
 | `/_protected/` | （nginxの内部location） | `internal;` を付け、apiの `X-Accel-Redirect` からだけ使う。外から直接は取得できない |
@@ -239,7 +239,7 @@ SSEのパスにだけ適用する。apiのレスポンスにも `X-Accel-Bufferi
 - 変数の一覧は `deploy/env/yoriki.env.example` に、説明と空の値で管理する。新しい変数を追加したら、`.envrc.example` と合わせて更新する。
 - PostgreSQLの初期設定は `/etc/yoriki/postgres.env`（`deploy/env/postgres.env.example`）、Cloudflare Tunnelのトークンは `/etc/yoriki/cloudflared.env`（`deploy/env/cloudflared.env.example`）に置く。どれも所有者root、権限600にする。
 - Composeファイル自体の変数（`YORIKI_API_IMAGE` 等のイメージのdigest、証明書のディレクトリ、dockerグループのGID）は、`deploy/.env`（`deploy/.env.example` をコピー）に置く。ここには秘密情報を書かない。
-- LLMのAPI key、Connector・外部連携の資格情報は、基盤管理者が管理画面で接続と一緒に登録し、DBに暗号化して保存する（`utils/crypto.py`）。apiとqcluster（Workerサーバーのqclusterを含む）の中でだけ復号して使い、APIの応答・画面・ログ・監査ログ・Sandboxへは出さない。画面には「設定済み」と末尾の4文字だけを出す。
+- LLMのAPI key、Connector・外部連携の資格情報は、permissionを持つ管理者（Connector管理者等。authorization.md §10）が管理画面で接続と一緒に登録し、DBに暗号化して保存する（`utils/crypto.py`）。apiとqcluster（Workerサーバーのqclusterを含む）の中でだけ復号して使い、APIの応答・画面・ログ・監査ログ・Sandboxへは出さない。画面には「設定済み」と末尾の4文字だけを出す。
 - 暗号化の鍵は `YORIKI_SECRET_ENCRYPTION_KEYS`（Fernetの鍵。カンマ区切り）で渡し、DBには置かない。DBやそのバックアップだけが漏れても、Secretは読めない。apiとqcluster（Workerサーバーを含む）で同じ値にする。
   - 生成：`python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`（apiのイメージの中で実行できる）。
   - 鍵を失うと、登録したSecretはすべて入力し直しになる。DBのバックアップとは別の場所にも控える。
@@ -510,5 +510,5 @@ Cloudflareは無料プランだけを使う。§8.3・§8.4は、次の制約の
 - **SSE**：前段のnginxは `auth_request`（認証だけをoauth2-proxyに問い合わせる方式）で使っているので、応答はoauth2-proxyを通らず、SSEはそのまま通る。前段のnginxでもSSEのパスのバッファリングを切る（Yorikiは `X-Accel-Buffering: no` を返すので、設定がなくても効く）。
 - **バリアのセッション切れ**：oauth2-proxyのセッションが切れると、APIの呼び出しはIdPへのリダイレクトになり、XHRではCORSのエラーかJSONでない応答になる。フロントエンドは、APIの呼び出しがネットワークエラーやJSONでない応答になったら画面ごと再読み込みし、oauth2-proxyに改めて認証させる（frontend-conventions.md §3.1）。
 - **ログアウト**：消すのはYorikiのセッションだけにする。oauth2-proxyのセッションは前段の基盤のもので、ほかのアプリと共有しているので、そのままにする。
-- **IPアドレスの制限は使わない**：前段の他のアプリと同じく、oauth2-proxyのバリアとYorikiのログイン・役割で守る。
+- **IPアドレスの制限は使わない**：前段の他のアプリと同じく、oauth2-proxyのバリアとYorikiのログイン・permissionで守る。
 - **利用者のIPアドレスを前段のnginxで解決して渡す**：ログインの試行回数の制限は送信元のIPアドレスごとにも数える（backend-conventions.md §6.2）。前段のnginxは、Cloudflareから受けた `CF-Connecting-IP` で利用者のIPアドレスを解決し（`set_real_ip_from <CloudflareのIPアドレスの範囲、またはcloudflaredのネットワーク>`、`real_ip_header CF-Connecting-IP`）、`X-Forwarded-For` を `$remote_addr` で上書きしてYorikiのnginxへ渡す。解決しないまま自分から見た接続元（CloudflareのエッジのIPアドレス）を付け足すと、Yorikiには多くの社員が同じIPアドレスに見え、誰かの失敗が続くと関係のない人も一定時間ログインできなくなる（制限を逃れられるわけではない。アカウントごとの制限はそのまま効く）。Yorikiのnginxは `sites/http.conf`（私設のアドレスだけを信頼する）を使う。

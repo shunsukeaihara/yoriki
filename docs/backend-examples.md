@@ -807,7 +807,7 @@ from rest_framework.viewsets import GenericViewSet, ReadOnlyModelViewSet
 
 from utils.permissions import AppUser
 from utils.serializers import CountSerializer
-from .models import ACTIVE_STATUSES, ClarificationRequest, Run, RunEvent
+from .models import ACTIVE_STATUSES, ClarificationRequest, Run, RunAccess, RunEvent
 from .serializers import (
     ClarificationAnswerSerializer, ClarificationRequestSerializer,
     RunCancelSerializer, RunEventSerializer, RunSerializer,
@@ -815,14 +815,19 @@ from .serializers import (
 
 
 class MyRunMixin:
-    """URLのrunを、ログインユーザーの会話のRunに限定して取得する"""
+    """URLのrunを、利用者が見られるRunに限定して取得する（見られなければ404）。
+
+    結果を見られる人とログを見られる人は違う（authorization.md §7.1。チャットから起動したタスクのRunでは、
+    起動した人は結果だけ、ログはタスクを管理できる人だけ）。どちらで絞るかをViewSetごとに `run_access` で決める
+    """
+
+    run_access = RunAccess.RESULT
 
     @property
     def run(self) -> Run:
         if not hasattr(self, "_run"):
             self._run = get_object_or_404(
-                Run.objects.all(), uid=self.kwargs["run"],
-                conversation__owner=self.request.user, conversation__deleted=False)
+                Run.objects.visible_to(self.request.user, self.run_access), uid=self.kwargs["run"])
         return self._run
 
     def get_queryset(self):
@@ -839,7 +844,8 @@ class AppRunViewSet(ReadOnlyModelViewSet):
     ordering = ("-created", "-pk")
 
     def get_queryset(self):
-        return super().get_queryset().filter(conversation__owner=self.request.user, conversation__deleted=False)
+        # 実行したときの範囲と部門で判定する（Run.visible_to。会話のRunは依頼した人）
+        return super().get_queryset().visible_to(self.request.user, RunAccess.RESULT)
 
     @extend_schema(
         description="実行の停止を依頼する。実行中の場合は停止中になり、Workerが停止を確認すると取消になる",
@@ -862,6 +868,8 @@ class AppRunViewSet(ReadOnlyModelViewSet):
 
 @extend_schema(description="Runのイベント履歴", tags=["app/run/event"])
 class AppRunEventViewSet(MyRunMixin, ListModelMixin, GenericViewSet):
+    # イベント（Toolの呼出しと結果を含む）はログ。ログを見られる人だけ
+    run_access = RunAccess.LOG
     permission_classes = [AppUser]
     queryset = RunEvent.objects.select_related("actor")
     serializer_class = RunEventSerializer

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 
-definePageMeta({ permission: PermissionCode.CHANGE_MODEL_PROFILE })
+definePageMeta({ permission: ManagePagePermissions.MODEL_PROFILE })
 
+const { hasPermission } = usePermission()
 const api = useAPI()
 const { t } = useI18n()
 const reloadKey = ref(0)
@@ -33,7 +34,7 @@ const columns: TableColumn<ModelProfile>[] = [
         :description="$t('Agentが選ぶモデルです。中身を変えて保存すると新しい版になり、履歴が残ります')"
       >
         <template #end>
-          <ModelProfileDialog @saved="reload">
+          <ModelProfileDialog v-if="hasPermission(PermissionCode.ADD_MODEL_PROFILE)" @saved="reload">
             <template #trigger="{ on }">
               <DBtn icon="i-lucide-plus" v-on="on">{{ $t('モデル設定を追加') }}</DBtn>
             </template>

@@ -7,7 +7,7 @@ const { create, patch } = vi.hoisted(() => ({ create: vi.fn(), patch: vi.fn() })
 mockNuxtImport('useAPI', () => () => ({
   manage: {
     users: () => ({ create, patch }),
-    groups: { list: () => Promise.resolve([{ name: '業務管理者' }]) },
+    groups: { list: () => Promise.resolve([{ name: '全社のSkill公開者' }]) },
   },
 }))
 
@@ -15,9 +15,10 @@ const user: ManageUser = {
   id: 'u1',
   email: 'taro@example.co.jp',
   displayName: '太郎',
-  groups: ['業務管理者'],
+  groups: ['全社のSkill公開者'],
   isActive: true,
-  isPlatformAdmin: false,
+  canChange: true,
+  canIssueInvitation: true,
   hasPassword: true,
   ssoProviders: [],
   lastLogin: null,
@@ -37,7 +38,7 @@ describe('ManageUserForm', () => {
     const wrapper = await mountSuspended(ManageUserForm, { props: { modelValue: user } })
     expect(wrapper.find('input[type="email"]').attributes('disabled')).toBeDefined()
     await (wrapper.vm as unknown as Form).onSubmit()
-    expect(patch).toHaveBeenCalledWith({ displayName: '太郎', groups: ['業務管理者'], isActive: true })
+    expect(patch).toHaveBeenCalledWith({ displayName: '太郎', groups: ['全社のSkill公開者'], isActive: true })
   })
 
   it('作成ではメールアドレスを送る', async () => {

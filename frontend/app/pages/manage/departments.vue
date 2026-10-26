@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 
-definePageMeta({ permission: PermissionCode.CHANGE_DEPARTMENT })
+definePageMeta({ permission: ManagePagePermissions.DEPARTMENT })
 
+const { hasPermission } = usePermission()
 const api = useAPI()
 const { t } = useI18n()
 const reloadKey = ref(0)
@@ -34,7 +35,7 @@ const columns: TableColumn<Department>[] = [
         "
       >
         <template #end>
-          <DepartmentDialog @saved="reload">
+          <DepartmentDialog v-if="hasPermission(PermissionCode.ADD_DEPARTMENT)" @saved="reload">
             <template #trigger="{ on }">
               <DBtn icon="i-lucide-plus" v-on="on">{{ $t('部門を追加') }}</DBtn>
             </template>

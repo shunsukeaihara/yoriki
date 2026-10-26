@@ -1,41 +1,21 @@
 <script setup lang="ts">
-/** 部門の所属の追加と役割の変更。社員は追加するときだけ選べる（別の社員にするなら、外して追加し直す） */
+/**
+ * 部門の所属の追加。所属は変更せず、外して追加し直す。部門の中で何ができるかは、その人のpermissionで決まる
+ * （authorization.md §4）。自分と、自分の持たない権限を持つアカウントの所属は、サーバーが断る
+ */
 const props = defineProps<{ departmentId: string }>()
 const api = useAPI()
 const toast = useToast()
 const { t } = useI18n()
-const modelValue = defineModel<DepartmentMembership | null>()
-const emit = defineEmits<{
-  created: [value: DepartmentMembership]
-  updated: [value: DepartmentMembership]
-  failed: [error: unknown]
-}>()
+const emit = defineEmits<{ created: [value: DepartmentMembership]; failed: [error: unknown] }>()
 
-const emptyForm = () => ({
-  id: null as string | null,
-  user: null as string | null,
-  role: DepartmentRole.MEMBER as DepartmentRoleEnum,
-})
-const form = ref(emptyForm())
-
-watch(
-  modelValue,
-  (value) => {
-    form.value = value ? { id: value.id, user: value.user, role: value.role } : emptyForm()
-  },
-  { immediate: true },
-)
+const form = ref({ user: null as string | null })
 
 const { onSubmit, loading, errors } = createSubmit({
   form,
-  fn: ({ id, user, role }) =>
-    id
-      ? api.manage.departments(props.departmentId).members(id).patch({ role })
-      : api.manage.departments(props.departmentId).members().create({ user: user!, role }),
+  fn: ({ user }) => api.manage.departments(props.departmentId).members().create({ user: user! }),
   onSuccess: (result) => {
-    if (form.value.id) emit('updated', result)
-    else emit('created', result)
-    modelValue.value = result
+    emit('created', result)
     toast.add({ title: t('保存しました'), color: 'success' })
   },
   onError: (err) => {
@@ -53,7 +33,6 @@ defineExpose({ onSubmit, loading, canPost })
   <DFormStack>
     <DFormAlert :errors="errors" />
     <DAutocomplete
-      v-if="!form.id"
       v-model="form.user"
       :label="$t('社員')"
       required
@@ -62,14 +41,6 @@ defineExpose({ onSubmit, loading, canPost })
       item-title="email"
       item-description="displayName"
       :error-messages="errors.user"
-    />
-    <p v-else class="text-sm">{{ modelValue?.userInfo.displayName || modelValue?.userInfo.email }}</p>
-    <DRadioGroup
-      v-model="form.role"
-      :label="$t('部門の中の役割')"
-      :items="departmentRoleItems(t)"
-      variant="card"
-      :error-messages="errors.role"
     />
   </DFormStack>
 </template>

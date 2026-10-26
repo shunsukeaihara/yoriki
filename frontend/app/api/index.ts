@@ -174,7 +174,7 @@ const createAPI = () => {
         patch: (data: Partial<ManageUserUpdate>) => http.patch<ManageUser, ManageUser>(`v1/users/${id}/`, data),
         invitation: () => http.post<InvitationLink, InvitationLink>(`v1/users/${id}/invitation/`),
       }),
-      // 部門（Skill の部門の範囲に使う）と所属
+      // 部門（部門のSkill・Connector等の所有の単位）と所属
       departments: (id?: string) => ({
         ...resource<Department, DepartmentWrite>(http, 'v1/departments', id),
         members: (memberId?: string) => ({
@@ -185,9 +185,7 @@ const createAPI = () => {
           ),
           create: (data: DepartmentMembershipWrite) =>
             http.post<DepartmentMembership, DepartmentMembership>(`v1/departments/${id}/members/`, data),
-          // 社員は変えられない（役割だけ）
-          patch: (data: DepartmentMembershipUpdate) =>
-            http.patch<DepartmentMembership, DepartmentMembership>(`v1/departments/${id}/members/${memberId}/`, data),
+          // 所属は変更せず、消して作り直す
           delete: () => http.delete<undefined, undefined>(`v1/departments/${id}/members/${memberId}/`),
         }),
       }),
@@ -244,7 +242,7 @@ const createAPI = () => {
         // 更新では使うDB接続を送れない
         update: (data: ConnectorUpdate) => http.put<Connector, Connector>(`v1/connectors/${id}/`, data),
         patch: (data: Partial<ConnectorUpdate>) => http.patch<Connector, Connector>(`v1/connectors/${id}/`, data),
-        // 作成・編集で選ぶ接続先と部門（部門は自分の所属の範囲）。接続先・部門の管理の権限がなくても選べる
+        // 作成で選ぶ接続先と部門（部門は所属を問わず有効なすべて）。接続先・部門の管理の権限がなくても選べる
         connections: (params?: ListParams) =>
           http.get<Paginated<MinimumDatabaseConnection>, Paginated<MinimumDatabaseConnection>>(
             'v1/connectors/connections/',

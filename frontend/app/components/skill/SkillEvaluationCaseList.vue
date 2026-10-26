@@ -10,7 +10,7 @@ const toast = useToast()
 const confirm = useConfirmDialog()
 const { t } = useI18n()
 
-const canChange = (item: SkillEvaluationCase) => !item.required || props.skill.access >= SkillAccess.PUBLISH
+const canChange = (item: SkillEvaluationCase) => !item.required || props.skill.canPublish
 
 const sorted = (items: SkillEvaluationCase[]) =>
   [...items].sort((a, b) => Number(b.required ?? false) - Number(a.required ?? false) || a.name.localeCompare(b.name))

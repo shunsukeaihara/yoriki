@@ -6,9 +6,10 @@ const login = (allPermissions: string[]) => {
     username: 'u1',
     email: 'u1@example.com',
     displayName: 'U1',
-    isPlatformAdmin: false,
     allPermissions,
     departments: [],
+    usableDepartments: [],
+    manageableDepartments: [],
   }
 }
 
@@ -30,5 +31,18 @@ describe('useManageMenu', () => {
     const { items, links } = useManageMenu()
     expect(items.value.map((item) => item.label)).toEqual(['ユーザー'])
     expect(links.value.map((link) => link.to)).toEqual(['/manage/users'])
+  })
+
+  it('見るだけのpermissionでも、そのページに入れる（追加・削除だけでは入れない）', () => {
+    login([PermissionCode.VIEW_CONNECTOR, PermissionCode.VIEW_DEPARTMENT, PermissionCode.ADD_LLM_CONNECTION])
+    const { links } = useManageMenu()
+    expect(links.value.map((link) => link.to)).toEqual(['/manage/connectors', '/manage/departments'])
+  })
+
+  it('システムのSkillは、システムのSkillのpermissionを持つ人にだけ出す', () => {
+    login([PermissionCode.PUBLISH_COMPANY_SKILLS, PermissionCode.EDIT_DEPARTMENT_SKILLS])
+    expect(useManageMenu().links.value).toEqual([])
+    login([PermissionCode.EDIT_SYSTEM_SKILLS])
+    expect(useManageMenu().links.value.map((link) => link.to)).toEqual(['/manage/system_skills'])
   })
 })

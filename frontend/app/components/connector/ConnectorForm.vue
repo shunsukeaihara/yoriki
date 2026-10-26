@@ -2,7 +2,8 @@
 /**
  * Connectorの作成と、境界の設定の編集（design.md §4.9.1）。使うDB接続は作成した後は変えられない。
  * 境界（説明、既定のスキーマ、上限、機密）を変えて保存すると新しい版になる。
- * 公開する表は ConnectorTablesForm、利用の許可は ConnectorPermissionsForm で編集する
+ * 範囲（部門・全社・システム）と部門も作成した後は変えられない（authorization.md §5.2）。
+ * 公開する表は ConnectorTablesForm で編集する
  */
 const api = useAPI()
 const toast = useToast()
@@ -21,8 +22,9 @@ const emptyForm = () => ({
   version: 0,
   name: '',
   connection: null as string | null,
-  // 作成のときだけ送る。その後は「使える部門」のタブ（ConnectorDepartmentsForm）で変える
-  departments: [] as string[],
+  // 作成のときだけ送る
+  scope: ConnectorScope.DEPARTMENT as ConnectorScopeEnum,
+  department: null as string | null,
   isActive: true,
   description: '',
   defaultSchema: '',
@@ -77,9 +79,10 @@ const { onSubmit, loading, errors } = createSubmit({
       changeReason: f.changeReason || undefined,
     }
     if (!f.id) {
+      const department = f.scope === ConnectorScope.DEPARTMENT ? f.department : null
       return api.manage
         .connectors()
-        .create({ ...common, connection: f.connection!, departments: f.departments } as ConnectorWrite)
+        .create({ ...common, connection: f.connection!, scope: f.scope, department } as ConnectorWrite)
     }
     return api.manage.connectors(f.id).patch({ ...common, version: f.version })
   },
@@ -97,7 +100,11 @@ const { onSubmit, loading, errors } = createSubmit({
 })
 
 // 必須項目が埋まっているかだけを確認する。形式の検証はサーバーに任せる
-const canPost = computed(() => Boolean(form.value.name && form.value.connection))
+const canPost = computed(
+  () =>
+    Boolean(form.value.name && form.value.connection) &&
+    (isEdit.value || form.value.scope !== ConnectorScope.DEPARTMENT || Boolean(form.value.department)),
+)
 
 defineExpose({ onSubmit, loading, canPost, reset })
 </script>
@@ -119,15 +126,25 @@ defineExpose({ onSubmit, loading, canPost, reset })
       :error-messages="errors.connection"
       @selected="(item) => (selectedConnection = item as MinimumDatabaseConnection | null)"
     />
-    <DAutocomplete
-      v-if="!isEdit"
-      v-model="form.departments"
-      :label="$t('使える部門')"
-      multiple
-      :search-fn="api.manage.connectors().departments"
-      :hint="$t('所属している社員が見て使えます。部門を指定しなければ全社向けです')"
-      :error-messages="errors.departments"
-    />
+    <template v-if="!isEdit">
+      <DRadioGroup
+        v-model="form.scope"
+        :label="$t('範囲')"
+        :hint="$t('作成した後は変更できません')"
+        :items="connectorScopeItems(t)"
+        variant="card"
+        :error-messages="errors.scope"
+      />
+      <DAutocomplete
+        v-if="form.scope === ConnectorScope.DEPARTMENT"
+        v-model="form.department"
+        :label="$t('部門')"
+        required
+        :search-fn="api.manage.connectors().departments"
+        :hint="$t('この部門に所属する社員が会話で使えます')"
+        :error-messages="errors.department"
+      />
+    </template>
     <!-- 使うDB接続は作成した後は変えられない（公開した表は、そのDBのものなので） -->
     <div v-else class="grid gap-1 text-sm">
       <span class="text-muted">{{ $t('接続先') }}</span>
@@ -143,6 +160,11 @@ defineExpose({ onSubmit, loading, canPost, reset })
         </span>
       </template>
       <span v-else>{{ modelValue?.connectionInfo.name }}（{{ modelValue?.kindDisplay }}）</span>
+      <span class="mt-2 text-muted">{{ $t('範囲') }}</span>
+      <span>
+        {{ modelValue?.scopeDisplay }}
+        <template v-if="modelValue?.departmentInfo">・{{ modelValue.departmentInfo.name }}</template>
+      </span>
     </div>
 
     <DFormSection

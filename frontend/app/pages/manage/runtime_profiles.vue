@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 
-definePageMeta({ permission: PermissionCode.CHANGE_RUNTIME_PROFILE })
+definePageMeta({ permission: ManagePagePermissions.RUNTIME_PROFILE })
 
+const { hasPermission } = usePermission()
 const api = useAPI()
 const { t } = useI18n()
 const reloadKey = ref(0)
@@ -43,7 +44,7 @@ const shortImage = (image: string) => {
         "
       >
         <template #end>
-          <RuntimeProfileDialog @saved="reload">
+          <RuntimeProfileDialog v-if="hasPermission(PermissionCode.ADD_RUNTIME_PROFILE)" @saved="reload">
             <template #trigger="{ on }">
               <DBtn icon="i-lucide-plus" v-on="on">{{ $t('Runtime Profileを追加') }}</DBtn>
             </template>

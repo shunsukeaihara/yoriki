@@ -13,12 +13,13 @@ mockNuxtImport('useAPI', () => () => ({
 mockNuxtImport('useConfirmDialog', () => () => () => Promise.resolve(true))
 
 const user = { id: 'u1', email: 'taro@example.co.jp', displayName: '太郎' }
-const skill = (access: number) =>
+const skill = (canPublish: boolean) =>
   ({
     id: 's1',
     name: '請求書の照合',
     scope: SkillScope.DEPARTMENT,
-    access,
+    canEdit: true,
+    canPublish,
     version: 1,
   }) as Skill
 const evaluationCase = (id: string, name: string, required: boolean): SkillEvaluationCase => ({
@@ -44,17 +45,17 @@ describe('SkillEvaluationCaseList', () => {
   it('必須のケースは、公開の権限がなければ変更・削除のボタンを出さない', async () => {
     const cases = [evaluationCase('c1', '必須のケース', true), evaluationCase('c2', '任意のケース', false)]
     const wrapper = await mountSuspended(SkillEvaluationCaseList, {
-      props: { modelValue: cases, skill: skill(SkillAccess.EDIT) },
+      props: { modelValue: cases, skill: skill(false) },
     })
     expect(wrapper.text()).toContain('公開の前に必須')
     expect(wrapper.findAll('button[aria-label="削除"]')).toHaveLength(1)
-    await wrapper.setProps({ skill: skill(SkillAccess.PUBLISH) })
+    await wrapper.setProps({ skill: skill(true) })
     expect(wrapper.findAll('button[aria-label="削除"]')).toHaveLength(2)
   })
 
   it('削除すると一覧から除く', async () => {
     const wrapper = await mountSuspended(SkillEvaluationCaseList, {
-      props: { modelValue: [evaluationCase('c2', '任意のケース', false)], skill: skill(SkillAccess.EDIT) },
+      props: { modelValue: [evaluationCase('c2', '任意のケース', false)], skill: skill(false) },
     })
     await wrapper.find('button[aria-label="削除"]').trigger('click')
     await flushPromises()

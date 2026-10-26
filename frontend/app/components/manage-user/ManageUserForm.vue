@@ -3,6 +3,8 @@ const api = useAPI()
 const toast = useToast()
 const { t } = useI18n()
 const modelValue = defineModel<ManageUser | null>()
+// 操作する人が変えられないアカウント（canChange が false）では、入力を止める
+const props = defineProps<{ disabled?: boolean }>()
 const emit = defineEmits<{
   created: [value: ManageUserCreated]
   updated: [value: ManageUser]
@@ -36,7 +38,8 @@ watch(
 
 const isEdit = computed(() => Boolean(form.value.id))
 
-// 役割（Group）は少ないので、全件を選択肢にする（defineExpose より前で await しないよう、待たずに読み込む）
+// Group（permissionの集まり）は少ないので、全件を選択肢にする（defineExpose より前で await しないよう、待たずに読み込む）
+// 自分の持たないpermissionを含むGroupは、サーバーが付け外しを断る
 const { data: groups } = useAsyncData('manage-groups', () => api.manage.groups.list())
 const groupItems = computed(() => (groups.value ?? []).map((g) => ({ value: g.name, title: g.name })))
 
@@ -58,7 +61,7 @@ const { onSubmit, loading, errors } = createSubmit({
 })
 
 // 必須項目が埋まっているかだけを確認する。形式の検証はサーバーに任せる
-const canPost = computed(() => Boolean(form.value.email))
+const canPost = computed(() => !props.disabled && Boolean(form.value.email))
 
 defineExpose({ onSubmit, loading, canPost })
 </script>
@@ -79,11 +82,18 @@ defineExpose({ onSubmit, loading, canPost })
       "
       :error-messages="errors.email"
     />
-    <DTextField v-model="form.displayName" :label="$t('表示名')" :error-messages="errors.displayName" />
+    <DTextField
+      v-model="form.displayName"
+      :label="$t('表示名')"
+      :disabled="disabled"
+      :error-messages="errors.displayName"
+    />
     <DSelect
       v-model="form.groups"
-      :label="$t('役割')"
+      :label="$t('Group')"
+      :hint="$t('Groupはpermissionの集まりです。自分の持たないpermissionを含むGroupは付け外しできません')"
       :items="groupItems"
+      :disabled="disabled"
       multiple
       :placeholder="$t('なし（通常の社員）')"
       :error-messages="errors.groups"
@@ -92,6 +102,7 @@ defineExpose({ onSubmit, loading, canPost })
       v-if="isEdit"
       v-model="form.isActive"
       :label="$t('有効')"
+      :disabled="disabled"
       :hint="$t('無効にすると、ログインできなくなり、ログイン中のセッションも使えなくなります')"
       :error-messages="errors.isActive"
     />

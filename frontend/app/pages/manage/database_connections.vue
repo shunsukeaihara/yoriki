@@ -2,7 +2,7 @@
 import type { TableColumn } from '@nuxt/ui'
 
 // 接続先のいずれかの操作ができる人が入れる。一覧は見る（か変更できる）人にだけ出す（APIの ModelPermissions と同じ）
-definePageMeta({ permission: DATABASE_CONNECTION_PERMISSIONS })
+definePageMeta({ permission: ManagePagePermissions.DATABASE_CONNECTION })
 
 const api = useAPI()
 const { t } = useI18n()

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 
-// 一覧はAPIが所属で絞る。管理画面のページには、作成・編集・削除のいずれかができる人だけが入れる
-definePageMeta({ permission: CONNECTOR_EDIT_PERMISSIONS })
+// 部門・全社・システムのConnectorを全件扱う（所属は問わない。authorization.md §5.2）
+definePageMeta({ permission: ManagePagePermissions.CONNECTOR })
 
 const api = useAPI()
 const { hasPermission } = usePermission()
@@ -18,6 +18,8 @@ const emptyParams = (): ConnectorListParams => ({
   kind: undefined,
   isActive: undefined,
   isSensitive: undefined,
+  scope: undefined,
+  department: undefined,
 })
 // DB接続の一覧から「Connector」の件数を押して開いたときは、そのDB接続で絞り込む
 const params = ref<ConnectorListParams>({
@@ -41,6 +43,7 @@ const clearParams = () => {
 
 const columns: TableColumn<Connector>[] = [
   { accessorKey: 'name', header: t('名前') },
+  { accessorKey: 'scopeDisplay', header: t('範囲') },
   { accessorKey: 'connection', header: t('接続先') },
   { accessorKey: 'kindDisplay', header: t('種別') },
   { accessorKey: 'tables', header: t('公開する表') },
@@ -63,12 +66,12 @@ const onCreated = (connector: Connector) => {
         :title="$t('Connector')"
         :description="
           $t(
-            '社内DBのうち、エージェントが読み取れる範囲です。接続先の上で公開する表・ビューと使える部門を決め、その部門の社員の依頼で読み取ります（部門を指定しなければ全社向け）。範囲や上限を変えて保存すると新しい版になります',
+            '社内DBのうち、エージェントが読み取れる範囲です。接続先の上で公開する表・ビューを決めます。部門のConnectorはその部門の社員が、全社のConnectorは全社員が会話で使い、システムのConnectorはシステムのタスクだけが使います。表や上限を変えて保存すると新しい版になります',
           )
         "
       >
         <template #end>
-          <!-- 作成はサーバー側でも権限と所属を確認し、足りなければ403・400になる -->
+          <!-- 作成はサーバー側でも権限を確認し、なければ403になる -->
           <ConnectorDialog v-if="hasPermission(PermissionCode.ADD_CONNECTOR)" @saved="onCreated">
             <template #trigger="{ on }">
               <DBtn icon="i-lucide-plus" v-on="on">{{ $t('Connectorを追加') }}</DBtn>
@@ -85,6 +88,13 @@ const onCreated = (connector: Connector) => {
           :search-fn="api.manage.connectors().connections"
           item-description="kindDisplay"
           :initial-selected="initialConnection"
+        />
+        <DSelect v-model="params.scope" :label="$t('範囲')" :items="connectorScopeItems(t)" clearable />
+        <DAutocomplete
+          v-if="params.scope === ConnectorScope.DEPARTMENT"
+          v-model="params.department"
+          :label="$t('部門')"
+          :search-fn="api.manage.connectors().departments"
         />
         <DSelect v-model="params.kind" :label="$t('種別')" :items="connectorKindItems(t)" clearable />
         <DSelect v-model="params.isSensitive" :label="$t('機密')" :items="sensitiveItems(t)" clearable />
@@ -104,6 +114,12 @@ const onCreated = (connector: Connector) => {
           <UBadge v-if="row.original.isSensitive" color="warning" variant="subtle" size="sm" class="ml-2">
             {{ $t('機密') }}
           </UBadge>
+        </template>
+        <template #scopeDisplay-cell="{ row }">
+          <div>{{ row.original.scopeDisplay }}</div>
+          <div v-if="row.original.departmentInfo" class="text-xs text-muted">
+            {{ row.original.departmentInfo.name }}
+          </div>
         </template>
         <template #connection-cell="{ row }">
           <NuxtLink

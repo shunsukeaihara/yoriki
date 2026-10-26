@@ -43,11 +43,12 @@ describe('skillOwnerLabel', () => {
     description: '',
     suspended: false,
     draft: null,
-    access: 1,
+    canEdit: false,
+    canPublish: false,
     created: '2026-10-24T00:00:00Z',
     updated: '2026-10-24T00:00:00Z',
   }
-  it('個人は持ち主、部門は部門名、全社は「全社」', () => {
+  it('個人は持ち主、部門は部門名、全社は「全社」、システムは「システム」', () => {
     const owner = { id: 'u1', email: 'taro@example.co.jp', displayName: '' }
     expect(
       skillOwnerLabel({ ...base, scope: 1, scopeDisplay: '個人', ownerInfo: owner, departmentInfo: null }, t),
@@ -61,5 +62,40 @@ describe('skillOwnerLabel', () => {
     expect(skillOwnerLabel({ ...base, scope: 3, scopeDisplay: '全社', ownerInfo: null, departmentInfo: null }, t)).toBe(
       '全社',
     )
+    expect(
+      skillOwnerLabel({ ...base, scope: 4, scopeDisplay: 'システム', ownerInfo: null, departmentInfo: null }, t),
+    ).toBe('システム')
+  })
+})
+
+describe('useSkillCreatableScopes', () => {
+  const login = (allPermissions: string[], manageable: { id: string; name: string }[] = []) => {
+    useAccountStore().user = {
+      id: 'u1',
+      username: 'u1',
+      email: 'u1@example.com',
+      displayName: 'U1',
+      allPermissions,
+      departments: manageable,
+      usableDepartments: manageable,
+      manageableDepartments: manageable,
+    }
+  }
+  const accounting = { id: 'd1', name: '経理部' }
+
+  it('個人はいつでも作れる。部門は管理できる部門と部門のpermissionの両方が要る', () => {
+    login([], [accounting])
+    expect(useSkillCreatableScopes().scopes.value).toEqual([SkillScope.PERSONAL])
+    login([PermissionCode.EDIT_DEPARTMENT_SKILLS])
+    expect(useSkillCreatableScopes().scopes.value).toEqual([SkillScope.PERSONAL])
+    login([PermissionCode.EDIT_DEPARTMENT_SKILLS], [accounting])
+    const { scopes, departments } = useSkillCreatableScopes()
+    expect(scopes.value).toEqual([SkillScope.PERSONAL, SkillScope.DEPARTMENT])
+    expect(departments.value).toEqual([accounting])
+  })
+
+  it('全社・システムはそれぞれのpermissionで作れる', () => {
+    login([PermissionCode.PUBLISH_COMPANY_SKILLS, PermissionCode.EDIT_SYSTEM_SKILLS])
+    expect(useSkillCreatableScopes().scopes.value).toEqual([SkillScope.PERSONAL, SkillScope.COMPANY, SkillScope.SYSTEM])
   })
 })

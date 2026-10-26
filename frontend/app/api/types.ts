@@ -45,12 +45,15 @@ export type ConnectorQuery = Api<'ConnectorQueryRequest'>
 export type ConnectorQueryResult = Api<'ConnectorQueryResult'>
 export type ConnectorVersion = Api<'ConnectorVersion'>
 export type DatabaseConnectionListParams = ListParams & { name?: string; kind?: ConnectorKindEnum; isActive?: boolean }
+export type ConnectorScopeEnum = Schemas['ConnectorScopeEnum']
 export type ConnectorListParams = ListParams & {
   name?: string
   connection?: string
   kind?: ConnectorKindEnum
   isActive?: boolean
   isSensitive?: boolean
+  scope?: ConnectorScopeEnum
+  department?: string
 }
 
 export type SSOProviderKindEnum = Schemas['SSOProviderKindEnum']
@@ -69,17 +72,15 @@ export type ManageUserWrite = Api<'ManageUserCreateRequest'>
 export type ManageUserUpdate = Api<'ManageUserUpdateRequest'>
 export type Group = Api<'Group'>
 
-export type ManageUserListParams = ListParams & { isActive?: boolean; isSuperuser?: boolean; group?: string }
+export type ManageUserListParams = ListParams & { isActive?: boolean; group?: string }
 
 export type MyDepartment = Api<'MyDepartment'>
-export type DepartmentRoleEnum = Schemas['DepartmentRoleEnum']
 export type Department = Api<'Department'>
 export type MinimumDepartment = Api<'MinimumDepartment'>
 export type DepartmentWrite = Api<'DepartmentRequest'>
 export type DepartmentMembership = Api<'DepartmentMembership'>
 export type DepartmentMembershipWrite = Api<'DepartmentMembershipRequest'>
-export type DepartmentMembershipUpdate = Api<'DepartmentMembershipUpdateRequest'>
-export type DepartmentMembershipListParams = ListParams & { role?: DepartmentRoleEnum; q?: string }
+export type DepartmentMembershipListParams = ListParams & { q?: string }
 
 export type SkillScopeEnum = Schemas['SkillScopeEnum']
 export type SkillAssetRoleEnum = Schemas['SkillAssetRoleEnum']
@@ -131,6 +132,7 @@ export type SkillListParams = ListParams & {
   department?: string
   suspended?: boolean
   published?: boolean
+  editable?: boolean
 }
 
 export type AppModelProfile = Api<'AppModelProfile'>

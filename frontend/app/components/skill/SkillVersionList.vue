@@ -54,7 +54,7 @@ const toggle = async (number: number) => {
         </DBtn>
         <!-- 編集・切戻しはサーバー側でも権限を確認し、権限がなければ403になる -->
         <DBtn
-          v-if="skill.access >= SkillAccess.EDIT && !skill.draft"
+          v-if="skill.canEdit && !skill.draft"
           size="sm"
           color="neutral"
           variant="ghost"
@@ -64,7 +64,7 @@ const toggle = async (number: number) => {
           {{ $t('この版から編集') }}
         </DBtn>
         <SkillRollbackDialog
-          v-if="skill.access >= SkillAccess.PUBLISH && v.number !== skill.version"
+          v-if="skill.canPublish && v.number !== skill.version"
           :skill="skill"
           :number="v.number"
           @rolled-back="(value) => emit('rolledBack', value)"

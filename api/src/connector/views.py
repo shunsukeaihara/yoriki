@@ -155,9 +155,9 @@ class ConnectorViewSet(SoftDeleteMixin, ModelViewSet):
         "query": "change",
         # 公開する表を選ぶための、接続先の表の一覧（接続先のpermissionがなくても、Connectorを編集できるように）
         "tables": "change",
-        # 作成で選ぶ接続先と部門の一覧
+        # 作成で選ぶ接続先の一覧と、作成・一覧の絞り込みで選ぶ部門の一覧
         "connections": "add",
-        "departments": "add",
+        "departments": "view",
     }
     lookup_field = "uid"
     queryset = Connector.objects.filter(deleted=False).select_related(
@@ -222,7 +222,8 @@ class ConnectorViewSet(SoftDeleteMixin, ModelViewSet):
         return self.get_paginated_response(self.get_serializer(page, many=True).data)
 
     @extend_schema(
-        description="部門の範囲のConnectorを作るときに選べる部門（有効なすべての部門。所属は問わない）。"
+        description="部門の範囲のConnectorの作成と一覧の絞り込みで選べる部門"
+        "（有効なすべての部門。所属は問わない）。"
         "`search` で名前を絞り込む",
         request=None,
         responses=MinimumDepartmentSerializer(many=True),

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
  * Skillの詳細。公開中の版の中身、Draftの編集と資料・公開、評価ケースとDraftの評価、版の履歴と切戻し、変更の記録。
- * 何ができるかは Skill.access で決まり（design.md §3.6）、ボタンを隠すだけで、サーバーでも必ず確かめる（403）
+ * 何ができるかはサーバーが判定した Skill.canEdit・canPublish で決まり（authorization.md §5.1）、ボタンを隠すだけで、
+ * サーバーでも必ず確かめる（403）
  */
 import { AxiosError } from 'axios'
 import SkillDraftForm from '~/components/skill/SkillDraftForm.vue'
@@ -16,8 +17,8 @@ const skillId = route.params.skillId as string
 const { data: skill, error, refresh } = await useAsyncData(`skill-${skillId}`, () => api.skills(skillId).get())
 if (error.value) throw createError(error.value) // 404 / 403 はエラー画面にする
 
-const canEdit = computed(() => (skill.value?.access ?? 0) >= SkillAccess.EDIT)
-const canPublish = computed(() => (skill.value?.access ?? 0) >= SkillAccess.PUBLISH)
+const canEdit = computed(() => Boolean(skill.value?.canEdit))
+const canPublish = computed(() => Boolean(skill.value?.canPublish))
 
 // 公開中の版の中身
 const current = ref<SkillVersion | null>(null)

@@ -15,9 +15,7 @@ const dialog = ref<InstanceType<typeof DDialog> | null>(null)
 
 const isEdit = computed(() => Boolean(props.evaluationCase))
 // 必須の印を付けられるのは、部門・全社のSkillで公開の権限を持つ人
-const canRequire = computed(
-  () => props.skill.scope !== SkillScope.PERSONAL && props.skill.access >= SkillAccess.PUBLISH,
-)
+const canRequire = computed(() => props.skill.scope !== SkillScope.PERSONAL && props.skill.canPublish)
 
 const emptyForm = () => ({
   name: '',

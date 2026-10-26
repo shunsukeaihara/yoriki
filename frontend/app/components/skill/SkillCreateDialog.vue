@@ -2,6 +2,8 @@
 import SkillCreateForm from './SkillCreateForm.vue'
 import DDialog from '../common/DDialog.vue'
 
+// 作れる範囲（SkillCreateForm の scopes）。システムのSkillは管理画面から作る
+defineProps<{ scopes?: SkillScopeEnum[] }>()
 const emit = defineEmits<{ created: [value: Skill] }>()
 
 const dialog = ref<InstanceType<typeof DDialog> | null>(null)
@@ -25,7 +27,7 @@ const created = (value: Skill) => {
     </template>
     <template #header>{{ $t('Skillを作る') }}</template>
     <template #content>
-      <SkillCreateForm :key="formKey" ref="formRef" @created="created" />
+      <SkillCreateForm :key="formKey" ref="formRef" :scopes="scopes" @created="created" />
     </template>
     <template #footer="{ closeDialog }">
       <DBtn color="neutral" variant="ghost" @click="closeDialog()">{{ $t('キャンセル') }}</DBtn>

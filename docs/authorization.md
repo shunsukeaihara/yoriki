@@ -132,7 +132,7 @@ Connector管理者・連携の管理者・システム管理者・ユーザー�
 | 個人 | 自分のファイル（OneDrive・Google Drive等）を読ませる | 本人のOAuthのtoken | 本人 | 本人 |
 | 部門 | 部門の業務データ | 共有の資格情報 | 使える部門 | Connector管理者（`connector.add/change/delete_connector`） |
 | 全社 | 全社員に見せてよい共通のデータ | 共有の資格情報 | 全員 | Connector管理者 |
-| システム | システムタスクだけが使うデータ | 共有の資格情報 | システム管理者・Connector管理者（定義だけ） | Connector管理者 |
+| システム | システムタスクだけが使うデータ | 共有の資格情報 | `connector.view_connector` を持つ人（システム管理者・Connector管理者。定義だけ） | Connector管理者 |
 
 - 接続（接続先と資格情報）は、permission（`connector.view/add/change/delete_<接続のModel>`）だけで判定する。
 - 個人Connectorは、本人のtokenで読めるもの（本人に共有された他部門のファイルを含む）を読める。本人の権限を超えないので本人が作れる。外へ出す経路は §7で絞る。

@@ -197,7 +197,7 @@ Skill編集はDjango側の管理Toolとして提供する。エージェント�
 権限の設計は [authorization.md](authorization.md) を正とする。要点は次のとおり。
 
 - 権限は「所属」と「permission」の2軸で判定する。Groupは判定に使わない（permissionの集まりで、導入先が自由に変えてよい）。部門は人の集まりで、入れ子・特別な部門・部門の中の役割を持たない（0.33で、0.27の部門の中の役割をやめた）。
-- 所属は、使える部門・管理できる部門の2つの関数で判定する。すべての部門に所属している扱いは、permission `user.can_use_all_departments`（利用）・`user.can_manage_all_departments`（利用と業務の管理）で表す。
+- 所属は、使える部門・管理できる部門の2つの関数（と、部門タスクのチャットからの起動に使う実際の所属）で判定する。permission `user.can_use_all_departments` は使える部門だけを、`user.can_manage_all_departments` は使える部門と管理できる部門をすべての部門に広げる。どちらも実際の所属は広げない（監査のための権限で部門タスクを起動させない）。
 - Skillの範囲は「所有と管理の単位」で、個人・部門（1つの部門）・全社・システムのどれか。システムのSkillはシステムタスクだけが使い、会話には出さない。
 - Skillは権限を持たない。手順と判断基準で、許可を狭めることはできても広げることはできない。
 
@@ -1311,7 +1311,7 @@ Artifact Storeはサーバー設定でLocalまたはS3 Backendを選べるよう
 
 ユーザーは、SSOでは初回のログイン時に、Yorikiのアカウントではユーザー管理者の作成時に作り、通常社員から始める。Group（permissionの集まり）と所属はYorikiの管理画面で割り当てる。IdPのグループからの自動割当は、必要になった時点で追加する。
 
-管理画面の操作（Connector・接続、LLMの接続・モデル設定、Runtime Profile、SSOの設定、ユーザー、部門と所属等）は、すべてpermissionで判定する（authorization.md §10）。Djangoの標準のpermissionを付ければ、基盤管理者でない人（Connector管理者・ユーザー管理者等の信頼された強い役割）に管理を任せられる。permissionの指定を書き忘れた操作は誰も通さない。基盤管理者（`is_superuser`）はアプリの判定に持ち込まず（すべてのpermissionを持つ人として扱う）、`is_superuser` を見るのはDjango管理画面とパスワードでの非常口のログインだけにする。`is_superuser` はフロントエンドに渡さない。
+管理画面の操作（Connector・接続、LLMの接続・モデル設定、Runtime Profile、SSOの設定、ユーザー、部門と所属等）は、すべてpermissionで判定する（authorization.md §10）。Djangoの標準のpermissionを付ければ、基盤管理者でない人（Connector管理者・ユーザー管理者等の信頼された強い役割）に管理を任せられる。permissionの指定を書き忘れた操作は誰も通さない。基盤管理者（`is_superuser`）はアプリの判定に持ち込まず（すべてのpermissionを持つ人として扱う）、`is_superuser` を見るのは、Django管理画面、パスワードでの非常口のログイン、基盤管理者のアカウントの保護（変更と招待・再設定のリンクの発行・受け入れは基盤管理者だけ）の3か所だけにする（authorization.md §4.1）。`is_superuser` はフロントエンドに渡さない。
 
 個人のConnector（利用者の権限で使うもの。§4.9.1）では、ログイン時に追加のscope（Microsoft Graphの `Files.Read`・`Sites.Read.All`、Google Driveの `drive.readonly` 等）と `offline_access` を要求し、refresh tokenを暗号化して保存する。Auth0やその他のOIDCでログインする場合は、ログイン時にMicrosoft Graph・Google Driveに使うtokenを得られないため、Connectorの利用時に別途OAuthの同意を得る。
 

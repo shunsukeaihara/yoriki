@@ -490,7 +490,7 @@ notification:
 
 同じスレッドへ結果も載せる場合はinteraction側の完了イベントに含める。notificationで同じ対話スレッドを指定する場合も同じ配信へ統合し、完了報告と結果の重複投稿を避ける。結果通知のためだけに別スレッドを作らない。
 
-公開済みTask Definition RevisionにBinding Revisionを関連付け、RunにはSkill・資料・モデル設定・受け取ったpayloadとファイル・生成した依頼文とともに固定する。通知Skill、通知Adapter、Interaction BindingとChannel Plugin、Destinationの版も対象に含める。設定変更は次のRunから反映し、再試行中のRunやDeliveryを新しい通知先へ暗黙に向けない。Secretは値を保存せず参照を持ち、資格情報の更新・失効は別に反映する。
+公開済みTask Definition RevisionにBinding Revisionを関連付け、RunにはSkill・資料・モデル設定・受け取ったpayloadとファイル・生成した依頼文とともに固定する。通知Skill、通知Adapter、Interaction BindingとChannel Plugin、Destinationの版も対象に含める。設定変更は次のRunから反映し、再試行中のRunやDeliveryを新しい通知先へ暗黙に向けない。ただし、固定した出口が停止・削除・タスクの範囲の外になったら、配信の直前に確かめて送らない（authorization.md §7.2）。Secretは値を保存せず参照を持ち、資格情報の更新・失効は別に反映する。
 
 通常チャットにはTask Definitionを必須にしない。既定のchat Triggerと画面内の結果表示を使い、必要に応じてタスクを指定して実行する。PipelineRunやTaskRunは追加せず、共通Runへ起動元とBindingを関連付ける。タスクの起動Pluginを増やしても、RunnerにPlugin別の業務分岐を増やさない。
 

@@ -140,8 +140,6 @@ auditlog.register(Destination)
 ```python
 from collections import defaultdict
 
-from django.core.exceptions import ValidationError as DjangoValidationError
-from django.core.validators import validate_email
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
 
@@ -170,11 +168,8 @@ class DestinationSerializer(serializers.ModelSerializer):
         errors = defaultdict(list)
         if kind in (DestinationKind.WEBHOOK, DestinationKind.TEAMS) and not address.startswith("https://"):
             errors["address"].append(_("URLはhttps://で始めてください"))
-        if kind == DestinationKind.EMAIL:
-            try:
-                validate_email(address)
-            except DjangoValidationError:
-                errors["address"].append(_("メールアドレスの形式が正しくありません"))
+        if kind == DestinationKind.SLACK and not address.startswith("https://hooks.slack.com/"):
+            errors["address"].append(_("SlackのIncoming WebhookのURLを入力してください"))
         if errors:
             raise serializers.ValidationError(errors)
         return attrs

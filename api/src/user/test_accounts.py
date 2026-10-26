@@ -4,6 +4,7 @@
 """
 
 import threading
+import time
 from datetime import timedelta
 
 import pytest
@@ -13,7 +14,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from .factories import SSOProviderFactory, UserFactory, grant
-from .models import Invitation, InvitationPurpose, User
+from .models import Invitation, InvitationPurpose, User, lock_accounts
 
 SESSION = "/api/app/v1/auth/session/"
 VERIFY = "/api/app/v1/auth/invitations/verify/"
@@ -477,3 +478,41 @@ class TestDelegatedUserAdmin:
 
 def _permissions(*codes: str) -> list[Permission]:
     return [Permission.objects.get(content_type__app_label=c.split(".")[0], codename=c.split(".")[1]) for c in codes]
+
+
+class TestAcceptRace:
+    @pytest.mark.django_db(transaction=True)
+    @pytest.mark.parametrize("change", ["issuer_lost_permission", "target_promoted"])
+    def test_accept_waits_for_a_concurrent_permission_change(self, password_user, change):
+        """権限の変更（ユーザーの管理APIと同じく行をロックする）の途中に受け入れが来ても、変更の確定を待って
+        最新の権限で確かめ直す（authorization.md §10）"""
+        user_admin = grant(UserFactory.create(), *USER_ADMIN_PERMS)
+        password_user = grant(password_user, "user.view_user")
+        _invitation, token = Invitation.issue(user=password_user, actor=user_admin)
+        locked = threading.Event()
+        errors: list[BaseException] = []
+
+        def change_permissions():
+            try:
+                with transaction.atomic():
+                    target = user_admin if change == "issuer_lost_permission" else password_user
+                    lock_accounts(target)
+                    locked.set()
+                    time.sleep(0.5)  # 受け入れの要求がロックを待つ間に、権限を変える
+                    if change == "issuer_lost_permission":
+                        user_admin.user_permissions.remove(*_permissions("user.view_user"))
+                    else:
+                        password_user.user_permissions.add(*_permissions("connector.add_connector"))
+            except BaseException as exc:
+                errors.append(exc)
+            finally:
+                connection.close()
+
+        thread = threading.Thread(target=change_permissions)
+        thread.start()
+        assert locked.wait(timeout=5)
+        res = APIClient().post(ACCEPT, {"token": token, "password": PASSWORD}, format="json")
+        thread.join()
+        assert errors == []
+        assert res.status_code == 400
+        assert "token" in res.json()

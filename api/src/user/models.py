@@ -70,6 +70,15 @@ def granted_permissions(user: User) -> set[str]:
     return {f"{p.content_type.app_label}.{p.codename}" for p in perms}
 
 
+def lock_accounts(*users: User) -> None:
+    """アカウントの行をpkの順にロックする（呼び出し元のtransactionの終わりまで）。
+
+    ユーザーの管理APIでの変更（Group・有効）と招待の受け入れを直列にし、ロックの後に読み直したpermissionで
+    確かめ直すために使う。Django管理画面でのGroupの中身の変更は、このロックを取らない（基盤管理者だけの操作）
+    """
+    list(User.objects.select_for_update().filter(pk__in={u.pk for u in users}).order_by("pk").values_list("pk"))
+
+
 # granted_permissions() が使う関連の先読み
 ACCOUNT_PERMISSIONS_PREFETCH = ("user_permissions__content_type", "groups__permissions__content_type")
 

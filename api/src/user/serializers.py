@@ -6,6 +6,7 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.models import Group
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema_field
@@ -25,6 +26,7 @@ from .models import (
     User,
     can_manage_account,
     can_use_password,
+    lock_accounts,
 )
 
 # ドメイン名（ラベルを . でつないだもの）。メールアドレスやURLを書いたものを入力エラーにするための簡単な確認
@@ -194,6 +196,10 @@ class InvitationAcceptSerializer(InvitationTokenSerializer):
     password = serializers.CharField(write_only=True, max_length=4096, trim_whitespace=False)
 
     def validate(self, attrs):
+        # ユーザーの管理APIでの権限の変更と同じ行をロックしてから、最新の権限で確かめ直す（確かめた後に発行した人の
+        # 権限が外れた・対象が昇格した変更を、受け入れが追い越さないように）
+        found = self._find(attrs["token"])
+        lock_accounts(found.user, found.created_by)
         invitation = self._find(attrs["token"], for_update=True)
         try:
             validate_password(attrs["password"], invitation.user)
@@ -288,27 +294,47 @@ class ManageUserSerializer(serializers.ModelSerializer):
         return value
 
     def validate_groups(self, value: list[Group]) -> list[Group]:
-        actor = self.context["request"].user
-        current = set(self.instance.groups.all()) if self.instance is not None else set()
-        changed = current.symmetric_difference(value)
-        if changed and self.instance is not None and self.instance.pk == actor.pk:
-            raise serializers.ValidationError(_("自分のGroupは変えられません"))
-        own = actor.get_all_permissions()
-        for group in sorted(changed, key=lambda g: g.name):
-            perms = {
-                f"{app_label}.{codename}"
-                for app_label, codename in group.permissions.values_list("content_type__app_label", "codename")
-            }
-            if not perms <= own:
-                raise serializers.ValidationError(
-                    _("自分の持たないpermissionを含むGroup「%(name)s」は付け外しできません") % {"name": group.name}
-                )
+        _check_groups(self.context["request"].user, self.instance, value)
         return value
 
     def validate(self, attrs):
         if self.instance is not None and not can_manage_account(self.context["request"].user, self.instance):
             raise PermissionDenied(_("自分の持たない権限を持つアカウントは変更できません"))
         return attrs
+
+    @transaction.atomic
+    def update(self, instance: User, validated_data) -> User:
+        # 操作する人と対象の行をロックし、読み直した権限で確かめ直す（招待の受け入れ・同時の変更と直列にする）
+        actor = self.context["request"].user
+        lock_accounts(actor, instance)
+        actor, target = User.objects.get(pk=actor.pk), User.objects.get(pk=instance.pk)
+        if not can_manage_account(actor, target):
+            raise PermissionDenied(_("自分の持たない権限を持つアカウントは変更できません"))
+        if "groups" in validated_data:
+            _check_groups(actor, target, validated_data["groups"])
+        return super().update(instance, validated_data)
+
+
+def _check_groups(actor: User, target: User | None, groups: list[Group]) -> None:
+    """Groupの付け外しを確かめる。自分のGroupは変えられず、自分の持たないpermissionを含むGroupは付け外しできない"""
+    current = set(target.groups.all()) if target is not None else set()
+    changed = current.symmetric_difference(groups)
+    if changed and target is not None and target.pk == actor.pk:
+        raise serializers.ValidationError({"groups": [_("自分のGroupは変えられません")]})
+    own = actor.get_all_permissions()
+    for group in sorted(changed, key=lambda g: g.name):
+        perms = {
+            f"{app_label}.{codename}"
+            for app_label, codename in group.permissions.values_list("content_type__app_label", "codename")
+        }
+        if not perms <= own:
+            raise serializers.ValidationError(
+                {
+                    "groups": [
+                        _("自分の持たないpermissionを含むGroup「%(name)s」は付け外しできません") % {"name": group.name}
+                    ]
+                }
+            )
 
 
 class ManageUserCreateSerializer(ManageUserSerializer):
@@ -323,9 +349,13 @@ class ManageUserCreateSerializer(ManageUserSerializer):
     def get_invitation(self, obj: User) -> dict | None:
         return getattr(obj, "invitation_link", None)
 
+    @transaction.atomic
     def create(self, validated_data) -> User:
         actor = validated_data.pop("created_by")
         groups = validated_data.pop("groups", [])
+        # 操作する人の行をロックし、読み直した権限でGroupを確かめ直す（同時に権限を外す変更と直列にする）
+        lock_accounts(actor)
+        _check_groups(User.objects.get(pk=actor.pk), None, groups)
         # ユーザー名はメールアドレスにする（Django管理画面のログインでも使える）
         user = User(username=validated_data["email"], **validated_data)
         user.set_unusable_password()

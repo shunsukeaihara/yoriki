@@ -889,7 +889,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Connectorの作成で選べる、有効な接続先の一覧（`search` で名前を絞り込む） */
+        /** @description Connectorの作成と一覧の絞り込みで選べる、有効な接続先の一覧（`search` で名前を絞り込む） */
         get: operations["v1_connectors_connections_list"];
         put?: never;
         post?: never;

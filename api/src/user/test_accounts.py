@@ -498,7 +498,7 @@ class TestAcceptRace:
                     target = user_admin if change == "issuer_lost_permission" else password_user
                     lock_accounts(target)
                     locked.set()
-                    time.sleep(0.5)  # 受け入れの要求がロックを待つ間に、権限を変える
+                    time.sleep(2)  # 受け入れの要求がロックを待つ間に、権限を変える
                     if change == "issuer_lost_permission":
                         user_admin.user_permissions.remove(*_permissions("user.view_user"))
                     else:
@@ -516,3 +516,39 @@ class TestAcceptRace:
         assert errors == []
         assert res.status_code == 400
         assert "token" in res.json()
+
+
+class TestUpdateRace:
+    @pytest.mark.django_db(transaction=True)
+    def test_update_keeps_a_password_set_while_waiting_for_the_lock(self, password_user):
+        """ユーザーの更新は、ロックの後に読み直した行を保存する（待つ間に受け入れが設定したパスワードを書き戻さない）"""
+        user_admin = grant(UserFactory.create(), *USER_ADMIN_PERMS)
+        locked = threading.Event()
+        errors: list[BaseException] = []
+
+        def accept():
+            try:
+                with transaction.atomic():
+                    lock_accounts(password_user)
+                    locked.set()
+                    time.sleep(2)  # 更新の要求がロックを待つ間に、パスワードを変える
+                    user = User.objects.get(pk=password_user.pk)
+                    user.set_password("another-horse-battery-staple")
+                    user.save(update_fields=["password"])
+            except BaseException as exc:
+                errors.append(exc)
+            finally:
+                connection.close()
+
+        client = APIClient()
+        client.force_login(user_admin)
+        thread = threading.Thread(target=accept)
+        thread.start()
+        assert locked.wait(timeout=5)
+        res = client.patch(f"{USERS}{password_user.uid}/", {"display_name": "太郎"}, format="json")
+        thread.join()
+        assert errors == []
+        assert res.status_code == 200, res.json()
+        password_user.refresh_from_db()
+        assert password_user.display_name == "太郎"
+        assert password_user.check_password("another-horse-battery-staple")

@@ -312,7 +312,9 @@ class ManageUserSerializer(serializers.ModelSerializer):
             raise PermissionDenied(_("自分の持たない権限を持つアカウントは変更できません"))
         if "groups" in validated_data:
             _check_groups(actor, target, validated_data["groups"])
-        return super().update(instance, validated_data)
+        # 取得した時点の instance ではなく、ロックの後に読み直した行を保存する（その間のパスワードの設定や
+        # 無効化を、古い値で書き戻さない）
+        return super().update(target, validated_data)
 
 
 def _check_groups(actor: User, target: User | None, groups: list[Group]) -> None:

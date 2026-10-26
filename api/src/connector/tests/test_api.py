@@ -144,6 +144,9 @@ class TestPermission:
         assert results[0]["connection_info"]["host"] is None
         assert api_client.get(f"{url}describe/").status_code == 200
         assert api_client.get(f"{url}versions/").status_code == 200
+        # 一覧の絞り込みで選ぶ接続先と部門は、見る権限で使える
+        assert api_client.get(f"{CONNECTORS}connections/").status_code == 200
+        assert api_client.get(f"{CONNECTORS}departments/").status_code == 200
         # 試し実行は接続先のデータを読むので、編集の権限で行う
         assert api_client.post(f"{url}query/", {"sql": "SELECT 1"}, format="json").status_code == 403
         assert api_client.patch(url, {"version": 1, "name": "受注実績"}, format="json").status_code == 403

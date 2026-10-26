@@ -155,8 +155,8 @@ class ConnectorViewSet(SoftDeleteMixin, ModelViewSet):
         "query": "change",
         # 公開する表を選ぶための、接続先の表の一覧（接続先のpermissionがなくても、Connectorを編集できるように）
         "tables": "change",
-        # 作成で選ぶ接続先の一覧と、作成・一覧の絞り込みで選ぶ部門の一覧
-        "connections": "add",
+        # 作成と一覧の絞り込みで選ぶ接続先・部門の一覧（名前だけ。接続先の設定は返さない）
+        "connections": "view",
         "departments": "view",
     }
     lookup_field = "uid"
@@ -202,7 +202,7 @@ class ConnectorViewSet(SoftDeleteMixin, ModelViewSet):
         return Response(self.get_serializer(result).data)
 
     @extend_schema(
-        description="Connectorの作成で選べる、有効な接続先の一覧（`search` で名前を絞り込む）",
+        description="Connectorの作成と一覧の絞り込みで選べる、有効な接続先の一覧（`search` で名前を絞り込む）",
         request=None,
         responses=MinimumDatabaseConnectionSerializer(many=True),
         parameters=[OpenApiParameter("search", str, description="名前の一部")],

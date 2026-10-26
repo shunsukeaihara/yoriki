@@ -22,7 +22,7 @@ from django.utils.translation import gettext as _
 
 from ..errors import ConnectorError, ConnectorErrorKind
 from ..models import Connector, ConnectorVersion
-from ..sql import CheckedQuery, Dialect, check_query, table_key
+from ..sql import CheckedQuery, Dialect, check_query
 
 # 管理画面で表を選ぶための一覧の上限
 MAX_LISTED_TABLES = 5000
@@ -218,7 +218,7 @@ class DatasourceAdapter(ABC):
 
     def _key(self, schema: str, name: str) -> tuple[str, str]:
         # MySQLのスキーマはDB名（公開する表はスキーマを持たない）
-        return table_key(self.connector.database if self.dialect.schema_is_database else schema, name, self.dialect)
+        return (self.connector.database if self.dialect.schema_is_database else schema, name)
 
     def check_query(self, sql: str, params: Sequence[Param]) -> CheckedQuery:
         assert self.version is not None

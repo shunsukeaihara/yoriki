@@ -23,7 +23,6 @@ from .models import (
     ConnectorVersion,
     Operation,
 )
-from .sql import DIALECTS, table_key
 
 MAX_TABLES = 500
 MAX_PARAMS = 100
@@ -250,7 +249,7 @@ class ConnectorSerializer(serializers.ModelSerializer):
         for entry in content.get("tables", []):
             # MySQLのスキーマはDB名なので持たない。他はスキーマを省いた表を既定のスキーマにそろえる
             entry["schema"] = "" if kind == ConnectorKind.MYSQL else entry["schema"] or default_schema
-            key = table_key(entry["schema"], entry["name"], DIALECTS[kind])
+            key = (entry["schema"], entry["name"])
             if key in seen:
                 errors["tables"].append(
                     _("同じ表・ビューが2回あります：%(name)s") % {"name": ".".join(filter(None, key))}

@@ -58,7 +58,7 @@ def _check(dialect: Dialect, sql: str, params_count: int = 0):
             "SELECT * FROM `core`.`vendors` WHERE a = %s AND DATE_FORMAT(d, '%%Y') = %s",
             ("core.vendors",),
         ),
-        (MYSQL, "SELECT * FROM CORE.Vendors", 0, "SELECT * FROM CORE.Vendors", ("core.vendors",)),
+        (MYSQL, "SELECT * FROM core.vendors", 0, "SELECT * FROM core.vendors", ("core.vendors",)),
         (
             TSQL,
             "SELECT TOP 5 * FROM vendors WHERE a = ?",
@@ -66,7 +66,7 @@ def _check(dialect: Dialect, sql: str, params_count: int = 0):
             "SELECT TOP 5 * FROM [dbo].vendors WHERE a = ?",
             ("dbo.vendors",),
         ),
-        (TSQL, "SELECT * FROM [core].[dbo].[Vendors]", 0, "SELECT * FROM [core].[dbo].[Vendors]", ("dbo.vendors",)),
+        (TSQL, "SELECT * FROM [core].[dbo].[vendors]", 0, "SELECT * FROM [core].[dbo].[vendors]", ("dbo.vendors",)),
     ],
 )
 def test_accepts(dialect, sql, params_count, expected_sql, tables):
@@ -113,6 +113,11 @@ def test_accepts(dialect, sql, params_count, expected_sql, tables):
         (POSTGRES, "SELECT * FROM vendors WHERE a = ?", 0, "引数の数"),
         (POSTGRES, "SELECT * FROM", 0, "解析"),
         (MYSQL, "SELECT * FROM mysql.user", 0, "接続先のDB以外"),
+        # 大文字・小文字を区別する設定のDBでは別の表なので、公開した名前と同じに書いたものだけを受け付ける
+        (MYSQL, "SELECT * FROM Vendors", 0, "公開していない"),
+        (MYSQL, "SELECT * FROM CORE.vendors", 0, "接続先のDB以外"),
+        (TSQL, "SELECT * FROM dbo.Vendors", 0, "公開していない"),
+        (TSQL, "SELECT * FROM DBO.vendors", 0, "公開していない"),
         (MYSQL, "SELECT LOAD_FILE('/etc/passwd')", 0, "関数"),
         (MYSQL, "SELECT SLEEP(10)", 0, "関数"),
         (MYSQL, "SELECT * FROM vendors LOCK IN SHARE MODE", 0, "ロック"),

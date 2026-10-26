@@ -19,7 +19,6 @@ from sqlglot.errors import SqlglotError
 from sqlglot.optimizer.scope import Scope, traverse_scope
 
 from .errors import ConnectorError, ConnectorErrorKind
-from .models import ConnectorKind
 
 MAX_SQL_LENGTH = 100_000
 
@@ -109,14 +108,15 @@ class Dialect:
 
     name: str  # sqlglotの方言
     paramstyle: str  # "format"（%s）か "qmark"（?）
-    case_sensitive: bool  # 引用符で囲んだ名前の大文字・小文字を区別する（PostgreSQL）
+    # 引用符のない名前を小文字として解決する（PostgreSQL）。他の方言は、大文字・小文字を区別するかがDBの設定
+    # （MySQLの lower_case_table_names、SQL Serverの照合順序）で変わるので、書いたとおりの名前で比べる
+    folds_unquoted: bool
     schema_is_database: bool  # スキーマがDB名と同じ（MySQL）
 
 
-POSTGRES = Dialect("postgres", "format", case_sensitive=True, schema_is_database=False)
-MYSQL = Dialect("mysql", "format", case_sensitive=False, schema_is_database=True)
-TSQL = Dialect("tsql", "qmark", case_sensitive=False, schema_is_database=False)
-DIALECTS = {ConnectorKind.POSTGRESQL: POSTGRES, ConnectorKind.MYSQL: MYSQL, ConnectorKind.SQLSERVER: TSQL}
+POSTGRES = Dialect("postgres", "format", folds_unquoted=True, schema_is_database=False)
+MYSQL = Dialect("mysql", "format", folds_unquoted=False, schema_is_database=True)
+TSQL = Dialect("tsql", "qmark", folds_unquoted=False, schema_is_database=False)
 
 
 def _reject(message: str) -> ConnectorError:
@@ -124,21 +124,19 @@ def _reject(message: str) -> ConnectorError:
 
 
 def _identifier(node: exp.Expression | None, dialect: Dialect) -> str:
-    """名前の比べ方をそろえる。PostgreSQLは引用符のない名前を小文字にする。他は大文字・小文字を区別しない"""
+    """表の参照の名前を、DBの中の実際の名前と比べる形にする。
+
+    PostgreSQLは引用符のない名前を小文字にする（DBと同じ解決）。MySQL・SQL Serverは書いたとおりにする。
+    大文字・小文字を区別しない設定のDBで小文字にそろえると、区別する設定のDBでは別の表（`Vendors` と `vendors`）を
+    通してしまうので、公開した名前（DBから読んだ実際の名前）と同じに書いたものだけを受け付ける
+    """
     if node is None:
         return ""
     if not isinstance(node, exp.Identifier):
         raise _reject(_("この書き方の表の名前は使えません"))
-    if dialect.case_sensitive:
-        return node.this if node.quoted else node.this.lower()
-    return node.this.casefold()
-
-
-def table_key(schema: str, name: str, dialect: Dialect) -> tuple[str, str]:
-    """公開する表・ビューの名前（DBの中の実際の名前）を、比べる形にする"""
-    if dialect.case_sensitive:
-        return (schema, name)
-    return (schema.casefold(), name.casefold())
+    if dialect.folds_unquoted and not node.quoted:
+        return node.this.lower()
+    return node.this
 
 
 def check_query(
@@ -201,14 +199,15 @@ def _check_tables(
     root: exp.Expression, *, dialect: Dialect, database: str, default_schema: str, exposed: Iterable[tuple[str, str]]
 ) -> tuple[str, ...]:
     """文の中のすべての表が、同じ文のCTEか、公開した表・ビューであることを確かめる"""
-    allowed = {table_key(database if dialect.schema_is_database else s, n, dialect) for s, n in exposed}
-    database_key = database if dialect.case_sensitive else database.casefold()
-    default_key = table_key(default_schema, "", dialect)[0]
+    allowed = {(database if dialect.schema_is_database else s, n) for s, n in exposed}
     used: list[str] = []
     for table in _real_tables(root):
-        schema, name = _resolve(table, dialect=dialect, database_key=database_key, default_key=default_key)
+        schema, name = _resolve(table, dialect=dialect, database=database, default_schema=default_schema)
         if (schema, name) not in allowed:
-            raise _reject(_("公開していない表・ビューです：%(name)s") % {"name": table.sql(dialect.name)})
+            raise _reject(
+                _("公開していない表・ビューです（名前の大文字・小文字も公開した名前と同じに書きます）：%(name)s")
+                % {"name": table.sql(dialect.name)}
+            )
         if not table.args.get("db"):
             # スキーマを書かない名前は、DBが別のスキーマで解決することがある（SQL Serverの dbo、PostgreSQLの
             # pg_catalog への読み替え）。検査したスキーマを付けて、実行時の解決を固定する
@@ -241,7 +240,7 @@ def _real_tables(root: exp.Expression) -> list[exp.Table]:
     return real
 
 
-def _resolve(table: exp.Table, *, dialect: Dialect, database_key: str, default_key: str) -> tuple[str, str]:
+def _resolve(table: exp.Table, *, dialect: Dialect, database: str, default_schema: str) -> tuple[str, str]:
     """表の参照を、比べる形の（スキーマ、名前）にする"""
     if isinstance(table.this, exp.Dot):
         raise _reject(_("別のサーバーの表は使えません"))
@@ -252,12 +251,12 @@ def _resolve(table: exp.Table, *, dialect: Dialect, database_key: str, default_k
     name = _identifier(table.this, dialect)
     if dialect.schema_is_database:
         # MySQLのスキーマはDB名。別のDBの表は読まない
-        if catalog or (schema and schema != database_key):
+        if catalog or (schema and schema != database):
             raise _reject(_("接続先のDB以外の表は使えません"))
-        return database_key, name
-    if catalog and catalog != database_key:
+        return database, name
+    if catalog and catalog != database:
         raise _reject(_("接続先のDB以外の表は使えません"))
-    return schema or default_key, name
+    return schema or default_schema, name
 
 
 def _render(root: exp.Expression, placeholders: list[exp.Placeholder], original: str, dialect: Dialect) -> str:

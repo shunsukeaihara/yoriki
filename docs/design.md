@@ -152,7 +152,7 @@ input_schema_ref: bl-check-input-v1
 output_schema_ref: bl-check-result-v1
 ```
 
-Skillが要求する権限（Tool、Connector、資料）は、ユーザーの権限と管理者の組織ポリシーの範囲内でのみ有効にする。`connectors` は省略してよく、その場合はエージェントが利用者の使えるConnectorから探して使う。Skillから任意のホストパス、Dockerオプション、実行イメージ、接続先URLを指定できる仕組みにはしない。実行環境はRunの単位で決まる承認済みのRuntime Profileを使い（Skillからは選ばない。§7.3）、接続先は登録済みのConnectorから選ぶだけにする。
+Skillが要求する権限（Tool、Connector、資料）は、ユーザーの権限と管理者の組織ポリシーの範囲内でのみ有効にする。`connectors` は省略してよく、その場合は会話のRunでだけ、エージェントが利用者の使えるConnectorから探して使う（タスクのRunでは、タスクに固定したConnectorだけ。authorization.md §5.4）。Skillから任意のホストパス、Dockerオプション、実行イメージ、接続先URLを指定できる仕組みにはしない。実行環境はRunの単位で決まる承認済みのRuntime Profileを使い（Skillからは選ばない。§7.3）、接続先は登録済みのConnectorから選ぶだけにする。
 
 プロンプトと手順はDB編集を認める。管理Toolの実装コードとOSパッケージはレビュー済みソース・イメージで管理する。追加Pythonライブラリは7.6節の取得経路でRun専用環境に導入する。秘密情報はSkill本文に埋め込まず、管理側のSecret参照（Connectorの資格情報等）として扱う。
 
@@ -522,7 +522,7 @@ Webhook AdapterはAPIキー・署名等で認証し、URLを知っているだ�
 - **項目の取り出し（任意）**：Bindingに、取り出す項目を表で書く（名前、payloadの中の場所（JSONのpath）、必須か、型（文字・数値・日付・ファイル））。取り出した値はプロンプトのテンプレートに `{{ inputs.名前 }}` で埋め込める。値は文字として埋め込むだけで、式やコードとして評価しない。必須の項目がない要求と型の合わない要求は、受付時に400で断り、Runを作らない。型がファイルの項目は受付時にArtifactとして取り込む（URLは許可した取得先だけ）。設定画面では、サンプルのpayloadを貼ると、取り出した値と埋め込んだ後のプロンプトを表示して確かめられる。
 - **Bindingに置くもの**：Runを作る前にサーバーが決めることだけを置く。受け口と認証、重複の判定に使う送り元のイベントIDの場所（任意）、項目の取り出し（任意）、payload・ファイルの大きさと数の上限。
 - **重複の判定**：重複のキーは、Bindingで指定した送り元のイベントIDか、要求の `Idempotency-Key` ヘッダーだけにする。本文の内容（hash）ではキーにしない（同じ内容の別の出来事を、再送と区別できないため）。どちらもない場合は重複の判定をせず、届くたびに新しいRunを作る。この場合は、送り元が再送すると二重に実行されることを設定画面に表示する。
-- **失敗を必ず知らせる**：Webhookで起動するタスクは、失敗を知らせる先を必須とする（`run.failed` を含む結果通知か、対話のチャネル）。ないTask Definitionは公開できない。受付時の202にはrun_idを含め、送り元は同じ認証で状態を確かめる口（`GET /api/hooks/v1/tasks/{task}/runs/{run_id}/`。状態と、失敗なら理由の要約だけを返す）でも結果を確かめられる。画面は、これらを入れるふつうのフォームと項目の表にする（項目の場所はJSONのpathを文字で入れる）。
+- **失敗を必ず知らせる**：Webhookで起動するタスクは、失敗を知らせる先を必須とする（`run.failed` を含む結果通知か、対話のチャネル）。ないTask Definitionは公開できない。受付時の202にはrun_idを含め、送り元は同じ認証で状態を確かめる口（`GET /api/hooks/v1/tasks/{task}/runs/{run_id}/`。状態と、失敗なら決まった失敗のコードだけを返す。エラーの本文やログ由来の情報は、鍵の持ち主に返さない。authorization.md §7.1）でも結果を確かめられる。画面は、これらを入れるふつうのフォームと項目の表にする（項目の場所はJSONのpathを文字で入れる）。
 - **推奨の形式**：送る形を決められる送り元（Zapier等）向けに、Yorikiの推奨の形式（`event_id`、`message`、`inputs`、`files`）を示す。この形式で送れば、重複のキーとファイルの取り込みはBindingの設定なしで行う。推奨であり、必須にはしない。
 
 取り出した項目の誤りは受付時に400で返せる。それ以外の形の誤りに気づくのはRunを始めた後になり、送り元には受付時に202を返しているので、読み取れなかった場合（Skillの読み取りのスクリプトで形を確かめて合わなかった場合を含む）は、Runの失敗として、必須にした失敗の通知先へ知らせる。
@@ -732,7 +732,7 @@ Provider Adapterは、メッセージ・Tool定義・オプションを受け取
 | 操作 | Connectorは提供する操作を、読取り（`read`）と書込み（`write`）に分類して宣言する。例：`sharepoint.search`（read）、`sharepoint.download`（read）、`sharepoint.upload`（write） |
 | 利用の許可 | 所属とpermissionの2軸で判定する（[authorization.md](authorization.md) §5.2）。Connectorは範囲（個人・部門・全社・システム）を持つ。部門のConnectorは1つの部門に属し、使える部門の人が見る・使える（表・列の説明、試し実行、会話での操作）。全社のConnectorは全員が使える。システムのConnectorはシステムタスクだけが使い、会話には出さない。個人のConnectorは本人のOAuthのtokenで動き、本人だけが使う。部門・全社・システムのConnectorの作成・編集・削除は、Connector管理者（`connector.add_connector`・`change_connector`・`delete_connector`）が所属を問わず行う。使える範囲を変えると、実行中のRunにも次の操作から効く。会話ではエージェントが利用者の使えるConnectorから探して使い、タスクではタスクに固定したConnectorだけを使う。既定は読取りの操作だけとし、書込みは今は持たない（入れるときは出口として扱い、タスクに許された書込み先だけにする） |
 | 機密のフラグ | 個人情報を主な中身とする接続先には、基盤管理者が機密のフラグを付ける。フラグの付いたConnectorは、ローカルLLMのモデルを使うタスク・会話にだけ割り当てられる（§4冒頭）。一部の列だけが個人情報の場合は、フラグではなく公開する範囲で外す |
-| Skillからの利用 | Skillは、必要な操作（例：`sharepoint.download`）を要件として宣言できる（宣言しなくてもよく、その場合はエージェントが利用者の使えるConnectorから探して使う）。宣言は要件で、使える範囲を広げも狭めもしない。社員やエージェントがチャットでSkillを作るときも同じで、公開時に、宣言した操作がConnectorの境界の中にあるかを検証し、実行時に利用者の権限で確かめる（§4.8のモデルの能力の検証と同じ） |
+| Skillからの利用 | Skillは、必要な操作（例：`sharepoint.download`）を要件として宣言できる（宣言しなくてもよく、その場合は会話のRunでだけ、エージェントが利用者の使えるConnectorから探して使う。タスクのRunでは、タスクに固定したConnectorだけを使う）。宣言は要件で、使える範囲を広げも狭めもしない。社員やエージェントがチャットでSkillを作るときも同じで、公開時に、宣言した操作がConnectorの境界の中にあるかを検証し、実行時に利用者の権限で確かめる（§4.8のモデルの能力の検証と同じ） |
 | 結果 | ファイルや大量の結果はArtifactとして保存し、Sandboxの `/workspace/input/connectors/{invocation_id}/` へ読取り専用で展開する（§7.1）。LLMには件数・ファイル名・先頭部分などの要約だけを返す |
 | 記録 | 操作、引数、対象、件数・サイズ、所要時間、Connectorの版をToolInvocationに記録する |
 
@@ -781,9 +781,9 @@ Connectorは「接続」「境界」「使い方」の3層に分けて管理す�
 
 #### 4.9.3 SharePoint等のファイル・SaaS
 
-SharePoint・OneDrive（Microsoft Graph）、Google Driveは、検索、一覧、ダウンロード、（許可した場合の）アップロードの操作を持つConnectorとして実装する。ダウンロードしたファイルはArtifactとして保存し、版とhashを記録して、どの時点の原本を使ったかを後から確認できるようにする。
+SharePoint・OneDrive（Microsoft Graph）、Google Driveは、検索、一覧、ダウンロードの読取りの操作を持つConnectorとして実装する（アップロード等の書込みは、出口としての許可を設計する将来の段階で足す。authorization.md §7）。ダウンロードしたファイルはArtifactとして保存し、版とhashを記録して、どの時点の原本を使ったかを後から確認できるようにする。
 
-社内システムのREST APIは、APIごとにAdapterのコードを書かず、汎用のHTTP Connectorの設定で追加できるようにする。基盤管理者が、接続先のURL、認証（資格情報は暗号化して保存）、呼んでよい操作（メソッドとパスのパターン、読取り・書込みの分類、入出力の説明）を登録する。登録していないパスやホストへは送信しない。
+社内システムのREST APIは、APIごとにAdapterのコードを書かず、汎用のHTTP Connectorの設定で追加できるようにする。基盤管理者が、接続先のURL、認証（資格情報は暗号化して保存）、呼んでよい操作（メソッドとパスのパターン、読取り・書込みの分類、入出力の説明）を登録する。書込みの分類の操作は、書込みを出口として許可する将来の段階まで登録できないようにする（authorization.md §7）。登録していないパスやホストへは送信しない。
 
 外部サービスが公式のMCP（Model Context Protocol）サーバーを提供している場合は、MCPサーバーに接続するConnectorとして取り込める。この場合もMCPサーバーへの接続はControl Planeだけが行い、許可したtoolだけをエージェントへ見せる。MCPのtoolも読取り・書込みに分類し、分類できないtoolは書込みとして扱う。
 
@@ -816,7 +816,7 @@ Connectorは独立したサービスではなく、`yoriki-api` のイメージ�
 Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプトからも呼べるようにする（例：請求書の明細の各行について社内DBを照会して突合する）。Sandboxにはネットワークを与えないまま、次の仕組みで仲介する。
 
 - Sandboxには、Runnerにだけつながる通信路（Unixドメインソケットをmountする）と、それを使う小さなPythonのライブラリ（`yoriki_connector`）を入れる。スクリプトは `yoriki_connector.query("sales_db", sql, params)` のように呼ぶ。
-- Runnerは要求を受けると、LLMのTool呼出しと同じConnectorの処理を通す。Runに固定したBinding、利用者の権限、読取り専用の強制、上限、ToolInvocationへの記録はすべて同じで、スクリプトからの呼出しだからといって範囲を広げない。
+- Runnerは要求を受けると、LLMのTool呼出しと同じConnectorの処理を通す。Runに固定したBinding、Runの実行許可（起動のしかたで決まる。authorization.md §6）、読取り専用の強制、上限、ToolInvocationへの記録はすべて同じで、スクリプトからの呼出しだからといって範囲を広げない。
 - 通信路はRunごと（Attemptごと）に作り、終われば閉じる。接続情報やtokenは通信路を流れず、Sandboxには結果だけが返る。大きな結果は `/workspace/input/connectors/{invocation_id}/` にファイルとして置く。
 - 1つのRunからの呼出しの回数・頻度にも上限を設け、スクリプトの不具合で社内DBに大量の問合せが流れないようにする。
 

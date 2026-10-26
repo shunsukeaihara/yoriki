@@ -242,7 +242,7 @@ const createAPI = () => {
         // 更新では使うDB接続を送れない
         update: (data: ConnectorUpdate) => http.put<Connector, Connector>(`v1/connectors/${id}/`, data),
         patch: (data: Partial<ConnectorUpdate>) => http.patch<Connector, Connector>(`v1/connectors/${id}/`, data),
-        // 作成で選ぶ接続先と部門（部門は所属を問わず有効なすべて）。接続先・部門の管理の権限がなくても選べる
+        // 作成と一覧の絞り込みで選ぶ接続先と部門（部門は所属を問わず有効なすべて）。接続先・部門の管理の権限がなくても選べる
         connections: (params?: ListParams) =>
           http.get<Paginated<MinimumDatabaseConnection>, Paginated<MinimumDatabaseConnection>>(
             'v1/connectors/connections/',

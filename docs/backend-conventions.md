@@ -640,7 +640,7 @@ DATABASES = {
 
 - 権限の設計（範囲、3つの層、実行許可）は [authorization.md](authorization.md) を正とする。ここではDjangoでの書き方を定める。
 - 権限は「所属」と「permission」の2軸で判定する。判定にGroupを使わない（`user.groups` やGroupの名前で絞らない）。Userのフラグも判定に使わない。
-- **所属**は、`Department.objects.usable_by(user)`（使える部門）と `Department.objects.manageable_by(user)`（管理できる部門）だけで判定する。ほかの場所で `DepartmentMembership` を直接引かない。使える部門は、permission `user.can_use_all_departments` か `user.can_manage_all_departments` を持てばすべての部門を返す。管理できる部門は、`user.can_manage_all_departments` を持つときだけすべての部門を返す（`can_use_all_departments` では広がらない）。1つのリクエストの中では結果を `request.user` に持たせて使い回し、所属・Groupを変える処理の後では使わない。
+- **所属**は、`Department.objects.usable_by(user)`（使える部門）と `Department.objects.manageable_by(user)`（管理できる部門）、`Department.objects.joined_by(user)`（実際の所属。permissionで広がらない。部門タスクのチャットからの起動と、本人の所属の表示に使う）だけで判定する。ほかの場所で `DepartmentMembership` を直接引かない。使える部門は、permission `user.can_use_all_departments` か `user.can_manage_all_departments` を持てばすべての部門を返す。管理できる部門は、`user.can_manage_all_departments` を持つときだけすべての部門を返す（`can_use_all_departments` では広がらない）。1つのリクエストの中では結果を `request.user` に持たせて使い回し、所属・Groupを変える処理の後では使わない。
 - **permission**はDjangoのpermissionで判定する。
   1. Yorikiで定義するpermissionは `utils.permissions.AppPermission` に（app_label、codename、表示名）として1か所にまとめる。codenameは `can_<動詞>_<対象>` にする（例：`skill.can_publish_company_skills`）。
   2. 対象アプリのModelの `Meta.permissions` に `AppPermission.XXX.meta` を書き、マイグレーションでpermissionを作る。

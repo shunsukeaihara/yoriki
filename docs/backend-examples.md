@@ -1033,15 +1033,14 @@ def _has_scope_permission(user, scope: SkillScope, action: SkillAction) -> bool:
 
 class SkillQuerySet(models.QuerySet):
     def visible_to(self, user) -> "SkillQuerySet":
-        """見る・使えるSkill。個人は本人、部門は使える部門、全社は全員、システムはシステムSkillを編集できる人"""
-        q = (
+        """業務画面と会話で見る・使えるSkill。個人は本人、部門は使える部門、全社は全員。
+        システムSkillは含めない（管理画面のViewSetが、システムSkillのpermissionで扱う。authorization.md §7.3）"""
+        return self.filter(
             Q(scope=SkillScope.PERSONAL, owner=user)
             | Q(scope=SkillScope.DEPARTMENT, department__in=Department.objects.usable_by(user))
-            | Q(scope=SkillScope.COMPANY)
+            | Q(scope=SkillScope.COMPANY),
+            deleted=False,
         )
-        if _has_scope_permission(user, SkillScope.SYSTEM, SkillAction.EDIT):
-            q |= Q(scope=SkillScope.SYSTEM)
-        return self.filter(q, deleted=False)
 
 
 class Skill(models.Model):
@@ -1072,6 +1071,9 @@ class Skill(models.Model):
             return False
         if self.scope == SkillScope.PERSONAL:
             return self.owner_id == user.pk  # 個人は本人だけ（permissionを見ない）
+        if self.scope == SkillScope.SYSTEM:
+            # システムSkillは所属を問わず、permissionだけで判定する（見るのは編集できる人）
+            return _has_scope_permission(user, SkillScope.SYSTEM, SkillAction.EDIT if action == SkillAction.VIEW else action)
         if action == SkillAction.VIEW:
             return Skill.objects.visible_to(user).filter(pk=self.pk).exists()
         if self.scope == SkillScope.DEPARTMENT and not (

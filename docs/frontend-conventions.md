@@ -332,6 +332,7 @@ ViewSetの `@action`（停止、回答、公開等）も、入力があれば同
 // composables/permission.ts
 export const PermissionCode = {
   VIEW_DESTINATION: 'delivery.view_destination',
+  ADD_DESTINATION: 'delivery.add_destination',
   CHANGE_DESTINATION: 'delivery.change_destination',
   DELETE_DESTINATION: 'delivery.delete_destination',
   PUBLISH_COMPANY_SKILLS: 'skill.can_publish_company_skills',

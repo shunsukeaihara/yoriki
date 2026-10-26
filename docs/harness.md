@@ -604,7 +604,7 @@ Runnerは、shell以外のToolの処理もSandboxの中で行う。ファイル�
 - どのSkillを使うかを、利用者に1行で伝える。
 - 合うSkillがなければ、Skillなしで進めてよい。
 
-**読込み**：`skill` が呼ばれたら、RunnerはそのSkillをその時点の最新の公開版へ解決し、権限・停止・必要な能力・機密の制限と、Skillの要るToolがこのRunにあるかを確かめて、Manifestへの追記と `skill.loaded` の記録を同じDB transactionで行う（design.md §3.2）。結果として返すもの：
+**読込み**：`skill` は会話のRunにだけ出す（タスクのRunでは、タスクに固定した版のSkillだけを使い、探して読み込まない。authorization.md §5.4）。`skill` が呼ばれたら、RunnerはそのSkillをその時点の最新の公開版へ解決し、権限・停止・必要な能力・機密の制限と、Skillの要るToolがこのRunにあるかを確かめて、Manifestへの追記と `skill.loaded` の記録を同じDB transactionで行う（design.md §3.2）。結果として返すもの：
 
 ```
 <skill name="請求書の照合" version="7">

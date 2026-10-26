@@ -218,6 +218,7 @@ definePageMeta({ permission: DESTINATION_PERMISSIONS })
 
 const api = useAPI()
 const { t } = useI18n()
+const { hasPermission } = usePermission()
 const reloadKey = ref(0)
 const reload = () => (reloadKey.value = Date.now())
 
@@ -244,7 +245,8 @@ const columns: TableColumn<Destination>[] = [
   <UContainer>
     <ListPageTitle :title="$t('通知先')">
       <template #end>
-        <DestinationDialog @saved="reload">
+        <!-- 追加はサーバー側でも権限を確認し、権限がなければ403になる -->
+        <DestinationDialog v-if="hasPermission(PermissionCode.ADD_DESTINATION)" @saved="reload">
           <template #trigger="{ on }">
             <DBtn icon="i-lucide-plus" v-on="on">{{ $t('通知先を追加') }}</DBtn>
           </template>
@@ -336,7 +338,12 @@ const onDelete = async () => {
         {{ $t('削除') }}
       </DBtn>
       <div class="flex-1" />
-      <DBtn :disabled="!formRef?.canPost" :loading="formRef?.loading" @click="formRef?.onSubmit()">
+      <DBtn
+        v-if="hasPermission(PermissionCode.CHANGE_DESTINATION)"
+        :disabled="!formRef?.canPost"
+        :loading="formRef?.loading"
+        @click="formRef?.onSubmit()"
+      >
         {{ $t('更新') }}
       </DBtn>
     </template>

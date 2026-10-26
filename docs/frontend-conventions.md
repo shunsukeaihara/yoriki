@@ -366,7 +366,7 @@ export const usePermission = defineStore('permission', () => {
 - 社員向けのlayoutの「管理」の入口も、表示できるメニュー項目があるときだけ出す。
 - 画面は層で分ける（authorization.md §7.3）。業務画面（ルート直下）は利用と業務の管理（個人・部門・全社のSkill・タスク）で、一覧は所属で絞られる。管理画面（`/manage`）は基盤の管理（Connector・接続・入口・出口、システムのSkill・タスク、LLM・Runtime Profile・SSO・ユーザー・部門）で、所属を問わず全件を扱う。部門のSkillの公開者や部門のタスク管理者は、管理画面に入らない。
 - 業務画面のSkill・タスクの一覧は、範囲のタブ（個人・部門・全社）と部門の選択で絞ってから、選んで詳細（編集）に入る形にする（authorization.md §7.3.1）。部門の選択肢は、Skillは `usableDepartments`、タスクは `manageableDepartments` から作る。
-- ボタンや操作は `v-if="hasPermission(PermissionCode.X)"` で出し分ける。コメントで「サーバー側でも403で弾かれる」ことを書いておく。
+- 管理画面のボタンや操作は `v-if="hasPermission(PermissionCode.X)"` で出し分ける。業務画面の範囲を持つもの（Skill・タスク）の1件ごとの操作は、APIが返す操作の可否（`access` 等）で出し分ける（個人のものはpermissionなしで本人が扱えるため。§6.1）。どちらも、コメントで「サーバー側でも403で弾かれる」ことを書いておく。
 - 特定の組織IDやユーザーIDをフロントエンドに直接書いて機能を出し分けない。出し分けが必要なら、サーバーが権限か設定値として返す。
 
 ---

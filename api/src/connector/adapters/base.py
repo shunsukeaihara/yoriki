@@ -27,6 +27,8 @@ from ..sql import CheckedQuery, Dialect, check_query, table_key
 # 管理画面で表を選ぶための一覧の上限
 MAX_LISTED_TABLES = 5000
 FETCH_SIZE = 500
+# INFORMATION_SCHEMA を名前で照会するときの、1回の名前の数
+NAMES_PER_QUERY = 1000
 # 1行の大きさが分からない最初の取り出し
 FIRST_FETCH_SIZE = 10
 
@@ -167,28 +169,34 @@ class DatasourceAdapter(ABC):
         return result
 
     def _catalog(self, names: list[str] | None) -> list[TableInfo]:
-        """INFORMATION_SCHEMA から表・ビューと列を読む。names を渡せば、その名前の表だけ"""
-        condition = self.catalog_scope
-        params: tuple[str, ...] = ()
-        if names is not None:
-            condition += f" AND TABLE_NAME IN ({', '.join([self.param_marker] * len(names))})"
-            params = tuple(names)
+        """INFORMATION_SCHEMA から表・ビューと列を読む。names を渡せば、その名前の表だけ。
+
+        列は、読んだ表の名前で照会する（一覧を件数の上限で打ち切ったときに、載せない表の列まで読まない）。
+        名前は同じでスキーマの違う表の列も返るので、表と組み合わせて選ぶ
+        """
         with self.connect() as conn:
             cur = conn.cursor()
-            cur.execute(
-                "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES"
-                f" WHERE {condition} ORDER BY TABLE_SCHEMA, TABLE_NAME",
-                params,
-            )
-            tables = [(s, n, k) for s, n, k in cur.fetchmany(MAX_LISTED_TABLES)]
-            cur.execute(
-                f"SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, {self.type_column} FROM INFORMATION_SCHEMA.COLUMNS"
-                f" WHERE {condition} ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION",
-                params,
-            )
+            tables: list[tuple[str, str, str]] = []
+            for condition, params in self._by_names(names):
+                cur.execute(
+                    "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES"
+                    f" WHERE {condition} ORDER BY TABLE_SCHEMA, TABLE_NAME",
+                    params,
+                )
+                tables += [(s, n, k) for s, n, k in cur.fetchmany(MAX_LISTED_TABLES - len(tables))]
+                if len(tables) >= MAX_LISTED_TABLES:
+                    break
+            listed = {(s, n) for s, n, _k in tables}
             columns: dict[tuple[str, str], list[ColumnInfo]] = {}
-            for schema, table, column, type_ in cur.fetchall():
-                columns.setdefault((schema, table), []).append(ColumnInfo(column, type_))
+            for condition, params in self._by_names(sorted({n for _s, n, _k in tables})) if tables else ():
+                cur.execute(
+                    f"SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, {self.type_column} FROM INFORMATION_SCHEMA.COLUMNS"
+                    f" WHERE {condition} ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION",
+                    params,
+                )
+                for schema, table, column, type_ in cur.fetchall():
+                    if (schema, table) in listed:
+                        columns.setdefault((schema, table), []).append(ColumnInfo(column, type_))
         return [
             TableInfo(
                 schema=s,
@@ -198,6 +206,15 @@ class DatasourceAdapter(ABC):
             )
             for s, n, k in tables
         ]
+
+    def _by_names(self, names: list[str] | None) -> Iterator[tuple[str, tuple[str, ...]]]:
+        """INFORMATION_SCHEMA を読む条件と引数。名前は区切って渡す（SQL Serverの引数は2100個まで）"""
+        if names is None:
+            yield self.catalog_scope, ()
+            return
+        for start in range(0, len(names), NAMES_PER_QUERY):
+            chunk = tuple(names[start : start + NAMES_PER_QUERY])
+            yield f"{self.catalog_scope} AND TABLE_NAME IN ({', '.join([self.param_marker] * len(chunk))})", chunk
 
     def _key(self, schema: str, name: str) -> tuple[str, str]:
         # MySQLのスキーマはDB名（公開する表はスキーマを持たない）
@@ -231,6 +248,10 @@ class DatasourceAdapter(ABC):
                 columns = [d[0] for d in cur.description]
                 result = QueryResult(columns=columns, rows=[], tables=checked.tables, sql=checked.sql)
                 result.csv_bytes = _csv_size(columns)
+                if result.csv_bytes > max_bytes:
+                    raise ConnectorError(
+                        ConnectorErrorKind.REJECTED, _("列名だけで結果のサイズの上限を超えます。列を絞ってください")
+                    )
                 for row in _fetch(cur, result, max_rows, max_bytes):
                     size = _csv_size([to_text(v) for v in row])
                     if len(result.rows) >= max_rows or result.csv_bytes + size > max_bytes:

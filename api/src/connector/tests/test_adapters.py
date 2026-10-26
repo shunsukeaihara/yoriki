@@ -302,6 +302,12 @@ class TestDatasource:
         assert 0 < len(result.rows) < VENDOR_ROWS
         assert result.csv_bytes <= 1024
 
+    def test_header_beyond_byte_limit_is_rejected(self, source):
+        connector = _connector(source, max_result_bytes=5)
+        with pytest.raises(ConnectorError) as exc_info:
+            get_adapter(connector).query("SELECT code, name FROM vendors")
+        assert exc_info.value.kind == ConnectorErrorKind.REJECTED
+
     def test_timeout(self, source):
         connector = _connector(source, timeout_seconds=1)
         with pytest.raises(ConnectorError) as exc_info:

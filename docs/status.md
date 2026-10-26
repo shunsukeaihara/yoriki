@@ -71,14 +71,14 @@
 
 設計書・規約に反映済み。経緯を知らずに変えないよう、要点だけを挙げる。
 
-- **権限**：「permissionを定義する → Groupに割り当てる → Groupをユーザーに割り当てる」で扱う。permissionは `utils.permissions.AppPermission` に1か所でまとめ（codenameは `can_<動詞>_<対象>`）、Modelの `Meta.permissions` で作る。役割（業務管理者・Skill公開者）はGroupで、初期の中身は `user/roles.py`（`migrate` のたびに同期）。Userのフラグや役割の名前では判定しない。基盤管理者は `is_superuser`。フロントエンドも `allPermissions` だけで判定する（backend-conventions.md §6.3、frontend-conventions.md §6）。
+- **権限**：[authorization.md](authorization.md) を正とする（0.33）。以下の今の実装（permissionの定義は `utils.permissions.AppPermission`、`Meta.permissions` で作る）のうち、Groupを `migrate` のたびに `user/roles.py` で同期する仕組み、部門の中の役割、`PlatformAdmin` は古い形で、§4の実装のPRで authorization.md の形（初期のGroupは一度だけ作る、所属とpermissionの2軸、`DenyAll`）に直す。
 - **パスワードでのログイン**：基盤管理者だけ（`utils.backends.PlatformAdminPasswordBackend`）。社員はSSOだけ（`SOCIALACCOUNT_ONLY`）。
 - **SSOのアカウント確認**：許可したメールドメイン、Microsoftはテナントを固定、Googleは `hd` の一致が必須（未設定なら起動しない）。
 - **テスト**：ローカルでもCIでもPostgreSQLで実行する（SQLiteは使わない）。PostgreSQLが起動していなければ、pytestは起動のコマンドを案内して止まる。NOTIFY/LISTENも実際のPostgreSQLで確かめる。
 - **静的ファイル**：本番はnginxが `/api/static/` で返す（`static` サービスが共有ボリュームへコピー）。開発時はUvicornが返す。WhiteNoiseは使わない。
 - **CSP**：NuxtのSPAがインラインのスクリプトを含むため、`script-src 'unsafe-inline'` を許可している（課題。§3）。
 - **CI**：変更したディレクトリに関係するworkflowだけを動かす。Actionはコミットのsha、公式イメージはdigestで固定し、公開から2週間以内の版は使わない。
-- **Skillの権限**：個人は本人、部門は所属の役割（利用・編集・公開）、全社はpermission（`skill.can_edit_company_skills`・`can_publish_company_skills`）で決める。部門は役割（Group）と別のDepartmentで表す。Draftの変更は編集以上、公開・切戻し・停止・削除・名前とToolの変更は公開の役割。判定は `Skill.access_of()` と `Skill.objects.visible_to()`（design.md §3.6）。
+- **Skillの権限**：今の実装は、部門の範囲を所属の役割（利用・編集・公開）で判定している（`Skill.access_of()`）。これは古い形で、§4の実装のPRで authorization.md §5.1 の形（所属とpermission、システムの範囲、`can()`）に直す。
 - **資料のアプリ名**：Pythonの標準ライブラリの `resource` と重なるので `resources` にした。
 - **マージ**：squash mergeを基本にし、コミットを残す価値があるときだけ通常のmerge。`main` に入るコミットには、条件を満たせば `[skip ci]` を付ける（development.md §1、§4.1）。
 

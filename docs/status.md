@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-27（#44 のマージ後）
+- 最終更新：2026-10-27（権限の設計 authorization.md の文書のPRの中）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -90,7 +90,7 @@
 - Compose：channel-listener（Channelの受信を実装するとき）。
 - 管理コマンド：`drain_workers`・`resume_workers`（Workerの実行を実装するとき）。
 - 業務のアプリは `llm`、`conversation`、`run`、`harness`、`stream`、`usage`、`runtime`（Runtime Profile、Launcher）、`artifact`、`skill`・`resources`、`connector`（土台だけ）まで。`plugin`、`task`、`delivery` 等（backend-conventions.md §1.2）は、まだない。
-- 権限の2軸（所属とpermission。design.md §3.6）に合わせる残り：Skillの部門の範囲、`user/roles.py` の作り直しをやめる、管理APIをすべてpermissionにする。方針は決まり、次のPRで行う（§4の「次の作業」）。
+- 権限の設計（[authorization.md](authorization.md)。design.md 0.33）に実装を合わせる：Skillの部門の役割をやめる、システムの範囲、Connectorの範囲（個人・部門・全社・システムと1つの部門）、`can_use_all_departments`・`can_manage_all_departments` と使える部門・管理できる部門の2つの関数、判定をQuerySetとModelの `can()` に集める、管理APIのpermission化と既定を誰も通さない `DenyAll` にする、`is_platform_admin` をAPIから外す、`app/v1/my/` に所属の情報を足す、初期のGroupを一度だけ作る。§4の「次の作業」。
 - Connectorで後回しにしたもの：Plugin Registry（`plugin` アプリ。今は種別からAdapterをコードで選ぶ。タスク・配信のPluginとあわせて作る）、同時実行数の上限を守らせる（会話でのConnectorの段階。DB接続ごとに、DBで全Workerを通して数える）、SQL ServerのSNAPSHOT分離（DB側で有効なら使う。design.md §4.9.2）、MariaDB（MySQLの `MAX_EXECUTION_TIME` がない。試していない）、HTTP・SharePoint・Google Drive・MCPのConnector、書込みの操作。PostgreSQLの証明書の確認（`verify-full`）は、OSの証明書（`sslrootcert=system`。libpq 16以降）を使い、社内のCAの証明書を指定する項目はまだない。PyMySQLは1.2.1〜1.2.3の不具合（作ったばかりのユーザーがTLSなしで初めてログインすると失敗する）を避けて1.2.0に固定している（`api/pyproject.toml`）。直った版が出たら上げる。
 - Skillで後回しにしたもの：実行中のRunでSkillを最新の公開版へ切り替える依頼（design.md §3.2）、機密の制限によるSkillの絞り込み（Connectorの段階）、Resource Collection、Connectorの宣言、MD・CSV・PPTX以外の形式（XLSX・DOCX・PDF等）の検証、PPTXの画像としてのプレビュー（LibreOfficeを使わない方法が未決。design.md §7.6）、本文（説明・手順・Schema）の版の差分の表示（今は変わった項目名だけ。資料の差分は #40 で表示）、公開せずに捨てたDraftの資料の原本の回収、共通Skillから個人用を派生させる操作、Draftを開いた後に別の版が公開されたときの取り込み（今は破棄して開き直す）、画面のToolの選択肢と説明（今はフロントエンドに `harness.tools.ALL_TOOLS` と同じ一覧を持つ。APIで返すようにする）。
 - 会話からのSkill更新で後回しにしたもの：中身が前の版と同じDraftの公開を止めない（版が増える）、Draftに他の人の未公開の変更があっても一緒に公開する（`get_skill` の説明で、公開の前に利用者へ伝えさせるだけ）、編集のRunの対象は1つだけ（複数のSkillをまとめて直す依頼は分ける）、別のAttemptで再開すると `/workspace/master` のDraftの資料が置き直されない（`get_skill` を呼び直せば置く）。
@@ -113,18 +113,14 @@
 
 ## 4 次の作業
 
-**今の状態（2026-10-27）**：Skillの段階（下の1）は #41 までで揃った。下の2（Connectorとタスク・配信）は、①（Connectorの土台）が #42、②（Connectorの管理画面）が #44 で済んだ。合意した方針：Connectorを先に作る（最初の業務の1つ目が先に動く）、Connectorの種類は今回は社内DBだけ（HTTP Connectorは後回し）、MySQLのドライバはPyMySQL、Webhook等で起動したRunの実行主体はタスクに設定した社員（既定は作成者）にする（design.md 0.31）。
+**今の状態（2026-10-27）**：Skillの段階（下の1）は #41 までで揃った。下の2（Connectorとタスク・配信）は、①（Connectorの土台）が #42、②（Connectorの管理画面）が #44 で済んだ。合意した方針：Connectorを先に作る（最初の業務の1つ目が先に動く）、Connectorの種類は今回は社内DBだけ（HTTP Connectorは後回し）、MySQLのドライバはPyMySQL、Webhook等で起動したRunの実行主体はタスクに設定した社員（既定は作成者）にする（design.md 0.31。0.33で、起動のしかたで決まる実行許可に改めた）。
 
-#44 で利用者と合意したこと（design.md 0.32）：接続先と資格情報をDB接続（画面では「接続先」）としてConnectorから分ける。権限は「所属」と「permission」の2軸で判定し、Groupは判定に使わない（Groupはpermissionをまとめる入れ物で、後からいくらでも変えられること）。Connectorを見る・使うのは所属だけ（使える部門。空なら全社向け）、作成・編集・削除は所属＋permission、接続先はpermissionだけ。全部を見る人は、部門の「すべての部門の範囲を含む」印で管理する。SkillとConnectorは同じ所属の判定にする（Skill側は次の段階）。管理画面のメニューは「Connector → DB Connector → 接続先・Connector」。
+#44 で利用者と合意したこと（design.md 0.32）：接続先と資格情報をDB接続（画面では「接続先」）としてConnectorから分ける。権限は「所属」と「permission」の2軸で判定し、Groupは判定に使わない（Groupはpermissionをまとめる入れ物で、後からいくらでも変えられること）。Connectorを見る・使うのは所属だけ（使える部門。空なら全社向け）、作成・編集・削除は所属＋permission、接続先はpermissionだけ。全部を見る人は、部門の「すべての部門の範囲を含む」印で管理する。SkillとConnectorは同じ所属の判定にする（Skill側は次の段階）。管理画面のメニューは「Connector → DB Connector → 接続先・Connector」。このうち所属の持ち方（使える部門の多対多、空なら全社向け、部門の印）は、0.33で範囲と1つの部門、`can_use_all_departments` 等に改めた（authorization.md）。
 
-**次の作業**：利用者の指示（2026-10-27）で、下の2の③より先に、§3の「権限の2軸に合わせる残り」を1つのPRで行う。作業ブランチ `feature/authz-affiliation-permission`（`main` の #44 から切った。まだ変更なし）。2026-10-27に利用者と決めたこと：
-- **Skillの部門の範囲（合意）**：部門の中の役割（`DepartmentMembership.role`・`DepartmentRole`。利用・編集・公開）をやめる。部門のSkillを使うのは所属だけ（`Department.objects.of(user)`。「すべての部門の範囲を含む」部門を含む）。Draftの変更は所属＋新しいpermission `skill.can_edit_department_skills`、公開・切戻し・停止・削除・Toolの変更は所属＋`skill.can_publish_department_skills`（`AppPermission` に足す）。全社の範囲は今のpermission（`can_edit_company_skills`・`can_publish_company_skills`）のまま、個人は本人。役割は人ごとのpermissionに移せないので、移行の後に基盤管理者がpermissionを付け直す（役割の列は消す。了承済み）。直すところ：`skill/models.py` の `visible_to()`・`scope_access_of()`・`DEPARTMENT_ACCESS`、`user/models.py`（`DepartmentRole`、`role_of()`、所属の `role`）、`user/serializers.py`（`MyDepartmentSerializer` は `Department.objects.of(user)` の部門にする、`DepartmentMembershipSerializer` から役割を外す）、`user/views.py`（所属の役割の絞り込み）、`app/settings.py` の `DepartmentRoleEnum`、テストの `role=`。画面は `composables/skill.ts`・`composables/conversation.ts`・`SkillCreateForm`（作れる部門をpermissionと所属で決める）・`DepartmentMemberForm`（役割の欄をなくす）・`api/types.ts`、`PermissionCode` に2つ足す。
-- **役割（Group）の初期定義（合意）**：`user/roles.py` の `sync_role_groups`（post_migrateで毎回作り直す）をやめ、最初に一度だけGroupを作るデータのマイグレーションにする（新しいpermissionを作ってから付ける。`create_permissions` を `apps` 付きで呼ぶ）。初期のGroupの案：「Skill公開者」（全社のSkillの編集・公開。今の名前のまま）、「部門のSkill編集者」、「部門のSkill公開者」、「業務管理者」（空）。
-- **管理画面の入口（いったん合意）**：今のまま、メニューに出せる項目があるかで決める。
-- **Groupの扱い（合意）**：Groupは「permissionの集まり」。ユーザーに付けると中のpermissionをまとめて持つ。判定はいつも個々のpermissionで行い、名前・中身・数は後から自由に変えられる。文書の「役割（Group）」は「Group（permissionの集まり）」の書き方にそろえる。Groupの中身の編集は、当面Djangoの管理画面（`/api/admin/`）で行う（合意。いずれYorikiの画面でも作るかもしれない）。
-- **管理API（合意）**：管理APIはすべてpermissionで判定する（「基盤管理者だけ」の判定を残さない）。LLMの接続・モデル設定（版の履歴を含む）・Runtime Profile（版の履歴、既定にする操作を含む）・ユーザー（招待のリンクの発行を含む）・Group の一覧・部門と所属・SSOの設定のViewSetを、`PlatformAdmin` から `ModelPermissions` にする（`@action` は `action_permissions` に書く。例：接続の確認は `view`、既定にするは `change`、招待のリンクは `change`）。画面は、ページ・メニュー（`useManageMenu()`）・追加・更新・削除のボタンを、APIと同じDjango標準のpermission（view・add・change・delete。変更できる人は閲覧もできる）で出し分ける。`DEFAULT_PERMISSION_CLASSES` の `PlatformAdmin`（書き忘れを閉じる既定）と、Django管理画面（`/api/admin/`）は基盤管理者のまま。backend-conventions.md §6.3 の「基盤管理者だけが使う管理画面は `PlatformAdmin`」と frontend-conventions.md §6.1 を直す。
-
-進め方：design.md §3.6 の表と本文（「Skillをこの判定に合わせる変更は次の段階で行う」を消す）、改訂の履歴 0.33、版と更新日、backend-conventions.md §6.3 の役割の手順（3・4）を先に直し、それから実装する。前の作業ブランチ `feature/connector-manage-ui` は、手元のものは利用者が消す。GitHubのものは残っている（削除が自動の権限の確認で止められた）。
+**次の作業**：利用者の指示（2026-10-27）で、下の2の③より先に、権限の設計をやり直した。利用者と議論し、Codexのレビューを7回受けて [authorization.md](authorization.md) にまとめた（Skill・Connector・タスク・入口・出口の範囲（個人・部門・全社・システム）、利用・業務の管理・基盤の管理の3つの層、起動のしかたで決まる実行許可、ログの見え方、画面を層で分けること等）。作業ブランチ `feature/authz-affiliation-permission`。PRは2つに分ける。
+- **① 文書のPR（今のブランチ）**：authorization.md を足し、design.md（0.33）・backend-conventions.md・backend-examples.md・frontend-conventions.md・frontend-examples.md・harness.md・deployment.md・realtime.md を、authorization.md を正とする要約と参照に直した。Codexのレビューを受けてからPRにする。
+- **② 実装のPR（文書のPRのマージの後）**：§3の「権限の設計に実装を合わせる」。タスク・入口・出口はまだ実装がないので方針だけ。セッションの前半に作った実装の途中の変更（古い案。`utils/permissions.py` の部門のpermission、管理APIの `ModelPermissions` 化、ユーザー管理の防止策の一部、`roles.py` の削除等）は `git stash` に「wip: authz implementation (pre-authorization.md)」として退避してある。使える部分を新しい文書に合わせて取り込み、要らなければ捨てる。
+- 消して困るDBのデータはない（利用者に確認済み）。移行は、今のデータを新しい形に置き換え、合わないもの（複数の部門を持つConnector、部門の中の役割、「すべての部門の範囲を含む」部門の印）は消すか作り直す。
 
 その後に、下の2の③（会話でのConnector）へ進む。
 

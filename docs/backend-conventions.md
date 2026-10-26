@@ -645,7 +645,7 @@ DATABASES = {
   3. 役割（業務管理者・Skill公開者等）はGroupで表す。初期の役割と、それに含めるpermissionは `user/roles.py` の `ROLES` に書く。`migrate` のたびに同名のGroupを作り、定義したpermissionを追加する（管理画面でGroupに足したpermissionは消さない）。post_migrateはアプリごとに順に送られるので、同期の中で参照するアプリのpermissionを先に作り、アプリの順番に依存しないようにしている。
   4. Groupは、基盤管理者がDjangoの管理画面でユーザーに割り当てる。個別のpermissionを直接付けてもよい。
 - 基盤管理者は `is_superuser` で表し、すべてのpermissionを持つ。基盤管理者だけに許す操作（基盤の設定等）は `PlatformAdmin` で判定する。
-- 管理のModelのViewSetは `ModelPermissions` で、操作ごとにそのModelの標準のpermission（一覧・詳細は `view_*`、作成は `add_*`、更新は `change_*`、削除は `delete_*`）を確かめる。`@action` は `action_permissions = {"check": "view"}` のように種類を書き（書いていない操作は断る）、所属で `get_queryset` を絞るだけの操作は `"login"` にする。対象のModelが違うとき（版の履歴等）は `permission_model` で指定する。
+- 管理のModelのViewSetは `ModelPermissions` で、操作ごとにそのModelの標準のpermission（一覧・詳細は `view_*`、作成は `add_*`、更新は `change_*`、削除は `delete_*`）を確かめる。`@action` は `action_permissions = {"check": "view"}` のように種類を書き（書いていない操作は断る）、所属で `get_queryset` を絞るだけの操作は `"login"` にする。Djangoの管理画面と同じく、`change_*` を持つ人は `view` の操作もできる。対象のModelが違うとき（版の履歴等）は `permission_model` で指定する。
 - ViewSetでは `require_permission(AppPermission.XXX)` で確認する。`require_permission` は、ログイン済みで `user.has_perm()` が真の場合に許可するpermissionクラスを返す。Django標準のpermissionは `"<app_label>.<codename>"` の文字列で渡す。
 - permissionを持つユーザーの一覧（通知の宛先等）は `User.objects.with_permission(AppPermission.XXX)` で取得する（直接・Group経由・基盤管理者を含む）。
 - `AppUser`・`PlatformAdmin` は `_Xxx(BasePermission)` を定義し、公開名を `Xxx = IsAuthenticated & _Xxx` にする。

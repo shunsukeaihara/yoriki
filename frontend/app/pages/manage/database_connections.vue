@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 
-definePageMeta({ permission: PermissionCode.VIEW_DATABASE_CONNECTION })
+// 変更できる人は見ることもできる（APIの ModelPermissions と同じ）
+definePageMeta({ permission: [PermissionCode.VIEW_DATABASE_CONNECTION, PermissionCode.CHANGE_DATABASE_CONNECTION] })
 
 const api = useAPI()
 const { t } = useI18n()

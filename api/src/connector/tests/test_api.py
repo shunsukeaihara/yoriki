@@ -89,6 +89,15 @@ class TestPermission:
         assert api_client.delete(url).status_code == 204
 
     @pytest.mark.django_db
+    def test_change_implies_view(self, api_client, app_user):
+        # Djangoの管理画面と同じく、変更できる人は見ることもできる
+        connection = DatabaseConnectionFactory.create()
+        api_client.force_login(_grant(app_user, "change_databaseconnection"))
+        assert api_client.get(CONNECTIONS).status_code == 200
+        assert api_client.patch(f"{CONNECTIONS}{connection.uid}/", {"username": "r2"}, format="json").status_code == 200
+        assert api_client.delete(f"{CONNECTIONS}{connection.uid}/").status_code == 403
+
+    @pytest.mark.django_db
     def test_connection_check_and_tables_need_view(self, api_client, app_user, monkeypatch):
         connection = DatabaseConnectionFactory.create()
         monkeypatch.setattr("connector.adapters.postgresql.PostgreSQLAdapter.check", lambda self: None)

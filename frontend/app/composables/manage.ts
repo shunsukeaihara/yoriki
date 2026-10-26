@@ -62,7 +62,7 @@ export const useManageMenu = () => {
               label: $i18n.t('接続先'),
               icon: 'i-lucide-server',
               to: '/manage/database_connections',
-              permission: PermissionCode.VIEW_DATABASE_CONNECTION,
+              permission: [PermissionCode.VIEW_DATABASE_CONNECTION, PermissionCode.CHANGE_DATABASE_CONNECTION],
             },
             {
               label: $i18n.t('Connector'),

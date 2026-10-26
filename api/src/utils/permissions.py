@@ -84,7 +84,7 @@ class _ModelPermission(BasePermission):
     対象のModelは `view.permission_model`（なければ `view.queryset.model`）。`@action` は
     `view.action_permissions = {"check": "view"}` のように、どの種類のpermissionで判定するかを書く。
     `"login"` はpermissionを問わない（所属で `get_queryset` を絞る操作等）。書いていない操作は断る
-    （書き忘れたactionを開けない）
+    （書き忘れたactionを開けない）。Djangoの管理画面と同じく、`change_*` を持つ人は `view` の操作もできる
     """
 
     ACTIONS = {
@@ -103,7 +103,8 @@ class _ModelPermission(BasePermission):
         if kind == "login":
             return request.user.is_active
         model = getattr(view, "permission_model", None) or view.queryset.model
-        return request.user.has_perm(f"{model._meta.app_label}.{kind}_{model._meta.model_name}")
+        kinds = ("view", "change") if kind == "view" else (kind,)
+        return any(request.user.has_perm(f"{model._meta.app_label}.{k}_{model._meta.model_name}") for k in kinds)
 
 
 # 操作ごとに、対象のModelの標準のpermission（view・add・change・delete）を持つログインユーザーだけを許可する

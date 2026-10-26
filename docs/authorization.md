@@ -355,7 +355,7 @@ Runの中身が外へ出る経路をすべて列挙し、どれにも「結果�
 | 全件利用者 | `user.can_use_all_departments` |
 | 全件管理者 | `user.can_manage_all_departments`と、部門・全社のSkill・タスクのpermission |
 | Connector管理者 | `connector.*_connector`、`connector.*_<接続のModel>` |
-| システム管理者 | `skill.can_edit_system_skills`、`skill.can_publish_system_skills`、`task.can_manage_system_tasks`（タスクの段階で作る） |
+| システム管理者 | `skill.can_edit_system_skills`、`skill.can_publish_system_skills`、`task.can_manage_system_tasks`（タスクの段階で作る）、`connector.view_connector`（システムタスクに登録するConnectorの定義を見るため） |
 | 連携の管理者 | 入口・出口のModelのpermission（タスク・配信の段階で作る） |
 | ユーザー管理者 | `user.*_user`、`user.*_department` |
 

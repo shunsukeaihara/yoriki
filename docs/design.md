@@ -108,7 +108,7 @@ Skillの選択や読込み自体は権限を増やさない。Skillを通して�
 
 ファイルだけを更新する場合も、新しいResource Versionを参照するSkill Versionを発行する。Skill本文が同じでも、どのファイルを使う版かを一意に記録する。本文・複数ファイルをまとめて変更する場合は、一つのSkill Draftから整合した組合せとして公開する。
 
-Skillは範囲（個人・部門・全社・システム）ごとに公開する（§3.6）。会話は最新の公開版を使い、Runの中では固定する（次の依頼のRunでは、その時点の最新の公開版を使う）。タスクは版を固定し、版を上げるのはタスクの変更として、タスクを管理できる人が行う（ライブラリの依存と同じ。authorization.md §5.4）。Run開始時に、指定されたSkill（`/` やTask Definitionで指定したもの）を具体的なSkill Versionへ解決し、Skill Version、資料版、Connectorの利用の許可、モデル設定の版とeffort、image digestを実行Manifestへ固定する。
+Skillは範囲（個人・部門・全社・システム）ごとに公開する（§3.6）。会話は最新の公開版を使い、Runの中では固定する（次の依頼のRunでは、その時点の最新の公開版を使う）。タスクは版を固定し、版を上げるのはタスクの変更として、タスクを管理できる人が行う（ライブラリの依存と同じ。authorization.md §5.4）。Run開始時に、指定されたSkill（`/` やTask Definitionで指定したもの）を具体的なSkill Versionへ解決し、Skill Version、資料版、モデル設定の版とeffort、image digestを実行Manifestへ固定する。Connectorは、タスクでは使うConnectorを固定するが、使えるかどうか（所属・範囲・停止）は固定せず、操作のたびに判定する（authorization.md §6）。
 
 指定がなく、エージェントが実行の途中でSkillを読み込む場合は、最初に使う前に、そのSkillをその時点の公開範囲の最新の公開版（Skill Version）へ解決し、資料版・必要な能力と合わせてRunのManifestへ追記する。追記は、能力と権限の確認と同じDB transactionで確定し、RunEventに記録してから読み込む。一度追記した版は変えず、同じRunの再試行・入力待ちからの再開では、追記済みの版と資料を使う（途中でSkillが公開し直されても切り替えない）。Manifestには、Run開始時に固定したものと実行中に追記したもの（追記の順序と時刻）を区別して残す。
 
@@ -787,7 +787,7 @@ Webの検索と取得も、初期段階の後にConnector（Web検索・Web取�
 
 #### 4.9.4 Adapterの契約
 
-ConnectorのAdapterは `validate_config`、`describe`（提供する操作と入出力のSchema）、`execute`（操作の実行）を実装し、他のPluginと同じRegistryで管理する。接続のSecretとtokenはControl Planeの中だけで使い、Runner・Sandbox・ログへ出さない。QClusterだけのWorkerサーバー（§6.1）のRunnerも、社内DB・SaaSへ直接接続せず、Connector（同じプロセス内のConnectorの処理）を通す。HTTPを介さないだけで、Run開始時に固定した利用の許可の確認（そのRunで使える操作と対象）、利用者の権限のtoken、読取り専用の多層の強制（§4.9.2）、行数・サイズ・時間の上限、ToolInvocationへの記録はすべてこの処理の中で行う。接続情報はControl Planeと同じ信頼範囲のサーバーの中だけで使い、SandboxとLLMへは渡さない。
+ConnectorのAdapterは `validate_config`、`describe`（提供する操作と入出力のSchema）、`execute`（操作の実行）を実装し、他のPluginと同じRegistryで管理する。接続のSecretとtokenはControl Planeの中だけで使い、Runner・Sandbox・ログへ出さない。QClusterだけのWorkerサーバー（§6.1）のRunnerも、社内DB・SaaSへ直接接続せず、Connector（同じプロセス内のConnectorの処理）を通す。HTTPを介さないだけで、操作のたびの利用の許可の確認（そのRunの実行許可と、その時点の所属・範囲。authorization.md §6）、利用者の権限のtoken、読取り専用の多層の強制（§4.9.2）、行数・サイズ・時間の上限、ToolInvocationへの記録はすべてこの処理の中で行う。接続情報はControl Planeと同じ信頼範囲のサーバーの中だけで使い、SandboxとLLMへは渡さない。
 
 #### 4.9.5 Connectorが動く場所
 
@@ -828,7 +828,7 @@ Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプ�
 | ConversationMessage | 送信元、本文、添付参照、順序、関連Run、client message ID。外部投稿はproviderのユーザーID・表示名・message IDを持ち、社内ユーザーIDは必須にしない |
 | UserInstruction | 対象Runまたは次の依頼、種類、受付順序、反映状態、適用したCheckpoint、結果参照 |
 | ClarificationRequest | 対象Run、質問ID・世代、本文・選択肢、期限、回答状態、採用した回答と外部message参照 |
-| Run | 共通実行要求、起動Binding版、タスク版、固定したModelProfileの版とSkill Version、実行許可（誰の権限か・起動の種類・タスクの版。authorization.md §6）、状態、Manifest、予算、親Run、適用済み指示sequence |
+| Run | 共通実行要求、起動Binding版、タスク版、固定したModelProfileの版とSkill Version、実行許可（誰の権限か・起動の種類・タスクの版。authorization.md §6）、実行したときのタスクの範囲と部門（結果・ログを見られる人の判定に使う。authorization.md §7.1）、状態、Manifest、予算、親Run、適用済み指示sequence |
 | ExecutionAttempt | Worker、試行番号、lease、fencing token、開始・終了、失敗理由 |
 | RunEvent | 単調なsequence、イベント種別、表示用内容、モデル用の内容とモデルの履歴への効き方（harness.md §5）、時刻 |
 | Checkpoint | メッセージ参照（対応するRunEventのsequence）、Tool結果、再開状態、ファイルsnapshot参照、schema version |
@@ -1076,7 +1076,7 @@ Launcherは承認済みimage digest、固定mount根、資源上限、container 
 
 回収はコンテナ内の書込みを停止した後に実施する。通常ファイルだけを対象にし、symlink、特殊ファイル、許可外パス、過大なファイル数・総量を拒否する。外部から取得したsnapshotやarchiveを復元するときもパストラバーサルと展開量を検証する。
 
-Artifact Storeへ保存後、hashとサイズを記録し、その参照をDBへ確定する。保存に失敗したRunはCOMPLETEDにしない。回収はAttemptを終えるたび（確認待ち・完了・停止・失敗）に、Workspace snapshotと同じtarから行う。隠しファイルと、会話の同じパスの最新の成果物と中身が同じファイルは回収し直さない。作り直したファイルは新しいArtifactにし、前の版も残す。成果物の取得権限はRunの所有者または明示的な共有権限に基づき、HTML等の生成物をアプリと同じoriginで無条件に実行しない。
+Artifact Storeへ保存後、hashとサイズを記録し、その参照をDBへ確定する。保存に失敗したRunはCOMPLETEDにしない。回収はAttemptを終えるたび（確認待ち・完了・停止・失敗）に、Workspace snapshotと同じtarから行う。隠しファイルと、会話の同じパスの最新の成果物と中身が同じファイルは回収し直さない。作り直したファイルは新しいArtifactにし、前の版も残す。成果物の取得権限はRunの結果を見られる人（authorization.md §7.1。実行したときの範囲と部門で判定する）に基づき、HTML等の生成物をアプリと同じoriginで無条件に実行しない。
 
 ### 7.5 コマンドとPythonの実行ループ
 

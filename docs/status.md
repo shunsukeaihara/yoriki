@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-27（#44）
+- 最終更新：2026-10-27（#44 のマージ後）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -117,11 +117,13 @@
 
 #44 で利用者と合意したこと（design.md 0.32）：接続先と資格情報をDB接続（画面では「接続先」）としてConnectorから分ける。権限は「所属」と「permission」の2軸で判定し、Groupは判定に使わない（Groupはpermissionをまとめる入れ物で、後からいくらでも変えられること）。Connectorを見る・使うのは所属だけ（使える部門。空なら全社向け）、作成・編集・削除は所属＋permission、接続先はpermissionだけ。全部を見る人は、部門の「すべての部門の範囲を含む」印で管理する。SkillとConnectorは同じ所属の判定にする（Skill側は次の段階）。管理画面のメニューは「Connector → DB Connector → 接続先・Connector」。
 
-**次の作業**：利用者の指示（2026-10-27）で、下の2の③より先に、§3の「権限の2軸に合わせる残り」を1つのPRで行う。着手の前に、次の点を利用者と決め、design.md を直してから実装する（2026-10-27に提案し、返事を待っている）。
-- Skillの部門の範囲：部門の中の役割（`DepartmentMembership.role`。利用・編集・公開）をやめ、使うのは所属だけ、Draftの変更は所属＋`skill.can_edit_department_skills`、公開・切戻し・停止・削除・Toolの変更は所属＋`skill.can_publish_department_skills` にする案。役割は人ごとのpermissionに移せないので、移行の後に基盤管理者がpermissionを付け直す。全社の範囲は今のpermissionのまま、個人は本人。
-- `user/roles.py`：`migrate` のたびに役割（Group）を作り直すのをやめ、最初に一度だけ作るデータのマイグレーションにする（合意済み）。
-- LLMの接続・モデル設定・Runtime Profile・ユーザー・部門・SSOの設定の管理API（今は `PlatformAdmin`）を `ModelPermissions` にそろえるか。SSOの設定とユーザーは基盤管理者だけのまま残す選択もある。
-- 管理画面の入口を、今のまま「メニューに出せる項目があるか」で決めてよいか。
+**次の作業**：利用者の指示（2026-10-27）で、下の2の③より先に、§3の「権限の2軸に合わせる残り」を1つのPRで行う。作業ブランチ `feature/authz-affiliation-permission`（`main` の #44 から切った。まだ変更なし）。2026-10-27に利用者と決めたこと：
+- **Skillの部門の範囲（合意）**：部門の中の役割（`DepartmentMembership.role`・`DepartmentRole`。利用・編集・公開）をやめる。部門のSkillを使うのは所属だけ（`Department.objects.of(user)`。「すべての部門の範囲を含む」部門を含む）。Draftの変更は所属＋新しいpermission `skill.can_edit_department_skills`、公開・切戻し・停止・削除・Toolの変更は所属＋`skill.can_publish_department_skills`（`AppPermission` に足す）。全社の範囲は今のpermission（`can_edit_company_skills`・`can_publish_company_skills`）のまま、個人は本人。役割は人ごとのpermissionに移せないので、移行の後に基盤管理者がpermissionを付け直す（役割の列は消す。了承済み）。直すところ：`skill/models.py` の `visible_to()`・`scope_access_of()`・`DEPARTMENT_ACCESS`、`user/models.py`（`DepartmentRole`、`role_of()`、所属の `role`）、`user/serializers.py`（`MyDepartmentSerializer` は `Department.objects.of(user)` の部門にする、`DepartmentMembershipSerializer` から役割を外す）、`user/views.py`（所属の役割の絞り込み）、`app/settings.py` の `DepartmentRoleEnum`、テストの `role=`。画面は `composables/skill.ts`・`composables/conversation.ts`・`SkillCreateForm`（作れる部門をpermissionと所属で決める）・`DepartmentMemberForm`（役割の欄をなくす）・`api/types.ts`、`PermissionCode` に2つ足す。
+- **役割（Group）の初期定義（合意）**：`user/roles.py` の `sync_role_groups`（post_migrateで毎回作り直す）をやめ、最初に一度だけGroupを作るデータのマイグレーションにする（新しいpermissionを作ってから付ける。`create_permissions` を `apps` 付きで呼ぶ）。初期のGroupの案：「Skill公開者」（全社のSkillの編集・公開。今の名前のまま）、「部門のSkill編集者」、「部門のSkill公開者」、「業務管理者」（空）。
+- **管理画面の入口（いったん合意）**：今のまま、メニューに出せる項目があるかで決める。
+- **未決**：LLMの接続・モデル設定・Runtime Profile・ユーザー・部門・SSOの設定の管理API（今は `PlatformAdmin`）を `ModelPermissions` にそろえるか。利用者の答えを待つ。決まるまで今回の範囲に入れない。
+
+進め方：design.md §3.6 の表と本文（「Skillをこの判定に合わせる変更は次の段階で行う」を消す）、改訂の履歴 0.33、版と更新日、backend-conventions.md §6.3 の役割の手順（3・4）を先に直し、それから実装する。前の作業ブランチ `feature/connector-manage-ui` は手元とGitHubに残っている（削除が自動の権限の確認で止められた。利用者が消すか、許可の設定を足すのを待っている）。
 
 その後に、下の2の③（会話でのConnector）へ進む。
 

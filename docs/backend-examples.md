@@ -1158,8 +1158,23 @@ class AppSkillViewSet(SoftDeleteMixin, ModelViewSet):
     lookup_field = "uid"
     queryset = Skill.objects.select_related("owner", "department")
 
+    # 見えることと、変えられることは別。操作ごとにModelの判定で確かめる（作成の可否はSerializerで判定する）
+    OBJECT_ACTIONS = {
+        "update": SkillAction.EDIT,
+        "partial_update": SkillAction.EDIT,
+        "destroy": SkillAction.DELETE,
+        "publish": SkillAction.PUBLISH,
+    }
+
     def get_queryset(self):
         return super().get_queryset().visible_to(self.request.user)
+
+    def get_object(self):
+        skill = super().get_object()
+        required = self.OBJECT_ACTIONS.get(self.action)
+        if required is not None and not skill.can(self.request.user, required):
+            raise PermissionDenied
+        return skill
     serializer_class = SkillSerializer
     search_fields = ["name"]
     ordering = ("-updated", "-pk")
@@ -1174,9 +1189,7 @@ class AppSkillViewSet(SoftDeleteMixin, ModelViewSet):
     )
     @action(detail=True, methods=["post"], serializer_class=SkillPublishSerializer)
     def publish(self, request, *args, **kwargs):
-        skill = self.get_object()
-        if not skill.can(request.user, SkillAction.PUBLISH):
-            raise PermissionDenied
+        skill = self.get_object()  # 公開の権限は get_object() で確かめた
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.save(skill=skill, actor=request.user)
@@ -1223,6 +1236,6 @@ class SkillVersionAdmin(admin.ModelAdmin):
 - 競合はドメインの例外（`VersionConflict`）として送出し、Serializerで409（`Conflict`）に変換する。
 - 版とSkillの書き換えは `Skill.publish()` の `@transaction.atomic` で囲んでいる。
 - 公開の入力（`SkillPublishSerializer`）と出力（`SkillVersionSerializer`）は別のSerializerにする。入力側は `to_representation` で出力用Serializerに処理を任せる。そうすることで、スキーマ上のリクエストとレスポンスの型を分けられる。
-- 判定はViewに書かない。一覧と親の取得は `Skill.objects.visible_to(user)`、操作は `skill.can(user, SkillAction.PUBLISH)` で行い、どちらも同じ規則表から作る（backend-conventions.md §6.3）。
+- 判定はViewに書かない。一覧と親の取得は `Skill.objects.visible_to(user)`、更新・削除・公開は `get_object()` の中で `skill.can(user, 操作)` で行い（見えるだけでは変えられない）、どちらも同じ規則表から作る（backend-conventions.md §6.3）。
 - URLの親（Skill）は `SkillMixin` のpropertyで取得する。版はSkillの中の版番号で識別するので、`lookup_field = "number"` とする。
 - 版は、APIでも管理画面でも変更・削除できないようにする。切り戻すときも、旧版の本文で新しい版を公開する。

@@ -255,7 +255,7 @@ def test_editor_without_publish_role_saves_a_draft(conversation, app_user):
     )
     run = execute(run, adapter)
 
-    # Toolは編集の役割では変えられない（開いたDraftも残さない）
+    # Toolは編集の権限では変えられない（開いたDraftも残さない）
     first = results(run, "update_skill_draft")[0]
     assert first["is_error"] and "公開の権限" in text_of(first)
     published = results(run, "publish_skill_draft")[0]

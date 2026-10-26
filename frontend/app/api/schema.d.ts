@@ -906,7 +906,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description 部門の範囲のConnectorを作るときに選べる部門（有効なすべての部門。所属は問わない）。`search` で名前を絞り込む */
+        /** @description 部門の範囲のConnectorの作成と一覧の絞り込みで選べる部門（有効なすべての部門。所属は問わない）。`search` で名前を絞り込む */
         get: operations["v1_connectors_departments_list"];
         put?: never;
         post?: never;
@@ -1509,7 +1509,7 @@ export interface components {
              */
             file: string;
         };
-        /** @description 資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の役割だけが変えられる */
+        /** @description 資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の権限を持つ人だけが変えられる */
         AssetChecks: {
             /**
              * @description 空なら自動で判別する
@@ -1535,7 +1535,7 @@ export interface components {
             /** @description 列ごとの値の型（文字列なら省く） */
             column_types?: components["schemas"]["ColumnType"][];
         };
-        /** @description 資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の役割だけが変えられる */
+        /** @description 資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の権限を持つ人だけが変えられる */
         AssetChecksRequest: {
             /**
              * @description 空なら自動で判別する
@@ -3870,7 +3870,7 @@ export interface components {
             readonly checks: components["schemas"]["AssetChecks"];
             readonly validation: components["schemas"]["AssetValidation"];
         };
-        /** @description 資料の検証の条件を変える（公開の役割だけ）。変えると検証し直す */
+        /** @description 資料の検証の条件を変える（公開の権限を持つ人だけ）。変えると検証し直す */
         SkillDraftAssetChecksRequest: {
             /** @description 編集を始めた時点のDraftのrevision */
             revision: number;

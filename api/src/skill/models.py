@@ -705,7 +705,7 @@ class SkillDraft(SkillContent):
             raise InvalidDraft(_("同じkeyの資料があります"))
         data = src.read()
         resource_version = Resource.create_from_upload(io.BytesIO(data), filename, actor=actor)
-        # 外してから同じkeyで加え直しても、元の版の検証の条件を引き継ぐ（条件を変えるのは公開の役割だけ）
+        # 外してから同じkeyで加え直しても、元の版の検証の条件を引き継ぐ（条件を変えるのは公開の権限を持つ人だけ）
         base = current.base_asset(key)
         checks = formats.normalize_checks(checks if checks is not None else base.checks if base else None)
         asset = SkillDraftAsset.objects.create(
@@ -870,7 +870,7 @@ class SkillDraftAsset(models.Model):
     resource_version = models.ForeignKey(
         ResourceVersion, on_delete=models.PROTECT, related_name="+", verbose_name=_("資料の版")
     )
-    # 検証の条件は公開の役割だけが変える。検証の結果（formats.inspect()）は、原本か条件を変えるたびに取り直す。
+    # 検証の条件は公開の権限を持つ人だけが変える。検証の結果（formats.inspect()）は、原本か条件を変えるたびに取り直す。
     # 差分は、Draftの元の版の同じkeyの資料とのもの
     checks = models.JSONField(_("検証の条件"), default=dict, blank=True)
     validation = models.JSONField(_("検証の結果"), default=dict, blank=True)
@@ -1013,7 +1013,7 @@ class SkillEvaluationCase(models.Model):
     criteria = models.TextField(_("確認する観点"), blank=True)
     # 業務結果（submit_result の値）のうち、一致を確かめる項目
     expected_result = models.JSONField(_("期待する業務結果"), null=True, blank=True)
-    # 部門・全社のSkillで、公開の前に今のDraftで通過していることを求める。付け外しと変更は公開の役割だけ
+    # 部門・全社のSkillで、公開の前に今のDraftで通過していることを求める。付け外しと変更は公開の権限を持つ人だけ
     required = models.BooleanField(_("公開の前に必須"), default=False)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+", verbose_name=_("作成者")

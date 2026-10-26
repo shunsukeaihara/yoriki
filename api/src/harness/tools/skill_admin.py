@@ -690,7 +690,7 @@ def _published(skill: Skill, change: SkillChange, state: str) -> ToolResult:
 
 
 def _saved_only(skill: Skill, expected: int) -> ToolResult:
-    """公開の役割がないときは、公開せずにDraftのまま残す（design.md §3.6）"""
+    """公開の権限がないときは、公開せずにDraftのまま残す（design.md §3.6）"""
     draft = SkillDraft.objects.filter(skill=skill).first()
     if draft is None:
         return ToolResult.error(NO_DRAFT)

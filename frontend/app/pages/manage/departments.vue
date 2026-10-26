@@ -30,7 +30,7 @@ const columns: TableColumn<Department>[] = [
         :title="$t('部門')"
         :description="
           $t(
-            '部門のSkillを誰が使い、誰が編集・公開できるかを、所属と部門の中の役割で決めます。役割（権限の組）とは別です',
+            '部門は人の集まりで、部門のSkill・Connectorを使える人を決めます。部門の中で何ができるか（編集・公開等）は、Group（permissionの集まり）で決まります',
           )
         "
       >

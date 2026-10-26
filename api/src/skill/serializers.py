@@ -88,7 +88,7 @@ class ColumnTypeSerializer(serializers.Serializer):
 
 
 class AssetChecksSerializer(serializers.Serializer):
-    """資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の役割だけが変えられる"""
+    """資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の権限を持つ人だけが変えられる"""
 
     encoding = serializers.ChoiceField(
         choices=["", *formats.CSV_ENCODINGS], required=False, allow_blank=True, help_text=_("空なら自動で判別する")
@@ -628,7 +628,7 @@ class SkillDraftAssetSerializer(serializers.ModelSerializer):
 
 
 class SkillDraftAssetChecksSerializer(serializers.Serializer):
-    """資料の検証の条件を変える（公開の役割だけ）。変えると検証し直す"""
+    """資料の検証の条件を変える（公開の権限を持つ人だけ）。変えると検証し直す"""
 
     revision = serializers.IntegerField(min_value=1, help_text=_("編集を始めた時点のDraftのrevision"))
     checks = AssetChecksSerializer()

@@ -358,7 +358,7 @@ def test_editor_cannot_loosen_required_cases(api_client, app_user, other_user):
     assert api_client.patch(f"{url}{required.uid}/", {"prompt": "緩い依頼"}, format="json").status_code == 403
     assert api_client.delete(f"{url}{required.uid}/").status_code == 403
     assert api_client.patch(f"{url}{optional.uid}/", {"required": True}, format="json").status_code == 403
-    # 必須でないケースは編集の役割で作り・変え・消せる
+    # 必須でないケースは編集の権限で作り・変え・消せる
     res = api_client.post(url, {"name": "c", "prompt": "依頼"}, format="json")
     assert res.status_code == 201, res.json()
     assert api_client.patch(f"{url}{optional.uid}/", {"criteria": "観点"}, format="json").status_code == 200

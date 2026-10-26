@@ -2607,7 +2607,7 @@ paths:
   /api/v1/connectors/departments/:
     get:
       operationId: v1_connectors_departments_list
-      description: 部門の範囲のConnectorを作るときに選べる部門（有効なすべての部門。所属は問わない）。`search` で名前を絞り込む
+      description: 部門の範囲のConnectorの作成と一覧の絞り込みで選べる部門（有効なすべての部門。所属は問わない）。`search` で名前を絞り込む
       parameters:
       - name: cursor
         required: false
@@ -4507,7 +4507,7 @@ components:
       - file
     AssetChecks:
       type: object
-      description: 資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の役割だけが変えられる
+      description: 資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の権限を持つ人だけが変えられる
       properties:
         encoding:
           description: "空なら自動で判別する\n\n* `` - \n* `utf-8` - utf-8\n* `utf-8-sig` -
@@ -4540,7 +4540,7 @@ components:
           description: 列ごとの値の型（文字列なら省く）
     AssetChecksRequest:
       type: object
-      description: 資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の役割だけが変えられる
+      description: 資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の権限を持つ人だけが変えられる
       properties:
         encoding:
           description: "空なら自動で判別する\n\n* `` - \n* `utf-8` - utf-8\n* `utf-8-sig` -
@@ -9651,7 +9651,7 @@ components:
       - validation
     SkillDraftAssetChecksRequest:
       type: object
-      description: 資料の検証の条件を変える（公開の役割だけ）。変えると検証し直す
+      description: 資料の検証の条件を変える（公開の権限を持つ人だけ）。変えると検証し直す
       properties:
         revision:
           type: integer

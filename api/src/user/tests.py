@@ -569,8 +569,9 @@ class TestDepartmentFunctions:
 class TestMembershipRace:
     @pytest.mark.django_db(transaction=True)
     @pytest.mark.parametrize("operation", ["create", "destroy"])
-    def test_membership_change_waits_for_a_concurrent_promotion(self, operation):
-        """所属の付け外しは、対象の行のロックを待ち、昇格した後の権限で確かめ直す（authorization.md §10）"""
+    @pytest.mark.parametrize("change", ["target_promoted", "actor_revoked"])
+    def test_membership_change_waits_for_a_concurrent_permission_change(self, operation, change):
+        """所属の付け外しは、行のロックを待ち、変わった後の権限で確かめ直す（authorization.md §10）"""
         department = DepartmentFactory.create()
         manager = grant(UserFactory.create(), "user.change_department")
         target = UserFactory.create()
@@ -583,10 +584,13 @@ class TestMembershipRace:
         def promote():
             try:
                 with transaction.atomic():
-                    lock_accounts(target)
+                    lock_accounts(target if change == "target_promoted" else manager)
                     locked.set()
-                    time.sleep(2)  # 所属の変更の要求がロックを待つ間に、対象に権限を付ける
-                    target.user_permissions.add(Permission.objects.get(codename="can_publish_company_skills"))
+                    time.sleep(2)  # 所属の変更の要求がロックを待つ間に、対象に権限を付ける・操作する人の権限を外す
+                    if change == "target_promoted":
+                        target.user_permissions.add(Permission.objects.get(codename="can_publish_company_skills"))
+                    else:
+                        manager.user_permissions.clear()
             except BaseException as exc:
                 errors.append(exc)
             finally:

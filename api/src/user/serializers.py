@@ -308,6 +308,9 @@ class ManageUserSerializer(serializers.ModelSerializer):
         actor = self.context["request"].user
         lock_accounts(actor, instance)
         actor, target = User.objects.get(pk=actor.pk), User.objects.get(pk=instance.pk)
+        # ロックを待つ間に、ユーザーを変える権限を外されていないか
+        if not actor.has_perm("user.change_user"):
+            raise PermissionDenied(_("ユーザーを変更する権限がありません"))
         if not can_manage_account(actor, target):
             raise PermissionDenied(_("自分の持たない権限を持つアカウントは変更できません"))
         if "groups" in validated_data:
@@ -357,7 +360,10 @@ class ManageUserCreateSerializer(ManageUserSerializer):
         groups = validated_data.pop("groups", [])
         # 操作する人の行をロックし、読み直した権限でGroupを確かめ直す（同時に権限を外す変更と直列にする）
         lock_accounts(actor)
-        _check_groups(User.objects.get(pk=actor.pk), None, groups)
+        actor = User.objects.get(pk=actor.pk)
+        if not actor.has_perm("user.add_user"):
+            raise PermissionDenied(_("ユーザーを追加する権限がありません"))
+        _check_groups(actor, None, groups)
         # ユーザー名はメールアドレスにする（Django管理画面のログインでも使える）
         user = User(username=validated_data["email"], **validated_data)
         user.set_unusable_password()
@@ -570,6 +576,9 @@ def check_membership_change(actor: User, target: User, *, lock: bool = False) ->
     if lock:
         lock_accounts(actor, target)
         actor, target = User.objects.get(pk=actor.pk), User.objects.get(pk=target.pk)
+        # ロックを待つ間に、所属を変える権限（部門の変更）を外されていないか
+        if not actor.has_perm("user.change_department"):
+            raise PermissionDenied(_("部門の所属を変える権限がありません"))
     if actor.pk == target.pk:
         raise PermissionDenied(_("自分の所属は変えられません"))
     if not can_manage_account(actor, target):

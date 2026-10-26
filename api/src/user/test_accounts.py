@@ -552,3 +552,29 @@ class TestUpdateRace:
         password_user.refresh_from_db()
         assert password_user.display_name == "太郎"
         assert password_user.check_password("another-horse-battery-staple")
+
+    @pytest.mark.django_db(transaction=True)
+    def test_update_is_refused_when_the_actor_loses_permission_while_waiting(self, password_user):
+        user_admin = grant(UserFactory.create(), *USER_ADMIN_PERMS)
+        locked = threading.Event()
+
+        def revoke():
+            try:
+                with transaction.atomic():
+                    lock_accounts(user_admin)
+                    locked.set()
+                    time.sleep(2)  # 更新の要求がロックを待つ間に、操作する人の権限を外す
+                    user_admin.user_permissions.clear()
+            finally:
+                connection.close()
+
+        client = APIClient()
+        client.force_login(user_admin)
+        thread = threading.Thread(target=revoke)
+        thread.start()
+        assert locked.wait(timeout=5)
+        res = client.patch(f"{USERS}{password_user.uid}/", {"display_name": "太郎"}, format="json")
+        thread.join()
+        assert res.status_code == 403
+        password_user.refresh_from_db()
+        assert password_user.display_name != "太郎"

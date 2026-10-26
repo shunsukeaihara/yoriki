@@ -186,7 +186,18 @@ class DatabaseConnectionSerializer(serializers.ModelSerializer):
         instance.connector_count = 0
         return instance
 
+    @transaction.atomic
     def update(self, instance: DatabaseConnection, validated_data) -> DatabaseConnection:
+        # validate() は取得した時点の値で比べている。同時に別の要求が接続先を変えていても、パスワードなしで
+        # 接続先を変えさせないよう、行をロックして最新の値で比べ直す
+        latest = DatabaseConnection.objects.select_for_update().get(pk=instance.pk)
+        if latest.deleted:
+            raise Conflict()
+        moved = any(name in validated_data and validated_data[name] != getattr(latest, name) for name in ADDRESS_FIELDS)
+        if moved and "password" not in validated_data:
+            raise serializers.ValidationError(
+                {"password": _("接続先（ホスト・ポート・DB名）を変えるときは、パスワードを入力し直してください")}
+            )
         for name, value in validated_data.items():
             setattr(instance, name, value)
         # 変えた項目だけを保存する（取得した後に他の要求が変えた項目を書き戻さない）

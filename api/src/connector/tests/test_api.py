@@ -2,6 +2,7 @@ import pytest
 from auditlog.models import LogEntry
 from django.contrib.auth.models import Group, Permission
 from django.test import override_settings
+from rest_framework.exceptions import ValidationError
 
 from connector.adapters import get_adapter
 from connector.adapters.base import QueryResult
@@ -177,6 +178,23 @@ class TestDatabaseConnection:
         assert admin_client.delete(url).status_code == 204
         connection.refresh_from_db()
         assert connection.deleted is True
+
+    @pytest.mark.django_db
+    def test_moving_back_after_concurrent_move_requires_password(self):
+        # 取得した後に、別の要求が接続先とパスワードを変えた。古い接続先へ戻す要求は、パスワードなしでは断る
+        connection = DatabaseConnectionFactory.create(host="db.example.co.jp", password="old-pass-0000")
+        stale = DatabaseConnection.objects.get(pk=connection.pk)
+        DatabaseConnection.objects.filter(pk=connection.pk).update(host="db2.example.co.jp")
+        connection.refresh_from_db()
+        connection.password = "new-pass-9999"
+        connection.save()
+        serializer = DatabaseConnectionUpdateSerializer(stale, data={"host": "db.example.co.jp"}, partial=True)
+        assert serializer.is_valid(), serializer.errors  # 取得した時点の値では、接続先は変わっていない
+        with pytest.raises(ValidationError) as exc_info:
+            serializer.save()
+        assert "password" in exc_info.value.detail
+        connection.refresh_from_db()
+        assert connection.host == "db2.example.co.jp"
 
     @pytest.mark.django_db
     def test_update_serializer_keeps_kind(self):

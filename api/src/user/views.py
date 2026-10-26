@@ -315,6 +315,7 @@ class DepartmentMembershipViewSet(
     def perform_create(self, serializer):
         serializer.save(department=self.department)
 
+    @transaction.atomic
     def perform_destroy(self, instance: DepartmentMembership):
-        check_membership_change(self.request.user, instance.user)  # type: ignore[arg-type]
+        check_membership_change(self.request.user, instance.user, lock=True)  # type: ignore[arg-type]
         instance.delete()

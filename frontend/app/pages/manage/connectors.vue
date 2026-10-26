@@ -40,6 +40,13 @@ const clearParams = () => {
   params.value = emptyParams()
   reload()
 }
+// 部門の条件は部門の範囲でだけ使う（範囲を変えたら外す。残すと、隠れた条件で一覧が空になる）
+watch(
+  () => params.value.scope,
+  (scope) => {
+    if (scope !== ConnectorScope.DEPARTMENT) params.value.department = undefined
+  },
+)
 
 const columns: TableColumn<Connector>[] = [
   { accessorKey: 'name', header: t('名前') },

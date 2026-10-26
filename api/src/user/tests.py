@@ -1,10 +1,12 @@
 import importlib
+import threading
+import time
 
 import pytest
 from allauth.core.exceptions import ImmediateHttpResponse
 from allauth.socialaccount.models import SocialAccount, SocialLogin
 from django.contrib.auth.models import AnonymousUser, Group, Permission
-from django.db import connection
+from django.db import connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.test import RequestFactory
 from rest_framework.test import APIClient
@@ -18,6 +20,7 @@ from .models import (
     SSOProvider,
     User,
     is_sso_enabled,
+    lock_accounts,
     manageable_department_ids,
     usable_department_ids,
 )
@@ -561,3 +564,45 @@ class TestDepartmentFunctions:
         app_user.is_active = False
         assert not Department.objects.usable_by(app_user).exists()
         assert not Department.objects.joined_by(app_user).exists()
+
+
+class TestMembershipRace:
+    @pytest.mark.django_db(transaction=True)
+    @pytest.mark.parametrize("operation", ["create", "destroy"])
+    def test_membership_change_waits_for_a_concurrent_promotion(self, operation):
+        """所属の付け外しは、対象の行のロックを待ち、昇格した後の権限で確かめ直す（authorization.md §10）"""
+        department = DepartmentFactory.create()
+        manager = grant(UserFactory.create(), "user.change_department")
+        target = UserFactory.create()
+        membership = DepartmentMembershipFactory.create(department=department, user=target)
+        if operation == "create":
+            membership.delete()
+        locked = threading.Event()
+        errors: list[BaseException] = []
+
+        def promote():
+            try:
+                with transaction.atomic():
+                    lock_accounts(target)
+                    locked.set()
+                    time.sleep(2)  # 所属の変更の要求がロックを待つ間に、対象に権限を付ける
+                    target.user_permissions.add(Permission.objects.get(codename="can_publish_company_skills"))
+            except BaseException as exc:
+                errors.append(exc)
+            finally:
+                connection.close()
+
+        client = APIClient()
+        client.force_login(manager)
+        thread = threading.Thread(target=promote)
+        thread.start()
+        assert locked.wait(timeout=5)
+        members = f"/api/v1/departments/{department.uid}/members/"
+        if operation == "create":
+            res = client.post(members, {"user": target.uid}, format="json")
+        else:
+            res = client.delete(f"{members}{membership.uid}/")
+        thread.join()
+        assert errors == []
+        assert res.status_code == 403
+        assert DepartmentMembership.objects.filter(user=target).exists() == (operation == "destroy")

@@ -561,8 +561,15 @@ class DepartmentSerializer(serializers.ModelSerializer):
         return value
 
 
-def check_membership_change(actor: User, target: User) -> None:
-    """所属の付け外しは、ユーザーの変更と同じ防止策に従う（authorization.md §10）"""
+def check_membership_change(actor: User, target: User, *, lock: bool = False) -> None:
+    """所属の付け外しは、ユーザーの変更と同じ防止策に従う（authorization.md §10）。
+
+    書き込む直前は lock=True で呼ぶ（transactionの中で、操作する人と対象の行をロックし、読み直した権限で確かめる。
+    確かめた後に対象が昇格した変更を、所属の変更が追い越さないように）
+    """
+    if lock:
+        lock_accounts(actor, target)
+        actor, target = User.objects.get(pk=actor.pk), User.objects.get(pk=target.pk)
     if actor.pk == target.pk:
         raise PermissionDenied(_("自分の所属は変えられません"))
     if not can_manage_account(actor, target):
@@ -589,3 +596,8 @@ class DepartmentMembershipSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(_("この社員は既に部門に所属しています"))
         check_membership_change(self.context["request"].user, value)
         return value
+
+    @transaction.atomic
+    def create(self, validated_data) -> DepartmentMembership:
+        check_membership_change(self.context["request"].user, validated_data["user"], lock=True)
+        return super().create(validated_data)

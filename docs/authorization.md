@@ -121,7 +121,7 @@ Connector管理者・連携の管理者・システム管理者・ユーザー�
 | 全社 | 全社員が使う共通の手順 | 全員 | `skill.can_edit_company_skills` | `skill.can_publish_company_skills` |
 | システム | システムタスクの手順 | システム管理者 | `skill.can_edit_system_skills` | `skill.can_publish_system_skills` |
 
-- 公開のpermissionはDraftの変更を含む。評価ケースの作成・変更は編集の権限、「公開の前に必須」の印の付け外しは公開の権限。
+- 公開のpermissionはDraftの変更を含む。評価ケースの作成・変更・削除は編集の権限、「公開の前に必須」の印の付け外しと、必須のケースの変更・削除は公開の権限（編集の権限で公開の条件を緩められないように。design.md §3.7.1）。
 - 範囲は通常の操作では変えない（必要なら新しく作る）。組織の再編での付け替えは §9。
 - エージェントが会話からSkillを直すときも、依頼した人の権限で同じ判定をする。
 

@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-27（#44）
+- 最終更新：2026-10-27（#45 権限の設計の文書のPRの中。マージの前）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -45,6 +45,7 @@
 | #41 | Draftの評価（design.md §3.7.1、harness.md §10.9）：`skill` に評価ケース（SkillEvaluationCase。依頼の文・添付・確認する観点・期待する業務結果・公開の前に必須の印。Skillごとに20件まで）、評価（SkillEvaluation。開始時にDraftの中身と資料の版を写して固定）、ケースごとの結果（SkillEvaluationResult）。`conversation/evaluation.py`：ケースごとに公開中の版とDraftで評価のRun（`Run.kind`・起動方法とも評価。答える人がいないRunで、Toolは `/` で指定したときと同じくSkillの `tools` と `submit_result`）を、一覧に出さない会話（`Conversation.purpose`）で動かし、両方が終わったら機械的な検証（完了・業務結果・期待値の項目の一致）とLLMの判定（`report_verdict` を強制。参考。利用量は `EVALUATION_JUDGE` でDraftの側のRunに記録）。Runの終了・Reconcilerから進め、評価の停止と、編集のRunを止めたときの停止。公開の条件：部門・全社のSkillで必須のケースが今のDraftのrevisionで通過していなければ、画面でも `publish_skill_draft` でも公開できない（評価の後に変えたケースは評価し直す）。必須の印の付け外しと必須のケースの変更・削除は公開の役割だけ。編集のRunの `test_skill_draft`（確認の種類「Draftの評価」で待ち、評価が終わるとサーバーが結果を返して再開。1つの編集のRunで3回まで）。API：`skills/{id}/evaluation_cases`（multipartで添付）・`evaluations`（開始・一覧・詳細・`cancel`）、Draftの `unevaluatedCases`。画面：Skillの「評価」のタブ（評価ケースの一覧・追加・変更・削除、「Draftを評価」、評価の履歴）、評価の結果のページ `/skills/[skillId]/evaluations/[evaluationId]`（ケースごとに公開中の版とDraftの結果・検証・判定を並べる。評価中は読み直す・停止）、Draftのタブの必須の評価の表示と公開の制限、会話の「Draftを評価しています」。Skillの詳細のページを `pages/skills/[skillId]/index.vue` に移した |
 | #42 | Connectorの土台（design.md §4.9.1・§4.9.2）：`connector` アプリ。Connector（種別はPostgreSQL・MySQL・SQL Server。接続先（種別・ホスト・ポート・DB名）は作成後は変えない。パスワードは `EncryptedSecretField`、通信の暗号化、接続のタイムアウト、同時実行数の上限（項目だけ））、境界の不変の版 ConnectorVersion（説明、既定のスキーマ、公開する表・ビューと列の説明、行数・サイズ・実行時間の上限、機密のフラグ。中身を変えると版が増える）、ConnectorPermission（役割（Group）か部門と、使える操作。`Connector.objects.usable_by()`・`operations_for()`。基盤管理者はすべて）。Adapter（`connector/adapters/`。psycopg 3・PyMySQL・pyodbc。読取り専用のtransaction、実行時間の上限、サーバー側のcursorで行数・サイズの上限で打ち切り）。SQLの検査（`connector/sql.py`。sqlglotで1つのSELECT文、スコープごとに公開した表・CTEだけ、書込み・ロック・ヒント・危険な関数・別のDBを拒否、検査した構文木から作り直したSQLを実行、引数は `?`）。管理API（`v1/connectors`（`check`・`tables`・`describe`・`query`（試し実行））、版の履歴）。本体のイメージにMicrosoft ODBC Driver 18。CIの `connector-db`（実際のMySQL・SQL Serverで確かめる）。#44 で、接続先をDB接続として分け、利用の許可（ConnectorPermission）を使える部門に変えた |
 | #44 | DB接続（画面では「接続先」）をConnectorから分けた（design.md 0.32）：`DatabaseConnection`（種別・接続先・資格情報・接続のタイムアウト・同時実行数の上限。版なし。ホスト・ポート・DB名はパスワードを入れ直せば変えられ、保存のときに行をロックして最新の値で確かめる。種別は変えない。`v1/database_connections`（`check`・`tables`）。使っているConnectorがあれば削除を断る）。ConnectorはDB接続を参照し（作成後は変えない）、1つの接続の上に範囲（公開する表・上限・機密）と使える部門の違うConnectorを複数作れる。既存のConnectorは、マイグレーションで同じ内容のDB接続に移す。権限を所属とpermissionの2軸にした：接続先は標準のpermission（view・add・change・delete）だけ、Connectorを見る・使うのは所属だけ（使える部門。空なら全社向け）、作成・編集・削除は所属＋permission（`utils.permissions.ModelPermissions`）。役割・部門と操作の利用の許可（ConnectorPermission）はやめた。部門に「すべての部門の範囲を含む」印（`covers_all_departments`）を足し、所属の判定を `Department.objects.of(user)` にまとめた。ユーザーとGroupのpermissionの付け外しを監査ログに残す。管理画面：メニューを「Connector → DB Connector → 接続先・Connector」の入れ子にし（`useManageMenu()` の `items`・`links`）、`/manage/database_connections`（一覧・作成・編集・接続の確認。Connectorの件数からその接続のConnectorの一覧へ）と `/manage/connectors`（一覧（接続先・種別・機密・有効で絞り込み）と作成、詳細のドロワーのタブ「設定」・「公開する表」（接続先の表・ビューの一覧から選び、表と列に説明を付ける）・「使える部門」・「試し実行」（エージェントに見える表・列の説明と、SELECT文の試し実行）・「版の履歴」）。ページ・ボタンはpermissionで出し分ける。タブをまたいで未保存の入力を残し、編集の間に別の版ができたら409を案内して最新を読み直す。接続先につなぐ要求は、接続と実行のタイムアウトまで待つ。APIクライアントで、利用者・エージェント・DBがキーを決めるJSON（SkillのSchema、業務結果、Toolの引数、列名 → 説明等）の中のキーを変換しないようにした（以前は `invoice_no` が画面で `invoiceNo` になり、`VendorCode` は保存し直すと `vendor_code` に変わっていた。frontend-conventions.md §3.1） |
+| #45 | 権限の設計をやり直し、[authorization.md](authorization.md) にまとめた（design.md 0.33。文書だけ）：範囲（個人・部門・全社・システム）、利用・業務の管理・基盤の管理の3つの層、所属の関数と `can_use_all_departments`・`can_manage_all_departments`、起動のしかたで決まる実行許可、結果とログの見え方、入口・出口、画面を層で分けること、`is_superuser` をアプリの判定に持ち込まないこと。design.md・規約・例・harness.md・deployment.md・realtime.md を authorization.md の要約と参照に直した |
 
 確認済みのこと：
 
@@ -71,14 +72,14 @@
 
 設計書・規約に反映済み。経緯を知らずに変えないよう、要点だけを挙げる。
 
-- **権限**：「permissionを定義する → Groupに割り当てる → Groupをユーザーに割り当てる」で扱う。permissionは `utils.permissions.AppPermission` に1か所でまとめ（codenameは `can_<動詞>_<対象>`）、Modelの `Meta.permissions` で作る。役割（業務管理者・Skill公開者）はGroupで、初期の中身は `user/roles.py`（`migrate` のたびに同期）。Userのフラグや役割の名前では判定しない。基盤管理者は `is_superuser`。フロントエンドも `allPermissions` だけで判定する（backend-conventions.md §6.3、frontend-conventions.md §6）。
+- **権限**：[authorization.md](authorization.md) を正とする（0.33）。以下の今の実装（permissionの定義は `utils.permissions.AppPermission`、`Meta.permissions` で作る）のうち、Groupを `migrate` のたびに `user/roles.py` で同期する仕組み、部門の中の役割、`PlatformAdmin` は古い形で、§4の実装のPRで authorization.md の形（初期のGroupは一度だけ作る、所属とpermissionの2軸、`DenyAll`）に直す。
 - **パスワードでのログイン**：基盤管理者だけ（`utils.backends.PlatformAdminPasswordBackend`）。社員はSSOだけ（`SOCIALACCOUNT_ONLY`）。
 - **SSOのアカウント確認**：許可したメールドメイン、Microsoftはテナントを固定、Googleは `hd` の一致が必須（未設定なら起動しない）。
 - **テスト**：ローカルでもCIでもPostgreSQLで実行する（SQLiteは使わない）。PostgreSQLが起動していなければ、pytestは起動のコマンドを案内して止まる。NOTIFY/LISTENも実際のPostgreSQLで確かめる。
 - **静的ファイル**：本番はnginxが `/api/static/` で返す（`static` サービスが共有ボリュームへコピー）。開発時はUvicornが返す。WhiteNoiseは使わない。
 - **CSP**：NuxtのSPAがインラインのスクリプトを含むため、`script-src 'unsafe-inline'` を許可している（課題。§3）。
 - **CI**：変更したディレクトリに関係するworkflowだけを動かす。Actionはコミットのsha、公式イメージはdigestで固定し、公開から2週間以内の版は使わない。
-- **Skillの権限**：個人は本人、部門は所属の役割（利用・編集・公開）、全社はpermission（`skill.can_edit_company_skills`・`can_publish_company_skills`）で決める。部門は役割（Group）と別のDepartmentで表す。Draftの変更は編集以上、公開・切戻し・停止・削除・名前とToolの変更は公開の役割。判定は `Skill.access_of()` と `Skill.objects.visible_to()`（design.md §3.6）。
+- **Skillの権限**：今の実装は、部門の範囲を所属の役割（利用・編集・公開）で判定している（`Skill.access_of()`）。これは古い形で、§4の実装のPRで authorization.md §5.1 の形（所属とpermission、システムの範囲、`can()`）に直す。
 - **資料のアプリ名**：Pythonの標準ライブラリの `resource` と重なるので `resources` にした。
 - **マージ**：squash mergeを基本にし、コミットを残す価値があるときだけ通常のmerge。`main` に入るコミットには、条件を満たせば `[skip ci]` を付ける（development.md §1、§4.1）。
 
@@ -90,7 +91,7 @@
 - Compose：channel-listener（Channelの受信を実装するとき）。
 - 管理コマンド：`drain_workers`・`resume_workers`（Workerの実行を実装するとき）。
 - 業務のアプリは `llm`、`conversation`、`run`、`harness`、`stream`、`usage`、`runtime`（Runtime Profile、Launcher）、`artifact`、`skill`・`resources`、`connector`（土台だけ）まで。`plugin`、`task`、`delivery` 等（backend-conventions.md §1.2）は、まだない。
-- 権限の2軸（所属とpermission。design.md §3.6）に合わせる残り：Skillの部門の範囲を `Department.objects.of(user)`（「すべての部門の範囲を含む」部門を含む）で判定する、部門の中の役割（利用・編集・公開）とpermissionの関係を決める（Skillの編集・公開も所属＋permissionにするか）。`user/roles.py` が `migrate` のたびに役割（Group）を作り直してpermissionを足し直すのをやめ、初期の役割を一度だけ作るデータのマイグレーションにする（Groupを後から自由に変えられるように）。LLMの接続・モデル設定・Runtime Profile・ユーザー・部門・SSOの設定の管理API（今は `PlatformAdmin`）を、`ModelPermissions` にするか決める。
+- 権限の設計（[authorization.md](authorization.md)。design.md 0.33）に実装を合わせる：Skillの部門の役割をやめる、システムの範囲、Connectorの範囲（個人・部門・全社・システムと1つの部門）、`can_use_all_departments`・`can_manage_all_departments` と使える部門・管理できる部門の2つの関数、判定をQuerySetとModelの `can()` に集める、管理APIのpermission化と既定を誰も通さない `DenyAll` にする、`is_platform_admin` をAPIから外す、`app/v1/my/` に所属の情報を足す、初期のGroupを一度だけ作る。§4の「次の作業」。
 - Connectorで後回しにしたもの：Plugin Registry（`plugin` アプリ。今は種別からAdapterをコードで選ぶ。タスク・配信のPluginとあわせて作る）、同時実行数の上限を守らせる（会話でのConnectorの段階。DB接続ごとに、DBで全Workerを通して数える）、SQL ServerのSNAPSHOT分離（DB側で有効なら使う。design.md §4.9.2）、MariaDB（MySQLの `MAX_EXECUTION_TIME` がない。試していない）、HTTP・SharePoint・Google Drive・MCPのConnector、書込みの操作。PostgreSQLの証明書の確認（`verify-full`）は、OSの証明書（`sslrootcert=system`。libpq 16以降）を使い、社内のCAの証明書を指定する項目はまだない。PyMySQLは1.2.1〜1.2.3の不具合（作ったばかりのユーザーがTLSなしで初めてログインすると失敗する）を避けて1.2.0に固定している（`api/pyproject.toml`）。直った版が出たら上げる。
 - Skillで後回しにしたもの：実行中のRunでSkillを最新の公開版へ切り替える依頼（design.md §3.2）、機密の制限によるSkillの絞り込み（Connectorの段階）、Resource Collection、Connectorの宣言、MD・CSV・PPTX以外の形式（XLSX・DOCX・PDF等）の検証、PPTXの画像としてのプレビュー（LibreOfficeを使わない方法が未決。design.md §7.6）、本文（説明・手順・Schema）の版の差分の表示（今は変わった項目名だけ。資料の差分は #40 で表示）、公開せずに捨てたDraftの資料の原本の回収、共通Skillから個人用を派生させる操作、Draftを開いた後に別の版が公開されたときの取り込み（今は破棄して開き直す）、画面のToolの選択肢と説明（今はフロントエンドに `harness.tools.ALL_TOOLS` と同じ一覧を持つ。APIで返すようにする）。
 - 会話からのSkill更新で後回しにしたもの：中身が前の版と同じDraftの公開を止めない（版が増える）、Draftに他の人の未公開の変更があっても一緒に公開する（`get_skill` の説明で、公開の前に利用者へ伝えさせるだけ）、編集のRunの対象は1つだけ（複数のSkillをまとめて直す依頼は分ける）、別のAttemptで再開すると `/workspace/master` のDraftの資料が置き直されない（`get_skill` を呼び直せば置く）。
@@ -113,15 +114,28 @@
 
 ## 4 次の作業
 
-**今の状態（2026-10-27）**：Skillの段階（下の1）は #41 までで揃った。下の2（Connectorとタスク・配信）は、①（Connectorの土台）が #42、②（Connectorの管理画面）が #44 で済んだ。合意した方針：Connectorを先に作る（最初の業務の1つ目が先に動く）、Connectorの種類は今回は社内DBだけ（HTTP Connectorは後回し）、MySQLのドライバはPyMySQL、Webhook等で起動したRunの実行主体はタスクに設定した社員（既定は作成者）にする（design.md 0.31）。
+**今の状態（2026-10-27）**：Skillの段階（下の1）は #41 までで揃った。下の2（Connectorとタスク・配信）は、①（Connectorの土台）が #42、②（Connectorの管理画面）が #44 で済んだ。そのあと利用者の指示で、③より先に権限の設計をやり直し、#45（文書だけ）で [authorization.md](authorization.md) にまとめた。権限は authorization.md を正とする（design.md §3.6・§4.1・§4.9.1・§10.0はその要約）。
 
-#44 で利用者と合意したこと（design.md 0.32）：接続先と資格情報をDB接続（画面では「接続先」）としてConnectorから分ける。権限は「所属」と「permission」の2軸で判定し、Groupは判定に使わない（Groupはpermissionをまとめる入れ物で、後からいくらでも変えられること）。Connectorを見る・使うのは所属だけ（使える部門。空なら全社向け）、作成・編集・削除は所属＋permission、接続先はpermissionだけ。全部を見る人は、部門の「すべての部門の範囲を含む」印で管理する。SkillとConnectorは同じ所属の判定にする（Skill側は次の段階）。管理画面のメニューは「Connector → DB Connector → 接続先・Connector」。
+**#45 で決めたこと**は authorization.md にすべて書いてある。議論の要点：
+- 範囲は「所有と管理の単位」（個人・部門・全社・システム）。部門のものは1つの部門に属し、複数の部門にまたがるものは作らない。システムのSkill・Connector・タスクは基盤の管理（強い権限の管理者）が扱い、会話には出さない。
+- 3つの層：利用（範囲と所属）、業務の管理（範囲と所属と範囲ごとのpermission）、基盤の管理（permissionだけ）。Connector・入口・出口・接続は基盤の管理（信頼された技術者）。画面も層で分ける（業務画面と `/manage`）。
+- Skillは権限を持たない。Runの権限は起動のしかたで決まる（実行許可）。人のいない起動（Webhook・スケジュール・手動実行）は指示を受け取らない。タスクはSkillの版を固定する（ライブラリと同じ）。
+- `is_superuser` はアプリの判定とフロントエンドに持ち込まない（Django管理画面・非常口のログイン・基盤管理者のアカウントの保護の3か所だけ）。`app/v1/my/` はすべてのpermissionと所属の情報を返す。
+- Codexのレビューの途中で、私（Claude）の判断で決めて利用者に伝えた点（異論があれば直す）：前のRunで読んだデータが会話の文脈とWorkspaceに残るのは許容する、出口はRunに版を固定し無効になったら送らない、追加・削除だけを任せることはしない、チャットから起動したタスクの入力とログは管理者が見られる（起動の前に示す）、基盤管理者のアカウントは基盤管理者だけが扱う、権限を失った起動者も自分のRunの結果は見られる、Webhookのpayloadの全体はデータとして渡す（鍵を渡した送り元の力の範囲内）。
+- レビュー：`codex review --base main` は23回で指摘なし。敵対的なレビュー（`codex-companion.mjs adversarial-review`）は15回で、指摘がタスク・配信の細部の詰めに移ったところで利用者の指示で区切った（残りはタスク・配信の実装のPRで見る）。
 
-**次の作業**：利用者の指示（2026-10-27）で、下の2の③より先に、§3の「権限の2軸に合わせる残り」を1つのPRで行う。着手の前に、次の点を利用者と決め、design.md を直してから実装する（2026-10-27に提案し、返事を待っている）。
-- Skillの部門の範囲：部門の中の役割（`DepartmentMembership.role`。利用・編集・公開）をやめ、使うのは所属だけ、Draftの変更は所属＋`skill.can_edit_department_skills`、公開・切戻し・停止・削除・Toolの変更は所属＋`skill.can_publish_department_skills` にする案。役割は人ごとのpermissionに移せないので、移行の後に基盤管理者がpermissionを付け直す。全社の範囲は今のpermissionのまま、個人は本人。
-- `user/roles.py`：`migrate` のたびに役割（Group）を作り直すのをやめ、最初に一度だけ作るデータのマイグレーションにする（合意済み）。
-- LLMの接続・モデル設定・Runtime Profile・ユーザー・部門・SSOの設定の管理API（今は `PlatformAdmin`）を `ModelPermissions` にそろえるか。SSOの設定とユーザーは基盤管理者だけのまま残す選択もある。
-- 管理画面の入口を、今のまま「メニューに出せる項目があるか」で決めてよいか。
+**次の作業**：#45 のマージの後、**authorization.md に実装を合わせるPR**（§3の「権限の設計に実装を合わせる」）。作業ブランチは `main` から新しく切る。範囲：
+- Skill：部門の中の役割（`DepartmentRole`・`DepartmentMembership.role`・`Department.role_of()`）をやめ、所属とpermission（`skill.can_edit/publish_department_skills`、既存の全社、新しいシステムの `can_edit/publish_system_skills`）で判定する。システムの範囲を足す（業務画面の一覧と会話の候補からは外す）。判定を `Skill.objects.visible_to()`・`usable_by()` と `skill.can(user, 操作)` に集める（今の `access_of()`・`scope_access_of()` を置き換える）。
+- Connector：使える部門の多対多（空なら全社向け）をやめ、範囲（個人・部門・全社・システム）と1つの部門にする。作成・編集は所属を問わずpermissionだけ。`/manage/connectors` の一覧は全件。個人Connector（本人のOAuth）は会話でのConnectorの段階で。
+- 所属：部門の「すべての部門の範囲を含む」印をやめ、`user.can_use_all_departments`・`user.can_manage_all_departments` と、`Department.objects.usable_by()`・`manageable_by()`・`joined_by()`（有効な部門だけを返す）にする。
+- 管理API：`PlatformAdmin` をなくし、すべて `ModelPermissions` 等のpermissionで判定する。`DEFAULT_PERMISSION_CLASSES` は `DenyAll`。委任の防止策（ユーザーの更新で書ける項目を絞る、自分の所属・Groupは変えられない、持たないpermissionのGroupは付け外しできない、基盤管理者のアカウントは基盤管理者だけ、持たないpermissionのアカウントは変更・リンクの発行ができず、受け入れのときも確かめ直す、`can_change`・`can_issue_invitation` を返す）。部門の所属の付け外しは部門のchangeのpermission。
+- `app/v1/my/`：`is_platform_admin` を外し、`departments`・`usable_departments`・`manageable_departments` を足す。ユーザーの管理APIからも `is_platform_admin` を外す。
+- 初期のGroup：`user/roles.py` の `sync_role_groups`（post_migrate）をやめ、データのマイグレーションで一度だけ作る（authorization.md §11）。
+- フロントエンド：`isPlatformAdmin` の利用をやめる（ユーザーの管理の一覧のバッジ、招待の可否）。管理画面のメニュー・ページは `view_*` か `change_*`。Skillの画面の部門の役割の選択肢（`departmentRoleItems`、所属の編集の役割の欄）を外し、作成の範囲と部門を `manageableDepartments` とpermissionで決める。業務画面の一覧の形（authorization.md §7.3.1）。
+- テストは必要なpermissionだけを付けたユーザーで行い、superuserで判定を試さない。
+- 移行：消して困るDBのデータはない（利用者に確認済み）。今のデータを新しい形に置き換え、合わないもの（複数の部門を持つConnector、部門の中の役割、「すべての部門」の印）は消すか作り直す。
+- 参考：セッションの前半に古い案で作った実装の途中の変更が `git stash` に「wip: authz implementation (pre-authorization.md)」として残っている（`utils/permissions.py` の部門のpermission、管理APIの `ModelPermissions` 化、ユーザー管理の防止策の一部、`roles.py` の削除等）。使える部分だけを取り込み、要らなければ `git stash drop` する。
+- タスク・入口・出口・配信はまだ実装がないので、このPRでは扱わない（下の2の⑤〜⑦で authorization.md に従って作る）。
 
 その後に、下の2の③（会話でのConnector）へ進む。
 
@@ -133,6 +147,7 @@ design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにし
    - ② Connectorの管理画面（#44）：接続先（DB接続）の分離と `/manage/database_connections`、`/manage/connectors`（登録、表の一覧から公開する表を選んで説明を付ける、使える部門、試し実行、版の履歴）、所属とpermissionの2軸の権限。
    - ③ 会話でのConnector：Tool `datasource_describe`・`datasource_query`（結果はCSVのArtifactにして `/workspace/input/connectors/{id}/`、モデルには要約）、Run開始時に使えるConnector（`Connector.objects.usable_by()`。所属で決まる）を固定して `<connectors>` で見せる、入力欄の `@`、機密のConnectorはローカルLLMのRunだけ（使ったRunに印、モデルの切り替えの制限）、Skillが宣言した操作の公開時の検証、接続先ごとの同時実行数の上限（harness.md §10.2）。
    - ④ Skillのスクリプトからの呼出し（`yoriki_connector` とUnixドメインソケット。design.md §4.9.6）。後回しにしてもよい（最初の業務は `datasource_query` で動く）。
+   - ⑤〜⑦の権限（範囲、実行許可、入口・出口、結果とログの見え方）は authorization.md §5.3〜§7 に従う。
    - ⑤ タスクとWebhookでの起動（backend）：TaskDefinition・TriggerBindingと不変の版、Webhookの受け口（APIキーで認証、送り元のイベントIDか `Idempotency-Key` での重複の判定、項目の取り出し、payloadのファイル化、202とrun_id、状態を確かめる口）、TriggerReceipt・Runを同じtransactionで作る。
    - ⑥ 配信：Destination・NotificationBinding・Delivery・DeliveryAttempt、完了時の配信Outbox、再試行のDispatcher、in_app・webhook・zapierのAdapter、標準の形式へのフォールバック、期限付きのファイルURL、`prepare_notification`・`request_delivery`。
    - ⑦ タスク・Destinationの画面：一覧と編集（サンプルのpayloadで取り出しを試す）、自動実行の履歴と配信の状態、「通知を再試行」、チャットから指定したタスクを起動する。
@@ -169,6 +184,7 @@ cd frontend && pnpm install
 - 変更前に、AGENTS.md と、触る範囲の規約を読む。作業の進め方（ブランチ、コミット、Pull Request、CI、マージ）は development.md に従う。
 - 作業の区切りでは、本書の §1・§3・§4 を更新する。Pull Requestで進めた作業は、マージの前にそのPull Requestの中で更新する（マージの後に `main` へ別にコミットしない）。
 - Codexのレビュー：手元で `codex review --base main -c 'developer_instructions="レビューの指摘とまとめは、すべて日本語で書いてください。"'` を実行し（数分かかる。出力の `[P1]`・`[P2]` の行と末尾を読む）、指摘をコードで確かめて直し（テストも足す）、コミットして、指摘がなくなるまで繰り返す。PRの前に回してよい。
+- 敵対的なレビュー：普通のレビューと並行して、`node ~/.claude/plugins/cache/openai-codex/codex/<版>/scripts/codex-companion.mjs adversarial-review --wait --base main "<日本語で答えること、重点、議論し直さなくてよい合意済みの方針>"` も回す（権限や設計の変更で特に効く）。毎回何かを出す性質なので、指摘が細部の詰めに移ったら、利用者と相談して区切る（#45 では15回で区切った）。
 - ブランチの名前は `<種類>/<内容>`（development.md §1。例：`feature/skill-models`）。
 - Pull Requestの進め方（AGENTS.md）：コードの変更は手元のブランチで作り、PRはユーザーに依頼されてから作る。マージはユーザーが指示したときに限り行う。本書の状況の更新や誤字の修正のように判断を含まない文書の変更は、PRを作らずに `main` へ直接コミットする。design.md や規約の判断を変える変更はPRにする（development.md §1）。PRごとにCodexのレビューを受け、指摘をコードで確かめてから直す。CIが通ったら報告し、マージの指示を待つ（squash merge。`[skip ci]` は development.md §4.1）。作業の中で見つけた小さな問題は、別のPRにせず、今のPRで直す。PRのページは消せないので、試しのPRや取り消しのPRは作らない。
 - 設計の判断を変える話が出たら、コードを書く前に design.md と本書を直し、合意してから実装する。

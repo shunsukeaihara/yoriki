@@ -58,7 +58,6 @@ export const DestinationKind = {
   SLACK: 2,
   TEAMS: 3,
   DISCORD: 4,
-  EMAIL: 5,
 } as const
 
 // 検索条件の選択肢。一覧の表示はサーバーの kindDisplay を使う
@@ -67,7 +66,6 @@ export const destinationKindItems = (t: (key: string) => string) => [
   { value: DestinationKind.SLACK, title: t('Slack') },
   { value: DestinationKind.TEAMS, title: t('Teams') },
   { value: DestinationKind.DISCORD, title: t('Discord') },
-  { value: DestinationKind.EMAIL, title: t('メール') },
 ]
 ```
 
@@ -195,6 +193,9 @@ const saved = (value: Destination) => {
 `pages/manage.vue` と `middleware/manage.ts` は実装済みで、変更しない。ページを追加したら、メニューの項目を足す。`/manage` に入れるかどうかは、表示できる項目があるかで決まる。
 
 ```ts
+// 通知先の管理画面に入れるpermission（一覧のAPIと同じ、閲覧か変更）
+export const DESTINATION_PERMISSIONS: PermissionCode[] = [PermissionCode.VIEW_DESTINATION, PermissionCode.CHANGE_DESTINATION]
+
 const { $i18n } = useNuxtApp()
 const all = computed<ManageMenuItem[]>(() => [
   {
@@ -202,7 +203,7 @@ const all = computed<ManageMenuItem[]>(() => [
     icon: 'i-lucide-send',
     to: '/manage/destinations',
     // リンク先のページの definePageMeta と同じ権限
-    permission: PermissionCode.MANAGE_DESTINATIONS,
+    permission: DESTINATION_PERMISSIONS,
   },
 ])
 ```
@@ -213,10 +214,11 @@ const all = computed<ManageMenuItem[]>(() => [
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 
-definePageMeta({ permission: PermissionCode.MANAGE_DESTINATIONS })
+definePageMeta({ permission: DESTINATION_PERMISSIONS })
 
 const api = useAPI()
 const { t } = useI18n()
+const { hasPermission } = usePermission()
 const reloadKey = ref(0)
 const reload = () => (reloadKey.value = Date.now())
 
@@ -243,7 +245,8 @@ const columns: TableColumn<Destination>[] = [
   <UContainer>
     <ListPageTitle :title="$t('通知先')">
       <template #end>
-        <DestinationDialog @saved="reload">
+        <!-- 追加はサーバー側でも権限を確認し、権限がなければ403になる -->
+        <DestinationDialog v-if="hasPermission(PermissionCode.ADD_DESTINATION)" @saved="reload">
           <template #trigger="{ on }">
             <DBtn icon="i-lucide-plus" v-on="on">{{ $t('通知先を追加') }}</DBtn>
           </template>
@@ -327,7 +330,7 @@ const onDelete = async () => {
     <template #footer>
       <!-- 削除はサーバー側でも権限を確認し、権限がなければ403になる -->
       <DBtn
-        v-if="hasPermission(PermissionCode.MANAGE_DESTINATIONS)"
+        v-if="hasPermission(PermissionCode.DELETE_DESTINATION)"
         color="error"
         variant="ghost"
         @click="onDelete"
@@ -335,7 +338,12 @@ const onDelete = async () => {
         {{ $t('削除') }}
       </DBtn>
       <div class="flex-1" />
-      <DBtn :disabled="!formRef?.canPost" :loading="formRef?.loading" @click="formRef?.onSubmit()">
+      <DBtn
+        v-if="hasPermission(PermissionCode.CHANGE_DESTINATION)"
+        :disabled="!formRef?.canPost"
+        :loading="formRef?.loading"
+        @click="formRef?.onSubmit()"
+      >
         {{ $t('更新') }}
       </DBtn>
     </template>
@@ -345,7 +353,7 @@ const onDelete = async () => {
 
 要点：
 - Formは新規（Dialog）と編集（Drawer）で同じものを使う。送信ボタンはFormの外に置き、`ref` から `onSubmit` を呼ぶ。
-- 入力の形式の検証（`https://`、メールの形式）はサーバーで行い、返ってきたエラーをそのまま入力欄に表示する。フロントエンドの `canPost` は必須項目の確認だけにする。
+- 入力の形式の検証（`https://`、SlackのURLの形式）はサーバーで行い、返ってきたエラーをそのまま入力欄に表示する。フロントエンドの `canPost` は必須項目の確認だけにする。
 - 詳細は子ルートのドロワーで開くので、URLを共有すれば同じ画面を開ける。更新や削除の後は `changed` をemitして一覧を再読込する。
 
 ---

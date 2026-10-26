@@ -67,7 +67,7 @@ data: {"type":"run.delta","run":"8sJ2...","message":"Qw9...","text":"了解し�
 
 ## 4 バックエンドの実装
 
-- ストリームのendpointは、Djangoの非同期viewで `StreamingHttpResponse`（async generator）を返す。DRFのViewSetにはしない。認証はセッション（`request.auser()`）で行い、権限の判定（対象Runの所有者か等）はViewSetと同じQuerySetの絞り込み関数を使う。
+- ストリームのendpointは、Djangoの非同期viewで `StreamingHttpResponse`（async generator）を返す。DRFのViewSetにはしない。認証はセッション（`request.auser()`）で行い、権限の判定はViewSetと同じQuerySetの絞り込み関数とModelの判定を使う。ストリームに流れるのはRunの中身（Toolの呼出しと結果を含む）なので、結果だけでなくログを見られる人の判定（authorization.md §7.1。会話は依頼した人、タスクは管理できる人）で絞る。接続したときだけでなく、イベントやLLMの出力の差分を送る前にも（まとめて送るときはまとめごとに）、DBの最新の所属・permissionで見られるかを確かめ直し、見られなくなったら接続を閉じる（所属・Groupの変更や部門の移管が、開いたままの接続にも効くように）。
 - 新しいイベントの通知には、PostgreSQLの `LISTEN/NOTIFY` を使う。RunEventや通知を保存するのと同じtransactionの中で `pg_notify`（payloadはIDだけ）を実行する。PostgreSQLはcommitした時点で通知を届け、rollbackすれば通知も出ない。ストリーム側は通知を受けたらDBから `sequence` より後のイベントを読む。
 - `LISTEN` 用のDB接続はプロセスごとに1本だけ持ち、各ストリームへasyncioのキューで配る。ストリームごとにDB接続を持ち続けない。
 - 接続時に `Last-Event-ID` があれば、それより後のイベントをDBから先に送ってから、新しい通知を待つ。

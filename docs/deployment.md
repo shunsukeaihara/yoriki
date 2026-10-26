@@ -191,9 +191,9 @@ cd frontend && pnpm dev
 | `/api/` | api:8000（パスはそのまま転送。Djangoは `/api/` の下にURLを置く） | 通常のAPI |
 | `/api/app/v1/stream/`、`/api/app/v1/runs/{id}/stream/` | api:8000 | SSE用（§4.2）。`location ~ ^/api/app/v1/(runs/[^/]+/)?stream/$` で両方に合わせる |
 | `/api/hooks/` | api:8000 | Webhook・Channelの受信。bodyの上限を小さくし、rate limitを強くする |
-| `/api/admin/`、`/api/schema/` | api:8000 | ログインと役割で守る（管理画面は基盤管理者、スキーマとSwagger UIはどの環境でもログインした利用者）。IPの制限は導入先が任意で追加する |
+| `/api/admin/`、`/api/schema/` | api:8000 | ログインとpermissionで守る（Django管理画面は基盤管理者、スキーマとSwagger UIはどの環境でもログインした利用者）。IPの制限は導入先が任意で追加する |
 | `/api/accounts/` | api:8000 | SSOのログイン開始と認証基盤からのコールバック |
-| `/api/files/<token>/` | api:8000 | 成果物の期限付き取得。セッションを使わずtokenを確認する。rate limitを付ける |
+| `/api/files/<token>/` | api:8000 | 出口（Zapier等）へ渡した成果物の期限付き取得。セッションを使わずtokenを確認する。rate limitを付ける。社員向けのダウンロードには使わない（セッションで認証し、取得のたびに閲覧の判定をし直す。authorization.md §7.1） |
 | `/_protected/` | （nginxの内部location） | `internal;` を付け、apiの `X-Accel-Redirect` からだけ使う。外から直接は取得できない |
 | `/api/ping/` | api:8000 | ヘルスチェック（認証なし） |
 | `/api/static/` | （nginxが直接返す） | Djangoの静的ファイル（§2）。長くキャッシュさせる |
@@ -206,7 +206,7 @@ cd frontend && pnpm dev
 - CSPは、NuxtのSPAがHTMLにインラインのスクリプト（色モードの初期化、`window.__NUXT__` の設定）を含むため、`script-src` に `'unsafe-inline'` を許可している。インラインのスクリプトのハッシュかnonceで絞るのは今後の課題とする。
 - nginxの設定は2種類ある。nginxでTLSを終端して直接公開する `sites/tls.conf`（`compose.yaml`）と、前段（Cloudflare Tunnel、認証プロキシ、エッジのnginx）がTLSを終端し、80番で受ける `sites/http.conf`（`compose.app.yaml`、`compose.cloudflare.yaml`）。`http.conf` は前段が付けた `X-Forwarded-For`・`X-Forwarded-Proto` を、私設のアドレスからのものだけ信頼するので、インターネットへ直接公開しない。
 - `client_max_body_size` はパスごとに決める（通常のAPIは小さく、添付のアップロードだけ大きくする）。
-- 成果物のダウンロード（Local保存）は、apiが権限と期限付きtokenを確認した後、`X-Accel-Redirect` でnginxの内部location（`location /_protected/ { internal; }`）からファイルを返す。nginxから保存先のディレクトリを直接公開しない。
+- 成果物のダウンロード（Local保存）は、apiが権限（社員はセッションで、取得のたびに結果を見られるかを判定する。出口は期限付きtokenと出口の有効性・範囲）を確認した後、`X-Accel-Redirect` でnginxの内部location（`location /_protected/ { internal; }`）からファイルを返す。nginxから保存先のディレクトリを直接公開しない。
 
 ### 4.2 SSE
 
@@ -239,7 +239,7 @@ SSEのパスにだけ適用する。apiのレスポンスにも `X-Accel-Bufferi
 - 変数の一覧は `deploy/env/yoriki.env.example` に、説明と空の値で管理する。新しい変数を追加したら、`.envrc.example` と合わせて更新する。
 - PostgreSQLの初期設定は `/etc/yoriki/postgres.env`（`deploy/env/postgres.env.example`）、Cloudflare Tunnelのトークンは `/etc/yoriki/cloudflared.env`（`deploy/env/cloudflared.env.example`）に置く。どれも所有者root、権限600にする。
 - Composeファイル自体の変数（`YORIKI_API_IMAGE` 等のイメージのdigest、証明書のディレクトリ、dockerグループのGID）は、`deploy/.env`（`deploy/.env.example` をコピー）に置く。ここには秘密情報を書かない。
-- LLMのAPI key、Connector・外部連携の資格情報は、基盤管理者が管理画面で接続と一緒に登録し、DBに暗号化して保存する（`utils/crypto.py`）。apiとqcluster（Workerサーバーのqclusterを含む）の中でだけ復号して使い、APIの応答・画面・ログ・監査ログ・Sandboxへは出さない。画面には「設定済み」と末尾の4文字だけを出す。
+- LLMのAPI key、Connector・外部連携の資格情報は、permissionを持つ管理者（Connector管理者等。authorization.md §10）が管理画面で接続と一緒に登録し、DBに暗号化して保存する（`utils/crypto.py`）。apiとqcluster（Workerサーバーのqclusterを含む）の中でだけ復号して使い、APIの応答・画面・ログ・監査ログ・Sandboxへは出さない。画面には「設定済み」と末尾の4文字だけを出す。
 - 暗号化の鍵は `YORIKI_SECRET_ENCRYPTION_KEYS`（Fernetの鍵。カンマ区切り）で渡し、DBには置かない。DBやそのバックアップだけが漏れても、Secretは読めない。apiとqcluster（Workerサーバーを含む）で同じ値にする。
   - 生成：`python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`（apiのイメージの中で実行できる）。
   - 鍵を失うと、登録したSecretはすべて入力し直しになる。DBのバックアップとは別の場所にも控える。
@@ -439,7 +439,7 @@ Cの構成：
 - **ネットワーク**：エッジ、アプリ、Worker、DBのサーバーはすべて同じ私設ネットワークに置く。私設ネットワークの外のサーバーは想定しない。
 - **共有するもの**：複数台にした時点で、次のものはサーバーの外に置く。
   - PostgreSQL：専用のサーバー、またはRDS等のマネージドサービス。
-  - ファイルの保存先：Local Backendはサーバーをまたいで共有できないので、S3（または互換のストレージ）に切り替える（design.md §7.10の移行手順）。成果物のダウンロードは、`X-Accel-Redirect` ではなくS3の期限付きURLかapi経由で返す。
+  - ファイルの保存先：Local Backendはサーバーをまたいで共有できないので、S3（または互換のストレージ）に切り替える（design.md §7.10の移行手順）。成果物のダウンロードは、`X-Accel-Redirect` ではなく、社員向けはapiがセッションで閲覧を確かめてapi経由で返す（署名付きURLへリダイレクトしない。取り消した権限で再利用させないため）。出口向けは、apiがtokenと出口の有効性・範囲を確かめた後に、ごく短い期限のS3の署名付きURLへリダイレクトしてよい（authorization.md §7.1）。
 - **増やしてよいもの・1つだけにするもの**：
   - frontend、api：何台でも増やせる（状態を持たない。セッションはDB、SSEの取りこぼしはDBから読み直す）。
   - qcluster：何台でも増やせる（RunとDeliveryはDBのclaimで重複しない）。クラスタは1つで、どのqclusterもエージェントの実行と配信・Outbox・清掃を受け持つ（§3.2）。qclusterを動かすサーバーには、Dockerソケットとworkspacesの領域を用意する。
@@ -510,5 +510,5 @@ Cloudflareは無料プランだけを使う。§8.3・§8.4は、次の制約の
 - **SSE**：前段のnginxは `auth_request`（認証だけをoauth2-proxyに問い合わせる方式）で使っているので、応答はoauth2-proxyを通らず、SSEはそのまま通る。前段のnginxでもSSEのパスのバッファリングを切る（Yorikiは `X-Accel-Buffering: no` を返すので、設定がなくても効く）。
 - **バリアのセッション切れ**：oauth2-proxyのセッションが切れると、APIの呼び出しはIdPへのリダイレクトになり、XHRではCORSのエラーかJSONでない応答になる。フロントエンドは、APIの呼び出しがネットワークエラーやJSONでない応答になったら画面ごと再読み込みし、oauth2-proxyに改めて認証させる（frontend-conventions.md §3.1）。
 - **ログアウト**：消すのはYorikiのセッションだけにする。oauth2-proxyのセッションは前段の基盤のもので、ほかのアプリと共有しているので、そのままにする。
-- **IPアドレスの制限は使わない**：前段の他のアプリと同じく、oauth2-proxyのバリアとYorikiのログイン・役割で守る。
+- **IPアドレスの制限は使わない**：前段の他のアプリと同じく、oauth2-proxyのバリアとYorikiのログイン・permissionで守る。
 - **利用者のIPアドレスを前段のnginxで解決して渡す**：ログインの試行回数の制限は送信元のIPアドレスごとにも数える（backend-conventions.md §6.2）。前段のnginxは、Cloudflareから受けた `CF-Connecting-IP` で利用者のIPアドレスを解決し（`set_real_ip_from <CloudflareのIPアドレスの範囲、またはcloudflaredのネットワーク>`、`real_ip_header CF-Connecting-IP`）、`X-Forwarded-For` を `$remote_addr` で上書きしてYorikiのnginxへ渡す。解決しないまま自分から見た接続元（CloudflareのエッジのIPアドレス）を付け足すと、Yorikiには多くの社員が同じIPアドレスに見え、誰かの失敗が続くと関係のない人も一定時間ログインできなくなる（制限を逃れられるわけではない。アカウントごとの制限はそのまま効く）。Yorikiのnginxは `sites/http.conf`（私設のアドレスだけを信頼する）を使う。

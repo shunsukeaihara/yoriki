@@ -214,7 +214,7 @@ Anthropicのthinkingブロック（署名付き）、OpenAIのreasoning（暗号
 - 親が結果のないTool呼出しのまま終わっていた（失敗・停止）ときは、結果が分からないことを結果として補う（§5.4）。
 - モデル・effortは子のRunのもので、推論の途中経過は同じ接続・同じモデルの応答のものだけを戻す（§5.5）。
 - **Workspace**：`/workspace/work`・`/workspace/output` は親のRunの最後のCheckpointから戻し（§8.1）、`/workspace/input` には会話でそれまでに送った添付をすべて置く。最初の発言には、それまでの添付の一覧を添える。
-- **タスク**：トリガーで起動してから終わるまでが1つのRunで、その間（確認待ち・再試行・別のAttempt）は文脈とWorkspaceを引き継ぐ。別のときのトリガーで起動したRunは別のもので、前の回の文脈もWorkspaceも引き継がない。
+- **タスク**：トリガーで起動してから終わるまでが1つのRunで、その間（確認待ち・再試行・別のAttempt）は文脈とWorkspaceを引き継ぐ。別のときのトリガーで起動したRunは別のもので、前の回の文脈もWorkspaceも引き継がない。チャットから起動したタスクのRunも、会話の文脈を引き継がず、タスクの定義と入力だけで文脈を組み立てる（authorization.md §6。会話に残った、もう使えない部門の情報をタスクの出口へ流させないため）。
 
 ## 6 system promptと実行時の文脈
 
@@ -342,9 +342,9 @@ class ToolResult:
 
 用意しないTool：
 
-- **Webの検索・取得**：MVPには入れず、後でConnector（Web検索・Web取得）として加える（design.md §4.9.3）。任意のURLの取得はデータの持ち出し口（URLや検索の文字列に社内のデータを載せられる）と、社内への要求（SSRF）になるため、基盤管理者が有効にしたときだけ、使える利用者・役割を限って使えるようにする。取得は公開のIPアドレスに限り（名前解決した公開のアドレスに固定して接続する）、許可したドメインだけに絞る設定も持つ。機密の会話・機密のConnectorを使ったRunでは使わせない。結果は信頼しない内容として囲む（§6.3）。
+- **Webの検索・取得**：MVPには入れず、後でConnector（Web検索・Web取得）として加える（design.md §4.9.3）。任意のURLの取得はデータの持ち出し口（URLや検索の文字列に社内のデータを載せられる）と、社内への要求（SSRF）になるため、基盤管理者が有効にしたときだけ、使える部門を限って使えるようにする。取得は公開のIPアドレスに限り（名前解決した公開のアドレスに固定して接続する）、許可したドメインだけに絞る設定も持つ。機密の会話・機密のConnectorを使ったRunでは使わせない。結果は信頼しない内容として囲む（§6.3）。
 - **プロバイダ組込みのWeb検索**（OpenAIの `web_search`、AnthropicのWeb検索、GeminiのGoogle検索による根拠付け）：検索はプロバイダの中で行われ、Yorikiからは通信しない。既定では使わず、基盤管理者が許可したときだけ使えるようにする（MVPの後。Web検索のConnectorと同じ時期）。
-  - 許可はモデル設定ごと（ModelProfileの能力「組込みのWeb検索」と、許可の設定）と、使える利用者・役割で行う。ローカルLLMにはないので、機密の会話・機密のConnectorを使ったRunでは使えない。
+  - 許可はモデル設定ごと（ModelProfileの能力「組込みのWeb検索」と、許可の設定）と、使える部門で行う。ローカルLLMにはないので、機密の会話・機密のConnectorを使ったRunでは使えない。
   - Toolとしてはプロバイダの組込みの形のまま渡し（Codexの方式）、Runnerは実行しない。検索の問い合わせと出典はプロバイダの応答から取り出し、RunEventに記録する。
   - 問い合わせの文字列やプロバイダがページを開く動作も、社内のデータの持ち出し口になりうるので、各社の許可するドメインの絞り込み（OpenAI・Anthropicのドメインの指定等）を設定できるようにし、結果は信頼しない内容として扱う。
 - **サブエージェント**：MVPは1つの会話で1つの主たるRunを進める（design.md §5.1）。並列の調査が必要になったら、子のRunとして検討する。
@@ -355,8 +355,8 @@ class ToolResult:
 **Runに出すToolの一覧**は、Run開始時に次から決め、`request.header` に記録する。Runの中では変えない（prompt cacheを保つため）。
 
 1. Runの種類：業務のRun、Skillの編集のRun、Draftの評価のRun（design.md §3.6・§3.7）。Skill管理のToolは編集のRunだけ、Skill公開のToolは評価のRunには出さない。評価のRunは、評価するSkill（公開中の版か、評価に写したDraft）を `/` で指定したRunと同じに扱い、`skill`・`request_skill_edit` は出さない（design.md §3.7.1）。
-2. Skill：`/` かTask DefinitionでSkillを指定したRunでは、そのSkillの `tools` に限り、業務結果のSchemaがあれば `submit_result` を加える（`skill` は出さない）。答える人がいる業務のRunには、Skillの指定にかかわらず `request_skill_edit` を加える（編集を提案するだけで、作業の権限を増やさないため）。指定がなく、エージェントが探して使う会話では、利用者が使えるToolの全体と `skill` を出す。
-3. 利用者の権限と組織のポリシー：Connectorは、使える部門に所属している（か全社向けの）ものだけ（design.md §4.9.1）。
+2. Skill：`/` かTask DefinitionでSkillを指定したRunでは、そのSkillの `tools` に限り（タスクのRunでは、さらにタスクのTool一覧との両方に入っているものだけ。どちらにも書いていなければToolなし。引数の制限もタスクの定義に従う。authorization.md §5.4）、業務結果のSchemaがあれば `submit_result` を加える（`skill` は出さない）。答える人がいる業務のRunには、Skillの指定にかかわらず `request_skill_edit` を加える（編集を提案するだけで、作業の権限を増やさないため）。指定がなく、エージェントが探して使う会話では、利用者が使えるToolの全体と `skill` を出す。
+3. 実行許可（authorization.md §6）：会話では、依頼した人が使えるConnector（本人の個人、使える部門の部門、全社）だけ。タスクのRunでは、タスクに固定したConnectorだけで、エージェントが探して使うことはしない（チャットから起動したRunは、それをさらに起動した人の今の権限で絞る）。システムのConnector・Skillは、システムタスクのRunにだけ出す。
 4. モデルの能力：Tool呼出しに対応しないモデルでは、Toolを出さない（Skillも、Toolが要るものは候補にしない。design.md §4.8）。
 5. 確認の相手：`ask_user` は、答える人がいるRun（会話、または対話Bindingのあるタスク）だけに出す。
 6. Sandbox：SkillかTask DefinitionがSandboxを使うToolを許さないコマンド不要のRun（design.md §3.4）では、Sandboxを使うToolを出さない。Runtime ProfileはRunの単位で決まり、既定がなければRunを始めない（design.md §7.3）。Sandboxを使うToolがあるRunでも、Sandboxは最初に呼ばれた時点で起動する（design.md §4）。
@@ -604,7 +604,7 @@ Runnerは、shell以外のToolの処理もSandboxの中で行う。ファイル�
 - どのSkillを使うかを、利用者に1行で伝える。
 - 合うSkillがなければ、Skillなしで進めてよい。
 
-**読込み**：`skill` が呼ばれたら、RunnerはそのSkillをその時点の最新の公開版へ解決し、権限・停止・必要な能力・機密の制限と、Skillの要るToolがこのRunにあるかを確かめて、Manifestへの追記と `skill.loaded` の記録を同じDB transactionで行う（design.md §3.2）。結果として返すもの：
+**読込み**：`skill` は会話のRunにだけ出す（タスクのRunでは、タスクに固定した版のSkillだけを使い、探して読み込まない。authorization.md §5.4）。`skill` が呼ばれたら、RunnerはそのSkillをその時点の最新の公開版へ解決し、権限・停止・必要な能力・機密の制限と、Skillの要るToolがこのRunにあるかを確かめて、Manifestへの追記と `skill.loaded` の記録を同じDB transactionで行う（design.md §3.2）。結果として返すもの：
 
 ```
 <skill name="請求書の照合" version="7">
@@ -717,13 +717,13 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 | `get_skill` | なし | 公開中の版とDraft（あれば）の中身・revision・資料を返し、資料を `/workspace/master` に置く（公開中の版は `skills/{skill_id}/{key}/{ファイル名}`、Draftは `drafts/{skill_id}/r{revision}/{key}/{ファイル名}`） |
 | `create_skill` | `name`、`scope`（`personal`・`department`・`company`）、`department`、`description`、`instructions` | 新しいSkillとDraftを作る（新規の依頼のときだけ） |
 | `update_skill_draft` | `expected_revision`、`change_summary`、変える項目（`description`・`instructions`・`requires`・`input_schema`・`output_schema`・`tools`） | Draftを変える。Draftがなければ公開中の版から開く（`expected_revision` は0） |
-| `stage_skill_asset` | `expected_revision`、`key`、`path`（Sandboxの中のファイル）、`role`、`description`、`checks`（CSVの検証の条件。変えるのは公開の役割だけ） | Sandboxのファイルを、Draftの資料として追加・置換する（原本のbytesのまま。添付の `/workspace/input` のファイルもそのまま置換に使える）。形式ごとに検証し、結果に誤りと公開中の版との差分（MDの本文、CSVの行、PPTXのスライドごとのテキストと構造）を返す（design.md §3.9）。`/workspace/input` 以外のファイルは、エージェントが編集した候補として検証する |
+| `stage_skill_asset` | `expected_revision`、`key`、`path`（Sandboxの中のファイル）、`role`、`description`、`checks`（CSVの検証の条件。変えるのは公開の権限を持つ人だけ） | Sandboxのファイルを、Draftの資料として追加・置換する（原本のbytesのまま。添付の `/workspace/input` のファイルもそのまま置換に使える）。形式ごとに検証し、結果に誤りと公開中の版との差分（MDの本文、CSVの行、PPTXのスライドごとのテキストと構造）を返す（design.md §3.9）。`/workspace/input` 以外のファイルは、エージェントが編集した候補として検証する |
 | `remove_skill_asset` | `expected_revision`、`key` | Draftから資料を外す |
-| `publish_skill_draft` | `expected_revision`、`change_reason` | Draftを公開する。公開の役割がなければ公開せず「変更案を保存」と返す |
-| `rollback_skill` | `number`、`expected_version`、`change_reason` | 公開中の版を過去の版に戻す（公開の役割だけ） |
+| `publish_skill_draft` | `expected_revision`、`change_reason` | Draftを公開する。公開の権限がなければ公開せず「変更案を保存」と返す |
+| `rollback_skill` | `number`、`expected_version`、`change_reason` | 公開中の版を過去の版に戻す（公開の権限を持つ人だけ） |
 | `test_skill_draft` | `cases`（評価ケースの名前。省けば全部。10件まで） | Draftを評価する（design.md §3.7.1）。`ask_user` と同じく単独で呼び、評価が終わるまで編集のRunは確認待ち（確認の種類「Draftの評価」。利用者が答えるものではない）になってAttemptを終える。評価が終わるとサーバーがケースごとの結果（通過か、LLMの判定と理由、Draftの側の最後の応答と業務結果の抜粋）を結果として記録し、Runを再開する。編集のRunを止めたら評価も止める。1つの編集のRunで3回まで |
 
-- 権限は管理APIと同じ判定（`Skill.access_of()`）を、呼ぶたびにサーバーで確かめる。Toolの変更・公開・切戻しは公開の役割だけ。
+- 権限は画面のAPIと同じ判定（`Skill.can()`。authorization.md §5.1）を、依頼した人の権限で呼ぶたびにサーバーで確かめる。Toolの変更・公開・切戻しは公開の権限を持つ人だけ。
 - `publish_skill_draft` は、画面と同じ公開の条件（必須の評価ケース。design.md §3.7.1）を確かめる。満たさなければ、足りないケースを示して `test_skill_draft` を呼ぶよう返す。評価ケースはエージェントからは作らない（利用者がSkillの画面で作る）。
 - 公開・切戻しは、ToolInvocationのoperation keyをSkillChangeに渡し、再試行で版を重ねない。SkillChangeには編集のRunを記録する。
 - 結果の `value` に、Skillの名前・範囲・状態（変更案を保存・公開・切戻し）・版・変更点を持たせ、画面はそれを会話に表示し、Skillの画面（版の中身・切戻し）へのリンクを置く（design.md §11.6）。

@@ -331,7 +331,10 @@ ViewSetの `@action`（停止、回答、公開等）も、入力があれば同
 ```ts
 // composables/permission.ts
 export const PermissionCode = {
-  MANAGE_DESTINATIONS: 'delivery.can_manage_destinations',
+  VIEW_DESTINATION: 'delivery.view_destination',
+  ADD_DESTINATION: 'delivery.add_destination',
+  CHANGE_DESTINATION: 'delivery.change_destination',
+  DELETE_DESTINATION: 'delivery.delete_destination',
   PUBLISH_COMPANY_SKILLS: 'skill.can_publish_company_skills',
 } as const
 export type PermissionCode = (typeof PermissionCode)[keyof typeof PermissionCode]
@@ -345,10 +348,13 @@ export const usePermission = defineStore('permission', () => {
 })
 ```
 
-- 権限コードはDjangoの `app_label.codename` の形で、`app/v1/my/` の `allPermissions` から判定する（`usePermission`）。
+- 権限の設計は [authorization.md](authorization.md) を正とする。
+- 権限コードはDjangoの `app_label.codename` の形で、`app/v1/my/` の `allPermissions`（Group経由と直接を含む本人のすべてのpermission）から判定する（`usePermission`）。所属は、同じ応答の `departments`（実際の所属）・`usableDepartments`（使える部門）・`manageableDepartments`（管理できる部門）を使い、フロントエンドで所属やpermissionの規則を作り直さない（authorization.md §4.1.1）。
 - 使う権限コードは `PermissionCode` に定数として追加し、画面のコードに文字列を直接書かない（`Permissions` はDOMの型名と衝突するので使わない）。
-- 接続先・Connectorの画面は、APIと同じDjango標準のpermission（`connector.view_databaseconnection`・`add_*`・`change_*`・`delete_*`）で、ページ・追加・更新・削除のボタンを出し分ける。Connectorの一覧はAPIが所属で絞る。基盤管理者だけが使える画面（LLMの接続等）は、そのModelのDjango標準のpermission（`llm.change_llmconnection` 等）で出し分ける。基盤管理者はすべてのpermissionを持つ。APIは `PlatformAdmin` で守っている（backend-conventions.md §6.3）。`isPlatformAdmin` では判定しない。
-- 役割（業務管理者・Skill公開者等）の名前では判定しない。役割はpermissionをまとめたGroupで、`allPermissions` にはGroupから得たpermissionも含まれる。基盤管理者はすべてのpermissionを持つ（backend-conventions.md §6.3）。
+- 管理画面（基盤の管理）は、APIと同じDjango標準のpermission（`<app_label>.view_<model>`・`add_*`・`change_*`・`delete_*`）で、ページ・メニュー・追加・更新・削除のボタンを出し分ける。ページとメニューは `view_*` か `change_*` のどちらかを持てば出す（一覧のAPIと同じ。変更できる人は閲覧もできる）。追加・削除だけを任せることはしない（`add_*`・`delete_*` は `view_*` か `change_*` と一緒に付ける。authorization.md §10）。ボタンはそれぞれのpermissionで出し分ける。管理画面の一覧は所属で絞らない。
+- 業務画面の範囲を持つもの（Skill・タスク）は、1件ごとの操作の可否を詳細・一覧のAPIが返す（例：Skillの `access`）。ボタンはそれで出し分け、permissionと所属から自分で計算しない。作成ボタンと、作成で選べる範囲・部門は、`allPermissions` と `manageableDepartments` で決める。
+- 基盤管理者かどうか（`is_superuser`）はAPIが返さない。基盤管理者はすべてのpermissionを持つので、permissionで出し分ければ足りる。
+- Groupの名前では判定しない。Groupはpermissionの集まりで、`allPermissions` にはGroupから得たpermissionも含まれる。
 
 ### 6.2 画面・メニュー・ボタン
 
@@ -358,7 +364,9 @@ export const usePermission = defineStore('permission', () => {
 - 管理画面のサイドメニューは `composables/manage.ts` の `useManageMenu()` に1か所で定義する。各リンクに `permission`（リンク先のページの `definePageMeta` と同じもの）を持たせ、権限のない項目は表示しない。見出し（`children` を持つ項目。例：Connector → DB Connector → 接続先・Connector）で入れ子にでき、表示できるリンクが1つもない見出しは出さない。`items` はメニューの木、`links` は表示できるリンクを平らにしたもので、見出しの文字・`/manage` の最初の移動先・入口の判定には `links` を使う。
 - `pages/manage.vue` の `definePageMeta({ layout: 'manage', middleware: 'manage' })` は `/manage` 以下の全ページに適用される（route metaは親から子に引き継がれる）。`middleware/manage.ts` は、表示できるリンクが1つもなければ403にする。`/manage` に入れる権限の一覧を別に持たず、メニューの定義から決める。`/manage` 自体はメニューの最初の項目へ移動する。
 - 社員向けのlayoutの「管理」の入口も、表示できるメニュー項目があるときだけ出す。
-- ボタンや操作は `v-if="hasPermission(PermissionCode.X)"` で出し分ける。コメントで「サーバー側でも403で弾かれる」ことを書いておく。
+- 画面は層で分ける（authorization.md §7.3）。業務画面（ルート直下）は利用と業務の管理（個人・部門・全社のSkill・タスク）で、一覧は所属で絞られる。管理画面（`/manage`）は基盤の管理（Connector・接続・入口・出口、システムのSkill・タスク、LLM・Runtime Profile・SSO・ユーザー・部門）で、所属を問わず全件を扱う。部門のSkillの公開者や部門のタスク管理者は、管理画面に入らない。
+- 業務画面のSkill・タスクの一覧は、範囲のタブ（個人・部門・全社）と部門の選択で絞ってから、選んで詳細（編集）に入る形にする（authorization.md §7.3.1）。部門の選択肢は、Skillは `usableDepartments`、タスクは `manageableDepartments` から作る。
+- 管理画面のボタンや操作は `v-if="hasPermission(PermissionCode.X)"` で出し分ける。業務画面の範囲を持つもの（Skill・タスク）の1件ごとの操作は、APIが返す操作の可否（`access` 等）で出し分ける（個人のものはpermissionなしで本人が扱えるため。§6.1）。どちらも、コメントで「サーバー側でも403で弾かれる」ことを書いておく。
 - 特定の組織IDやユーザーIDをフロントエンドに直接書いて機能を出し分けない。出し分けが必要なら、サーバーが権限か設定値として返す。
 
 ---
@@ -471,7 +479,7 @@ pages/
     └── departments/[departmentId].vue
 ```
 
-- Skillの画面は、管理画面（`/manage`）ではなく社員向けのルート直下に置く。個人のSkillは全社員が作り、何ができるかはSkillごとの `access`（範囲と部門の中の役割。design.md §3.6）で決まるため、`/manage` に入る権限とは関係がない。APIも社員向けの `app/v1/skills` にある。
+- Skillの画面は、管理画面（`/manage`）ではなく社員向けのルート直下に置く。個人のSkillは全社員が作り、何ができるかはSkillごとの `access`（範囲・所属・permission。authorization.md §5.1）で決まるため、`/manage` に入る権限とは関係がない。APIも社員向けの `app/v1/skills` にある。
 - Skillの詳細は、編集する項目が多いので、一覧の子ルートのドロワー（§8.2）ではなくページ全体にする。
 
 - URLのパス、ディレクトリ名、パラメータ名は、APIのリソース名に合わせる（`/runs/[runId]` ↔ `app/v1/runs/{uid}`）。パラメータの値はAPIの `id`（uid）をそのまま使う。

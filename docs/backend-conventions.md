@@ -641,13 +641,13 @@ DATABASES = {
 
 - 権限の設計（範囲、3つの層、実行許可）は [authorization.md](authorization.md) を正とする。ここではDjangoでの書き方を定める。
 - 権限は「所属」と「permission」の2軸で判定する。判定にGroupを使わない（`user.groups` やGroupの名前で絞らない）。Userのフラグも判定に使わない。
-- **所属**は、`Department.objects.usable_by(user)`（使える部門）と `Department.objects.manageable_by(user)`（管理できる部門）、`Department.objects.joined_by(user)`（実際の所属。permissionで広がらない。部門タスクのチャットからの起動と、本人の所属の表示に使う）だけで判定する。ほかの場所で `DepartmentMembership` を直接引かない。使える部門は、permission `user.can_use_all_departments` か `user.can_manage_all_departments` を持てばすべての部門を返す。管理できる部門は、`user.can_manage_all_departments` を持つときだけすべての部門を返す（`can_use_all_departments` では広がらない）。1つのリクエストの中では結果を `request.user` に持たせて使い回し、所属・Groupを変える処理の後では使わない。
+- **所属**は、`Department.objects.usable_by(user)`（使える部門）と `Department.objects.manageable_by(user)`（管理できる部門）、`Department.objects.joined_by(user)`（実際の所属。permissionで広がらない。部門タスクのチャットからの起動と、本人の所属の表示に使う）だけで判定する。ほかの場所で `DepartmentMembership` を直接引かない。使える部門は、permission `user.can_use_all_departments` か `user.can_manage_all_departments` を持てばすべての部門を返す。どの関数も、有効な部門（無効にしていない部門）だけを返す。管理できる部門は、`user.can_manage_all_departments` を持つときだけすべての部門を返す（`can_use_all_departments` では広がらない）。1つのリクエストの中では結果を `request.user` に持たせて使い回し、所属・Groupを変える処理の後では使わない。
 - **permission**はDjangoのpermissionで判定する。
   1. Yorikiで定義するpermissionは `utils.permissions.AppPermission` に（app_label、codename、表示名）として1か所にまとめる。codenameは `can_<動詞>_<対象>` にする（例：`skill.can_publish_company_skills`）。
   2. 対象アプリのModelの `Meta.permissions` に `AppPermission.XXX.meta` を書き、マイグレーションでpermissionを作る。
   3. Groupは「permissionの集まり」。初期のGroup（authorization.md §11）は、`user` のデータのマイグレーションで最初に一度だけ作る（`migrate` のたびに作り直さない。消したGroupや外したpermissionを戻さないため）。マイグレーションの中では、初期のGroupに入れるpermissionを `create_permissions` を `apps` 付きで呼んで先に作る。
   4. Groupの中身はDjangoの管理画面（`/api/admin/`）で編集する。ユーザーへの割り当ては、Yorikiの管理画面（`v1/users`）かDjangoの管理画面で行う。
-- **`is_superuser` はアプリの判定に使わない**。Djangoの `has_perm()` は有効なsuperuserにすべてのpermissionを返すので、アプリはいつもpermissionで判定すればよい。`is_superuser` を見るのは、Django管理画面と、パスワードでのログインの判定（`utils.backends.PasswordBackend`。SSOが有効でも基盤管理者だけはパスワードでログインできる）だけにする。APIの応答（`app/v1/my/` やユーザーの管理API）に `is_superuser` を出さない。
+- **`is_superuser` はアプリの判定に使わない**。Djangoの `has_perm()` は有効なsuperuserにすべてのpermissionを返すので、アプリはいつもpermissionで判定すればよい。`is_superuser` を見るのは、Django管理画面、パスワードでのログインの判定（`utils.backends.PasswordBackend`。SSOが有効でも基盤管理者だけはパスワードでログインできる）、基盤管理者のアカウントの保護（変更と招待・再設定のリンクの発行・受け入れは基盤管理者だけ）だけにする。APIの応答（`app/v1/my/` やユーザーの管理API）に `is_superuser` を出さない。
 - **範囲を持つもの**（Skill・Connector・タスク・入口・出口）の判定は、各アプリのQuerySetとModelに置き、Viewに条件を書かない。
   - 一覧の絞り込みはQuerySetのメソッド（`visible_to(user)`・`manageable_by(user)` 等）、1件の判定はModelの `can(user, 操作)` にする。操作は「見る・使う・管理・起動・結果を見る・ログを見る・候補に出す」等を区別する。範囲ごとの規則は1つの表に書き、QuerySetとModelの両方がそれを読む。
   - Viewは `get_queryset` でQuerySetのメソッドを使い、操作の前にModelの `can()` を呼ぶ。一覧では隠れるのにIDを指定すると読める、という食い違いを作らない。

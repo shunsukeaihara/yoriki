@@ -155,7 +155,16 @@ class DatasourceAdapter(ABC):
         """
         assert self.version is not None
         names = sorted({entry["name"] for entry in self.version.tables})
-        found = {self._key(t.schema, t.name): t for t in self._run(lambda: self._catalog(names))} if names else {}
+        # MySQLはDB名がスキーマなので、範囲（catalog_scope）で絞れている
+        schemas = (
+            None if self.dialect.schema_is_database else sorted({e.get("schema", "") for e in self.version.tables})
+        )
+        # 結果は公開した名前とスキーマの組の範囲に収まるので、件数の上限で打ち切らない
+        found = (
+            {self._key(t.schema, t.name): t for t in self._run(lambda: self._catalog(names, schemas, limit=None))}
+            if names
+            else {}
+        )
         result = []
         for entry in self.version.tables:
             schema, name = entry.get("schema", ""), entry["name"]
@@ -168,8 +177,10 @@ class DatasourceAdapter(ABC):
             result.append(TableInfo(schema, name, kind, columns, entry.get("description", "")))
         return result
 
-    def _catalog(self, names: list[str] | None) -> list[TableInfo]:
-        """INFORMATION_SCHEMA から表・ビューと列を読む。names を渡せば、その名前の表だけ。
+    def _catalog(
+        self, names: list[str] | None, schemas: list[str] | None = None, *, limit: int | None = MAX_LISTED_TABLES
+    ) -> list[TableInfo]:
+        """INFORMATION_SCHEMA から表・ビューと列を読む。names・schemas を渡せば、その名前・スキーマの表だけ。
 
         列は、読んだ表の名前で照会する（一覧を件数の上限で打ち切ったときに、載せない表の列まで読まない）。
         名前は同じでスキーマの違う表の列も返るので、表と組み合わせて選ぶ
@@ -177,18 +188,19 @@ class DatasourceAdapter(ABC):
         with self.connect() as conn:
             cur = conn.cursor()
             tables: list[tuple[str, str, str]] = []
-            for condition, params in self._by_names(names):
+            for condition, params in self._by_names(names, schemas):
                 cur.execute(
                     "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES"
                     f" WHERE {condition} ORDER BY TABLE_SCHEMA, TABLE_NAME",
                     params,
                 )
-                tables += [(s, n, k) for s, n, k in cur.fetchmany(MAX_LISTED_TABLES - len(tables))]
-                if len(tables) >= MAX_LISTED_TABLES:
+                rows = cur.fetchall() if limit is None else cur.fetchmany(limit - len(tables))
+                tables += [(s, n, k) for s, n, k in rows]
+                if limit is not None and len(tables) >= limit:
                     break
             listed = {(s, n) for s, n, _k in tables}
             columns: dict[tuple[str, str], list[ColumnInfo]] = {}
-            for condition, params in self._by_names(sorted({n for _s, n, _k in tables})) if tables else ():
+            for condition, params in self._by_names(sorted({n for _s, n, _k in tables}), schemas) if tables else ():
                 cur.execute(
                     f"SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, {self.type_column} FROM INFORMATION_SCHEMA.COLUMNS"
                     f" WHERE {condition} ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION",
@@ -207,14 +219,22 @@ class DatasourceAdapter(ABC):
             for s, n, k in tables
         ]
 
-    def _by_names(self, names: list[str] | None) -> Iterator[tuple[str, tuple[str, ...]]]:
-        """INFORMATION_SCHEMA を読む条件と引数。名前は区切って渡す（SQL Serverの引数は2100個まで）"""
+    def _by_names(
+        self, names: list[str] | None, schemas: list[str] | None = None
+    ) -> Iterator[tuple[str, tuple[str, ...]]]:
+        """INFORMATION_SCHEMA を読む条件と引数。名前は区切って渡す（SQL Serverの引数は2100個まで。スキーマは
+        公開する表の数（500）までなので区切らない）"""
+        scope = self.catalog_scope
+        scope_params: tuple[str, ...] = ()
+        if schemas is not None:
+            scope += f" AND TABLE_SCHEMA IN ({', '.join([self.param_marker] * len(schemas))})"
+            scope_params = tuple(schemas)
         if names is None:
-            yield self.catalog_scope, ()
+            yield scope, scope_params
             return
         for start in range(0, len(names), NAMES_PER_QUERY):
             chunk = tuple(names[start : start + NAMES_PER_QUERY])
-            yield f"{self.catalog_scope} AND TABLE_NAME IN ({', '.join([self.param_marker] * len(chunk))})", chunk
+            yield f"{scope} AND TABLE_NAME IN ({', '.join([self.param_marker] * len(chunk))})", scope_params + chunk
 
     def _key(self, schema: str, name: str) -> tuple[str, str]:
         # MySQLのスキーマはDB名（公開する表はスキーマを持たない）

@@ -65,7 +65,7 @@ class DatabaseConnectionSerializer(serializers.ModelSerializer):
     )
     has_password = serializers.SerializerMethodField()
     password_hint = serializers.SerializerMethodField()
-    connector_count = serializers.IntegerField(read_only=True, help_text=_("この接続を使うConnectorの数"))
+    connector_count = serializers.SerializerMethodField(help_text=_("この接続を使うConnectorの数"))
     created_by: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(slug_field="uid", read_only=True)
 
     class Meta:
@@ -102,6 +102,11 @@ class DatabaseConnectionSerializer(serializers.ModelSerializer):
 
     def get_password_hint(self, obj: DatabaseConnection) -> str:
         return obj.password.hint
+
+    def get_connector_count(self, obj: DatabaseConnection) -> int:
+        # 一覧・詳細は件数を注釈で付けて読む（DatabaseConnectionViewSet）。作成・更新の応答では数える
+        count = getattr(obj, "connector_count", None)
+        return count if count is not None else obj.connectors.filter(deleted=False).count()
 
     def validate_name(self, value: str) -> str:
         value = value.strip()
@@ -144,11 +149,6 @@ class DatabaseConnectionSerializer(serializers.ModelSerializer):
             attrs.pop("password")  # 空文字は「変更しない」
         return attrs
 
-    def create(self, validated_data) -> DatabaseConnection:
-        instance = super().create(validated_data)
-        instance.connector_count = 0
-        return instance
-
     @transaction.atomic
     def update(self, instance: DatabaseConnection, validated_data) -> DatabaseConnection:
         # validate() は取得した時点の値で比べている。同時に別の要求が接続先を変えていても、パスワードなしで
@@ -165,7 +165,6 @@ class DatabaseConnectionSerializer(serializers.ModelSerializer):
         for name, value in validated_data.items():
             setattr(latest, name, value)
         latest.save(update_fields=[*validated_data, "updated"])
-        latest.connector_count = getattr(instance, "connector_count", None)  # 一覧の注釈を引き継ぐ
         return latest
 
 
@@ -181,8 +180,24 @@ class DatabaseConnectionUpdateSerializer(DatabaseConnectionSerializer):
 
 
 class MinimumDatabaseConnectionSerializer(serializers.ModelSerializer):
+    """Connectorの応答に載せる接続先。ホスト・ポート・DB名は、接続先を見る（か変える）permissionを持つ人にだけ出す
+    （Connectorは所属だけで見られるので、接続先の詳細をpermissionの判定を通さずに出さない）"""
+
     id = serializers.CharField(source="uid", read_only=True)
     kind_display = serializers.CharField(source="get_kind_display", read_only=True)
+    host = serializers.CharField(read_only=True, allow_null=True, help_text=_("接続先を見る権限がなければnull"))
+    port = serializers.IntegerField(read_only=True, allow_null=True, help_text=_("接続先を見る権限がなければnull"))
+    database = serializers.CharField(read_only=True, allow_null=True, help_text=_("接続先を見る権限がなければnull"))
+
+    ADDRESS = ("host", "port", "database")
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not (user and any(user.has_perm(f"connector.{k}_databaseconnection") for k in ("view", "change"))):
+            data.update(dict.fromkeys(self.ADDRESS))
+        return data
 
     class Meta:
         model = DatabaseConnection

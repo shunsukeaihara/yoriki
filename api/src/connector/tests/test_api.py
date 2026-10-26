@@ -121,7 +121,11 @@ class TestPermission:
         api_client.force_login(app_user)
 
         # 見る・使うのは所属だけ（permissionは要らない）。所属していない部門のConnectorは見えない
-        assert [c["id"] for c in api_client.get(CONNECTORS).json()["results"]] == [connector.uid]
+        results = api_client.get(CONNECTORS).json()["results"]
+        assert [c["id"] for c in results] == [connector.uid]
+        # 接続先のホスト等は、接続先を見る権限がなければ出さない
+        assert results[0]["connection_info"]["host"] is None
+        assert results[0]["connection_info"]["name"] == connector.connection.name
         assert api_client.get(f"{url}describe/").status_code == 200
         assert api_client.get(f"{url}versions/").status_code == 200
         assert api_client.get(f"{CONNECTORS}{other.uid}/").status_code == 404

@@ -94,9 +94,6 @@ class DatabaseConnection(models.Model):
     updated = models.DateTimeField(auto_now=True)
     deleted = models.BooleanField(default=False)
 
-    # この接続を使うConnectorの数。一覧・詳細では注釈で付ける（DatabaseConnectionViewSet）
-    connector_count: int | None
-
     class Meta:
         verbose_name = _("接続先")
         verbose_name_plural = verbose_name

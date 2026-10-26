@@ -6787,6 +6787,9 @@ components:
       - name
     MinimumDatabaseConnection:
       type: object
+      description: |-
+        Connectorの応答に載せる接続先。ホスト・ポート・DB名は、接続先を見る（か変える）permissionを持つ人にだけ出す
+        （Connectorは所属だけで見られるので、接続先の詳細をpermissionの判定を通さずに出さない）
       properties:
         id:
           type: string
@@ -6806,15 +6809,18 @@ components:
         host:
           type: string
           readOnly: true
-          title: ホスト
+          nullable: true
+          description: 接続先を見る権限がなければnull
         port:
           type: integer
           readOnly: true
-          title: ポート
+          nullable: true
+          description: 接続先を見る権限がなければnull
         database:
           type: string
           readOnly: true
-          title: DB名
+          nullable: true
+          description: 接続先を見る権限がなければnull
         connect_timeout_seconds:
           type: integer
           readOnly: true

@@ -106,9 +106,14 @@ const onCreated = (connector: Connector) => {
           </UBadge>
         </template>
         <template #connection-cell="{ row }">
-          <NuxtLink :to="`/manage/database_connections/${row.original.connection}`" class="text-primary">
+          <NuxtLink
+            v-if="row.original.connectionInfo.host"
+            :to="`/manage/database_connections/${row.original.connection}`"
+            class="text-primary"
+          >
             {{ row.original.connectionInfo.name }}
           </NuxtLink>
+          <span v-else>{{ row.original.connectionInfo.name }}</span>
         </template>
         <template #tables-cell="{ row }">
           {{ $t('{count}件', { count: row.original.tables?.length ?? 0 }) }}

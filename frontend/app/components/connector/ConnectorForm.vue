@@ -131,14 +131,18 @@ defineExpose({ onSubmit, loading, canPost, reset })
     <!-- 使うDB接続は作成した後は変えられない（公開した表は、そのDBのものなので） -->
     <div v-else class="grid gap-1 text-sm">
       <span class="text-muted">{{ $t('接続先') }}</span>
-      <NuxtLink :to="`/manage/database_connections/${modelValue?.connection}`" class="text-primary">
-        {{ modelValue?.connectionInfo.name }}
-      </NuxtLink>
-      <span class="font-mono text-xs text-muted">
-        {{ modelValue?.kindDisplay }}・{{ modelValue?.connectionInfo.host }}:{{ modelValue?.connectionInfo.port }}/{{
-          modelValue?.connectionInfo.database
-        }}
-      </span>
+      <!-- ホスト・DB名は、接続先を見る権限がある人にだけサーバーが返す（なければnull） -->
+      <template v-if="modelValue?.connectionInfo.host">
+        <NuxtLink :to="`/manage/database_connections/${modelValue.connection}`" class="text-primary">
+          {{ modelValue.connectionInfo.name }}
+        </NuxtLink>
+        <span class="font-mono text-xs text-muted">
+          {{ modelValue.kindDisplay }}・{{ modelValue.connectionInfo.host }}:{{ modelValue.connectionInfo.port }}/{{
+            modelValue.connectionInfo.database
+          }}
+        </span>
+      </template>
+      <span v-else>{{ modelValue?.connectionInfo.name }}（{{ modelValue?.kindDisplay }}）</span>
     </div>
 
     <DFormSection

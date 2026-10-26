@@ -2502,6 +2502,10 @@ export interface components {
             readonly id: string;
             readonly name: string;
         };
+        /**
+         * @description Connectorの応答に載せる接続先。ホスト・ポート・DB名は、接続先を見る（か変える）permissionを持つ人にだけ出す
+         *     （Connectorは所属だけで見られるので、接続先の詳細をpermissionの判定を通さずに出さない）
+         */
         MinimumDatabaseConnection: {
             readonly id: string;
             /** 名前 */
@@ -2509,12 +2513,12 @@ export interface components {
             /** 種別 */
             readonly kind: components["schemas"]["ConnectorKindEnum"];
             readonly kind_display: string;
-            /** ホスト */
-            readonly host: string;
-            /** ポート */
-            readonly port: number;
-            /** DB名 */
-            readonly database: string;
+            /** @description 接続先を見る権限がなければnull */
+            readonly host: string | null;
+            /** @description 接続先を見る権限がなければnull */
+            readonly port: number | null;
+            /** @description 接続先を見る権限がなければnull */
+            readonly database: string | null;
             /** 接続のタイムアウト（秒） */
             readonly connect_timeout_seconds: number;
             /** 有効 */

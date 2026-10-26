@@ -18,6 +18,7 @@ class PostgreSQLAdapter(DatasourceAdapter):
     """psycopg 3。読取り専用のtransaction（`default_transaction_read_only`、`BEGIN READ ONLY`）と `statement_timeout`"""
 
     dialect = POSTGRES
+    catalog_scope = "TABLE_SCHEMA NOT IN ('pg_catalog', 'information_schema') AND TABLE_SCHEMA NOT LIKE 'pg\\_%%'"
 
     @contextmanager
     def connect(self) -> Iterator[psycopg.Connection]:
@@ -55,20 +56,6 @@ class PostgreSQLAdapter(DatasourceAdapter):
     def open_cursor(self, conn: psycopg.Connection) -> Any:
         # サーバー側のcursorで少しずつ取り出す（上限で打ち切った残りの行を読まない）
         return conn.cursor(name="yoriki_query")
-
-    def tables_sql(self) -> str:
-        return (
-            "SELECT table_schema, table_name, table_type FROM information_schema.tables"
-            " WHERE table_schema NOT IN ('pg_catalog', 'information_schema') AND table_schema NOT LIKE 'pg\\_%'"
-            " ORDER BY table_schema, table_name"
-        )
-
-    def columns_sql(self) -> str:
-        return (
-            "SELECT table_schema, table_name, column_name, data_type FROM information_schema.columns"
-            " WHERE table_schema NOT IN ('pg_catalog', 'information_schema') AND table_schema NOT LIKE 'pg\\_%'"
-            " ORDER BY table_schema, table_name, ordinal_position"
-        )
 
     def translate_error(self, exc: Exception) -> ConnectorError | None:
         if isinstance(exc, errors.QueryCanceled):

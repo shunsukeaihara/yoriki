@@ -1779,6 +1779,8 @@ export interface components {
             readonly row_count: number;
             /** @description 行数・サイズの上限で打ち切った */
             readonly truncated: boolean;
+            /** @description 取得した行のうち、応答には先頭の行だけを載せた（row_count が取得した行数） */
+            readonly preview_truncated: boolean;
             readonly csv_bytes: number;
             readonly elapsed_ms: number;
             readonly tables: string[];

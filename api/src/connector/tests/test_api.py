@@ -1,7 +1,9 @@
 import pytest
+from auditlog.models import LogEntry
 from django.contrib.auth.models import Group, Permission
 from django.test import override_settings
 
+from connector.adapters.base import QueryResult
 from connector.errors import ConnectorError, ConnectorErrorKind
 from connector.factories import ConnectorFactory, ConnectorPermissionFactory
 from connector.models import VERSION_FIELDS, Connector, ConnectorKind, ConnectorVersion, Operation
@@ -221,6 +223,19 @@ class TestUpdate:
         assert [(p.group, p.department) for p in connector.permissions.all()] == [(None, department)]
 
     @pytest.mark.django_db
+    def test_permission_changes_are_audited(self, admin_client, department):
+        connector = ConnectorFactory.create()
+        res = admin_client.patch(
+            f"{CONNECTORS}{connector.uid}/",
+            {"version": 1, "permissions": [{"department": department.uid}]},
+            format="json",
+        )
+        assert res.status_code == 200, res.data
+        permission = connector.permissions.get()
+        entries = LogEntry.objects.get_for_object(permission)
+        assert [e.action for e in entries] == [LogEntry.Action.CREATE]
+
+    @pytest.mark.django_db
     def test_delete(self, admin_client):
         connector = ConnectorFactory.create()
         assert admin_client.delete(f"{CONNECTORS}{connector.uid}/").status_code == 204
@@ -268,6 +283,23 @@ class TestOperations:
         assert res.status_code == 200
         assert res.json()["ok"] is False
         assert res.json()["error_kind"] == "rejected"
+
+    @pytest.mark.django_db
+    def test_query_preview_is_marked(self, admin_client, monkeypatch):
+        connector = ConnectorFactory.create(version__tables=[{"schema": "public", "name": "vendors"}])
+        rows = [(i,) for i in range(250)]
+        monkeypatch.setattr(
+            "connector.adapters.postgresql.PostgreSQLAdapter.query",
+            lambda self, sql, params: QueryResult(columns=["id"], rows=rows, sql=sql),
+        )
+        body = admin_client.post(
+            f"{CONNECTORS}{connector.uid}/query/", {"sql": "SELECT id FROM vendors"}, format="json"
+        ).json()
+        assert body["ok"] is True
+        assert len(body["rows"]) == 200
+        assert body["row_count"] == 250
+        assert body["preview_truncated"] is True
+        assert body["truncated"] is False
 
     @pytest.mark.django_db
     def test_query_params_must_be_scalars(self, admin_client):

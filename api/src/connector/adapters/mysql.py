@@ -30,6 +30,8 @@ class MySQLAdapter(DatasourceAdapter):
     """PyMySQL。読取り専用のtransaction（`START TRANSACTION READ ONLY`）と `MAX_EXECUTION_TIME`"""
 
     dialect = MYSQL
+    catalog_scope = "TABLE_SCHEMA = DATABASE()"
+    type_column = "COLUMN_TYPE"
 
     @contextmanager
     def connect(self) -> Iterator[pymysql.connections.Connection]:
@@ -75,18 +77,6 @@ class MySQLAdapter(DatasourceAdapter):
     def open_cursor(self, conn: pymysql.connections.Connection) -> Any:
         # 結果をバッファしないcursorで少しずつ取り出す
         return conn.cursor(pymysql.cursors.SSCursor)
-
-    def tables_sql(self) -> str:
-        return (
-            "SELECT table_schema, table_name, table_type FROM information_schema.tables"
-            " WHERE table_schema = DATABASE() ORDER BY table_schema, table_name"
-        )
-
-    def columns_sql(self) -> str:
-        return (
-            "SELECT table_schema, table_name, column_name, column_type FROM information_schema.columns"
-            " WHERE table_schema = DATABASE() ORDER BY table_schema, table_name, ordinal_position"
-        )
 
     def translate_error(self, exc: Exception) -> ConnectorError | None:
         if isinstance(exc, pymysql.MySQLError):

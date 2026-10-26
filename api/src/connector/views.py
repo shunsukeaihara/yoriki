@@ -130,9 +130,7 @@ class ConnectorViewSet(SoftDeleteMixin, ModelViewSet):
         adapter = get_adapter(self.get_object())
         sql, params = serializer.validated_data["sql"], serializer.validated_data["params"]
         try:
-            result = adapter.query(sql, params)
-            result.rows = result.rows[:PREVIEW_ROWS]
-            data = ConnectorQueryResultSerializer.build(result)
+            data = ConnectorQueryResultSerializer.build(adapter.query(sql, params), preview_rows=PREVIEW_ROWS)
         except ConnectorError as exc:
             data = ConnectorQueryResultSerializer.build(None, error_kind=exc.kind, detail=exc.message)
         return Response(ConnectorQueryResultSerializer(data).data)

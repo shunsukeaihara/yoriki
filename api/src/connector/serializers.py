@@ -266,8 +266,11 @@ class ConnectorSerializer(serializers.ModelSerializer):
         return {name: sent[name] if name in sent else getattr(current, name) for name in VERSION_FIELDS}
 
     def _save_permissions(self, connector: Connector, permissions: list[dict[str, Any]]) -> None:
-        connector.permissions.all().delete()
-        ConnectorPermission.objects.bulk_create(ConnectorPermission(connector=connector, **p) for p in permissions)
+        # 監査ログに残すため、1件ずつ削除・作成する（bulk_create は保存のシグナルを送らない）
+        for permission in connector.permissions.all():
+            permission.delete()
+        for p in permissions:
+            ConnectorPermission.objects.create(connector=connector, **p)
 
     @transaction.atomic
     def create(self, validated_data) -> Connector:
@@ -402,6 +405,9 @@ class ConnectorQueryResultSerializer(serializers.Serializer):
     rows = serializers.SerializerMethodField(help_text=_("値は文字列にしたもの（NULLは空文字）"))
     row_count = serializers.IntegerField(read_only=True)
     truncated = serializers.BooleanField(read_only=True, help_text=_("行数・サイズの上限で打ち切った"))
+    preview_truncated = serializers.BooleanField(
+        read_only=True, help_text=_("取得した行のうち、応答には先頭の行だけを載せた（row_count が取得した行数）")
+    )
     csv_bytes = serializers.IntegerField(read_only=True)
     elapsed_ms = serializers.IntegerField(read_only=True)
     tables = serializers.ListField(child=serializers.CharField(), read_only=True)
@@ -411,7 +417,9 @@ class ConnectorQueryResultSerializer(serializers.Serializer):
         return [[to_text(v) for v in row] for row in obj["rows"]]
 
     @staticmethod
-    def build(result: QueryResult | None, *, error_kind: str = "", detail: str = "") -> dict[str, Any]:
+    def build(
+        result: QueryResult | None, *, error_kind: str = "", detail: str = "", preview_rows: int | None = None
+    ) -> dict[str, Any]:
         if result is None:
             return {
                 "ok": False,
@@ -422,6 +430,7 @@ class ConnectorQueryResultSerializer(serializers.Serializer):
                 "rows": [],
                 "row_count": 0,
                 "truncated": False,
+                "preview_truncated": False,
                 "csv_bytes": 0,
                 "elapsed_ms": 0,
                 "tables": [],
@@ -432,9 +441,10 @@ class ConnectorQueryResultSerializer(serializers.Serializer):
             "detail": "",
             "sql": result.sql,
             "columns": result.columns,
-            "rows": result.rows,
+            "rows": result.rows[:preview_rows],
             "row_count": len(result.rows),
             "truncated": result.truncated,
+            "preview_truncated": preview_rows is not None and len(result.rows) > preview_rows,
             "csv_bytes": result.csv_bytes,
             "elapsed_ms": result.elapsed_ms,
             "tables": list(result.tables),

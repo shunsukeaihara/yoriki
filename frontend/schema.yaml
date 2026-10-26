@@ -5045,6 +5045,10 @@ components:
           type: boolean
           readOnly: true
           description: 行数・サイズの上限で打ち切った
+        preview_truncated:
+          type: boolean
+          readOnly: true
+          description: 取得した行のうち、応答には先頭の行だけを載せた（row_count が取得した行数）
         csv_bytes:
           type: integer
           readOnly: true
@@ -5063,6 +5067,7 @@ components:
       - elapsed_ms
       - error_kind
       - ok
+      - preview_truncated
       - row_count
       - rows
       - sql

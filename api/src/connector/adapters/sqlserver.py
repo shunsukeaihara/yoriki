@@ -43,6 +43,8 @@ class SQLServerAdapter(DatasourceAdapter):
     """
 
     dialect = TSQL
+    catalog_scope = "TABLE_CATALOG = DB_NAME()"
+    param_marker = "?"
 
     @property
     def driver(self) -> str:
@@ -82,18 +84,6 @@ class SQLServerAdapter(DatasourceAdapter):
 
     def open_cursor(self, conn: Any) -> Any:
         return conn.cursor()
-
-    def tables_sql(self) -> str:
-        return (
-            "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES"
-            " WHERE TABLE_CATALOG = DB_NAME() ORDER BY TABLE_SCHEMA, TABLE_NAME"
-        )
-
-    def columns_sql(self) -> str:
-        return (
-            "SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS"
-            " WHERE TABLE_CATALOG = DB_NAME() ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION"
-        )
 
     def translate_error(self, exc: Exception) -> ConnectorError | None:
         pyodbc = _pyodbc()

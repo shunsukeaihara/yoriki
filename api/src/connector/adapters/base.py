@@ -103,13 +103,10 @@ class DatasourceAdapter(ABC):
     def open_cursor(self, conn: Any) -> Any:
         """結果を少しずつ取り出すcursor（全行をメモリに読まない）"""
 
-    @abstractmethod
-    def tables_sql(self) -> str:
-        """表・ビューの一覧（スキーマ、名前、種類）を返すSQL。アカウントが読める範囲"""
-
-    @abstractmethod
-    def columns_sql(self) -> str:
-        """列の一覧（スキーマ、表、列、型）を返すSQL"""
+    # INFORMATION_SCHEMA を読む範囲（WHERE の条件）、列の型の列、ドライバの引数の印
+    catalog_scope: str
+    type_column = "DATA_TYPE"
+    param_marker = "%s"
 
     @abstractmethod
     def translate_error(self, exc: Exception) -> ConnectorError | None:
@@ -146,35 +143,17 @@ class DatasourceAdapter(ABC):
 
     def list_tables(self) -> list[TableInfo]:
         """アカウントが読める表・ビューと列の一覧。管理者が公開する表を選ぶために使う"""
-
-        def run() -> list[TableInfo]:
-            with self.connect() as conn:
-                cur = conn.cursor()
-                cur.execute(self.tables_sql())
-                tables = [(s, n, k) for s, n, k in cur.fetchmany(MAX_LISTED_TABLES)]
-                cur.execute(self.columns_sql())
-                columns: dict[tuple[str, str], list[ColumnInfo]] = {}
-                for schema, table, column, type_ in cur.fetchall():
-                    columns.setdefault((schema, table), []).append(ColumnInfo(column, type_))
-            return [
-                TableInfo(
-                    schema=s,
-                    name=n,
-                    kind="view" if "VIEW" in k.upper() else "table",
-                    columns=tuple(columns.get((s, n), ())),
-                )
-                for s, n, k in tables
-            ]
-
-        return self._run(run)
+        return self._run(lambda: self._catalog(None))
 
     def describe(self) -> list[TableInfo]:
         """公開している表・ビューの列と、管理者が付けた説明（`datasource_describe`）。
 
-        DBにない表（公開した後に消された等）は、列を空にして返す
+        公開した表を名前で照会する（一覧の件数の上限に左右されない）。DBにない表（公開した後に消された等）は、
+        列を空にして返す
         """
         assert self.version is not None
-        found = {self._key(t.schema, t.name): t for t in self.list_tables()}
+        names = sorted({entry["name"] for entry in self.version.tables})
+        found = {self._key(t.schema, t.name): t for t in self._run(lambda: self._catalog(names))} if names else {}
         result = []
         for entry in self.version.tables:
             schema, name = entry.get("schema", ""), entry["name"]
@@ -186,6 +165,39 @@ class DatasourceAdapter(ABC):
             kind = table.kind if table else "table"
             result.append(TableInfo(schema, name, kind, columns, entry.get("description", "")))
         return result
+
+    def _catalog(self, names: list[str] | None) -> list[TableInfo]:
+        """INFORMATION_SCHEMA から表・ビューと列を読む。names を渡せば、その名前の表だけ"""
+        condition = self.catalog_scope
+        params: tuple[str, ...] = ()
+        if names is not None:
+            condition += f" AND TABLE_NAME IN ({', '.join([self.param_marker] * len(names))})"
+            params = tuple(names)
+        with self.connect() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM INFORMATION_SCHEMA.TABLES"
+                f" WHERE {condition} ORDER BY TABLE_SCHEMA, TABLE_NAME",
+                params,
+            )
+            tables = [(s, n, k) for s, n, k in cur.fetchmany(MAX_LISTED_TABLES)]
+            cur.execute(
+                f"SELECT TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME, {self.type_column} FROM INFORMATION_SCHEMA.COLUMNS"
+                f" WHERE {condition} ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION",
+                params,
+            )
+            columns: dict[tuple[str, str], list[ColumnInfo]] = {}
+            for schema, table, column, type_ in cur.fetchall():
+                columns.setdefault((schema, table), []).append(ColumnInfo(column, type_))
+        return [
+            TableInfo(
+                schema=s,
+                name=n,
+                kind="view" if "VIEW" in k.upper() else "table",
+                columns=tuple(columns.get((s, n), ())),
+            )
+            for s, n, k in tables
+        ]
 
     def _key(self, schema: str, name: str) -> tuple[str, str]:
         # MySQLのスキーマはDB名（公開する表はスキーマを持たない）

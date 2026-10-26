@@ -3,12 +3,13 @@
  * 画面のコードに文字列を直接書かず、使うものをここに追加する。役割（Group）の名前では判定しない
  */
 export const PermissionCode = {
-  // ユーザー、SSOの設定、LLMの接続とモデル設定、Runtime Profile、Connectorは基盤管理者だけが使う。API は PlatformAdmin で守っている
+  // ユーザー、SSOの設定、LLMの接続とモデル設定、Runtime Profile、DB接続とConnectorは基盤管理者だけが使う。API は PlatformAdmin で守っている
   CHANGE_USER: 'user.change_user',
   CHANGE_SSO_PROVIDER: 'user.change_ssoprovider',
   CHANGE_LLM_CONNECTION: 'llm.change_llmconnection',
   CHANGE_MODEL_PROFILE: 'llm.change_modelprofile',
   CHANGE_RUNTIME_PROFILE: 'runtime.change_runtimeprofile',
+  CHANGE_DATABASE_CONNECTION: 'connector.change_databaseconnection',
   CHANGE_CONNECTOR: 'connector.change_connector',
   // 部門と所属も基盤管理者だけが管理する
   CHANGE_DEPARTMENT: 'user.change_department',

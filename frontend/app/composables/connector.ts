@@ -58,9 +58,13 @@ export const sensitiveItems = (t: T) => [
   { value: false, title: t('機密でない') },
 ]
 
-/** 接続先にかかわる操作を待つ秒数（接続のタイムアウト＋実行時間の上限） */
-export const connectorWaitSeconds = (connector: Pick<Connector, 'connectTimeoutSeconds' | 'timeoutSeconds'>) =>
-  (connector.connectTimeoutSeconds ?? 10) + connector.timeoutSeconds
+/** DB接続の確認・表の一覧を待つ秒数（接続のタイムアウト＋DBでの実行時間の上限。サーバーは版がなければ30秒） */
+export const connectionWaitSeconds = (connection: Pick<DatabaseConnection, 'connectTimeoutSeconds'>) =>
+  (connection.connectTimeoutSeconds ?? 10) + 30
+
+/** Connectorの説明の表示・試し実行を待つ秒数（接続のタイムアウト＋版の実行時間の上限） */
+export const connectorWaitSeconds = (connector: Pick<Connector, 'connectionInfo' | 'timeoutSeconds'>) =>
+  connector.connectionInfo.connectTimeoutSeconds + connector.timeoutSeconds
 
 /** 表・ビューの表示名。MySQLはスキーマを持たない */
 export const tableLabel = (table: { schema: string; name: string }) =>

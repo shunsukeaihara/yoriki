@@ -3,15 +3,17 @@ from auditlog.models import LogEntry
 from django.contrib.auth.models import Group, Permission
 from django.test import override_settings
 
+from connector.adapters import get_adapter
 from connector.adapters.base import QueryResult
 from connector.errors import ConnectorError, ConnectorErrorKind
-from connector.factories import ConnectorFactory, ConnectorPermissionFactory
-from connector.models import VERSION_FIELDS, Connector, ConnectorKind, ConnectorVersion, Operation
-from connector.serializers import ConnectorUpdateSerializer
+from connector.factories import ConnectorFactory, ConnectorPermissionFactory, DatabaseConnectionFactory
+from connector.models import VERSION_FIELDS, Connector, ConnectorKind, ConnectorVersion, DatabaseConnection, Operation
+from connector.serializers import ConnectorUpdateSerializer, DatabaseConnectionUpdateSerializer
 from user.factories import UserFactory
 from user.models import Department, DepartmentMembership, DepartmentRole
 from utils.exceptions import Conflict
 
+CONNECTIONS = "/api/v1/database_connections/"
 CONNECTORS = "/api/v1/connectors/"
 
 
@@ -26,7 +28,7 @@ def fixture_department(db) -> Department:
     return Department.objects.create(name="経理部")
 
 
-def _data(**overrides):
+def _connection_data(**overrides):
     data = {
         "name": "基幹DB",
         "kind": ConnectorKind.POSTGRESQL,
@@ -34,6 +36,15 @@ def _data(**overrides):
         "database": "core",
         "username": "yoriki_reader",
         "password": "secret-pass-1234",
+    }
+    data.update(overrides)
+    return data
+
+
+def _data(on: DatabaseConnection | None = None, **overrides):
+    data = {
+        "name": "取引先マスタ",
+        "connection": (on or DatabaseConnectionFactory.create()).uid,
         "tables": [{"name": "vendors", "description": "取引先", "columns": {"code": "取引先コード"}}],
         "permissions": [],
     }
@@ -43,29 +54,22 @@ def _data(**overrides):
 
 class TestPermission:
     @pytest.mark.django_db
-    def test_only_platform_admin(self, api_client, app_user):
-        assert api_client.get(CONNECTORS).status_code == 401
+    @pytest.mark.parametrize(
+        ("url", "codename"), [(CONNECTIONS, "change_databaseconnection"), (CONNECTORS, "change_connector")]
+    )
+    def test_only_platform_admin(self, api_client, app_user, url, codename):
+        assert api_client.get(url).status_code == 401
         api_client.force_login(app_user)
-        assert api_client.get(CONNECTORS).status_code == 403
+        assert api_client.get(url).status_code == 403
         # 標準のpermissionは画面のメニューの出し分けに使うだけで、APIは基盤管理者に限る
-        app_user.user_permissions.add(Permission.objects.get(codename="change_connector"))
-        assert api_client.get(CONNECTORS).status_code == 403
+        app_user.user_permissions.add(Permission.objects.get(codename=codename))
+        assert api_client.get(url).status_code == 403
 
 
-class TestCreate:
+class TestDatabaseConnection:
     @pytest.mark.django_db
-    def test_create(self, admin_client, platform_admin, department):
-        Group.objects.create(name="経理担当")
-        res = admin_client.post(
-            CONNECTORS,
-            _data(
-                permissions=[
-                    {"group": "経理担当", "operations": ["datasource_describe"]},
-                    {"department": department.uid},
-                ]
-            ),
-            format="json",
-        )
+    def test_create(self, admin_client, platform_admin):
+        res = admin_client.post(CONNECTIONS, _connection_data(), format="json")
         assert res.status_code == 201, res.data
         body = res.json()
         # パスワードは応答に出さない
@@ -73,6 +77,133 @@ class TestCreate:
         assert body["has_password"] is True
         assert body["password_hint"] == "1234"
         assert body["port"] == 5432  # 種別の既定のポート
+        assert body["connector_count"] == 0
+        connection = DatabaseConnection.objects.get(uid=body["id"])
+        assert connection.password.reveal() == "secret-pass-1234"
+        assert connection.created_by == platform_admin
+
+    @pytest.mark.django_db
+    @pytest.mark.parametrize(
+        ("overrides", "field"),
+        [
+            ({"password": ""}, "password"),
+            ({"host": "db.example.co.jp;Server=evil"}, "host"),
+            ({"port": 0}, "port"),
+        ],
+    )
+    def test_validation(self, admin_client, overrides, field):
+        res = admin_client.post(CONNECTIONS, _connection_data(**overrides), format="json")
+        assert res.status_code == 400
+        assert field in res.json()
+
+    @pytest.mark.django_db
+    def test_duplicate_name(self, admin_client):
+        DatabaseConnectionFactory.create(name="基幹DB")
+        res = admin_client.post(CONNECTIONS, _connection_data(), format="json")
+        assert res.status_code == 400
+        assert "name" in res.json()
+
+    @pytest.mark.django_db
+    @override_settings(YORIKI_SECRET_ENCRYPTION_KEYS=[])
+    def test_requires_encryption_key(self, admin_client):
+        res = admin_client.post(CONNECTIONS, _connection_data(), format="json")
+        assert res.status_code == 400
+        assert "password" in res.json()
+
+    @pytest.mark.django_db
+    def test_password(self, admin_client):
+        connection = DatabaseConnectionFactory.create(password="old-pass-0000")
+        url = f"{CONNECTIONS}{connection.uid}/"
+        # 送らない・空文字は変更しない
+        assert admin_client.patch(url, {"username": "reader2"}, format="json").status_code == 200
+        assert admin_client.patch(url, {"password": ""}, format="json").status_code == 200
+        connection.refresh_from_db()
+        assert connection.password.reveal() == "old-pass-0000"
+        assert connection.username == "reader2"
+        assert admin_client.patch(url, {"password": "new-pass-9999"}, format="json").status_code == 200
+        connection.refresh_from_db()
+        assert connection.password.reveal() == "new-pass-9999"
+
+    @pytest.mark.django_db
+    @pytest.mark.parametrize("change", [{"host": "db2.example.co.jp"}, {"port": 15432}, {"database": "core2"}])
+    def test_moving_requires_password(self, admin_client, change):
+        connection = DatabaseConnectionFactory.create(password="old-pass-0000")
+        url = f"{CONNECTIONS}{connection.uid}/"
+        # 登録済みのパスワードを別のサーバーへ送らない
+        res = admin_client.patch(url, change, format="json")
+        assert res.status_code == 400
+        assert "password" in res.json()
+        res = admin_client.patch(url, {**change, "password": ""}, format="json")
+        assert res.status_code == 400
+        res = admin_client.patch(url, {**change, "password": "new-pass-9999"}, format="json")
+        assert res.status_code == 200, res.data
+        connection.refresh_from_db()
+        assert connection.password.reveal() == "new-pass-9999"
+        assert all(getattr(connection, name) == value for name, value in change.items())
+
+    @pytest.mark.django_db
+    def test_same_address_does_not_require_password(self, admin_client):
+        connection = DatabaseConnectionFactory.create(host="db.example.co.jp", port=5432, database="core")
+        res = admin_client.patch(
+            f"{CONNECTIONS}{connection.uid}/",
+            {"host": "db.example.co.jp", "port": 5432, "database": "core", "username": "reader2"},
+            format="json",
+        )
+        assert res.status_code == 200, res.data
+
+    @pytest.mark.django_db
+    def test_kind_cannot_change(self, admin_client):
+        connection = DatabaseConnectionFactory.create()
+        res = admin_client.patch(f"{CONNECTIONS}{connection.uid}/", {"kind": ConnectorKind.MYSQL}, format="json")
+        assert res.status_code == 200, res.data
+        connection.refresh_from_db()
+        assert connection.kind == ConnectorKind.POSTGRESQL
+
+    @pytest.mark.django_db
+    def test_password_is_not_audited(self, admin_client):
+        connection = DatabaseConnectionFactory.create()
+        admin_client.patch(f"{CONNECTIONS}{connection.uid}/", {"password": "new-pass-9999"}, format="json")
+        assert all("password" not in (e.changes_dict or {}) for e in LogEntry.objects.get_for_object(connection))
+
+    @pytest.mark.django_db
+    def test_delete_in_use(self, admin_client):
+        connection = DatabaseConnectionFactory.create()
+        connector = ConnectorFactory.create(connection=connection)
+        url = f"{CONNECTIONS}{connection.uid}/"
+        assert admin_client.get(url).json()["connector_count"] == 1
+        assert admin_client.delete(url).status_code == 409
+        connector.deleted = True
+        connector.save()
+        assert admin_client.delete(url).status_code == 204
+        connection.refresh_from_db()
+        assert connection.deleted is True
+
+    @pytest.mark.django_db
+    def test_update_serializer_keeps_kind(self):
+        assert "kind" in DatabaseConnectionUpdateSerializer.Meta.read_only_fields
+
+
+class TestCreate:
+    @pytest.mark.django_db
+    def test_create(self, admin_client, platform_admin, department):
+        Group.objects.create(name="経理担当")
+        connection = DatabaseConnectionFactory.create()
+        res = admin_client.post(
+            CONNECTORS,
+            _data(
+                connection,
+                permissions=[
+                    {"group": "経理担当", "operations": ["datasource_describe"]},
+                    {"department": department.uid},
+                ],
+            ),
+            format="json",
+        )
+        assert res.status_code == 201, res.data
+        body = res.json()
+        assert body["connection"] == connection.uid
+        assert body["connection_info"]["host"] == "db.example.co.jp"
+        assert body["kind"] == ConnectorKind.POSTGRESQL
         assert body["version"] == 1
         assert body["default_schema"] == "public"
         assert body["tables"] == [
@@ -86,7 +217,7 @@ class TestCreate:
         }
 
         connector = Connector.objects.get(uid=body["id"])
-        assert connector.password.reveal() == "secret-pass-1234"
+        assert connector.connection == connection
         assert connector.created_by == platform_admin
         assert connector.current_version is not None
         assert connector.current_version.number == 1
@@ -94,17 +225,13 @@ class TestCreate:
 
     @pytest.mark.django_db
     def test_mysql_has_no_schema(self, admin_client):
-        res = admin_client.post(
-            CONNECTORS, _data(kind=ConnectorKind.MYSQL, tables=[{"schema": "x", "name": "vendors"}]), format="json"
-        )
+        mysql = DatabaseConnectionFactory.create(kind=ConnectorKind.MYSQL, port=3306)
+        res = admin_client.post(CONNECTORS, _data(mysql, tables=[{"schema": "x", "name": "vendors"}]), format="json")
         assert res.status_code == 201, res.data
-        assert res.json()["port"] == 3306
         assert res.json()["default_schema"] == ""
         assert res.json()["tables"][0]["schema"] == ""
 
-        res = admin_client.post(
-            CONNECTORS, _data(name="別", kind=ConnectorKind.MYSQL, default_schema="x"), format="json"
-        )
+        res = admin_client.post(CONNECTORS, _data(mysql, name="別", default_schema="x"), format="json")
         assert res.status_code == 400
         assert "default_schema" in res.json()
 
@@ -112,9 +239,7 @@ class TestCreate:
     @pytest.mark.parametrize(
         ("overrides", "field"),
         [
-            ({"password": ""}, "password"),
-            ({"host": "db.example.co.jp;Server=evil"}, "host"),
-            ({"port": 0}, "port"),
+            ({"connection": "missing"}, "connection"),
             ({"tables": [{"name": "vendors"}, {"schema": "public", "name": "vendors"}]}, "tables"),
             ({"permissions": [{"operations": ["datasource_query"]}]}, "permissions"),
             ({"permissions": [{"group": "経理担当", "department": "x"}]}, "permissions"),
@@ -131,17 +256,24 @@ class TestCreate:
 
     @pytest.mark.django_db
     def test_duplicate_name(self, admin_client):
-        ConnectorFactory.create(name="基幹DB")
+        ConnectorFactory.create(name="取引先マスタ")
         res = admin_client.post(CONNECTORS, _data(), format="json")
         assert res.status_code == 400
         assert "name" in res.json()
 
     @pytest.mark.django_db
-    @override_settings(YORIKI_SECRET_ENCRYPTION_KEYS=[])
-    def test_requires_encryption_key(self, admin_client):
-        res = admin_client.post(CONNECTORS, _data(), format="json")
+    def test_deleted_connection(self, admin_client):
+        connection = DatabaseConnectionFactory.create(deleted=True)
+        res = admin_client.post(CONNECTORS, _data(connection), format="json")
         assert res.status_code == 400
-        assert "password" in res.json()
+        assert "connection" in res.json()
+
+    @pytest.mark.django_db
+    def test_many_connectors_on_one_connection(self, admin_client):
+        connection = DatabaseConnectionFactory.create()
+        for name in ("取引先マスタ", "受注実績"):
+            assert admin_client.post(CONNECTORS, _data(connection, name=name), format="json").status_code == 201
+        assert connection.connectors.count() == 2
 
 
 class TestUpdate:
@@ -162,11 +294,11 @@ class TestUpdate:
     @pytest.mark.django_db
     def test_same_boundary_does_not_create_version(self, admin_client):
         connector = ConnectorFactory.create()
-        res = admin_client.patch(f"{CONNECTORS}{connector.uid}/", {"version": 1, "username": "reader2"}, format="json")
+        res = admin_client.patch(f"{CONNECTORS}{connector.uid}/", {"version": 1, "name": "受注実績"}, format="json")
         assert res.status_code == 200, res.data
         assert res.json()["version"] == 1
         connector.refresh_from_db()
-        assert connector.username == "reader2"
+        assert connector.name == "受注実績"
 
     @pytest.mark.django_db
     def test_conflict(self, admin_client):
@@ -183,34 +315,15 @@ class TestUpdate:
         assert "version" in res.json()
 
     @pytest.mark.django_db
-    def test_destination_cannot_change(self, admin_client):
-        connector = ConnectorFactory.create(host="db.example.co.jp", port=5432, database="core")
+    def test_connection_cannot_change(self, admin_client):
+        connector = ConnectorFactory.create()
+        other = DatabaseConnectionFactory.create()
         res = admin_client.patch(
-            f"{CONNECTORS}{connector.uid}/",
-            {"version": 1, "kind": ConnectorKind.MYSQL, "host": "evil.example.com", "port": 1, "database": "x"},
-            format="json",
+            f"{CONNECTORS}{connector.uid}/", {"version": 1, "connection": other.uid}, format="json"
         )
         assert res.status_code == 200, res.data
         connector.refresh_from_db()
-        assert (connector.kind, connector.host, connector.port, connector.database) == (
-            ConnectorKind.POSTGRESQL,
-            "db.example.co.jp",
-            5432,
-            "core",
-        )
-
-    @pytest.mark.django_db
-    def test_password(self, admin_client):
-        connector = ConnectorFactory.create(password="old-pass-0000")
-        url = f"{CONNECTORS}{connector.uid}/"
-        # 送らない・空文字は変更しない
-        assert admin_client.patch(url, {"version": 1}, format="json").status_code == 200
-        assert admin_client.patch(url, {"version": 1, "password": ""}, format="json").status_code == 200
-        connector.refresh_from_db()
-        assert connector.password.reveal() == "old-pass-0000"
-        assert admin_client.patch(url, {"version": 1, "password": "new-pass-9999"}, format="json").status_code == 200
-        connector.refresh_from_db()
-        assert connector.password.reveal() == "new-pass-9999"
+        assert connector.connection != other
 
     @pytest.mark.django_db
     def test_permissions_are_replaced(self, admin_client, department):
@@ -243,13 +356,13 @@ class TestUpdate:
         connector = ConnectorFactory.create()
         stale = Connector.objects.get(pk=connector.pk)
         Connector.objects.filter(pk=connector.pk).update(deleted=True)
-        serializer = ConnectorUpdateSerializer(stale, data={"version": 1, "username": "reader2"}, partial=True)
+        serializer = ConnectorUpdateSerializer(stale, data={"version": 1, "name": "受注実績"}, partial=True)
         assert serializer.is_valid(), serializer.errors
         with pytest.raises(Conflict):
             serializer.save(actor=platform_admin)
         connector.refresh_from_db()
         assert connector.deleted is True
-        assert connector.username == "yoriki_reader"
+        assert connector.name != "受注実績"
 
     @pytest.mark.django_db
     def test_delete(self, admin_client):
@@ -276,16 +389,36 @@ class TestOperations:
 
     @pytest.mark.django_db
     def test_check(self, admin_client, monkeypatch):
-        connector = ConnectorFactory.create()
+        connection = DatabaseConnectionFactory.create()
         monkeypatch.setattr("connector.adapters.postgresql.PostgreSQLAdapter.check", lambda self: None)
-        assert admin_client.post(f"{CONNECTORS}{connector.uid}/check/").json() == {"ok": True, "detail": ""}
+        assert admin_client.post(f"{CONNECTIONS}{connection.uid}/check/").json() == {"ok": True, "detail": ""}
 
         def fail(self):
             raise ConnectorError(ConnectorErrorKind.CONNECTION, "password authentication failed")
 
         monkeypatch.setattr("connector.adapters.postgresql.PostgreSQLAdapter.check", fail)
-        res = admin_client.post(f"{CONNECTORS}{connector.uid}/check/")
+        res = admin_client.post(f"{CONNECTIONS}{connection.uid}/check/")
         assert res.json() == {"ok": False, "detail": "password authentication failed"}
+
+    @pytest.mark.django_db
+    def test_tables_of_connection(self, admin_client, monkeypatch):
+        connection = DatabaseConnectionFactory.create()
+
+        def fail(self):
+            raise ConnectorError(ConnectorErrorKind.CONNECTION, "timeout")
+
+        monkeypatch.setattr("connector.adapters.postgresql.PostgreSQLAdapter.list_tables", fail)
+        res = admin_client.get(f"{CONNECTIONS}{connection.uid}/tables/")
+        assert res.json() == {"ok": False, "detail": "timeout", "tables": []}
+
+    @pytest.mark.django_db
+    def test_connector_uses_its_connection(self, monkeypatch):
+        connection = DatabaseConnectionFactory.create(kind=ConnectorKind.MYSQL)
+        connector = ConnectorFactory.create(connection=connection)
+        adapter = get_adapter(connector)
+        assert adapter.connection == connection
+        assert adapter.version == connector.current_version
+        assert get_adapter(connection).version is None
 
     @pytest.mark.django_db
     def test_query_is_checked_before_connecting(self, admin_client, monkeypatch):
@@ -384,6 +517,14 @@ class TestUsableBy:
 
         connector.is_active = True
         connector.save()
+        # DB接続を止めたら、その上のConnectorも使えない
+        connector.connection.is_active = False
+        connector.connection.save()
+        assert list(Connector.objects.usable_by(user)) == []
+        assert connector.operations_for(user) == set()
+        connector.connection.is_active = True
+        connector.connection.save()
+
         user.is_active = False
         user.save()
         assert list(Connector.objects.usable_by(user)) == []

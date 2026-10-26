@@ -1,0 +1,85 @@
+<script setup lang="ts">
+import type { TableColumn } from '@nuxt/ui'
+
+definePageMeta({ permission: PermissionCode.CHANGE_DATABASE_CONNECTION })
+
+const api = useAPI()
+const { t } = useI18n()
+const reloadKey = ref(0)
+const reload = () => (reloadKey.value = Date.now())
+
+const emptyParams = (): DatabaseConnectionListParams => ({ name: undefined, kind: undefined, isActive: undefined })
+const params = ref(emptyParams())
+const clearParams = () => {
+  params.value = emptyParams()
+  reload()
+}
+
+const columns: TableColumn<DatabaseConnection>[] = [
+  { accessorKey: 'name', header: t('名前') },
+  { accessorKey: 'kindDisplay', header: t('種別') },
+  { accessorKey: 'host', header: t('接続先') },
+  { accessorKey: 'connectorCount', header: t('Connector') },
+  { accessorKey: 'isActive', header: t('有効') },
+  { accessorKey: 'updated', header: t('更新日時') },
+]
+</script>
+
+<template>
+  <div>
+    <UContainer>
+      <ListPageTitle
+        :title="$t('DB接続')"
+        :description="
+          $t(
+            '社内DBの接続先と資格情報です。エージェントには見せません。1つのDB接続の上に、公開する表と使える人の違うConnectorを複数作れます',
+          )
+        "
+      >
+        <template #end>
+          <DatabaseConnectionDialog @saved="reload">
+            <template #trigger="{ on }">
+              <DBtn icon="i-lucide-plus" v-on="on">{{ $t('DB接続を追加') }}</DBtn>
+            </template>
+          </DatabaseConnectionDialog>
+        </template>
+      </ListPageTitle>
+
+      <TableSearchForm :reload="reload" :clear="clearParams">
+        <DTextField v-model="params.name" :label="$t('名前')" />
+        <DSelect v-model="params.kind" :label="$t('種別')" :items="connectorKindItems(t)" clearable />
+        <DSelect v-model="params.isActive" :label="$t('有効')" :items="activeItems(t)" clearable />
+      </TableSearchForm>
+
+      <DDataTable
+        v-model:reload-key="reloadKey"
+        :columns="columns"
+        :fetch="api.manage.databaseConnections().list"
+        :params="params"
+      >
+        <template #name-cell="{ row }">
+          <NuxtLink :to="`/manage/database_connections/${row.original.id}`" class="text-primary">
+            {{ row.original.name }}
+          </NuxtLink>
+        </template>
+        <template #host-cell="{ row }">
+          <span class="font-mono text-xs">
+            {{ row.original.host }}:{{ row.original.port }}/{{ row.original.database }}
+          </span>
+        </template>
+        <template #connectorCount-cell="{ row }">
+          <NuxtLink :to="`/manage/connectors?connection=${row.original.id}`" class="text-primary">
+            {{ $t('{count}件', { count: row.original.connectorCount }) }}
+          </NuxtLink>
+        </template>
+        <template #isActive-cell="{ row }">
+          <UBadge :color="row.original.isActive ? 'success' : 'neutral'" variant="subtle">
+            {{ row.original.isActive ? $t('有効') : $t('無効') }}
+          </UBadge>
+        </template>
+        <template #updated-cell="{ row }">{{ formatDatetime(row.original.updated) }}</template>
+      </DDataTable>
+    </UContainer>
+    <NuxtPage @changed="reload" />
+  </div>
+</template>

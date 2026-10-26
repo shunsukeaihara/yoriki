@@ -36,6 +36,12 @@ export const useManageMenu = () => {
       permission: PermissionCode.CHANGE_RUNTIME_PROFILE,
     },
     {
+      label: $i18n.t('DB接続'),
+      icon: 'i-lucide-server',
+      to: '/manage/database_connections',
+      permission: PermissionCode.CHANGE_DATABASE_CONNECTION,
+    },
+    {
       label: $i18n.t('Connector'),
       icon: 'i-lucide-database',
       to: '/manage/connectors',

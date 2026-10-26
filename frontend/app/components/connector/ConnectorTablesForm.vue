@@ -44,7 +44,9 @@ const loadDbTables = async () => {
   loadingDb.value = true
   dbError.value = ''
   try {
-    const result = await api.manage.connectors(connector.id).tables(connectorWaitSeconds(connector))
+    const result = await api.manage
+      .databaseConnections(connector.connection)
+      .tables(connectionWaitSeconds(connector.connectionInfo))
     dbTables.value = result.ok ? result.tables : null
     dbError.value = result.detail
   } catch (err) {

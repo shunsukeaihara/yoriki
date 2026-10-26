@@ -221,17 +221,31 @@ const createAPI = () => {
         versions: (number?: number) =>
           readOnlyResource<RuntimeProfileVersion>(http, `v1/runtime_profiles/${id}/versions`, number?.toString()),
       }),
+      // 社内DBの接続先と資格情報。確認と表の一覧は接続先のDBにつなぐので、接続のタイムアウトまで待つ（waitSeconds）
+      databaseConnections: (id?: string) => ({
+        ...resource<DatabaseConnection, DatabaseConnectionWrite, DatabaseConnectionListParams>(
+          http,
+          'v1/database_connections',
+          id,
+        ),
+        // 更新では種別を送れない
+        update: (data: DatabaseConnectionUpdate) =>
+          http.put<DatabaseConnection, DatabaseConnection>(`v1/database_connections/${id}/`, data),
+        patch: (data: Partial<DatabaseConnectionUpdate>) =>
+          http.patch<DatabaseConnection, DatabaseConnection>(`v1/database_connections/${id}/`, data),
+        check: (waitSeconds: number) =>
+          http.post<ConnectorCheck, ConnectorCheck>(`v1/database_connections/${id}/check/`, null, waitFor(waitSeconds)),
+        // 接続先のアカウントが読める表・ビューの一覧（Connectorで公開する表を選ぶ）
+        tables: (waitSeconds: number) =>
+          http.get<ConnectorTables, ConnectorTables>(`v1/database_connections/${id}/tables/`, waitFor(waitSeconds)),
+      }),
       connectors: (id?: string) => ({
         ...resource<Connector, ConnectorWrite, ConnectorListParams>(http, 'v1/connectors', id),
-        // 更新では種別と接続先（ホスト・ポート・DB名）を送れない
+        // 更新では使うDB接続を送れない
         update: (data: ConnectorUpdate) => http.put<Connector, Connector>(`v1/connectors/${id}/`, data),
         patch: (data: Partial<ConnectorUpdate>) => http.patch<Connector, Connector>(`v1/connectors/${id}/`, data),
-        // 次の4つは接続先のDBにつなぐので、接続と実行のタイムアウト（waitSeconds。connectorWaitSeconds()）まで待つ
-        check: (waitSeconds: number) =>
-          http.post<ConnectorCheck, ConnectorCheck>(`v1/connectors/${id}/check/`, null, waitFor(waitSeconds)),
-        // 接続先のアカウントが読める表・ビューの一覧と、公開している表・ビューの説明（エージェントに見せる内容）
-        tables: (waitSeconds: number) =>
-          http.get<ConnectorTables, ConnectorTables>(`v1/connectors/${id}/tables/`, waitFor(waitSeconds)),
+        // 公開している表・ビューの説明（エージェントに見せる内容）と試し実行。接続先のDBにつなぐので、
+        // 接続と実行のタイムアウト（waitSeconds。connectorWaitSeconds()）まで待つ
         describe: (waitSeconds: number) =>
           http.get<ConnectorTables, ConnectorTables>(`v1/connectors/${id}/describe/`, waitFor(waitSeconds)),
         query: (data: ConnectorQuery, waitSeconds: number) =>

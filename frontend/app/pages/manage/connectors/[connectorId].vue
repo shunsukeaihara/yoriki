@@ -104,10 +104,8 @@ const tabs = computed(() => [
       />
       <UTabs v-model="tab" :items="tabs" variant="link" :unmount-on-hide="false">
         <template #settings>
-          <div class="grid gap-6 pt-4">
+          <div class="pt-4">
             <ConnectorForm ref="formRef" v-model="connector" @updated="onUpdated" @failed="onFailed" />
-            <USeparator />
-            <ConnectorCheckButton v-if="connector" :connector="connector" />
           </div>
         </template>
         <template #tables>

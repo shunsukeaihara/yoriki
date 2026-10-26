@@ -21,7 +21,7 @@ from uuid import UUID
 from django.utils.translation import gettext as _
 
 from ..errors import ConnectorError, ConnectorErrorKind
-from ..models import Connector, ConnectorVersion
+from ..models import ConnectorVersion, DatabaseConnection
 from ..sql import CheckedQuery, Dialect, check_query
 
 # 管理画面で表を選ぶための一覧の上限
@@ -95,9 +95,10 @@ class DatasourceAdapter(ABC):
 
     dialect: Dialect
 
-    def __init__(self, connector: Connector, version: ConnectorVersion | None = None):
-        self.connector = connector
-        self.version = version or connector.current_version
+    def __init__(self, connection: DatabaseConnection, version: ConnectorVersion | None = None):
+        """version はConnectorの境界の版。接続の確認と表の一覧（DB接続の管理画面）では渡さない"""
+        self.connection = connection
+        self.version = version
 
     # --- 種別ごとに実装する ---
 
@@ -242,7 +243,7 @@ class DatasourceAdapter(ABC):
 
     def _key(self, schema: str, name: str) -> tuple[str, str]:
         # MySQLのスキーマはDB名（公開する表はスキーマを持たない）
-        return (self.connector.database if self.dialect.schema_is_database else schema, name)
+        return (self.connection.database if self.dialect.schema_is_database else schema, name)
 
     def check_query(self, sql: str, params: Sequence[Param]) -> CheckedQuery:
         assert self.version is not None
@@ -250,7 +251,7 @@ class DatasourceAdapter(ABC):
             sql,
             len(params),
             dialect=self.dialect,
-            database=self.connector.database,
+            database=self.connection.database,
             default_schema=self.default_schema,
             exposed=[(t.get("schema", ""), t["name"]) for t in self.version.tables],
         )

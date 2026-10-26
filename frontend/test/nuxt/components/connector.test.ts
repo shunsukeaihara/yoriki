@@ -1,26 +1,40 @@
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AxiosError, AxiosHeaders } from 'axios'
-import { ConnectorForm, ConnectorPermissionsForm, ConnectorQueryPanel, ConnectorTablesForm } from '#components'
+import {
+  ConnectorForm,
+  ConnectorPermissionsForm,
+  ConnectorQueryPanel,
+  ConnectorTablesForm,
+  DatabaseConnectionForm,
+} from '#components'
 
-const { create, patch, tables, groups, query } = vi.hoisted(() => ({
+const { create, patch, tables, groups, query, connectionCreate, connectionPatch } = vi.hoisted(() => ({
   create: vi.fn(),
   patch: vi.fn(),
   tables: vi.fn(),
   groups: vi.fn(),
   query: vi.fn(),
+  connectionCreate: vi.fn(),
+  connectionPatch: vi.fn(),
 }))
 
 mockNuxtImport('useAPI', () => () => ({
   manage: {
-    connectors: () => ({ create, patch, tables, query }),
+    connectors: () => ({ create, patch, query }),
+    databaseConnections: () => ({
+      create: connectionCreate,
+      patch: connectionPatch,
+      tables,
+      list: vi.fn().mockResolvedValue({ results: [], next: null, previous: null }),
+    }),
     groups: { list: groups },
     departments: () => ({ list: vi.fn().mockResolvedValue({ results: [], next: null, previous: null }) }),
   },
 }))
 
-const connector: Connector = {
-  id: 'c1',
+const connection: DatabaseConnection = {
+  id: 'd1',
   name: '販売管理DB',
   kind: ConnectorKind.SQLSERVER,
   kindDisplay: 'SQL Server',
@@ -33,6 +47,30 @@ const connector: Connector = {
   tls: TlsMode.VERIFY,
   connectTimeoutSeconds: 10,
   maxConcurrency: 4,
+  isActive: true,
+  connectorCount: 1,
+  createdBy: 'u1',
+  created: '2026-10-26T00:00:00Z',
+  updated: '2026-10-26T00:00:00Z',
+}
+
+const connector: Connector = {
+  id: 'c1',
+  name: '取引先マスタ',
+  connection: 'd1',
+  connectionInfo: {
+    id: 'd1',
+    name: '販売管理DB',
+    kind: ConnectorKind.SQLSERVER,
+    kindDisplay: 'SQL Server',
+    host: 'sales-db.internal',
+    port: 1433,
+    database: 'Sales',
+    connectTimeoutSeconds: 10,
+    isActive: true,
+  },
+  kind: ConnectorKind.SQLSERVER,
+  kindDisplay: 'SQL Server',
   isActive: true,
   version: 2,
   description: '販売の実績',
@@ -60,18 +98,18 @@ const flushPromises = () => new Promise((resolve) => setTimeout(resolve))
 
 type Exposed = { onSubmit: () => Promise<void>; canPost: boolean }
 
-describe('ConnectorForm', () => {
+describe('DatabaseConnectionForm', () => {
   beforeEach(() => {
-    create.mockReset().mockResolvedValue(connector)
-    patch.mockReset().mockResolvedValue(connector)
+    connectionCreate.mockReset().mockResolvedValue(connection)
+    connectionPatch.mockReset().mockResolvedValue(connection)
   })
 
   type Form = Exposed & {
     form: { name: string; kind: number; host: string; database: string; username: string; password: string }
   }
 
-  it('作成では接続先とパスワードを送り、MySQLでは既定のスキーマを送らない', async () => {
-    const wrapper = await mountSuspended(ConnectorForm, { props: { modelValue: null } })
+  it('作成では接続先とパスワードを送る。ポートは空なら送らない', async () => {
+    const wrapper = await mountSuspended(DatabaseConnectionForm, { props: { modelValue: null } })
     const vm = wrapper.vm as unknown as Form
     Object.assign(vm.form, {
       name: '基幹DB',
@@ -84,31 +122,68 @@ describe('ConnectorForm', () => {
     await nextTick()
     expect(vm.canPost).toBe(true)
     await vm.onSubmit()
-    const data = create.mock.calls[0]![0]
+    const data = connectionCreate.mock.calls[0]![0]
     expect(data).toMatchObject({ kind: ConnectorKind.MYSQL, host: 'db.internal', password: 'secret' })
-    expect(data.maxResultBytes).toBe(10 * 1024 * 1024)
     expect(data.port).toBeUndefined()
-    expect(data.defaultSchema).toBeUndefined()
   })
 
-  it('更新では編集を始めた時点の版を送り、空のパスワードとMBで割り切れない上限は変えない', async () => {
+  it('更新では空のパスワードを送らず、接続先を変えたらパスワードを入れるまで保存できない', async () => {
+    const wrapper = await mountSuspended(DatabaseConnectionForm, { props: { modelValue: connection } })
+    const vm = wrapper.vm as unknown as Form
+    expect(wrapper.text()).toContain('末尾 word')
+    await vm.onSubmit()
+    expect(connectionPatch.mock.calls[0]![0]).not.toHaveProperty('password')
+    expect(connectionPatch.mock.calls[0]![0]).not.toHaveProperty('kind')
+
+    vm.form.host = 'sales-db2.internal'
+    await nextTick()
+    expect(vm.canPost).toBe(false)
+    expect(wrapper.text()).toContain('接続先を変えるときは、パスワードを入力し直します')
+    vm.form.password = 'new-pass'
+    await nextTick()
+    expect(vm.canPost).toBe(true)
+  })
+})
+
+describe('ConnectorForm', () => {
+  beforeEach(() => {
+    create.mockReset().mockResolvedValue(connector)
+    patch.mockReset().mockResolvedValue(connector)
+  })
+
+  type Form = Exposed & { form: { name: string; connection: string | null } }
+
+  it('作成では使うDB接続を送り、DB接続を選ぶまで保存できない', async () => {
+    const wrapper = await mountSuspended(ConnectorForm, { props: { modelValue: null } })
+    const vm = wrapper.vm as unknown as Form
+    vm.form.name = '受注実績'
+    await nextTick()
+    expect(vm.canPost).toBe(false)
+    vm.form.connection = 'd1'
+    await nextTick()
+    await vm.onSubmit()
+    const data = create.mock.calls[0]![0]
+    expect(data).toMatchObject({ name: '受注実績', connection: 'd1', maxResultBytes: 10 * 1024 * 1024 })
+    expect(data.defaultSchema).toBe('')
+  })
+
+  it('更新では編集を始めた時点の版を送り、DB接続とMBで割り切れない上限は変えない', async () => {
     const wrapper = await mountSuspended(ConnectorForm, { props: { modelValue: connector } })
     await (wrapper.vm as unknown as Form).onSubmit()
     const data = patch.mock.calls[0]![0]
     expect(data).toMatchObject({ version: 2, maxResultBytes: 1_500_000, defaultSchema: 'dbo' })
-    expect(data).not.toHaveProperty('password')
-    expect(data).not.toHaveProperty('host')
-    expect(wrapper.text()).toContain('末尾 word')
+    expect(data).not.toHaveProperty('connection')
+    expect(wrapper.text()).toContain('販売管理DB')
   })
 
   it('別のタブの保存でConnectorが変わっても、未保存の入力を残して版だけを最新にする。reset() で捨てる', async () => {
     const wrapper = await mountSuspended(ConnectorForm, { props: { modelValue: connector } })
     const vm = wrapper.vm as unknown as Form & { form: { version: number }; reset: () => void }
-    vm.form.name = '販売管理DB（本番）'
+    vm.form.name = '取引先マスタ（本番）'
     await wrapper.setProps({ modelValue: { ...connector, version: 3, tables: [] } })
-    expect(vm.form).toMatchObject({ name: '販売管理DB（本番）', version: 3 })
+    expect(vm.form).toMatchObject({ name: '取引先マスタ（本番）', version: 3 })
     vm.reset()
-    expect(vm.form).toMatchObject({ name: '販売管理DB', version: 3 })
+    expect(vm.form).toMatchObject({ name: '取引先マスタ', version: 3 })
   })
 
   it('未保存の入力がなければ、変わったConnectorに合わせ直す', async () => {
@@ -150,7 +225,7 @@ describe('ConnectorTablesForm', () => {
     expect(vm.canPost).toBe(false)
     vm.loadOnce()
     await flushPromises()
-    expect(tables).toHaveBeenCalledWith(40) // 接続のタイムアウト10秒＋実行時間の上限30秒
+    expect(tables).toHaveBeenCalledWith(40) // DB接続の接続のタイムアウト10秒＋DBでの実行時間30秒
     vm.selectedKeys = [...vm.selectedKeys, 'dbo\u0000Orders']
     vm.setColumnDescription(vm.form.tables[0], 'VendorCode', '')
     await nextTick()

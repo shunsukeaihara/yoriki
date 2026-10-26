@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
- * Connectorの作成と、接続・境界の設定の編集（design.md §4.9）。種別と接続先（ホスト・ポート・DB名）は作成した後は
- * 変えられない。境界（説明、既定のスキーマ、上限、機密）を変えて保存すると新しい版になる。
+ * Connectorの作成と、境界の設定の編集（design.md §4.9.1）。使うDB接続は作成した後は変えられない。
+ * 境界（説明、既定のスキーマ、上限、機密）を変えて保存すると新しい版になる。
  * 公開する表は ConnectorTablesForm、利用の許可は ConnectorPermissionsForm で編集する
  */
 const api = useAPI()
@@ -20,16 +20,7 @@ const emptyForm = () => ({
   // 編集を始めた時点の版。その間に他の人が版を作っていたら、サーバーが409で断る
   version: 0,
   name: '',
-  kind: ConnectorKind.POSTGRESQL as ConnectorKind,
-  host: '',
-  port: null as number | null,
-  database: '',
-  username: '',
-  // パスワードは書き込み専用。編集では、入力したときだけ送る
-  password: '',
-  tls: TlsMode.VERIFY as TlsMode,
-  connectTimeoutSeconds: 10 as number | null,
-  maxConcurrency: 4 as number | null,
+  connection: null as string | null,
   isActive: true,
   description: '',
   defaultSchema: '',
@@ -46,14 +37,7 @@ const toForm = (value: Connector | null | undefined) =>
         id: value.id,
         version: value.version ?? 0,
         name: value.name,
-        kind: value.kind,
-        host: value.host,
-        port: value.port ?? null,
-        database: value.database,
-        username: value.username,
-        tls: value.tls ?? TlsMode.VERIFY,
-        connectTimeoutSeconds: value.connectTimeoutSeconds ?? null,
-        maxConcurrency: value.maxConcurrency ?? null,
+        connection: value.connection,
         isActive: value.isActive ?? true,
         description: value.description,
         defaultSchema: value.defaultSchema ?? '',
@@ -67,7 +51,12 @@ const form = ref(emptyForm())
 const { reset } = syncConnectorForm(modelValue, form, toForm)
 
 const isEdit = computed(() => Boolean(form.value.id))
-const isMySQL = computed(() => form.value.kind === ConnectorKind.MYSQL)
+// 選んだDB接続の種別（MySQLは既定のスキーマを持たない）
+const selectedConnection = ref<MinimumDatabaseConnection | null>(null)
+const kind = computed<ConnectorKind>(
+  () => modelValue.value?.kind ?? selectedConnection.value?.kind ?? ConnectorKind.POSTGRESQL,
+)
+const isMySQL = computed(() => kind.value === ConnectorKind.MYSQL)
 
 const { onSubmit, loading, errors } = createSubmit({
   form,
@@ -75,10 +64,6 @@ const { onSubmit, loading, errors } = createSubmit({
     // 空欄の数値は送らない（作成ではサーバーの既定値、更新では変更なし）
     const common = {
       name: f.name,
-      username: f.username,
-      tls: f.tls,
-      connectTimeoutSeconds: f.connectTimeoutSeconds ?? undefined,
-      maxConcurrency: f.maxConcurrency ?? undefined,
       isActive: f.isActive,
       description: f.description,
       // MySQLはDB名がスキーマなので送らない。空欄は種別の既定（public、dbo）
@@ -89,27 +74,14 @@ const { onSubmit, loading, errors } = createSubmit({
       isSensitive: f.isSensitive,
       changeReason: f.changeReason || undefined,
     }
-    if (!f.id) {
-      return api.manage.connectors().create({
-        ...common,
-        kind: f.kind,
-        host: f.host.trim(),
-        port: f.port ?? undefined,
-        database: f.database.trim(),
-        password: f.password,
-      } as ConnectorWrite)
-    }
-    return api.manage.connectors(f.id).patch({
-      ...common,
-      version: f.version,
-      ...(f.password ? { password: f.password } : {}),
-    })
+    if (!f.id) return api.manage.connectors().create({ ...common, connection: f.connection! } as ConnectorWrite)
+    return api.manage.connectors(f.id).patch({ ...common, version: f.version })
   },
   onSuccess: (result) => {
     if (form.value.id) emit('updated', result)
     else emit('created', result)
     modelValue.value = result
-    reset() // 送ったパスワードと変更理由を残さない
+    reset() // 送った変更理由を残さない
     toast.add({ title: t('保存しました'), color: 'success' })
   },
   onError: (err) => {
@@ -119,19 +91,7 @@ const { onSubmit, loading, errors } = createSubmit({
 })
 
 // 必須項目が埋まっているかだけを確認する。形式の検証はサーバーに任せる
-const canPost = computed(() => {
-  const f = form.value
-  if (!f.name || !f.username) return false
-  if (isEdit.value) return true
-  return Boolean(f.host.trim() && f.database.trim() && f.password)
-})
-
-const passwordHint = computed(() => {
-  const current = modelValue.value
-  if (current?.hasPassword)
-    return t('登録済み（末尾 {hint}）。差し替えるときだけ入力します', { hint: current.passwordHint })
-  return t('SELECT権限だけを持つ専用のアカウントを使います')
-})
+const canPost = computed(() => Boolean(form.value.name && form.value.connection))
 
 defineExpose({ onSubmit, loading, canPost, reset })
 </script>
@@ -141,96 +101,31 @@ defineExpose({ onSubmit, loading, canPost, reset })
     <DFormAlert :errors="errors" />
     <DTextField v-model="form.name" :label="$t('名前')" required :error-messages="errors.name" />
 
-    <DFormSection :title="$t('接続先')">
-      <template v-if="!isEdit">
-        <DRadioGroup
-          v-model="form.kind"
-          :label="$t('種別')"
-          :items="connectorKindItems(t)"
-          orientation="horizontal"
-          variant="card"
-          required
-          :error-messages="errors.kind"
-        />
-        <div class="grid grid-cols-[1fr_8rem] gap-4">
-          <DTextField
-            v-model="form.host"
-            :label="$t('ホスト')"
-            required
-            placeholder="db.internal"
-            :hint="$t('作成した後は変更できません')"
-            :error-messages="errors.host"
-          />
-          <DNumberField
-            v-model="form.port"
-            :label="$t('ポート')"
-            :min="1"
-            :max="65535"
-            :format-options="{ useGrouping: false }"
-            :placeholder="String(defaultPort(form.kind))"
-            :error-messages="errors.port"
-          />
-        </div>
-        <DTextField
-          v-model="form.database"
-          :label="$t('DB名')"
-          required
-          :hint="$t('作成した後は変更できません')"
-          :error-messages="errors.database"
-        />
-      </template>
-      <template v-else>
-        <!-- 種別と接続先は作成した後は変えられない。変えるときは新しいConnectorを作る -->
-        <DTextField
-          :model-value="`${modelValue?.kindDisplay}・${form.host}:${form.port}/${form.database}`"
-          :label="$t('接続先')"
-          disabled
-          :hint="$t('作成した後は変更できません')"
-        />
-      </template>
-      <div class="grid grid-cols-2 gap-4">
-        <DTextField
-          v-model="form.username"
-          :label="$t('ユーザー名')"
-          required
-          autocomplete="off"
-          :error-messages="errors.username"
-        />
-        <DTextField
-          v-model="form.password"
-          type="password"
-          autocomplete="new-password"
-          :label="$t('パスワード')"
-          :required="!isEdit"
-          :hint="passwordHint"
-          :error-messages="errors.password"
-        />
-      </div>
-      <DSelect
-        v-model="form.tls"
-        :label="$t('通信の暗号化')"
-        :items="tlsItems(t)"
-        :clearable="false"
-        :error-messages="errors.tls"
-      />
-      <div class="grid grid-cols-2 gap-4">
-        <DNumberField
-          v-model="form.connectTimeoutSeconds"
-          :label="$t('接続のタイムアウト（秒）')"
-          :min="1"
-          :max="300"
-          :error-messages="errors.connectTimeoutSeconds"
-        />
-        <DNumberField
-          v-model="form.maxConcurrency"
-          :label="$t('同時実行数の上限')"
-          :min="1"
-          :max="1000"
-          :hint="$t('すべてのWorkerを通した数')"
-          :error-messages="errors.maxConcurrency"
-        />
-      </div>
-    </DFormSection>
+    <DAutocomplete
+      v-if="!isEdit"
+      v-model="form.connection"
+      :label="$t('DB接続')"
+      required
+      :search-fn="api.manage.databaseConnections().list"
+      :query-params="{ isActive: true }"
+      item-description="kindDisplay"
+      :clearable="false"
+      :hint="$t('作成した後は変更できません。接続先と資格情報は、DB接続の画面で変えます')"
+      :error-messages="errors.connection"
+      @selected="(item) => (selectedConnection = item as MinimumDatabaseConnection | null)"
+    />
+    <!-- 使うDB接続は作成した後は変えられない（公開した表は、そのDBのものなので） -->
+    <div v-else class="grid gap-1 text-sm">
+      <span class="text-muted">{{ $t('DB接続') }}</span>
+      <NuxtLink :to="`/manage/database_connections/${modelValue?.connection}`" class="text-primary">
+        {{ modelValue?.connectionInfo.name }}
+      </NuxtLink>
+      <span class="font-mono text-xs text-muted">
+        {{ modelValue?.kindDisplay }}・{{ modelValue?.connectionInfo.host }}:{{ modelValue?.connectionInfo.port }}/{{
+          modelValue?.connectionInfo.database
+        }}
+      </span>
+    </div>
 
     <DFormSection
       :title="$t('エージェントが扱える範囲')"
@@ -250,10 +145,8 @@ defineExpose({ onSubmit, loading, canPost, reset })
         v-if="!isMySQL"
         v-model="form.defaultSchema"
         :label="$t('既定のスキーマ')"
-        :placeholder="defaultSchema(form.kind)"
-        :hint="
-          $t('表の名前にスキーマを書かなかったときのスキーマ。空欄は {schema}', { schema: defaultSchema(form.kind) })
-        "
+        :placeholder="defaultSchema(kind)"
+        :hint="$t('表の名前にスキーマを書かなかったときのスキーマ。空欄は {schema}', { schema: defaultSchema(kind) })"
         :error-messages="errors.defaultSchema"
       />
       <div class="grid grid-cols-3 gap-4">

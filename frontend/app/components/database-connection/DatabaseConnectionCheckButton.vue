@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** 接続の確認。接続先に接続して、ホスト・認証・DB名が正しいかを表示する */
-const props = defineProps<{ connector: Connector }>()
+const props = defineProps<{ connection: DatabaseConnection }>()
 const api = useAPI()
 const toast = useToast()
 const { t } = useI18n()
@@ -11,7 +11,9 @@ const onCheck = async () => {
   loading.value = true
   result.value = null
   try {
-    result.value = await api.manage.connectors(props.connector.id).check(connectorWaitSeconds(props.connector))
+    result.value = await api.manage
+      .databaseConnections(props.connection.id)
+      .check(connectionWaitSeconds(props.connection))
   } catch (err) {
     toast.add({ title: t('エラー'), description: makeErrorMsg(err), color: 'error' })
   } finally {

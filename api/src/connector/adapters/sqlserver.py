@@ -53,7 +53,7 @@ class SQLServerAdapter(DatasourceAdapter):
     @contextmanager
     def connect(self) -> Iterator[Any]:
         pyodbc = _pyodbc()
-        c = self.connector
+        c = self.connection
         timeout = self.version.timeout_seconds if self.version else 30
         conn_str = ";".join(
             [

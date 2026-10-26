@@ -1,11 +1,13 @@
 """外部データへの接続（Connector。design.md §4.9）。
 
-基盤管理者が登録する。接続先（種別・ホスト・ポート・DB名）は作成した後は変えない。資格情報は
-`EncryptedSecretField` で暗号化して保存し、平文はAdapterの中でだけ復号する（Runner・Sandbox・ログ・画面へ出さない）。
+基盤管理者が登録する。接続先と資格情報は接続（社内DBでは DatabaseConnection）に持ち、Connectorは1つの接続の上で
+エージェントが扱える範囲を決める。1つの接続の上に、範囲と使える人の違うConnectorを複数作れる（design.md §4.9.1）。
+資格情報は `EncryptedSecretField` で暗号化して保存し、平文はAdapterの中でだけ復号する（Runner・Sandbox・ログ・画面へ
+出さない）。
 
 エージェントが扱える範囲（境界。公開する表・ビュー、上限、機密のフラグ）は不変の版（ConnectorVersion）で持つ。
 Runは開始時の版を固定して使う。誰が使えるか（ConnectorPermission）は版に入れず、変えるとすぐに効く（権限の失効を
-固定した版にも適用するため。design.md §3.11）。
+固定した版にも適用するため。design.md §3.11）。接続は版を持たず、変えると次の操作から効く。
 """
 
 from typing import Any
@@ -59,26 +61,12 @@ class Operation(models.TextChoices):
 DATASOURCE_OPERATIONS = (Operation.DATASOURCE_DESCRIBE, Operation.DATASOURCE_QUERY)
 
 
-class ConnectorQuerySet(models.QuerySet):
-    def usable_by(self, user) -> "ConnectorQuerySet":
-        """利用者が使えるConnector（有効で、利用の許可の役割か部門に当たる）。基盤管理者はすべて"""
-        qs = self.filter(deleted=False, is_active=True, current_version__isnull=False)
-        if not user.is_active:
-            return qs.none()
-        if user.is_superuser:
-            return qs
-        return qs.filter(
-            models.Q(permissions__group__in=user.groups.all())
-            | models.Q(permissions__department__memberships__user=user, permissions__department__deleted=False)
-        ).distinct()
+class DatabaseConnection(models.Model):
+    """社内DBへの接続先と資格情報。基盤管理者だけが登録・変更する。エージェントには見せない。
 
-
-class Connector(models.Model):
-    """外部データへの接続。基盤管理者だけが登録・変更する。
-
-    種別と接続先（ホスト・ポート・DB名）は作成した後は変えない（更新用のSerializerと管理画面に項目を置かない）。
-    接続先を後から変えられると、登録済みのパスワードが別のサーバーへ送られたり、版（進行中のRunが使う）の
-    意味が変わったりするため。ユーザー名とパスワードは差し替えられ、次の操作から使う
+    種別は作成した後は変えない（SQLの方言と既定のスキーマの意味が変わるため）。接続先（ホスト・ポート・DB名）は
+    変えられるが、そのときはパスワードを入れ直す（登録済みのパスワードを別のサーバーへ送らないため。
+    DatabaseConnectionUpdateSerializer）。版は持たず、変えると実行中のRunにも次の操作から効く
     """
 
     uid = NanoidField(unique=True)
@@ -91,8 +79,63 @@ class Connector(models.Model):
     password = EncryptedSecretField(_("パスワード"))
     tls = models.PositiveSmallIntegerField(_("通信の暗号化"), choices=TLSMode.choices, default=TLSMode.VERIFY)
     connect_timeout_seconds = models.PositiveIntegerField(_("接続のタイムアウト（秒）"), default=10)
-    # 全Workerを通した同時実行数の上限。Runnerが守る（会話でConnectorを使う段階で実装する。design.md §4.9.5）
+    # 全Workerを通した同時実行数の上限。この接続の上のConnectorを合わせて数える。Runnerが守る
+    # （会話でConnectorを使う段階で実装する。design.md §4.9.5）
     max_concurrency = models.PositiveIntegerField(_("同時実行数の上限"), default=4)
+    is_active = models.BooleanField(_("有効"), default=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+", verbose_name=_("作成者")
+    )
+
+    created = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated = models.DateTimeField(auto_now=True)
+    deleted = models.BooleanField(default=False)
+
+    class Meta:
+        verbose_name = _("DB接続")
+        verbose_name_plural = verbose_name
+        constraints = [
+            models.UniqueConstraint(
+                fields=["name"], condition=models.Q(deleted=False), name="uniq_database_connection_name"
+            ),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class ConnectorQuerySet(models.QuerySet):
+    def usable_by(self, user) -> "ConnectorQuerySet":
+        """利用者が使えるConnector（Connectorと接続が有効で、利用の許可の役割か部門に当たる）。基盤管理者はすべて"""
+        qs = self.filter(
+            deleted=False,
+            is_active=True,
+            current_version__isnull=False,
+            connection__deleted=False,
+            connection__is_active=True,
+        )
+        if not user.is_active:
+            return qs.none()
+        if user.is_superuser:
+            return qs
+        return qs.filter(
+            models.Q(permissions__group__in=user.groups.all())
+            | models.Q(permissions__department__memberships__user=user, permissions__department__deleted=False)
+        ).distinct()
+
+
+class Connector(models.Model):
+    """1つの接続の上で、エージェントが扱える範囲（境界）と使える人を決める。基盤管理者だけが登録・変更する。
+
+    使う接続は作成した後は変えない（公開した表・ビューは、その接続のDBのものなので）。今は社内DBのConnectorだけで、
+    他の種類（SharePoint等）を足すときは、種類ごとの接続を持たせる
+    """
+
+    uid = NanoidField(unique=True)
+    name = models.CharField(_("名前"), max_length=100)
+    connection = models.ForeignKey(
+        DatabaseConnection, on_delete=models.PROTECT, related_name="connectors", verbose_name=_("DB接続")
+    )
     current_version = models.ForeignKey(
         "ConnectorVersion",
         on_delete=models.PROTECT,
@@ -123,6 +166,13 @@ class Connector(models.Model):
         return self.name
 
     @property
+    def kind(self) -> int:
+        return self.connection.kind
+
+    def get_kind_display(self) -> str:
+        return self.connection.get_kind_display()
+
+    @property
     def version_number(self) -> int:
         return self.current_version.number if self.current_version else 0
 
@@ -134,6 +184,8 @@ class Connector(models.Model):
     def operations_for(self, user) -> set[Operation]:
         """利用者がこのConnectorで使える操作。利用の許可のうち、利用者に当たるものの操作を合わせる"""
         if not user.is_active or self.deleted or not self.is_active:
+            return set()
+        if self.connection.deleted or not self.connection.is_active:
             return set()
         if user.is_superuser:
             return set(self.operations)
@@ -280,6 +332,7 @@ class ConnectorPermission(models.Model):
 
 
 # パスワードは暗号化した値でも監査ログに残さない
-auditlog.register(Connector, exclude_fields=["password", "updated"])
+auditlog.register(DatabaseConnection, exclude_fields=["password", "updated"])
+auditlog.register(Connector, exclude_fields=["updated"])
 auditlog.register(ConnectorVersion)
 auditlog.register(ConnectorPermission, exclude_fields=["updated"])

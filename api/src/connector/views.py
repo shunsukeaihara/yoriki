@@ -1,3 +1,5 @@
+from django.db import transaction
+from django.db.models import Count, Q
 from django.utils.translation import gettext_lazy as _
 from django_filters import rest_framework as filters
 from drf_spectacular.utils import OpenApiResponse, extend_schema, extend_schema_view
@@ -6,12 +8,13 @@ from rest_framework.generics import get_object_or_404
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
+from utils.exceptions import Conflict
 from utils.permissions import PlatformAdmin
 from utils.views import SoftDeleteMixin
 
 from .adapters import get_adapter
 from .errors import ConnectorError
-from .models import Connector, ConnectorKind, ConnectorVersion
+from .models import Connector, ConnectorKind, ConnectorVersion, DatabaseConnection
 from .serializers import (
     ConnectorCheckSerializer,
     ConnectorQueryResultSerializer,
@@ -20,62 +23,75 @@ from .serializers import (
     ConnectorTablesSerializer,
     ConnectorUpdateSerializer,
     ConnectorVersionSerializer,
+    DatabaseConnectionSerializer,
+    DatabaseConnectionUpdateSerializer,
 )
 
 # 試し実行の応答に載せる行数。行数・サイズの上限はConnectorの版の値で、エージェントと同じ
 PREVIEW_ROWS = 200
 
 
-class ConnectorFilter(filters.FilterSet):
+class DatabaseConnectionFilter(filters.FilterSet):
     name = filters.CharFilter(label=_("名前"), lookup_expr="icontains")
     kind = filters.ChoiceFilter(label=_("種別"), choices=ConnectorKind.choices)
+
+    class Meta:
+        model = DatabaseConnection
+        fields = ["name", "kind", "is_active"]
+
+
+class ConnectorFilter(filters.FilterSet):
+    name = filters.CharFilter(label=_("名前"), lookup_expr="icontains")
+    connection = filters.CharFilter(label=_("DB接続"), field_name="connection__uid")
+    kind = filters.ChoiceFilter(label=_("種別"), field_name="connection__kind", choices=ConnectorKind.choices)
     is_sensitive = filters.BooleanFilter(label=_("機密"), field_name="current_version__is_sensitive")
 
     class Meta:
         model = Connector
-        fields = ["name", "kind", "is_active", "is_sensitive"]
+        fields = ["name", "connection", "kind", "is_active", "is_sensitive"]
 
 
 CONFLICT = OpenApiResponse(description="他の変更と競合した（編集を始めた後に、別の版ができている）")
 
 
-@extend_schema(description="Connectorの管理API（基盤管理者だけ）", tags=["manage/connector"])
+@extend_schema(description="DB接続の管理API（基盤管理者だけ）", tags=["manage/connector/database_connection"])
 @extend_schema_view(
-    update=extend_schema(request=ConnectorUpdateSerializer, responses={200: ConnectorSerializer, 409: CONFLICT}),
-    partial_update=extend_schema(
-        request=ConnectorUpdateSerializer, responses={200: ConnectorSerializer, 409: CONFLICT}
-    ),
+    update=extend_schema(request=DatabaseConnectionUpdateSerializer, responses=DatabaseConnectionSerializer),
+    partial_update=extend_schema(request=DatabaseConnectionUpdateSerializer, responses=DatabaseConnectionSerializer),
 )
-class ConnectorViewSet(SoftDeleteMixin, ModelViewSet):
-    """接続先と資格情報、エージェントが扱える範囲（境界）を決めるので、基盤管理者だけにする（design.md §4.9.1）。
-
-    境界（公開する表、上限、機密のフラグ）を変えて保存すると新しい版ができる。進行中のRunは開始時の版を使い続ける
+class DatabaseConnectionViewSet(SoftDeleteMixin, ModelViewSet):
+    """社内DBの接続先と資格情報。接続先を変えるときはパスワードを入れ直す。変えると、この接続を使うConnectorの
+    次の操作から効く（design.md §4.9.1）
     """
 
     permission_classes = [PlatformAdmin]
     lookup_field = "uid"
     queryset = (
-        Connector.objects.filter(deleted=False)
-        .select_related("created_by", "current_version")
-        .prefetch_related("permissions__group", "permissions__department")
+        DatabaseConnection.objects.filter(deleted=False)
+        .select_related("created_by")
+        .annotate(connector_count=Count("connectors", filter=Q(connectors__deleted=False)))
     )
-    serializer_class = ConnectorSerializer
-    filterset_class = ConnectorFilter
-    search_fields = ("name",)
+    serializer_class = DatabaseConnectionSerializer
+    filterset_class = DatabaseConnectionFilter
+    search_fields = ("name", "host", "database")
     ordering = ("name", "pk")
 
     def get_serializer_class(self):
-        # 更新では種別と接続先（ホスト・ポート・DB名）を変えられない
+        # 更新では種別を変えられない
         if self.action in ("update", "partial_update"):
-            return ConnectorUpdateSerializer
+            return DatabaseConnectionUpdateSerializer
         return super().get_serializer_class()
 
     def perform_create(self, serializer):
-        # Connectorと最初の版、利用の許可は ConnectorSerializer.create() の transaction で作る
         serializer.save(created_by=self.request.user)
 
-    def perform_update(self, serializer):
-        serializer.save(actor=self.request.user)
+    @transaction.atomic
+    def perform_destroy(self, instance: DatabaseConnection):
+        # Connectorの作成と同じ行をロックし、削除と同時に作られたConnectorを見落とさない
+        locked = DatabaseConnection.objects.select_for_update().get(pk=instance.pk)
+        if locked.connectors.filter(deleted=False).exists():
+            raise Conflict(_("このDB接続を使っているConnectorがあるため、削除できません"))
+        super().perform_destroy(locked)
 
     @extend_schema(
         description="接続先に接続して、ホスト・認証・DB名が正しいかを確かめる",
@@ -92,7 +108,7 @@ class ConnectorViewSet(SoftDeleteMixin, ModelViewSet):
         return Response(self.get_serializer(result).data)
 
     @extend_schema(
-        description="接続先のアカウントが読める表・ビューと列の一覧。公開する表を選ぶために使う",
+        description="接続先のアカウントが読める表・ビューと列の一覧。Connectorで公開する表を選ぶために使う",
         request=None,
         responses=ConnectorTablesSerializer,
     )
@@ -103,6 +119,46 @@ class ConnectorViewSet(SoftDeleteMixin, ModelViewSet):
         except ConnectorError as exc:
             result = ConnectorTablesSerializer.build(None, exc.message)
         return Response(self.get_serializer(result).data)
+
+
+@extend_schema(description="Connectorの管理API（基盤管理者だけ）", tags=["manage/connector"])
+@extend_schema_view(
+    update=extend_schema(request=ConnectorUpdateSerializer, responses={200: ConnectorSerializer, 409: CONFLICT}),
+    partial_update=extend_schema(
+        request=ConnectorUpdateSerializer, responses={200: ConnectorSerializer, 409: CONFLICT}
+    ),
+)
+class ConnectorViewSet(SoftDeleteMixin, ModelViewSet):
+    """エージェントが扱える範囲（境界）と使える人を決めるので、基盤管理者だけにする（design.md §4.9.1）。
+
+    境界（公開する表、上限、機密のフラグ）を変えて保存すると新しい版ができる。進行中のRunは開始時の版を使い続ける。
+    接続の確認と表の一覧は、使うDB接続の操作（DatabaseConnectionViewSet）で行う
+    """
+
+    permission_classes = [PlatformAdmin]
+    lookup_field = "uid"
+    queryset = (
+        Connector.objects.filter(deleted=False)
+        .select_related("created_by", "current_version", "connection")
+        .prefetch_related("permissions__group", "permissions__department")
+    )
+    serializer_class = ConnectorSerializer
+    filterset_class = ConnectorFilter
+    search_fields = ("name",)
+    ordering = ("name", "pk")
+
+    def get_serializer_class(self):
+        # 更新では使うDB接続を変えられない
+        if self.action in ("update", "partial_update"):
+            return ConnectorUpdateSerializer
+        return super().get_serializer_class()
+
+    def perform_create(self, serializer):
+        # Connectorと最初の版、利用の許可は ConnectorSerializer.create() の transaction で作る
+        serializer.save(created_by=self.request.user)
+
+    def perform_update(self, serializer):
+        serializer.save(actor=self.request.user)
 
     @extend_schema(
         description="公開している表・ビューの列と説明。エージェントの `datasource_describe` と同じ内容",

@@ -3,6 +3,27 @@
 from django.db import migrations, models
 
 
+def move_department_grants(apps, schema_editor):
+    """部門での利用の許可を、使える部門に移す。
+
+    部門の許可がないConnector（役割（Group）の許可だけ、または誰にも許可していない）は、使える部門が空になると
+    全社向けに広がってしまうので、無効にする。基盤管理者が使える部門を選んでから有効にし直す
+    """
+    Connector = apps.get_model("connector", "Connector")
+    ConnectorPermission = apps.get_model("connector", "ConnectorPermission")
+    for connector in Connector.objects.all():
+        department_ids = set(
+            ConnectorPermission.objects.filter(
+                connector=connector, department__isnull=False, department__deleted=False
+            ).values_list("department_id", flat=True)
+        )
+        if department_ids:
+            connector.departments.set(department_ids)
+        else:
+            connector.is_active = False
+            connector.save(update_fields=["is_active"])
+
+
 class Migration(migrations.Migration):
     dependencies = [
         ("connector", "0002_database_connection"),
@@ -27,6 +48,7 @@ class Migration(migrations.Migration):
             name="departments",
             field=models.ManyToManyField(blank=True, related_name="+", to="user.department", verbose_name="使える部門"),
         ),
+        migrations.RunPython(move_department_grants, migrations.RunPython.noop),
         migrations.DeleteModel(
             name="ConnectorPermission",
         ),

@@ -3,6 +3,7 @@ from auditlog.models import LogEntry
 from django.contrib.auth.models import Group, Permission
 from django.test import override_settings
 from rest_framework.exceptions import ValidationError
+from rest_framework.test import APIRequestFactory
 
 from connector.adapters import get_adapter
 from connector.adapters.base import QueryResult
@@ -179,6 +180,24 @@ class TestDepartmentScope:
         assert api_client.patch(url, {"version": 1, "max_rows": 5}, format="json").status_code == 200
         # 全社向けにする（部門を空にする）ことはできない
         assert api_client.patch(url, {"version": 2, "departments": []}, format="json").status_code == 400
+
+    @pytest.mark.django_db
+    def test_recheck_departments_after_lock(self, api_client, editor, department):
+        # 取得した後に、別の要求が所属していない部門を足した。古い部門の一覧で保存させない（足された部門を外さない）
+        other = Department.objects.create(name="営業部")
+        connector = ConnectorFactory.create()
+        connector.departments.set([department])
+        stale = Connector.objects.get(pk=connector.pk)
+        request = APIRequestFactory().patch("/")
+        request.user = editor
+        serializer = ConnectorUpdateSerializer(
+            stale, data={"version": 1, "departments": [department.uid]}, partial=True, context={"request": request}
+        )
+        assert serializer.is_valid(), serializer.errors
+        connector.departments.add(other)
+        with pytest.raises(ValidationError):
+            serializer.save(actor=editor)
+        assert set(connector.departments.all()) == {department, other}
 
     @pytest.mark.django_db
     def test_company_wide(self, api_client, editor, department):

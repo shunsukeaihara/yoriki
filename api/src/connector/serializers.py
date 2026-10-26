@@ -309,21 +309,12 @@ class ConnectorSerializer(serializers.ModelSerializer):
         return value
 
     def _validate_scope(self, attrs) -> None:
-        """自分の所属の範囲の外の部門を足し引きさせない。全社向け（部門の指定なし）にする・やめるのは、すべての部門の
-        範囲を持つ人だけ"""
         if self.instance is not None and "departments" not in attrs:
             return
-        user = self.context["request"].user
-        if covers_all_departments(user):
-            return
         current = set(self.instance.departments.all()) if self.instance else set()
-        departments = set(attrs.get("departments", []))
-        if not departments or (self.instance is not None and not current):
-            raise serializers.ValidationError(
-                {"departments": _("全社向け（部門の指定なし）にする・やめるのは、すべての部門の範囲を持つ人だけです")}
-            )
-        if (departments ^ current) - set(Department.objects.of(user)):
-            raise serializers.ValidationError({"departments": _("所属していない部門は、足し引きできません")})
+        check_department_change(
+            self.context["request"].user, current, set(attrs.get("departments", [])), self.instance is None
+        )
 
     def validate(self, attrs):
         if self.instance is not None and "version_number" not in attrs:
@@ -390,12 +381,30 @@ class ConnectorSerializer(serializers.ModelSerializer):
             raise Conflict() from exc
         departments = validated_data.pop("departments", None)
         if departments is not None:
+            # validate() は取得した時点の部門で確かめた。Connectorの行は revise() でロックしているので、最新の部門で
+            # 確かめ直す（その間に別の部門が足されていたら、所属していない部門を外すことになる）
+            check_department_change(
+                self.context["request"].user, set(instance.departments.all()), set(departments), creating=False
+            )
             instance.departments.set(departments)
         for name, value in validated_data.items():
             setattr(instance, name, value)
         # 変えた項目だけを保存する（取得した後に他の要求が変えた項目を書き戻さない。行は revise() でロックしている）
         instance.save(update_fields=[*validated_data, "current_version", "updated"])
         return instance
+
+
+def check_department_change(user, current: set[Department], departments: set[Department], creating: bool) -> None:
+    """使える部門の変更を、利用者の所属の範囲で確かめる。足し引きできるのは自分が所属している部門だけで、
+    全社向け（部門の指定なし）にする・やめるのは、すべての部門の範囲を持つ人だけ"""
+    if covers_all_departments(user):
+        return
+    if not departments or (not creating and not current):
+        raise serializers.ValidationError(
+            {"departments": _("全社向け（部門の指定なし）にする・やめるのは、すべての部門の範囲を持つ人だけです")}
+        )
+    if (departments ^ current) - set(Department.objects.of(user)):
+        raise serializers.ValidationError({"departments": _("所属していない部門は、足し引きできません")})
 
 
 class ConnectorUpdateSerializer(ConnectorSerializer):

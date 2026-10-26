@@ -7,8 +7,10 @@ from connector.adapters.base import QueryResult
 from connector.errors import ConnectorError, ConnectorErrorKind
 from connector.factories import ConnectorFactory, ConnectorPermissionFactory
 from connector.models import VERSION_FIELDS, Connector, ConnectorKind, ConnectorVersion, Operation
+from connector.serializers import ConnectorUpdateSerializer
 from user.factories import UserFactory
 from user.models import Department, DepartmentMembership, DepartmentRole
+from utils.exceptions import Conflict
 
 CONNECTORS = "/api/v1/connectors/"
 
@@ -234,6 +236,20 @@ class TestUpdate:
         permission = connector.permissions.get()
         entries = LogEntry.objects.get_for_object(permission)
         assert [e.action for e in entries] == [LogEntry.Action.CREATE]
+
+    @pytest.mark.django_db
+    def test_update_does_not_restore_deleted(self, platform_admin):
+        # 更新の要求が取得した後に、別の要求が削除した
+        connector = ConnectorFactory.create()
+        stale = Connector.objects.get(pk=connector.pk)
+        Connector.objects.filter(pk=connector.pk).update(deleted=True)
+        serializer = ConnectorUpdateSerializer(stale, data={"version": 1, "username": "reader2"}, partial=True)
+        assert serializer.is_valid(), serializer.errors
+        with pytest.raises(Conflict):
+            serializer.save(actor=platform_admin)
+        connector.refresh_from_db()
+        assert connector.deleted is True
+        assert connector.username == "yoriki_reader"
 
     @pytest.mark.django_db
     def test_delete(self, admin_client):

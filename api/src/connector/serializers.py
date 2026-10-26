@@ -302,7 +302,8 @@ class ConnectorSerializer(serializers.ModelSerializer):
             validated_data.pop("password")  # 空文字は「変更しない」
         for name, value in validated_data.items():
             setattr(instance, name, value)
-        instance.save()
+        # 変えた項目だけを保存する（取得した後に他の要求が変えた項目を書き戻さない。行は revise() でロックしている）
+        instance.save(update_fields=[*validated_data, "current_version", "updated"])
         return instance
 
 

@@ -158,9 +158,13 @@ class Connector(models.Model):
     def revise(self, *, actor, expected_version: int, change_reason: str = "", **fields: Any) -> "ConnectorVersion":
         """境界（公開する表、上限、機密のフラグ）を変えた新しい版を作り、現在の版にする。
 
-        編集を始めた後に他の人が版を作っていたら VersionConflict。中身が現在の版と同じなら版を作らず、現在の版を返す
+        編集を始めた後に他の人が版を作っていた・削除されていたら VersionConflict。中身が現在の版と同じなら版を作らず、
+        現在の版を返す。Connectorの行のロックは呼び出し元のtransactionの終わりまで続く
         """
         current = Connector.objects.select_for_update(of=("self",)).select_related("current_version").get(pk=self.pk)
+        if current.deleted:
+            # 編集を始めた後に削除された
+            raise VersionConflict("deleted")
         latest = current.current_version
         latest_number = latest.number if latest else 0
         if latest_number != expected_version:

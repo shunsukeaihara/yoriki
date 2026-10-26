@@ -231,6 +231,11 @@ class AppDestinationViewSet(ReadOnlyModelViewSet):
     serializer_class = AppDestinationSerializer
     filterset_class = DestinationFilter
     ordering = ("name", "pk")
+
+    def get_queryset(self):
+        # 利用者が管理できるタスクの範囲に許された出口だけ（部門は管理できる部門、全社・システムはそのタスクの管理の
+        # permission）。範囲の外のIDは詳細でも404にする（authorization.md §5.4・§7.2）
+        return super().get_queryset().selectable_by(self.request.user)
 ```
 
 ### delivery/urls.py
@@ -246,7 +251,7 @@ urlpatterns = router.urls
 要点：
 - Viewに書いてあるのは、取得対象、権限、作成者の受け渡しだけ。検証と整形はすべてSerializerにある。
 - 管理用の権限は、Groupの名前ではなくDjangoの標準のpermission（`delivery.add_destination` 等）で判定する（`ModelPermissions`）。permissionはGroup（permissionの集まり）か個別にユーザーへ付ける。
-- 業務画面向けは、別のSerializer（`AppDestinationSerializer`）とViewSetで出す項目を絞る（候補のAPIは接続先や認証の設定を返さない。authorization.md §7.2）。1つのSerializerの中で利用者によって分岐させない。実際の配信先は範囲を持ち、候補は利用者のタスクの範囲で絞る（この例では省略）。
+- 業務画面向けは、別のSerializer（`AppDestinationSerializer`）とViewSetで出す項目を絞る（候補のAPIは接続先や認証の設定を返さない。authorization.md §7.2）。1つのSerializerの中で利用者によって分岐させない。候補は、利用者が管理できるタスクの範囲に許された出口だけに絞る（`selectable_by()`。範囲の持ち方はこの例では省略）。
 - 種別の表示名は `kind_display` としてサーバーで返す。フロントエンドはこれを表示に使う（frontend-examples.md）。
 - `ordering` の最後に `pk` を置き、カーソル方式のページングで並び順が一意に決まるようにする。
 - 書き換えるテーブルは1つなので、`perform_create` にtransactionは付けない。
@@ -879,6 +884,11 @@ class AppRunEventViewSet(MyRunMixin, ListModelMixin, GenericViewSet):
 @extend_schema(description="エージェントからの確認質問", tags=["app/run/clarification"])
 class AppClarificationViewSet(MyRunMixin, ListModelMixin, RetrieveModelMixin, GenericViewSet):
     permission_classes = [AppUser]
+
+    @property
+    def run_access(self) -> RunAccess:
+        # 質問と回答の一覧・詳細はログ（ほかの参加者の回答を含む）。回答する操作は、結果を見られる人（起動した人）にも許す
+        return RunAccess.RESULT if self.action == "answer" else RunAccess.LOG
     lookup_field = "uid"
     queryset = ClarificationRequest.objects.select_related("answered_by")
     serializer_class = ClarificationRequestSerializer
@@ -1040,9 +1050,14 @@ def _has_scope_permission(user, scope: SkillScope, action: SkillAction) -> bool:
 
 
 class SkillQuerySet(models.QuerySet):
+    def usable_by(self, user) -> "SkillQuerySet":
+        """会話で使えるSkill（`/` の候補とエージェントの一覧）。見えるもののうち、公開済みのものだけ"""
+        return self.visible_to(user).filter(latest_version__gt=0)
+
     def visible_to(self, user) -> "SkillQuerySet":
-        """業務画面と会話で見る・使えるSkill。個人は本人、部門は使える部門、全社は全員。
-        システムSkillは含めない（管理画面のViewSetが、システムSkillのpermissionで扱う。authorization.md §7.3）"""
+        """業務画面で見るSkill。個人は本人、部門は使える部門、全社は全員（未公開のものは、実際は編集できる人にだけ
+        見せる。この例では省く）。システムSkillは含めない（管理画面のViewSetが、システムSkillのpermissionで扱う。
+        authorization.md §7.3）"""
         return self.filter(
             Q(scope=SkillScope.PERSONAL, owner=user)
             | Q(scope=SkillScope.DEPARTMENT, department__in=Department.objects.usable_by(user))
@@ -1195,14 +1210,12 @@ class SkillPublishSerializer(serializers.Serializer):
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.generics import get_object_or_404
 from rest_framework.response import Response
-from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
-
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.viewsets import ReadOnlyModelViewSet
 
 from utils.permissions import AppUser
-from utils.views import SoftDeleteMixin
 from .models import Skill, SkillAction, SkillVersion
 from .serializers import SkillPublishSerializer, SkillSerializer, SkillVersionSerializer
 
@@ -1222,19 +1235,20 @@ class SkillMixin:
 
 
 @extend_schema(description="Skill（業務画面）", tags=["app/skill"])
-class AppSkillViewSet(SoftDeleteMixin, ModelViewSet):
+class AppSkillViewSet(ReadOnlyModelViewSet):
+    """一覧・詳細・公開だけを示す（作成・更新・削除はこの例では省く。作成ではSerializerで範囲と部門を受け取り、
+    作れる範囲かを判定する）"""
+
     # 範囲を持つものは、ログインだけをpermission_classesで確かめ、対象はQuerySetとModelの判定で決める
     permission_classes = [AppUser]
     lookup_field = "uid"
     queryset = Skill.objects.select_related("owner", "department")
+    serializer_class = SkillSerializer
+    search_fields = ["name"]
+    ordering = ("-updated", "-pk")
 
-    # 見えることと、変えられることは別。操作ごとにModelの判定で確かめる（作成の可否はSerializerで判定する）
-    OBJECT_ACTIONS = {
-        "update": SkillAction.EDIT,
-        "partial_update": SkillAction.EDIT,
-        "destroy": SkillAction.DELETE,
-        "publish": SkillAction.PUBLISH,
-    }
+    # 見えることと、変えられることは別。操作ごとにModelの判定で確かめる
+    OBJECT_ACTIONS = {"publish": SkillAction.PUBLISH}
 
     def get_queryset(self):
         return super().get_queryset().visible_to(self.request.user)
@@ -1245,12 +1259,6 @@ class AppSkillViewSet(SoftDeleteMixin, ModelViewSet):
         if required is not None and not skill.can(self.request.user, required):
             raise PermissionDenied
         return skill
-    serializer_class = SkillSerializer
-    search_fields = ["name"]
-    ordering = ("-updated", "-pk")
-
-    def perform_create(self, serializer):
-        serializer.save(owner=self.request.user)
 
     @extend_schema(
         description="新しい版を公開する",

@@ -202,7 +202,7 @@ const all = computed<ManageMenuItem[]>(() => [
     icon: 'i-lucide-send',
     to: '/manage/destinations',
     // リンク先のページの definePageMeta と同じ権限
-    permission: PermissionCode.CHANGE_DESTINATION,
+    permission: [PermissionCode.VIEW_DESTINATION, PermissionCode.CHANGE_DESTINATION],
   },
 ])
 ```
@@ -213,7 +213,7 @@ const all = computed<ManageMenuItem[]>(() => [
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 
-definePageMeta({ permission: PermissionCode.CHANGE_DESTINATION })
+definePageMeta({ permission: [PermissionCode.VIEW_DESTINATION, PermissionCode.CHANGE_DESTINATION] })
 
 const api = useAPI()
 const { t } = useI18n()

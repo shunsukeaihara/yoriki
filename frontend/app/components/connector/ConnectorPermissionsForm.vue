@@ -31,14 +31,12 @@ const toRows = (permissions: ConnectorPermission[] | undefined): Row[] =>
     operations: [...(p.operations ?? [])],
   }))
 
-const form = ref({ version: 0, permissions: [] as Row[] })
-watch(
-  modelValue,
-  (value) => {
-    form.value = { version: value?.version ?? 0, permissions: toRows(value?.permissions) }
-  },
-  { immediate: true },
-)
+const toForm = (value: Connector | null | undefined) => ({
+  version: value?.version ?? 0,
+  permissions: toRows(value?.permissions),
+})
+const form = ref(toForm(null))
+const { reset } = syncConnectorForm(modelValue, form, toForm)
 
 // 役割（Group）は少ないので、全件を選択肢にする（defineExpose より前で await しないよう、待たずに読み込む）
 const { data: groups } = useAsyncData('manage-groups', () => api.manage.groups.list())
@@ -76,6 +74,7 @@ const { onSubmit, loading, errors } = createSubmit({
   onSuccess: (result) => {
     emit('updated', result)
     modelValue.value = result
+    reset()
     toast.add({ title: t('保存しました'), color: 'success' })
   },
   onError: (err) => {
@@ -95,7 +94,7 @@ const canPost = computed(
     form.value.permissions.every((row) => (row.grantee === 'group' ? row.group : row.department)),
 )
 
-defineExpose({ onSubmit, loading, canPost })
+defineExpose({ onSubmit, loading, canPost, reset })
 </script>
 
 <template>

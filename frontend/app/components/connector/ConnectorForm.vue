@@ -39,37 +39,32 @@ const emptyForm = () => ({
   isSensitive: false,
   changeReason: '',
 })
+const toForm = (value: Connector | null | undefined) =>
+  value
+    ? {
+        ...emptyForm(),
+        id: value.id,
+        version: value.version ?? 0,
+        name: value.name,
+        kind: value.kind,
+        host: value.host,
+        port: value.port ?? null,
+        database: value.database,
+        username: value.username,
+        tls: value.tls ?? TlsMode.VERIFY,
+        connectTimeoutSeconds: value.connectTimeoutSeconds ?? null,
+        maxConcurrency: value.maxConcurrency ?? null,
+        isActive: value.isActive ?? true,
+        description: value.description,
+        defaultSchema: value.defaultSchema ?? '',
+        maxRows: value.maxRows,
+        maxResultMb: bytesToMb(value.maxResultBytes),
+        timeoutSeconds: value.timeoutSeconds,
+        isSensitive: value.isSensitive,
+      }
+    : emptyForm()
 const form = ref(emptyForm())
-
-watch(
-  modelValue,
-  (value) => {
-    form.value = value
-      ? {
-          ...emptyForm(),
-          id: value.id,
-          version: value.version ?? 0,
-          name: value.name,
-          kind: value.kind,
-          host: value.host,
-          port: value.port ?? null,
-          database: value.database,
-          username: value.username,
-          tls: value.tls ?? TlsMode.VERIFY,
-          connectTimeoutSeconds: value.connectTimeoutSeconds ?? null,
-          maxConcurrency: value.maxConcurrency ?? null,
-          isActive: value.isActive ?? true,
-          description: value.description,
-          defaultSchema: value.defaultSchema ?? '',
-          maxRows: value.maxRows,
-          maxResultMb: bytesToMb(value.maxResultBytes),
-          timeoutSeconds: value.timeoutSeconds,
-          isSensitive: value.isSensitive,
-        }
-      : emptyForm()
-  },
-  { immediate: true },
-)
+const { reset } = syncConnectorForm(modelValue, form, toForm)
 
 const isEdit = computed(() => Boolean(form.value.id))
 const isMySQL = computed(() => form.value.kind === ConnectorKind.MYSQL)
@@ -114,6 +109,7 @@ const { onSubmit, loading, errors } = createSubmit({
     if (form.value.id) emit('updated', result)
     else emit('created', result)
     modelValue.value = result
+    reset() // 送ったパスワードと変更理由を残さない
     toast.add({ title: t('保存しました'), color: 'success' })
   },
   onError: (err) => {
@@ -137,7 +133,7 @@ const passwordHint = computed(() => {
   return t('SELECT権限だけを持つ専用のアカウントを使います')
 })
 
-defineExpose({ onSubmit, loading, canPost })
+defineExpose({ onSubmit, loading, canPost, reset })
 </script>
 
 <template>

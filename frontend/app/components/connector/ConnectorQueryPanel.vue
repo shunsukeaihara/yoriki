@@ -25,24 +25,28 @@ const onDescribe = async () => {
 }
 
 // --- 試し実行 ---
-const sql = ref('')
-const paramsText = ref('')
-const params = computed(() => parseQueryParams(paramsText.value, t))
+const form = ref({ sql: '', paramsText: '' })
+const params = computed(() => parseQueryParams(form.value.paramsText, t))
 const result = ref<ConnectorQueryResult | null>(null)
-const running = ref(false)
-const onRun = async () => {
-  running.value = true
-  result.value = null
-  try {
-    result.value = await api.manage
-      .connectors(props.connector.id)
-      .query({ sql: sql.value, params: params.value.value }, waitSeconds.value)
-  } catch (err) {
-    toast.add({ title: t('エラー'), description: makeErrorMsg(err), color: 'error' })
-  } finally {
-    running.value = false
-  }
-}
+const {
+  onSubmit: onRun,
+  loading: running,
+  errors,
+} = createSubmit({
+  form,
+  fn: ({ sql }) => {
+    result.value = null
+    return api.manage.connectors(props.connector.id).query({ sql, params: params.value.value }, waitSeconds.value)
+  },
+  onSuccess: (value) => (result.value = value),
+  onError: (err) => toast.add({ title: t('エラー'), description: makeErrorMsg(err), color: 'error' }),
+})
+// 引数ごとのエラー（{ "0": [...] }）は、何番目の引数かを付けて出す
+const paramsErrors = computed(() =>
+  params.value.error
+    ? [params.value.error]
+    : flattenRowErrors(errors.value.params, (i, message) => t('{n}番目：{message}', { n: i + 1, message })),
+)
 
 const formatBytes = (bytes: number) =>
   bytes < 1024 * 1024 ? t('{n}KB', { n: Math.ceil(bytes / 1024) }) : t('{n}MB', { n: (bytes / 1024 / 1024).toFixed(1) })
@@ -92,24 +96,31 @@ const formatBytes = (bytes: number) =>
         $t('エージェントと同じ検査と上限で実行します。公開した表・ビューだけを使えます。表示は先頭の200行までです')
       "
     >
+      <DFormAlert :errors="errors" />
       <DTextarea
-        v-model="sql"
+        v-model="form.sql"
         :label="$t('SELECT文')"
         :rows="5"
         :hint="$t('引数の場所は ? で書きます')"
         placeholder="SELECT code, name FROM vendors WHERE code = ?"
+        :error-messages="errors.sql"
         class="font-mono"
       />
       <DTextField
-        v-model="paramsText"
+        v-model="form.paramsText"
         :label="$t('引数')"
         :hint="$t('JSONの配列で書きます。引数がなければ空欄にします')"
         placeholder='["A01"]'
-        :error-messages="params.error ? [params.error] : undefined"
+        :error-messages="paramsErrors.length ? paramsErrors : undefined"
         class="font-mono"
       />
       <div>
-        <DBtn icon="i-lucide-play" :disabled="!sql.trim() || Boolean(params.error)" :loading="running" @click="onRun">
+        <DBtn
+          icon="i-lucide-play"
+          :disabled="!form.sql.trim() || Boolean(params.error)"
+          :loading="running"
+          @click="onRun"
+        >
           {{ $t('実行') }}
         </DBtn>
       </div>

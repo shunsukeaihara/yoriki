@@ -24,14 +24,13 @@ const toEntries = (tables: ConnectorTableEntry[] | undefined): Entry[] =>
     columns: { ...(e.columns ?? {}) },
   }))
 
-const form = ref({ version: 0, tables: [] as Entry[], changeReason: '' })
-watch(
-  modelValue,
-  (value) => {
-    form.value = { version: value?.version ?? 0, tables: toEntries(value?.tables), changeReason: '' }
-  },
-  { immediate: true },
-)
+const toForm = (value: Connector | null | undefined) => ({
+  version: value?.version ?? 0,
+  tables: toEntries(value?.tables),
+  changeReason: '',
+})
+const form = ref(toForm(null))
+const { reset } = syncConnectorForm(modelValue, form, toForm)
 
 // 接続先の表・ビューと列（読み込むまでは null）
 const dbTables = ref<ConnectorTable[] | null>(null)
@@ -128,6 +127,7 @@ const { onSubmit, loading, errors } = createSubmit({
   onSuccess: (result) => {
     emit('updated', result)
     modelValue.value = result
+    reset()
     toast.add({ title: t('保存しました'), color: 'success' })
   },
   onError: (err) => {
@@ -145,7 +145,7 @@ const tableErrors = computed(() =>
 
 const canPost = computed(() => Boolean(modelValue.value) && dirty.value)
 
-defineExpose({ onSubmit, loading, canPost, loadOnce })
+defineExpose({ onSubmit, loading, canPost, loadOnce, reset })
 </script>
 
 <template>

@@ -89,3 +89,28 @@ export const parseQueryParams = (text: string, t: T): { value: unknown[]; error:
   }
   return { value: [], error: t('JSONの配列で書いてください（例：["A01", 10]）') }
 }
+
+/**
+ * 詳細のタブごとのフォーム（設定・公開する表・利用の許可）を、共有するConnectorに合わせる。別のタブの保存で
+ * Connectorが変わったときは、未保存の入力を残して版だけを最新にする（タブごとに送る項目が分かれているので、
+ * 残した入力で別のタブの保存を戻さない）。入力を捨てて合わせ直すときは reset() を呼ぶ（保存の後、最新の読み直し）
+ */
+export const syncConnectorForm = <F extends { version: number }>(
+  modelValue: Ref<Connector | null | undefined>,
+  form: Ref<F>,
+  toForm: (value: Connector | null | undefined) => F,
+) => {
+  const reset = () => {
+    form.value = toForm(modelValue.value)
+  }
+  watch(
+    modelValue,
+    (value, old) => {
+      const dirty = Boolean(old) && JSON.stringify(form.value) !== JSON.stringify(toForm(old))
+      if (value && old && value.id === old.id && dirty) form.value.version = value.version ?? 0
+      else form.value = toForm(value)
+    },
+    { immediate: true },
+  )
+  return { reset }
+}

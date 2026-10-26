@@ -1,17 +1,19 @@
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ConnectorForm, ConnectorPermissionsForm, ConnectorTablesForm } from '#components'
+import { AxiosError, AxiosHeaders } from 'axios'
+import { ConnectorForm, ConnectorPermissionsForm, ConnectorQueryPanel, ConnectorTablesForm } from '#components'
 
-const { create, patch, tables, groups } = vi.hoisted(() => ({
+const { create, patch, tables, groups, query } = vi.hoisted(() => ({
   create: vi.fn(),
   patch: vi.fn(),
   tables: vi.fn(),
   groups: vi.fn(),
+  query: vi.fn(),
 }))
 
 mockNuxtImport('useAPI', () => () => ({
   manage: {
-    connectors: () => ({ create, patch, tables }),
+    connectors: () => ({ create, patch, tables, query }),
     groups: { list: groups },
     departments: () => ({ list: vi.fn().mockResolvedValue({ results: [], next: null, previous: null }) }),
   },
@@ -98,6 +100,22 @@ describe('ConnectorForm', () => {
     expect(data).not.toHaveProperty('host')
     expect(wrapper.text()).toContain('末尾 word')
   })
+
+  it('別のタブの保存でConnectorが変わっても、未保存の入力を残して版だけを最新にする。reset() で捨てる', async () => {
+    const wrapper = await mountSuspended(ConnectorForm, { props: { modelValue: connector } })
+    const vm = wrapper.vm as unknown as Form & { form: { version: number }; reset: () => void }
+    vm.form.name = '販売管理DB（本番）'
+    await wrapper.setProps({ modelValue: { ...connector, version: 3, tables: [] } })
+    expect(vm.form).toMatchObject({ name: '販売管理DB（本番）', version: 3 })
+    vm.reset()
+    expect(vm.form).toMatchObject({ name: '販売管理DB', version: 3 })
+  })
+
+  it('未保存の入力がなければ、変わったConnectorに合わせ直す', async () => {
+    const wrapper = await mountSuspended(ConnectorForm, { props: { modelValue: connector } })
+    await wrapper.setProps({ modelValue: { ...connector, version: 3, description: '新しい説明' } })
+    expect((wrapper.vm as unknown as { form: object }).form).toMatchObject({ version: 3, description: '新しい説明' })
+  })
 })
 
 describe('ConnectorTablesForm', () => {
@@ -178,5 +196,33 @@ describe('ConnectorPermissionsForm', () => {
         { group: '業務管理者', department: null, operations: ['datasource_describe'] },
       ],
     })
+  })
+})
+
+describe('ConnectorQueryPanel', () => {
+  beforeEach(() => {
+    query.mockReset()
+  })
+
+  it('サーバーが断った引数のエラーを、何番目の引数かを付けて欄に出す', async () => {
+    const response = {
+      status: 400,
+      statusText: 'Bad Request',
+      headers: { 'content-type': 'application/json' },
+      config: { headers: new AxiosHeaders() },
+      data: { params: { '1': ['引数は、文字・数値・真偽値・nullにしてください'] } },
+    }
+    query.mockRejectedValue(new AxiosError('400', 'ERR_BAD_REQUEST', undefined, undefined, response))
+    const wrapper = await mountSuspended(ConnectorQueryPanel, { props: { connector } })
+    const vm = wrapper.vm as unknown as { form: { sql: string; paramsText: string }; onRun: () => Promise<void> }
+    vm.form.sql = 'SELECT * FROM Vendors WHERE VendorCode = ? AND Region = ?'
+    vm.form.paramsText = '["A01", {"a": 1}]'
+    await vm.onRun()
+    expect(query.mock.calls[0]).toEqual([
+      { sql: 'SELECT * FROM Vendors WHERE VendorCode = ? AND Region = ?', params: ['A01', { a: 1 }] },
+      40,
+    ])
+    await nextTick()
+    expect(wrapper.text()).toContain('2番目：引数は、文字・数値・真偽値・nullにしてください')
   })
 })

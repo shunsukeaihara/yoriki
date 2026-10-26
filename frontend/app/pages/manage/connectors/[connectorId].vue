@@ -49,8 +49,10 @@ const onUpdated = () => {
 const onFailed = (err: unknown) => {
   conflicted.value = err instanceof AxiosError && err.response?.status === 409
 }
+// 他の人の版を読み込み、すべてのタブの未保存の入力を捨てて合わせ直す
 const reloadLatest = async () => {
   await refresh()
+  for (const form of [formRef.value, tablesRef.value, permissionsRef.value]) form?.reset()
   conflicted.value = false
   versionsReloadKey.value = Date.now()
 }

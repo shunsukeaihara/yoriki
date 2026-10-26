@@ -267,6 +267,7 @@ class DatasourceAdapter(ABC):
         checked = self.check_query(sql, params)
         max_rows = self.version.max_rows
         max_bytes = self.version.max_result_bytes
+        timeout = self.version.timeout_seconds
 
         def run() -> QueryResult:
             started = time.monotonic()
@@ -285,7 +286,8 @@ class DatasourceAdapter(ABC):
                     )
                 if csv_out is not None:
                     csv_out.write(header)
-                for row in _fetch(cur, result, max_rows, max_bytes):
+                deadline = started + timeout
+                for row in _fetch(cur, result, max_rows, max_bytes, deadline):
                     line = _csv_line(_csv_row(row))
                     size = len(line.encode())
                     if result.row_count >= max_rows or result.csv_bytes + size > max_bytes:
@@ -303,10 +305,16 @@ class DatasourceAdapter(ABC):
         return self._run(run)
 
 
-def _fetch(cur, result: QueryResult, max_rows: int, max_bytes: int) -> Iterator[Sequence[Any]]:
+def _fetch(cur, result: QueryResult, max_rows: int, max_bytes: int, deadline: float) -> Iterator[Sequence[Any]]:
     """上限を超える分を取り出さないよう、残りの行数と、これまでの1行の大きさから見た残りのバイト数で件数を絞る。
-    打ち切ったと分かるように、上限より1行だけ多く取り出す"""
+    打ち切ったと分かるように、上限より1行だけ多く取り出す。
+
+    DBの実行時間の上限（PostgreSQLの statement_timeout 等）は取り出しの1回ずつに効くので、問い合わせの全体は
+    ここで開始からの時間で止める
+    """
     while True:
+        if time.monotonic() > deadline:
+            raise ConnectorError(ConnectorErrorKind.TIMEOUT, _("実行時間の上限を超えました"))
         count = result.row_count
         size = min(FETCH_SIZE, max_rows - count + 1)
         if count:

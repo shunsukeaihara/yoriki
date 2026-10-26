@@ -14,6 +14,7 @@ DBのアカウントか読取り専用のtransactionで止まることを確か�
 
 import io
 import os
+import time
 from collections.abc import Callable, Iterator
 from contextlib import closing
 from dataclasses import dataclass
@@ -368,7 +369,7 @@ class FakeCursor:
 def _consume(cur: FakeCursor, max_rows: int, max_bytes: int) -> QueryResult:
     result = QueryResult(columns=["v"], rows=[])
     result.csv_bytes = len("v\n")
-    for row in _fetch(cur, result, max_rows, max_bytes):
+    for row in _fetch(cur, result, max_rows, max_bytes, time.monotonic() + 60):
         size = len(f"{row[0]}\n".encode())
         if len(result.rows) >= max_rows or result.csv_bytes + size > max_bytes:
             result.truncated = True
@@ -384,6 +385,15 @@ def test_fetch_does_not_read_beyond_row_limit():
     result = _consume(cur, max_rows=1, max_bytes=10**9)
     assert result.truncated is True
     assert cur.sizes == [2]  # 上限より1行だけ多く取り出す
+
+
+def test_fetch_stops_at_deadline():
+    cur = FakeCursor([(i,) for i in range(1000)])
+    result = QueryResult(columns=["v"], rows=[])
+    with pytest.raises(ConnectorError) as exc_info:
+        list(_fetch(cur, result, 10**6, 10**9, time.monotonic() - 1))
+    assert exc_info.value.kind == ConnectorErrorKind.TIMEOUT
+    assert cur.sizes == []
 
 
 def test_fetch_does_not_read_beyond_byte_limit():

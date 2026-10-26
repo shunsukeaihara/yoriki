@@ -27,6 +27,8 @@ from ..sql import CheckedQuery, Dialect, check_query, table_key
 # 管理画面で表を選ぶための一覧の上限
 MAX_LISTED_TABLES = 5000
 FETCH_SIZE = 500
+# 1行の大きさが分からない最初の取り出し
+FIRST_FETCH_SIZE = 10
 
 Param = str | int | float | bool | None
 
@@ -217,7 +219,7 @@ class DatasourceAdapter(ABC):
                 columns = [d[0] for d in cur.description]
                 result = QueryResult(columns=columns, rows=[], tables=checked.tables, sql=checked.sql)
                 result.csv_bytes = _csv_size(columns)
-                for row in _fetch(cur):
+                for row in _fetch(cur, result, max_rows, max_bytes):
                     size = _csv_size([to_text(v) for v in row])
                     if len(result.rows) >= max_rows or result.csv_bytes + size > max_bytes:
                         result.truncated = True
@@ -230,8 +232,20 @@ class DatasourceAdapter(ABC):
         return self._run(run)
 
 
-def _fetch(cur) -> Iterator[Sequence[Any]]:
-    while rows := cur.fetchmany(FETCH_SIZE):
+def _fetch(cur, result: QueryResult, max_rows: int, max_bytes: int) -> Iterator[Sequence[Any]]:
+    """上限を超える分を取り出さないよう、残りの行数と、これまでの1行の大きさから見た残りのバイト数で件数を絞る。
+    打ち切ったと分かるように、上限より1行だけ多く取り出す"""
+    while True:
+        count = len(result.rows)
+        size = min(FETCH_SIZE, max_rows - count + 1)
+        if count:
+            per_row = max(1, (result.csv_bytes - _csv_size(result.columns)) // count)
+            size = min(size, max(1, (max_bytes - result.csv_bytes) // per_row + 1))
+        else:
+            size = min(size, FIRST_FETCH_SIZE)
+        rows = cur.fetchmany(size)
+        if not rows:
+            return
         yield from rows
 
 

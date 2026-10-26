@@ -26,6 +26,7 @@ from django.db import connection
 from nanoid import generate
 
 from connector.adapters import get_adapter
+from connector.adapters.base import QueryResult, _fetch
 from connector.errors import ConnectorError, ConnectorErrorKind
 from connector.factories import ConnectorFactory
 from connector.models import VERSION_FIELDS, Connector, ConnectorKind, TLSMode
@@ -332,3 +333,41 @@ class TestDatasource:
                 assert error is not None
                 assert error.kind == ConnectorErrorKind.QUERY
         assert source.admin_query(f"SELECT COUNT(*) FROM {source.qualified('items')}") == [(0,)]
+
+
+class FakeCursor:
+    def __init__(self, rows: list[tuple[Any, ...]]):
+        self.rows = rows
+        self.sizes: list[int] = []
+
+    def fetchmany(self, size: int) -> list[tuple[Any, ...]]:
+        self.sizes.append(size)
+        taken, self.rows = self.rows[:size], self.rows[size:]
+        return taken
+
+
+def _consume(cur: FakeCursor, max_rows: int, max_bytes: int) -> QueryResult:
+    result = QueryResult(columns=["v"], rows=[])
+    result.csv_bytes = len("v\n")
+    for row in _fetch(cur, result, max_rows, max_bytes):
+        size = len(f"{row[0]}\n".encode())
+        if len(result.rows) >= max_rows or result.csv_bytes + size > max_bytes:
+            result.truncated = True
+            break
+        result.rows.append(tuple(row))
+        result.csv_bytes += size
+    return result
+
+
+def test_fetch_does_not_read_beyond_row_limit():
+    cur = FakeCursor([(i,) for i in range(1000)])
+    result = _consume(cur, max_rows=1, max_bytes=10**9)
+    assert result.truncated is True
+    assert cur.sizes == [2]  # 上限より1行だけ多く取り出す
+
+
+def test_fetch_does_not_read_beyond_byte_limit():
+    cur = FakeCursor([("x" * 99,) for _ in range(1000)])  # 1行100バイト
+    result = _consume(cur, max_rows=10**6, max_bytes=1000)
+    assert result.truncated is True
+    assert sum(cur.sizes) <= 12

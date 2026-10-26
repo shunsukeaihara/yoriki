@@ -62,7 +62,12 @@ class MySQLAdapter(DatasourceAdapter):
                 cur.execute("START TRANSACTION READ ONLY")
             yield conn
         finally:
-            # 結果を読み切っていない（上限で打ち切った）接続でも、残りを読まずに閉じる。commitしないので取り消される
+            # 結果を読み切っていない（上限で打ち切った）接続でも、残りを読まずに閉じる。commitしないので取り消される。
+            # PyMySQLは、読みかけの結果を捨てるとき（cursorのclose、結果の__del__）に残りを読み切ろうとするので、
+            # その印を外しておく
+            result = getattr(conn, "_result", None)
+            if result is not None:
+                result.unbuffered_active = False
             if conn.open:
                 with suppress(pymysql.MySQLError):
                     conn.close()

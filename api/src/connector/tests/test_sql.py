@@ -48,7 +48,7 @@ def _check(dialect: Dialect, sql: str, params_count: int = 0):
             POSTGRES,
             "SELECT * FROM vendors -- ?\n WHERE a = ?",
             1,
-            "SELECT * FROM \"public\".vendors WHERE a = %s",
+            'SELECT * FROM "public".vendors WHERE a = %s',
             ("public.vendors",),
         ),
         (

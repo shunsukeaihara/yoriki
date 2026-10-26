@@ -12,6 +12,7 @@ CIでは YORIKI_CONNECTOR_TEST_REQUIRED=1 を付け、接続先がなければ�
 DBのアカウントか読取り専用のtransactionで止まることを確かめる（design.md §4.9.2の多層の防御）。
 """
 
+import io
 import os
 from collections.abc import Callable, Iterator
 from contextlib import closing
@@ -290,6 +291,18 @@ class TestDatasource:
         assert csv[1] == "V002,取引先2,2001.00,2026-01-03"
         assert result.csv_bytes == len(result.to_csv().encode())
 
+    def test_query_writes_csv_and_keeps_head(self, source):
+        out = io.StringIO()
+        result = get_adapter(_connector(source)).query(
+            "SELECT code, name FROM vendors ORDER BY code", keep_rows=3, csv_out=out
+        )
+        lines = out.getvalue().splitlines()
+        assert lines[0] == "code,name"
+        assert len(lines) == VENDOR_ROWS + 1
+        assert result.row_count == VENDOR_ROWS
+        assert [r[0] for r in result.rows] == ["V001", "V002", "V003"]
+        assert result.csv_bytes == len(out.getvalue().encode())
+
     def test_truncates_by_rows_and_bytes(self, source):
         connector = _connector(source, max_rows=10)
         result = get_adapter(connector).query("SELECT code FROM vendors ORDER BY code")
@@ -361,6 +374,7 @@ def _consume(cur: FakeCursor, max_rows: int, max_bytes: int) -> QueryResult:
             result.truncated = True
             break
         result.rows.append(tuple(row))
+        result.row_count += 1
         result.csv_bytes += size
     return result
 

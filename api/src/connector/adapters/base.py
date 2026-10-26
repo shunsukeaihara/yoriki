@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from datetime import time as dt_time
 from decimal import Decimal
-from typing import Any
+from typing import Any, TextIO
 from uuid import UUID
 
 from django.utils.translation import gettext as _
@@ -54,7 +54,10 @@ class TableInfo:
 @dataclass
 class QueryResult:
     columns: list[str]
+    # メモリに残した行（query() の keep_rows まで）。全体は csv_out に書いたCSVにある
     rows: list[tuple[Any, ...]]
+    # 読んだ行数（打ち切った場合は、打ち切るまで）
+    row_count: int = 0
     # 行数・サイズの上限で打ち切った（打ち切った後の行は読んでいない）
     truncated: bool = False
     # CSVにしたときのバイト数（打ち切った場合は、打ち切るまで）
@@ -64,10 +67,11 @@ class QueryResult:
     sql: str = ""  # 実際に実行したSQL（検査した構文木から作り直したもの）
 
     def to_csv(self) -> str:
+        """メモリに残した行のCSV"""
         buffer = io.StringIO()
         writer = csv.writer(buffer, lineterminator="\n")
         writer.writerow(self.columns)
-        writer.writerows([to_text(v) for v in row] for row in self.rows)
+        writer.writerows(_csv_row(row) for row in self.rows)
         return buffer.getvalue()
 
 
@@ -251,8 +255,14 @@ class DatasourceAdapter(ABC):
             exposed=[(t.get("schema", ""), t["name"]) for t in self.version.tables],
         )
 
-    def query(self, sql: str, params: Sequence[Param] = ()) -> QueryResult:
-        """公開している表・ビューへのSELECT文を実行する（`datasource_query`）。行数・サイズの上限で打ち切る"""
+    def query(
+        self, sql: str, params: Sequence[Param] = (), *, keep_rows: int | None = None, csv_out: TextIO | None = None
+    ) -> QueryResult:
+        """公開している表・ビューへのSELECT文を実行する（`datasource_query`）。行数・サイズの上限で打ち切る。
+
+        行は読むたびに `csv_out` へCSVで書き、メモリには先頭の `keep_rows` 行だけを残す（None ならすべて）。
+        大きな結果はファイルに書き、画面やモデルには先頭だけを見せるため
+        """
         assert self.version is not None
         checked = self.check_query(sql, params)
         max_rows = self.version.max_rows
@@ -267,17 +277,25 @@ class DatasourceAdapter(ABC):
                     raise ConnectorError(ConnectorErrorKind.REJECTED, _("結果を返さない文は実行できません"))
                 columns = [d[0] for d in cur.description]
                 result = QueryResult(columns=columns, rows=[], tables=checked.tables, sql=checked.sql)
-                result.csv_bytes = _csv_size(columns)
+                header = _csv_line(columns)
+                result.csv_bytes = len(header.encode())
                 if result.csv_bytes > max_bytes:
                     raise ConnectorError(
                         ConnectorErrorKind.REJECTED, _("列名だけで結果のサイズの上限を超えます。列を絞ってください")
                     )
+                if csv_out is not None:
+                    csv_out.write(header)
                 for row in _fetch(cur, result, max_rows, max_bytes):
-                    size = _csv_size([to_text(v) for v in row])
-                    if len(result.rows) >= max_rows or result.csv_bytes + size > max_bytes:
+                    line = _csv_line(_csv_row(row))
+                    size = len(line.encode())
+                    if result.row_count >= max_rows or result.csv_bytes + size > max_bytes:
                         result.truncated = True
                         break
-                    result.rows.append(tuple(row))
+                    if keep_rows is None or len(result.rows) < keep_rows:
+                        result.rows.append(tuple(row))
+                    if csv_out is not None:
+                        csv_out.write(line)
+                    result.row_count += 1
                     result.csv_bytes += size
             result.elapsed_ms = int((time.monotonic() - started) * 1000)
             return result
@@ -289,10 +307,10 @@ def _fetch(cur, result: QueryResult, max_rows: int, max_bytes: int) -> Iterator[
     """上限を超える分を取り出さないよう、残りの行数と、これまでの1行の大きさから見た残りのバイト数で件数を絞る。
     打ち切ったと分かるように、上限より1行だけ多く取り出す"""
     while True:
-        count = len(result.rows)
+        count = result.row_count
         size = min(FETCH_SIZE, max_rows - count + 1)
         if count:
-            per_row = max(1, (result.csv_bytes - _csv_size(result.columns)) // count)
+            per_row = max(1, (result.csv_bytes - len(_csv_line(result.columns).encode())) // count)
             size = min(size, max(1, (max_bytes - result.csv_bytes) // per_row + 1))
         else:
             size = min(size, FIRST_FETCH_SIZE)
@@ -302,7 +320,11 @@ def _fetch(cur, result: QueryResult, max_rows: int, max_bytes: int) -> Iterator[
         yield from rows
 
 
-def _csv_size(values: Sequence[Any]) -> int:
+def _csv_row(row: Sequence[Any]) -> list[str]:
+    return [to_text(v) for v in row]
+
+
+def _csv_line(values: Sequence[str]) -> str:
     buffer = io.StringIO()
     csv.writer(buffer, lineterminator="\n").writerow(values)
-    return len(buffer.getvalue().encode())
+    return buffer.getvalue()

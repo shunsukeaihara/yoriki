@@ -417,9 +417,7 @@ class ConnectorQueryResultSerializer(serializers.Serializer):
         return [[to_text(v) for v in row] for row in obj["rows"]]
 
     @staticmethod
-    def build(
-        result: QueryResult | None, *, error_kind: str = "", detail: str = "", preview_rows: int | None = None
-    ) -> dict[str, Any]:
+    def build(result: QueryResult | None, *, error_kind: str = "", detail: str = "") -> dict[str, Any]:
         if result is None:
             return {
                 "ok": False,
@@ -441,10 +439,10 @@ class ConnectorQueryResultSerializer(serializers.Serializer):
             "detail": "",
             "sql": result.sql,
             "columns": result.columns,
-            "rows": result.rows[:preview_rows],
-            "row_count": len(result.rows),
+            "rows": result.rows,
+            "row_count": result.row_count,
             "truncated": result.truncated,
-            "preview_truncated": preview_rows is not None and len(result.rows) > preview_rows,
+            "preview_truncated": result.row_count > len(result.rows),
             "csv_bytes": result.csv_bytes,
             "elapsed_ms": result.elapsed_ms,
             "tables": list(result.tables),

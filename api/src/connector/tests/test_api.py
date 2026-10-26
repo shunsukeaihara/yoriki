@@ -303,11 +303,13 @@ class TestOperations:
     @pytest.mark.django_db
     def test_query_preview_is_marked(self, admin_client, monkeypatch):
         connector = ConnectorFactory.create(version__tables=[{"schema": "public", "name": "vendors"}])
-        rows = [(i,) for i in range(250)]
-        monkeypatch.setattr(
-            "connector.adapters.postgresql.PostgreSQLAdapter.query",
-            lambda self, sql, params: QueryResult(columns=["id"], rows=rows, sql=sql),
-        )
+
+        def query(self, sql, params, *, keep_rows=None, csv_out=None):
+            # 応答に載せる行だけを残させる
+            assert keep_rows == 200
+            return QueryResult(columns=["id"], rows=[(i,) for i in range(keep_rows)], row_count=250, sql=sql)
+
+        monkeypatch.setattr("connector.adapters.postgresql.PostgreSQLAdapter.query", query)
         body = admin_client.post(
             f"{CONNECTORS}{connector.uid}/query/", {"sql": "SELECT id FROM vendors"}, format="json"
         ).json()

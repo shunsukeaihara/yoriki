@@ -30,8 +30,8 @@ from skill.models import (
     SkillDraft,
     SkillScope,
 )
-from user.factories import DepartmentFactory, DepartmentMembershipFactory
-from user.models import DepartmentRole
+from user.factories import DepartmentFactory, DepartmentMembershipFactory, grant
+from utils.permissions import AppPermission
 
 from .fakes import FakeAdapter, calls, reply
 
@@ -241,7 +241,8 @@ def test_staged_files_are_checked_against_the_published_version(conversation, ap
 @pytest.mark.django_db
 def test_editor_without_publish_role_saves_a_draft(conversation, app_user):
     department = DepartmentFactory.create(name="経理部")
-    DepartmentMembershipFactory.create(department=department, user=app_user, role=DepartmentRole.EDITOR)
+    DepartmentMembershipFactory.create(department=department, user=app_user)
+    grant(app_user, AppPermission.EDIT_DEPARTMENT_SKILLS)
     skill = publish(app_user, scope=SkillScope.DEPARTMENT, department=department)
     run = post(conversation, skill_edit=edit(skill))
     adapter = FakeAdapter(
@@ -431,7 +432,7 @@ def test_free_text_answer_to_the_skill_edit_question_is_not_an_approval(conversa
 @pytest.mark.django_db
 def test_request_skill_edit_names_only_skills_the_user_can_edit(conversation, app_user, other_user):
     department = DepartmentFactory.create(name="経理部")
-    DepartmentMembershipFactory.create(department=department, user=app_user, role=DepartmentRole.MEMBER)
+    DepartmentMembershipFactory.create(department=department, user=app_user)
     publish(other_user, name="部門の照合", scope=SkillScope.DEPARTMENT, department=department)
     mine = publish(app_user, name="個人の照合")
     run = post(conversation)
@@ -452,12 +453,12 @@ def test_request_skill_edit_names_only_skills_the_user_can_edit(conversation, ap
 @pytest.mark.django_db
 def test_edit_run_does_not_start_without_edit_access(conversation, app_user, other_user):
     department = DepartmentFactory.create()
-    membership = DepartmentMembershipFactory.create(department=department, user=app_user, role=DepartmentRole.EDITOR)
+    DepartmentMembershipFactory.create(department=department, user=app_user)
+    grant(app_user, AppPermission.EDIT_DEPARTMENT_SKILLS)
     skill = publish(other_user, scope=SkillScope.DEPARTMENT, department=department)
     busy = post(conversation, "先に別の作業")
     post(conversation, skill_edit=edit(skill))
-    membership.role = DepartmentRole.MEMBER
-    membership.save()
+    app_user.user_permissions.clear()
     execute(busy, FakeAdapter([reply("終わりました。")]))
 
     assert not Run.objects.filter(kind=RunKind.SKILL_EDIT).exists()

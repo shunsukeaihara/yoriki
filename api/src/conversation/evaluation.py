@@ -46,7 +46,7 @@ from skill.models import (
     EvaluationStatus,
     EvaluationVerdict,
     Skill,
-    SkillAccess,
+    SkillAction,
     SkillDraft,
     SkillEvaluation,
     SkillEvaluationAsset,
@@ -173,7 +173,7 @@ def start_evaluation(
 def _check_startable(skill: Skill, cases: list[SkillEvaluationCase], actor, model_version: ModelProfileVersion) -> None:
     if skill.deleted:
         raise CannotEvaluate(_("このSkillは削除されました。"))
-    if skill.scope_access_of(actor) < SkillAccess.EDIT:
+    if not skill.can(actor, SkillAction.EDIT):
         raise CannotEvaluate(_("このSkillのDraftを評価する権限がありません。"))
     if skill.suspended:
         raise CannotEvaluate(_("停止中のSkillは評価できません。"))

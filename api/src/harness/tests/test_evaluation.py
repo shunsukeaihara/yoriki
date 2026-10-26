@@ -39,8 +39,8 @@ from skill.models import (
     SkillScope,
 )
 from usage.models import UsageLedger, UsagePurpose
-from user.factories import DepartmentFactory, DepartmentMembershipFactory
-from user.models import DepartmentRole
+from user.factories import DepartmentFactory, DepartmentMembershipFactory, grant
+from utils.permissions import AppPermission
 
 from .fakes import FakeAdapter, calls, reply
 from .test_skill_edit import FileSession
@@ -284,7 +284,8 @@ def _finish(evaluation: SkillEvaluation, monkeypatch) -> None:
 @pytest.mark.django_db
 def test_required_case_must_pass_with_the_current_draft_before_publishing(api_client, app_user, model, monkeypatch):
     department = DepartmentFactory.create()
-    DepartmentMembershipFactory.create(department=department, user=app_user, role=DepartmentRole.PUBLISHER)
+    DepartmentMembershipFactory.create(department=department, user=app_user)
+    grant(app_user, AppPermission.PUBLISH_DEPARTMENT_SKILLS)
     skill = skill_with_draft(app_user, scope=SkillScope.DEPARTMENT, department=department)
     required = case(skill, required=True)
     case(skill, name="任意のケース")
@@ -345,7 +346,8 @@ def test_personal_skill_has_no_required_cases(api_client, app_user):
 @pytest.mark.django_db
 def test_editor_cannot_loosen_required_cases(api_client, app_user, other_user):
     department = DepartmentFactory.create()
-    DepartmentMembershipFactory.create(department=department, user=app_user, role=DepartmentRole.EDITOR)
+    DepartmentMembershipFactory.create(department=department, user=app_user)
+    grant(app_user, AppPermission.EDIT_DEPARTMENT_SKILLS)
     skill = skill_with_draft(other_user, scope=SkillScope.DEPARTMENT, department=department)
     required = case(skill, required=True)
     optional = case(skill, name="任意")
@@ -496,7 +498,8 @@ def test_test_skill_draft_without_cases_tells_the_user(app_user):
 @pytest.mark.django_db
 def test_publish_tool_asks_to_test_required_cases(app_user):
     department = DepartmentFactory.create()
-    DepartmentMembershipFactory.create(department=department, user=app_user, role=DepartmentRole.PUBLISHER)
+    DepartmentMembershipFactory.create(department=department, user=app_user)
+    grant(app_user, AppPermission.PUBLISH_DEPARTMENT_SKILLS)
     skill = skill_with_draft(app_user, scope=SkillScope.DEPARTMENT, department=department)
     case(skill, required=True)
     conversation = ConversationFactory.create(owner=app_user)

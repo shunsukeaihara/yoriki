@@ -1,23 +1,28 @@
+import importlib
+
 import pytest
 from allauth.core.exceptions import ImmediateHttpResponse
 from allauth.socialaccount.models import SocialAccount, SocialLogin
 from django.contrib.auth.models import AnonymousUser, Group, Permission
+from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
 from django.test import RequestFactory
 from rest_framework.test import APIClient
 
 from .adapters import SocialAccountAdapter, is_allowed_account
-from .factories import DepartmentFactory, DepartmentMembershipFactory, SSOProviderFactory, UserFactory
+from .factories import DepartmentFactory, DepartmentMembershipFactory, SSOProviderFactory, UserFactory, grant
 from .models import (
     Department,
     DepartmentMembership,
-    DepartmentRole,
     SSOKind,
     SSOProvider,
     User,
-    covers_all_departments,
     is_sso_enabled,
+    manageable_department_ids,
+    usable_department_ids,
 )
-from .roles import ROLES, sync_role_groups
+
+INITIAL_GROUPS_MIGRATION = importlib.import_module("user.migrations.0007_initial_groups")
 
 
 class TestAuthSession:
@@ -67,8 +72,10 @@ class TestMyUser:
         data = res.json()
         assert data["id"] == app_user.uid
         assert data["email"] == app_user.email
-        assert data["is_platform_admin"] is False
         assert data["all_permissions"] == ["user.view_user"]
+        # 基盤管理者かどうかは画面に渡さない（authorization.md §4.1）
+        assert "is_platform_admin" not in data
+        assert "is_superuser" not in data
 
     @pytest.mark.django_db
     def test_inactive_user_is_rejected(self, api_client, app_user):
@@ -77,37 +84,42 @@ class TestMyUser:
         assert api_client.get(self.url).status_code in (401, 403)
 
 
-class TestRoleGroups:
-    @pytest.mark.django_db
-    def test_role_groups_are_created(self):
-        assert set(Group.objects.filter(name__in=ROLES).values_list("name", flat=True)) == set(ROLES)
+def _create_initial_groups() -> None:
+    """初期のGroupのマイグレーションを、その時点のModelで動かし直す（flushするテストの後ではGroupが残っていない）"""
+    state = MigrationExecutor(connection).loader.project_state(("user", "0007_initial_groups"))
+    INITIAL_GROUPS_MIGRATION.create_groups(state.apps, None)
+
+
+class TestInitialGroups:
+    """初期のGroupはデータのマイグレーションで一度だけ作る（authorization.md §11）"""
 
     @pytest.mark.django_db
-    def test_sync_adds_permissions_and_keeps_manual_ones(self, monkeypatch):
-        group = Group.objects.get(name="業務管理者")
-        manual = Permission.objects.get(codename="change_user")
-        group.permissions.add(manual)
-        monkeypatch.setitem(ROLES, "業務管理者", ["user.view_user"])
-        sync_role_groups()
-        assert set(group.permissions.values_list("codename", flat=True)) == {"view_user", "change_user"}
+    def test_groups_are_created_with_permissions(self):
+        Group.objects.all().delete()
+        _create_initial_groups()
+        for name, perms in INITIAL_GROUPS_MIGRATION.GROUPS.items():
+            group = Group.objects.get(name=name)
+            codes = {f"{p.content_type.app_label}.{p.codename}" for p in group.permissions.all()}
+            assert codes == set(perms), name
 
     @pytest.mark.django_db
-    def test_sync_creates_missing_permissions_first(self, monkeypatch):
-        # post_migrateの順番で、参照するアプリのpermissionがまだ作られていない場合
-        Permission.objects.filter(content_type__app_label="user", codename="view_user").delete()
-        monkeypatch.setitem(ROLES, "試験用の役割", ["user.view_user"])
-        sync_role_groups()
-        group = Group.objects.get(name="試験用の役割")
-        assert list(group.permissions.values_list("codename", flat=True)) == ["view_user"]
-
-    @pytest.mark.django_db
-    def test_skill_publisher_can_edit_and_publish_company_skills(self, app_user):
-        # 役割「Plugin公開者」は「Skill公開者」に改めた（design.md 0.19）
-        assert not Group.objects.filter(name="Plugin公開者").exists()
-        app_user.groups.add(Group.objects.get(name="Skill公開者"))
+    def test_existing_groups_are_kept(self, app_user):
+        """以前の「Skill公開者」は割り当てを残して改名し、手で変えたGroupは変えない"""
+        Group.objects.all().delete()
+        old = Group.objects.create(name="Skill公開者")
+        old.permissions.add(
+            *Permission.objects.filter(codename__in=["can_edit_company_skills", "can_publish_company_skills"])
+        )
+        app_user.groups.add(old)
+        Group.objects.create(name="業務管理者")
+        Group.objects.create(name="全件利用者")  # 導入先で中身を空にした
+        _create_initial_groups()
+        assert not Group.objects.filter(name__in=["Skill公開者", "業務管理者"]).exists()
         app_user = User.objects.get(pk=app_user.pk)
+        assert list(app_user.groups.values_list("name", flat=True)) == ["全社のSkill公開者"]
         assert app_user.has_perm("skill.can_edit_company_skills")
         assert app_user.has_perm("skill.can_publish_company_skills")
+        assert not Group.objects.get(name="全件利用者").permissions.exists()
 
 
 class TestWithPermission:
@@ -439,15 +451,20 @@ class TestDepartmentAPI:
     url = "/api/v1/departments/"
 
     @pytest.mark.django_db
-    def test_only_platform_admin(self, api_client, app_user):
-        DepartmentMembershipFactory.create(user=app_user, role=DepartmentRole.PUBLISHER)
+    def test_needs_department_permissions(self, api_client, app_user):
+        DepartmentMembershipFactory.create(user=app_user)
         api_client.force_login(app_user)
         assert api_client.get(self.url).status_code == 403
         assert api_client.post(self.url, {"name": "経理部"}, format="json").status_code == 403
+        viewer = grant(UserFactory.create(), "user.view_department")
+        api_client.force_login(viewer)
+        assert api_client.get(self.url).status_code == 200
+        assert api_client.post(self.url, {"name": "経理部"}, format="json").status_code == 403
 
     @pytest.mark.django_db
-    def test_create_and_assign(self, api_client, platform_admin, app_user):
-        api_client.force_login(platform_admin)
+    def test_create_and_assign(self, api_client, app_user):
+        manager = grant(UserFactory.create(), "user.add_department", "user.change_department")
+        api_client.force_login(manager)
         res = api_client.post(self.url, {"name": " 経理部 "}, format="json")
         assert res.status_code == 201, res.json()
         assert res.json()["name"] == "経理部"
@@ -455,42 +472,92 @@ class TestDepartmentAPI:
         assert api_client.post(self.url, {"name": "経理部"}, format="json").status_code == 400
         members = f"{self.url}{res.json()['id']}/members/"
 
-        res = api_client.post(members, {"user": app_user.uid, "role": DepartmentRole.EDITOR}, format="json")
+        res = api_client.post(members, {"user": app_user.uid}, format="json")
         assert res.status_code == 201, res.json()
         assert res.json()["user_info"]["email"] == app_user.email
-        assert api_client.post(members, {"user": app_user.uid, "role": 1}, format="json").status_code == 400
+        assert "role" not in res.json()
+        assert api_client.post(members, {"user": app_user.uid}, format="json").status_code == 400
         assert api_client.get(self.url).json()["results"][0]["member_count"] == 1
-
-        # 所属の社員は変えず、役割だけを変える
-        other = UserFactory.create()
-        res = api_client.patch(f"{members}{res.json()['id']}/", {"user": other.uid, "role": 3}, format="json")
-        assert res.status_code == 200
-        membership = DepartmentMembership.objects.get()
-        assert membership.user == app_user
-        assert membership.role == DepartmentRole.PUBLISHER
+        # 所属は変更せず、消して作り直す
+        assert api_client.delete(f"{members}{res.json()['id']}/").status_code == 204
+        assert not DepartmentMembership.objects.exists()
 
     @pytest.mark.django_db
-    def test_covers_all_departments(self, api_client, platform_admin, app_user):
-        api_client.force_login(platform_admin)
-        res = api_client.post(self.url, {"name": "監査室", "covers_all_departments": True}, format="json")
-        assert res.status_code == 201, res.json()
-        assert res.json()["covers_all_departments"] is True
-        sales = DepartmentFactory.create(name="営業部")
-        assert covers_all_departments(app_user) is False
-        assert list(Department.objects.of(app_user)) == []
-        DepartmentMembershipFactory.create(
-            user=app_user, department=Department.objects.get(uid=res.json()["id"]), role=DepartmentRole.MEMBER
-        )
-        # 印のある部門の所属者は、すべての部門に所属しているものとして扱う
-        assert covers_all_departments(app_user) is True
-        assert sales in set(Department.objects.of(app_user))
+    def test_membership_needs_change_permission(self, api_client, app_user):
+        department = DepartmentFactory.create()
+        viewer = grant(UserFactory.create(), "user.view_department", "user.add_department")
+        api_client.force_login(viewer)
+        members = f"{self.url}{department.uid}/members/"
+        assert api_client.get(members).status_code == 200
+        assert api_client.post(members, {"user": app_user.uid}, format="json").status_code == 403
+
+    @pytest.mark.django_db
+    def test_cannot_change_own_or_stronger_membership(self, api_client):
+        """所属の付け外しも、ユーザーの変更と同じ防止策に従う（authorization.md §10）"""
+        department = DepartmentFactory.create()
+        manager = grant(UserFactory.create(), "user.change_department")
+        api_client.force_login(manager)
+        members = f"{self.url}{department.uid}/members/"
+        res = api_client.post(members, {"user": manager.uid}, format="json")
+        assert res.status_code == 403
+        stronger = grant(UserFactory.create(), "skill.can_publish_department_skills")
+        assert api_client.post(members, {"user": stronger.uid}, format="json").status_code == 403
+        admin = UserFactory.create(is_superuser=True)
+        assert api_client.post(members, {"user": admin.uid}, format="json").status_code == 403
+        own = DepartmentMembershipFactory.create(department=department, user=manager)
+        assert api_client.delete(f"{members}{own.uid}/").status_code == 403
+        weaker = DepartmentMembershipFactory.create(department=department, user=UserFactory.create())
+        assert api_client.delete(f"{members}{weaker.uid}/").status_code == 204
 
     @pytest.mark.django_db
     def test_my_departments(self, api_client, app_user):
-        DepartmentMembershipFactory.create(
-            user=app_user, department=DepartmentFactory.create(name="営業部"), role=DepartmentRole.EDITOR
-        )
+        sales = DepartmentFactory.create(name="営業部")
+        DepartmentFactory.create(name="経理部")
+        DepartmentMembershipFactory.create(user=app_user, department=sales)
         DepartmentMembershipFactory.create(user=app_user, department=DepartmentFactory.create(deleted=True))
         api_client.force_login(app_user)
-        departments = api_client.get("/api/app/v1/my/").json()["departments"]
-        assert [(d["name"], d["role"]) for d in departments] == [("営業部", DepartmentRole.EDITOR)]
+        data = api_client.get("/api/app/v1/my/").json()
+        assert [d["name"] for d in data["departments"]] == ["営業部"]
+        assert [d["name"] for d in data["usable_departments"]] == ["営業部"]
+        assert [d["name"] for d in data["manageable_departments"]] == ["営業部"]
+
+        api_client.force_login(grant(app_user, "user.can_use_all_departments"))
+        data = api_client.get("/api/app/v1/my/").json()
+        assert [d["name"] for d in data["departments"]] == ["営業部"]
+        assert [d["name"] for d in data["usable_departments"]] == ["営業部", "経理部"]
+        assert [d["name"] for d in data["manageable_departments"]] == ["営業部"]
+
+
+class TestDepartmentFunctions:
+    """使える部門・管理できる部門・実際の所属（authorization.md §4.1）"""
+
+    @pytest.mark.django_db
+    @pytest.mark.parametrize(
+        ("perms", "usable", "manageable"),
+        [
+            ([], {"営業部"}, {"営業部"}),
+            (["user.can_use_all_departments"], {"営業部", "経理部"}, {"営業部"}),
+            (["user.can_manage_all_departments"], {"営業部", "経理部"}, {"営業部", "経理部"}),
+        ],
+    )
+    def test_permissions_widen_departments(self, app_user, perms, usable, manageable):
+        sales = DepartmentFactory.create(name="営業部")
+        accounting = DepartmentFactory.create(name="経理部")
+        DepartmentFactory.create(name="旧部門", deleted=True)
+        DepartmentMembershipFactory.create(user=app_user, department=sales)
+        user = grant(app_user, *perms)
+        assert {d.name for d in Department.objects.usable_by(user)} == usable
+        assert {d.name for d in Department.objects.manageable_by(user)} == manageable
+        assert {d.name for d in Department.objects.joined_by(user)} == {"営業部"}
+        ids = {sales.pk: "営業部", accounting.pk: "経理部"}
+        assert {ids[pk] for pk in usable_department_ids(user)} == usable
+        assert {ids[pk] for pk in manageable_department_ids(user)} == manageable
+
+    @pytest.mark.django_db
+    def test_platform_admin_has_all_and_inactive_has_none(self, app_user, platform_admin):
+        DepartmentFactory.create(name="営業部")
+        assert {d.name for d in Department.objects.manageable_by(platform_admin)} == {"営業部"}
+        DepartmentMembershipFactory.create(user=app_user, department=Department.objects.get())
+        app_user.is_active = False
+        assert not Department.objects.usable_by(app_user).exists()
+        assert not Department.objects.joined_by(app_user).exists()

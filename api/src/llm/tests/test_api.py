@@ -31,11 +31,14 @@ class TestPermission:
         assert api_client.get(url).status_code == 403
 
     @pytest.mark.django_db
-    def test_standard_permission_is_not_enough(self, api_client, app_user):
-        # 標準のpermissionは画面のメニューの出し分けに使うだけで、APIは基盤管理者に限る
-        app_user.user_permissions.add(Permission.objects.get(codename="change_llmconnection"))
+    def test_standard_permission_decides(self, api_client, app_user):
+        # 基盤管理者でなくても、標準のpermissionを持てばその操作ができる（authorization.md §10）
+        app_user.user_permissions.add(Permission.objects.get(codename="view_llmconnection"))
         api_client.force_login(app_user)
-        assert api_client.get(CONNECTIONS).status_code == 403
+        assert api_client.get(CONNECTIONS).status_code == 200
+        assert api_client.get(PROFILES).status_code == 403
+        res = api_client.post(CONNECTIONS, {"name": "x", "kind": ProviderKind.OPENAI, "api_key": "sk-abcdefgh12345678"})
+        assert res.status_code == 403
 
 
 class TestLLMConnection:

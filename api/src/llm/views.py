@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
 from utils.exceptions import Conflict
-from utils.permissions import AppUser, PlatformAdmin
+from utils.permissions import AppUser, ModelPermissions
 from utils.views import SoftDeleteMixin
 
 from .models import LLMConnection, ModelProfile, ModelProfileVersion, ProviderKind
@@ -32,14 +32,15 @@ class LLMConnectionFilter(filters.FilterSet):
         fields = ["name", "kind", "is_active"]
 
 
-@extend_schema(description="LLMのプロバイダ接続の管理API（基盤管理者だけ）", tags=["manage/llm_connection"])
+@extend_schema(description="LLMのプロバイダ接続の管理API", tags=["manage/llm_connection"])
 @extend_schema_view(
     update=extend_schema(request=LLMConnectionUpdateSerializer, responses=LLMConnectionSerializer),
     partial_update=extend_schema(request=LLMConnectionUpdateSerializer, responses=LLMConnectionSerializer),
 )
 class LLMConnectionViewSet(SoftDeleteMixin, ModelViewSet):
-    # API keyを扱い、接続先を決めるので、基盤管理者だけにする（design.md §4.8）
-    permission_classes = [PlatformAdmin]
+    # API keyを扱い、接続先を決める。permissionは既定では基盤管理者だけが持つ（design.md §4.8、§10.0）
+    permission_classes = [ModelPermissions]
+    action_permissions = {"check": "view"}
     lookup_field = "uid"
     queryset = LLMConnection.objects.filter(deleted=False).select_related("created_by")
     serializer_class = LLMConnectionSerializer
@@ -88,7 +89,7 @@ class ModelProfileFilter(filters.FilterSet):
 CONFLICT = OpenApiResponse(description="他の変更と競合した（編集を始めた後に、別の版ができている）")
 
 
-@extend_schema(description="モデル設定の管理API（基盤管理者だけ）", tags=["manage/model_profile"])
+@extend_schema(description="モデル設定の管理API", tags=["manage/model_profile"])
 @extend_schema_view(
     update=extend_schema(responses={200: ModelProfileSerializer, 409: CONFLICT}),
     partial_update=extend_schema(responses={200: ModelProfileSerializer, 409: CONFLICT}),
@@ -96,7 +97,8 @@ CONFLICT = OpenApiResponse(description="他の変更と競合した（編集を�
 class ModelProfileViewSet(SoftDeleteMixin, ModelViewSet):
     """中身（接続、モデル名、上限、単価、能力）を変えて保存すると新しい版ができる。進行中のRunは受付時の版を使い続ける"""
 
-    permission_classes = [PlatformAdmin]
+    permission_classes = [ModelPermissions]
+    action_permissions = {"make_default": "change"}
     lookup_field = "uid"
     queryset = ModelProfile.objects.filter(deleted=False).select_related(
         "created_by", "current_version__connection", "current_version__created_by"
@@ -155,9 +157,10 @@ class ModelProfileMixin:
         return super().get_queryset().filter(profile=self.model_profile)  # type: ignore[misc]
 
 
-@extend_schema(description="モデル設定の版の履歴（基盤管理者だけ）", tags=["manage/model_profile/version"])
+@extend_schema(description="モデル設定の版の履歴", tags=["manage/model_profile/version"])
 class ModelProfileVersionViewSet(ModelProfileMixin, ReadOnlyModelViewSet):
-    permission_classes = [PlatformAdmin]
+    permission_classes = [ModelPermissions]
+    permission_model = ModelProfile
     lookup_field = "number"  # 版番号で識別する子リソースの例外（backend-conventions.md §4.1）
     queryset = ModelProfileVersion.objects.select_related("connection", "created_by")
     serializer_class = ModelProfileVersionSerializer

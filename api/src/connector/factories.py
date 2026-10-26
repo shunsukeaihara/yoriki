@@ -3,7 +3,7 @@ from factory.django import DjangoModelFactory
 
 from user.factories import UserFactory
 
-from .models import Connector, ConnectorKind, DatabaseConnection, TLSMode
+from .models import Connector, ConnectorKind, ConnectorScope, DatabaseConnection, TLSMode
 
 
 class DatabaseConnectionFactory(DjangoModelFactory[DatabaseConnection]):
@@ -31,7 +31,8 @@ class ConnectorFactory(DjangoModelFactory[Connector]):
         skip_postgeneration_save = True  # version() の revise() で保存する
 
     name = factory.Sequence(lambda n: f"社内DB{n}")
-    connection = factory.SubFactory(DatabaseConnectionFactory)  # 使える部門なし（全社向け）
+    connection = factory.SubFactory(DatabaseConnectionFactory)
+    scope = ConnectorScope.COMPANY  # 部門の範囲にするときは department も渡す
     created_by = factory.SubFactory(UserFactory)
 
     @factory.post_generation

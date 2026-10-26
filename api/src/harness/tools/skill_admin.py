@@ -20,7 +20,7 @@ from run.models import ToolInvocation
 from skill.errors import DraftExists, EvaluationRequired, InvalidDraft, VersionConflict
 from skill.models import (
     Skill,
-    SkillAccess,
+    SkillAction,
     SkillAssetRole,
     SkillChange,
     SkillContent,
@@ -78,16 +78,16 @@ def _request(context: ToolContext) -> SimpleNamespace:
     return SimpleNamespace(user=context.run.owner)
 
 
-def _target(context: ToolContext, needed: SkillAccess = SkillAccess.EDIT) -> tuple[Skill | None, ToolResult | None]:
+def _target(context: ToolContext, needed: SkillAction = SkillAction.EDIT) -> tuple[Skill | None, ToolResult | None]:
     skill = edit_target(context.run)
     if skill is None:
         return None, ToolResult.error(NO_TARGET)
     if skill.deleted:
         return None, ToolResult.error("This skill was deleted. Stop and tell the user.")
-    access = skill.scope_access_of(context.run.owner)
-    if access < SkillAccess.EDIT:
+    user = context.run.owner
+    if not skill.can(user, SkillAction.EDIT):
         return None, ToolResult.error("The user can no longer edit this skill. Stop and tell the user.")
-    if access < needed:
+    if not skill.can(user, needed):
         return None, ToolResult.error(
             "Only a person with the publish role for this skill can do this. Tell the user that it was not done."
         )
@@ -212,8 +212,8 @@ def execute_get_skill(_arguments: dict[str, Any], context: ToolContext) -> ToolR
     if skill is None:
         return error or ToolResult.error(NO_TARGET)
     session = context.sandbox_session()
-    access = skill.scope_access_of(context.run.owner)
-    lines = [f'<skill name="{skill.name}" scope="{scope_label(skill)}" your_access="{access_label(access)}">']
+    access = access_label(skill, context.run.owner)
+    lines = [f'<skill name="{skill.name}" scope="{scope_label(skill)}" your_access="{access}">']
     version = (
         skill.versions.prefetch_related("assets__resource_version__blob").filter(pk=skill.current_version_id).first()
         if skill.current_version_id is not None
@@ -297,13 +297,12 @@ def execute_create_skill(arguments: dict[str, Any], context: ToolContext) -> Too
     }
     if arguments["scope"] == "department":
         name = arguments.get("department", "").strip()
-        department = Department.objects.filter(deleted=False, name=name).first() if name else None
+        department = Department.objects.active().filter(name=name).first() if name else None
         if department is None:
-            names = ", ".join(
-                f'"{d.name}"' for d in Department.objects.filter(deleted=False, memberships__user=run.owner)
-            )
+            names = ", ".join(f'"{d.name}"' for d in Department.objects.manageable_by(run.owner).order_by("name"))
             return ToolResult.error(
-                f"No department named {name!r}. The user's departments: {names or 'none'}. Call again with one of them."
+                f"No department named {name!r}. Departments where the user can manage skills: {names or 'none'}. "
+                "Call again with one of them."
             )
         data["department"] = department.uid
     serializer = SkillCreateSerializer(data=data, context={"request": _request(context)})
@@ -515,7 +514,7 @@ def execute_stage_skill_asset(arguments: dict[str, Any], context: ToolContext) -
         # 外した資料を同じkeyで加え直すときは、元の版の条件と比べる
         base = draft.base_asset(key) if existing is None else None
         current_checks = formats.normalize_checks(existing.checks if existing else base.checks if base else None)
-        if checks is not None and checks != current_checks and skill.scope_access_of(actor) < SkillAccess.PUBLISH:
+        if checks is not None and checks != current_checks and not skill.can(actor, SkillAction.PUBLISH):
             return ToolResult.error(
                 "Changing the checks needs the publish role for this skill. Call again without checks."
             )
@@ -743,7 +742,7 @@ def execute_publish_skill_draft(arguments: dict[str, Any], context: ToolContext)
     skill, error = _target(context)
     if skill is None:
         return error or ToolResult.error(NO_TARGET)
-    if skill.scope_access_of(context.run.owner) < SkillAccess.PUBLISH:
+    if not skill.can(context.run.owner, SkillAction.PUBLISH):
         return _saved_only(skill, arguments["expected_revision"])
     key = _operation_key(context)
     # 同じ呼出しのやり直しで、前の試みが公開を済ませていれば、その結果を返す
@@ -778,7 +777,7 @@ ROLLBACK_PARAMETERS: dict[str, Any] = {
 
 
 def execute_rollback_skill(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
-    skill, error = _target(context, SkillAccess.PUBLISH)
+    skill, error = _target(context, SkillAction.PUBLISH)
     if skill is None:
         return error or ToolResult.error(NO_TARGET)
     run = context.run

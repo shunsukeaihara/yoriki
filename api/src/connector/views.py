@@ -16,7 +16,7 @@ from utils.views import SoftDeleteMixin
 
 from .adapters import get_adapter
 from .errors import ConnectorError
-from .models import Connector, ConnectorKind, ConnectorVersion, DatabaseConnection
+from .models import Connector, ConnectorKind, ConnectorScope, ConnectorVersion, DatabaseConnection
 from .serializers import (
     ConnectorCheckSerializer,
     ConnectorQueryResultSerializer,
@@ -48,10 +48,12 @@ class ConnectorFilter(filters.FilterSet):
     connection = filters.CharFilter(label=_("接続先"), field_name="connection__uid")
     kind = filters.ChoiceFilter(label=_("種別"), field_name="connection__kind", choices=ConnectorKind.choices)
     is_sensitive = filters.BooleanFilter(label=_("機密"), field_name="current_version__is_sensitive")
+    scope = filters.ChoiceFilter(label=_("範囲"), choices=ConnectorScope.choices)
+    department = filters.CharFilter(label=_("部門"), field_name="department__uid")
 
     class Meta:
         model = Connector
-        fields = ["name", "connection", "kind", "is_active", "is_sensitive"]
+        fields = ["name", "connection", "kind", "is_active", "is_sensitive", "scope", "department"]
 
 
 CONFLICT = OpenApiResponse(description="他の変更と競合した（編集を始めた後に、別の版ができている）")
@@ -130,7 +132,7 @@ class DatabaseConnectionViewSet(SoftDeleteMixin, ModelViewSet):
         return Response(self.get_serializer(result).data)
 
 
-@extend_schema(description="Connectorの管理API（所属とpermissionで判定する）", tags=["manage/connector"])
+@extend_schema(description="Connectorの管理API（permissionで判定する）", tags=["manage/connector"])
 @extend_schema_view(
     update=extend_schema(request=ConnectorUpdateSerializer, responses={200: ConnectorSerializer, 409: CONFLICT}),
     partial_update=extend_schema(
@@ -138,10 +140,10 @@ class DatabaseConnectionViewSet(SoftDeleteMixin, ModelViewSet):
     ),
 )
 class ConnectorViewSet(SoftDeleteMixin, ModelViewSet):
-    """エージェントが扱える範囲（境界）と使える部門を決める（design.md §4.9.1）。
+    """エージェントが扱える範囲（境界）を決める（design.md §4.9.1）。部門・全社・システムのConnectorを全件扱う。
 
-    所属とpermissionの2軸で判定する。見る・使う（説明、試し実行、版の履歴）は所属だけで、一覧は所属で絞る。
-    作成・編集・削除は、所属に加えて `connector.<add|change|delete>_connector` を要する（基盤管理者はすべて）。
+    基盤の管理なので、所属を問わず `connector.<view|add|change|delete>_connector` だけで判定する
+    （authorization.md §5.2）。試し実行は接続先のデータを読むので、編集の権限で行う。
 
     境界（公開する表、上限、機密のフラグ）を変えて保存すると新しい版ができる。進行中のRunは開始時の版を使い続ける。
     接続の確認と表の一覧は、使うDB接続の操作（DatabaseConnectionViewSet）で行う
@@ -149,36 +151,27 @@ class ConnectorViewSet(SoftDeleteMixin, ModelViewSet):
 
     permission_classes = [ModelPermissions]
     action_permissions = {
-        "list": "login",
-        "retrieve": "login",
-        "describe": "login",
-        "query": "login",
+        "describe": "view",
+        "query": "change",
         # 公開する表を選ぶための、接続先の表の一覧（接続先のpermissionがなくても、Connectorを編集できるように）
         "tables": "change",
-        # 作成で選ぶ接続先の一覧
+        # 作成で選ぶ接続先と部門の一覧
         "connections": "add",
-        # 使える部門として選べる部門（自分の所属の範囲）
-        "departments": "login",
+        "departments": "add",
     }
     lookup_field = "uid"
-    queryset = (
-        Connector.objects.filter(deleted=False)
-        .select_related("created_by", "current_version", "connection")
-        .prefetch_related("departments")
+    queryset = Connector.objects.filter(deleted=False).select_related(
+        "created_by", "current_version", "connection", "department"
     )
     serializer_class = ConnectorSerializer
     filterset_class = ConnectorFilter
     search_fields = ("name",)
     ordering = ("name", "pk")
 
-    def get_queryset(self):
-        # 所属の軸：全社向けか、使える部門に所属しているConnectorだけ（それ以外は404）
-        return super().get_queryset().filter(pk__in=Connector.objects.visible_to(self.request.user).values("pk"))
-
     def get_usable_object(self) -> Connector:
         """接続先のDBにつなぐ操作（説明、試し実行）の対象。無効なConnector・接続先、版のないものでは断る"""
         connector = self.get_object()
-        if not Connector.objects.usable_by(self.request.user).filter(pk=connector.pk).exists():
+        if not connector.in_service():
             raise Conflict(_("このConnectorか接続先が無効なため、使えません"))
         return connector
 
@@ -189,7 +182,7 @@ class ConnectorViewSet(SoftDeleteMixin, ModelViewSet):
         return super().get_serializer_class()
 
     def perform_create(self, serializer):
-        # Connectorと最初の版、利用の許可は ConnectorSerializer.create() の transaction で作る
+        # Connectorと最初の版は ConnectorSerializer.create() の transaction で作る
         serializer.save(created_by=self.request.user)
 
     def perform_update(self, serializer):
@@ -229,7 +222,7 @@ class ConnectorViewSet(SoftDeleteMixin, ModelViewSet):
         return self.get_paginated_response(self.get_serializer(page, many=True).data)
 
     @extend_schema(
-        description="使える部門として選べる部門（自分の所属の範囲。すべての部門の範囲を持つ人はすべて）。"
+        description="部門の範囲のConnectorを作るときに選べる部門（有効なすべての部門。所属は問わない）。"
         "`search` で名前を絞り込む",
         request=None,
         responses=MinimumDepartmentSerializer(many=True),
@@ -243,7 +236,7 @@ class ConnectorViewSet(SoftDeleteMixin, ModelViewSet):
         search_fields=None,
     )
     def departments(self, request, *args, **kwargs):
-        qs = Department.objects.of(request.user).order_by("name", "pk")
+        qs = Department.objects.active().order_by("name", "pk")
         if search := request.query_params.get("search", "").strip():
             qs = qs.filter(name__icontains=search)
         page = self.paginate_queryset(qs)
@@ -283,27 +276,24 @@ class ConnectorViewSet(SoftDeleteMixin, ModelViewSet):
 
 
 class ConnectorMixin:
-    """URLのconnectorを、利用者が見られる（所属の範囲の）Connectorに限定して取得する"""
+    """URLのconnectorを、削除されていないConnectorに限定して取得する"""
 
     kwargs: dict[str, str]
 
     @property
     def connector(self) -> Connector:
         if not hasattr(self, "_connector"):
-            self._connector = get_object_or_404(
-                Connector.objects.visible_to(self.request.user),  # type: ignore[attr-defined]
-                uid=self.kwargs["connector"],
-            )
+            self._connector = get_object_or_404(Connector.objects.all(), uid=self.kwargs["connector"], deleted=False)
         return self._connector
 
     def get_queryset(self):
         return super().get_queryset().filter(connector=self.connector)  # type: ignore[misc]
 
 
-@extend_schema(description="Connectorの版の履歴（所属で判定する）", tags=["manage/connector/version"])
+@extend_schema(description="Connectorの版の履歴", tags=["manage/connector/version"])
 class ConnectorVersionViewSet(ConnectorMixin, ReadOnlyModelViewSet):
     permission_classes = [ModelPermissions]
-    action_permissions = {"list": "login", "retrieve": "login"}
+    permission_model = Connector
     lookup_field = "number"  # 版番号で識別する子リソースの例外（backend-conventions.md §4.1）
     queryset = ConnectorVersion.objects.select_related("created_by")
     serializer_class = ConnectorVersionSerializer

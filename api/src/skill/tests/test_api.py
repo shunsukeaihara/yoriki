@@ -1,14 +1,14 @@
 import pytest
-from django.contrib.auth.models import Group
+from django.contrib.auth.models import Group, Permission
 from django.core.files.uploadedfile import SimpleUploadedFile
 
 from artifact.tests.test_api import body_of
 from resources.models import ResourceVersion
 from skill.factories import SkillDraftFactory, SkillFactory, SkillVersionFactory
 from skill.models import Skill, SkillChange, SkillChangeKind, SkillDraft, SkillScope, SkillVersion
-from user.factories import DepartmentFactory, DepartmentMembershipFactory
-from user.models import DepartmentRole
-from user.roles import sync_role_groups
+from user.factories import DepartmentFactory, DepartmentMembershipFactory, UserFactory, grant
+from user.models import User
+from utils.permissions import AppPermission
 
 SKILLS = "/api/app/v1/skills/"
 
@@ -21,10 +21,20 @@ def _upload(name: str, content: bytes) -> SimpleUploadedFile:
     return SimpleUploadedFile(name, content, content_type="text/plain")
 
 
-def _skill_publisher(user):
-    sync_role_groups()
-    user.groups.add(Group.objects.get(name="Skill公開者"))
-    return user
+def _skill_publisher(user) -> User:
+    """全社のSkillの編集・公開のpermissionを持つ人"""
+    return grant(user, AppPermission.EDIT_COMPANY_SKILLS, AppPermission.PUBLISH_COMPANY_SKILLS)
+
+
+def _department_editor(user, department, *, publish: bool = False) -> User:
+    """部門に所属し、部門のSkillの編集（publish=Trueなら公開も）のpermissionを持つ人"""
+    DepartmentMembershipFactory.create(department=department, user=user)
+    perms = [AppPermission.EDIT_DEPARTMENT_SKILLS] + ([AppPermission.PUBLISH_DEPARTMENT_SKILLS] if publish else [])
+    return grant(user, *perms)
+
+
+def _abilities(data: dict) -> tuple[bool, bool]:
+    return data["can_edit"], data["can_publish"]
 
 
 def _create(api_client, user, **data) -> dict:
@@ -74,16 +84,15 @@ class TestVisibility:
     @pytest.mark.django_db
     def test_unpublished_skill_is_only_for_editors(self, api_client, app_user, other_user):
         department = DepartmentFactory.create()
-        membership = DepartmentMembershipFactory.create(department=department, user=app_user)
+        DepartmentMembershipFactory.create(department=department, user=app_user)
         in_department = SkillFactory.create(scope=SkillScope.DEPARTMENT, department=department, created_by=other_user)
         company = SkillFactory.create(scope=SkillScope.COMPANY, created_by=other_user)
         api_client.force_login(app_user)
         assert api_client.get(SKILLS).json()["results"] == []
         assert api_client.get(_url(company)).status_code == 404
 
-        membership.role = DepartmentRole.EDITOR
-        membership.save()
-        _skill_publisher(app_user)
+        app_user = _skill_publisher(grant(app_user, AppPermission.EDIT_DEPARTMENT_SKILLS))
+        api_client.force_login(app_user)
         results = api_client.get(SKILLS).json()["results"]
         assert {s["id"] for s in results} == {in_department.uid, company.uid}
 
@@ -92,13 +101,13 @@ class TestVisibility:
         SkillDraftFactory.create(skill=company)
         api_client.force_login(other_user)
         res = api_client.get(_url(company))
-        assert res.json()["access"] == 1
+        assert _abilities(res.json()) == (False, False)
         assert res.json()["draft"] is None
 
     @pytest.mark.django_db
     def test_deleted_department_hides_its_skills(self, api_client, app_user):
         department = DepartmentFactory.create()
-        DepartmentMembershipFactory.create(department=department, user=app_user, role=DepartmentRole.PUBLISHER)
+        app_user = _department_editor(app_user, department, publish=True)
         skill = SkillFactory.create(scope=SkillScope.DEPARTMENT, department=department, created_by=app_user)
         department.deleted = True
         department.save()
@@ -116,7 +125,7 @@ class TestCreate:
         data = _create(api_client, app_user, instructions="1. 読む", tools=["read", "read", "grep"])
         assert data["scope"] == SkillScope.PERSONAL
         assert data["version"] == 0
-        assert data["access"] == 3
+        assert _abilities(data) == (True, True)
         skill = Skill.objects.get(uid=data["id"])
         assert skill.owner == app_user
         draft = SkillDraft.objects.get(skill=skill)
@@ -134,21 +143,24 @@ class TestCreate:
         _create(api_client, other_user)
 
     @pytest.mark.django_db
-    def test_department_needs_editor(self, api_client, app_user):
+    def test_department_needs_membership_and_permission(self, api_client, app_user):
         department = DepartmentFactory.create()
-        membership = DepartmentMembershipFactory.create(department=department, user=app_user)
+        DepartmentMembershipFactory.create(department=department, user=app_user)
         api_client.force_login(app_user)
         body = {"scope": SkillScope.DEPARTMENT, "department": department.uid, "name": "部門のSkill"}
         assert api_client.post(SKILLS, body, format="json").status_code == 403
         assert api_client.post(SKILLS, {**body, "department": None}, format="json").status_code == 400
+        # permissionがあっても、管理できない（所属していない）部門には作れない
+        outsider = grant(UserFactory.create(), AppPermission.EDIT_DEPARTMENT_SKILLS)
+        api_client.force_login(outsider)
+        assert api_client.post(SKILLS, body, format="json").status_code == 403
 
-        membership.role = DepartmentRole.EDITOR
-        membership.save()
+        api_client.force_login(grant(app_user, AppPermission.EDIT_DEPARTMENT_SKILLS))
         res = api_client.post(SKILLS, body, format="json")
         assert res.status_code == 201, res.json()
         assert res.json()["department_info"]["id"] == department.uid
-        assert res.json()["access"] == 2
-        # 編集の役割ではToolを決められない（design.md §3.6）
+        assert _abilities(res.json()) == (True, False)
+        # 編集の権限ではToolを決められない（authorization.md §5.1）
         res = api_client.post(SKILLS, {**body, "name": "別のSkill", "tools": ["shell"]}, format="json")
         assert res.status_code == 403
 
@@ -157,7 +169,7 @@ class TestCreate:
         api_client.force_login(app_user)
         body = {"scope": SkillScope.COMPANY, "name": "全社のSkill", "tools": ["shell"]}
         assert api_client.post(SKILLS, body, format="json").status_code == 403
-        _skill_publisher(app_user)
+        api_client.force_login(_skill_publisher(app_user))
         assert api_client.post(SKILLS, body, format="json").status_code == 201
 
     @pytest.mark.django_db
@@ -292,7 +304,9 @@ class TestDraftAndPublish:
         assert api_client.get(f"{SKILLS}{skill_id}/drafts/").json() == []
 
 
-class TestDepartmentRoles:
+class TestDepartmentPermissions:
+    """部門のSkillは、管理できる部門と範囲ごとのpermissionで判定する（authorization.md §5.1）"""
+
     @pytest.fixture(name="department_skill")
     def fixture_department_skill(self, other_user) -> Skill:
         department = DepartmentFactory.create()
@@ -300,14 +314,11 @@ class TestDepartmentRoles:
         SkillVersionFactory.create(skill=skill, created_by=other_user)
         return skill
 
-    def _join(self, skill: Skill, user, role: DepartmentRole):
-        DepartmentMembershipFactory.create(department=skill.department, user=user, role=role)
-
     @pytest.mark.django_db
     def test_member_can_only_use(self, api_client, app_user, department_skill):
-        self._join(department_skill, app_user, DepartmentRole.MEMBER)
+        DepartmentMembershipFactory.create(department=department_skill.department, user=app_user)
         api_client.force_login(app_user)
-        assert api_client.get(_url(department_skill)).json()["access"] == 1
+        assert _abilities(api_client.get(_url(department_skill)).json()) == (False, False)
         assert api_client.get(_url(department_skill, "versions/1/")).status_code == 200
         assert api_client.get(_url(department_skill, "drafts/")).status_code == 403
         assert api_client.post(_url(department_skill, "drafts/"), {}, format="json").status_code == 403
@@ -315,8 +326,7 @@ class TestDepartmentRoles:
 
     @pytest.mark.django_db
     def test_editor_edits_but_cannot_publish_or_change_tools(self, api_client, app_user, department_skill):
-        self._join(department_skill, app_user, DepartmentRole.EDITOR)
-        api_client.force_login(app_user)
+        api_client.force_login(_department_editor(app_user, department_skill.department))
         draft = api_client.post(_url(department_skill, "drafts/"), {}, format="json").json()
         url = _url(department_skill, f"drafts/{draft['id']}/")
         res = api_client.patch(url, {"revision": draft["revision"], "instructions": "直した"}, format="json")
@@ -332,8 +342,7 @@ class TestDepartmentRoles:
 
     @pytest.mark.django_db
     def test_publisher_publishes(self, api_client, app_user, department_skill):
-        self._join(department_skill, app_user, DepartmentRole.PUBLISHER)
-        api_client.force_login(app_user)
+        api_client.force_login(_department_editor(app_user, department_skill.department, publish=True))
         draft = api_client.post(_url(department_skill, "drafts/"), {}, format="json").json()
         res = api_client.patch(
             _url(department_skill, f"drafts/{draft['id']}/"),
@@ -350,16 +359,14 @@ class TestDepartmentRoles:
         skill = SkillFactory.create(scope=SkillScope.COMPANY, created_by=_skill_publisher(other_user))
         SkillVersionFactory.create(skill=skill)
         group = Group.objects.create(name="編集者")
-        group.permissions.add(
-            *Group.objects.get(name="Skill公開者").permissions.filter(codename="can_edit_company_skills")
-        )
+        group.permissions.add(Permission.objects.get(codename="can_edit_company_skills"))
         app_user.groups.add(group)
         api_client.force_login(app_user)
-        assert api_client.get(_url(skill)).json()["access"] == 2
+        assert _abilities(api_client.get(_url(skill)).json()) == (True, False)
         draft = api_client.post(_url(skill, "drafts/"), {}, format="json").json()
         assert _publish(api_client, skill.uid, draft).status_code == 403
         # 公開の権限を持つ人が、残された変更案を公開する
-        api_client.force_login(other_user)
+        api_client.force_login(User.objects.get(pk=other_user.pk))
         assert _publish(api_client, skill.uid, draft).status_code == 201
 
 
@@ -631,7 +638,7 @@ class TestAssetValidation:
     @pytest.mark.django_db
     def test_editor_cannot_change_checks(self, api_client, app_user, other_user):
         department = DepartmentFactory.create()
-        DepartmentMembershipFactory.create(department=department, user=app_user, role=DepartmentRole.EDITOR)
+        app_user = _department_editor(app_user, department)
         skill = SkillFactory.create(scope=SkillScope.DEPARTMENT, department=department, created_by=other_user)
         draft = SkillDraftFactory.create(skill=skill, created_by=other_user, updated_by=other_user)
         api_client.force_login(app_user)

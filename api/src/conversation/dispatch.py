@@ -19,7 +19,7 @@ from run.models import (
     RunStatus,
 )
 from runtime.models import RuntimeProfile
-from skill.models import Skill, SkillAccess
+from skill.models import CONVERSATION_SCOPES, Skill, SkillAction
 
 from .models import Conversation, ConversationMessage, InstructionKind, InstructionState, MessageRole, UserInstruction
 
@@ -192,7 +192,7 @@ def resolve_skill_edit(message: ConversationMessage, user, version) -> dict[str,
     skill = Skill.objects.filter(uid=uid, deleted=False).select_related("department").first()
     if skill is None:
         raise CannotStart(_("編集するSkillが削除されました。"))
-    if skill.scope_access_of(user) < SkillAccess.EDIT:
+    if skill.scope not in CONVERSATION_SCOPES or not skill.can(user, SkillAction.EDIT):
         raise CannotStart(_("Skill「%(name)s」を編集する権限がありません。") % {"name": skill.name})
     return {"skill": skill.uid, "name": skill.name}
 

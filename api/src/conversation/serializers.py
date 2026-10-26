@@ -13,7 +13,7 @@ from llm.models import ModelProfile
 from llm.serializers import AppModelProfileSerializer
 from run.models import ACTIVE_STATUSES, Run
 from run.serializers import RunSerializer
-from skill.models import Skill, SkillAccess
+from skill.models import Skill, SkillAction
 from utils.fields import NormalizedTextField
 
 from .dispatch import CannotStart, MessageMode, post_message
@@ -242,7 +242,7 @@ class MessageSerializer(serializers.ModelSerializer):
         edit_skill: Any = fields["edit_skill"]
         if request is not None:
             # 編集の権限は validate_edit_skill() で確かめる（見えないSkillは、ないものとして断る）
-            edit_skill.queryset = Skill.objects.visible_to(request.user)
+            edit_skill.queryset = Skill.objects.visible_to(request.user).in_conversation()
         return fields
 
     @extend_schema_field(MessageSkillEditSerializer(allow_null=True))
@@ -268,7 +268,7 @@ class MessageSerializer(serializers.ModelSerializer):
         return value
 
     def validate_edit_skill(self, value: Skill | None) -> Skill | None:
-        if value is not None and value.scope_access_of(self.context["request"].user) < SkillAccess.EDIT:
+        if value is not None and not value.can(self.context["request"].user, SkillAction.EDIT):
             raise serializers.ValidationError(_("このSkillを編集する権限がありません"))
         return value
 

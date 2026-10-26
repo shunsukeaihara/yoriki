@@ -10,7 +10,7 @@ from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
-from rest_framework.exceptions import Throttled
+from rest_framework.exceptions import PermissionDenied, Throttled
 
 from utils.backends import LOCKOUT_MESSAGE
 from utils.crypto import is_encryption_configured
@@ -19,11 +19,11 @@ from utils.serializers import ReadOnlyModelSerializer
 from .models import (
     Department,
     DepartmentMembership,
-    DepartmentRole,
     Invitation,
     SSOKind,
     SSOProvider,
     User,
+    can_manage_account,
     can_use_password,
 )
 
@@ -40,25 +40,23 @@ class MinimumUserSerializer(ReadOnlyModelSerializer):
 
 
 class MyDepartmentSerializer(ReadOnlyModelSerializer):
-    """所属する部門と、部門の中の役割"""
-
-    id = serializers.CharField(source="department.uid", read_only=True)
-    name = serializers.CharField(source="department.name", read_only=True)
-    role = serializers.ChoiceField(choices=DepartmentRole.choices, read_only=True)
-    role_display = serializers.CharField(source="get_role_display", read_only=True)
+    id = serializers.CharField(source="uid", read_only=True)
 
     class Meta:
-        model = DepartmentMembership
-        fields = ["id", "name", "role", "role_display"]
+        model = Department
+        fields = ["id", "name"]
 
 
 class MyUserSerializer(ReadOnlyModelSerializer):
-    """ログイン中の利用者。画面の表示と権限の判定に使う"""
+    """ログイン中の利用者。画面の出し分けの元になるもの（permissionと所属）をすべて返す（authorization.md §4.1.1）"""
 
     id = serializers.CharField(source="uid", read_only=True)
-    is_platform_admin = serializers.BooleanField(read_only=True)
     all_permissions = serializers.SerializerMethodField()
-    departments = serializers.SerializerMethodField()
+    departments = serializers.SerializerMethodField(help_text=_("実際に所属している部門"))
+    usable_departments = serializers.SerializerMethodField(help_text=_("使える部門（一覧の絞り込みの選択肢）"))
+    manageable_departments = serializers.SerializerMethodField(
+        help_text=_("管理できる部門（部門のSkill・タスクを作るときの選択肢）")
+    )
 
     class Meta:
         model = User
@@ -67,20 +65,25 @@ class MyUserSerializer(ReadOnlyModelSerializer):
             "username",
             "email",
             "display_name",
-            "is_platform_admin",
             "all_permissions",
             "departments",
+            "usable_departments",
+            "manageable_departments",
         )
 
     @extend_schema_field(MyDepartmentSerializer(many=True))
     def get_departments(self, obj: User) -> list[Any]:
-        """所属する部門（Skillの部門の範囲。design.md §3.6）"""
-        memberships = (
-            obj.department_memberships.filter(department__deleted=False)
-            .select_related("department")
-            .order_by("department__name", "pk")
+        return list(MyDepartmentSerializer(Department.objects.joined_by(obj).order_by("name", "pk"), many=True).data)
+
+    @extend_schema_field(MyDepartmentSerializer(many=True))
+    def get_usable_departments(self, obj: User) -> list[Any]:
+        return list(MyDepartmentSerializer(Department.objects.usable_by(obj).order_by("name", "pk"), many=True).data)
+
+    @extend_schema_field(MyDepartmentSerializer(many=True))
+    def get_manageable_departments(self, obj: User) -> list[Any]:
+        return list(
+            MyDepartmentSerializer(Department.objects.manageable_by(obj).order_by("name", "pk"), many=True).data
         )
-        return [MyDepartmentSerializer(m).data for m in memberships]
 
     @extend_schema_field(serializers.ListField(child=serializers.CharField()))
     def get_all_permissions(self, obj: User) -> list[str]:
@@ -174,6 +177,10 @@ class InvitationTokenSerializer(serializers.Serializer):
         # SSOが有効な間は、基盤管理者以外にリンクを使わせない（SSOだけでログインする規則を迂回させない）
         if not can_use_password(invitation.user):
             raise serializers.ValidationError({"token": [SSO_ONLY]})
+        # 発行の後に、発行した人が権限を失った・対象が昇格したなら、残ったリンクでアカウントを奪わせない
+        # （authorization.md §10）
+        if not can_manage_account(invitation.created_by, invitation.user):
+            raise serializers.ValidationError({"token": [INVALID_INVITATION]})
         return invitation
 
     def validate(self, attrs):
@@ -205,7 +212,7 @@ class InvitationAcceptSerializer(InvitationTokenSerializer):
 
 
 class GroupSerializer(serializers.ModelSerializer):
-    """役割（Group）。ユーザーへの割り当てでは名前で指定する"""
+    """Group（permissionの集まり）。ユーザーへの割り当てでは名前で指定する"""
 
     class Meta:
         model = Group
@@ -214,16 +221,24 @@ class GroupSerializer(serializers.ModelSerializer):
 
 
 class ManageUserSerializer(serializers.ModelSerializer):
-    """ユーザーの作成・表示（基盤管理者だけ）。Yorikiのアカウントのパスワードは、本人が招待のリンクで設定する"""
+    """ユーザーの作成・表示。Yorikiのアカウントのパスワードは、本人が招待のリンクで設定する。
+
+    書ける項目は表示名・有効・Groupだけ（permissionの直接の付与、`is_superuser`、SSOの識別子は出さない）。
+    管理を任された人が自分の権限を超えられないよう、自分の持たないpermissionを含むGroupは付け外しできず、
+    自分の持たないpermissionを持つアカウントと基盤管理者のアカウントは変更できない（authorization.md §10）
+    """
 
     id = serializers.CharField(source="uid", read_only=True)
     email = serializers.EmailField(max_length=254)
     groups: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(
-        many=True, slug_field="name", queryset=Group.objects.all(), required=False, help_text=_("役割の名前")
+        many=True, slug_field="name", queryset=Group.objects.all(), required=False, help_text=_("Groupの名前")
     )
-    is_platform_admin = serializers.BooleanField(read_only=True)
     has_password = serializers.SerializerMethodField(help_text=_("パスワードを設定済みか"))
     sso_providers = serializers.SerializerMethodField(help_text=_("紐付いているSSOの認証基盤"))
+    can_change = serializers.SerializerMethodField(help_text=_("操作する人がこのアカウントを変更できるか"))
+    can_issue_invitation = serializers.SerializerMethodField(
+        help_text=_("操作する人がこのアカウントに招待・再設定のリンクを発行できるか")
+    )
 
     class Meta:
         model = User
@@ -233,9 +248,10 @@ class ManageUserSerializer(serializers.ModelSerializer):
             "display_name",
             "groups",
             "is_active",
-            "is_platform_admin",
             "has_password",
             "sso_providers",
+            "can_change",
+            "can_issue_invitation",
             "last_login",
             "created",
             "updated",
@@ -248,6 +264,13 @@ class ManageUserSerializer(serializers.ModelSerializer):
     def get_sso_providers(self, obj: User) -> list[str]:
         # allauthの SocialAccount の逆参照（django-stubs は allauth の型を知らない）
         return sorted({account.provider for account in obj.socialaccount_set.all()})  # type: ignore[attr-defined]
+
+    def get_can_change(self, obj: User) -> bool:
+        actor = self.context["request"].user
+        return actor.has_perm("user.change_user") and can_manage_account(actor, obj)
+
+    def get_can_issue_invitation(self, obj: User) -> bool:
+        return self.get_can_change(obj) and can_use_password(obj)
 
     def validate_email(self, value: str) -> str:
         value = value.strip().lower()
@@ -263,6 +286,29 @@ class ManageUserSerializer(serializers.ModelSerializer):
         if not value and self.instance is not None and request and self.instance.pk == request.user.pk:
             raise serializers.ValidationError(_("自分のアカウントは無効にできません"))
         return value
+
+    def validate_groups(self, value: list[Group]) -> list[Group]:
+        actor = self.context["request"].user
+        current = set(self.instance.groups.all()) if self.instance is not None else set()
+        changed = current.symmetric_difference(value)
+        if changed and self.instance is not None and self.instance.pk == actor.pk:
+            raise serializers.ValidationError(_("自分のGroupは変えられません"))
+        own = actor.get_all_permissions()
+        for group in sorted(changed, key=lambda g: g.name):
+            perms = {
+                f"{app_label}.{codename}"
+                for app_label, codename in group.permissions.values_list("content_type__app_label", "codename")
+            }
+            if not perms <= own:
+                raise serializers.ValidationError(
+                    _("自分の持たないpermissionを含むGroup「%(name)s」は付け外しできません") % {"name": group.name}
+                )
+        return value
+
+    def validate(self, attrs):
+        if self.instance is not None and not can_manage_account(self.context["request"].user, self.instance):
+            raise PermissionDenied(_("自分の持たない権限を持つアカウントは変更できません"))
+        return attrs
 
 
 class ManageUserCreateSerializer(ManageUserSerializer):
@@ -304,6 +350,9 @@ class IssueInvitationSerializer(serializers.Serializer):
     """招待・再設定のリンクの発行。SSOが有効な間は基盤管理者のアカウントにだけ発行できる"""
 
     def validate(self, attrs):
+        if not can_manage_account(self.context["request"].user, self.context["user"]):
+            # 再設定のリンクで、自分より強いアカウント（基盤管理者を含む）を乗っ取らせない
+            raise PermissionDenied(_("自分の持たない権限を持つアカウントには、リンクを発行できません"))
         if not can_use_password(self.context["user"]):
             raise serializers.ValidationError(
                 _(
@@ -462,13 +511,8 @@ class DepartmentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Department
-        fields = ["id", "name", "covers_all_departments", "member_count", "created", "updated"]
+        fields = ["id", "name", "member_count", "created", "updated"]
         read_only_fields = ["created", "updated"]
-        extra_kwargs = {
-            "covers_all_departments": {
-                "help_text": _("所属する人を、すべての部門に所属しているものとして扱う（すべてを見る人の管理に使う）")
-            }
-        }
 
     def get_member_count(self, obj: Department) -> int:
         # 一覧・詳細は件数を注釈で付けて読む（DepartmentViewSet）。作成・更新の応答では数える
@@ -485,28 +529,31 @@ class DepartmentSerializer(serializers.ModelSerializer):
         return value
 
 
+def check_membership_change(actor: User, target: User) -> None:
+    """所属の付け外しは、ユーザーの変更と同じ防止策に従う（authorization.md §10）"""
+    if actor.pk == target.pk:
+        raise PermissionDenied(_("自分の所属は変えられません"))
+    if not can_manage_account(actor, target):
+        raise PermissionDenied(_("自分の持たない権限を持つアカウントの所属は変えられません"))
+
+
 class DepartmentMembershipSerializer(serializers.ModelSerializer):
-    """部門の所属。社員は作成時だけ指定し、後からは役割だけを変える"""
+    """部門の所属。変えるときは、所属を消して作り直す"""
 
     id = serializers.CharField(source="uid", read_only=True)
     user: "serializers.SlugRelatedField[User]" = serializers.SlugRelatedField(
         slug_field="uid", queryset=User.objects.filter(is_active=True)
     )
     user_info = MinimumUserSerializer(source="user", read_only=True)
-    role_display = serializers.CharField(source="get_role_display", read_only=True)
 
     class Meta:
         model = DepartmentMembership
-        fields = ["id", "user", "user_info", "role", "role_display", "created", "updated"]
+        fields = ["id", "user", "user_info", "created", "updated"]
         read_only_fields = ["created", "updated"]
 
     def validate_user(self, value: User) -> User:
         department = self.context["department"]
         if DepartmentMembership.objects.filter(department=department, user=value).exists():
             raise serializers.ValidationError(_("この社員は既に部門に所属しています"))
+        check_membership_change(self.context["request"].user, value)
         return value
-
-
-class DepartmentMembershipUpdateSerializer(DepartmentMembershipSerializer):
-    # 宣言した項目には read_only_fields が効かないので、宣言し直す
-    user: "serializers.SlugRelatedField[User]" = serializers.SlugRelatedField(slug_field="uid", read_only=True)

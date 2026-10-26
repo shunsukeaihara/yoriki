@@ -3,16 +3,23 @@ from auditlog.models import LogEntry
 from django.contrib.auth.models import Group, Permission
 from django.test import override_settings
 from rest_framework.exceptions import ValidationError
-from rest_framework.test import APIRequestFactory
 
 from connector.adapters import get_adapter
 from connector.adapters.base import QueryResult
 from connector.errors import ConnectorError, ConnectorErrorKind
 from connector.factories import ConnectorFactory, DatabaseConnectionFactory
-from connector.models import VERSION_FIELDS, Connector, ConnectorKind, ConnectorVersion, DatabaseConnection, Operation
+from connector.models import (
+    VERSION_FIELDS,
+    Connector,
+    ConnectorKind,
+    ConnectorScope,
+    ConnectorVersion,
+    DatabaseConnection,
+    Operation,
+)
 from connector.serializers import ConnectorUpdateSerializer, DatabaseConnectionUpdateSerializer
-from user.factories import UserFactory
-from user.models import Department, DepartmentMembership, DepartmentRole
+from user.factories import UserFactory, grant
+from user.models import Department, DepartmentMembership, User
 from utils.exceptions import Conflict
 
 CONNECTIONS = "/api/v1/database_connections/"
@@ -47,6 +54,7 @@ def _data(on: DatabaseConnection | None = None, **overrides):
     data = {
         "name": "取引先マスタ",
         "connection": (on or DatabaseConnectionFactory.create()).uid,
+        "scope": ConnectorScope.COMPANY,
         "tables": [{"name": "vendors", "description": "取引先", "columns": {"code": "取引先コード"}}],
     }
     data.update(overrides)
@@ -111,37 +119,47 @@ class TestPermission:
 
     @pytest.mark.django_db
     def test_connector(self, api_client, app_user, department, monkeypatch):
-        connector = ConnectorFactory.create(version__tables=[{"schema": "public", "name": "vendors"}])
-        connector.departments.set([department])
-        other = ConnectorFactory.create()
-        other.departments.set([Department.objects.create(name="営業部")])
+        """管理画面のConnectorは、所属を問わずpermissionだけで判定する（authorization.md §5.2）"""
+        connector = ConnectorFactory.create(
+            scope=ConnectorScope.DEPARTMENT, department=department, version__tables=[{"schema": "public", "name": "v"}]
+        )
+        other = ConnectorFactory.create(scope=ConnectorScope.SYSTEM)
         url = f"{CONNECTORS}{connector.uid}/"
         monkeypatch.setattr("connector.adapters.postgresql.PostgreSQLAdapter.describe", lambda self: [])
-        DepartmentMembership.objects.create(department=department, user=app_user, role=DepartmentRole.MEMBER)
+        monkeypatch.setattr("connector.adapters.postgresql.PostgreSQLAdapter.query", lambda self, *a, **k: None)
+        # 部門に所属していても、permissionがなければ管理画面のAPIは使えない
+        DepartmentMembership.objects.create(department=department, user=app_user)
         api_client.force_login(app_user)
+        assert api_client.get(CONNECTORS).status_code == 403
+        assert api_client.get(url).status_code == 403
+        assert api_client.get(f"{url}describe/").status_code == 403
+        assert api_client.get(f"{url}versions/").status_code == 403
 
-        # 見る・使うのは所属だけ（permissionは要らない）。所属していない部門のConnectorは見えない
+        # 見るpermissionがあれば、所属していなくても全件（部門・全社・システム）を見られる
+        viewer = grant(UserFactory.create(), "connector.view_connector")
+        api_client.force_login(viewer)
         results = api_client.get(CONNECTORS).json()["results"]
-        assert [c["id"] for c in results] == [connector.uid]
+        assert {c["id"] for c in results} == {connector.uid, other.uid}
         # 接続先のホスト等は、接続先を見る権限がなければ出さない
         assert results[0]["connection_info"]["host"] is None
-        assert results[0]["connection_info"]["name"] == connector.connection.name
         assert api_client.get(f"{url}describe/").status_code == 200
         assert api_client.get(f"{url}versions/").status_code == 200
-        assert api_client.get(f"{CONNECTORS}{other.uid}/").status_code == 404
-        assert api_client.get(f"{CONNECTORS}{other.uid}/versions/").status_code == 404
-        # 作成・編集・削除はpermissionも要る
+        # 試し実行は接続先のデータを読むので、編集の権限で行う
+        assert api_client.post(f"{url}query/", {"sql": "SELECT 1"}, format="json").status_code == 403
         assert api_client.patch(url, {"version": 1, "name": "受注実績"}, format="json").status_code == 403
         assert api_client.get(f"{url}tables/").status_code == 403
-        assert api_client.post(CONNECTORS, _data(departments=[department.uid]), format="json").status_code == 403
+        assert api_client.post(CONNECTORS, _data(), format="json").status_code == 403
         assert api_client.delete(url).status_code == 403
 
-        api_client.force_login(_grant(app_user, "add_connector", "change_connector", "delete_connector"))
+        editor = grant(UserFactory.create(), "connector.add_connector", "connector.change_connector")
+        api_client.force_login(grant(editor, "connector.delete_connector"))
         assert api_client.patch(url, {"version": 1, "name": "受注実績"}, format="json").status_code == 200
-        assert api_client.post(CONNECTORS, _data(departments=[department.uid]), format="json").status_code == 201
-        # permissionがあっても、所属していない部門のConnectorは編集できない
+        res = api_client.post(
+            CONNECTORS, _data(scope=ConnectorScope.DEPARTMENT, department=department.uid), format="json"
+        )
+        assert res.status_code == 201, res.json()
         assert (
-            api_client.patch(f"{CONNECTORS}{other.uid}/", {"version": 1, "name": "x"}, format="json").status_code == 404
+            api_client.patch(f"{CONNECTORS}{other.uid}/", {"version": 1, "name": "x"}, format="json").status_code == 200
         )
         assert api_client.delete(url).status_code == 204
 
@@ -158,97 +176,69 @@ class TestPermission:
         assert api_client.post(CONNECTIONS, _connection_data(), format="json").status_code == 403
 
 
-class TestDepartmentScope:
-    """所属の軸。全部門の範囲を持たない人は、自分の部門だけを足し引きでき、全社向け（部門なし）は変えられない"""
+class TestScope:
+    """範囲（部門・全社・システム）と部門は作成時に決め、変えない（authorization.md §5.2）"""
 
     @pytest.fixture(name="editor")
-    def fixture_editor(self, app_user, department):
-        DepartmentMembership.objects.create(department=department, user=app_user, role=DepartmentRole.MEMBER)
-        return _grant(app_user, "add_connector", "change_connector")
+    def fixture_editor(self, app_user):
+        return grant(app_user, "connector.add_connector", "connector.change_connector")
 
     @pytest.mark.django_db
     def test_create(self, api_client, editor, department):
-        other = Department.objects.create(name="営業部")
         api_client.force_login(editor)
-        res = api_client.post(CONNECTORS, _data(departments=[department.uid, other.uid]), format="json")
+        # 部門の範囲では部門が要る。所属していない部門でも作れる（基盤の管理）
+        res = api_client.post(CONNECTORS, _data(scope=ConnectorScope.DEPARTMENT), format="json")
         assert res.status_code == 400
-        assert "departments" in res.json()
-        # 部門の指定なし（全社向け）では作れない
-        res = api_client.post(CONNECTORS, _data(), format="json")
-        assert res.status_code == 400
-        assert "departments" in res.json()
-        res = api_client.post(CONNECTORS, _data(departments=[department.uid]), format="json")
-        assert res.status_code == 201, res.data
-        assert [d["name"] for d in res.json()["department_infos"]] == ["経理部"]
-
-    @pytest.mark.django_db
-    def test_update(self, api_client, editor, department):
-        other = Department.objects.create(name="営業部")
-        connector = ConnectorFactory.create()
-        connector.departments.set([department, other])
-        url = f"{CONNECTORS}{connector.uid}/"
-        api_client.force_login(editor)
-        # 所属していない部門は外せない。部門に触れない編集はできる
-        assert api_client.patch(url, {"version": 1, "departments": [department.uid]}, format="json").status_code == 400
-        assert api_client.patch(url, {"version": 1, "max_rows": 5}, format="json").status_code == 200
-        # 全社向けにする（部門を空にする）ことはできない
-        assert api_client.patch(url, {"version": 2, "departments": []}, format="json").status_code == 400
-
-    @pytest.mark.django_db
-    def test_recheck_departments_after_lock(self, api_client, editor, department):
-        # 取得した後に、別の要求が所属していない部門を足した。古い部門の一覧で保存させない（足された部門を外さない）
-        other = Department.objects.create(name="営業部")
-        connector = ConnectorFactory.create()
-        connector.departments.set([department])
-        # ViewSetと同じく、取得時に部門を先読みしておく
-        stale = Connector.objects.prefetch_related("departments").get(pk=connector.pk)
-        request = APIRequestFactory().patch("/")
-        request.user = editor
-        serializer = ConnectorUpdateSerializer(
-            stale, data={"version": 1, "departments": [department.uid]}, partial=True, context={"request": request}
+        assert "department" in res.json()
+        res = api_client.post(
+            CONNECTORS, _data(name="部門", scope=ConnectorScope.DEPARTMENT, department=department.uid), format="json"
         )
-        assert serializer.is_valid(), serializer.errors
-        connector.departments.add(other)
-        with pytest.raises(ValidationError):
-            serializer.save(actor=editor)
-        assert set(connector.departments.all()) == {department, other}
+        assert res.status_code == 201, res.data
+        assert res.json()["scope_display"] == "部門"
+        assert res.json()["department_info"]["name"] == "経理部"
+        # 全社・システムでは部門を持たない（送られても外す）
+        res = api_client.post(
+            CONNECTORS, _data(name="全社", scope=ConnectorScope.COMPANY, department=department.uid), format="json"
+        )
+        assert res.status_code == 201, res.data
+        assert res.json()["department"] is None
+        res = api_client.post(CONNECTORS, _data(name="システム", scope=ConnectorScope.SYSTEM), format="json")
+        assert res.status_code == 201, res.data
+        assert Connector.objects.get(uid=res.json()["id"]).scope == ConnectorScope.SYSTEM
 
     @pytest.mark.django_db
-    def test_company_wide(self, api_client, editor, department):
-        connector = ConnectorFactory.create()  # 部門の指定なし（全社向け）
-        url = f"{CONNECTORS}{connector.uid}/"
+    def test_scope_and_department_cannot_change(self, api_client, editor, department):
+        connector = ConnectorFactory.create(scope=ConnectorScope.DEPARTMENT, department=department)
+        other = Department.objects.create(name="営業部")
         api_client.force_login(editor)
-        assert api_client.get(url).status_code == 200
-        # 全社向けをやめる（部門を指定する）ことはできない
-        assert api_client.patch(url, {"version": 1, "departments": [department.uid]}, format="json").status_code == 400
+        res = api_client.patch(
+            f"{CONNECTORS}{connector.uid}/",
+            {"version": 1, "scope": ConnectorScope.COMPANY, "department": other.uid, "max_rows": 5},
+            format="json",
+        )
+        assert res.status_code == 200, res.data
+        connector.refresh_from_db()
+        assert connector.current_version is not None
+        assert (connector.scope, connector.department, connector.current_version.max_rows) == (
+            ConnectorScope.DEPARTMENT,
+            department,
+            5,
+        )
 
     @pytest.mark.django_db
     def test_choices(self, api_client, editor, department, monkeypatch):
         Department.objects.create(name="営業部")
+        Department.objects.create(name="旧部門", deleted=True)
         DatabaseConnectionFactory.create(name="基幹DB")
         DatabaseConnectionFactory.create(name="止めたDB", is_active=False)
         api_client.force_login(editor)
-        # 選べる部門は自分の所属の範囲だけ。接続先は有効なものだけ（接続先のpermissionがなくても選べる）
-        assert [d["name"] for d in api_client.get(f"{CONNECTORS}departments/").json()["results"]] == ["経理部"]
+        # 選べる部門は有効なすべての部門（所属は問わない）。接続先は有効なものだけ（接続先のpermissionがなくても選べる）
+        names = [d["name"] for d in api_client.get(f"{CONNECTORS}departments/").json()["results"]]
+        assert names == ["営業部", "経理部"]
         assert [c["name"] for c in api_client.get(f"{CONNECTORS}connections/").json()["results"]] == ["基幹DB"]
         connector = ConnectorFactory.create()
-        connector.departments.set([department])
         monkeypatch.setattr("connector.adapters.postgresql.PostgreSQLAdapter.list_tables", lambda self: [])
         assert api_client.get(f"{CONNECTORS}{connector.uid}/tables/").json() == {"ok": True, "detail": "", "tables": []}
-
-    @pytest.mark.django_db
-    def test_covers_all_departments(self, api_client, app_user, department):
-        # 「すべての部門の範囲を含む」部門の所属者は、すべての部門に所属しているものとして扱う
-        everyone = Department.objects.create(name="監査室", covers_all_departments=True)
-        DepartmentMembership.objects.create(department=everyone, user=app_user, role=DepartmentRole.MEMBER)
-        editor = _grant(app_user, "add_connector", "change_connector")
-        connector = ConnectorFactory.create()
-        connector.departments.set([department])
-        api_client.force_login(editor)
-        assert api_client.get(f"{CONNECTORS}{connector.uid}/").status_code == 200
-        res = api_client.patch(f"{CONNECTORS}{connector.uid}/", {"version": 1, "departments": []}, format="json")
-        assert res.status_code == 200, res.data
-        assert api_client.post(CONNECTORS, _data(), format="json").status_code == 201
 
 
 class TestDatabaseConnection:
@@ -401,7 +391,9 @@ class TestCreate:
     @pytest.mark.django_db
     def test_create(self, admin_client, platform_admin, department):
         connection = DatabaseConnectionFactory.create()
-        res = admin_client.post(CONNECTORS, _data(connection, departments=[department.uid]), format="json")
+        res = admin_client.post(
+            CONNECTORS, _data(connection, scope=ConnectorScope.DEPARTMENT, department=department.uid), format="json"
+        )
         assert res.status_code == 201, res.data
         body = res.json()
         assert body["connection"] == connection.uid
@@ -413,7 +405,7 @@ class TestCreate:
             {"schema": "public", "name": "vendors", "description": "取引先", "columns": {"code": "取引先コード"}}
         ]
         assert body["is_sensitive"] is False
-        assert body["departments"] == [department.uid]
+        assert body["department"] == department.uid
 
         connector = Connector.objects.get(uid=body["id"])
         assert connector.connection == connection
@@ -440,7 +432,8 @@ class TestCreate:
         [
             ({"connection": "missing"}, "connection"),
             ({"tables": [{"name": "vendors"}, {"schema": "public", "name": "vendors"}]}, "tables"),
-            ({"departments": ["missing"]}, "departments"),
+            ({"scope": ConnectorScope.DEPARTMENT, "department": "missing"}, "department"),
+            ({"scope": 1}, "scope"),
             ({"max_rows": 0}, "max_rows"),
         ],
     )
@@ -520,19 +513,6 @@ class TestUpdate:
         assert res.status_code == 200, res.data
         connector.refresh_from_db()
         assert connector.connection != other
-
-    @pytest.mark.django_db
-    def test_departments_are_replaced_and_audited(self, admin_client, department):
-        connector = ConnectorFactory.create()
-        connector.departments.set([Department.objects.create(name="営業部")])
-        url = f"{CONNECTORS}{connector.uid}/"
-        # 送らなければ変えない
-        admin_client.patch(url, {"version": 1}, format="json")
-        assert connector.departments.count() == 1
-        res = admin_client.patch(url, {"version": 1, "departments": [department.uid]}, format="json")
-        assert res.status_code == 200, res.data
-        assert list(connector.departments.all()) == [department]
-        assert any("departments" in (e.changes_dict or {}) for e in LogEntry.objects.get_for_object(connector))
 
     @pytest.mark.django_db
     def test_update_does_not_restore_deleted(self, platform_admin):
@@ -664,78 +644,81 @@ class TestOperations:
 
 
 class TestUsableBy:
-    """使うのは所属だけで決まる（permissionは見ない）"""
+    """会話で使えるConnector（authorization.md §5.2）。部門は使える部門の人、全社は全員、システムは会話で使わない"""
 
     @pytest.mark.django_db
-    def test_department_and_company_wide(self, department):
-        by_department = ConnectorFactory.create()
-        by_department.departments.set([department])
+    def test_department_company_and_system(self, department):
+        by_department = ConnectorFactory.create(scope=ConnectorScope.DEPARTMENT, department=department)
         company_wide = ConnectorFactory.create()
-        elsewhere = ConnectorFactory.create()
-        elsewhere.departments.set([Department.objects.create(name="営業部")])
+        system = ConnectorFactory.create(scope=ConnectorScope.SYSTEM)
+        elsewhere = ConnectorFactory.create(
+            scope=ConnectorScope.DEPARTMENT, department=Department.objects.create(name="営業部")
+        )
 
         member = UserFactory.create()
-        DepartmentMembership.objects.create(department=department, user=member, role=DepartmentRole.MEMBER)
+        DepartmentMembership.objects.create(department=department, user=member)
         assert set(Connector.objects.usable_by(member)) == {by_department, company_wide}
         assert by_department.operations_for(member) == {Operation.DATASOURCE_DESCRIBE, Operation.DATASOURCE_QUERY}
         assert elsewhere.operations_for(member) == set()
+        assert system.operations_for(member) == set()
 
         outsider = UserFactory.create()
         assert list(Connector.objects.usable_by(outsider)) == [company_wide]
         assert by_department.operations_for(outsider) == set()
 
     @pytest.mark.django_db
-    def test_covers_all_departments(self, department):
-        connector = ConnectorFactory.create()
-        connector.departments.set([department])
-        auditor = UserFactory.create()
-        everyone = Department.objects.create(name="監査室", covers_all_departments=True)
-        DepartmentMembership.objects.create(department=everyone, user=auditor, role=DepartmentRole.MEMBER)
+    @pytest.mark.parametrize("perm", ["user.can_use_all_departments", "user.can_manage_all_departments"])
+    def test_all_departments(self, department, perm):
+        connector = ConnectorFactory.create(scope=ConnectorScope.DEPARTMENT, department=department)
+        ConnectorFactory.create(scope=ConnectorScope.SYSTEM)
+        auditor = grant(UserFactory.create(), perm)
         assert list(Connector.objects.usable_by(auditor)) == [connector]
-        everyone.deleted = True
-        everyone.save()
-        assert list(Connector.objects.usable_by(auditor)) == []
+        assert connector.operations_for(auditor) == set(connector.operations)
+
+    @pytest.mark.django_db
+    def test_platform_admin_does_not_use_system_connectors_in_conversation(self, platform_admin, department):
+        connector = ConnectorFactory.create(scope=ConnectorScope.DEPARTMENT, department=department)
+        system = ConnectorFactory.create(scope=ConnectorScope.SYSTEM)
+        assert list(Connector.objects.usable_by(platform_admin)) == [connector]
+        assert system.operations_for(platform_admin) == set()
 
     @pytest.mark.django_db
     def test_inactive_deleted_and_removed_department(self, department):
-        connector = ConnectorFactory.create()
-        connector.departments.set([department])
+        connector = ConnectorFactory.create(scope=ConnectorScope.DEPARTMENT, department=department)
         user = UserFactory.create()
-        DepartmentMembership.objects.create(department=department, user=user, role=DepartmentRole.MEMBER)
-        assert list(Connector.objects.usable_by(user)) == [connector]
+        DepartmentMembership.objects.create(department=department, user=user)
+
+        def fresh():
+            # 所属の判定は利用者のオブジェクトにキャッシュするので、変えた後は読み直す
+            return User.objects.get(pk=user.pk)
+
+        assert list(Connector.objects.usable_by(fresh())) == [connector]
 
         department.deleted = True
         department.save()
-        assert list(Connector.objects.usable_by(user)) == []
-        assert connector.operations_for(user) == set()
+        assert list(Connector.objects.usable_by(fresh())) == []
+        assert connector.operations_for(fresh()) == set()
         department.deleted = False
         department.save()
 
         connector.is_active = False
         connector.save()
-        assert list(Connector.objects.usable_by(user)) == []
-        assert connector.operations_for(user) == set()
+        assert list(Connector.objects.usable_by(fresh())) == []
+        assert connector.operations_for(fresh()) == set()
 
         connector.is_active = True
         connector.save()
         # DB接続を止めたら、その上のConnectorも使えない
         connector.connection.is_active = False
         connector.connection.save()
-        assert list(Connector.objects.usable_by(user)) == []
-        assert connector.operations_for(user) == set()
+        assert list(Connector.objects.usable_by(fresh())) == []
+        assert connector.operations_for(fresh()) == set()
         connector.connection.is_active = True
         connector.connection.save()
 
-        user.is_active = False
-        user.save()
-        assert list(Connector.objects.usable_by(user)) == []
-
-    @pytest.mark.django_db
-    def test_platform_admin_can_use_all(self, platform_admin, department):
-        connector = ConnectorFactory.create()
-        connector.departments.set([department])
-        assert list(Connector.objects.usable_by(platform_admin)) == [connector]
-        assert connector.operations_for(platform_admin) == set(connector.operations)
+        User.objects.filter(pk=user.pk).update(is_active=False)
+        assert list(Connector.objects.usable_by(fresh())) == []
+        assert connector.operations_for(fresh()) == set()
 
 
 def _content(connector: Connector, **overrides):

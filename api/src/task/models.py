@@ -11,6 +11,7 @@
 """
 
 import operator
+import secrets
 from enum import Enum
 from functools import reduce
 from typing import TYPE_CHECKING, Any, Self
@@ -20,6 +21,7 @@ from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
 from django.db import models, transaction
 from django.db.models import Q
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from user.models import Department, manageable_department_ids
@@ -259,6 +261,10 @@ class TaskDefinition(models.Model):
         current.deleted = True
         current.save(update_fields=["deleted", "updated"])
         self.deleted = True
+        # 入口も消す（鍵を使えなくする。監査ログに残すため1件ずつ保存する）
+        for binding in TriggerBinding.objects.alive().filter(task=current):
+            binding.deleted = True
+            binding.save(update_fields=["deleted", "updated"])
         current.stop_runs(_("タスクが削除されました"), actor=actor)
 
     def stop_runs(self, reason: "str | StrPromise", *, actor=None) -> None:
@@ -332,4 +338,224 @@ class TaskDefinitionRevision(models.Model):
         return f"{self.task} v{self.number}"
 
 
+class TriggerKind(models.IntegerChoices):
+    """入口の種類。スケジュールは後で足す"""
+
+    WEBHOOK = 1, _("Webhook")
+
+
+# Webhookの入口を付けられるタスクの範囲（個人のタスクの入口はスケジュールだけ。authorization.md §5.4）
+WEBHOOK_TASK_SCOPES = (TaskScope.DEPARTMENT, TaskScope.COMPANY, TaskScope.SYSTEM)
+# payloadの大きさの上限（入口ごとに設定する。既定1MiB・最大10MiB。nginxの client_max_body_size も合わせる）
+DEFAULT_MAX_PAYLOAD_BYTES = 1024 * 1024
+MAX_PAYLOAD_BYTES = 10 * 1024 * 1024
+# 鍵の形。見分け用に先頭の数文字（KEY_PREFIX_LENGTH）だけを保存して画面に出す
+WEBHOOK_KEY_PREFIX = "yrk_wh_"
+KEY_PREFIX_LENGTH = len(WEBHOOK_KEY_PREFIX) + 6
+
+
+class TriggerBindingQuerySet(models.QuerySet):
+    def alive(self) -> Self:
+        return self.filter(deleted=False)
+
+
+class TriggerBinding(models.Model):
+    """タスクの入口（design.md §4.1・§4.2、authorization.md §5.5）。連携の管理者（Modelのpermission）が作る。
+
+    Webhookの入口とタスクは1対1で、タスクは作成時に決めて変えない（鍵を持つ送り元が、後から付けたタスクまで起動
+    できないように。付け替えるときは入口を作り直す）。鍵はハッシュと見分け用の先頭の数文字だけを保存し、作成時と
+    作り直したときに一度だけ返す。受け取り方（重複の判定、項目の取り出し、payloadの上限）は不変の版
+    （TriggerBindingRevision）が持ち、保存のたびに新しい版を作る。受け付けたRunは受付時の版を記録する
+    """
+
+    uid = NanoidField(unique=True)
+    kind = models.PositiveSmallIntegerField(_("種類"), choices=TriggerKind.choices, default=TriggerKind.WEBHOOK)
+    task = models.ForeignKey(
+        TaskDefinition, on_delete=models.PROTECT, related_name="triggers", verbose_name=_("タスク")
+    )
+    name = models.CharField(_("名前"), max_length=100)
+    key_hash = models.CharField(_("鍵のハッシュ"), max_length=64, unique=True, editable=False)
+    key_prefix = models.CharField(_("鍵の先頭"), max_length=20, editable=False)
+    current_revision = models.ForeignKey(
+        "TriggerBindingRevision",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("今の版"),
+    )
+    # 停止。新しい要求を受け付けない（受け付けたRunは止めない。止めたいときはタスクを停止する）
+    suspended = models.BooleanField(_("停止中"), default=False)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+", verbose_name=_("作成者")
+    )
+    key_rotated = models.DateTimeField(_("鍵を作った日時"), null=True, blank=True)
+
+    created = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated = models.DateTimeField(auto_now=True)
+    deleted = models.BooleanField(default=False)
+
+    objects = TriggerBindingQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = _("タスクの入口")
+        verbose_name_plural = verbose_name
+        constraints = [
+            # Webhookの入口とタスクは1対1（authorization.md §5.5）
+            models.UniqueConstraint(
+                fields=["task"], condition=Q(kind=TriggerKind.WEBHOOK, deleted=False), name="uniq_task_webhook"
+            ),
+        ]
+
+    def __str__(self):
+        return self.name
+
+    def in_service(self) -> bool:
+        return not self.deleted and not self.suspended and self.current_revision_id is not None
+
+    @property
+    def version_number(self) -> int:
+        return self.current_revision.number if self.current_revision else 0
+
+    @staticmethod
+    def new_key() -> tuple[str, str, str]:
+        """新しい鍵。（鍵、ハッシュ、先頭）"""
+        from utils.authentication import hash_hook_key  # noqa: PLC0415  utilsのModelに依らない関数
+
+        key = WEBHOOK_KEY_PREFIX + secrets.token_urlsafe(32)
+        return key, hash_hook_key(key), key[:KEY_PREFIX_LENGTH]
+
+    @classmethod
+    @transaction.atomic
+    def create_with_revision(
+        cls, *, task: TaskDefinition, name: str, actor, change_reason: str = "", content: dict[str, Any]
+    ) -> tuple["TriggerBinding", str]:
+        """入口と最初の版を作る。（入口、鍵）。鍵はここでだけ返す"""
+        key, key_hash, prefix = cls.new_key()
+        binding = cls.objects.create(
+            task=task,
+            name=name,
+            key_hash=key_hash,
+            key_prefix=prefix,
+            key_rotated=timezone.now(),
+            created_by=actor,
+        )
+        binding.revise(actor=actor, expected_version=0, change_reason=change_reason, **content)
+        return binding, key
+
+    @transaction.atomic
+    def revise(
+        self, *, actor, expected_version: int, change_reason: str = "", **fields: Any
+    ) -> "TriggerBindingRevision":
+        """受け取り方を変えた新しい版を作り、今の版にする。次の要求から使う。競合は VersionConflict。
+        中身が今の版と同じなら版を作らない（TaskDefinition.revise() と同じ）"""
+        current = (
+            TriggerBinding.objects.select_for_update(of=("self",)).select_related("current_revision").get(pk=self.pk)
+        )
+        if current.deleted:
+            raise VersionConflict("deleted")
+        latest = current.current_revision
+        latest_number = latest.number if latest else 0
+        if latest_number != expected_version:
+            raise VersionConflict(f"expected={expected_version} latest={latest_number}")
+        if latest and all(getattr(latest, name) == fields[name] for name in TRIGGER_REVISION_FIELDS):
+            self.current_revision = latest
+            return latest
+        revision = TriggerBindingRevision.objects.create(
+            binding=current, number=latest_number + 1, created_by=actor, change_reason=change_reason, **fields
+        )
+        current.current_revision = revision
+        current.save(update_fields=["current_revision", "updated"])
+        self.current_revision = revision
+        return revision
+
+    @transaction.atomic
+    def rotate_key(self) -> str:
+        """鍵を作り直す。前の鍵はすぐに使えなくなる。新しい鍵はここでだけ返す"""
+        key, key_hash, prefix = self.new_key()
+        current = TriggerBinding.objects.select_for_update(of=("self",)).get(pk=self.pk)
+        current.key_hash, current.key_prefix, current.key_rotated = key_hash, prefix, timezone.now()
+        current.save(update_fields=["key_hash", "key_prefix", "key_rotated", "updated"])
+        self.key_hash, self.key_prefix, self.key_rotated = key_hash, prefix, current.key_rotated
+        return key
+
+
+# 入口の版に入れる項目。変えると新しい版になる
+TRIGGER_REVISION_FIELDS = ("event_id_path", "inputs", "max_payload_bytes")
+
+
+class TriggerBindingRevision(models.Model):
+    """入口の受け取り方の版。作成後に変更・削除しない。
+
+    - `event_id_path`：重複の判定に使う送り元のイベントIDの場所（JSONのpath。例 `$.event.id`）。空なら
+      `Idempotency-Key` ヘッダーか、推奨の形式の `event_id`（どれもなければ判定しない）
+    - `inputs`：項目の取り出し。`[{"name": "vendor", "path": "$.data.vendor_name"}]`。型と必須かどうかは、
+      タスクの版の入力の項目の定義で決める。空なら、推奨の形式の `inputs` をそのまま入力の値にする
+    """
+
+    uid = NanoidField(unique=True)
+    binding = models.ForeignKey(
+        TriggerBinding, on_delete=models.PROTECT, related_name="revisions", verbose_name=_("入口")
+    )
+    number = models.PositiveIntegerField(_("版"))
+    event_id_path = models.CharField(_("イベントIDの場所"), max_length=200, blank=True)
+    inputs = models.JSONField(_("項目の取り出し"), default=list)
+    max_payload_bytes = models.PositiveIntegerField(_("payloadの大きさの上限"), default=DEFAULT_MAX_PAYLOAD_BYTES)
+    change_reason = models.CharField(_("変更理由"), max_length=500, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+", verbose_name=_("保存した人")
+    )
+
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("タスクの入口の版")
+        verbose_name_plural = verbose_name
+        constraints = [models.UniqueConstraint(fields=["binding", "number"], name="uniq_trigger_revision_number")]
+
+    def __str__(self):
+        return f"{self.binding} v{self.number}"
+
+
+class TriggerReceipt(models.Model):
+    """入口が受け付けた要求（design.md §4.2）。Runと同じtransactionで作る。
+
+    重複のキー（送り元のイベントIDか `Idempotency-Key`）があれば、入口ごとに一意にする。同じキーと同じ入力の再送には
+    既存のRunを返し、同じキーで違う入力は断る。入口の版が変わっても、同じ受信の再送で新しいRunを作らない。
+    キーがなければ重複の判定をせず、届くたびに新しいRunを作る。キーは今は消さずに持ち続ける
+    """
+
+    uid = NanoidField(unique=True)
+    binding = models.ForeignKey(
+        TriggerBinding, on_delete=models.PROTECT, related_name="receipts", verbose_name=_("入口")
+    )
+    binding_revision = models.ForeignKey(
+        TriggerBindingRevision, on_delete=models.PROTECT, related_name="+", verbose_name=_("入口の版")
+    )
+    # 空なら重複を判定しない
+    dedup_key = models.CharField(_("重複のキー"), max_length=200, blank=True)
+    payload_sha256 = models.CharField(_("入力のハッシュ"), max_length=64)
+    payload_size = models.PositiveIntegerField(_("payloadの大きさ"))
+    content_type = models.CharField(_("形式"), max_length=100)
+    run = models.OneToOneField(
+        "run.Run", on_delete=models.PROTECT, related_name="trigger_receipt", verbose_name=_("実行")
+    )
+
+    created = models.DateTimeField(_("受付日時"), auto_now_add=True, db_index=True)
+
+    class Meta:
+        verbose_name = _("入口の受付")
+        verbose_name_plural = verbose_name
+        constraints = [
+            models.UniqueConstraint(
+                fields=["binding", "dedup_key"], condition=~Q(dedup_key=""), name="uniq_trigger_dedup_key"
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.binding} {self.dedup_key or self.uid}"
+
+
 auditlog.register(TaskDefinition)
+auditlog.register(TriggerBinding, exclude_fields=["key_hash", "updated"])
+auditlog.register(TriggerBindingRevision)

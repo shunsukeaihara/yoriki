@@ -47,6 +47,8 @@ class User(AbstractUser):
 
     uid = NanoidField(unique=True)
     display_name = models.CharField(_("表示名"), max_length=150, blank=True)
+    # 人のいない起動（Webhook等）のRunの実行主体（`system_user()`）。ログインできず、ユーザーの管理APIにも出さない
+    is_system = models.BooleanField(_("システム用"), default=False, editable=False)
 
     created = models.DateTimeField(auto_now_add=True, db_index=True)
     updated = models.DateTimeField(auto_now=True)
@@ -58,6 +60,22 @@ class User(AbstractUser):
 
     def __str__(self):
         return self.display_name or self.email or self.username
+
+
+SYSTEM_USERNAME = "yoriki-system"
+
+
+def system_user() -> User:
+    """人のいない起動（Webhook等）のRunの実行主体（Run.owner と会話の持ち主）。利用量の記録と実行時の文脈の名前に使い、
+    権限の判定には使わない（タスクの範囲で動く。authorization.md §6）。無効で、パスワードもないのでログインできない"""
+    user, created = User.objects.get_or_create(
+        username=SYSTEM_USERNAME,
+        defaults={"is_system": True, "is_active": False, "display_name": "Yoriki"},
+    )
+    if created:
+        user.set_unusable_password()
+        user.save(update_fields=["password"])
+    return user
 
 
 def granted_permissions(user: User) -> set[str]:

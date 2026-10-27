@@ -203,7 +203,9 @@ class ManageUserViewSet(
     permission_classes = [ModelPermissions]
     action_permissions = {"invitation": "change"}
     lookup_field = "uid"
-    queryset = User.objects.prefetch_related("groups", "socialaccount_set", *ACCOUNT_PERMISSIONS_PREFETCH)
+    queryset = User.objects.filter(is_system=False).prefetch_related(
+        "groups", "socialaccount_set", *ACCOUNT_PERMISSIONS_PREFETCH
+    )
     serializer_class = ManageUserSerializer
     filterset_class = ManageUserFilter
     search_fields = ("email", "display_name")

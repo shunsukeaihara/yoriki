@@ -1,27 +1,60 @@
+import logging
+from typing import TYPE_CHECKING
+
+from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from django_filters import rest_framework as filters
-from drf_spectacular.utils import OpenApiResponse, extend_schema, extend_schema_view
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema, extend_schema_view
 from rest_framework import mixins, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.generics import get_object_or_404
 from rest_framework.response import Response
-from rest_framework.viewsets import GenericViewSet, ReadOnlyModelViewSet
+from rest_framework.viewsets import GenericViewSet, ModelViewSet, ReadOnlyModelViewSet
 
 from run.models import Run, RunLaunch
 from run.serializers import RunSerializer
-from utils.permissions import AppUser
+from utils.permissions import AppUser, ModelPermissions
+from utils.views import SoftDeleteMixin
 
-from .dispatch import InvalidInputs, start_task_run
+from .authentication import WebhookKeyAuthentication, WebhookTaskPermission
+from .dispatch import InvalidInputs, receive_webhook, start_task_run
 from .errors import CannotRun
-from .models import BUSINESS_SCOPES, TaskDefinition, TaskDefinitionRevision, TaskScope
+from .models import (
+    BUSINESS_SCOPES,
+    WEBHOOK_TASK_SCOPES,
+    TaskDefinition,
+    TaskDefinitionRevision,
+    TaskScope,
+    TriggerBinding,
+    TriggerBindingRevision,
+    TriggerKind,
+    TriggerReceipt,
+)
 from .serializers import (
+    HookErrorSerializer,
+    HookReceivedSerializer,
+    HookRunSerializer,
     TaskDefinitionRevisionSerializer,
     TaskDefinitionSerializer,
     TaskDefinitionUpdateSerializer,
     TaskRunCreateSerializer,
     TaskSuspendSerializer,
+    TriggerBindingKeySerializer,
+    TriggerBindingRevisionSerializer,
+    TriggerBindingSerializer,
+    TriggerBindingStateSerializer,
+    TriggerBindingUpdateSerializer,
+    TriggerReceiptSerializer,
+    TriggerTaskSerializer,
 )
+from .webhook import PayloadError
+
+if TYPE_CHECKING:
+    from django_stubs_ext import StrPromise
+
+logger = logging.getLogger(__name__)
 
 CONFLICT = OpenApiResponse(description="他の変更と競合した（編集を始めた後に、他の人が版を作った）")
 
@@ -55,7 +88,7 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
     lookup_field = "uid"
     queryset = TaskDefinition.objects.select_related(
         "owner", "department", "created_by", "current_revision__model_profile__current_version"
-    )
+    ).prefetch_related("triggers")
     serializer_class = TaskDefinitionSerializer
     filterset_class = TaskFilter
     search_fields = ("name",)
@@ -165,3 +198,230 @@ class AppTaskRunViewSet(TaskMixin, mixins.ListModelMixin, GenericViewSet):
             .filter(task=self.task)
             .filter(pk__in=Run.objects.visible_to(self.request.user).values("pk"))
         )
+
+
+@extend_schema(
+    description="タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（連携の管理者。authorization.md §5.5）",
+    tags=["manage/trigger_binding"],
+)
+@extend_schema_view(
+    create=extend_schema(responses={201: TriggerBindingKeySerializer}),
+    update=extend_schema(
+        request=TriggerBindingUpdateSerializer, responses={200: TriggerBindingSerializer, 409: CONFLICT}
+    ),
+    partial_update=extend_schema(
+        request=TriggerBindingUpdateSerializer, responses={200: TriggerBindingSerializer, 409: CONFLICT}
+    ),
+    destroy=extend_schema(description="入口を消す。鍵はすぐに使えなくなる（受け付けたRunは止めない）"),
+)
+class TriggerBindingViewSet(SoftDeleteMixin, ModelViewSet):
+    permission_classes = [ModelPermissions]
+    action_permissions = {"suspend": "change", "resume": "change", "rotate_key": "change", "tasks": "add"}
+    lookup_field = "uid"
+    queryset = TriggerBinding.objects.alive().select_related(
+        "task__department", "task__current_revision", "current_revision", "created_by"
+    )
+    serializer_class = TriggerBindingSerializer
+    filterset_fields = ["suspended"]
+    search_fields = ("name", "task__name")
+    ordering = ("name", "pk")
+
+    def get_serializer_class(self):
+        if self.action in ("update", "partial_update"):
+            return TriggerBindingUpdateSerializer
+        return super().get_serializer_class()
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        binding = serializer.save(actor=request.user)
+        data = TriggerBindingKeySerializer(binding, context=self.get_serializer_context()).data
+        return Response(data, status=status.HTTP_201_CREATED)
+
+    def perform_update(self, serializer):
+        serializer.save(actor=self.request.user)
+
+    @extend_schema(description="停止する。新しい要求を受け付けない", request=None, responses=TriggerBindingSerializer)
+    @action(detail=True, methods=["post"], serializer_class=TriggerBindingStateSerializer)
+    def suspend(self, request, *args, **kwargs):
+        return self._change_state(request, TriggerBindingSerializer, suspended=True)
+
+    @extend_schema(description="停止を解く", request=None, responses=TriggerBindingSerializer)
+    @action(detail=True, methods=["post"], serializer_class=TriggerBindingStateSerializer)
+    def resume(self, request, *args, **kwargs):
+        return self._change_state(request, TriggerBindingSerializer, suspended=False)
+
+    @extend_schema(
+        description="鍵を作り直す。前の鍵はすぐに使えなくなる。新しい鍵は応答で一度だけ返す",
+        request=None,
+        responses=TriggerBindingKeySerializer,
+    )
+    @action(detail=True, methods=["post"], url_path="rotate_key", serializer_class=TriggerBindingStateSerializer)
+    def rotate_key(self, request, *args, **kwargs):
+        return self._change_state(request, TriggerBindingKeySerializer, rotate_key=True)
+
+    @transaction.atomic
+    def _change_state(self, request, output, **changes) -> Response:
+        serializer = self.get_serializer(instance=self.get_object(), data={})
+        serializer.is_valid(raise_exception=True)
+        binding = serializer.save(**changes)
+        return Response(output(binding, context=self.get_serializer_context()).data)
+
+    @extend_schema(
+        description="入口を付けられるタスク（部門・全社・システム。まだWebhookの入口がないもの）",
+        responses=TriggerTaskSerializer(many=True),
+    )
+    @action(detail=False, methods=["get"], serializer_class=TriggerTaskSerializer)
+    def tasks(self, request, *args, **kwargs):
+        taken = TriggerBinding.objects.alive().filter(kind=TriggerKind.WEBHOOK).values("task")
+        qs = (
+            TaskDefinition.objects.filter(deleted=False, scope__in=WEBHOOK_TASK_SCOPES)
+            .exclude(pk__in=taken)
+            .select_related("department", "current_revision")
+            .order_by("name", "pk")
+        )
+        if name := request.query_params.get("search"):
+            qs = qs.filter(name__icontains=name)
+        page = self.paginate_queryset(qs)
+        serializer = self.get_serializer(page, many=True)
+        return self.get_paginated_response(serializer.data)
+
+
+class TriggerBindingMixin:
+    kwargs: dict[str, str]
+
+    @property
+    def binding(self) -> TriggerBinding:
+        if not hasattr(self, "_binding"):
+            self._binding = get_object_or_404(TriggerBinding.objects.alive(), uid=self.kwargs["binding"])
+        return self._binding
+
+
+@extend_schema(description="入口の受け取り方の版の履歴", tags=["manage/trigger_binding/revision"])
+class TriggerBindingRevisionViewSet(TriggerBindingMixin, ReadOnlyModelViewSet):
+    permission_classes = [ModelPermissions]
+    permission_model = TriggerBinding
+    lookup_field = "number"
+    queryset = TriggerBindingRevision.objects.select_related("created_by")
+    serializer_class = TriggerBindingRevisionSerializer
+    ordering = ("-number",)
+
+    def get_queryset(self):
+        return super().get_queryset().filter(binding=self.binding)
+
+
+@extend_schema(
+    description="入口の受付の履歴（Runの状態まで。結果・ログはタスクの画面で、タスクを管理できる人が見る）",
+    tags=["manage/trigger_binding/receipt"],
+)
+class TriggerReceiptViewSet(TriggerBindingMixin, mixins.ListModelMixin, GenericViewSet):
+    permission_classes = [ModelPermissions]
+    permission_model = TriggerBinding
+    queryset = TriggerReceipt.objects.select_related("binding_revision", "run")
+    serializer_class = TriggerReceiptSerializer
+    ordering = ("-created", "-pk")
+
+    def get_queryset(self):
+        return super().get_queryset().filter(binding=self.binding)
+
+
+def hook_error(
+    code: str, detail: "str | StrPromise", http_status: int, errors: dict[str, str] | None = None
+) -> Response:
+    body: dict[str, object] = {"code": code, "detail": str(detail)}
+    if errors:
+        body["inputs"] = errors
+    return Response(body, status=http_status)
+
+
+HOOK_ERRORS = {
+    400: OpenApiResponse(HookErrorSerializer, description="payloadの形・項目の誤り（Runは作らない）"),
+    401: OpenApiResponse(description="鍵がないか、正しくない"),
+    403: OpenApiResponse(HookErrorSerializer, description="入口が停止中"),
+    409: OpenApiResponse(
+        HookErrorSerializer, description="同じイベントIDで違う内容を受け取った、またはタスクを今は実行できない"
+    ),
+    413: OpenApiResponse(HookErrorSerializer, description="payloadが入口の上限より大きい"),
+    415: OpenApiResponse(HookErrorSerializer, description="受け付けない形式"),
+}
+
+
+@extend_schema(
+    description="Webhookでタスクを起動する（design.md §4.2）。受け付けたら202とrun_idを返し、作業の完了を待たない。"
+    "同じイベントID（入口で指定した場所・Idempotency-Key ヘッダー・推奨の形式の event_id）の再送には、前のRunを"
+    "200で返す",
+    tags=["hooks/task"],
+    request={
+        "application/json": OpenApiTypes.OBJECT,
+        "application/x-www-form-urlencoded": OpenApiTypes.OBJECT,
+        "text/plain": OpenApiTypes.STR,
+    },
+    parameters=[OpenApiParameter("Idempotency-Key", str, OpenApiParameter.HEADER, required=False)],
+    responses={202: HookReceivedSerializer, 200: HookReceivedSerializer, **HOOK_ERRORS},
+)
+class HookTaskViewSet(GenericViewSet):
+    authentication_classes = [WebhookKeyAuthentication]
+    permission_classes = [WebhookTaskPermission]
+    serializer_class = HookReceivedSerializer
+
+    def create(self, request, *args, **kwargs):
+        binding: TriggerBinding = request.auth
+        revision = binding.current_revision
+        if not binding.in_service() or revision is None:
+            return hook_error("trigger_suspended", _("この入口は停止中です"), status.HTTP_403_FORBIDDEN)
+        limit = revision.max_payload_bytes
+        body = self._read_body(request, limit)
+        if body is None:
+            return hook_error(
+                "payload_too_large",
+                _("payloadが大きすぎます（上限 %(limit)s バイト）") % {"limit": limit},
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            )
+        try:
+            run, created = receive_webhook(
+                binding,
+                body=body,
+                content_type=request.META.get("CONTENT_TYPE", ""),
+                idempotency_key=request.headers.get("Idempotency-Key"),
+            )
+        except PayloadError as exc:
+            return hook_error(exc.code, exc.detail, exc.status, exc.errors)
+        except InvalidInputs as exc:
+            return hook_error("invalid_inputs", str(exc), status.HTTP_400_BAD_REQUEST, exc.errors)
+        except CannotRun as exc:
+            # 理由にはタスクの中身（Skill・Connectorの名前等）が入るので、送り元には返さずログに残す
+            logger.warning("webhook %s cannot start task %s: %s", binding.uid, binding.task.uid, exc)
+            return hook_error("task_unavailable", _("タスクを今は実行できません"), status.HTTP_409_CONFLICT)
+        data = {**HookRunSerializer(run).data, "duplicate": not created}
+        return Response(data, status=status.HTTP_202_ACCEPTED if created else status.HTTP_200_OK)
+
+    @staticmethod
+    def _read_body(request, limit: int) -> bytes | None:
+        """本文を上限まで読む。上限を超えたら None。
+
+        request.body は DATA_UPLOAD_MAX_MEMORY_SIZE を超えると断るので、入口の上限まで自分で読む"""
+        try:
+            length = int(request.META.get("CONTENT_LENGTH") or 0)
+        except ValueError:
+            length = 0
+        if length > limit:
+            return None
+        body = request._request.read(limit + 1)
+        return None if len(body) > limit else body
+
+
+@extend_schema(
+    description="Webhookで起動したRunの状態（authorization.md §7.1）。状態と決まった失敗のコードだけを返す",
+    tags=["hooks/task/run"],
+)
+class HookTaskRunViewSet(mixins.RetrieveModelMixin, GenericViewSet):
+    authentication_classes = [WebhookKeyAuthentication]
+    permission_classes = [WebhookTaskPermission]
+    lookup_field = "uid"
+    lookup_url_kwarg = "run_id"
+    queryset = Run.objects.all()
+    serializer_class = HookRunSerializer
+
+    def get_queryset(self):
+        # この入口が受け付けたRunだけ
+        return super().get_queryset().filter(trigger_receipt__binding=self.request.auth)

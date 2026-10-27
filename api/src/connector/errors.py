@@ -13,6 +13,7 @@ class ConnectorErrorKind(StrEnum):
     TIMEOUT = "timeout"  # 実行時間の上限を超えた
     QUERY = "query"  # 接続先がエラーを返した（構文、列名の誤り等）
     UNAVAILABLE = "unavailable"  # ドライバ（ODBC Driver等）がない
+    BUSY = "busy"  # 接続の同時実行数の上限で、待っても枠が空かなかった
 
 
 class ConnectorError(Exception):

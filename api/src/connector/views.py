@@ -5,19 +5,22 @@ from django_filters import rest_framework as filters
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema, extend_schema_view
 from rest_framework.decorators import action
 from rest_framework.generics import get_object_or_404
+from rest_framework.mixins import ListModelMixin
 from rest_framework.response import Response
-from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
+from rest_framework.viewsets import GenericViewSet, ModelViewSet, ReadOnlyModelViewSet
 
 from user.models import Department
 from user.serializers import MinimumDepartmentSerializer
 from utils.exceptions import Conflict
-from utils.permissions import ModelPermissions
+from utils.permissions import AppUser, ModelPermissions
 from utils.views import SoftDeleteMixin
 
 from .adapters import get_adapter
 from .errors import ConnectorError
+from .limits import connection_slot
 from .models import Connector, ConnectorKind, ConnectorScope, ConnectorVersion, DatabaseConnection
 from .serializers import (
+    AppConnectorSerializer,
     ConnectorCheckSerializer,
     ConnectorQueryResultSerializer,
     ConnectorQuerySerializer,
@@ -32,6 +35,8 @@ from .serializers import (
 
 # 試し実行の応答に載せる行数。行数・サイズの上限はConnectorの版の値で、エージェントと同じ
 PREVIEW_ROWS = 200
+# 試し実行で、接続の同時実行の枠が空くのを待つ上限（秒）
+PREVIEW_WAIT_SECONDS = 10
 
 
 class DatabaseConnectionFilter(filters.FilterSet):
@@ -145,7 +150,7 @@ class ConnectorViewSet(SoftDeleteMixin, ModelViewSet):
     基盤の管理なので、所属を問わず `connector.<view|add|change|delete>_connector` だけで判定する
     （authorization.md §5.2）。試し実行は接続先のデータを読むので、編集の権限で行う。
 
-    境界（公開する表、上限、機密のフラグ）を変えて保存すると新しい版ができる。進行中のRunは開始時の版を使い続ける。
+    境界（公開する表、上限、機密のフラグ）を変えて保存すると新しい版ができ、実行中のRunにも次の操作から効く。
     接続の確認と表の一覧は、使うDB接続の操作（DatabaseConnectionViewSet）で行う
     """
 
@@ -266,11 +271,21 @@ class ConnectorViewSet(SoftDeleteMixin, ModelViewSet):
     def query(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        adapter = get_adapter(self.get_usable_object())
+        connector = self.get_usable_object()
+        adapter = get_adapter(connector)
         sql, params = serializer.validated_data["sql"], serializer.validated_data["params"]
+        assert connector.current_version is not None  # get_usable_object() が確かめた
         try:
-            # 応答に載せる行だけをメモリに残す（上限までの全体を貯めない）
-            data = ConnectorQueryResultSerializer.build(adapter.query(sql, params, keep_rows=PREVIEW_ROWS))
+            # エージェントの操作と同じく、接続の同時実行数の上限の中で実行する
+            with connection_slot(
+                connector.connection,
+                f"manage:{request.user.uid}",
+                hold_seconds=connector.connection.connect_timeout_seconds + connector.current_version.timeout_seconds,
+                wait_seconds=PREVIEW_WAIT_SECONDS,
+            ):
+                # 応答に載せる行だけをメモリに残す（上限までの全体を貯めない）
+                result = adapter.query(sql, params, keep_rows=PREVIEW_ROWS)
+            data = ConnectorQueryResultSerializer.build(result)
         except ConnectorError as exc:
             data = ConnectorQueryResultSerializer.build(None, error_kind=exc.kind, detail=exc.message)
         return Response(ConnectorQueryResultSerializer(data).data)
@@ -299,3 +314,18 @@ class ConnectorVersionViewSet(ConnectorMixin, ReadOnlyModelViewSet):
     queryset = ConnectorVersion.objects.select_related("created_by")
     serializer_class = ConnectorVersionSerializer
     ordering = "-number"  # Connectorの中で一意
+
+
+@extend_schema(description="会話で使えるConnector（入力欄の `@` の候補）", tags=["app/connector"])
+class AppConnectorViewSet(ListModelMixin, GenericViewSet):
+    """依頼した人が会話で使えるConnector（部門のものは使える部門の人、全社のものは全員。authorization.md §5.2）。
+    機密のものも返す（ローカルLLMのモデルの会話でだけ使える。画面で出し分ける）"""
+
+    permission_classes = [AppUser]
+    queryset = Connector.objects.select_related("connection", "current_version", "department")
+    serializer_class = AppConnectorSerializer
+    search_fields = ("name",)
+    ordering = ("name", "pk")
+
+    def get_queryset(self):
+        return super().get_queryset().filter(pk__in=Connector.objects.usable_by(self.request.user).values("pk"))

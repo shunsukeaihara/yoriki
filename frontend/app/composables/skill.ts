@@ -80,7 +80,7 @@ export const skillRequirementItems = (t: T) =>
     { value: 4, title: t('構造化出力') },
   ] satisfies { value: SkillRequirementEnum; title: string }[]
 
-/** 使ってよいToolの選択肢（バックエンドの harness.tools.ALL_TOOLS） */
+/** 使ってよいToolの選択肢（バックエンドの harness.tools.SKILL_TOOLS） */
 export const skillToolItems = (t: T) =>
   [
     { value: 'read', title: 'read', description: t('ファイルを読む') },
@@ -93,6 +93,8 @@ export const skillToolItems = (t: T) =>
     { value: 'job_kill', title: 'job_kill', description: t('バックグラウンドのジョブを止める') },
     { value: 'ask_user', title: 'ask_user', description: t('利用者に確認する') },
     { value: 'todo_write', title: 'todo_write', description: t('作業の計画を書く') },
+    { value: 'datasource_describe', title: 'datasource_describe', description: t('Connectorの表・列の説明を見る') },
+    { value: 'datasource_query', title: 'datasource_query', description: t('ConnectorでSELECT文を実行する') },
   ] satisfies { value: ToolName; title: string; description: string }[]
 
 /** SkillChange の summary.fields の項目名 */

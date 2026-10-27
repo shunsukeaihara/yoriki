@@ -335,8 +335,8 @@ class ToolResult:
 | `present_files` | `files`（`path`・`description` の並び。4件まで） | 主な成果物を示す（§10.5） | READ | 不可 |
 | `submit_result` | 業務結果のSchema（SkillかTask Definitionのもの） | 業務結果を確定する（§10.5） | READ | 不可（単独で呼ぶ） |
 | `install_python_packages` | `packages`（`name`・`version`） | 管理された取得で、Run専用の環境へ入れる（design.md §7.6） | WRITE_SANDBOX | 不可 |
-| `datasource_describe` | `connector` | 公開している表・列の説明（design.md §4.9.2） | READ | 可 |
-| `datasource_query` | `connector`、`sql`、`params` | SELECT文（引数の場所は `?`）を実行し、結果をCSVで `/workspace/input/connectors/{invocation_id}/` に置く | READ | 可（接続の同時実行数の上限の中で） |
+| `datasource_describe` | `connector`（Run開始時に固定した一覧の名前のenum） | 公開している表・列の説明（design.md §4.9.2） | READ | 不可（同時実行の枠と記録をDBで扱うので、1つずつ実行する） |
+| `datasource_query` | `connector`、`sql`、`params`（文字列の並び） | SELECT文（引数の場所は `?`）を実行し、結果をCSVで `/workspace/input/connectors/{invocation_id}/` に置く | READ | 不可（同上。接続の同時実行数の上限の中で） |
 | `request_skill_edit` | `skill`（編集するSkillの名前。新しく作るなら空）、`summary`（変更の要約） | Skillの編集を提案し、利用者の確認を待つ（§10.9）。答える人がいる業務のRunだけに出す | INTERACT | 不可（単独で呼ぶ） |
 | Skill管理のTool | §10.9 | Skillの編集のRun（関連Run）だけに出す（design.md §3.6） | WRITE_EXTERNAL | 不可 |
 
@@ -641,9 +641,12 @@ Runが使うSkill（`/` で指定したものと、読み込んだもの）が�
 ### 10.2 Connector
 
 - `datasource_describe`・`datasource_query`（design.md §4.9.2）。Toolの名前にはプロバイダの制約で `.` を使えないので、`_` にする。
-- 結果はArtifactとして保存し、Sandboxの `/workspace/input/connectors/{invocation_id}/result.csv` に読取り専用で置く。モデルには、件数・列名・先頭の数行・ファイルの場所だけを返す（design.md §4.9.1）。SandboxのないRunでは、上限の中の結果を表として返す。
-- `@` で明示したConnectorは、Run開始時にその説明（`describe` の要約）を最初の `message.user` に入れる。
-- 機密のフラグの付いたConnectorは、ローカルLLMのモデルを使うRunにだけ一覧に出す。そのRunで一度でも使ったら、Runに「機密のConnectorの結果を扱った」印を記録し、モデルの切り替えの条件に使う（design.md §4.8）。
+- 一覧：Run開始時に、依頼した人が使えるConnector（`Connector.objects.usable_by()`）の名前と説明を決めてManifestに固定し（`fixed.connector_catalog`）、`<connectors>` で見せる。Toolの `connector` の引数は、その名前のenumにする。使えるConnectorがなければ、ConnectorのToolを出さない。`/` でSkillを指定したRunでは、Skillの「使ってよいTool」にあるものだけを出す。
+- 操作のたびに、依頼した人が今も使えるか（範囲・所属・停止・削除）と、機密のConnectorならRunのモデルがローカルLLMかを確かめ直す（一覧に出したことを根拠にしない。authorization.md §6）。境界（公開する表・上限）はその時点の版を使い、使った版をToolInvocationに記録する（authorization.md §7.2）。
+- 接続先への操作は、接続の同時実行数の上限の中で行う。枠（ConnectionLease）は接続の行をロックして数えてから取り、全Workerとapi（管理画面の試し実行）を通して数える。空かなければ60秒まで待ち、それでも空かなければエラーとしてモデルに返す。
+- 結果はArtifact（種別「Connectorの結果」）として保存し、Sandboxの `/workspace/input/connectors/{invocation_id}/result.csv` に読取り専用で置く。同じ会話の次の依頼でも読める（authorization.md §6.1）。モデルには、件数・列名・先頭の10行・ファイルの場所だけを返す（design.md §4.9.1）。ファイルを読むTool（`read`・`shell`）のないRunでは、上限の中の結果を表として返す。
+- `@` で明示したConnectorは、Run開始時に使えるかを確かめ（使えなければRunを始めない）、公開している表の名前と説明を最初の `message.user` に入れる（列の型は `datasource_describe` で確かめさせる。Run開始時に接続先へつながない）。`@` を指定したメッセージは、実行中なら次の依頼として受け付ける（一覧をRun開始時に決めるため）。`/` で指定したSkillがConnectorのToolを許さなければ、指定を断る。
+- 機密のフラグの付いたConnectorは、ローカルLLMのモデルを使うRunにだけ一覧に出す。`datasource_query` で使う前に、Runと会話に「個人情報・機密情報を扱う」印を付け（Manifestにも追記する）、以後その会話はローカルLLMのモデルだけになる。モデルの切り替えの候補と、利用者が会話のモデルを変えるときの条件に使う（design.md §4.8）。次の依頼は前の文脈を引き継ぐので、会話ごと機密にする。
 - Skillのスクリプトからの呼出し（design.md §4.9.6）も、同じConnectorの処理とToolInvocationの記録を通す。
 
 ### 10.3 確認待ち（`ask_user`）

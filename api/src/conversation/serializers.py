@@ -8,6 +8,8 @@ from rest_framework import serializers
 
 from artifact.models import Artifact, ArtifactKind
 from artifact.serializers import ArtifactSerializer
+from connector.models import Connector
+from harness.connectors import MAX_EXPLICIT_CONNECTORS
 from harness.skills import MAX_EXPLICIT_SKILLS, unsupported_skills
 from llm.models import ModelProfile
 from llm.serializers import AppModelProfileSerializer
@@ -100,6 +102,15 @@ class ConversationSerializer(serializers.ModelSerializer):
     def update(self, instance: Conversation, validated_data) -> Conversation:
         actor = validated_data.pop("actor", None)
         with transaction.atomic():
+            # 機密のConnectorを使ったRunが、同時に会話を機密にすることがある（harness/tools/datasource.py）。
+            # 会話の行をロックして読み直し、機密になっていればクラウドのモデルへ変えさせない（古い値で上書きもしない）
+            locked = Conversation.objects.select_for_update().get(pk=instance.pk)
+            instance.handles_sensitive_data = locked.handles_sensitive_data
+            profile = validated_data.get("model_profile")
+            if locked.handles_sensitive_data and profile is not None and not profile.current_version.is_local:
+                raise serializers.ValidationError(
+                    {"model_profile": _("個人情報や機密情報を扱う会話では、ローカルLLMのモデルを選んでください")}
+                )
             instance = super().update(instance, validated_data)
             if "model_profile" in validated_data or "effort" in validated_data:
                 self._switch_active_run(instance, actor)
@@ -129,6 +140,13 @@ class InstructionInfoSerializer(serializers.Serializer):
 
 class MessageSkillSerializer(serializers.Serializer):
     """メッセージで指定したSkill（送ったときの名前）"""
+
+    id = serializers.CharField(read_only=True)
+    name = serializers.CharField(read_only=True)
+
+
+class MessageConnectorSerializer(serializers.Serializer):
+    """メッセージで指定したConnector（送ったときの名前）"""
 
     id = serializers.CharField(read_only=True)
     name = serializers.CharField(read_only=True)
@@ -171,6 +189,17 @@ class MessageSerializer(serializers.ModelSerializer):
         help_text=_("入力欄の `/` で指定したSkill。実行中なら次の依頼になる（Skillの版は依頼を始めるときに決める）"),
     )
     skills_info = MessageSkillSerializer(source="skills", many=True, read_only=True)
+    connectors: "serializers.SlugRelatedField[Connector]" = serializers.SlugRelatedField(
+        slug_field="uid",
+        many=True,
+        required=False,
+        queryset=Connector.objects.none(),
+        write_only=True,
+        help_text=_(
+            "入力欄の `@` で指定したConnector。実行中なら次の依頼になる（使える一覧は依頼を始めるときに決める）"
+        ),
+    )
+    connectors_info = MessageConnectorSerializer(source="connectors", many=True, read_only=True)
     edit_skill: "serializers.SlugRelatedField[Skill]" = serializers.SlugRelatedField(
         slug_field="uid",
         required=False,
@@ -207,6 +236,8 @@ class MessageSerializer(serializers.ModelSerializer):
             "attachments_info",
             "skills",
             "skills_info",
+            "connectors",
+            "connectors_info",
             "edit_skill",
             "create_skill",
             "skill_edit",
@@ -239,6 +270,12 @@ class MessageSerializer(serializers.ModelSerializer):
             # 指定できるのは、利用者が使えるSkillだけ（使えるかはRun開始時にもう一度確かめる）
             skill_relation: Any = skills.child_relation
             skill_relation.queryset = Skill.objects.usable_by(request.user)
+        connectors = fields["connectors"]
+        if request is not None and isinstance(connectors, serializers.ManyRelatedField):
+            # 指定できるのは、利用者が使えるConnectorだけ（使えるか、機密ならモデルがローカルLLMかは、Run開始時に
+            # もう一度確かめる）
+            connector_relation: Any = connectors.child_relation
+            connector_relation.queryset = Connector.objects.usable_by(request.user)
         edit_skill: Any = fields["edit_skill"]
         if request is not None:
             # 編集の権限は validate_edit_skill() で確かめる（見えないSkillは、ないものとして断る）
@@ -265,6 +302,14 @@ class MessageSerializer(serializers.ModelSerializer):
         value = list(dict.fromkeys(value))
         if len(value) > MAX_EXPLICIT_SKILLS:
             raise serializers.ValidationError(_("Skillは%(limit)s個まで指定できます") % {"limit": MAX_EXPLICIT_SKILLS})
+        return value
+
+    def validate_connectors(self, value: list[Connector]) -> list[Connector]:
+        value = list(dict.fromkeys(value))
+        if len(value) > MAX_EXPLICIT_CONNECTORS:
+            raise serializers.ValidationError(
+                _("Connectorは%(limit)s個まで指定できます") % {"limit": MAX_EXPLICIT_CONNECTORS}
+            )
         return value
 
     def validate_edit_skill(self, value: Skill | None) -> Skill | None:
@@ -306,6 +351,7 @@ class MessageSerializer(serializers.ModelSerializer):
                 actor=validated_data["sender"],
                 attachments=validated_data.get("attachments", []),
                 skills=validated_data.get("skills", []),
+                connectors=validated_data.get("connectors", []),
                 skill_edit=self._skill_edit(validated_data),
             )
         except CannotStart as exc:

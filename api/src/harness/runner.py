@@ -71,6 +71,7 @@ from stream.notifier import notify_delta
 from usage.models import UsageLedger, UsagePurpose
 
 from . import compaction
+from .connectors import catalog_names as connector_names
 from .context import (
     ADDITIONAL_INSTRUCTION_PREFIX,
     RUNTIME_CONTEXT_TAG,
@@ -88,6 +89,7 @@ from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, SandboxSession
 from .skills import explicit_versions, revoked_skill
 from .tools import ALL_TOOLS, SANDBOX_TOOLS, WORKSPACE_WRITING_TOOLS
 from .tools.base import Effect, Tool, ToolContext, ToolResult
+from .tools.datasource import make_datasource_tools
 from .tools.request_skill_edit import REQUEST_SKILL_EDIT
 from .tools.skill_admin import CREATE_SKILL, SKILL_ADMIN_TOOLS
 from .tools.skill_tool import make_skill_tool
@@ -491,22 +493,25 @@ class Runner:
         if self.skill_tools is not None:
             return self.skill_tools
         explicit = explicit_versions(self.run_obj)
+        # Run開始時に固定した、依頼した人が使えるConnector。なければConnectorのToolは出さない（harness.md §7.5の3）
+        names = connector_names(self.run_obj)
+        datasource = make_datasource_tools(names) if names else ()
         if self.run_obj.kind == RunKind.SKILL_EDIT:
             # Skillの編集のRun：Skill管理のToolを出し、Skillを使う・提案するToolは出さない（harness.md §10.9）。
             # 新しいSkillを作る依頼でだけ create_skill を出す
-            tools = (*ALL_TOOLS, *SKILL_ADMIN_TOOLS, TEST_SKILL_DRAFT)
+            tools = (*ALL_TOOLS, *datasource, *SKILL_ADMIN_TOOLS, TEST_SKILL_DRAFT)
             if not ((self.run_obj.manifest or {}).get("fixed") or {}).get("skill_edit", {}).get("skill"):
                 tools += (CREATE_SKILL,)
         elif explicit:
             allowed = {name for version in explicit for name in version.tools}
-            tools = tuple(t for t in ALL_TOOLS if t.name in allowed)
+            tools = tuple(t for t in (*ALL_TOOLS, *datasource) if t.name in allowed)
             schema = next((v.output_schema for v in explicit if v.output_schema), None)
             if schema:
                 tools += (make_submit_result_tool(schema),)
             # Skillの編集の提案は作業の権限を増やさないので、Skillの指定にかかわらず出す（harness.md §7.5）
             tools += (REQUEST_SKILL_EDIT,)
         else:
-            tools = ALL_TOOLS
+            tools = (*ALL_TOOLS, *datasource)
             catalog = ((self.run_obj.manifest or {}).get("fixed") or {}).get("skill_catalog") or {}
             if names := [e["name"] for e in catalog.get("skills", [])]:
                 tools += (make_skill_tool(names),)

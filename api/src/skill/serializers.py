@@ -11,7 +11,7 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 
-from harness.tools import ALL_TOOLS
+from harness.tools import SKILL_TOOLS
 from harness.tools.base import schema_problem
 from llm.models import ModelProfile
 from resources import formats
@@ -42,7 +42,7 @@ from .models import (
 
 # 資料のkey。Sandboxの中のパス（/workspace/master/skills/<Skill>/<key>/）にも使う
 ASSET_KEY_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
-TOOL_CHOICES = [(t.name, t.name) for t in ALL_TOOLS]
+TOOL_CHOICES = [(t.name, t.name) for t in SKILL_TOOLS]
 MAX_INSTRUCTIONS = 100_000
 
 

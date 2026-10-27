@@ -25,6 +25,8 @@ from .storage import StoredObject, get_storage
 # ファイル名に使わない文字（パスの区切り、制御文字、Windowsで使えない文字）
 UNSAFE_NAME_CHARS = re.compile(r'[\x00-\x1f\x7f/\\:*?"<>|]')
 MAX_NAME_LENGTH = 200
+# Connectorの結果を置く /workspace/input の中のディレクトリ（harness.md §10.2）
+CONNECTOR_RESULTS_DIR = "connectors"
 
 
 def clean_filename(name: str) -> str:
@@ -107,6 +109,8 @@ class BlobLocation(models.Model):
 class ArtifactKind(models.IntegerChoices):
     ATTACHMENT = 1, _("添付")
     OUTPUT = 2, _("成果物")
+    # エージェントがConnectorで読んだ結果（datasource_query のCSV。design.md §4.9.1）。/workspace/input に置く
+    CONNECTOR_RESULT = 3, _("Connectorの結果")
 
 
 class ArtifactQuerySet(models.QuerySet):
@@ -125,6 +129,11 @@ class ArtifactQuerySet(models.QuerySet):
             .exclude(messages__instruction__state__in=pending)
         )
 
+    def connector_results(self, conversation_id: int) -> Self:
+        """会話のRunがConnectorで読んだ結果（/workspace/input/connectors/ に置くもの）。同じ会話の次の依頼でも読める
+        （authorization.md §6.1）"""
+        return self.filter(conversation_id=conversation_id, kind=ArtifactKind.CONNECTOR_RESULT, deleted=False)
+
 
 class Artifact(models.Model):
     """利用者に見せるファイル。中身（blob）は変えず、変わったファイルは新しいArtifactにする"""
@@ -141,7 +150,7 @@ class Artifact(models.Model):
         related_name="artifacts",
         verbose_name=_("会話"),
     )
-    # 成果物を作ったRun。添付では空
+    # 成果物・Connectorの結果を作ったRun。添付では空
     run = models.ForeignKey(
         "run.Run", on_delete=models.CASCADE, null=True, blank=True, related_name="artifacts", verbose_name=_("実行")
     )
@@ -149,7 +158,7 @@ class Artifact(models.Model):
     kind = models.PositiveSmallIntegerField(_("種別"), choices=ArtifactKind.choices)
     name = models.CharField(_("ファイル名"), max_length=255)
     # Sandboxの中の場所。添付は /workspace/input の中の名前（メッセージで送ったときに決める）、
-    # 成果物は /workspace/output からの相対パス
+    # 成果物は /workspace/output からの相対パス、Connectorの結果は /workspace/input からの相対パス
     path = models.CharField(_("パス"), max_length=1000, blank=True)
     content_type = models.CharField(_("形式"), max_length=200)
     expires = models.DateTimeField(_("保持期限"), null=True, blank=True)
@@ -203,6 +212,8 @@ class Artifact(models.Model):
             .exclude(path="")
             .values_list("path", flat=True)
         )
+        # Connectorの結果を置くディレクトリと同じ名前にしない
+        used.add(CONNECTOR_RESULTS_DIR)
         for artifact in artifacts:
             stem, ext = posixpath.splitext(artifact.name)
             path, number = artifact.name, 1
@@ -223,6 +234,23 @@ class Artifact(models.Model):
             run=run,
             blob=blob,
             kind=ArtifactKind.OUTPUT,
+            name=name,
+            path=path,
+            content_type=guess_content_type(name),
+            expires=cls.default_expires(),
+        )
+
+    @classmethod
+    def create_connector_result(cls, run, path: str, name: str, blob: BlobObject) -> "Artifact":
+        """Connectorで読んだ結果を記録する。`path` は /workspace/input からの相対パス（connectors/ の下）で、
+        サーバーが決めた値"""
+        name = clean_filename(name)
+        return cls.objects.create(
+            owner=run.owner,
+            conversation_id=run.conversation_id,
+            run=run,
+            blob=blob,
+            kind=ArtifactKind.CONNECTOR_RESULT,
             name=name,
             path=path,
             content_type=guess_content_type(name),

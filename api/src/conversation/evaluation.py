@@ -20,6 +20,7 @@ from django.utils.translation import gettext as _
 from django_q.tasks import async_task
 
 from artifact.models import Artifact, ArtifactKind
+from harness.connectors import build_catalog as build_connector_catalog
 from harness.skills import evaluation_entry, manifest_entry
 from llm.models import ModelProfileVersion
 from llm.providers import get_adapter
@@ -239,6 +240,9 @@ def _start_run(evaluation: SkillEvaluation, case: SkillEvaluationCase, files: li
                 "handles_sensitive_data": False,
                 "skills": [entry],
                 "skill_catalog": None,
+                # 評価を依頼した人が使えるConnector。Draftの「使ってよいTool」にConnectorの操作があれば使う
+                "connectors": [],
+                "connector_catalog": build_connector_catalog(actor, version) if version.supports_tools else None,
                 "evaluation": {"evaluation": evaluation.uid, "side": side},
             },
             "appended": [],

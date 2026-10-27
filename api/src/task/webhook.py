@@ -71,7 +71,13 @@ def _unquote(double: str | None, single: str | None) -> str:
         except ValueError:
             raise ValueError(_("引用符の中の書き方が正しくありません")) from None
     assert single is not None
-    return re.sub(r"\\(.)", r"\1", single)
+
+    def unescape(match: re.Match[str]) -> str:
+        if match.group(1) not in ("'", "\\"):
+            raise ValueError(_("引用符 ' の中で使えるエスケープは \\' と \\\\ だけです"))
+        return match.group(1)
+
+    return re.sub(r"\\(.)", unescape, single)
 
 
 def extract(data: Any, path: str) -> tuple[bool, Any]:

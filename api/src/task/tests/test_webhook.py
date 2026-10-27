@@ -575,3 +575,9 @@ def test_quoted_path_keys_use_json_escapes():
     assert extract({"data": {"vendor name": "ACME"}}, '$.data["vendor\\u0020name"]') == (True, "ACME")
     with pytest.raises(ValueError):
         parse_path('$["\\x"]')
+
+
+def test_single_quoted_paths_allow_only_quote_and_backslash_escapes():
+    with pytest.raises(ValueError):
+        parse_path("$.data['a\\nb']")
+    assert parse_path("$['a\\\\b']") == ["a\\b"]

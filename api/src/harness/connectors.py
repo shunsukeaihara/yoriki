@@ -75,6 +75,22 @@ def build_catalog(user, *, sensitive: bool, explicit: Sequence[dict[str, Any]] =
     return {"connectors": entries, "omitted": len(usable) - len(entries)}
 
 
+def fixed_catalog(connectors: Sequence[Connector]) -> dict[str, Any] | None:
+    """タスクのRunの一覧：タスクに固定したConnector（使えるかは呼び出し側で確かめたもの）。なければNone。
+    タスクのRunでは、エージェントはこの一覧の外のConnectorを探して使わない（authorization.md §5.4）"""
+    if not connectors:
+        return None
+    entries = [
+        {
+            "connector": c.uid,
+            "name": c.name,
+            "description": _one_line(c.current_version.description, DESCRIPTION_LIMIT) if c.current_version else "",
+        }
+        for c in connectors
+    ]
+    return {"connectors": entries, "omitted": 0}
+
+
 def catalog(run: Run) -> dict[str, Any]:
     return ((run.manifest or {}).get("fixed") or {}).get("connector_catalog") or {}
 

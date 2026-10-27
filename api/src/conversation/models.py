@@ -24,6 +24,8 @@ class ConversationPurpose(models.IntegerChoices):
     CHAT = 1, _("会話")
     # Draftの評価のRunごとに作る会話（design.md §3.7.1）。会話の一覧には出さない
     EVALUATION = 2, _("Skillの評価")
+    # タスクのRunごとに作る会話（design.md §5.1）。会話の一覧には出さない
+    TASK = 3, _("タスク")
 
 
 class ConversationQuerySet(models.QuerySet):

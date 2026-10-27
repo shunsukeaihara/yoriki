@@ -70,7 +70,7 @@ from skill.models import SkillEvaluation
 from stream.notifier import notify_delta
 from usage.models import UsageLedger, UsagePurpose
 
-from . import compaction
+from . import compaction, tasks
 from .connectors import catalog_names as connector_names
 from .context import (
     ADDITIONAL_INSTRUCTION_PREFIX,
@@ -254,9 +254,12 @@ class Runner:
         ClarificationRequest.objects.filter(
             run=self.run_obj, kind__in=TOOL_CLARIFICATIONS, status=ClarificationStatus.OPEN
         ).update(status=ClarificationStatus.CANCELLED)
+        # 続けられなくなったRun（タスクの停止・Skillの失効等）では、読むだけのToolもやり直さない（次の区切りで止める。
+        # authorization.md §6）
+        revoked = self._revoked() is not None
         for call in pending_tool_calls(events):
             tool = tools.get(call["name"])
-            if tool is not None and tool.replay_safe:
+            if tool is not None and tool.replay_safe and not revoked:
                 # 読むだけのToolは、同じ引数で実行し直す
                 self._run_tool(tool, ToolCall(call["id"], call["name"], call["arguments"]))
                 continue
@@ -423,14 +426,23 @@ class Runner:
             return False
         if run.status != RunStatus.RUNNING:
             raise LeaseLost(f"run={run.uid} status={run.status}")
-        if reason := revoked_skill(run) or revoked_edit(run):
-            # 停止・権限の失効は、始めた後のRunでも次の区切りから使わせない（design.md §3.2）。編集の対象が機密に
-            # なったら、読んだ中身を次のモデルの呼出しで送らない（harness.md §10.9）
-            self._fail(RunEndReason.SKILL, reason)
+        if revoked := self._revoked():
+            self._fail(*revoked)
             return False
         self._apply_instructions()
         self._record_finished_jobs()
         return True
+
+    def _revoked(self) -> tuple[RunEndReason, str] | None:
+        """続けられなくなった理由。タスクの停止・削除・部門の無効化（authorization.md §6・§9）と、Skillの停止・権限の
+        失効（design.md §3.2）は、始めた後のRunでも次の区切りから効く。編集の対象が機密になったら、読んだ中身を次の
+        モデルの呼出しで送らない（harness.md §10.9）"""
+        run = self.run_obj
+        if reason := tasks.revoked_task(run):
+            return RunEndReason.TASK, reason
+        if reason := revoked_skill(run) or revoked_edit(run):
+            return RunEndReason.SKILL, reason
+        return None
 
     def _record_finished_jobs(self) -> None:
         """終わったバックグラウンドのジョブを job.finished として記録し、モデルに知らせる（harness.md §8.3）"""
@@ -511,6 +523,13 @@ class Runner:
             tools = (*ALL_TOOLS, *datasource, *SKILL_ADMIN_TOOLS, TEST_SKILL_DRAFT)
             if not ((self.run_obj.manifest or {}).get("fixed") or {}).get("skill_edit", {}).get("skill"):
                 tools += (CREATE_SKILL,)
+        elif tasks.is_task_run(self.run_obj):
+            # タスクのRun：固定したSkillの「使ってよいTool」とタスクのToolの一覧の両方に入っているものだけ。
+            # 業務結果のSchemaはタスクのもの（なければSkillのもの）。`skill` は出さない（authorization.md §5.4）
+            allowed = tasks.allowed_tools(self.run_obj, {name for version in explicit for name in version.tools})
+            tools = tuple(t for t in (*ALL_TOOLS, *datasource) if t.name in allowed)
+            if schema := tasks.output_schema(self.run_obj):
+                tools += (make_submit_result_tool(schema),)
         elif explicit:
             allowed = {name for version in explicit for name in version.tools}
             tools = tuple(t for t in (*ALL_TOOLS, *datasource) if t.name in allowed)
@@ -890,6 +909,11 @@ class Runner:
         if run.status == RunStatus.CANCELLING:
             self._close_calls(remaining, "Not executed: the user cancelled the work.")
             self._finish_cancelled()
+            return False
+        if revoked := self._revoked():
+            # 1つの応答の残りの呼出しも、続けられなくなったら実行しない
+            self._close_calls(remaining, "Not executed: this work can no longer continue.")
+            self._fail(*revoked)
             return False
         pending = UserInstruction.objects.filter(
             run=run, kind=InstructionKind.CURRENT, state=InstructionState.RECEIVED

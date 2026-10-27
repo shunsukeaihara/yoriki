@@ -11,6 +11,7 @@ from django.http import HttpRequest, HttpResponse, HttpResponseBase, StreamingHt
 
 from run.models import RunEvent
 from run.views import my_runs
+from user.models import User
 
 from .notifier import get_listener, run_channel, user_channel
 from .serializers import serialize_event
@@ -35,12 +36,13 @@ async def run_stream(request: HttpRequest, run: str) -> HttpResponseBase:
     user = await request.auser()
     if not user.is_authenticated:
         return HttpResponse(status=401)
-    target = await my_runs(user).filter(uid=run).values("pk", "uid").afirst()
+    # 見られるRunの条件はpermission・所属を読むので（同期のDBの処理）、threadで組み立てて読む
+    target = await sync_to_async(lambda: my_runs(user).filter(uid=run).values("pk", "uid").first())()
     if target is None:
         return HttpResponse(status=404)
     after = _last_event_id(request)
     return StreamingHttpResponse(
-        _run_events(target["pk"], target["uid"], after), content_type="text/event-stream", headers=_headers()
+        _run_events(target["pk"], target["uid"], after, user.pk), content_type="text/event-stream", headers=_headers()
     )
 
 
@@ -61,6 +63,18 @@ def _last_event_id(request: HttpRequest) -> int:
 PAGE_SIZE = 500
 
 
+# 接続の間も、Runを見られるかを確かめ直す間隔（秒）。タスクの管理の権限・所属を外された人に、開いたままの接続から
+# ログを送り続けない（authorization.md §7.1）
+RECHECK_SECONDS = KEEPALIVE_SECONDS
+
+
+@sync_to_async
+def _still_visible(user_pk: int, run_pk: int) -> bool:
+    """利用者をDBから読み直して確かめる（permission・所属の判定はユーザーのオブジェクトにキャッシュされるため）"""
+    user = User.objects.filter(pk=user_pk).first()
+    return user is not None and my_runs(user).filter(pk=run_pk).exists()
+
+
 @sync_to_async
 def _events_after(run_pk: int, run_uid: str, after: int) -> list[tuple[int, str, dict[str, Any]]]:
     events = RunEvent.objects.filter(run_id=run_pk, sequence__gt=after).order_by("sequence")[:PAGE_SIZE]
@@ -71,7 +85,8 @@ def _typed(data: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     return data["type"], data
 
 
-async def _run_events(run_pk: int, run_uid: str, after: int) -> AsyncIterator[str]:
+async def _run_events(run_pk: int, run_uid: str, after: int, user_pk: int) -> AsyncIterator[str]:
+    loop = asyncio.get_running_loop()
     listener = get_listener()
     channel = run_channel(run_uid)
     # 先に購読してから、DBの記録を読む。読んだ後に保存されたイベントは通知で必ず届く
@@ -79,9 +94,15 @@ async def _run_events(run_pk: int, run_uid: str, after: int) -> AsyncIterator[st
     try:
         yield f"retry: {RETRY_MILLISECONDS}\n\n"
         last = after
+        checked = loop.time()
         while True:
-            # 読み切るまで続けて読む（再接続で多くのイベントが溜まっていても止まらない）
-            while page := await _events_after(run_pk, run_uid, last):
+            # 読み切るまで続けて読む（再接続で多くのイベントが溜まっていても止まらない）。ページごとに、見られるかを
+            # 確かめ直す
+            while True:
+                if not await _still_visible(user_pk, run_pk):
+                    return
+                checked = loop.time()
+                page = await _events_after(run_pk, run_uid, last)
                 for sequence, kind, data in page:
                     yield _format(kind, data, sequence)
                     last = sequence
@@ -96,6 +117,10 @@ async def _run_events(run_pk: int, run_uid: str, after: int) -> AsyncIterator[st
                     yield ": keepalive\n\n"
                     break
                 if payload.get("type") == "run.delta":
+                    if loop.time() - checked >= RECHECK_SECONDS:
+                        if not await _still_visible(user_pk, run_pk):
+                            return
+                        checked = loop.time()
                     yield _format("run.delta", payload)
                     continue
                 if payload.get("rescan") or payload.get("sequence", 0) > last:

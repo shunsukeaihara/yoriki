@@ -12,7 +12,7 @@ from typing import Any
 
 from django.conf import settings
 from django.db import models, transaction
-from django.db.models import Max
+from django.db.models import Max, Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -62,6 +62,12 @@ class RunTrigger(models.IntegerChoices):
     EVALUATION = 3, _("Skillの評価")
 
 
+class RunLaunch(models.IntegerChoices):
+    """タスクのRunの起動のしかた（authorization.md §6）。会話・評価のRunでは空"""
+
+    MANUAL = 1, _("タスクの画面からの手動実行")
+
+
 class RunKind(models.IntegerChoices):
     """Runの種類（harness.md §7.5の1）。Skill管理のToolは、Skillの編集のRunにだけ出す（design.md §3.6）"""
 
@@ -85,7 +91,24 @@ class RunEndReason(models.IntegerChoices):
     EXPIRED = 17, _("回答期限切れ")
     SANDBOX = 18, _("実行環境を使えない")
     SKILL = 19, _("Skillを使えない")
+    TASK = 20, _("タスクを続けられない")
     INTERNAL = 99, _("内部のエラー")
+
+
+class RunQuerySet(models.QuerySet):
+    def visible_to(self, user) -> "RunQuerySet":
+        """結果とログ（イベント・確認・実行中の進み具合）を見られるRun（authorization.md §7.1）。会話・評価のRunは
+        依頼した人。タスクのRunは、実行したときのタスクの範囲と部門を管理できる人（個人のタスクは本人）で、タスクの
+        今の範囲では判定しない"""
+        if not user.is_active:
+            return self.none()
+        from task.models import manageable_condition  # noqa: PLC0415  taskのModelがrunを参照するため
+
+        own = Q(owner=user, conversation__owner=user, conversation__deleted=False) & ~Q(trigger=RunTrigger.TASK)
+        task = Q(trigger=RunTrigger.TASK) & manageable_condition(
+            user, scope_field="task_scope", owner_field="owner", department_field="task_department"
+        )
+        return self.filter(own | task)
 
 
 class Run(models.Model):
@@ -127,15 +150,49 @@ class Run(models.Model):
     end_reason = models.PositiveSmallIntegerField(_("終わり方"), choices=RunEndReason.choices, null=True, blank=True)
     error = models.TextField(_("失敗の理由"), blank=True)
     step_count = models.PositiveIntegerField(_("ステップ数"), default=0)
+    # タスクのRun：受付時のタスクの版と起動のしかた、実行したときのタスクの範囲と部門（結果・ログを見られる人の
+    # 判定に使う。authorization.md §7.1）
+    task = models.ForeignKey(
+        "task.TaskDefinition",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="runs",
+        verbose_name=_("タスク"),
+    )
+    task_revision = models.ForeignKey(
+        "task.TaskDefinitionRevision",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("タスクの版"),
+    )
+    launch = models.PositiveSmallIntegerField(_("起動のしかた"), choices=RunLaunch.choices, null=True, blank=True)
+    task_scope = models.PositiveSmallIntegerField(_("実行したときのタスクの範囲"), null=True, blank=True)
+    task_department = models.ForeignKey(
+        "user.Department",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("実行したときのタスクの部門"),
+    )
 
     created = models.DateTimeField(auto_now_add=True, db_index=True)
     updated = models.DateTimeField(auto_now=True)
     finished = models.DateTimeField(_("終了日時"), null=True, blank=True)
 
+    objects = RunQuerySet.as_manager()
+
     class Meta:
         verbose_name = _("実行")
         verbose_name_plural = verbose_name
-        indexes = [models.Index(fields=["status", "-created"]), models.Index(fields=["conversation", "-created"])]
+        indexes = [
+            models.Index(fields=["status", "-created"]),
+            models.Index(fields=["conversation", "-created"]),
+            models.Index(fields=["task", "-created"]),
+        ]
 
     def __str__(self):
         return self.uid

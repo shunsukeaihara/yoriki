@@ -678,6 +678,120 @@ paths:
               schema:
                 $ref: '#/components/schemas/PaginatedRunList'
           description: ''
+  /api/app/v1/runs/{run}/artifacts/:
+    get:
+      operationId: app_v1_runs_artifacts_list
+      description: Runの添付と成果物（Runの結果とログを見られる人。authorization.md §7.1）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - in: query
+        name: kind
+        schema:
+          type: integer
+          title: 種別
+          enum:
+          - 1
+          - 2
+          - 3
+        description: |-
+          * `1` - 添付
+          * `2` - 成果物
+          * `3` - Connectorの結果
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: path
+        name: run
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - app/run/artifact
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedArtifactList'
+          description: ''
+  /api/app/v1/runs/{run}/artifacts/{uid}/:
+    get:
+      operationId: app_v1_runs_artifacts_retrieve
+      description: Runの添付と成果物（Runの結果とログを見られる人。authorization.md §7.1）
+      parameters:
+      - in: path
+        name: run
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/run/artifact
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Artifact'
+          description: ''
+  /api/app/v1/runs/{run}/artifacts/{uid}/download/:
+    get:
+      operationId: app_v1_runs_artifacts_download_retrieve
+      description: ファイルを取得する（ダウンロードとして返す）
+      parameters:
+      - in: path
+        name: run
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/run/artifact
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+          description: ファイル
   /api/app/v1/runs/{run}/clarifications/:
     get:
       operationId: app_v1_runs_clarifications_list
@@ -2218,6 +2332,425 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Skill'
+          description: ''
+  /api/app/v1/tasks/:
+    get:
+      operationId: app_v1_tasks_list
+      description: タスクの一覧・作成・変更・停止・手動実行
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - in: query
+        name: department
+        schema:
+          type: string
+        description: 部門
+      - in: query
+        name: name
+        schema:
+          type: string
+        description: 名前
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: scope
+        schema:
+          type: integer
+          title: 範囲
+          enum:
+          - 1
+          - 2
+          - 3
+          - 4
+        description: |-
+          範囲
+
+          * `1` - 個人
+          * `2` - 部門
+          * `3` - 全社
+          * `4` - システム
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: suspended
+        schema:
+          type: boolean
+      tags:
+      - app/task
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTaskDefinitionList'
+          description: ''
+    post:
+      operationId: app_v1_tasks_create
+      description: タスクの一覧・作成・変更・停止・手動実行
+      tags:
+      - app/task
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskDefinitionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TaskDefinitionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TaskDefinitionRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDefinition'
+          description: ''
+  /api/app/v1/tasks/{task}/revisions/:
+    get:
+      operationId: app_v1_tasks_revisions_list
+      description: タスクの版の履歴
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/task/revision
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTaskDefinitionRevisionList'
+          description: ''
+  /api/app/v1/tasks/{task}/revisions/{number}/:
+    get:
+      operationId: app_v1_tasks_revisions_retrieve
+      description: タスクの版の履歴
+      parameters:
+      - in: path
+        name: number
+        schema:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          title: 版
+        required: true
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/task/revision
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDefinitionRevision'
+          description: ''
+  /api/app/v1/tasks/{task}/runs/:
+    get:
+      operationId: app_v1_tasks_runs_list
+      description: タスクのRunの履歴（結果とログを見られるもの。authorization.md §7.1）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: integer
+          title: 状態
+          enum:
+          - 1
+          - 10
+          - 2
+          - 20
+          - 3
+          - 30
+          - 4
+          - 5
+        description: |-
+          * `1` - 順番待ち
+          * `2` - 作業中
+          * `3` - 確認待ち
+          * `4` - 再試行待ち
+          * `5` - 停止中
+          * `10` - 完了
+          * `20` - 失敗
+          * `30` - 停止済み
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/task/run
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedRunList'
+          description: ''
+  /api/app/v1/tasks/{uid}/:
+    get:
+      operationId: app_v1_tasks_retrieve
+      description: タスクの一覧・作成・変更・停止・手動実行
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/task
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDefinition'
+          description: ''
+    put:
+      operationId: app_v1_tasks_update
+      description: タスクの一覧・作成・変更・停止・手動実行
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/task
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskDefinitionUpdateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TaskDefinitionUpdateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TaskDefinitionUpdateRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDefinition'
+          description: ''
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、他の人が版を作った）
+    patch:
+      operationId: app_v1_tasks_partial_update
+      description: タスクの一覧・作成・変更・停止・手動実行
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/task
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTaskDefinitionUpdateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTaskDefinitionUpdateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTaskDefinitionUpdateRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDefinition'
+          description: ''
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、他の人が版を作った）
+    delete:
+      operationId: app_v1_tasks_destroy
+      description: タスクを削除する。順番待ち・実行中のRunも次の区切りで止まる
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/task
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/app/v1/tasks/{uid}/resume/:
+    post:
+      operationId: app_v1_tasks_resume_create
+      description: 停止を解く
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/task
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDefinition'
+          description: ''
+  /api/app/v1/tasks/{uid}/run/:
+    post:
+      operationId: app_v1_tasks_run_create
+      description: タスクの今の版で、手動で実行する（タスクを管理できる人。authorization.md §6）。入力はタスクの定義で決めた項目だけを受け付け、自由な依頼文は受けない
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/task
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskRunCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TaskRunCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TaskRunCreateRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Run'
+          description: ''
+  /api/app/v1/tasks/{uid}/suspend/:
+    post:
+      operationId: app_v1_tasks_suspend_create
+      description: 停止する。新しいRunを受け付けず、順番待ち・実行中のRunも次の区切りで止める
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/task
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDefinition'
           description: ''
   /api/files/{token}/:
     get:
@@ -8143,6 +8676,44 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Skill'
+    PaginatedTaskDefinitionList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskDefinition'
+    PaginatedTaskDefinitionRevisionList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskDefinitionRevision'
     PatchedConnectorUpdateRequest:
       type: object
       description: Connectorの更新。使うDB接続と範囲・部門は変えられないので、読み取り専用にする
@@ -8621,6 +9192,64 @@ components:
           minLength: 1
           title: 名前
           maxLength: 100
+    PatchedTaskDefinitionUpdateRequest:
+      type: object
+      description: タスクの更新。範囲と部門は変えられないので、読み取り専用にする
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        version:
+          type: integer
+          minimum: 0
+          description: 今の版。更新では、編集を始めた時点の値を送る（作成では送らない）
+        description:
+          type: string
+          maxLength: 2000
+        prompt_template:
+          type: string
+          minLength: 1
+          maxLength: 20000
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskSkillRequest'
+        connectors:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 30
+          description: 使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う
+          maxItems: 10
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolsEnum'
+          description: 使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う
+          maxItems: 50
+        model_profile:
+          type: string
+          minLength: 1
+        effort:
+          type: string
+          description: 空ならモデルの既定
+          maxLength: 50
+        handles_sensitive_data:
+          type: boolean
+          description: 個人情報・機密情報を扱うタスク。機密のSkill・Connectorを使え、ローカルLLMのモデルだけを使う
+        inputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskInputRequest'
+        output_schema:
+          nullable: true
+          description: 業務結果のSchema。なければSkillのもの
+        change_reason:
+          type: string
+          writeOnly: true
+          maxLength: 500
     Ping:
       type: object
       properties:
@@ -8846,6 +9475,7 @@ components:
       - 17
       - 18
       - 19
+      - 20
       - 99
       type: integer
       description: |-
@@ -8861,6 +9491,7 @@ components:
         * `17` - 回答期限切れ
         * `18` - 実行環境を使えない
         * `19` - Skillを使えない
+        * `20` - タスクを続けられない
         * `99` - 内部のエラー
     RunEventKindEnum:
       enum:
@@ -10631,6 +11262,496 @@ components:
       - layout_before
       - slide
       - texts
+    TaskDefinition:
+      type: object
+      description: |-
+        タスクの作成と表示（定義を管理できる人だけが見る。authorization.md §5.3）。中身は今の版の値を平らに出す。
+
+        中身を変えて保存すると、サーバーが新しい版を作る。更新では、編集を始めた時点の `version` を送り、その間に他の人が
+        版を作っていたら409になる。範囲と部門は作成時に決め、更新では変えない
+      properties:
+        id:
+          type: string
+          readOnly: true
+        scope:
+          allOf:
+          - $ref: '#/components/schemas/SkillScopeEnum'
+          description: |-
+            範囲。作成した後は変えられない
+
+            * `1` - 個人
+            * `2` - 部門
+            * `3` - 全社
+            * `4` - システム
+        scope_display:
+          type: string
+          readOnly: true
+        department:
+          type: string
+          nullable: true
+          description: 部門の範囲では必須。作成した後は変えられない
+        department_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumDepartment'
+          readOnly: true
+          nullable: true
+        owner:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+          nullable: true
+        name:
+          type: string
+          maxLength: 100
+        suspended:
+          type: boolean
+          readOnly: true
+          title: 停止中
+        version:
+          type: integer
+          minimum: 0
+          description: 今の版。更新では、編集を始めた時点の値を送る（作成では送らない）
+        description:
+          type: string
+          default: ''
+          maxLength: 2000
+        prompt_template:
+          type: string
+          description: Runの最初の依頼文。{{ inputs.名前 }} に入力の値を文字として埋め込む
+          maxLength: 20000
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskSkill'
+        connectors:
+          type: array
+          items:
+            type: string
+            maxLength: 30
+          description: 使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う
+          maxItems: 10
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolsEnum'
+          description: 使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う
+          maxItems: 50
+        model_profile:
+          type: string
+        effort:
+          type: string
+          default: ''
+          description: 空ならモデルの既定
+          maxLength: 50
+        handles_sensitive_data:
+          type: boolean
+          default: false
+          description: 個人情報・機密情報を扱うタスク。機密のSkill・Connectorを使え、ローカルLLMのモデルだけを使う
+        inputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskInput'
+        output_schema:
+          nullable: true
+          description: 業務結果のSchema。なければSkillのもの
+        model_profile_info:
+          allOf:
+          - $ref: '#/components/schemas/AppModelProfile'
+          readOnly: true
+        can_run:
+          type: boolean
+          readOnly: true
+          description: 今、手動で実行できるか（停止中でなく、版がある）
+        created_by:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - can_run
+      - created
+      - created_by
+      - department_info
+      - id
+      - model_profile
+      - model_profile_info
+      - name
+      - owner
+      - prompt_template
+      - scope
+      - scope_display
+      - suspended
+      - updated
+    TaskDefinitionRequest:
+      type: object
+      description: |-
+        タスクの作成と表示（定義を管理できる人だけが見る。authorization.md §5.3）。中身は今の版の値を平らに出す。
+
+        中身を変えて保存すると、サーバーが新しい版を作る。更新では、編集を始めた時点の `version` を送り、その間に他の人が
+        版を作っていたら409になる。範囲と部門は作成時に決め、更新では変えない
+      properties:
+        scope:
+          allOf:
+          - $ref: '#/components/schemas/SkillScopeEnum'
+          description: |-
+            範囲。作成した後は変えられない
+
+            * `1` - 個人
+            * `2` - 部門
+            * `3` - 全社
+            * `4` - システム
+        department:
+          type: string
+          minLength: 1
+          nullable: true
+          description: 部門の範囲では必須。作成した後は変えられない
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        version:
+          type: integer
+          minimum: 0
+          description: 今の版。更新では、編集を始めた時点の値を送る（作成では送らない）
+        description:
+          type: string
+          default: ''
+          maxLength: 2000
+        prompt_template:
+          type: string
+          minLength: 1
+          description: Runの最初の依頼文。{{ inputs.名前 }} に入力の値を文字として埋め込む
+          maxLength: 20000
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskSkillRequest'
+        connectors:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 30
+          description: 使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う
+          maxItems: 10
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolsEnum'
+          description: 使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う
+          maxItems: 50
+        model_profile:
+          type: string
+          minLength: 1
+        effort:
+          type: string
+          default: ''
+          description: 空ならモデルの既定
+          maxLength: 50
+        handles_sensitive_data:
+          type: boolean
+          default: false
+          description: 個人情報・機密情報を扱うタスク。機密のSkill・Connectorを使え、ローカルLLMのモデルだけを使う
+        inputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskInputRequest'
+        output_schema:
+          nullable: true
+          description: 業務結果のSchema。なければSkillのもの
+        change_reason:
+          type: string
+          writeOnly: true
+          maxLength: 500
+      required:
+      - model_profile
+      - name
+      - prompt_template
+      - scope
+    TaskDefinitionRevision:
+      type: object
+      description: 版の表示（履歴）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        number:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          readOnly: true
+          title: 版
+        description:
+          type: string
+          readOnly: true
+          title: 説明
+        prompt_template:
+          type: string
+          readOnly: true
+          title: プロンプトのテンプレート
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskSkill'
+          readOnly: true
+        connectors:
+          type: array
+          items:
+            type: string
+            maxLength: 30
+          readOnly: true
+          title: 使うConnector
+        tools:
+          type: array
+          items:
+            type: string
+            maxLength: 50
+          readOnly: true
+          title: 使ってよいTool
+        model_profile:
+          type: string
+          readOnly: true
+        effort:
+          type: string
+          readOnly: true
+          maxLength: 50
+        handles_sensitive_data:
+          type: boolean
+          readOnly: true
+          title: 個人情報・機密情報を扱う
+        inputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskInput'
+          readOnly: true
+        output_schema:
+          readOnly: true
+          nullable: true
+          title: 業務結果のSchema
+        change_reason:
+          type: string
+          readOnly: true
+          title: 変更理由
+          maxLength: 500
+        created_by:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - change_reason
+      - connectors
+      - created
+      - created_by
+      - description
+      - effort
+      - handles_sensitive_data
+      - id
+      - inputs
+      - model_profile
+      - number
+      - output_schema
+      - prompt_template
+      - skills
+      - tools
+    TaskDefinitionUpdateRequest:
+      type: object
+      description: タスクの更新。範囲と部門は変えられないので、読み取り専用にする
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        version:
+          type: integer
+          minimum: 0
+          description: 今の版。更新では、編集を始めた時点の値を送る（作成では送らない）
+        description:
+          type: string
+          maxLength: 2000
+        prompt_template:
+          type: string
+          minLength: 1
+          maxLength: 20000
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskSkillRequest'
+        connectors:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 30
+          description: 使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う
+          maxItems: 10
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolsEnum'
+          description: 使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う
+          maxItems: 50
+        model_profile:
+          type: string
+          minLength: 1
+        effort:
+          type: string
+          description: 空ならモデルの既定
+          maxLength: 50
+        handles_sensitive_data:
+          type: boolean
+          description: 個人情報・機密情報を扱うタスク。機密のSkill・Connectorを使え、ローカルLLMのモデルだけを使う
+        inputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskInputRequest'
+        output_schema:
+          nullable: true
+          description: 業務結果のSchema。なければSkillのもの
+        change_reason:
+          type: string
+          writeOnly: true
+          maxLength: 500
+    TaskInput:
+      type: object
+      properties:
+        name:
+          type: string
+          description: 項目の名前（英小文字・数字・_）。テンプレートでは {{ inputs.名前 }}
+          pattern: ^[a-z][a-z0-9_]{0,49}$
+        label:
+          type: string
+          description: 画面に出す名前
+          maxLength: 100
+        type:
+          $ref: '#/components/schemas/TaskInputTypeEnum'
+        required:
+          type: boolean
+          default: false
+        description:
+          type: string
+          default: ''
+          maxLength: 500
+        choices:
+          type: array
+          items:
+            type: string
+            maxLength: 200
+          description: 型が選択肢のときの選べる値
+          maxItems: 100
+        max_length:
+          type: integer
+          maximum: 10000
+          minimum: 1
+          nullable: true
+          description: 文字の長さの上限
+      required:
+      - label
+      - name
+      - type
+    TaskInputRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: 項目の名前（英小文字・数字・_）。テンプレートでは {{ inputs.名前 }}
+          pattern: ^[a-z][a-z0-9_]{0,49}$
+        label:
+          type: string
+          minLength: 1
+          description: 画面に出す名前
+          maxLength: 100
+        type:
+          $ref: '#/components/schemas/TaskInputTypeEnum'
+        required:
+          type: boolean
+          default: false
+        description:
+          type: string
+          default: ''
+          maxLength: 500
+        choices:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 200
+          description: 型が選択肢のときの選べる値
+          maxItems: 100
+        max_length:
+          type: integer
+          maximum: 10000
+          minimum: 1
+          nullable: true
+          description: 文字の長さの上限
+      required:
+      - label
+      - name
+      - type
+    TaskInputTypeEnum:
+      enum:
+      - string
+      - number
+      - integer
+      - boolean
+      - date
+      - choice
+      type: string
+      description: |-
+        * `string` - 文字
+        * `number` - 数値
+        * `integer` - 整数
+        * `boolean` - 真偽
+        * `date` - 日付
+        * `choice` - 選択肢
+    TaskRunCreateRequest:
+      type: object
+      properties:
+        inputs:
+          type: object
+          additionalProperties:
+            nullable: true
+          description: 入力の項目の名前と値。タスクの定義で決めた項目だけを受け付ける
+    TaskSkill:
+      type: object
+      properties:
+        skill:
+          type: string
+          description: SkillのID
+          maxLength: 30
+        version:
+          type: integer
+          minimum: 1
+          description: 固定する版の番号。Skillが新しい版を公開しても変わらない
+      required:
+      - skill
+      - version
+    TaskSkillRequest:
+      type: object
+      properties:
+        skill:
+          type: string
+          minLength: 1
+          description: SkillのID
+          maxLength: 30
+        version:
+          type: integer
+          minimum: 1
+          description: 固定する版の番号。Skillが新しい版を公開しても変わらない
+      required:
+      - skill
+      - version
     TextDiff:
       type: object
       properties:

@@ -66,6 +66,7 @@ INSTALLED_APPS = [
     "resources",
     "skill",
     "connector",
+    "task",
 ]
 
 MIDDLEWARE = [

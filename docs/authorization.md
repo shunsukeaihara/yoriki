@@ -198,7 +198,7 @@ Runを受け付けるときに、**実行許可**を組み立ててRunに固定�
 | 会話 | （タスクではない） | 依頼した人 | 依頼した人が使えるSkill・Connector、利用者に許されたTool。出口は依頼した人への応答 |
 | チャットからのタスクの起動 | 個人・部門・全社 | 起動した人 | タスクに固定したもの。起動した人がそのSkill・Connectorのすべてを使えなければ起動前に断る（出口は起動した人とは照らし合わせず、タスクの範囲に許されたもので判定する）。操作のたびに「タスクの版の一覧 ∩ 起動した人の今の権限」で判定する（権限を失えばその操作は断る。権限が増えても、タスクの版の一覧の外は使えない） |
 | 入口（スケジュール・Webhook） | 個人（スケジュールだけ）・部門・全社・システム | タスクの範囲（個人タスクは本人） | タスクに固定したもの |
-| タスクの画面からの手動実行（部門・全社は業務画面の `/tasks`、システムは管理画面） | 部門・全社・システム | タスクの範囲 | タスクに固定したもの。実行できるのはタスクを管理できる人 |
+| タスクの画面からの手動実行（個人・部門・全社は業務画面の `/tasks`、システムは管理画面） | 個人・部門・全社・システム | タスクの範囲（個人タスクは本人） | タスクに固定したもの。実行できるのはタスクを管理できる人（個人タスクは本人） |
 
 - 「人が自由に指示を出せる起動（会話・チャット）は、その人の権限を超えない。人が指示を出せない起動（入口・手動実行）は、タスクに固定したものの範囲で動く」と整理する。
 - 個人タスクはどの起動でも本人の権限で動く。入口からの起動で個人Connectorの本人のtoken（refresh token）を使うのは、本人がそのタスクの無人実行を明示的に有効にしたときだけ。tokenの失効、本人の無効化で止まり、再認可の手段を用意する。
@@ -350,19 +350,19 @@ Runの中身が外へ出る経路をすべて列挙し、どれにも「結果�
 
 ## 11 初期のGroup
 
-最初に一度だけ作る。後から名前・中身を変えても、消しても、作り直さない。
+最初に一度だけ作る。後から名前・中身を変えても、消しても、作り直さない。後の段階で足すpermission（タスク等）は、その段階のマイグレーションで一度だけ、新しいGroupを作るか既にあるGroupに足す（消したGroupは作り直さない）。
 
 | Group | permission |
 |---|---|
 | 部門のSkill編集者 | `skill.can_edit_department_skills` |
 | 部門のSkill公開者 | `skill.can_edit_department_skills`、`skill.can_publish_department_skills` |
 | 全社のSkill公開者 | `skill.can_edit_company_skills`、`skill.can_publish_company_skills` |
-| 部門のタスク管理者 | `task.can_manage_department_tasks`（タスクの段階で作る） |
-| 全社のタスク管理者 | `task.can_manage_company_tasks`（タスクの段階で作る） |
+| 部門のタスク管理者 | `task.can_manage_department_tasks` |
+| 全社のタスク管理者 | `task.can_manage_company_tasks` |
 | 全件利用者 | `user.can_use_all_departments` |
 | 全件管理者 | `user.can_manage_all_departments`と、部門・全社のSkill・タスクのpermission |
 | Connector管理者 | `connector.*_connector`、`connector.*_<接続のModel>` |
-| システム管理者 | `skill.can_edit_system_skills`、`skill.can_publish_system_skills`、`task.can_manage_system_tasks`（タスクの段階で作る）、`connector.view_connector`（システムタスクに登録するConnectorの定義を見るため） |
+| システム管理者 | `skill.can_edit_system_skills`、`skill.can_publish_system_skills`、`task.can_manage_system_tasks`、`connector.view_connector`（システムタスクに登録するConnectorの定義を見るため） |
 | 連携の管理者 | 入口・出口のModelのpermission（タスク・配信の段階で作る） |
 | ユーザー管理者 | `user.*_user`、`user.*_department` |
 

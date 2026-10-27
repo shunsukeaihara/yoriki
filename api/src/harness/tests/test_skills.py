@@ -17,7 +17,7 @@ from run.models import Run, RunEndReason, RunEvent, RunEventKind, RunStatus
 from run.tasks import claim_run
 from skill.factories import SkillFactory, SkillVersionFactory
 from skill.models import SkillAssetBinding, SkillAssetRole, SkillRequirement, SkillScope
-from user.factories import UserFactory
+from user.factories import DepartmentFactory, DepartmentMembershipFactory, UserFactory
 
 from .fakes import FakeAdapter, calls, reply
 
@@ -320,6 +320,27 @@ def test_run_stops_when_a_skill_in_use_is_suspended(conversation, app_user):
     assert run.status == RunStatus.FAILED
     assert run.end_reason == RunEndReason.SKILL
     assert "停止中" in run.error
+
+
+@pytest.mark.django_db
+def test_run_stops_when_the_user_leaves_the_department_of_the_skill(conversation, app_user):
+    department = DepartmentFactory.create()
+    membership = DepartmentMembershipFactory.create(department=department, user=app_user)
+    skill = SkillFactory.create(scope=SkillScope.DEPARTMENT, department=department, created_by=app_user)
+    SkillVersionFactory.create(skill=skill, tools=["todo_write"])
+    run = start(conversation, skills=[skill])
+
+    class RemoveMembership(FakeAdapter):
+        def stream(self, request):
+            # 1回目の応答の間に所属が外された。次の区切りで、読み直した利用者で確かめる
+            membership.delete()
+            yield from super().stream(request)
+
+    adapter = RemoveMembership([calls(("c1", "todo_write", {"todos": []})), reply("ok")])
+    run = execute(run, adapter)
+    assert run.status == RunStatus.FAILED
+    assert run.end_reason == RunEndReason.SKILL
+    assert len(adapter.requests) == 1
 
 
 @pytest.mark.django_db

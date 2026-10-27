@@ -126,6 +126,46 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/app/v1/connectors/:
+    get:
+      operationId: app_v1_connectors_list
+      description: 会話で使えるConnector（入力欄の `@` の候補）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - app/connector
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAppConnectorList'
+          description: ''
   /api/app/v1/conversations/:
     get:
       operationId: app_v1_conversations_list
@@ -216,9 +256,11 @@ paths:
           enum:
           - 1
           - 2
+          - 3
         description: |-
           * `1` - 添付
           * `2` - 成果物
+          * `3` - Connectorの結果
       - name: ordering
         required: false
         in: query
@@ -4390,6 +4432,51 @@ paths:
           description: 自分のRunではない
 components:
   schemas:
+    AppConnector:
+      type: object
+      description: |-
+        利用者が会話で使えるConnector（入力欄の `@` の候補）。名前・説明・範囲・機密のフラグだけを返し、接続先や
+        公開する表は返さない（authorization.md §7.2「候補のAPIと設定のAPIを分ける」）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+          title: 名前
+        kind_display:
+          type: string
+          readOnly: true
+        description:
+          type: string
+          readOnly: true
+        is_sensitive:
+          type: boolean
+          readOnly: true
+          description: 機密。ローカルLLMのモデルの会話でだけ使える
+        scope:
+          allOf:
+          - $ref: '#/components/schemas/ConnectorScopeEnum'
+          readOnly: true
+          title: 範囲
+        scope_display:
+          type: string
+          readOnly: true
+        department_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumDepartment'
+          readOnly: true
+          nullable: true
+      required:
+      - department_info
+      - description
+      - id
+      - is_sensitive
+      - kind_display
+      - name
+      - scope
+      - scope_display
     AppModelProfile:
       type: object
       description: 社員が会話で選ぶためのモデル設定。接続先や単価は出さない
@@ -4488,10 +4575,12 @@ components:
       enum:
       - 1
       - 2
+      - 3
       type: integer
       description: |-
         * `1` - 添付
         * `2` - 成果物
+        * `3` - Connectorの結果
     ArtifactRequest:
       type: object
       description: |-
@@ -6604,6 +6693,11 @@ components:
           items:
             $ref: '#/components/schemas/MessageSkill'
           readOnly: true
+        connectors_info:
+          type: array
+          items:
+            $ref: '#/components/schemas/MessageConnector'
+          readOnly: true
         skill_edit:
           allOf:
           - $ref: '#/components/schemas/MessageSkillEdit'
@@ -6620,6 +6714,7 @@ components:
           readOnly: true
       required:
       - attachments_info
+      - connectors_info
       - created
       - id
       - instruction
@@ -6628,6 +6723,19 @@ components:
       - sender
       - skill_edit
       - skills_info
+    MessageConnector:
+      type: object
+      description: メッセージで指定したConnector（送ったときの名前）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+      required:
+      - id
+      - name
     MessageRequest:
       type: object
       description: 会話のメッセージ。投稿すると、新しい依頼・今の作業への追加指示・確認への回答・次の依頼のどれかになる
@@ -6650,6 +6758,14 @@ components:
             writeOnly: true
           writeOnly: true
           description: 入力欄の `/` で指定したSkill。実行中なら次の依頼になる（Skillの版は依頼を始めるときに決める）
+        connectors:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            writeOnly: true
+          writeOnly: true
+          description: 入力欄の `@` で指定したConnector。実行中なら次の依頼になる（使える一覧は依頼を始めるときに決める）
         edit_skill:
           type: string
           minLength: 1
@@ -7377,6 +7493,25 @@ components:
     NullEnum:
       enum:
       - null
+    PaginatedAppConnectorList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/AppConnector'
     PaginatedArtifactList:
       type: object
       required:
@@ -10344,6 +10479,8 @@ components:
       - job_kill
       - ask_user
       - todo_write
+      - datasource_describe
+      - datasource_query
       type: string
       description: |-
         * `read` - read
@@ -10356,6 +10493,8 @@ components:
         * `job_kill` - job_kill
         * `ask_user` - ask_user
         * `todo_write` - todo_write
+        * `datasource_describe` - datasource_describe
+        * `datasource_query` - datasource_query
     UserStreamEvent:
       type: object
       description: ログインユーザー宛ての通知：自分のRunの状態の変更

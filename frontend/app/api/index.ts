@@ -60,6 +60,11 @@ const createAPI = () => {
         downloadUrl: () => `${config.public.apiEndpoint}app/v1/conversations/${id}/artifacts/${aid}/download/`,
       }),
     }),
+    // 会話で使える Connector（入力欄の `@` の候補）。AppConnectorViewSet は list だけ
+    connectors: {
+      list: (params?: ListParams) =>
+        http.get<Paginated<AppConnector>, Paginated<AppConnector>>('app/v1/connectors/', { params }),
+    },
     // Skill（design.md §3）。中身の編集は Draft で行い、公開すると版になる
     skills: (id?: string) => ({
       ...readOnlyResource<Skill, SkillListParams>(http, 'app/v1/skills', id),

@@ -2,6 +2,7 @@
 export const ArtifactKind = {
   ATTACHMENT: 1,
   OUTPUT: 2,
+  CONNECTOR_RESULT: 3,
 } as const satisfies Record<string, ArtifactKindEnum>
 
 /** ファイルの大きさの表示（1.2 MB 等） */

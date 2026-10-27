@@ -26,6 +26,12 @@ TOOL_GUIDANCE = {
         "smallest set that covers the request. Do not guess a skill's procedure without loading it. If none "
         "matches, work without a skill."
     ),
+    "datasource_query": (
+        "- Read company databases only through the connectors in <connectors>. Check the tables with "
+        "`datasource_describe` before `datasource_query`, select only the rows and columns you need, and pass "
+        "values in `params`. The full result is a CSV file in /workspace/input/connectors/; process it there "
+        "instead of copying rows into your reply."
+    ),
     "submit_result": (
         "- This work has a result schema. When the work is done and checked, call `submit_result` alone with the "
         "result, then write your final reply."

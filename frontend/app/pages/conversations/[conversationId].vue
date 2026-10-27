@@ -26,6 +26,13 @@ const { data: models } = await useAsyncData('app-model-profiles', () => api.mode
 const { items: visibleSkills, fetchAll: fetchSkills } = useFetchAll(() => api.skills().list({ pageSize: 200 }))
 const usableSkills = computed(() => visibleSkills.value.filter((s) => s.version > 0 && !s.suspended))
 const editableSkills = computed(() => visibleSkills.value.filter((s) => s.canEdit))
+// 入力欄の `@` の一覧。機密の Connector は、個人情報・機密情報を扱う会話でだけ選べる
+const { items: usableConnectors, fetchAll: fetchConnectors } = useFetchAll(() => api.connectors.list({ pageSize: 200 }))
+const sensitive = computed(() => conversation.value?.handlesSensitiveData ?? false)
+// Tool を使えないモデルでは Connector を使えないので、一覧に出さない（送ってもサーバーが断る）
+const connectorChoices = computed(() =>
+  conversation.value?.modelProfileInfo?.supportsTools ? usableConnectors.value : [],
+)
 
 const messages = useConversationMessages(conversationId)
 const { items: runs, fetchAll: fetchRuns } = useFetchAll(() =>
@@ -37,7 +44,7 @@ const {
   loading: filesLoading,
   fetchAll: fetchFiles,
 } = useFetchAll(() => api.conversations(conversationId).artifacts().list({ pageSize: 200 }))
-await Promise.all([messages.refresh(), fetchRuns(), fetchFiles(), fetchSkills()])
+await Promise.all([messages.refresh(), fetchRuns(), fetchFiles(), fetchSkills(), fetchConnectors()])
 
 const activeRun = computed(() => conversation.value?.activeRun ?? null)
 const activeRunId = computed(() => activeRun.value?.id ?? null)
@@ -140,6 +147,7 @@ const text = ref('')
 const mode = ref<string>(MessageMode.AUTO)
 const selectedSkills = ref<Skill[]>([])
 const skillEdit = ref<SkillEditChoice | null>(null)
+const selectedConnectors = ref<AppConnector[]>([])
 const sending = ref(false)
 // 送信に失敗して送り直すときは同じ ID を使い、サーバーで二重に受け付けないようにする（design.md §5.5）
 let clientMessageId = crypto.randomUUID()
@@ -162,6 +170,7 @@ const send = async () => {
         body,
         attachments: attachments.ids.value,
         skills: selectedSkills.value.map((s) => s.id),
+        connectors: selectedConnectors.value.map((c) => c.id),
         editSkill: skillEdit.value?.skill?.id ?? null,
         createSkill: skillEdit.value !== null && skillEdit.value.skill === null,
         clientMessageId,
@@ -172,6 +181,7 @@ const send = async () => {
     mode.value = MessageMode.AUTO
     selectedSkills.value = []
     skillEdit.value = null
+    selectedConnectors.value = []
     attachments.clear()
     messages.add(message)
     sync()
@@ -323,6 +333,13 @@ const menuItems = computed(() => [
                         </UBadge>
                       </li>
                     </ul>
+                    <ul v-if="item.message.connectorsInfo.length" class="mb-1 flex flex-wrap gap-1">
+                      <li v-for="connector in item.message.connectorsInfo" :key="connector.id">
+                        <UBadge color="info" variant="subtle" size="sm" icon="i-lucide-database">
+                          {{ connector.name }}
+                        </UBadge>
+                      </li>
+                    </ul>
                     <p v-if="item.message.body" class="whitespace-pre-wrap">{{ item.message.body }}</p>
                   </template>
                   <ul v-if="item.message.attachmentsInfo.length" class="mt-1 grid gap-0.5">
@@ -349,9 +366,12 @@ const menuItems = computed(() => [
             v-model:mode="mode"
             v-model:selected-skills="selectedSkills"
             v-model:skill-edit="skillEdit"
+            v-model:selected-connectors="selectedConnectors"
             :active-run="activeRun"
             :skills="usableSkills"
             :editable-skills="editableSkills"
+            :connectors="connectorChoices"
+            :sensitive="sensitive"
             :has-open-question="hasOpenQuestion"
             :attachments="attachments.items.value"
             :sending="sending"

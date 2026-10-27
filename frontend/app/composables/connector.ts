@@ -1,5 +1,12 @@
 type T = (key: string) => string
 
+// 入力欄の `@` で1つのメッセージに指定できる Connector の数（harness.connectors.MAX_EXPLICIT_CONNECTORS）
+export const MAX_CHOSEN_CONNECTORS = 5
+
+/** 会話で使える Connector か。機密の Connector は、個人情報・機密情報を扱う会話でだけ使える（design.md §4.9.1） */
+export const isConnectorUsableIn = (connector: Pick<AppConnector, 'isSensitive'>, sensitiveConversation: boolean) =>
+  !connector.isSensitive || sensitiveConversation
+
 // バックエンドの connector.models.ConnectorKind と同じ値
 export const ConnectorKind = {
   POSTGRESQL: 1,

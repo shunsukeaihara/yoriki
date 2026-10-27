@@ -44,6 +44,8 @@ export type ConnectorTables = Api<'ConnectorTables'>
 export type ConnectorQuery = Api<'ConnectorQueryRequest'>
 export type ConnectorQueryResult = Api<'ConnectorQueryResult'>
 export type ConnectorVersion = Api<'ConnectorVersion'>
+// 会話で使えるConnector（入力欄の `@` の候補）
+export type AppConnector = Api<'AppConnector'>
 export type DatabaseConnectionListParams = ListParams & { name?: string; kind?: ConnectorKindEnum; isActive?: boolean }
 export type ConnectorScopeEnum = Schemas['ConnectorScopeEnum']
 export type ConnectorListParams = ListParams & {

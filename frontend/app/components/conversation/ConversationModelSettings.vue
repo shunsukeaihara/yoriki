@@ -2,11 +2,13 @@
 /**
  * 会話のモデルと effort を切り替える。実行中の Run にも、次のステップから反映される（design.md §4.8）。
  * 個人情報・機密情報を扱う会話では、ローカルLLMのモデルだけを選べる（サーバーでも確かめる）。
+ * 途中から機密の会話にできるが、扱わない会話には戻せない。機密の Connector は、次の依頼から使える。
  */
 const props = defineProps<{ conversation: Conversation; models: AppModelProfile[] }>()
 const emit = defineEmits<{ updated: [value: Conversation] }>()
 const api = useAPI()
 const toast = useToast()
+const confirm = useConfirmDialog()
 const { t } = useI18n()
 
 const modelItems = computed(() => {
@@ -48,6 +50,29 @@ const save = async (data: Partial<ConversationWrite>) => {
   }
 }
 
+// 機密にするときのモデル。今のモデルがローカル LLM でなければ、選べるローカル LLM の最初のものに替える
+const localTarget = computed(() =>
+  props.conversation.modelProfileInfo.isLocal ? null : (props.models.find((m) => m.isLocal) ?? null),
+)
+const canMakeSensitive = computed(() => props.conversation.modelProfileInfo.isLocal || localTarget.value !== null)
+const makeSensitive = async () => {
+  const target = localTarget.value
+  const ok = await confirm({
+    title: t('個人情報・機密情報を扱う会話にしますか？'),
+    description: [
+      t(
+        '一度機密にすると、扱わない会話には戻せません。ローカルLLMのモデルだけを使い、機密のConnectorを次の依頼から使えます。',
+      ),
+      target ? t('モデルを「{name}」に切り替えます。', { name: target.name }) : '',
+    ]
+      .filter(Boolean)
+      .join(' '),
+    confirmLabel: t('機密にする'),
+  })
+  if (!ok) return
+  save(target ? { handlesSensitiveData: true, modelProfile: target.id } : { handlesSensitiveData: true })
+}
+
 const onEffort = (value: unknown) => {
   const effort = value === DEFAULT_EFFORT || !value ? '' : String(value)
   if (effort !== (props.conversation.effort ?? '')) save({ effort })
@@ -59,6 +84,17 @@ const onEffort = (value: unknown) => {
     <UBadge v-if="conversation.handlesSensitiveData" color="warning" variant="subtle" icon="i-lucide-shield">
       {{ $t('機密') }}
     </UBadge>
+    <DBtn
+      v-else-if="canMakeSensitive"
+      icon="i-lucide-shield"
+      variant="ghost"
+      color="neutral"
+      size="sm"
+      :disabled="saving"
+      :aria-label="$t('機密にする')"
+      :title="$t('個人情報・機密情報を扱う会話にする')"
+      @click="makeSensitive"
+    />
     <DSelect
       :model-value="conversation.modelProfile"
       :label="$t('モデル')"

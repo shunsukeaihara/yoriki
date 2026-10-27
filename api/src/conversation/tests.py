@@ -1,6 +1,9 @@
 import pytest
+from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
+from connector.factories import ConnectorFactory
+from connector.models import ConnectorScope
 from llm.factories import LLMConnectionFactory, ModelProfileFactory
 from llm.models import ProviderKind
 from run.factories import ClarificationRequestFactory, RunFactory
@@ -11,6 +14,7 @@ from user.factories import DepartmentFactory, DepartmentMembershipFactory
 
 from .factories import ConversationFactory
 from .models import Conversation, InstructionKind, UserInstruction
+from .serializers import ConversationSerializer
 
 # Runを始めるには既定のRuntime Profileが要る
 pytestmark = pytest.mark.usefixtures("default_runtime")
@@ -94,15 +98,83 @@ class TestConversation:
         run.refresh_from_db()
         assert run.status == RunStatus.CANCELLED
 
-    def test_sensitivity_cannot_be_changed_later(self, api_client, app_user, local_profile):
-        conversation = ConversationFactory.create(
-            owner=app_user, model_profile=local_profile, handles_sensitive_data=True
+    def test_conversation_can_become_confidential_but_not_back(self, api_client, app_user, local_profile):
+        conversation = ConversationFactory.create(owner=app_user)
+        url = f"/api/app/v1/conversations/{conversation.uid}/"
+        # 機密にするにはローカルLLMのモデルが要る
+        res = api_client.patch(url, {"handles_sensitive_data": True}, format="json")
+        assert res.status_code == 400
+        assert "model_profile" in res.data
+        run = RunFactory.create(conversation=conversation, status=RunStatus.RUNNING)
+        res = api_client.patch(url, {"handles_sensitive_data": True, "model_profile": local_profile.uid}, format="json")
+        assert res.status_code == 200, res.data
+        run.refresh_from_db()
+        assert run.handles_sensitive_data
+        assert run.model_version == local_profile.current_version
+        res = api_client.patch(url, {"handles_sensitive_data": False}, format="json")
+        assert res.status_code == 400
+        assert "handles_sensitive_data" in res.data
+        assert Conversation.objects.get(pk=conversation.pk).handles_sensitive_data
+
+    def test_making_it_confidential_switches_the_active_run_to_the_local_model(
+        self, api_client, app_user, local_profile
+    ):
+        conversation = ConversationFactory.create(owner=app_user, model_profile=local_profile)
+        cloud = ModelProfileFactory.create(version__supports_tools=True)
+        # 実行中のRunは、会話のモデル設定と違うクラウドのモデルを使っている
+        run = RunFactory.create(
+            conversation=conversation, status=RunStatus.RUNNING, model_version=cloud.current_version
         )
         res = api_client.patch(
-            f"/api/app/v1/conversations/{conversation.uid}/", {"handles_sensitive_data": False}, format="json"
+            f"/api/app/v1/conversations/{conversation.uid}/", {"handles_sensitive_data": True}, format="json"
         )
-        assert res.status_code == 200
-        assert Conversation.objects.get(pk=conversation.pk).handles_sensitive_data
+        assert res.status_code == 200, res.data
+        run.refresh_from_db()
+        assert run.handles_sensitive_data
+        assert run.model_version == local_profile.current_version
+
+    def test_making_it_confidential_checks_the_model_saved_by_another_update(self, app_user, local_profile):
+        conversation = ConversationFactory.create(owner=app_user, model_profile=local_profile)
+        serializer = ConversationSerializer(
+            conversation, data={"handles_sensitive_data": True}, partial=True, context={"request": None}
+        )
+        assert serializer.is_valid(), serializer.errors
+        # 検証の後に、別の更新がクラウドのモデルに変えた
+        cloud = ModelProfileFactory.create(version__supports_tools=True)
+        Conversation.objects.filter(pk=conversation.pk).update(model_profile=cloud)
+        with pytest.raises(ValidationError):
+            serializer.save()
+        assert not Conversation.objects.get(pk=conversation.pk).handles_sensitive_data
+
+    def test_stale_update_does_not_write_back_the_old_model(self, app_user, local_profile):
+        cloud = ModelProfileFactory.create(version__supports_tools=True)
+        conversation = ConversationFactory.create(owner=app_user, model_profile=cloud)
+        serializer = ConversationSerializer(
+            conversation, data={"title": "新しい題名"}, partial=True, context={"request": None}
+        )
+        assert serializer.is_valid(), serializer.errors
+        # 検証の後に、別の更新がローカルLLMに切り替えて機密にした
+        Conversation.objects.filter(pk=conversation.pk).update(handles_sensitive_data=True, model_profile=local_profile)
+        serializer.save()
+        conversation.refresh_from_db()
+        assert conversation.title == "新しい題名"
+        assert conversation.handles_sensitive_data
+        assert conversation.model_profile == local_profile
+
+    def test_conversation_made_confidential_during_the_update_is_not_reverted(self, app_user, local_profile):
+        conversation = ConversationFactory.create(owner=app_user, model_profile=local_profile)
+        cloud = ModelProfileFactory.create(version__supports_tools=True)
+        serializer = ConversationSerializer(
+            conversation, data={"model_profile": cloud.uid}, partial=True, context={"request": None}
+        )
+        assert serializer.is_valid(), serializer.errors
+        # 検証の後に、別の更新が会話を機密にした
+        Conversation.objects.filter(pk=conversation.pk).update(handles_sensitive_data=True)
+        with pytest.raises(ValidationError):
+            serializer.save()
+        conversation.refresh_from_db()
+        assert conversation.handles_sensitive_data
+        assert conversation.model_profile == local_profile
 
 
 @pytest.mark.django_db
@@ -185,6 +257,33 @@ class TestMessage:
         version.skill.save()
         listed = api_client.get(self.url(conversation))
         assert listed.data["results"][0]["skills_info"] == res.data["skills_info"]
+
+    def test_message_with_a_connector_starts_a_run_with_it(self, api_client, app_user):
+        conversation = ConversationFactory.create(owner=app_user)
+        connector = ConnectorFactory.create(name="販売管理")
+        res = api_client.post(self.url(conversation), {"body": "取引先", "connectors": [connector.uid]}, format="json")
+        assert res.status_code == 201, res.data
+        assert res.data["connectors_info"] == [{"id": connector.uid, "name": "販売管理"}]
+        run = Run.objects.get(conversation=conversation)
+        assert run.manifest["fixed"]["connectors"] == [
+            {
+                "connector": connector.uid,
+                "name": "販売管理",
+                "version": connector.current_version_id,
+            }
+        ]
+
+    def test_connector_the_user_cannot_use_is_rejected(self, api_client, app_user):
+        conversation = ConversationFactory.create(owner=app_user)
+        others = ConnectorFactory.create(scope=ConnectorScope.DEPARTMENT, department=DepartmentFactory.create())
+        system = ConnectorFactory.create(scope=ConnectorScope.SYSTEM)
+        for connector in (others, system):
+            res = api_client.post(
+                self.url(conversation), {"body": "依頼", "connectors": [connector.uid]}, format="json"
+            )
+            assert res.status_code == 400
+            assert "connectors" in res.data
+        assert not Run.objects.filter(conversation=conversation).exists()
 
     def test_skill_the_user_cannot_use_is_rejected(self, api_client, app_user, other_user):
         conversation = ConversationFactory.create(owner=app_user)

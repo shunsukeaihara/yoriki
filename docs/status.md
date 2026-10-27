@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-27（#46 authorization.md に実装を合わせるPRの中。マージの前）
+- 最終更新：2026-10-27（#47 会話でのConnectorのPRの中。このコミットの後にマージする）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -47,6 +47,7 @@
 | #44 | DB接続（画面では「接続先」）をConnectorから分けた（design.md 0.32）：`DatabaseConnection`（種別・接続先・資格情報・接続のタイムアウト・同時実行数の上限。版なし。ホスト・ポート・DB名はパスワードを入れ直せば変えられ、保存のときに行をロックして最新の値で確かめる。種別は変えない。`v1/database_connections`（`check`・`tables`）。使っているConnectorがあれば削除を断る）。ConnectorはDB接続を参照し（作成後は変えない）、1つの接続の上に範囲（公開する表・上限・機密）と使える部門の違うConnectorを複数作れる。既存のConnectorは、マイグレーションで同じ内容のDB接続に移す。権限を所属とpermissionの2軸にした：接続先は標準のpermission（view・add・change・delete）だけ、Connectorを見る・使うのは所属だけ（使える部門。空なら全社向け）、作成・編集・削除は所属＋permission（`utils.permissions.ModelPermissions`）。役割・部門と操作の利用の許可（ConnectorPermission）はやめた。部門に「すべての部門の範囲を含む」印（`covers_all_departments`）を足し、所属の判定を `Department.objects.of(user)` にまとめた。ユーザーとGroupのpermissionの付け外しを監査ログに残す。管理画面：メニューを「Connector → DB Connector → 接続先・Connector」の入れ子にし（`useManageMenu()` の `items`・`links`）、`/manage/database_connections`（一覧・作成・編集・接続の確認。Connectorの件数からその接続のConnectorの一覧へ）と `/manage/connectors`（一覧（接続先・種別・機密・有効で絞り込み）と作成、詳細のドロワーのタブ「設定」・「公開する表」（接続先の表・ビューの一覧から選び、表と列に説明を付ける）・「使える部門」・「試し実行」（エージェントに見える表・列の説明と、SELECT文の試し実行）・「版の履歴」）。ページ・ボタンはpermissionで出し分ける。タブをまたいで未保存の入力を残し、編集の間に別の版ができたら409を案内して最新を読み直す。接続先につなぐ要求は、接続と実行のタイムアウトまで待つ。APIクライアントで、利用者・エージェント・DBがキーを決めるJSON（SkillのSchema、業務結果、Toolの引数、列名 → 説明等）の中のキーを変換しないようにした（以前は `invoice_no` が画面で `invoiceNo` になり、`VendorCode` は保存し直すと `vendor_code` に変わっていた。frontend-conventions.md §3.1） |
 | #45 | 権限の設計をやり直し、[authorization.md](authorization.md) にまとめた（design.md 0.33。文書だけ）：範囲（個人・部門・全社・システム）、利用・業務の管理・基盤の管理の3つの層、所属の関数と `can_use_all_departments`・`can_manage_all_departments`、起動のしかたで決まる実行許可、結果とログの見え方、入口・出口、画面を層で分けること、`is_superuser` をアプリの判定に持ち込まないこと。design.md・規約・例・harness.md・deployment.md・realtime.md を authorization.md の要約と参照に直した |
 | #46 | [authorization.md](authorization.md) に実装を合わせた：所属の判定を `Department.objects.usable_by()`・`manageable_by()`・`joined_by()` と permission `user.can_use_all_departments`・`can_manage_all_departments` にした（部門の中の役割と「すべての部門の範囲を含む」印をやめた）。Skillはシステムの範囲と範囲ごとの編集・公開のpermission（部門・全社・システム）、判定を `Skill.can(user, SkillAction)` と `visible_to()`・`usable_by()`・`editable_by()` に集めた（システムのSkillは業務画面の一覧と会話に出さない）。Connectorは範囲（部門・全社・システム）と1つの部門（作成時に決めて変えない）、管理画面はpermissionだけで全件。管理APIをすべて `ModelPermissions` にし、`PlatformAdmin` をなくして既定を `DenyAll` にした。ユーザー管理の委任の防止策（`can_manage_account()`、`can_change`・`can_issue_invitation`、自分のGroup・所属は変えられない、持たないpermissionのGroupは付け外しできない、受け入れのときに確かめ直す）。`app/v1/my/` は `departments`・`usable_departments`・`manageable_departments` を返し、`is_platform_admin` を出さない。初期のGroupはデータのマイグレーション（`user` 0007）で一度だけ作る。画面：管理画面の入口は view か change、作成は add、削除は delete、Skillの一覧は範囲のタブ・部門・「編集できるものだけ」・行ごとのできること、作れる範囲は `manageableDepartments` とpermission、`/manage/system_skills`（詳細は `/skills/[id]` を使い回す）、Connectorの作成で範囲と部門を選ぶ |
+| #47 | 会話でのConnector：Tool `datasource_describe`・`datasource_query`（`connector` の引数はRun開始時に固定した一覧の名前のenum、操作のたびに依頼した人をDBから読み直して範囲・所属・停止と機密のモデルを確かめる、使った版をToolInvocationに記録）。結果はArtifact（種別「Connectorの結果」）にして `/workspace/input/connectors/<呼出し>/result.csv` に置き、モデルには件数・列名・先頭の10行（`<untrusted_content>` で囲む）だけ。Run開始時に `Connector.objects.usable_by()` を `fixed.connector_catalog` に固定して `<connectors>` で見せる。入力欄の `@`（`ConversationConnectorPicker`、`app/v1/connectors/`）、`@` の説明は確かめた版の表の名前と説明から作る。機密のConnectorは機密の会話のRunだけ（会話は途中で機密にでき、戻せない。会話の設定の盾のボタン。機密の会話はローカルLLMだけ）。接続の同時実行数の上限（`ConnectionLease`、`connector/limits.py`。管理画面の接続の確認・表の一覧・説明・試し実行も同じ枠）。操作の間はAttemptのleaseと枠の期限を延ばす。Runnerが区切りごとに依頼した人を読み直す（実行中に無効にされた・所属を外されたときに、Skillも次の区切りから止まる） |
 
 確認済みのこと：
 
@@ -68,6 +69,7 @@
 - #41 のDraftの評価は、手元のqcluster・手元のレジストリのRuntime Profile（runc）・偽のLLM・ブラウザ（Playwright）で、部門のSkill「請求書の照合」に評価ケースを2つ（添付つき・期待する業務結果つき・公開の前に必須のものと、任意のもの）追加 → Draftのタブに「必須の評価ケースが通過していません」と公開の制限 →「Draftを評価」→ 4つの評価のRunと判定が動いて「2件中2件が通過」→ 公開の制限が消える、狭い画面、会話の `/` の「編集」→ `test_skill_draft` →「SkillのDraftを評価しています」→ 評価の完了で編集のRunが再開して完了、まで確かめた（評価ケースと評価は開発用のDBに残っている）。偽のLLMは、要求の `tools` に `report_verdict` があれば判定、`test_skill_draft` があれば呼んでから文で答え、`submit_result` があれば `{"ok": true}` で呼ぶ形にした。実際のプロバイダのモデルでの評価と判定の質は、まだ試していない。
 - #42 のConnectorは、Adapterのテストを、テストのPostgreSQLの別のスキーマ・ロール、一時のコンテナのMySQL 8.0、SQL Server 2022（手元では本体のイメージの中から接続）で動かし、3種類とも同じ27件（接続の確認、表の一覧、describe、引数つきの問い合わせ、行数・サイズでの打ち切り、実行時間の上限、検査で断る、アカウントの権限で止まる、検査をすり抜けた書込みが残らない）が通るのを確かめた。管理画面とエージェントのToolはまだないので、実際の社内DBでは試していない。
 - #46 の権限の実装は、開発サーバーでブラウザ（Playwright）から、基盤管理者・委任したユーザー管理者（Group「ユーザー管理者」）・部門のSkill編集者（経理部の所属＋Group「部門のSkill編集者」）で確かめた：ユーザー管理者のメニューはユーザーと部門だけ、自分の持たないpermissionを持つアカウント（基盤管理者を含む）は「変更できません」で詳細の入力とリンクの発行が止まる、部門のSkill編集者のSkillの一覧（範囲のタブ、編集できます）と `/manage` の403、`/manage/system_skills` からシステムのSkillを作って詳細へ移り、業務画面の一覧には出ない、Connectorの作成で範囲と部門を選ぶ。フロントエンドの composables の単体テストは手元で動かないので（§5）、CIで確かめる。
+- #47 の会話でのConnectorは、手元のapi・qcluster（手元のレジストリのRuntime Profile、runc）・偽のLLM（`datasource_describe` → `datasource_query` → 結果のCSVを `read` → 文で答える）・ブラウザ（Playwright）で、開発用のDBの中に作った確認用のスキーマ・読取り用のロールを指すPostgreSQLの接続とConnectorを使い、入力欄で `@` → 一覧から選ぶ → 送る → 実際のSandboxで `/workspace/input/connectors/…/result.csv` を読む → 「添付と成果物」の「Connectorの結果」、機密のConnectorを `@` で指定した会話（このときは自動で機密にする実装で、後で機密の会話だけで使える方針に直した）、作業の記録の表示、狭い画面、まで確かめた（確認用の接続・Connector・スキーマ・ロールは、手元の別の暗号化の鍵で作ったので消し、会話も削除した）。実際のプロバイダのモデルがConnectorを選んでSQLを書くかは、まだ試していない。
 - #30 のSandboxは、手元のqcluster（fork）・手元のレジストリのRuntime Profile（platformのdigest）・Toolを呼ぶ偽のLLMで、shell → read → 確認待ち（Checkpointを保存してSandboxを消す）→ 回答 → 戻したWorkspaceで edit → 完了、まで確かめた。画面での表示は、ブラウザではまだ確かめていない。Linuxのホスト（本番の構成のqcluster・userns-remap）では、まだ試していない。
 
 ## 2 実装の中で決めたこと
@@ -93,7 +95,7 @@
 - 管理コマンド：`drain_workers`・`resume_workers`（Workerの実行を実装するとき）。
 - 業務のアプリは `llm`、`conversation`、`run`、`harness`、`stream`、`usage`、`runtime`（Runtime Profile、Launcher）、`artifact`、`skill`・`resources`、`connector`（土台だけ）まで。`plugin`、`task`、`delivery` 等（backend-conventions.md §1.2）は、まだない。
 - 権限で後回しにしたもの：システムのSkillの詳細を管理画面の中に置く（今は `/manage/system_skills` の一覧から業務画面の `/skills/[id]` を開く）、個人Connector（会話でのConnectorの段階）、業務画面の `/connectors`、ユーザーの更新APIでの所属の書込み（今は部門の所属のAPIで付け外しする。防止策は同じ）、部門の「無効」（今は論理削除で、所属と履歴は残る）、部門のものを別の部門・全社へ移す操作（authorization.md §9）、管理画面の詳細の入力欄を見るだけの人には止める（今は保存のボタンを出さないだけ。ユーザーは止める）。
-- Connectorで後回しにしたもの：Plugin Registry（`plugin` アプリ。今は種別からAdapterをコードで選ぶ。タスク・配信のPluginとあわせて作る）、同時実行数の上限を守らせる（会話でのConnectorの段階。DB接続ごとに、DBで全Workerを通して数える）、SQL ServerのSNAPSHOT分離（DB側で有効なら使う。design.md §4.9.2）、MariaDB（MySQLの `MAX_EXECUTION_TIME` がない。試していない）、HTTP・SharePoint・Google Drive・MCPのConnector、書込みの操作。PostgreSQLの証明書の確認（`verify-full`）は、OSの証明書（`sslrootcert=system`。libpq 16以降）を使い、社内のCAの証明書を指定する項目はまだない。PyMySQLは1.2.1〜1.2.3の不具合（作ったばかりのユーザーがTLSなしで初めてログインすると失敗する）を避けて1.2.0に固定している（`api/pyproject.toml`）。直った版が出たら上げる。
+- Connectorで後回しにしたもの：Plugin Registry（`plugin` アプリ。今は種別からAdapterをコードで選ぶ。タスク・配信のPluginとあわせて作る）、Skillが宣言するConnectorと公開時の検証（次のPR）、Skillのスクリプトからの呼出し（`yoriki_connector`）、個人Connector、業務画面の `/connectors`、`datasource_*` を並べて実行する（今は同時実行の枠と記録をDBで扱うので1つずつ）、実行中の会話で `@` を指定したメッセージを今の作業に取り込む（今は次の依頼）、会話のConnectorの結果の件数・合計の大きさの上限（今は保持期限の切れたものを置かないだけで、Attemptごとに残りをすべて置く。添付とあわせて決める）、1つのRunからの呼出しの回数・頻度の上限（design.md §4.9.6）、出口（Destination）の機密のフラグ（タスク・配信の段階。design.md §4冒頭）、SQL ServerのSNAPSHOT分離（DB側で有効なら使う。design.md §4.9.2）、MariaDB（MySQLの `MAX_EXECUTION_TIME` がない。試していない）、HTTP・SharePoint・Google Drive・MCPのConnector、書込みの操作。PostgreSQLの証明書の確認（`verify-full`）は、OSの証明書（`sslrootcert=system`。libpq 16以降）を使い、社内のCAの証明書を指定する項目はまだない。PyMySQLは1.2.1〜1.2.3の不具合（作ったばかりのユーザーがTLSなしで初めてログインすると失敗する）を避けて1.2.0に固定している（`api/pyproject.toml`）。直った版が出たら上げる。
 - Skillで後回しにしたもの：実行中のRunでSkillを最新の公開版へ切り替える依頼（design.md §3.2）、機密の制限によるSkillの絞り込み（Connectorの段階）、Resource Collection、Connectorの宣言、MD・CSV・PPTX以外の形式（XLSX・DOCX・PDF等）の検証、PPTXの画像としてのプレビュー（LibreOfficeを使わない方法が未決。design.md §7.6）、本文（説明・手順・Schema）の版の差分の表示（今は変わった項目名だけ。資料の差分は #40 で表示）、公開せずに捨てたDraftの資料の原本の回収、共通Skillから個人用を派生させる操作、Draftを開いた後に別の版が公開されたときの取り込み（今は破棄して開き直す）、画面のToolの選択肢と説明（今はフロントエンドに `harness.tools.ALL_TOOLS` と同じ一覧を持つ。APIで返すようにする）。
 - 会話からのSkill更新で後回しにしたもの：中身が前の版と同じDraftの公開を止めない（版が増える）、Draftに他の人の未公開の変更があっても一緒に公開する（`get_skill` の説明で、公開の前に利用者へ伝えさせるだけ）、編集のRunの対象は1つだけ（複数のSkillをまとめて直す依頼は分ける）、別のAttemptで再開すると `/workspace/master` のDraftの資料が置き直されない（`get_skill` を呼び直せば置く）。
 - 資料の検証で後回しにしたもの：検証の結果に検証の仕組みの版を持たせていない（検証の規則を変えても、保存した結果は取り直すまで古いまま）、MDの差分は2MBまで、PPTXの「編集した候補」かどうかは置いた場所（`/workspace/input` か）だけで決める、CSVの行の差分はキーの列がなければ行の組合せの増減だけ、10MBを超えるCSVはキー・型・先頭の0・差分を調べない（全行を持たない方法が要る）。
@@ -115,7 +117,7 @@
 
 ## 4 次の作業
 
-**今の状態（2026-10-27）**：Skillの段階（下の1）は #41 までで揃った。下の2（Connectorとタスク・配信）は、①（Connectorの土台）が #42、②（Connectorの管理画面）が #44 で済んだ。そのあと利用者の指示で、③より先に権限の設計をやり直し、#45（文書だけ）で [authorization.md](authorization.md) にまとめ、#46 で実装を合わせた。権限は authorization.md を正とする（design.md §3.6・§4.1・§4.9.1・§10.0はその要約）。
+**今の状態（2026-10-27）**：Skillの段階（下の1）は #41 までで揃った。下の2（Connectorとタスク・配信）は、①（Connectorの土台）が #42、②（Connectorの管理画面）が #44 で済んだ。そのあと利用者の指示で、③より先に権限の設計をやり直し、#45（文書だけ）で [authorization.md](authorization.md) にまとめ、#46 で実装を合わせた。権限は authorization.md を正とする（design.md §3.6・§4.1・§4.9.1・§10.0はその要約）。③（会話でのConnector）は、利用者と相談して「③a 会話でのConnector（#47。済み）→ ③b Skillが宣言するConnectorと公開時の検証」に分けた。次は③b。
 
 **#45 の議論の要点**（authorization.md にすべて書いてある）：
 - 範囲は「所有と管理の単位」（個人・部門・全社・システム）。部門のものは1つの部門に属する。システムのSkill・Connector・タスクは基盤の管理が扱い、会話には出さない。
@@ -131,7 +133,19 @@
 
 - レビュー：`codex review --base main` は5回目で指摘なし。敵対的なレビューは5回で、指摘（招待の受け入れ・ユーザーの更新・所属の付け外しと権限の変更の競合）を直し、Skillの公開などの操作全般とリクエストの途中の権限の取り消しの競合という細部に移ったところで、利用者と相談して区切った。
 
-**次の作業**：#46 のマージの後、下の2の③（会話でのConnector）。作業ブランチは `main` から新しく切る。
+**③aで利用者と決めたこと**：機密のConnector（③bで機密のSkillも）は、機密の会話・タスクでだけ一覧に出し、使わせる。会話は途中で機密にできるが、一度機密にしたら戻せない（機密の会話はローカルLLMだけなので、機密の情報はクラウドのモデルへ渡らない）。出口にも機密のフラグを付け、機密の会話・タスクの結果は機密の結果を送ってよい出口にだけ送る（利用者の提案。design.md §4冒頭に書き、⑥で作る。フラグの細かい形（誰が付けるか、既定値）は⑥の設計で利用者に確かめる）。Skillに機密を入れるかは③bで決める（利用者は悩んでいる。案は下の次の作業）。
+
+**③aで私（Claude）の判断で決めた点**（異論があれば直す）：
+- `datasource_*` は並べずに1つずつ実行する（harness.md §7.4の「並列：可」を改めた）。
+- `@` を指定したメッセージは、Skillの指定と同じく、実行中なら次の依頼にする。`/` で指定したSkillがConnectorのToolを許さなければ、`@` の指定を断る。
+- `datasource_query` の `params` は文字列の並び（全プロバイダで通るSchemaに型の組合せを書けないため。数や日付はSQLでCASTさせる）。
+- 管理画面の接続の確認・表の一覧・説明・試し実行も、エージェントと同じ接続の同時実行数の上限の中で行う（待つのは10秒まで）。
+- 本文が空で `@` だけの依頼は送れない（Skillは本文がなくても手順が依頼になるが、Connectorだけでは何を頼むかが決まらない）。Codexのレビューが何度か指摘したが、意図した仕様として残した。
+- Toolを使えないモデル（モデル設定の能力「Tool呼出し」がないもの）の会話では、`@` の一覧にConnectorを出さない（Toolを1つも出さないので、Connectorを使えない）。
+
+- レビュー：`codex review --base main` は10回目で指摘なし。敵対的なレビューは5回で、指摘（leaseの延長、利用者の読み直し、枠の延長と失効、枠を待つ間の権限の変化、会話の更新の競合）を直し、細かい競合の詰めに移ったところで区切った。
+
+**次の作業**：下の2の③b（Skillが宣言するConnectorと公開時の検証：Skillの版・Draftの項目、編集画面、`update_skill_draft`、`skill` の結果の `<connectors>`、公開時に宣言した操作がConnectorの境界の中にあるかの検証）。Skillの機密は、③bで決める。私の案：機密のConnectorを宣言したSkillは機密のSkillとして扱い（宣言から決まるので別のフラグは要らない）、機密の会話にだけ一覧に出す。資料そのものに個人情報を含むSkillのために、Skillの管理者が付けるフラグも足すかは、利用者と相談する。作業ブランチは `main` から新しく切る。
 
 
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。上から順に着手する（利用者から別の指示がなければ、上から）。提案する順番：
@@ -140,7 +154,7 @@ design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにし
 2. **Connector（`connector`）とタスク・配信（`task`、`delivery`）**：利用者と合意したPRの分け方は次のとおり。
    - ① Connectorの土台（backend。#42）：Connector・版、社内DBの3種類のAdapter、SQLの検査、管理API（接続の確認・表の一覧・describe・試し実行）。
    - ② Connectorの管理画面（#44）：接続先（DB接続）の分離と `/manage/database_connections`、`/manage/connectors`（登録、表の一覧から公開する表を選んで説明を付ける、使える部門、試し実行、版の履歴）、所属とpermissionの2軸の権限。
-   - ③ 会話でのConnector：Tool `datasource_describe`・`datasource_query`（結果はCSVのArtifactにして `/workspace/input/connectors/{id}/`、モデルには要約）、Run開始時に使えるConnector（`Connector.objects.usable_by()`。所属で決まる）を固定して `<connectors>` で見せる、入力欄の `@`、機密のConnectorはローカルLLMのRunだけ（使ったRunに印、モデルの切り替えの制限）、Skillが宣言した操作の公開時の検証、接続先ごとの同時実行数の上限（harness.md §10.2）。
+   - ③ 会話でのConnector（③a 済み。③b は下の「Skillが宣言した操作の公開時の検証」）：Tool `datasource_describe`・`datasource_query`（結果はCSVのArtifactにして `/workspace/input/connectors/{id}/`、モデルには要約）、Run開始時に使えるConnector（`Connector.objects.usable_by()`。所属で決まる）を固定して `<connectors>` で見せる、入力欄の `@`、機密のConnectorはローカルLLMのRunだけ（使ったRunに印、モデルの切り替えの制限）、Skillが宣言した操作の公開時の検証、接続先ごとの同時実行数の上限（harness.md §10.2）。
    - ④ Skillのスクリプトからの呼出し（`yoriki_connector` とUnixドメインソケット。design.md §4.9.6）。後回しにしてもよい（最初の業務は `datasource_query` で動く）。
    - ⑤〜⑦の権限（範囲、実行許可、入口・出口、結果とログの見え方）は authorization.md §5.3〜§7 に従う。
    - ⑤ タスクとWebhookでの起動（backend）：TaskDefinition・TriggerBindingと不変の版、Webhookの受け口（APIキーで認証、送り元のイベントIDか `Idempotency-Key` での重複の判定、項目の取り出し、payloadのファイル化、202とrun_id、状態を確かめる口）、TriggerReceipt・Runを同じtransactionで作る。
@@ -173,6 +187,7 @@ cd frontend && pnpm install
 - 手元のDocker Desktopの仮想ディスク（37GB）が満杯になると、PostgreSQLが `No space left on device` で止まり、テストが大量にエラーになる。#36 ではビルドキャッシュ（`docker builder prune -f`）を消して空けた。`docker system df` で確かめる。
 - 環境変数はリポジトリルートの `.envrc`（direnv）。テストやmypyは、`.envrc` を読み込んだ状態で実行する。エージェントが `.envrc` を読めない設定のときは、`.envrc.example` の `export` の行と、新しく生成した `YORIKI_SECRET_ENCRYPTION_KEYS`（Fernet）・`YORIKI_SANDBOX_RUNTIME=runc` を一時ファイルに書き、リポジトリのルートでコマンドごとに `source` する（`$PWD` を使う行があるため）。`api/` で `source` すると保存先が `api/.objects` になり、既存の資料・添付の原本が見つからない（Sandboxの起動が「cannot prepare ... not found」で失敗する）。
 - Sandboxの補助コマンド（`sandbox/helper/`）を変えたら、イメージをビルドし直す（#33で `read` の画像の符号化を変えた）。手元のレジストリのRuntime Profileで会話を動かすときは、pushし直して管理画面で新しいdigestに更新する。`pytest -m sandbox` は `YORIKI_SANDBOX_TEST_IMAGE=yoriki-sandbox-docs:dev` を付けて動かす。
+- 会話でのConnectorを手元で確かめるとき（#47 で行った方法）：開発用のDB（`yoriki-dev-postgres-1`）の中に確認用のスキーマ（例 `connector_check`）と読取り用のロールを作り（`GRANT USAGE ON SCHEMA`・`GRANT SELECT`）、管理画面か `manage.py shell` でそのロールのPostgreSQLの接続と、範囲が全社のConnector（既定のスキーマを確認用のスキーマに）を登録する。偽のLLMは、要求の `tools` に `datasource_query` があれば `datasource_describe` → `datasource_query`（`params` は文字列）→ 結果の `file:` の行のパスを `read` → 文で答える、と決める70行ほどのOpenAI互換のスクリプトを `127.0.0.1:8765` で動かした（リポジトリには置いていない）。接続のパスワードは今の暗号化の鍵で暗号化されるので、`.envrc` と違う鍵で作った接続は確かめた後に消す（`rotate_secret_encryption` が読めない行で止まらないように）。機密のConnectorを試すときは、会話を機密で始めるか、会話の設定の盾のボタンで機密にする（ローカルLLMのモデルが要る。開発用のDBの「確認用の偽モデル」はローカルLLM）。今の開発用のDBにConnectorと接続は残っていない（どれも削除済み）。
 - ConnectorのAdapterのテスト（`connector/tests/test_adapters.py`）は、PostgreSQLの分はいつも動き、MySQL・SQL Serverの分は管理者の接続先（`YORIKI_CONNECTOR_TEST_MYSQL`・`YORIKI_CONNECTOR_TEST_SQLSERVER`。`.envrc.example`）を渡したときだけ動く。#42 では一時のコンテナ（`docker run -d --rm --name yoriki-connector-mysql -p 127.0.0.1:3307:3306 -e MYSQL_ROOT_PASSWORD=... mysql:8.0`、`docker run -d --rm --platform linux/amd64 --name yoriki-connector-mssql -p 127.0.0.1:1434:1433 -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD=... mcr.microsoft.com/mssql/server:2022-latest`）で試した。手元のmacOSのODBC Driver 18（18.7.1.1まで）は `/opt/homebrew/opt/openssl/lib/` のOpenSSL 3以前を探すので、Homebrewの `openssl` が4系だと読み込めない。`export DYLD_LIBRARY_PATH=/opt/homebrew/opt/openssl@3/lib` を付け、`uv run` ではなく `.venv/bin/python -m pytest ...` で動かす（`uv run` を通すと `DYLD_LIBRARY_PATH` がPythonに届かない）。本体のイメージ（`docker build -t yoriki-api:dev api`）の中で、リポジトリを読取り専用でmountして動かしてもよい（`--user root` で `pip install uv`・`UV_PROJECT_ENVIRONMENT=/tmp/venv uv sync --locked`・`uv run --no-sync pytest ...`。DBのホストは `host.docker.internal`）。手元の `mysql@8.4`（Homebrew）は利用者のものなので使わない。
 - 画面をブラウザで確かめるときは、api（上記）と `cd frontend && pnpm dev` を起動し、Playwright（Python）で操作する。手元のブラウザのキャッシュ（chromium-1208）に合う版は `uv run --no-project --with playwright==1.58.0 python <script>`。基盤管理者は `/login?method=password` でログインし、`storage_state` を保存して使い回す。SSOの社員はパスワードでログインできないので、`manage.py shell` でその社員のセッションを作り（`BACKEND_SESSION_KEY` は `utils.backends.PasswordBackend`）、Cookie `sessionid` に入れる。開発用のDBには、#35 で使った基盤管理者 `skill-admin@example.co.jp`（パスワード `check-pass-123`）、社員 `skill-member@example.co.jp`（部門「経理部」の所属とGroup「部門のSkill編集者」。以前の「編集」の役割の代わり）、委任したユーザー管理者 `user-admin@example.co.jp`（Group「ユーザー管理者」。パスワードはないので、セッションを作って使う）、システムのSkill「部門横断の照合（確認用）」（未公開）、部門のSkill「請求書の照合」（版3まで）が残っている。
 - 手元のmacOS（Node.js 26.12.1）では、フロントエンドの単体テストのうちコンポーネントをマウントしないファイル（`test/nuxt/composables/`、`api/client.test.ts` 等）が、Nuxtの環境の準備で止まって「Hook timed out」になる（`main` でも同じ。CIでは通る。原因は未調査）。コンポーネントのテストのファイルと一緒に `pnpm vitest run <ファイル>` で動かすと、同じ実行の中では通ることがある。

@@ -35,7 +35,7 @@ from utils.exceptions import Conflict
 from ..sandbox import workspace_path
 from ..skill_edit import access_label, edit_entry, edit_target
 from ..skills import asset_path, draft_asset_path, scope_label
-from . import ALL_TOOLS
+from . import SKILL_TOOLS
 from .base import Effect, Tool, ToolContext, ToolResult
 from .files import call_helper, helper_error
 
@@ -347,7 +347,7 @@ UPDATE_DRAFT_PARAMETERS: dict[str, Any] = {
         "expected_revision": {"type": "integer", "minimum": 0},
         "description": {"type": "string", "maxLength": 2000},
         "instructions": {"type": "string", "maxLength": 100000},
-        "tools": {"type": "array", "items": {"type": "string", "enum": [t.name for t in ALL_TOOLS]}, "maxItems": 50},
+        "tools": {"type": "array", "items": {"type": "string", "enum": [t.name for t in SKILL_TOOLS]}, "maxItems": 50},
         "requires": {"type": "array", "items": {"type": "string", "enum": list(REQUIREMENTS)}, "maxItems": 10},
         "input_schema": {"type": "string", "maxLength": 50000},
         "output_schema": {"type": "string", "maxLength": 50000},

@@ -5,6 +5,11 @@ from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from artifact.models import Artifact, ArtifactKind
+from connector.models import Connector
+from harness.connectors import DATASOURCE_TOOL_NAMES, ConnectorUnavailable
+from harness.connectors import build_catalog as build_connector_catalog
+from harness.connectors import explicit_text as explicit_connectors_text
+from harness.connectors import resolve_explicit as resolve_explicit_connectors
 from harness.skills import SkillUnavailable, build_catalog, explicit_text, resolve_explicit
 from run.dispatch import enqueue_run
 from run.models import (
@@ -19,7 +24,7 @@ from run.models import (
     RunStatus,
 )
 from runtime.models import RuntimeProfile
-from skill.models import CONVERSATION_SCOPES, Skill, SkillAction
+from skill.models import CONVERSATION_SCOPES, Skill, SkillAction, SkillVersion
 
 from .models import Conversation, ConversationMessage, InstructionKind, InstructionState, MessageRole, UserInstruction
 
@@ -38,18 +43,27 @@ EARLIER_ATTACHMENTS_LIMIT = 50
 
 
 def user_message_data(
-    message: ConversationMessage, text: str, *, first: bool = False, skills: list[dict[str, object]] | None = None
+    message: ConversationMessage,
+    text: str,
+    *,
+    first: bool = False,
+    skills: list[dict[str, object]] | None = None,
+    connectors: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     """利用者の発言のRunEventの内容。添付は /workspace/input の場所とあわせて残す（harness/context.py が読む）。
 
     Runの最初の発言（first）には、同じ会話でそれまでに送った添付も添える。/workspace/input には会話の添付が
     すべてあり、作業ファイルも前の依頼のCheckpointから引き継ぐので、前の依頼のファイルを使う依頼に答えられるように。
-    `skills` は `/` で指定してRun開始時に解決したSkill（Manifestの内容）。本文も添え、モデルに `skill` を呼ばせない
+    `skills` は `/` で指定してRun開始時に解決したSkill（Manifestの内容）。本文も添え、モデルに `skill` を呼ばせない。
+    `connectors` は `@` で指定したConnector。公開している表の説明を添える（harness.md §10.2）
     """
     data: dict[str, object] = {"text": text, "message": message.uid}
     if skills:
         data["skills"] = skills
         data["skills_text"] = explicit_text(skills)
+    if connectors:
+        data["connectors"] = connectors
+        data["connectors_text"] = explicit_connectors_text(connectors)
     if attachments := describe_attachments(message):
         data["attachments"] = attachments
     if first:
@@ -90,12 +104,14 @@ def post_message(
     actor,
     attachments: list[Artifact] | None = None,
     skills: list[Skill] | None = None,
+    connectors: list[Connector] | None = None,
     skill_edit: dict[str, str] | None = None,
 ):
     """利用者のメッセージを保存し、新しいRun・追加指示・確認への回答・次の依頼のどれかとして受け付ける。
 
-    Skillを指定したメッセージは、Skillの版をRun開始時に決めるので、実行中なら次の依頼にする。Skillの編集の依頼
-    （`skill_edit`。{"id", "name"}、新しいSkillならidが空）も、別のRunになるので同じく次の依頼にする
+    Skill・Connectorを指定したメッセージは、Skillの版と使えるConnectorの一覧をRun開始時に決めるので、実行中なら
+    次の依頼にする。Skillの編集の依頼（`skill_edit`。{"id", "name"}、新しいSkillならidが空）も、別のRunになるので
+    同じく次の依頼にする
     """
     conversation = Conversation.objects.select_for_update().get(pk=conversation.pk)
     if client_message_id:
@@ -111,6 +127,7 @@ def post_message(
         body=body,
         client_message_id=client_message_id,
         skills=[{"id": s.uid, "name": s.name} for s in skills or []],
+        connectors=[{"id": c.uid, "name": c.name} for c in connectors or []],
         skill_edit=skill_edit or {},
     )
     if attachments:
@@ -140,7 +157,7 @@ def post_message(
         return message
     message.run = run
     message.save(update_fields=["run"])
-    separate = bool(skills) or bool(skill_edit)  # 別のRunとして始める依頼
+    separate = bool(skills) or bool(connectors) or bool(skill_edit)  # 別のRunとして始める依頼
     question = ClarificationRequest.objects.filter(
         run=run, status=ClarificationStatus.OPEN, kind__in=(ClarificationKind.QUESTION, ClarificationKind.SKILL_EDIT)
     ).first()
@@ -208,6 +225,34 @@ def chosen_skills(message: ConversationMessage) -> list[Skill]:
     return [found[uid] for uid in ids]
 
 
+def chosen_connectors(message: ConversationMessage) -> list[Connector]:
+    """メッセージで指定したConnector（指定の順）。削除されたものがあれば ConnectorUnavailable"""
+    ids = [c["id"] for c in message.connectors]
+    connectors = Connector.objects.filter(uid__in=ids, deleted=False).select_related(
+        "connection", "current_version", "department"
+    )
+    found = {c.uid: c for c in connectors}
+    missing = [c["name"] for c in message.connectors if c["id"] not in found]
+    if missing:
+        raise ConnectorUnavailable(_("%(names)s：削除されました") % {"names": "、".join(missing)})
+    return [found[uid] for uid in ids]
+
+
+def resolve_connectors(
+    message: ConversationMessage, user, version, skills: list[dict[str, object]], *, sensitive: bool
+):
+    """`@` で指定したConnectorを確かめる。`/` で指定したSkillがConnectorのToolを許さなければ使えないので断る"""
+    try:
+        connectors = resolve_explicit_connectors(chosen_connectors(message), user, version, sensitive=sensitive)
+    except ConnectorUnavailable as exc:
+        raise CannotStart(_("指定したConnectorを使えません。%(reason)s") % {"reason": exc}) from exc
+    if connectors and skills:
+        tools = SkillVersion.objects.filter(pk__in=[s["version"] for s in skills]).values_list("tools", flat=True)
+        if not any(name in DATASOURCE_TOOL_NAMES for names in tools for name in names):
+            raise CannotStart(_("指定したSkillはConnectorのToolを使わないので、Connectorを指定できません。"))
+    return connectors
+
+
 def start_run(conversation: Conversation, message: ConversationMessage, actor, *, parent: Run | None = None) -> Run:
     """呼び出し側のtransactionの中で呼ぶ。モデル設定の版とeffortを固定し、最初の発言を記録して実行を依頼する"""
     profile = conversation.model_profile
@@ -237,6 +282,16 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
         if not skills and skill_edit is None and version.supports_tools
         else None
     )
+    # エージェントが使えるConnectorの一覧も固定する（Toolの引数をRunの中で変えない。harness.md §10.2）。
+    # 使えるかは操作のたびに確かめ直す
+    # 機密のConnectorは、機密の会話のRunにだけ出す（design.md §4.9.1）
+    sensitive = conversation.handles_sensitive_data
+    connectors = resolve_connectors(message, conversation.owner, version, skills, sensitive=sensitive)
+    connector_catalog = (
+        build_connector_catalog(conversation.owner, sensitive=sensitive, explicit=connectors)
+        if version.supports_tools
+        else None
+    )
     fixed: dict[str, object] = {
         "model_version": version.pk,
         "effort": effort,
@@ -244,6 +299,8 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
         "handles_sensitive_data": conversation.handles_sensitive_data,
         "skills": skills,
         "skill_catalog": catalog,
+        "connectors": connectors,
+        "connector_catalog": connector_catalog,
     }
     if skill_edit is not None:
         fixed["skill_edit"] = skill_edit
@@ -264,7 +321,7 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
     message.run = run
     message.save(update_fields=["run"])
     RunEvent.record(run, RunEventKind.STATUS, {"status": RunStatus.QUEUED}, actor=actor)
-    data = user_message_data(message, message.body, first=True, skills=skills)
+    data = user_message_data(message, message.body, first=True, skills=skills, connectors=connectors)
     RunEvent.record(run, RunEventKind.USER_MESSAGE, data, actor=actor)
     enqueue_run(run)
     return run

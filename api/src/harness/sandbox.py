@@ -26,7 +26,7 @@ from django.conf import settings
 from django.utils import timezone
 from nanoid import generate
 
-from artifact.models import Artifact, ArtifactKind, BlobObject
+from artifact.models import CONNECTOR_RESULTS_DIR, Artifact, ArtifactKind, BlobObject
 from artifact.storage import StorageBackend, StorageError, StoredObject, get_storage
 from run.models import Checkpoint, ExecutionAttempt, Run
 from runtime.launcher import (
@@ -333,10 +333,14 @@ class SandboxSession:
         return fetch()
 
     def sync_inputs(self) -> None:
-        """会話の添付（取り込んだ依頼のもの）を、Workerのディレクトリ（Sandboxの /workspace/input に読取り専用で
-        mountする）に置く。まだ置いていないものだけを足す。bind mountなので、動いているSandboxにもそのまま見える"""
-        attachments = (
-            Artifact.objects.sent_inputs(self.run.conversation_id)
+        """会話の添付（取り込んだ依頼のもの）とConnectorの結果を、Workerのディレクトリ（Sandboxの /workspace/input に
+        読取り専用でmountする）に置く。まだ置いていないものだけを足す。bind mountなので、動いているSandboxにも
+        そのまま見える。Connectorの結果は connectors/<呼出し>/ の下に置く（harness.md §10.2）"""
+        conversation_id = self.run.conversation_id
+        # 保持期限の切れたConnectorの結果は置かない（会話で照会を重ねても、置くものが増え続けないように）
+        results = Artifact.objects.connector_results(conversation_id).filter(expires__gt=timezone.now())
+        inputs = (
+            (Artifact.objects.sent_inputs(conversation_id) | results)
             .exclude(pk__in=self.inputs)
             .select_related("blob")
             .order_by("pk")
@@ -344,12 +348,15 @@ class SandboxSession:
         self.input_dir.mkdir(parents=True, exist_ok=True)
         # userns-remap・gVisorのSandboxの利用者からも読めるようにする（書けるのはWorkerだけ）
         self.input_dir.chmod(0o755)
-        for artifact in attachments:
+        for artifact in inputs:
             path = self.input_dir / artifact.path
-            if path.parent != self.input_dir:
-                logger.warning("run %s: skipping attachment %s with a bad name", self.run.uid, artifact.uid)
+            if not self._input_path_ok(artifact, path):
+                logger.warning("run %s: skipping input %s with a bad name", self.run.uid, artifact.uid)
                 continue
             try:
+                for parent in reversed(path.relative_to(self.input_dir).parents[:-1]):
+                    (self.input_dir / parent).mkdir(exist_ok=True)
+                    (self.input_dir / parent).chmod(0o755)
                 with artifact.blob.open() as src, tempfile.NamedTemporaryFile(dir=self.dir, delete=False) as tmp:
                     shutil.copyfileobj(src, tmp, 1024 * 1024)
                 os.chmod(tmp.name, 0o644)
@@ -357,6 +364,19 @@ class SandboxSession:
             except (OSError, StorageError) as exc:
                 raise SandboxUnavailable(f"cannot prepare the attachment {artifact.uid}: {exc}") from exc
             self.inputs.add(artifact.pk)
+
+    def _input_path_ok(self, artifact: Artifact, path: Path) -> bool:
+        """添付は /workspace/input の直下、Connectorの結果は connectors/ の下だけに置く。Connectorの結果の
+        ディレクトリと同じ名前の添付（その名前を避けるようにする前に送ったもの）は置かない"""
+        if artifact.kind == ArtifactKind.CONNECTOR_RESULT:
+            parts = Path(artifact.path).parts
+            return (
+                len(parts) == 3
+                and parts[0] == CONNECTOR_RESULTS_DIR
+                and all(p not in ("", ".", "..") for p in parts)
+                and self.input_dir in path.parents
+            )
+        return path.parent == self.input_dir and artifact.path != CONNECTOR_RESULTS_DIR
 
     def _restore(self, sandbox: Sandbox) -> None:
         checkpoint = Checkpoint.latest_for(self.run)

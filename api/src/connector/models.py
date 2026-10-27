@@ -6,7 +6,8 @@
 出さない）。
 
 エージェントが扱える範囲（境界。公開する表・ビュー、上限、機密のフラグ）は不変の版（ConnectorVersion）で持つ。
-Runは開始時の版を固定して使う。
+境界の変更は、実行中のRunにも次の操作から効く（管理者の責任）。操作のたびに使った版をToolInvocationに記録する
+（authorization.md §7.2）。
 
 Connectorは範囲（部門・全社・システム）を持つ（authorization.md §5.2）。範囲と部門は作成時に決めて変えない。
 会話で使えるのは、部門のものは使える部門の人、全社のものは全員で、システムのものは会話では使わない
@@ -83,8 +84,7 @@ class DatabaseConnection(models.Model):
     password = EncryptedSecretField(_("パスワード"))
     tls = models.PositiveSmallIntegerField(_("通信の暗号化"), choices=TLSMode.choices, default=TLSMode.VERIFY)
     connect_timeout_seconds = models.PositiveIntegerField(_("接続のタイムアウト（秒）"), default=10)
-    # 全Workerを通した同時実行数の上限。この接続の上のConnectorを合わせて数える。Runnerが守る
-    # （会話でConnectorを使う段階で実装する。design.md §4.9.5）
+    # 全Workerを通した同時実行数の上限。この接続の上のConnectorを合わせて数える（ConnectionLease。design.md §4.9.5）
     max_concurrency = models.PositiveIntegerField(_("同時実行数の上限"), default=4)
     is_active = models.BooleanField(_("有効"), default=True)
     created_by = models.ForeignKey(
@@ -321,6 +321,31 @@ class ConnectorVersion(models.Model):
 
     def __str__(self):
         return f"{self.connector} v{self.number}"
+
+
+class ConnectionLease(models.Model):
+    """接続の同時実行の枠（design.md §4.9.5）。エージェントの操作の間だけ持ち、終われば消す。
+
+    枠を取るときは接続の行をロックして数えるので、全Workerを通して上限を超えない（connector/limits.py）。
+    Workerが落ちて消せなかった枠は、期限を過ぎたら数えない
+    """
+
+    connection = models.ForeignKey(
+        DatabaseConnection, on_delete=models.CASCADE, related_name="leases", verbose_name=_("接続先")
+    )
+    # 枠を持つもの（ToolInvocationのuid）。調べるときに使う
+    holder = models.CharField(_("保持者"), max_length=100)
+    expires = models.DateTimeField(_("期限"))
+
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("接続の同時実行の枠")
+        verbose_name_plural = verbose_name
+        indexes = [models.Index(fields=["connection", "expires"])]
+
+    def __str__(self):
+        return f"{self.connection_id}:{self.holder}"
 
 
 # パスワードは暗号化した値でも監査ログに残さない

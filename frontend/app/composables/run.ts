@@ -126,6 +126,10 @@ export const toolLabel = (
       return t('ジョブを停止')
     case 'skill':
       return t('Skillを読み込む：{name}', { name: arg('name') })
+    case 'datasource_describe':
+      return t('Connectorの表を確かめる：{connector}', { connector: arg('connector') })
+    case 'datasource_query':
+      return t('Connectorで読み取る：{connector}', { connector: arg('connector') })
     case 'submit_result':
       return t('業務結果を確定')
     case 'request_skill_edit':

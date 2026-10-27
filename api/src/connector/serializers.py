@@ -427,6 +427,36 @@ class MinimumConnectorSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class AppConnectorSerializer(serializers.ModelSerializer):
+    """利用者が会話で使えるConnector（入力欄の `@` の候補）。名前・説明・範囲・機密のフラグだけを返し、接続先や
+    公開する表は返さない（authorization.md §7.2「候補のAPIと設定のAPIを分ける」）"""
+
+    id = serializers.CharField(source="uid", read_only=True)
+    kind_display = serializers.CharField(source="get_kind_display", read_only=True)
+    description = serializers.CharField(source="current_version.description", read_only=True)
+    is_sensitive = serializers.BooleanField(
+        source="current_version.is_sensitive",
+        read_only=True,
+        help_text=_("機密。ローカルLLMのモデルの会話でだけ使える"),
+    )
+    scope_display = serializers.CharField(source="get_scope_display", read_only=True)
+    department_info = MinimumDepartmentSerializer(source="department", read_only=True, allow_null=True)
+
+    class Meta:
+        model = Connector
+        fields = [
+            "id",
+            "name",
+            "kind_display",
+            "description",
+            "is_sensitive",
+            "scope",
+            "scope_display",
+            "department_info",
+        ]
+        read_only_fields = fields
+
+
 class ConnectorVersionSerializer(serializers.ModelSerializer):
     """版の表示（履歴）"""
 

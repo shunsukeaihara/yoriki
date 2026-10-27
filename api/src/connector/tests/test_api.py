@@ -1,15 +1,20 @@
+from datetime import timedelta
+
 import pytest
 from auditlog.models import LogEntry
 from django.contrib.auth.models import Group, Permission
 from django.test import override_settings
+from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
+from connector import views as connector_views
 from connector.adapters import get_adapter
 from connector.adapters.base import QueryResult
 from connector.errors import ConnectorError, ConnectorErrorKind
 from connector.factories import ConnectorFactory, DatabaseConnectionFactory
 from connector.models import (
     VERSION_FIELDS,
+    ConnectionLease,
     Connector,
     ConnectorKind,
     ConnectorScope,
@@ -727,3 +732,85 @@ class TestUsableBy:
 def _content(connector: Connector, **overrides):
     current = connector.current_version
     return {name: overrides.get(name, getattr(current, name)) for name in VERSION_FIELDS}
+
+
+@pytest.mark.django_db
+class TestAppConnector:
+    """会話で使えるConnector（入力欄の `@` の候補）"""
+
+    URL = "/api/app/v1/connectors/"
+
+    def test_lists_only_usable_connectors(self, api_client, app_user, department):
+        DepartmentMembership.objects.create(department=department, user=app_user)
+        ConnectorFactory.create(name="全社", version__description="共通のマスター")
+        ConnectorFactory.create(name="経理", scope=ConnectorScope.DEPARTMENT, department=department)
+        ConnectorFactory.create(name="機密", version__is_sensitive=True)
+        ConnectorFactory.create(
+            name="他部門", scope=ConnectorScope.DEPARTMENT, department=Department.objects.create(name="営業部")
+        )
+        ConnectorFactory.create(name="システム", scope=ConnectorScope.SYSTEM)
+        ConnectorFactory.create(name="停止中", is_active=False)
+        api_client.force_login(app_user)
+        res = api_client.get(self.URL)
+        assert res.status_code == 200
+        assert [c["name"] for c in res.json()["results"]] == ["全社", "機密", "経理"]
+        company = res.json()["results"][0]
+        # 候補のAPIは、接続先や公開する表を返さない（authorization.md §7.2）
+        assert set(company) == {
+            "id",
+            "name",
+            "kind_display",
+            "description",
+            "is_sensitive",
+            "scope",
+            "scope_display",
+            "department_info",
+        }
+        assert company["description"] == "共通のマスター"
+        assert res.json()["results"][1]["is_sensitive"] is True
+
+    def test_requires_login(self, api_client):
+        assert api_client.get(self.URL).status_code in (401, 403)
+
+
+@pytest.mark.django_db
+class TestConnectionLimit:
+    """管理画面の接続先への操作も、エージェントの操作と同じ接続の同時実行数の上限の中で行う"""
+
+    @pytest.mark.parametrize("operation", ["check", "tables", "describe", "query"])
+    def test_manage_operations_use_the_connection_limit(self, admin_client, monkeypatch, operation):
+        connector = ConnectorFactory.create(
+            connection__max_concurrency=1, version__tables=[{"schema": "public", "name": "vendors"}]
+        )
+        ConnectionLease.objects.create(
+            connection=connector.connection, holder="run", expires=timezone.now() + timedelta(minutes=5)
+        )
+        monkeypatch.setattr(connector_views, "PREVIEW_WAIT_SECONDS", 0)
+        if operation == "check":
+            res = admin_client.post(f"{CONNECTIONS}{connector.connection.uid}/check/")
+            assert res.json() == {
+                "ok": False,
+                "detail": "接続先の同時実行数の上限に達しています。しばらく待ってから実行してください",
+            }
+        elif operation == "query":
+            res = admin_client.post(f"{CONNECTORS}{connector.uid}/query/", {"sql": "SELECT 1"}, format="json")
+            assert res.json()["error_kind"] == ConnectorErrorKind.BUSY
+        else:
+            res = admin_client.get(f"{CONNECTORS}{connector.uid}/{operation}/")
+            assert not res.json()["ok"]
+            assert "同時実行数の上限" in res.json()["detail"]
+        assert res.status_code == 200
+        # 待っても取れなかったので、残っているのは先に取られた枠だけ
+        assert ConnectionLease.objects.count() == 1
+
+    def test_preview_query_waits_for_the_connection_limit(self, admin_client, monkeypatch):
+        connector = ConnectorFactory.create(
+            connection__max_concurrency=1, version__tables=[{"schema": "public", "name": "vendors"}]
+        )
+        ConnectionLease.objects.create(
+            connection=connector.connection, holder="run", expires=timezone.now() + timedelta(minutes=5)
+        )
+        monkeypatch.setattr(connector_views, "PREVIEW_WAIT_SECONDS", 0)
+        res = admin_client.post(f"{CONNECTORS}{connector.uid}/query/", {"sql": "SELECT 1"}, format="json")
+        assert res.status_code == 200
+        assert res.json()["error_kind"] == ConnectorErrorKind.BUSY

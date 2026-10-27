@@ -12,6 +12,7 @@ authorization.md §6）。
 
 import hashlib
 import json
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -95,6 +96,17 @@ class Payload:
         self.size = len(self.file_bytes)
 
 
+def _refuse_constant(name: str) -> Any:
+    raise ValueError(name)  # NaN・Infinity は標準のJSONではない
+
+
+def _finite_float(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError(text)  # 1e999 等。保存するファイルも標準のJSONで読めるように断る
+    return value
+
+
 def _canonical(data: Any) -> bytes:
     """並び順と空白によらない形。対になっていないサロゲート（JSONの "\\ud800" 等）はUTF-8にできないので断る
     （DBの入力の値やファイルにも書けないため）"""
@@ -111,7 +123,7 @@ def parse_payload(body: bytes, content_type: str) -> Payload:
     media_type = content_type.split(";", 1)[0].strip().lower()
     if media_type == "application/json" or media_type.endswith("+json"):
         try:
-            data = json.loads(body.decode("utf-8"))
+            data = json.loads(body.decode("utf-8"), parse_constant=_refuse_constant, parse_float=_finite_float)
         except (UnicodeDecodeError, ValueError, RecursionError):
             raise PayloadError("invalid_json", _("本文をJSONとして読めません（UTF-8のJSONを送ってください）")) from None
         return Payload(
@@ -163,15 +175,17 @@ def parse_payload(body: bytes, content_type: str) -> Payload:
 
 def dedup_key(payload: Payload, event_id_path: str, idempotency_key: str | None) -> str | None:
     """重複の判定のキー（design.md §4.2）。入口で指定した送り元のイベントID、`Idempotency-Key` ヘッダー、推奨の形式の
-    `event_id` の順に使う（推奨の形式は、入口でイベントIDの場所を指定していないときだけ）。どれもなければ None"""
+    `event_id` の順に使う（推奨の形式は、入口でイベントIDの場所を指定していないときだけ）。どれもなければ None。
+    イベントIDと `Idempotency-Key` は出所の違う値なので、`event:`・`idempotency:` を付けて分ける（イベントID「x」と
+    別の要求の `Idempotency-Key`「x」を同じ要求とみなさない）"""
     if event_id_path and payload.data is not None:
         found, value = extract(payload.data, event_id_path)
         if found:
-            return _key_text(value, _("イベントID"))
+            return "event:" + _key_text(value, _("イベントID"))
     if idempotency_key is not None and idempotency_key.strip():
-        return _key_text(idempotency_key.strip(), "Idempotency-Key")
+        return "idempotency:" + _key_text(idempotency_key.strip(), "Idempotency-Key")
     if not event_id_path and isinstance(payload.data, dict) and payload.data.get("event_id") is not None:
-        return _key_text(payload.data["event_id"], "event_id")
+        return "event:" + _key_text(payload.data["event_id"], "event_id")
     return None
 
 

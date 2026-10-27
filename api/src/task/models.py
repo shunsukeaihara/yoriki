@@ -533,7 +533,8 @@ class TriggerReceipt(models.Model):
         TriggerBindingRevision, on_delete=models.PROTECT, related_name="+", verbose_name=_("入口の版")
     )
     # 空なら重複を判定しない
-    dedup_key = models.CharField(_("重複のキー"), max_length=200, blank=True)
+    # 出所（event:・idempotency:）を付けて持つ
+    dedup_key = models.CharField(_("重複のキー"), max_length=220, blank=True)
     payload_sha256 = models.CharField(_("入力のハッシュ"), max_length=64)
     payload_size = models.PositiveIntegerField(_("payloadの大きさ"))
     content_type = models.CharField(_("形式"), max_length=100)

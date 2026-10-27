@@ -12938,7 +12938,7 @@ components:
           type: string
           readOnly: true
           title: 重複のキー
-          maxLength: 200
+          maxLength: 220
         payload_size:
           type: integer
           maximum: 2147483647

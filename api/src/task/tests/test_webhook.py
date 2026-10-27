@@ -13,11 +13,18 @@ from conversation.models import ConversationPurpose
 from run.models import Run, RunEndReason, RunEvent, RunEventKind, RunLaunch, RunStatus, RunTrigger
 from task.dispatch import WEBHOOK_NOTE, receive_webhook
 from task.factories import TaskDefinitionFactory
-from task.models import TaskDefinition, TaskScope, TriggerBinding, TriggerBindingRevision, TriggerReceipt
+from task.models import (
+    REVISION_FIELDS,
+    TaskDefinition,
+    TaskScope,
+    TriggerBinding,
+    TriggerBindingRevision,
+    TriggerReceipt,
+)
 from task.serializers import TriggerBindingSerializer
 from task.webhook import PayloadError
 from user.factories import UserFactory, grant
-from user.models import User, system_user
+from user.models import SYSTEM_USERNAME, User, system_user
 
 pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("default_runtime")]
 
@@ -208,7 +215,7 @@ def test_a_webhook_starts_a_task_run_with_the_payload_as_a_file(api_client, task
     receipt = TriggerReceipt.objects.get(run=run)
     assert (receipt.binding, receipt.dedup_key, receipt.binding_revision) == (
         binding,
-        "evt-1",
+        "event:evt-1",
         binding.current_revision,
     )
 
@@ -278,7 +285,7 @@ def test_recommended_format_needs_no_mapping(api_client, integrator, task):
     assert res.status_code == 202, res.json()
     run = Run.objects.get(uid=res.json()["run_id"])
     assert run.manifest["fixed"]["task"]["inputs"] == {"vendor": "ACME", "amount": 300}
-    assert TriggerReceipt.objects.get(run=run).dedup_key == "z-1"
+    assert TriggerReceipt.objects.get(run=run).dedup_key == "event:z-1"
     # message は依頼文にしない（payloadのファイルに残るだけ）
     assert "経理の確認用" not in RunEvent.objects.get(run=run, kind=RunEventKind.USER_MESSAGE).data["text"]
 
@@ -380,7 +387,7 @@ def test_the_admin_sees_receipts_without_results(api_client, integrator, task, w
     _send(api_client, task, key, _payload())
     api_client.force_login(integrator)
     receipts = api_client.get(f"{BINDINGS}{binding.uid}/receipts/").json()["results"]
-    assert [(r["dedup_key"], r["run_status"]) for r in receipts] == [("evt-1", RunStatus.QUEUED)]
+    assert [(r["dedup_key"], r["run_status"]) for r in receipts] == [("event:evt-1", RunStatus.QUEUED)]
     assert "result" not in receipts[0]
     # 連携の管理者はタスクを管理できないので、タスクのRunの結果・ログは見えない
     assert api_client.get(f"/api/app/v1/tasks/{task.uid}/runs/").status_code == 404
@@ -496,3 +503,43 @@ def test_task_managers_can_download_the_received_payload(api_client, platform_ad
     assert [f["name"] for f in files] == ["webhook_payload.json"]
     res = api_client.get(f"/api/app/v1/runs/{run_id}/artifacts/{files[0]['id']}/download/")
     assert json.loads(body_of(res)) == _payload()
+
+
+def test_event_ids_and_idempotency_keys_do_not_collide(api_client, task, webhook):
+    _binding, key = webhook
+    first = _send(api_client, task, key, _payload(event_id="x")).json()["run_id"]
+    body = {"data": {"vendor_name": "別の会社"}}
+    res = _send(api_client, task, key, body, HTTP_IDEMPOTENCY_KEY="x")
+    assert res.status_code == 202
+    assert res.json()["run_id"] != first
+
+
+def test_non_finite_numbers_are_refused(api_client, task, webhook):
+    _binding, key = webhook
+    for number in ("NaN", "Infinity", "1e999"):
+        body = json.dumps(_payload())[:-1] + f', "score": {number}}}'
+        res = _send(api_client, task, key, body)
+        assert (res.status_code, res.json()["code"]) == (400, "invalid_json"), number
+
+
+def test_webhook_stays_editable_after_the_task_drops_an_input(api_client, integrator, task, webhook):
+    binding, _key = webhook
+    revision = task.current_revision
+    content = {name: getattr(revision, name) for name in REVISION_FIELDS}
+    task.revise(actor=task.created_by, expected_version=1, **{**content, "inputs": INPUTS[:1]})
+    api_client.force_login(integrator)
+    url = f"{BINDINGS}{binding.uid}/"
+    res = api_client.patch(url, {"version": 1, "max_payload_bytes": 2048}, format="json")
+    assert res.status_code == 200, res.json()
+    # 取り出しを送るときは、タスクにない項目を断る
+    res = api_client.patch(url, {"version": 2, "inputs": [{"name": "amount", "path": "$.a"}]}, format="json")
+    assert res.status_code == 400
+
+
+def test_system_user_does_not_reuse_an_employee_account():
+    employee = UserFactory.create(username=SYSTEM_USERNAME)
+    user = system_user()
+    assert user != employee
+    assert (user.is_system, user.is_active) == (True, False)
+    User.objects.filter(pk=user.pk).update(is_active=True)
+    assert system_user().is_active is False

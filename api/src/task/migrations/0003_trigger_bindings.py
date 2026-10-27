@@ -122,7 +122,7 @@ class Migration(migrations.Migration):
                         default=utils.fields.generate_uid, editable=False, max_length=22, unique=True
                     ),
                 ),
-                ("dedup_key", models.CharField(blank=True, max_length=200, verbose_name="重複のキー")),
+                ("dedup_key", models.CharField(blank=True, max_length=220, verbose_name="重複のキー")),
                 ("payload_sha256", models.CharField(max_length=64, verbose_name="入力のハッシュ")),
                 ("payload_size", models.PositiveIntegerField(verbose_name="payloadの大きさ")),
                 ("content_type", models.CharField(max_length=100, verbose_name="形式")),

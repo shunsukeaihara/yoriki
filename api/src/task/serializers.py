@@ -523,9 +523,11 @@ class TriggerBindingSerializer(serializers.ModelSerializer):
         sent = attrs.pop("current_revision", {})
         current = self.instance.current_revision if self.instance else None
         content = {name: sent[name] if name in sent else getattr(current, name) for name in TRIGGER_REVISION_FIELDS}
-        # タスクの今の版にない項目は取り出せない（タスクの項目を後で消したら、その取り出しは受付時に使わない）
+        # タスクの今の版にない項目は取り出せない。確かめるのは作成時と取り出しを送ったときだけ（タスクから項目を
+        # 消した後も、名前や上限は変えられるように。消した項目の取り出しは受付時に使わない）
         names = {i["name"] for i in (task.current_revision.inputs if task.current_revision else [])}
-        if unknown := [i["name"] for i in content["inputs"] if i["name"] not in names]:
+        sent_inputs = sent.get("inputs", []) if self.instance else content["inputs"]
+        if unknown := [i["name"] for i in sent_inputs if i["name"] not in names]:
             raise serializers.ValidationError(
                 {"inputs": _("タスクにない項目です：%(names)s") % {"names": ", ".join(unknown)}}
             )

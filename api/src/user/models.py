@@ -8,7 +8,7 @@ from auditlog.registry import auditlog
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser, Group, Permission, UserManager
 from django.contrib.postgres.fields import ArrayField
-from django.db import models, transaction
+from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -57,6 +57,9 @@ class User(AbstractUser):
         verbose_name = _("ユーザー")
         verbose_name_plural = verbose_name
         permissions = [AppPermission.USE_ALL_DEPARTMENTS.meta, AppPermission.MANAGE_ALL_DEPARTMENTS.meta]
+        constraints = [
+            models.UniqueConstraint(fields=["is_system"], condition=models.Q(is_system=True), name="uniq_system_user"),
+        ]
 
     def __str__(self):
         return self.display_name or self.email or self.username
@@ -67,14 +70,25 @@ SYSTEM_USERNAME = "yoriki-system"
 
 def system_user() -> User:
     """人のいない起動（Webhook等）のRunの実行主体（Run.owner と会話の持ち主）。利用量の記録と実行時の文脈の名前に使い、
-    権限の判定には使わない（タスクの範囲で動く。authorization.md §6）。無効で、パスワードもないのでログインできない"""
-    user, created = User.objects.get_or_create(
-        username=SYSTEM_USERNAME,
-        defaults={"is_system": True, "is_active": False, "display_name": "Yoriki"},
-    )
-    if created:
+    権限の判定には使わない（タスクの範囲で動く。authorization.md §6）。
+
+    ユーザー名ではなく `is_system` で探す（同じ名前の社員のアカウントを流用しない）。名前が社員のアカウントと重なって
+    いたら、別の名前で作る。いつも無効でパスワードもない状態にして返す（ログインできない）"""
+    user = User.objects.filter(is_system=True).first()
+    if user is None:
+        username = SYSTEM_USERNAME
+        if User.objects.filter(username=username).exists():
+            username = f"{SYSTEM_USERNAME}-{secrets.token_hex(4)}"
+        try:
+            with transaction.atomic():
+                user = User.objects.create(username=username, is_system=True, is_active=False, display_name="Yoriki")
+        except IntegrityError:
+            # 同時に作られた（is_system のユーザーは1人だけ）
+            user = User.objects.get(is_system=True)
+    if user.is_active or user.has_usable_password():
+        user.is_active = False
         user.set_unusable_password()
-        user.save(update_fields=["password"])
+        user.save(update_fields=["is_active", "password"])
     return user
 
 

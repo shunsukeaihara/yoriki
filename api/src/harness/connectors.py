@@ -98,8 +98,15 @@ def resolve_explicit(connectors: list[Connector], user, model_version) -> list[d
             raise ConnectorUnavailable(
                 _("%(name)s：機密のConnectorは、ローカルLLMのモデルでだけ使えます") % {"name": connector.name}
             )
+        version = connector.current_version
+        # 説明は確かめた版から作る（作る間に別の版になっても、確かめていない版の中身を入れない）
         entries.append(
-            {"connector": connector.uid, "name": connector.name, "sensitive": connector.current_version.is_sensitive}
+            {
+                "connector": connector.uid,
+                "name": connector.name,
+                "version": version.pk,
+                "sensitive": version.is_sensitive,
+            }
         )
     return entries
 
@@ -107,14 +114,10 @@ def resolve_explicit(connectors: list[Connector], user, model_version) -> list[d
 def explicit_text(entries: list[dict[str, Any]]) -> str:
     """`@` で指定したConnectorの説明（公開している表の名前と説明）。最初の発言に添える。列の型はDBから読むので
     ここには入れず、`datasource_describe` で確かめさせる（Run開始時に接続先へつながない）"""
-    found = {
-        c.uid: c
-        for c in Connector.objects.filter(uid__in=[e["connector"] for e in entries]).select_related("current_version")
-    }
+    versions = ConnectorVersion.objects.in_bulk([e["version"] for e in entries])
     blocks = []
     for entry in entries:
-        connector = found.get(entry["connector"])
-        version = connector.current_version if connector else None
+        version = versions.get(entry["version"])
         if version is None:
             continue
         lines = [f'<connector name="{_escape(entry["name"])}">']

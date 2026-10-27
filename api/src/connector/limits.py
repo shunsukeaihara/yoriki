@@ -2,7 +2,7 @@
 
 上限は接続（DatabaseConnection）ごとに持ち、同じ接続の上のConnectorを合わせて、全Workerとapiを通して数える。
 枠（ConnectionLease）は接続の行をロックして数えてから作り、操作が終われば消す。Workerが落ちて消せなかった枠は、
-期限を過ぎたら数えない（期限は操作の実行時間の上限より長くする）。
+期限を過ぎたら数えない。操作の間は、呼び出し側が期限を延ばす（`connection_slot()` が返す関数）。
 """
 
 import time
@@ -44,14 +44,16 @@ def connection_slot(
     wait_seconds: float,
     sleep: Callable[[float], None] = time.sleep,
     on_wait: Callable[[], None] = lambda: None,
-) -> Iterator[None]:
+) -> Iterator[Callable[[], None]]:
     """接続の枠を1つ取ってから中を実行する。`wait_seconds` 待っても空かなければ ConnectorError（BUSY）。
 
-    `hold_seconds` は中の操作が続きうる長さ（枠の期限は、これに余裕を足したもの）。`on_wait` は待つ間に呼ぶ
-    （Runnerのleaseを延ばす）。呼び出し側のtransactionの外で使う（枠を他のWorkerに見せるため）
+    `hold_seconds` は中の操作が続きうる長さ（枠の期限は、これに余裕を足したもの）。返す関数を呼ぶと、期限を
+    今からその長さだけ延ばす（DBの実行時間の上限は文ごとに効くので、長い操作の間は呼び続ける）。`on_wait` は
+    待つ間に呼ぶ（Runnerのleaseを延ばす）。呼び出し側のtransactionの外で使う（枠を他のWorkerに見せるため）
     """
+    hold = hold_seconds + LEASE_MARGIN_SECONDS
     deadline = time.monotonic() + wait_seconds
-    while (lease := _try_acquire(connection, holder, hold_seconds + LEASE_MARGIN_SECONDS)) is None:
+    while (lease := _try_acquire(connection, holder, hold)) is None:
         if time.monotonic() >= deadline:
             raise ConnectorError(
                 ConnectorErrorKind.BUSY,
@@ -59,7 +61,11 @@ def connection_slot(
             )
         on_wait()
         sleep(POLL_SECONDS)
+
+    def renew() -> None:
+        ConnectionLease.objects.filter(pk=lease.pk).update(expires=timezone.now() + timedelta(seconds=hold))
+
     try:
-        yield
+        yield renew
     finally:
         ConnectionLease.objects.filter(pk=lease.pk).delete()

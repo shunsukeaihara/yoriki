@@ -772,6 +772,37 @@ class TestAppConnector:
     def test_requires_login(self, api_client):
         assert api_client.get(self.URL).status_code in (401, 403)
 
+
+@pytest.mark.django_db
+class TestConnectionLimit:
+    """管理画面の接続先への操作も、エージェントの操作と同じ接続の同時実行数の上限の中で行う"""
+
+    @pytest.mark.parametrize("operation", ["check", "tables", "describe", "query"])
+    def test_manage_operations_use_the_connection_limit(self, admin_client, monkeypatch, operation):
+        connector = ConnectorFactory.create(
+            connection__max_concurrency=1, version__tables=[{"schema": "public", "name": "vendors"}]
+        )
+        ConnectionLease.objects.create(
+            connection=connector.connection, holder="run", expires=timezone.now() + timedelta(minutes=5)
+        )
+        monkeypatch.setattr(connector_views, "PREVIEW_WAIT_SECONDS", 0)
+        if operation == "check":
+            res = admin_client.post(f"{CONNECTIONS}{connector.connection.uid}/check/")
+            assert res.json() == {
+                "ok": False,
+                "detail": "接続先の同時実行数の上限に達しています。しばらく待ってから実行してください",
+            }
+        elif operation == "query":
+            res = admin_client.post(f"{CONNECTORS}{connector.uid}/query/", {"sql": "SELECT 1"}, format="json")
+            assert res.json()["error_kind"] == ConnectorErrorKind.BUSY
+        else:
+            res = admin_client.get(f"{CONNECTORS}{connector.uid}/{operation}/")
+            assert not res.json()["ok"]
+            assert "同時実行数の上限" in res.json()["detail"]
+        assert res.status_code == 200
+        # 待っても取れなかったので、残っているのは先に取られた枠だけ
+        assert ConnectionLease.objects.count() == 1
+
     def test_preview_query_waits_for_the_connection_limit(self, admin_client, monkeypatch):
         connector = ConnectorFactory.create(
             connection__max_concurrency=1, version__tables=[{"schema": "public", "name": "vendors"}]

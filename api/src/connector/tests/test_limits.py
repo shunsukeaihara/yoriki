@@ -64,3 +64,14 @@ def test_waits_for_a_slot_to_be_freed():
     ):
         assert list(ConnectionLease.objects.values_list("holder", flat=True)) == ["a"]
     assert len(waits) == 1 and beats == [1]
+
+
+@pytest.mark.django_db
+def test_slot_can_be_renewed_during_a_long_operation():
+    connection = DatabaseConnectionFactory.create(max_concurrency=1)
+    with connection_slot(connection, "a", hold_seconds=30, wait_seconds=0) as renew:
+        lease = ConnectionLease.objects.get()
+        ConnectionLease.objects.filter(pk=lease.pk).update(expires=timezone.now() + timedelta(seconds=1))
+        renew()
+        lease.refresh_from_db()
+        assert lease.expires > timezone.now() + timedelta(seconds=60)

@@ -35,8 +35,18 @@ from .serializers import (
 
 # 試し実行の応答に載せる行数。行数・サイズの上限はConnectorの版の値で、エージェントと同じ
 PREVIEW_ROWS = 200
-# 試し実行で、接続の同時実行の枠が空くのを待つ上限（秒）
+# 管理画面の操作（接続の確認、表の一覧、説明、試し実行）で、接続の同時実行の枠が空くのを待つ上限（秒）
 PREVIEW_WAIT_SECONDS = 10
+# 表の一覧と接続の確認に見込む時間（秒）。接続のタイムアウトに足して、枠の期限にする
+CATALOG_SECONDS = 30
+
+
+def in_slot(connection: DatabaseConnection, request, hold_seconds: int, operation):
+    """管理画面の操作も、エージェントの操作と同じ接続の同時実行数の上限の中で行う（design.md §4.9.5）"""
+    with connection_slot(
+        connection, f"manage:{request.user.uid}", hold_seconds=hold_seconds, wait_seconds=PREVIEW_WAIT_SECONDS
+    ):
+        return operation()
 
 
 class DatabaseConnectionFilter(filters.FilterSet):
@@ -116,8 +126,9 @@ class DatabaseConnectionViewSet(SoftDeleteMixin, ModelViewSet):
     )
     @action(detail=True, methods=["post"], serializer_class=ConnectorCheckSerializer)
     def check(self, request, *args, **kwargs):
+        connection = self.get_object()
         try:
-            get_adapter(self.get_object()).check()
+            in_slot(connection, request, connection.connect_timeout_seconds, get_adapter(connection).check)
             result = {"ok": True, "detail": ""}
         except ConnectorError as exc:
             result = {"ok": False, "detail": exc.message}
@@ -130,8 +141,12 @@ class DatabaseConnectionViewSet(SoftDeleteMixin, ModelViewSet):
     )
     @action(detail=True, methods=["get"], serializer_class=ConnectorTablesSerializer)
     def tables(self, request, *args, **kwargs):
+        connection = self.get_object()
+        hold = connection.connect_timeout_seconds + CATALOG_SECONDS
         try:
-            result = ConnectorTablesSerializer.build(get_adapter(self.get_object()).list_tables())
+            result = ConnectorTablesSerializer.build(
+                in_slot(connection, request, hold, get_adapter(connection).list_tables)
+            )
         except ConnectorError as exc:
             result = ConnectorTablesSerializer.build(None, exc.message)
         return Response(self.get_serializer(result).data)
@@ -200,8 +215,12 @@ class ConnectorViewSet(SoftDeleteMixin, ModelViewSet):
     )
     @action(detail=True, methods=["get"], serializer_class=ConnectorTablesSerializer)
     def tables(self, request, *args, **kwargs):
+        connection = self.get_object().connection
+        hold = connection.connect_timeout_seconds + CATALOG_SECONDS
         try:
-            result = ConnectorTablesSerializer.build(get_adapter(self.get_object().connection).list_tables())
+            result = ConnectorTablesSerializer.build(
+                in_slot(connection, request, hold, get_adapter(connection).list_tables)
+            )
         except ConnectorError as exc:
             result = ConnectorTablesSerializer.build(None, exc.message)
         return Response(self.get_serializer(result).data)
@@ -255,8 +274,13 @@ class ConnectorViewSet(SoftDeleteMixin, ModelViewSet):
     )
     @action(detail=True, methods=["get"], serializer_class=ConnectorTablesSerializer)
     def describe(self, request, *args, **kwargs):
+        connector = self.get_usable_object()
+        assert connector.current_version is not None  # get_usable_object() が確かめた
+        hold = connector.connection.connect_timeout_seconds + connector.current_version.timeout_seconds
         try:
-            result = ConnectorTablesSerializer.build(get_adapter(self.get_usable_object()).describe())
+            result = ConnectorTablesSerializer.build(
+                in_slot(connector.connection, request, hold, get_adapter(connector).describe)
+            )
         except ConnectorError as exc:
             result = ConnectorTablesSerializer.build(None, exc.message)
         return Response(self.get_serializer(result).data)
@@ -275,16 +299,12 @@ class ConnectorViewSet(SoftDeleteMixin, ModelViewSet):
         adapter = get_adapter(connector)
         sql, params = serializer.validated_data["sql"], serializer.validated_data["params"]
         assert connector.current_version is not None  # get_usable_object() が確かめた
+        hold = connector.connection.connect_timeout_seconds + connector.current_version.timeout_seconds
         try:
-            # エージェントの操作と同じく、接続の同時実行数の上限の中で実行する
-            with connection_slot(
-                connector.connection,
-                f"manage:{request.user.uid}",
-                hold_seconds=connector.connection.connect_timeout_seconds + connector.current_version.timeout_seconds,
-                wait_seconds=PREVIEW_WAIT_SECONDS,
-            ):
-                # 応答に載せる行だけをメモリに残す（上限までの全体を貯めない）
-                result = adapter.query(sql, params, keep_rows=PREVIEW_ROWS)
+            # 応答に載せる行だけをメモリに残す（上限までの全体を貯めない）
+            result = in_slot(
+                connector.connection, request, hold, lambda: adapter.query(sql, params, keep_rows=PREVIEW_ROWS)
+            )
             data = ConnectorQueryResultSerializer.build(result)
         except ConnectorError as exc:
             data = ConnectorQueryResultSerializer.build(None, error_kind=exc.kind, detail=exc.message)

@@ -138,9 +138,10 @@ def _slot(connector: Connector, version: ConnectorVersion, context: ToolContext)
     )
 
 
-def _keep_alive[T](context: ToolContext, operation: Callable[[], T]) -> T:
-    """接続先への操作を別のスレッドで行い、終わるのを待つ間もAttemptのleaseを延ばす（実行時間の上限はleaseより
-    長く設定できる）。別のスレッドはDjangoのDBに触らない（接続先のドライバだけを使う）"""
+def _keep_alive[T](context: ToolContext, operation: Callable[[], T], renew: Callable[[], None]) -> T:
+    """接続先への操作を別のスレッドで行い、終わるのを待つ間もAttemptのleaseと接続の枠の期限を延ばす（実行時間の
+    上限はleaseより長く設定でき、DBの上限は文ごとに効く）。別のスレッドはDjangoのDBに触らない（接続先の
+    ドライバだけを使う）"""
     with ThreadPoolExecutor(max_workers=1, thread_name_prefix="connector") as pool:
         future = pool.submit(operation)
         while True:
@@ -148,6 +149,7 @@ def _keep_alive[T](context: ToolContext, operation: Callable[[], T]) -> T:
                 return future.result(timeout=HEARTBEAT_SECONDS)
             except FutureTimeout:
                 context.attempt.heartbeat()
+                renew()
 
 
 def _failed(exc: ConnectorError, connector: Connector, version: ConnectorVersion) -> ToolResult:
@@ -181,8 +183,8 @@ def describe(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         return refused
     adapter = get_adapter(connector, version)
     try:
-        with _slot(connector, version, context):
-            tables = _keep_alive(context, adapter.describe)
+        with _slot(connector, version, context) as renew:
+            tables = _keep_alive(context, adapter.describe, renew)
     except ConnectorError as exc:
         return _failed(exc, connector, version)
     text = render_tables(connector, version, tables)
@@ -236,8 +238,8 @@ def query(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         # 行は読むたびにCSVで書き、メモリには見せる行だけを残す
         out = io.TextIOWrapper(raw, encoding="utf-8", newline="")
         try:
-            with _slot(connector, version, context):
-                result = _keep_alive(context, lambda: adapter.query(sql, params, keep_rows=keep, csv_out=out))
+            with _slot(connector, version, context) as renew:
+                result = _keep_alive(context, lambda: adapter.query(sql, params, keep_rows=keep, csv_out=out), renew)
         except ConnectorError as exc:
             return _failed(exc, connector, version)
         out.flush()
@@ -300,7 +302,9 @@ def _render_result(connector: Connector, version: ConnectorVersion, result: Quer
     if shown:
         heading = "rows (CSV)" if shown == result.row_count else f"first {shown} rows (CSV)"
         lines.append(f"{heading}:")
-        lines.append(result.to_csv().rstrip("\n"))
+        # DBの値はデータとして扱わせる（harness.md §6.3）。値で囲みを閉じさせない
+        rows = result.to_csv().rstrip("\n").replace("</untrusted_content", "<\\/untrusted_content")
+        lines.append(f'<untrusted_content source="connector:{_escape(connector.name)}">\n{rows}\n</untrusted_content>')
     lines.append("</connector_result>")
     return "\n".join(lines)
 

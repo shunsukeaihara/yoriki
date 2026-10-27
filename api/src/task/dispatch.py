@@ -5,7 +5,6 @@
 ではなくタスクに固定したものの範囲で動く（使えるかの判定は task/checks.py）。
 """
 
-import io
 import json
 from collections.abc import Callable, Sequence
 from typing import Any
@@ -240,7 +239,7 @@ def _place_files(
         Artifact.objects.create(
             owner=actor,
             conversation=conversation,
-            blob=BlobObject.put(io.BytesIO(file.content)),
+            blob=BlobObject.put(file.open()),
             kind=ArtifactKind.ATTACHMENT,
             name=clean_filename(file.name),
             content_type=guess_content_type(clean_filename(file.name)),

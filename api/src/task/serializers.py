@@ -435,7 +435,7 @@ class TaskRunCreateSerializer(serializers.Serializer):
                 raise serializers.ValidationError(
                     {"inputs": {name: _("ファイルが大きすぎます（%(limit)sMBまで）") % {"limit": limit}}}
                 )
-            files[name] = InputFile(name=uploaded[0].name or "file", content=uploaded[0].read())
+            files[name] = InputFile(name=uploaded[0].name or "file", upload=uploaded[0])
         if len(files) > (limit := settings.YORIKI_ATTACHMENTS_PER_MESSAGE):
             raise serializers.ValidationError(_("ファイルは%(limit)s個までです") % {"limit": limit})
         if both := set(files) & set(attrs["inputs"]):

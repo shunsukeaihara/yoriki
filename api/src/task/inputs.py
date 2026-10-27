@@ -7,10 +7,11 @@
 
 import datetime
 import hashlib
+import io
 import math
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Any
+from typing import IO, Any
 
 from django.utils.translation import gettext as _
 
@@ -26,21 +27,31 @@ MAX_NUMBER = 10**15
 
 @dataclass(eq=False)
 class InputFile:
-    """送られたファイル（手動実行・Webhookのmultipart）。`name` は送り元が付けた名前。`path` は /workspace/input の
-    中の名前（Webhookでpayloadのファイルに書くために、受付時に先に決める）"""
+    """送られたファイル（手動実行・Webhookのmultipart）。`name` は送り元が付けた名前。中身は `content`（Webhook。
+    本文は入口の上限までなのでメモリに持つ）か `upload`（手動実行。大きなファイルは一時ファイルのまま保存先へ流す）。
+    `path` は /workspace/input の中の名前（Webhookでpayloadのファイルに書くために、受付時に先に決める）"""
 
     name: str
-    content: bytes
+    content: bytes = b""
+    upload: IO[bytes] | None = None
     path: str = ""
 
     @cached_property
     def sha256(self) -> str:
         return hashlib.sha256(self.content).hexdigest()
 
-    def describe(self) -> dict[str, Any]:
-        """payloadのファイル（JSON）に書く形"""
-        path = f"/workspace/input/{self.path}"
-        return {"file": self.name, "path": path, "size": len(self.content), "sha256": self.sha256}
+    def open(self) -> IO[bytes]:
+        if self.upload is not None:
+            self.upload.seek(0)
+            return self.upload
+        return io.BytesIO(self.content)
+
+    def describe(self, *, with_path: bool = True) -> dict[str, Any]:
+        """payloadのファイル（JSON）に書く形。重複の判定では、パートの順番で変わるパスを除く"""
+        data: dict[str, Any] = {"file": self.name, "size": len(self.content), "sha256": self.sha256}
+        if with_path:
+            data["path"] = f"/workspace/input/{self.path}"
+        return data
 
 
 def clean_inputs(definitions: list[dict[str, Any]], values: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:

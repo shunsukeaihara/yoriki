@@ -392,6 +392,26 @@ def test_multipart_files_are_placed_and_file_inputs_point_to_them(api_client, in
     assert (changed.status_code, changed.json()["code"]) == (409, "event_id_reused")
 
 
+def test_resending_multipart_in_another_part_order_returns_the_same_run(api_client, integrator):
+    mapping = [{"name": "vendor", "path": "$.vendor"}, {"name": "invoice", "path": "$.a"}]
+    task, key = _file_task(api_client, integrator, inputs=mapping, event_id_path="$.id")
+
+    def body(*parts: str) -> bytes:
+        files = {"a": b"%PDF-a", "b": b"%PDF-b"}
+        chunks = [b'--B\r\nContent-Disposition: form-data; name="id"\r\n\r\nevt-1\r\n']
+        chunks.append(b'--B\r\nContent-Disposition: form-data; name="vendor"\r\n\r\nACME\r\n')
+        for name in parts:
+            disposition = f'form-data; name="{name}"; filename="same.pdf"'.encode()
+            chunks.append(b"--B\r\nContent-Disposition: " + disposition + b"\r\n\r\n" + files[name] + b"\r\n")
+        return b"".join(chunks) + b"--B--\r\n"
+
+    # 同じ名前のファイルは、パートの順番で「(2)」の付く先が変わるが、同じ入力として扱う
+    first = _send(api_client, task, key, body("a", "b"), content_type="multipart/form-data; boundary=B")
+    again = _send(api_client, task, key, body("b", "a"), content_type="multipart/form-data; boundary=B")
+    assert first.status_code == 202, first.json()
+    assert (again.status_code, again.json()["run_id"]) == (200, first.json()["run_id"])
+
+
 def test_recommended_format_in_multipart(api_client, integrator):
     task, key = _file_task(api_client, integrator)
     data = {
@@ -445,6 +465,15 @@ def test_multipart_limits_and_encoding(api_client, integrator, settings):
     assert (res.status_code, res.json()["code"]) == (400, "invalid_form")
     res = _send(api_client, task, key, b"x", content_type="multipart/form-data")
     assert (res.status_code, res.json()["code"]) == (400, "invalid_form")
+    # 形式の大文字小文字は問わない。ファイル以外の値の合計は、Djangoのフォームと同じ上限まで
+    settings.DATA_UPLOAD_MAX_MEMORY_SIZE = 100
+    files_part = b'--B\r\nContent-Disposition: form-data; name="inputs[invoice]"; filename="a.pdf"\r\n\r\n1\r\n'
+    body = files_part + b'--B\r\nContent-Disposition: form-data; name="inputs[vendor]"\r\n\r\nACME\r\n--B--\r\n'
+    res = _send(api_client, task, key, body, content_type="Multipart/Form-Data; boundary=B")
+    assert res.status_code == 202, res.json()
+    body = files_part + b'--B\r\nContent-Disposition: form-data; name="memo"\r\n\r\n' + b"x" * 200 + b"\r\n--B--\r\n"
+    res = _send(api_client, task, key, body, content_type="multipart/form-data; boundary=B")
+    assert (res.status_code, res.json()["code"]) == (413, "payload_too_large")
     # RFC 2231の形の名前の不正なUTF-8も断る（Djangoは置換文字にするため）
     for disposition in (
         b"name=\"inputs[invoice]\"; filename*=utf-8''%FF.pdf",
@@ -453,7 +482,7 @@ def test_multipart_limits_and_encoding(api_client, integrator, settings):
         body = b"--B\r\nContent-Disposition: form-data; " + disposition + b"\r\n\r\n1\r\n--B--\r\n"
         res = _send(api_client, task, key, body, content_type="multipart/form-data; boundary=B")
         assert (res.status_code, res.json()["code"]) == (400, "invalid_form")
-    assert not Run.objects.exists()
+    assert Run.objects.count() == 1
 
 
 def test_text_payload_is_kept_as_a_text_file(api_client, integrator):

@@ -146,12 +146,19 @@ def _describe_file(value: Any) -> Any:
     raise TypeError(type(value).__name__)
 
 
+def _identify_file(value: Any) -> Any:
+    if isinstance(value, InputFile):
+        return value.describe(with_path=False)
+    raise TypeError(type(value).__name__)
+
+
 def _canonical(data: Any) -> bytes:
-    """並び順と空白によらない形。ファイルは名前・パス・大きさ・SHA-256にする（中身が違えば違う入力）。対になっていない
-    サロゲート（JSONの "\\ud800" 等）はUTF-8にできないので断る（DBの入力の値やファイルにも書けないため）"""
+    """並び順と空白によらない形。ファイルは名前・大きさ・SHA-256にする（中身が違えば違う入力。置いたパスは
+    パートの順番で変わるので含めない）。対になっていないサロゲート（JSONの "\\ud800" 等）はUTF-8にできないので断る
+    （DBの入力の値やファイルにも書けないため）"""
     try:
         return json.dumps(
-            data, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=_describe_file
+            data, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=_identify_file
         ).encode()
     except UnicodeEncodeError:
         raise PayloadError("invalid_json", _("本文に文字として正しくない値があります")) from None
@@ -230,7 +237,9 @@ def parse_payload(body: bytes, content_type: str) -> Payload:
             raise PayloadError("too_many_fields", _("フォームの項目は%(limit)s個までです") % {"limit": limit}) from None
         return _form_payload(_form_data(pairs), media_type)
     if media_type == "multipart/form-data":
-        return _form_payload(*_parse_multipart(body, content_type))
+        # Djangoのparserは小文字の `multipart/` だけを受け付けるので、形式の部分を小文字にして渡す
+        params = content_type.split(";", 1)[1] if ";" in content_type else ""
+        return _form_payload(*_parse_multipart(body, f"{media_type};{params}"))
     if media_type == "text/plain":
         try:
             body.decode("utf-8")
@@ -271,7 +280,15 @@ def _parse_multipart(body: bytes, content_type: str) -> tuple[dict[str, Any], st
         values, uploaded = parser.parse()
     except (TooManyFieldsSent, TooManyFilesSent):
         raise PayloadError("too_many_fields", _("フォームの項目かファイルが多すぎます")) from None
-    except (MultiPartParserError, RequestDataTooBig, SuspiciousOperation, UnicodeDecodeError, ValueError):
+    except RequestDataTooBig:
+        # ファイル以外の値の合計は、Djangoのフォームと同じ上限（DATA_UPLOAD_MAX_MEMORY_SIZE）まで
+        detail = _("ファイル以外の値は合わせて%(limit)sバイトまでです（大きな文章はJSONで送ってください）")
+        raise PayloadError(
+            "payload_too_large",
+            detail % {"limit": settings.DATA_UPLOAD_MAX_MEMORY_SIZE},
+            status=413,
+        ) from None
+    except (MultiPartParserError, SuspiciousOperation, UnicodeDecodeError, ValueError):
         raise PayloadError("invalid_form", _("本文をmultipart/form-dataとして読めません")) from None
     pairs: list[tuple[str, Any]] = [(key, value) for key, items in values.lists() for value in items]
     files: list[InputFile] = []

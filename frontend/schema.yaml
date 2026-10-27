@@ -9657,6 +9657,10 @@ components:
           type: boolean
           readOnly: true
           description: 公開中の版が機密のSkillか（機密の会話でだけ使える）
+        edit_sensitive:
+          type: boolean
+          readOnly: true
+          description: 公開中の版かDraftが機密のSkillか（機密の会話でだけ編集できる）
         connectors_usable:
           type: boolean
           readOnly: true
@@ -9690,6 +9694,7 @@ components:
       - department_info
       - description
       - draft
+      - edit_sensitive
       - id
       - name
       - owner_info

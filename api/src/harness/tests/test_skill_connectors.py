@@ -220,3 +220,17 @@ def test_sensitive_skill_names_are_not_offered_to_a_conversation_that_is_not_con
     run = execute(run, adapter)
     [result] = results(run, "request_skill_edit")
     assert result["is_error"]
+
+
+@pytest.mark.django_db
+def test_edit_run_does_not_roll_back_to_a_sensitive_version_outside_confidential_work(app_user):
+    skill = SkillFactory.create(name="取引先の照合", created_by=app_user)
+    SkillVersionFactory.create(skill=skill, is_sensitive=True)
+    SkillVersionFactory.create(skill=skill, number=2)
+    run = _start(ConversationFactory.create(owner=app_user), skill_edit={"id": skill.uid, "name": skill.name})
+    arguments = {"number": 1, "expected_version": 2, "change_reason": "戻す"}
+    run = execute(run, FakeAdapter([calls(("c1", "rollback_skill", arguments)), reply("ok")]))
+    [result] = results(run, "rollback_skill")
+    assert result["is_error"] and "機密" in result["content"][0]["text"]
+    skill.refresh_from_db()
+    assert skill.version_number == 2

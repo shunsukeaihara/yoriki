@@ -67,8 +67,8 @@ const groups = computed(() => [
     label: t('編集する（今後の依頼に反映）'),
     items: [
       ...props.editable.map((skill) => {
-        // 機密の Skill は、機密の会話でだけ編集する（harness.md §10.9。Draft だけが機密のものはサーバーが断る）
-        const blocked = skill.sensitive && !props.sensitive
+        // 機密の Skill（公開中の版か Draft が機密）は、機密の会話でだけ編集する（harness.md §10.9）
+        const blocked = skill.editSensitive && !props.sensitive
         return {
           id: `edit-${skill.id}`,
           label: skill.name,

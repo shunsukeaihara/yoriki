@@ -3896,6 +3896,8 @@ export interface components {
             readonly suspended: boolean;
             /** @description 公開中の版が機密のSkillか（機密の会話でだけ使える） */
             readonly sensitive: boolean;
+            /** @description 公開中の版かDraftが機密のSkillか（機密の会話でだけ編集できる） */
+            readonly edit_sensitive: boolean;
             /** @description 公開中の版が宣言したConnectorを、利用者がすべて使えるか（使えなければ会話で使えない） */
             readonly connectors_usable: boolean;
             /** @description 開いているDraftのID。なければnull。Draftを編集できる人にだけ出す */

@@ -879,6 +879,7 @@ def execute_rollback_skill(arguments: dict[str, Any], context: ToolContext) -> T
                 change_reason=arguments["change_reason"],
                 operation_key=key,
                 run=run,
+                allow_sensitive=run.handles_sensitive_data,
             )
         except VersionConflict:
             return ToolResult.error(

@@ -32,6 +32,7 @@ from .models import (
     SkillAction,
     SkillAssetBinding,
     SkillChange,
+    SkillContent,
     SkillDraft,
     SkillDraftAsset,
     SkillEvaluation,
@@ -409,6 +410,9 @@ class SkillSerializer(serializers.ModelSerializer):
         help_text=_("公開・切戻し・停止・削除、名前とToolの変更、資料の検証の条件と必須の評価ケースの変更ができるか")
     )
     sensitive = serializers.SerializerMethodField(help_text=_("公開中の版が機密のSkillか（機密の会話でだけ使える）"))
+    edit_sensitive = serializers.SerializerMethodField(
+        help_text=_("公開中の版かDraftが機密のSkillか（機密の会話でだけ編集できる）")
+    )
     connectors_usable = serializers.SerializerMethodField(
         help_text=_("公開中の版が宣言したConnectorを、利用者がすべて使えるか（使えなければ会話で使えない）")
     )
@@ -426,6 +430,7 @@ class SkillSerializer(serializers.ModelSerializer):
             "description",
             "suspended",
             "sensitive",
+            "edit_sensitive",
             "connectors_usable",
             "draft",
             "can_edit",
@@ -435,29 +440,42 @@ class SkillSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["scope", "suspended", "created", "updated"]
 
-    def _declared(self, obj: Skill, version: SkillVersion) -> dict[str, Connector]:
-        """公開中の版が宣言したConnector。一覧ではまとめて1回で読む（件数でクエリを増やさない）"""
+    @staticmethod
+    def _contents(skill: Skill) -> list[SkillContent]:
+        """公開中の版と開いているDraft"""
+        drafts = getattr(skill, "open_drafts", None)
+        contents: list[SkillContent] = list(skill.drafts.all()) if drafts is None else list(drafts)
+        if skill.current_version is not None:
+            contents.append(skill.current_version)
+        return contents
+
+    def _declared(self, obj: Skill, contents: list[SkillContent]) -> dict[str, Connector]:
+        """公開中の版とDraftが宣言したConnector。一覧ではまとめて1回で読む（件数でクエリを増やさない）"""
         # 一覧の各行は同じ子のSerializerで出すので、子に持たせる
         declared: dict[str, Connector] | None = getattr(self, "_declared_connectors", None)
         if declared is None:
             parent = self.parent if isinstance(self.parent, serializers.ListSerializer) else None
             skills: list[Skill] = list(parent.instance) if parent is not None and parent.instance is not None else [obj]
-            contents = [s.current_version for s in skills if s.current_version is not None]
-            declared = self._declared_connectors = skill_connectors.load(contents)
-        if any(uid not in declared for uid in skill_connectors.declared_uids(version)):
-            declared = skill_connectors.load([version])
+            declared = self._declared_connectors = skill_connectors.load(c for s in skills for c in self._contents(s))
+        if any(uid not in declared for content in contents for uid in skill_connectors.declared_uids(content)):
+            declared = skill_connectors.load(contents)
         return declared
 
     def get_sensitive(self, obj: Skill) -> bool:
         version = obj.current_version
-        return version is not None and skill_connectors.is_sensitive(version, self._declared(obj, version))
+        return version is not None and skill_connectors.is_sensitive(version, self._declared(obj, [version]))
+
+    def get_edit_sensitive(self, obj: Skill) -> bool:
+        contents = self._contents(obj)
+        declared = self._declared(obj, contents)
+        return any(skill_connectors.is_sensitive(content, declared) for content in contents)
 
     def get_connectors_usable(self, obj: Skill) -> bool:
         version = obj.current_version
         request = self.context.get("request")
         if version is None or request is None or not version.connectors:
             return True
-        declared = self._declared(obj, version)
+        declared = self._declared(obj, [version])
         return all(
             (c := declared.get(uid)) is not None and c.can(request.user, ConnectorAction.USE)
             for uid in skill_connectors.declared_uids(version)

@@ -465,8 +465,10 @@ class Skill(models.Model):
         change_reason: str = "",
         operation_key: str = "",
         run=None,
+        allow_sensitive: bool = True,
     ) -> "SkillVersion":
-        """選んだ過去の版と同じ中身・資料の版を新しく作り、公開中の版にする（履歴は消さない。design.md §3.7）"""
+        """選んだ過去の版と同じ中身・資料の版を新しく作り、公開中の版にする（履歴は消さない。design.md §3.7）。
+        `allow_sensitive` がFalse（機密でない会話の編集のRun）なら、機密の版には切り戻さない（harness.md §10.9）"""
         current = self._lock()
         if done := current._recorded(
             operation_key,
@@ -486,7 +488,10 @@ class Skill(models.Model):
         if source.pk == current.current_version_id:
             raise InvalidDraft(_("公開中の版には切り戻せません"))
         # 過去の版の宣言も、今のConnectorの境界と切り戻す人の権限で確かめる（公開と同じ。design.md §4.9.1）
-        from .connectors import publish_errors  # noqa: PLC0415  skill.connectorsがこのモジュールを使うため
+        from .connectors import is_sensitive, publish_errors  # noqa: PLC0415  skill.connectorsがこのモジュールを使うため
+
+        if not allow_sensitive and is_sensitive(source):
+            raise InvalidDraft(_("機密の版には、個人情報・機密情報を扱う会話でだけ切り戻せます"))
 
         if errors := publish_errors(source, current, actor):
             raise InvalidDraft(

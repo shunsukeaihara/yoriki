@@ -7,7 +7,7 @@ from django.test.utils import CaptureQueriesContext
 
 from connector.factories import ConnectorFactory
 from connector.models import VERSION_FIELDS, ConnectorScope
-from skill.factories import SkillFactory, SkillVersionFactory
+from skill.factories import SkillDraftFactory, SkillFactory, SkillVersionFactory
 from skill.models import Skill, SkillScope
 from user.factories import DepartmentFactory, DepartmentMembershipFactory
 
@@ -199,3 +199,13 @@ def test_rollback_checks_the_declarations_of_the_old_version(api_client, app_use
     res = api_client.post(f"{SKILLS}{skill.uid}/rollback/", {"number": 1, "expected_version": 2}, format="json")
     assert res.status_code == 400
     assert "切り戻せません" in str(res.json())
+
+
+@pytest.mark.django_db
+def test_skill_with_a_sensitive_draft_is_edited_only_in_confidential_work(api_client, app_user):
+    skill = SkillFactory.create(created_by=app_user)
+    SkillVersionFactory.create(skill=skill)
+    SkillDraftFactory.create(skill=skill, is_sensitive=True)
+    api_client.force_login(app_user)
+    [item] = api_client.get(SKILLS).json()["results"]
+    assert not item["sensitive"] and item["edit_sensitive"]

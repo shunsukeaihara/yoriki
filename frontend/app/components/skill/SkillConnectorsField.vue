@@ -65,17 +65,28 @@ const operationItems = computed(() =>
   skillToolItems(t).filter((i) => i.value === 'datasource_describe' || i.value === 'datasource_query'),
 )
 const tableItems = (id: string) =>
-  (details.value[id]?.tables ?? []).map((table) => ({ value: table.name, title: table.name, description: table.description }))
+  (details.value[id]?.tables ?? []).map((table) => ({
+    value: table.name,
+    title: table.name,
+    description: table.description,
+  }))
 
 const choices = computed(() =>
   [...(isSystem.value ? system.value : []), ...usable.value]
     .filter((c) => fits(c) && !modelValue.value.some((d) => d.connector === c.id))
-    .map((c) => ({ value: c.id, title: c.isSensitive ? `${c.name}（${t('機密')}）` : c.name, description: c.description })),
+    .map((c) => ({
+      value: c.id,
+      title: c.isSensitive ? `${c.name}（${t('機密')}）` : c.name,
+      description: c.description,
+    })),
 )
 const adding = ref<string | null>(null)
 const add = (id: string | number | boolean | (string | number | boolean)[] | null | undefined) => {
   if (typeof id !== 'string' || !id) return
-  modelValue.value = [...modelValue.value, { connector: id, operations: ['datasource_describe', 'datasource_query'], tables: [] }]
+  modelValue.value = [
+    ...modelValue.value,
+    { connector: id, operations: ['datasource_describe', 'datasource_query'], tables: [] },
+  ]
   nextTick(() => (adding.value = null))
 }
 const update = (index: number, change: Partial<ConnectorDeclaration>) => {

@@ -3,6 +3,7 @@ payloadのファイル化、状態を確かめる口"""
 
 import hashlib
 import json
+from unittest import mock
 from urllib.parse import urlencode
 
 import pytest
@@ -24,7 +25,7 @@ from task.models import (
     TriggerReceipt,
 )
 from task.serializers import TriggerBindingSerializer
-from task.webhook import PayloadError, extract, parse_path
+from task.webhook import PayloadError, extract, parse_path, parse_payload
 from user.factories import UserFactory, grant
 from user.models import SYSTEM_USERNAME, User, system_user
 
@@ -410,6 +411,43 @@ def test_resending_multipart_in_another_part_order_returns_the_same_run(api_clie
     again = _send(api_client, task, key, body("b", "a"), content_type="multipart/form-data; boundary=B")
     assert first.status_code == 202, first.json()
     assert (again.status_code, again.json()["run_id"]) == (200, first.json()["run_id"])
+
+
+def test_resends_write_nothing_and_refused_requests_delete_what_was_written(api_client, integrator):
+    task, key = _file_task(api_client, integrator, event_id_path="$.event_id")
+    data = {"event_id": "e-1", "inputs[vendor]": "ACME", "inputs[invoice]": SimpleUploadedFile("a.pdf", b"1")}
+    with (
+        mock.patch.object(BlobObject, "write", wraps=BlobObject.write) as write,
+        mock.patch("artifact.storage.LocalStorage.delete", autospec=True) as delete,
+    ):
+        assert _send_multipart(api_client, task, key, data).status_code == 202
+        assert (write.call_count, delete.call_count) == (2, 0)  # payloadとファイル
+
+        # 再送は保存先に書く前に前のRunを返す
+        data["inputs[invoice]"] = SimpleUploadedFile("a.pdf", b"1")
+        assert _send_multipart(api_client, task, key, data).status_code == 200
+        assert write.call_count == 2
+
+        # 項目の誤りで断った要求は、書いたものを消す
+        data = {"event_id": "e-2", "inputs[invoice]": SimpleUploadedFile("a.pdf", b"1")}
+        res = _send_multipart(api_client, task, key, data)
+        assert (res.status_code, res.json()["code"]) == (400, "invalid_inputs")
+        assert (write.call_count, delete.call_count) == (4, 2)
+    assert Run.objects.count() == 1
+
+
+def test_a_json_value_shaped_like_a_file_is_not_the_same_input(api_client, integrator):
+    mapping = [{"name": "vendor", "path": "$.vendor"}, {"name": "invoice", "path": "$.doc"}]
+    task, key = _file_task(api_client, integrator, inputs=mapping, event_id_path="$.id")
+    content = b"%PDF-1.7"
+    described = {"file": "a.pdf", "size": len(content), "sha256": hashlib.sha256(content).hexdigest()}
+    files = {"id": "x", "vendor": "A", "doc": SimpleUploadedFile("a.pdf", content)}
+    assert _send_multipart(api_client, task, key, files).status_code == 202
+    receipt = TriggerReceipt.objects.get()
+    # ファイルの記述と同じ形の辞書をJSONで送っても、ファイルを付けた要求と同じ入力にならない（再送とみなさない）
+    body = json.dumps({"id": "x", "vendor": "A", "doc": described}).encode()
+    json_payload = parse_payload(body, "application/json")
+    assert json_payload.sha256 != receipt.payload_sha256
 
 
 def test_recommended_format_in_multipart(api_client, integrator):

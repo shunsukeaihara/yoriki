@@ -265,7 +265,9 @@ def _form_payload(data: dict[str, Any], media_type: str, files: list[InputFile] 
         data=data,
         file_name=PAYLOAD_JSON,
         file_bytes=json.dumps(data, ensure_ascii=False, indent=2, default=_describe_file).encode(),
-        sha256=hashlib.sha256(_canonical(data)).hexdigest(),
+        # multipartでは、ファイル以外の値は文字だけなので、印を付ければファイルの記述（辞書）をJSONやフォームの値と
+        # 取り違えない（ファイルの記述と同じ形の辞書をJSONで送っても、ファイルを付けた要求と同じ入力にならない）
+        sha256=hashlib.sha256((b"multipart:" if files is not None else b"") + _canonical(data)).hexdigest(),
         content_type=media_type,
         files=files or [],
     )

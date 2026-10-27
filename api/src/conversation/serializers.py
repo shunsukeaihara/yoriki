@@ -112,6 +112,8 @@ class ConversationSerializer(serializers.ModelSerializer):
                         {"handles_sensitive_data": _("個人情報・機密情報を扱う会話は、扱わない会話に戻せません")}
                     )
                 validated_data["handles_sensitive_data"] = True
+            if validated_data.get("handles_sensitive_data", locked.handles_sensitive_data):
+                # 保存した後のモデル（別の更新が変えていれば、そのモデル）がローカルLLMか確かめる
                 profile = validated_data.get("model_profile") or locked.model_profile
                 if profile.current_version is None or not profile.current_version.is_local:
                     raise serializers.ValidationError(

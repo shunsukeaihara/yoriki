@@ -116,6 +116,19 @@ class TestConversation:
         assert "handles_sensitive_data" in res.data
         assert Conversation.objects.get(pk=conversation.pk).handles_sensitive_data
 
+    def test_making_it_confidential_checks_the_model_saved_by_another_update(self, app_user, local_profile):
+        conversation = ConversationFactory.create(owner=app_user, model_profile=local_profile)
+        serializer = ConversationSerializer(
+            conversation, data={"handles_sensitive_data": True}, partial=True, context={"request": None}
+        )
+        assert serializer.is_valid(), serializer.errors
+        # 検証の後に、別の更新がクラウドのモデルに変えた
+        cloud = ModelProfileFactory.create(version__supports_tools=True)
+        Conversation.objects.filter(pk=conversation.pk).update(model_profile=cloud)
+        with pytest.raises(ValidationError):
+            serializer.save()
+        assert not Conversation.objects.get(pk=conversation.pk).handles_sensitive_data
+
     def test_stale_update_does_not_write_back_the_old_model(self, app_user, local_profile):
         cloud = ModelProfileFactory.create(version__supports_tools=True)
         conversation = ConversationFactory.create(owner=app_user, model_profile=cloud)

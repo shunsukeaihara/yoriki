@@ -117,10 +117,16 @@ class ConversationSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError(
                         {"model_profile": _("個人情報や機密情報を扱う会話では、ローカルLLMのモデルを選んでください")}
                     )
+            effort = validated_data.get("effort", "")
+            current = locked.model_profile.current_version
+            # 検証の後に別の更新がモデルを変えていれば、そのモデルの値か確かめ直す
+            if "model_profile" not in validated_data and effort and current and effort not in current.effort_values:
+                raise serializers.ValidationError({"effort": _("このモデルが受け付けるeffortの値から選んでください")})
             becomes_sensitive = (
                 validated_data.get("handles_sensitive_data", False) and not locked.handles_sensitive_data
             )
-            instance = super().update(instance, validated_data)
+            # 読み直した会話を更新する（検証の前に読んだ古い値、例えば機密にする前のクラウドのモデルを書き戻さない）
+            instance = super().update(locked, validated_data)
             if "model_profile" in validated_data or "effort" in validated_data:
                 self._switch_active_run(instance, actor)
             if becomes_sensitive:

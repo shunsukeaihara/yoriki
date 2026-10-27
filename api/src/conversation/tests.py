@@ -116,6 +116,21 @@ class TestConversation:
         assert "handles_sensitive_data" in res.data
         assert Conversation.objects.get(pk=conversation.pk).handles_sensitive_data
 
+    def test_stale_update_does_not_write_back_the_old_model(self, app_user, local_profile):
+        cloud = ModelProfileFactory.create(version__supports_tools=True)
+        conversation = ConversationFactory.create(owner=app_user, model_profile=cloud)
+        serializer = ConversationSerializer(
+            conversation, data={"title": "新しい題名"}, partial=True, context={"request": None}
+        )
+        assert serializer.is_valid(), serializer.errors
+        # 検証の後に、別の更新がローカルLLMに切り替えて機密にした
+        Conversation.objects.filter(pk=conversation.pk).update(handles_sensitive_data=True, model_profile=local_profile)
+        serializer.save()
+        conversation.refresh_from_db()
+        assert conversation.title == "新しい題名"
+        assert conversation.handles_sensitive_data
+        assert conversation.model_profile == local_profile
+
     def test_conversation_made_confidential_during_the_update_is_not_reverted(self, app_user, local_profile):
         conversation = ConversationFactory.create(owner=app_user, model_profile=local_profile)
         cloud = ModelProfileFactory.create(version__supports_tools=True)

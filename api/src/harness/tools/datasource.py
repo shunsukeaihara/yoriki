@@ -126,6 +126,16 @@ def _resolve(arguments: dict[str, Any], context: ToolContext) -> tuple[Connector
     return connector, version
 
 
+def _recheck(
+    arguments: dict[str, Any], context: ToolContext, connector: Connector
+) -> tuple[Connector, ConnectorVersion] | ToolResult:
+    """枠を取った後に、もう一度確かめる。枠は接続ごとなので、使う接続が変わっていないことも確かめる"""
+    rechecked = _resolve(arguments, context)
+    if not isinstance(rechecked, ToolResult) and rechecked[0].connection_id != connector.connection_id:
+        return ToolResult.error("The connector changed while waiting. Call the tool again.")
+    return rechecked
+
+
 def _slot(connector: Connector, version: ConnectorVersion, context: ToolContext):
     return connection_slot(
         connector.connection,
@@ -167,10 +177,14 @@ def describe(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     if isinstance(resolved, ToolResult):
         return resolved
     connector, version = resolved
-    adapter = get_adapter(connector, version)
     try:
         with _slot(connector, version, context) as renew:
-            tables = _keep_alive(context, adapter.describe, renew)
+            # 枠を待つ間に、停止・権限・境界（機密を含む）が変わっていることがある。つなぐ直前に確かめ直す
+            rechecked = _recheck(arguments, context, connector)
+            if isinstance(rechecked, ToolResult):
+                return rechecked
+            connector, version = rechecked
+            tables = _keep_alive(context, get_adapter(connector, version).describe, renew)
     except ConnectorError as exc:
         return _failed(exc, connector, version)
     text = render_tables(connector, version, tables)
@@ -216,13 +230,18 @@ def query(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         return resolved
     connector, version = resolved
     sql, params = arguments["sql"], list(arguments.get("params") or [])
-    adapter = get_adapter(connector, version)
     keep = PREVIEW_ROWS if _can_read_files(context) else INLINE_ROWS
     with tempfile.TemporaryFile() as raw:
         # 行は読むたびにCSVで書き、メモリには見せる行だけを残す
         out = io.TextIOWrapper(raw, encoding="utf-8", newline="")
         try:
             with _slot(connector, version, context) as renew:
+                # 枠を待つ間に、停止・権限・境界（機密を含む）が変わっていることがある。つなぐ直前に確かめ直す
+                rechecked = _recheck(arguments, context, connector)
+                if isinstance(rechecked, ToolResult):
+                    return rechecked
+                connector, version = rechecked
+                adapter = get_adapter(connector, version)
                 result = _keep_alive(context, lambda: adapter.query(sql, params, keep_rows=keep, csv_out=out), renew)
         except ConnectorError as exc:
             return _failed(exc, connector, version)

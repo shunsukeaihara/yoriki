@@ -2,6 +2,7 @@
 機密のConnector、権限の確かめ直し、結果のファイル"""
 
 import time
+from contextlib import contextmanager
 from datetime import timedelta
 
 import pytest
@@ -585,3 +586,28 @@ def test_expired_results_and_a_legacy_attachment_named_connectors_are_not_placed
     assert (session.input_dir / kept.path).is_file()
     assert not (session.input_dir / "connectors" / "old").exists()
     session.close()
+
+
+@pytest.mark.django_db
+def test_connector_made_sensitive_while_waiting_for_a_slot_is_refused(conversation, monkeypatch):
+    connector = ConnectorFactory.create(name="販売管理", version__tables=TABLES)
+    real_slot = datasource_module._slot
+
+    @contextmanager
+    def slot_then_change(*args, **kwargs):
+        with real_slot(*args, **kwargs) as renew:
+            # 枠を待つ間に、管理者が境界を機密にした
+            connector.revise(
+                actor=connector.created_by, expected_version=1, **{**_content(connector), "is_sensitive": True}
+            )
+            yield renew
+
+    monkeypatch.setattr(datasource_module, "_slot", slot_then_change)
+    run = start(conversation)
+    adapter = FakeAdapter(
+        [calls(("c1", "datasource_query", {"connector": "販売管理", "sql": "SELECT code FROM vendors"})), reply("ok")]
+    )
+    run = execute(run, adapter)
+    [result] = results(run, "datasource_query")
+    assert result["is_error"]
+    assert FakeDatasource.calls == []

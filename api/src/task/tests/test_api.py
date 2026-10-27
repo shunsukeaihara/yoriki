@@ -337,6 +337,8 @@ def test_manual_run_refuses_mismatched_files(api_client, app_user, model, settin
         _url(task, "run/"), {"inputs": json.dumps({"invoice": "x"}), "invoice": SimpleUploadedFile("a.pdf", b"1")}
     )
     assert (res.status_code, set(res.json()["inputs"])) == (400, {"invoice"})
+    res = _create(api_client, app_user, model, name="別", inputs=[{"name": "inputs", "label": "x", "type": "file"}])
+    assert "inputs は項目の名前に使えません" in str(res.json()["inputs"])
     res = api_client.post(_url(task, "run/"), {"inputs": "{", "invoice": SimpleUploadedFile("a.pdf", b"1")})
     assert res.status_code == 400
     # 同じフィールドに文字とファイル

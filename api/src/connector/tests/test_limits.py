@@ -89,3 +89,17 @@ def test_run_holding_renews_while_the_operation_runs():
     result = run_holding(operation, lambda: renewed.append(1), on_beat=lambda: beats.append(1), interval=0.01)
     assert result == "done"
     assert renewed and len(beats) == len(renewed)
+
+
+@pytest.mark.django_db
+def test_lost_slot_cannot_be_renewed():
+    connection = DatabaseConnectionFactory.create(max_concurrency=1)
+    with (
+        pytest.raises(ConnectorError) as raised,
+        connection_slot(connection, "a", hold_seconds=30, wait_seconds=0) as renew,
+    ):
+        # 延ばす前に期限が切れて、別の操作が枠を取った
+        ConnectionLease.objects.update(expires=timezone.now() - timedelta(seconds=1))
+        with connection_slot(connection, "b", hold_seconds=30, wait_seconds=0):
+            renew()
+    assert raised.value.kind == ConnectorErrorKind.BUSY

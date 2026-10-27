@@ -67,7 +67,15 @@ def connection_slot(
         sleep(POLL_SECONDS)
 
     def renew() -> None:
-        ConnectionLease.objects.filter(pk=lease.pk).update(expires=timezone.now() + timedelta(seconds=hold))
+        now = timezone.now()
+        renewed = ConnectionLease.objects.filter(pk=lease.pk, expires__gt=now).update(
+            expires=now + timedelta(seconds=hold)
+        )
+        if not renewed:
+            # 期限までに延ばせず、枠を失った（別の操作が取っているかもしれない）。この操作の結果は使わない
+            raise ConnectorError(
+                ConnectorErrorKind.BUSY, _("接続先の同時実行の枠を保てませんでした。もう一度実行してください")
+            )
 
     try:
         yield renew

@@ -660,6 +660,18 @@ def test_a_key_rotated_or_suspended_after_authentication_cannot_start_a_run(task
     assert not Run.objects.exists()
 
 
+def test_a_resend_with_a_key_rotated_after_authentication_is_refused(task, webhook):
+    binding, _key = webhook
+    body = json.dumps(_payload()).encode()
+    receive_webhook(binding, body=body, content_type="application/json", idempotency_key=None)
+    authenticated = TriggerBinding.objects.get(pk=binding.pk)
+    binding.rotate_key()
+    # 再送でも、作り直した後の古い鍵では前のRunを返さない
+    with pytest.raises(PayloadError) as exc:
+        receive_webhook(authenticated, body=body, content_type="application/json", idempotency_key=None)
+    assert exc.value.status == 401
+
+
 def test_resending_after_changing_the_event_id_path_returns_the_same_run(api_client, integrator, task, webhook):
     binding, key = webhook
     first = _send(api_client, task, key, _payload()).json()["run_id"]

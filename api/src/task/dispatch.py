@@ -318,19 +318,21 @@ def receive_webhook(
     受け付けられない要求は PayloadError（形の誤り・鍵・停止）、InvalidInputs（項目の誤り）、CannotRun（タスクを
     始められない）"""
     payload = parse_payload(body, content_type)
-    # 再送は、保存先に書く前に行をロックせずに見つけて返す（受付の記録は消さないので、見つかったRunはそのまま返せる）
-    current, revision, key = _current_binding(binding, body, payload, idempotency_key, lock=False)
-    if (existing := _received_run(current, key, payload, idempotency_key)) is not None:
-        return existing, False
+    # 再送は、保存先に書く前に見つけて返す。鍵の作り直し・停止と同時でも古い鍵で返さないよう、行をロックして確かめる
+    # （ロックはDBの確認の間だけで、保存先には書かない）
+    with transaction.atomic():
+        _lock_task(binding)
+        current, revision, key = _current_binding(binding, body, payload, idempotency_key)
+        if (existing := _received_run(current, key, payload, idempotency_key)) is not None:
+            return existing, False
     payload_file = InputFile(payload.file_name, payload.file_bytes)
     # 保存先への書き込みは、入口とタスクの行をロックする前に行う（保存先が遅くても、同じ入口・タスクを待たせない）。
     # 受け付けなかったら、書いたものを消す
     stored = store_files([payload_file, *payload.files])
     try:
         with transaction.atomic():
-            # タスク → 入口の順にロックする（タスクの削除と同じ順）
-            TaskDefinition.objects.select_for_update(of=("self",)).filter(pk=binding.task_id).first()
-            current, revision, key = _current_binding(binding, body, payload, idempotency_key, lock=True)
+            _lock_task(binding)
+            current, revision, key = _current_binding(binding, body, payload, idempotency_key)
             if (existing := _received_run(current, key, payload, idempotency_key)) is not None:
                 discard_files(stored)
                 return existing, False
@@ -356,12 +358,22 @@ def receive_webhook(
     return run, True
 
 
+def _lock_task(binding: TriggerBinding) -> None:
+    # タスク → 入口の順にロックする（タスクの削除と同じ順）
+    TaskDefinition.objects.select_for_update(of=("self",)).filter(pk=binding.task_id).first()
+
+
 def _current_binding(
-    binding: TriggerBinding, body: bytes, payload: Payload, idempotency_key: str | None, *, lock: bool
+    binding: TriggerBinding, body: bytes, payload: Payload, idempotency_key: str | None
 ) -> tuple[TriggerBinding, TriggerBindingRevision, str | None]:
-    """入口を読み直し、鍵（作り直されていないか）・停止・今の版の上限を確かめる。（入口、今の版、重複のキー）"""
-    bindings = TriggerBinding.objects.select_for_update(of=("self",)) if lock else TriggerBinding.objects.all()
-    current = bindings.select_related("task", "current_revision").filter(pk=binding.pk).first()
+    """入口の行をロックして読み直し、鍵（作り直されていないか）・停止・今の版の上限を確かめる。
+    （入口、今の版、重複のキー）"""
+    current = (
+        TriggerBinding.objects.select_for_update(of=("self",))
+        .select_related("task", "current_revision")
+        .filter(pk=binding.pk)
+        .first()
+    )
     if current is None or current.deleted or current.key_hash != binding.key_hash:
         raise PayloadError("invalid_key", _("鍵が正しくありません"), status=401)
     revision = current.current_revision

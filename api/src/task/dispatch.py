@@ -306,23 +306,18 @@ def receive_webhook(
 def _received_run(
     binding: TriggerBinding, key: str | None, payload: Payload, idempotency_key: str | None
 ) -> Run | None:
-    """前に受け付けた同じ要求のRun。今の版のキーで同じキーの違う入力があれば PayloadError（409）"""
-    if key is not None:
-        receipt = TriggerReceipt.objects.filter(binding=binding, dedup_key=key).select_related("run").first()
-        if receipt is not None:
-            if receipt.payload_sha256 != payload.sha256:
-                raise PayloadError("event_id_reused", _("同じイベントIDで、前と違う内容を受け取りました"), status=409)
-            return receipt.run
-    # 前の版のイベントIDの場所で取り出したキー。偶然同じ値の別の出来事と区別できないので、同じ入力のときだけ使う
-    keys = set()
-    paths = set(binding.revisions.values_list("event_id_path", flat=True))
-    for path in paths:
+    """前に受け付けた同じ要求のRun。
+
+    今の版と前の版のイベントIDの場所で取り出したキーのどれかで、同じ入力の受付があればそのRun（イベントIDの場所を
+    変えた後の再送も新しいRunにしない）。なければ、今の版のキーで違う入力の受付があるときだけ PayloadError（409）。
+    前の版の場所の値は別の出来事と偶然重なりうるので、違う入力で断る判定には使わない"""
+    keys = {key}
+    for path in set(binding.revisions.values_list("event_id_path", flat=True)):
         try:
             keys.add(dedup_key(payload, path, idempotency_key))
         except PayloadError:
             continue
     keys.discard(None)
-    keys.discard(key)
     if not keys:
         return None
     receipt = (
@@ -331,4 +326,8 @@ def _received_run(
         .order_by("pk")
         .first()
     )
-    return receipt.run if receipt else None
+    if receipt is not None:
+        return receipt.run
+    if key is not None and TriggerReceipt.objects.filter(binding=binding, dedup_key=key).exists():
+        raise PayloadError("event_id_reused", _("同じイベントIDで、前と違う内容を受け取りました"), status=409)
+    return None

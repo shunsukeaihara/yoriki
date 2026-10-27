@@ -552,3 +552,17 @@ def test_form_with_invalid_utf8_is_refused(api_client, integrator):
     res = _send(api_client, task, key, "event_id=%FF", content_type="application/x-www-form-urlencoded")
     assert (res.status_code, res.json()["code"]) == (400, "invalid_form")
     assert not Run.objects.exists()
+
+
+def test_resending_an_old_event_after_a_new_one_collides_on_the_new_path(api_client, integrator, task, webhook):
+    """前の版でイベントAを受け、場所を変えた版でイベントBを受けた後に、Aを再送しても前のRunを返す"""
+    binding, key = webhook
+    event_a = {"event": {"id": "a"}, "id": "shared", "data": {"vendor_name": "ACME"}}
+    run_a = _send(api_client, task, key, event_a).json()["run_id"]
+    api_client.force_login(integrator)
+    api_client.patch(f"{BINDINGS}{binding.uid}/", {"version": 1, "event_id_path": "$.id"}, format="json")
+    api_client.logout()
+    event_b = {"event": {"id": "b"}, "id": "shared", "data": {"vendor_name": "別の会社"}}
+    assert _send(api_client, task, key, event_b).status_code == 202
+    res = _send(api_client, task, key, event_a)
+    assert (res.status_code, res.json()["run_id"]) == (200, run_a)

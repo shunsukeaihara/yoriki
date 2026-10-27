@@ -11,7 +11,8 @@ from conversation.evaluation import cancel_evaluation, match_expected, progress_
 from conversation.factories import ConversationFactory
 from conversation.models import Conversation, ConversationPurpose
 from harness.runner import Runner
-from llm.factories import ModelProfileFactory
+from llm.factories import LLMConnectionFactory, ModelProfileFactory
+from llm.models import ProviderKind
 from resources.factories import ResourceVersionFactory
 from run.models import (
     ClarificationKind,
@@ -224,6 +225,25 @@ def test_evaluation_cannot_start_twice_or_for_a_suspended_skill(app_user, model)
     suspended.refresh_from_db()
     with pytest.raises(CannotEvaluate, match="停止中"):
         start_evaluation(suspended, cases=[case(suspended)], actor=app_user, model_version=model.current_version)
+
+
+@pytest.mark.django_db
+def test_sensitive_skill_is_evaluated_with_a_local_model_as_confidential_work(app_user, model):
+    """機密のSkillは、ローカルLLMのモデルで、機密のRunとして評価する（design.md §3.7.1）"""
+    skill = skill_with_draft(app_user, is_sensitive=True)
+    target = case(skill)
+    with pytest.raises(CannotEvaluate, match="ローカルLLM"):
+        start_evaluation(skill, cases=[target], actor=app_user, model_version=model.current_version)
+    local = ModelProfileFactory.create(
+        version__connection=LLMConnectionFactory.create(kind=ProviderKind.LOCAL), version__supports_tools=True
+    )
+    assert local.current_version is not None
+    evaluation = start_evaluation(skill, cases=[target], actor=app_user, model_version=local.current_version)
+    [result] = evaluation.results.all()
+    for run in (result.base_run, result.draft_run):
+        assert run is not None
+        assert run.handles_sensitive_data and run.manifest["fixed"]["handles_sensitive_data"]
+        assert run.conversation.handles_sensitive_data
 
 
 @pytest.mark.django_db

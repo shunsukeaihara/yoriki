@@ -89,7 +89,16 @@ REQUIREMENT_CAPABILITIES = {
 }
 
 # Draftと版が持つ中身。版を作るときにDraftからそのまま写す
-CONTENT_FIELDS = ("description", "instructions", "tools", "requires", "input_schema", "output_schema")
+CONTENT_FIELDS = (
+    "description",
+    "instructions",
+    "tools",
+    "requires",
+    "input_schema",
+    "output_schema",
+    "connectors",
+    "is_sensitive",
+)
 # 範囲ごとの規則（authorization.md §5.1）。個人は本人がすべてでき、ほかの範囲はここで決まる
 # - 使う：部門は使える部門の人、全社は全員、システムは会話で使わない
 # - 編集・公開：範囲ごとの（編集、公開）のpermission。部門は管理できる部門のSkillにだけ効く。公開できる人は編集もできる
@@ -121,6 +130,11 @@ class SkillContent(models.Model):
     )
     input_schema = models.JSONField(_("入力のSchema"), null=True, blank=True)
     output_schema = models.JSONField(_("業務結果のSchema"), null=True, blank=True)
+    # 使うConnectorと操作・表の宣言（skill/connectors.py。design.md §4.9.1）
+    connectors = models.JSONField(_("使うConnector"), default=list, blank=True)
+    # 資料そのものに個人情報・機密情報を含むSkill。機密の会話・タスクでだけ使う（design.md §4冒頭）。
+    # 機密のConnectorを宣言したSkillは、このフラグがなくても機密のSkillとして扱う
+    is_sensitive = models.BooleanField(_("機密"), default=False)
 
     class Meta:
         abstract = True
@@ -293,9 +307,10 @@ class Skill(models.Model):
     def _in_service(self) -> bool:
         return self.current_version_id is not None and not self.suspended
 
-    def unusable_reason(self, user, model_version) -> str:
+    def unusable_reason(self, user, model_version, *, sensitive: bool, connectors: set[str] | None = None) -> str:
         """利用者がこのモデル設定の版で使えない理由（使えれば空文字）。Run開始時とエージェントが読み込むときに、
-        その時点の公開中の版で確かめる（design.md §3.2・§4.8）"""
+        その時点の公開中の版で確かめる（design.md §3.2・§4.8）。`sensitive` はRunが機密か、`connectors` はRunの
+        Connectorの一覧のID（宣言したConnectorがなければ使えない。design.md §4.9.1）"""
         if self.scope not in CONVERSATION_SCOPES or not self.can(user, SkillAction.VIEW):
             return str(_("このSkillを使う権限がありません"))
         if self.suspended:
@@ -305,7 +320,11 @@ class Skill(models.Model):
             return str(_("このSkillはまだ公開されていません"))
         if not self.can(user, SkillAction.USE):
             return str(_("このSkillを使う権限がありません"))
-        return version.unsupported_by(model_version)
+        if reason := version.unsupported_by(model_version):
+            return reason
+        from .connectors import unusable_reason  # noqa: PLC0415  skill.connectorsがこのモジュールを使うため
+
+        return unusable_reason(version, user, sensitive=sensitive, available=connectors)
 
     @property
     def version_number(self) -> int:
@@ -389,6 +408,7 @@ class Skill(models.Model):
         if draft.base_version_id != current.current_version_id:
             raise VersionConflict("another version was published after the draft was opened")
         draft.check_publishable()
+        draft.check_connectors(actor)
         draft.check_evaluated()
 
         previous = current.current_version
@@ -827,6 +847,13 @@ class SkillDraft(SkillContent):
             raise InvalidDraft(
                 _("資料「%(key)s」に検証の誤りがあります：%(errors)s") % {"key": asset.key, "errors": "／".join(errors)}
             )
+
+    def check_connectors(self, actor) -> None:
+        """宣言したConnectorが、公開する人の権限とSkillの範囲とConnectorの今の版の境界に合うか（design.md §4.9.1）"""
+        from .connectors import publish_errors  # noqa: PLC0415  skill.connectorsがこのモジュールを使うため
+
+        if errors := publish_errors(self, self.skill, actor):
+            raise InvalidDraft("／".join(errors))
 
     def unevaluated_cases(self) -> list["SkillEvaluationCase"]:
         """公開の前に必須の評価ケースのうち、今のrevisionで通過していないもの（design.md §3.7.1）。

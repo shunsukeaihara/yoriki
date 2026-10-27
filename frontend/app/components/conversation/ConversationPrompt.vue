@@ -220,6 +220,7 @@ const onSubmit = () => {
           :skills="skills ?? []"
           :editable="editableSkills ?? []"
           :selected="selectedSkills.map((s) => s.id)"
+          :sensitive="sensitive ?? false"
           :full="skillsFull"
           :disabled="disabled"
           @select="selectSkill"

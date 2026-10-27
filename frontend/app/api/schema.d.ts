@@ -81,8 +81,25 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description 会話で使えるConnector（入力欄の `@` の候補） */
+        /** @description 会話で使えるConnector（入力欄の `@` の候補と、Skillで宣言するConnectorの候補） */
         get: operations["app_v1_connectors_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/connectors/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 会話で使えるConnector（入力欄の `@` の候補と、Skillで宣言するConnectorの候補） */
+        get: operations["app_v1_connectors_retrieve"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1493,6 +1510,30 @@ export interface components {
             readonly scope_display: string;
             readonly department_info: components["schemas"]["MinimumDepartment"] | null;
         };
+        /**
+         * @description 使えるConnectorの詳細。Skillで使う表を宣言するときの候補に、公開する表の名前と説明を返す（列の説明・接続先は
+         *     返さない）
+         */
+        AppConnectorDetail: {
+            readonly id: string;
+            /** 名前 */
+            readonly name: string;
+            readonly kind_display: string;
+            readonly description: string;
+            /** @description 機密。ローカルLLMのモデルの会話でだけ使える */
+            readonly is_sensitive: boolean;
+            /** 範囲 */
+            readonly scope: components["schemas"]["ConnectorScopeEnum"];
+            readonly scope_display: string;
+            readonly department_info: components["schemas"]["MinimumDepartment"] | null;
+            readonly operations: components["schemas"]["OperationsEnum"][];
+            readonly tables: components["schemas"]["AppConnectorTable"][];
+        };
+        AppConnectorTable: {
+            /** @description 表の名前（スキーマがあれば `スキーマ.表`） */
+            name: string;
+            description: string;
+        };
         /** @description 社員が会話で選ぶためのモデル設定。接続先や単価は出さない */
         AppModelProfile: {
             readonly id: string;
@@ -1849,6 +1890,22 @@ export interface components {
             readonly type: string;
             readonly description: string;
         };
+        /** @description Skillが宣言するConnectorと操作・表（design.md §4.9.1） */
+        ConnectorDeclaration: {
+            /** @description ConnectorのID */
+            connector: string;
+            operations: components["schemas"]["OperationsEnum"][];
+            /** @description 使う表（`スキーマ.表`）。空ならConnectorの公開する表のどれでも */
+            tables?: string[];
+        };
+        /** @description Skillが宣言するConnectorと操作・表（design.md §4.9.1） */
+        ConnectorDeclarationRequest: {
+            /** @description ConnectorのID */
+            connector: string;
+            operations: components["schemas"]["OperationsEnum"][];
+            /** @description 使う表（`スキーマ.表`）。空ならConnectorの公開する表のどれでも */
+            tables?: string[];
+        };
         /**
          * @description * `1` - PostgreSQL
          *     * `2` - MySQL
@@ -2179,6 +2236,15 @@ export interface components {
             max_concurrency?: number;
             /** 有効 */
             is_active?: boolean;
+        };
+        /** @description 宣言したConnectorの表示。消えたConnectorは名前を空にする */
+        DeclaredConnector: {
+            connector: string;
+            name: string;
+            /** @description Connectorの今の版が機密か */
+            is_sensitive: boolean;
+            operations: string[];
+            tables: string[];
         };
         Department: {
             readonly id: string;
@@ -2843,6 +2909,12 @@ export interface components {
         };
         /** @enum {unknown} */
         NullEnum: null;
+        /**
+         * @description * `datasource_describe` - 表・列の説明を見る
+         *     * `datasource_query` - SELECT文で読み取る
+         * @enum {string}
+         */
+        OperationsEnum: "datasource_describe" | "datasource_query";
         PaginatedAppConnectorList: {
             /**
              * Format: uri
@@ -3380,6 +3452,10 @@ export interface components {
             requires?: components["schemas"]["SkillRequirementEnum"][];
             input_schema?: unknown;
             output_schema?: unknown;
+            /** @description 使うConnectorと操作・表の宣言。宣言したConnectorを使えない人には、このSkillを出さない */
+            connectors?: components["schemas"]["ConnectorDeclarationRequest"][];
+            /** @description 機密。付けるのは編集の権限、外すのは公開の権限（authorization.md §5.1） */
+            is_sensitive?: boolean;
         };
         /**
          * @description 評価ケース。添付はファイルを送る（multipart/form-data）。`expected_result` はJSONの文字列でもよい。
@@ -3818,6 +3894,10 @@ export interface components {
             readonly description: string | null;
             /** 停止中 */
             readonly suspended: boolean;
+            /** @description 公開中の版が機密のSkillか（機密の会話でだけ使える） */
+            readonly sensitive: boolean;
+            /** @description 公開中の版が宣言したConnectorを、利用者がすべて使えるか（使えなければ会話で使えない） */
+            readonly connectors_usable: boolean;
             /** @description 開いているDraftのID。なければnull。Draftを編集できる人にだけ出す */
             readonly draft: string | null;
             /** @description Draftを変更できるか（本文・資料・評価ケース） */
@@ -3903,6 +3983,16 @@ export interface components {
             requires?: components["schemas"]["SkillRequirementEnum"][];
             input_schema?: unknown;
             output_schema?: unknown;
+            /** @description 使うConnectorと操作・表の宣言。宣言したConnectorを使えない人には、このSkillを出さない */
+            connectors?: components["schemas"]["ConnectorDeclaration"][];
+            /** @description 宣言したConnectorの名前と機密のフラグ */
+            readonly connectors_info: components["schemas"]["DeclaredConnector"][];
+            /** @description 宣言したConnectorの、公開するときに止まる問題（範囲・境界・Tool） */
+            readonly connector_problems: string[];
+            /** @description 機密。付けるのは編集の権限、外すのは公開の権限（authorization.md §5.1） */
+            is_sensitive?: boolean;
+            /** @description 機密のSkillか（機密のフラグか、宣言したConnectorの今の版が機密） */
+            readonly sensitive: boolean;
             readonly assets: components["schemas"]["SkillDraftAsset"][];
             readonly updated_by_info: components["schemas"]["MinimumUser"];
             /** @description 公開の前に必須の評価ケースのうち、今のrevisionで通過していないもの（あれば公開できない） */
@@ -3975,6 +4065,10 @@ export interface components {
             requires?: components["schemas"]["SkillRequirementEnum"][];
             input_schema?: unknown;
             output_schema?: unknown;
+            /** @description 使うConnectorと操作・表の宣言。宣言したConnectorを使えない人には、このSkillを出さない */
+            connectors?: components["schemas"]["ConnectorDeclarationRequest"][];
+            /** @description 機密。付けるのは編集の権限、外すのは公開の権限（authorization.md §5.1） */
+            is_sensitive?: boolean;
         };
         /** @description 評価の1回。`current` は今のDraftの今のrevisionを評価したものか */
         SkillEvaluation: {
@@ -4142,6 +4236,12 @@ export interface components {
             readonly input_schema: unknown;
             /** 業務結果のSchema */
             readonly output_schema: unknown;
+            /** @description 使うConnectorと操作・表の宣言 */
+            readonly connectors: components["schemas"]["DeclaredConnector"][];
+            /** 機密 */
+            readonly is_sensitive: boolean;
+            /** @description 機密のSkillか（機密のフラグか、宣言したConnectorの今の版が機密） */
+            readonly sensitive: boolean;
             readonly assets: components["schemas"]["SkillAsset"][];
             readonly rolled_back_from: number | null;
             /** 変更理由 */
@@ -4385,6 +4485,27 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaginatedAppConnectorList"];
+                };
+            };
+        };
+    };
+    app_v1_connectors_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AppConnectorDetail"];
                 };
             };
         };

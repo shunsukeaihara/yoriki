@@ -10,7 +10,7 @@ from harness.connectors import DATASOURCE_TOOL_NAMES, ConnectorUnavailable
 from harness.connectors import build_catalog as build_connector_catalog
 from harness.connectors import explicit_text as explicit_connectors_text
 from harness.connectors import resolve_explicit as resolve_explicit_connectors
-from harness.skills import SkillUnavailable, build_catalog, explicit_text, resolve_explicit
+from harness.skills import SkillUnavailable, build_catalog, declared_connectors, explicit_text, resolve_explicit
 from run.dispatch import enqueue_run
 from run.models import (
     ACTIVE_STATUSES,
@@ -24,6 +24,7 @@ from run.models import (
     RunStatus,
 )
 from runtime.models import RuntimeProfile
+from skill.connectors import skill_is_sensitive
 from skill.models import CONVERSATION_SCOPES, Skill, SkillAction, SkillVersion
 
 from .models import Conversation, ConversationMessage, InstructionKind, InstructionState, MessageRole, UserInstruction
@@ -199,8 +200,9 @@ def accept_skill_edit(clarification: ClarificationRequest, actor) -> None:
     UserInstruction.objects.create(conversation=message.conversation, message=message, kind=InstructionKind.NEXT)
 
 
-def resolve_skill_edit(message: ConversationMessage, user, version) -> dict[str, object]:
-    """Skillの編集の依頼の対象を確かめて、Manifestに固定する内容にする。編集できなければ CannotStart"""
+def resolve_skill_edit(message: ConversationMessage, user, version, *, sensitive: bool) -> dict[str, object]:
+    """Skillの編集の依頼の対象を確かめて、Manifestに固定する内容にする。編集できなければ CannotStart。
+    機密のSkillは、機密の会話でだけ編集する（harness.md §10.9）"""
     if not version.supports_tools:
         raise CannotStart(_("このモデルはToolを使えないので、Skillを編集できません。別のモデルを選んでください。"))
     uid = message.skill_edit.get("id", "")
@@ -211,6 +213,11 @@ def resolve_skill_edit(message: ConversationMessage, user, version) -> dict[str,
         raise CannotStart(_("編集するSkillが削除されました。"))
     if skill.scope not in CONVERSATION_SCOPES or not skill.can(user, SkillAction.EDIT):
         raise CannotStart(_("Skill「%(name)s」を編集する権限がありません。") % {"name": skill.name})
+    if not sensitive and skill_is_sensitive(skill):
+        raise CannotStart(
+            _("Skill「%(name)s」は機密のSkillなので、個人情報・機密情報を扱う会話で編集してください。")
+            % {"name": skill.name}
+        )
     return {"skill": skill.uid, "name": skill.name}
 
 
@@ -272,24 +279,38 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
     # Skillの編集の依頼は、対象のSkillを固定した編集のRunにする（harness.md §10.9）。それ以外では、`/` で指定した
     # Skillをその時点の公開中の版へ解決して固定し、指定がなければ、エージェントが選べるSkillの一覧を固定する
     # （Toolの一覧と `skill` の引数をRunの中で変えない。harness.md §7.5・§10.1）
-    skill_edit = resolve_skill_edit(message, conversation.owner, version) if message.skill_edit else None
+    # 機密のConnectorとSkillは、機密の会話のRunにだけ出す（design.md §4冒頭）
+    sensitive = conversation.handles_sensitive_data
+    skill_edit = (
+        resolve_skill_edit(message, conversation.owner, version, sensitive=sensitive) if message.skill_edit else None
+    )
     try:
-        skills = resolve_explicit(chosen_skills(message), conversation.owner, version) if not skill_edit else []
+        skills = (
+            resolve_explicit(chosen_skills(message), conversation.owner, version, sensitive=sensitive)
+            if not skill_edit
+            else []
+        )
     except SkillUnavailable as exc:
         raise CannotStart(_("指定したSkillを使えません。%(reason)s") % {"reason": exc}) from exc
-    catalog = (
-        build_catalog(conversation.owner, version)
-        if not skills and skill_edit is None and version.supports_tools
-        else None
-    )
     # エージェントが使えるConnectorの一覧も固定する（Toolの引数をRunの中で変えない。harness.md §10.2）。
-    # 使えるかは操作のたびに確かめ直す
-    # 機密のConnectorは、機密の会話のRunにだけ出す（design.md §4.9.1）
-    sensitive = conversation.handles_sensitive_data
+    # 使えるかは操作のたびに確かめ直す。`@` で指定したものと、`/` で指定したSkillが宣言したものを先に並べる
     connectors = resolve_connectors(message, conversation.owner, version, skills, sensitive=sensitive)
     connector_catalog = (
-        build_connector_catalog(conversation.owner, sensitive=sensitive, explicit=connectors)
+        build_connector_catalog(
+            conversation.owner, sensitive=sensitive, explicit=[*connectors, *declared_connectors(skills)]
+        )
         if version.supports_tools
+        else None
+    )
+    # Skillの一覧には、宣言したConnectorがこのRunのConnectorの一覧にあるものだけを出す（design.md §4.9.1）
+    catalog = (
+        build_catalog(
+            conversation.owner,
+            version,
+            sensitive=sensitive,
+            connectors={e["connector"] for e in (connector_catalog or {}).get("connectors", [])},
+        )
+        if not skills and skill_edit is None and version.supports_tools
         else None
     )
     fixed: dict[str, object] = {

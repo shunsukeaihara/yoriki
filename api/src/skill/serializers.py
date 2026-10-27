@@ -11,6 +11,7 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 
+from connector.models import Connector, ConnectorAction, Operation
 from harness.tools import SKILL_TOOLS
 from harness.tools.base import schema_problem
 from llm.models import ModelProfile
@@ -22,6 +23,7 @@ from utils.exceptions import Conflict
 from utils.fields import NormalizedTextField
 from utils.serializers import ReadOnlyModelSerializer
 
+from . import connectors as skill_connectors
 from .errors import CannotEvaluate, DraftExists, InvalidDraft, VersionConflict
 from .models import (
     MAX_CASES_PER_EVALUATION,
@@ -217,6 +219,49 @@ class SkillAssetSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class ConnectorDeclarationSerializer(serializers.Serializer):
+    """Skillが宣言するConnectorと操作・表（design.md §4.9.1）"""
+
+    connector = serializers.CharField(max_length=30, help_text=_("ConnectorのID"))
+    operations = serializers.ListField(
+        child=serializers.ChoiceField(choices=Operation.choices), max_length=len(Operation.choices)
+    )
+    tables = serializers.ListField(
+        child=serializers.CharField(max_length=300),
+        required=False,
+        max_length=skill_connectors.MAX_DECLARED_TABLES,
+        help_text=_("使う表（`スキーマ.表`）。空ならConnectorの公開する表のどれでも"),
+    )
+
+
+class DeclaredConnectorSerializer(serializers.Serializer):
+    """宣言したConnectorの表示。消えたConnectorは名前を空にする"""
+
+    connector = serializers.CharField()
+    name = serializers.CharField()
+    is_sensitive = serializers.BooleanField(help_text=_("Connectorの今の版が機密か"))
+    operations = serializers.ListField(child=serializers.CharField())
+    tables = serializers.ListField(child=serializers.CharField())
+
+
+def declared_connectors(content) -> list[dict[str, Any]]:
+    connectors = skill_connectors.load([content])
+    items = []
+    for declaration in content.connectors or []:
+        connector = connectors.get(declaration["connector"])
+        version = connector.current_version if connector and not connector.deleted else None
+        items.append(
+            {
+                "connector": declaration["connector"],
+                "name": connector.name if connector and not connector.deleted else "",
+                "is_sensitive": bool(version and version.is_sensitive),
+                "operations": declaration["operations"],
+                "tables": declaration.get("tables", []),
+            }
+        )
+    return items
+
+
 class SkillContentSerializer(serializers.ModelSerializer):
     """Draftと版に共通の中身"""
 
@@ -233,6 +278,14 @@ class SkillContentSerializer(serializers.ModelSerializer):
     )
     input_schema = serializers.JSONField(required=False, allow_null=True)
     output_schema = serializers.JSONField(required=False, allow_null=True)
+    connectors = ConnectorDeclarationSerializer(
+        many=True,
+        required=False,
+        help_text=_("使うConnectorと操作・表の宣言。宣言したConnectorを使えない人には、このSkillを出さない"),
+    )
+    is_sensitive = serializers.BooleanField(
+        required=False, help_text=_("機密。付けるのは編集の権限、外すのは公開の権限（authorization.md §5.1）")
+    )
 
     def validate_tools(self, value: list[str]) -> list[str]:
         return list(dict.fromkeys(value))  # 重ねずに、指定の順を保つ
@@ -242,6 +295,39 @@ class SkillContentSerializer(serializers.ModelSerializer):
 
     def validate_input_schema(self, value: Any) -> Any:
         return _schema_or_none(value)
+
+    def validate_connectors(self, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """宣言できるのは、宣言する人が使えるConnector（システムのConnectorは見る権限を持つ人）だけ。範囲と境界は
+        公開するときに確かめる（Connectorの版は後で変わるため）"""
+        request = self.context.get("request")
+        uids = [d["connector"] for d in value]
+        if len(uids) > skill_connectors.MAX_DECLARED_CONNECTORS:
+            raise serializers.ValidationError(
+                _("宣言できるConnectorは%(limit)s個までです") % {"limit": skill_connectors.MAX_DECLARED_CONNECTORS}
+            )
+        if len(set(uids)) != len(uids):
+            raise serializers.ValidationError(_("同じConnectorを2回宣言しています"))
+        found = Connector.objects.filter(uid__in=uids, deleted=False).select_related("connection", "department")
+        connectors = {c.uid: c for c in found}
+        declared = []
+        for declaration in value:
+            connector = connectors.get(declaration["connector"])
+            if connector is None or request is None or not skill_connectors.usable_by_declarer(connector, request.user):
+                raise serializers.ValidationError(
+                    _("宣言できないConnectorがあります（使う権限がないか、削除されました）")
+                )
+            if not declaration["operations"]:
+                raise serializers.ValidationError(
+                    _("Connector「%(name)s」で使う操作を選んでください") % {"name": connector.name}
+                )
+            declared.append(
+                {
+                    "connector": connector.uid,
+                    "operations": list(dict.fromkeys(declaration["operations"])),
+                    "tables": list(dict.fromkeys(t.strip() for t in declaration.get("tables", []) if t.strip())),
+                }
+            )
+        return declared
 
     def validate_output_schema(self, value: Any) -> Any:
         value = _schema_or_none(value)
@@ -256,6 +342,10 @@ class SkillContentSerializer(serializers.ModelSerializer):
 class SkillVersionSerializer(ReadOnlyModelSerializer):
     id = serializers.CharField(source="uid", read_only=True)
     assets = SkillAssetSerializer(many=True, read_only=True)
+    connectors = serializers.SerializerMethodField(help_text=_("使うConnectorと操作・表の宣言"))
+    sensitive = serializers.SerializerMethodField(
+        help_text=_("機密のSkillか（機密のフラグか、宣言したConnectorの今の版が機密）")
+    )
     rolled_back_from = serializers.IntegerField(source="rolled_back_from.number", read_only=True, allow_null=True)
     created_by_info = MinimumUserSerializer(source="created_by", read_only=True)
 
@@ -270,12 +360,22 @@ class SkillVersionSerializer(ReadOnlyModelSerializer):
             "requires",
             "input_schema",
             "output_schema",
+            "connectors",
+            "is_sensitive",
+            "sensitive",
             "assets",
             "rolled_back_from",
             "change_reason",
             "created_by_info",
             "created",
         ]
+
+    @extend_schema_field(DeclaredConnectorSerializer(many=True))
+    def get_connectors(self, obj: SkillVersion) -> list[dict[str, Any]]:
+        return declared_connectors(obj)
+
+    def get_sensitive(self, obj: SkillVersion) -> bool:
+        return skill_connectors.is_sensitive(obj)
 
 
 class MinimumSkillVersionSerializer(serializers.ModelSerializer):
@@ -308,6 +408,10 @@ class SkillSerializer(serializers.ModelSerializer):
     can_publish = serializers.SerializerMethodField(
         help_text=_("公開・切戻し・停止・削除、名前とToolの変更、資料の検証の条件と必須の評価ケースの変更ができるか")
     )
+    sensitive = serializers.SerializerMethodField(help_text=_("公開中の版が機密のSkillか（機密の会話でだけ使える）"))
+    connectors_usable = serializers.SerializerMethodField(
+        help_text=_("公開中の版が宣言したConnectorを、利用者がすべて使えるか（使えなければ会話で使えない）")
+    )
 
     class Meta:
         model = Skill
@@ -321,6 +425,8 @@ class SkillSerializer(serializers.ModelSerializer):
             "version",
             "description",
             "suspended",
+            "sensitive",
+            "connectors_usable",
             "draft",
             "can_edit",
             "can_publish",
@@ -328,6 +434,34 @@ class SkillSerializer(serializers.ModelSerializer):
             "updated",
         ]
         read_only_fields = ["scope", "suspended", "created", "updated"]
+
+    def _declared(self, obj: Skill, version: SkillVersion) -> dict[str, Connector]:
+        """公開中の版が宣言したConnector。一覧ではまとめて1回で読む（件数でクエリを増やさない）"""
+        # 一覧の各行は同じ子のSerializerで出すので、子に持たせる
+        declared: dict[str, Connector] | None = getattr(self, "_declared_connectors", None)
+        if declared is None:
+            parent = self.parent if isinstance(self.parent, serializers.ListSerializer) else None
+            skills: list[Skill] = list(parent.instance) if parent is not None and parent.instance is not None else [obj]
+            contents = [s.current_version for s in skills if s.current_version is not None]
+            declared = self._declared_connectors = skill_connectors.load(contents)
+        if any(uid not in declared for uid in skill_connectors.declared_uids(version)):
+            declared = skill_connectors.load([version])
+        return declared
+
+    def get_sensitive(self, obj: Skill) -> bool:
+        version = obj.current_version
+        return version is not None and skill_connectors.is_sensitive(version, self._declared(obj, version))
+
+    def get_connectors_usable(self, obj: Skill) -> bool:
+        version = obj.current_version
+        request = self.context.get("request")
+        if version is None or request is None or not version.connectors:
+            return True
+        declared = self._declared(obj, version)
+        return all(
+            (c := declared.get(uid)) is not None and c.can(request.user, ConnectorAction.USE)
+            for uid in skill_connectors.declared_uids(version)
+        )
 
     def get_draft(self, obj: Skill) -> str | None:
         """開いているDraftのID。なければnull。Draftを編集できる人にだけ出す"""
@@ -699,6 +833,13 @@ class SkillDraftSerializer(SkillContentSerializer):
     unevaluated_cases = serializers.SerializerMethodField(
         help_text=_("公開の前に必須の評価ケースのうち、今のrevisionで通過していないもの（あれば公開できない）")
     )
+    connectors_info = serializers.SerializerMethodField(help_text=_("宣言したConnectorの名前と機密のフラグ"))
+    sensitive = serializers.SerializerMethodField(
+        help_text=_("機密のSkillか（機密のフラグか、宣言したConnectorの今の版が機密）")
+    )
+    connector_problems = serializers.SerializerMethodField(
+        help_text=_("宣言したConnectorの、公開するときに止まる問題（範囲・境界・Tool）")
+    )
 
     class Meta:
         model = SkillDraft
@@ -712,6 +853,11 @@ class SkillDraftSerializer(SkillContentSerializer):
             "requires",
             "input_schema",
             "output_schema",
+            "connectors",
+            "connectors_info",
+            "connector_problems",
+            "is_sensitive",
+            "sensitive",
             "assets",
             "updated_by_info",
             "unevaluated_cases",
@@ -723,6 +869,19 @@ class SkillDraftSerializer(SkillContentSerializer):
     @extend_schema_field(MinimumEvaluationCaseSerializer(many=True))
     def get_unevaluated_cases(self, obj: SkillDraft) -> list[dict[str, Any]]:
         return list(MinimumEvaluationCaseSerializer(obj.unevaluated_cases(), many=True).data)
+
+    @extend_schema_field(DeclaredConnectorSerializer(many=True))
+    def get_connectors_info(self, obj: SkillDraft) -> list[dict[str, Any]]:
+        return declared_connectors(obj)
+
+    def get_sensitive(self, obj: SkillDraft) -> bool:
+        return skill_connectors.is_sensitive(obj)
+
+    def get_connector_problems(self, obj: SkillDraft) -> list[str]:
+        request = self.context.get("request")
+        if request is None or not obj.connectors:
+            return []
+        return skill_connectors.publish_errors(obj, obj.skill, request.user)
 
     def validate(self, attrs):
         draft = self.instance
@@ -737,6 +896,13 @@ class SkillDraftSerializer(SkillContentSerializer):
         ):
             # 本文を編集できても、Toolは増やせない（design.md §3.6）
             raise PermissionDenied(_("使ってよいToolを変えるには、この範囲の公開の権限が要ります"))
+        if (
+            draft.is_sensitive
+            and not attrs.get("is_sensitive", True)
+            and not _can(draft.skill, self.context, SkillAction.PUBLISH)
+        ):
+            # 編集の権限で機密の制限を緩めない（authorization.md §5.1）
+            raise PermissionDenied(_("機密のフラグを外すには、この範囲の公開の権限が要ります"))
         return attrs
 
     def create(self, validated_data):

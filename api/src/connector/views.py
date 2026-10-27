@@ -5,7 +5,7 @@ from django_filters import rest_framework as filters
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema, extend_schema_view
 from rest_framework.decorators import action
 from rest_framework.generics import get_object_or_404
-from rest_framework.mixins import ListModelMixin
+from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet, ModelViewSet, ReadOnlyModelViewSet
 
@@ -20,6 +20,7 @@ from .errors import ConnectorError
 from .limits import connection_slot, run_holding
 from .models import Connector, ConnectorKind, ConnectorScope, ConnectorVersion, DatabaseConnection
 from .serializers import (
+    AppConnectorDetailSerializer,
     AppConnectorSerializer,
     ConnectorCheckSerializer,
     ConnectorQueryResultSerializer,
@@ -336,16 +337,24 @@ class ConnectorVersionViewSet(ConnectorMixin, ReadOnlyModelViewSet):
     ordering = "-number"  # Connectorの中で一意
 
 
-@extend_schema(description="会話で使えるConnector（入力欄の `@` の候補）", tags=["app/connector"])
-class AppConnectorViewSet(ListModelMixin, GenericViewSet):
+@extend_schema(
+    description="会話で使えるConnector（入力欄の `@` の候補と、Skillで宣言するConnectorの候補）", tags=["app/connector"]
+)
+class AppConnectorViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
     """依頼した人が会話で使えるConnector（部門のものは使える部門の人、全社のものは全員。authorization.md §5.2）。
     機密のものも返す（ローカルLLMのモデルの会話でだけ使える。画面で出し分ける）"""
 
     permission_classes = [AppUser]
     queryset = Connector.objects.select_related("connection", "current_version", "department")
     serializer_class = AppConnectorSerializer
+    lookup_field = "uid"
     search_fields = ("name",)
     ordering = ("name", "pk")
+
+    def get_serializer_class(self):
+        if self.action == "retrieve":
+            return AppConnectorDetailSerializer
+        return super().get_serializer_class()
 
     def get_queryset(self):
         return super().get_queryset().filter(pk__in=Connector.objects.usable_by(self.request.user).values("pk"))

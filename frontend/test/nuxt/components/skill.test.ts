@@ -5,7 +5,26 @@ import { SkillDraftAssetList, SkillDraftForm } from '#components'
 
 const { patch, assetDelete } = vi.hoisted(() => ({ patch: vi.fn(), assetDelete: vi.fn() }))
 
+const salesConnector = {
+  id: 'c1',
+  name: '販売管理',
+  kindDisplay: 'PostgreSQL',
+  description: '',
+  isSensitive: false,
+  scope: 3,
+  scopeDisplay: '全社',
+  departmentInfo: null,
+}
 mockNuxtImport('useAPI', () => () => ({
+  connectors: {
+    list: () => Promise.resolve({ count: 1, next: null, previous: null, results: [salesConnector] }),
+    get: () =>
+      Promise.resolve({
+        ...salesConnector,
+        operations: ['datasource_describe', 'datasource_query'],
+        tables: [{ name: 'public.vendors', description: '取引先' }],
+      }),
+  },
   skills: () => ({
     drafts: () => ({ patch, assets: () => ({ delete: assetDelete }) }),
     fileUrl: (id: string) => `/api/files/${id}`,
@@ -35,6 +54,11 @@ const draft: SkillDraft = {
   requires: [],
   inputSchema: null,
   outputSchema: { type: 'object' },
+  connectors: [],
+  connectorsInfo: [],
+  connectorProblems: [],
+  isSensitive: false,
+  sensitive: false,
   assets: [
     {
       key: 'vendor-master',
@@ -61,7 +85,13 @@ const draft: SkillDraft = {
 }
 
 type Form = InstanceType<typeof SkillDraftForm> & {
-  form: { description: string; tools: string[]; outputSchema: string }
+  form: {
+    description: string
+    tools: string[]
+    outputSchema: string
+    connectors: ConnectorDeclaration[]
+    isSensitive: boolean
+  }
 }
 
 describe('SkillDraftForm', () => {
@@ -92,6 +122,32 @@ describe('SkillDraftForm', () => {
     expect(data).not.toHaveProperty('tools')
     // 保存した後は、応答の中身で入れ直す
     expect(vm.dirty).toBe(false)
+  })
+
+  it('使うConnectorと機密のフラグを送る', async () => {
+    const wrapper = await mountSuspended(SkillDraftForm, {
+      props: { modelValue: draft, skillId: 's1', canChangeTools: false },
+    })
+    const vm = wrapper.vm as unknown as Form
+    vm.form.connectors = [{ connector: 'c1', operations: ['datasource_query'], tables: ['public.vendors'] }]
+    vm.form.isSensitive = true
+    await nextTick()
+    await vm.onSubmit()
+    expect(patch.mock.calls[0]![0]).toMatchObject({
+      connectors: [{ connector: 'c1', operations: ['datasource_query'], tables: ['public.vendors'] }],
+      isSensitive: true,
+    })
+  })
+
+  it('機密のフラグは、公開の権限がなければ外せない', async () => {
+    // 選んだ Tool（公開の権限がないので変えられない）のほかに、機密のフラグも変えられなくなる
+    const lockedChecks = async (isSensitive: boolean) => {
+      const wrapper = await mountSuspended(SkillDraftForm, {
+        props: { modelValue: { ...draft, isSensitive }, skillId: 's1', canChangeTools: false },
+      })
+      return wrapper.findAll('button[role="checkbox"][data-state="checked"][disabled]').length
+    }
+    expect(await lockedChecks(true)).toBe((await lockedChecks(false)) + 1)
   })
 
   it('公開の権限があれば Tool も送る', async () => {

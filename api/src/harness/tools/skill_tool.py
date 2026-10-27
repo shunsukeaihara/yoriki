@@ -7,6 +7,7 @@ from django.utils.translation import gettext as _
 from run.models import RunEvent, RunEventKind
 from skill.models import Skill, SkillAction, SkillVersion
 
+from ..connectors import catalog as connector_catalog
 from ..skills import loaded_entries, manifest_entry, render
 from .base import Effect, Tool, ToolContext, ToolResult
 from .submit_result import NAME as SUBMIT_RESULT
@@ -52,7 +53,8 @@ def execute(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     loaded = next((e for e in loaded_entries(run) if e["skill"] == skill.uid), None)
     if loaded is not None:
         return _load_again(skill, loaded, entry["name"], context)
-    if reason := skill.unusable_reason(user, model_version):
+    available = {e["connector"] for e in connector_catalog(run).get("connectors", [])}
+    if reason := skill.unusable_reason(user, model_version, sensitive=run.handles_sensitive_data, connectors=available):
         return _unusable(reason)
     assert skill.current_version_id is not None  # unusable_reason() が確かめた
     version = SkillVersion.objects.prefetch_related("assets__resource_version").get(pk=skill.current_version_id)

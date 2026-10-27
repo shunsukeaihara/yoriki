@@ -42,6 +42,8 @@ describe('skillOwnerLabel', () => {
     version: 1,
     description: '',
     suspended: false,
+    sensitive: false,
+    connectorsUsable: true,
     draft: null,
     canEdit: false,
     canPublish: false,

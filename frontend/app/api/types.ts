@@ -46,6 +46,8 @@ export type ConnectorQueryResult = Api<'ConnectorQueryResult'>
 export type ConnectorVersion = Api<'ConnectorVersion'>
 // 会話で使えるConnector（入力欄の `@` の候補）
 export type AppConnector = Api<'AppConnector'>
+// 使えるConnectorの詳細（Skillで使う表を宣言するときの候補）
+export type AppConnectorDetail = Api<'AppConnectorDetail'>
 export type DatabaseConnectionListParams = ListParams & { name?: string; kind?: ConnectorKindEnum; isActive?: boolean }
 export type ConnectorScopeEnum = Schemas['ConnectorScopeEnum']
 export type ConnectorListParams = ListParams & {
@@ -100,6 +102,9 @@ export type SkillPublish = Api<'SkillPublishRequest'>
 export type SkillRollback = Api<'SkillRollbackRequest'>
 export type SkillSuspend = Api<'SkillSuspendRequest'>
 export type SkillDraft = Api<'SkillDraft'>
+// Skillが宣言するConnectorと操作・表（design.md §4.9.1）
+export type ConnectorDeclaration = Api<'ConnectorDeclaration'>
+export type DeclaredConnector = Api<'DeclaredConnector'>
 export type SkillDraftWrite = Api<'SkillDraftRequest'>
 export type SkillDraftOpen = Api<'SkillDraftOpenRequest'>
 export type SkillDraftAsset = Api<'SkillDraftAsset'>

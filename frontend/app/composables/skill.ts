@@ -106,6 +106,8 @@ export const skillFieldLabel = (name: string, t: T): string => {
     requires: t('必要な能力'),
     input_schema: t('入力のSchema'),
     output_schema: t('業務結果のSchema'),
+    connectors: t('使うConnector'),
+    is_sensitive: t('機密'),
   }
   return labels[name] ?? name
 }

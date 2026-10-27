@@ -1,5 +1,6 @@
 """接続の同時実行数の上限（design.md §4.9.5）"""
 
+import time
 from datetime import timedelta
 
 import pytest
@@ -7,7 +8,7 @@ from django.utils import timezone
 
 from connector.errors import ConnectorError, ConnectorErrorKind
 from connector.factories import DatabaseConnectionFactory
-from connector.limits import connection_slot
+from connector.limits import connection_slot, run_holding
 from connector.models import ConnectionLease
 
 
@@ -75,3 +76,16 @@ def test_slot_can_be_renewed_during_a_long_operation():
         renew()
         lease.refresh_from_db()
         assert lease.expires > timezone.now() + timedelta(seconds=60)
+
+
+def test_run_holding_renews_while_the_operation_runs():
+    renewed: list[int] = []
+    beats: list[int] = []
+
+    def operation() -> str:
+        time.sleep(0.1)
+        return "done"
+
+    result = run_holding(operation, lambda: renewed.append(1), on_beat=lambda: beats.append(1), interval=0.01)
+    assert result == "done"
+    assert renewed and len(beats) == len(renewed)

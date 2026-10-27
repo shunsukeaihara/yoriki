@@ -7,6 +7,8 @@
 
 import time
 from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from contextlib import contextmanager
 from datetime import timedelta
 
@@ -21,6 +23,8 @@ from .models import ConnectionLease, DatabaseConnection
 POLL_SECONDS = 0.5
 # 枠の期限の余裕（秒）。接続と実行時間の上限に足す
 LEASE_MARGIN_SECONDS = 60
+# 操作の間に枠の期限を延ばす間隔（秒）
+RENEW_SECONDS = 15
 
 
 def _try_acquire(connection: DatabaseConnection, holder: str, hold_seconds: int) -> ConnectionLease | None:
@@ -69,3 +73,23 @@ def connection_slot(
         yield renew
     finally:
         ConnectionLease.objects.filter(pk=lease.pk).delete()
+
+
+def run_holding[T](
+    operation: Callable[[], T],
+    renew: Callable[[], None],
+    *,
+    on_beat: Callable[[], None] = lambda: None,
+    interval: float = RENEW_SECONDS,
+) -> T:
+    """接続先への操作を別のスレッドで行い、終わるのを待つ間、枠の期限を延ばす（`connection_slot()` の `renew`）。
+    DBの実行時間の上限は文ごとに効くので、複数の文を実行する操作は期限より長く続きうる。`on_beat` も同じ間隔で
+    呼ぶ（RunnerのAttemptのleaseを延ばす）。別のスレッドはDjangoのDBに触らない（接続先のドライバだけを使う）"""
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="connector") as pool:
+        future = pool.submit(operation)
+        while True:
+            try:
+                return future.result(timeout=interval)
+            except FutureTimeout:
+                on_beat()
+                renew()

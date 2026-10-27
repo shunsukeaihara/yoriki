@@ -17,7 +17,7 @@ from utils.views import SoftDeleteMixin
 
 from .adapters import get_adapter
 from .errors import ConnectorError
-from .limits import connection_slot
+from .limits import connection_slot, run_holding
 from .models import Connector, ConnectorKind, ConnectorScope, ConnectorVersion, DatabaseConnection
 from .serializers import (
     AppConnectorSerializer,
@@ -45,8 +45,8 @@ def in_slot(connection: DatabaseConnection, request, hold_seconds: int, operatio
     """管理画面の操作も、エージェントの操作と同じ接続の同時実行数の上限の中で行う（design.md §4.9.5）"""
     with connection_slot(
         connection, f"manage:{request.user.uid}", hold_seconds=hold_seconds, wait_seconds=PREVIEW_WAIT_SECONDS
-    ):
-        return operation()
+    ) as renew:
+        return run_holding(operation, renew)
 
 
 class DatabaseConnectionFilter(filters.FilterSet):

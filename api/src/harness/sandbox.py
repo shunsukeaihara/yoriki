@@ -337,8 +337,10 @@ class SandboxSession:
         読取り専用でmountする）に置く。まだ置いていないものだけを足す。bind mountなので、動いているSandboxにも
         そのまま見える。Connectorの結果は connectors/<呼出し>/ の下に置く（harness.md §10.2）"""
         conversation_id = self.run.conversation_id
+        # 保持期限の切れたConnectorの結果は置かない（会話で照会を重ねても、置くものが増え続けないように）
+        results = Artifact.objects.connector_results(conversation_id).filter(expires__gt=timezone.now())
         inputs = (
-            (Artifact.objects.sent_inputs(conversation_id) | Artifact.objects.connector_results(conversation_id))
+            (Artifact.objects.sent_inputs(conversation_id) | results)
             .exclude(pk__in=self.inputs)
             .select_related("blob")
             .order_by("pk")
@@ -364,7 +366,8 @@ class SandboxSession:
             self.inputs.add(artifact.pk)
 
     def _input_path_ok(self, artifact: Artifact, path: Path) -> bool:
-        """添付は /workspace/input の直下、Connectorの結果は connectors/ の下だけに置く"""
+        """添付は /workspace/input の直下、Connectorの結果は connectors/ の下だけに置く。Connectorの結果の
+        ディレクトリと同じ名前の添付（その名前を避けるようにする前に送ったもの）は置かない"""
         if artifact.kind == ArtifactKind.CONNECTOR_RESULT:
             parts = Path(artifact.path).parts
             return (
@@ -373,7 +376,7 @@ class SandboxSession:
                 and all(p not in ("", ".", "..") for p in parts)
                 and self.input_dir in path.parents
             )
-        return path.parent == self.input_dir
+        return path.parent == self.input_dir and artifact.path != CONNECTOR_RESULTS_DIR
 
     def _restore(self, sandbox: Sandbox) -> None:
         checkpoint = Checkpoint.latest_for(self.run)

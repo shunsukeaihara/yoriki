@@ -11,8 +11,6 @@
 import io
 import tempfile
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FutureTimeout
 from typing import Any
 
 from django.utils import timezone
@@ -21,7 +19,7 @@ from artifact.models import CONNECTOR_RESULTS_DIR, Artifact, BlobObject
 from connector.adapters import get_adapter
 from connector.adapters.base import QueryResult, TableInfo
 from connector.errors import ConnectorError
-from connector.limits import connection_slot
+from connector.limits import connection_slot, run_holding
 from connector.models import Connector, ConnectorAction, ConnectorVersion
 from conversation.models import Conversation
 
@@ -139,17 +137,8 @@ def _slot(connector: Connector, version: ConnectorVersion, context: ToolContext)
 
 
 def _keep_alive[T](context: ToolContext, operation: Callable[[], T], renew: Callable[[], None]) -> T:
-    """接続先への操作を別のスレッドで行い、終わるのを待つ間もAttemptのleaseと接続の枠の期限を延ばす（実行時間の
-    上限はleaseより長く設定でき、DBの上限は文ごとに効く）。別のスレッドはDjangoのDBに触らない（接続先の
-    ドライバだけを使う）"""
-    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="connector") as pool:
-        future = pool.submit(operation)
-        while True:
-            try:
-                return future.result(timeout=HEARTBEAT_SECONDS)
-            except FutureTimeout:
-                context.attempt.heartbeat()
-                renew()
+    """待つ間もAttemptのleaseと接続の枠の期限を延ばす（実行時間の上限はleaseより長く設定できる）"""
+    return run_holding(operation, renew, on_beat=context.attempt.heartbeat, interval=HEARTBEAT_SECONDS)
 
 
 def _failed(exc: ConnectorError, connector: Connector, version: ConnectorVersion) -> ToolResult:

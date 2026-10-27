@@ -129,18 +129,16 @@ def start_evaluation(
             raise CannotEvaluate(reason)
         # Skillの範囲に合わないConnector（部門のSkillに別の部門のもの等）は、評価のRunでも読ませない。評価の結果は
         # そのSkillを編集できる人が見るので（公開と同じ範囲の検証。design.md §4.9.1）
-        declared = skill_connectors.load([draft])
-        if any(
-            (c := declared.get(uid)) is not None and not skill_connectors.scope_allows(skill, c)
-            for uid in skill_connectors.declared_uids(draft)
-        ):
+        if skill_connectors.out_of_scope(draft, skill):
             raise CannotEvaluate(_("このSkillの範囲では使えないConnectorを宣言しています。"))
-        # 公開中の版を評価する人が動かせなければ（使えなくなったConnectorやシステムのConnectorを宣言している）、
-        # 最初の公開の前と同じくDraftだけで評価する（その宣言を外したDraftを評価して公開できるように）
+        # 公開中の版を評価する人が動かせなければ（使えなくなったConnector、システムのConnector、Skillの範囲に
+        # 合わなくなったConnectorを宣言している）、最初の公開の前と同じくDraftだけで評価する（その宣言を外した
+        # Draftを評価して公開できるように）
         base = skill.current_version
         if base is not None and (
             skill_connectors.declares_system_connector(base)
             or skill_connectors.unusable_reason(base, actor, sensitive=sensitive)
+            or skill_connectors.out_of_scope(base, skill)
         ):
             base = None
         runtime_version = RuntimeProfile.default_version()

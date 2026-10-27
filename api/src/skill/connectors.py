@@ -175,3 +175,11 @@ def declares_system_connector(content: Any) -> bool:
     return any(
         (c := connectors.get(uid)) is not None and c.scope == ConnectorScope.SYSTEM for uid in declared_uids(content)
     )
+
+
+def out_of_scope(content: Any, skill) -> list[Connector]:
+    """宣言したConnectorのうち、Skillの範囲では宣言できないもの（公開した後に部門が付け替えられたもの等）"""
+    connectors = load([content])
+    return [
+        c for uid in declared_uids(content) if (c := connectors.get(uid)) is not None and not scope_allows(skill, c)
+    ]

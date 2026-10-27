@@ -160,15 +160,29 @@ def test_department_task_uses_its_department_and_company_skills(api_client, app_
 def test_system_task_uses_department_connectors_of_any_department(api_client, model):
     admin = grant(UserFactory.create(), AppPermission.MANAGE_SYSTEM_TASKS)
     connector = ConnectorFactory.create(scope=ConnectorScope.DEPARTMENT, department=DepartmentFactory.create())
+    skill = SkillFactory.create(scope=SkillScope.SYSTEM, owner=None)
+    SkillVersionFactory.create(skill=skill, tools=["datasource_query"])
     res = _create(
-        api_client, admin, model, scope=TaskScope.SYSTEM, connectors=[connector.uid], tools=["datasource_query"]
+        api_client,
+        admin,
+        model,
+        scope=TaskScope.SYSTEM,
+        skills=[{"skill": skill.uid, "version": 1}],
+        connectors=[connector.uid],
+        tools=["datasource_query"],
     )
     assert res.status_code == 201, res.json()
 
     # 全社のタスクには部門のConnectorを登録できない
     company = grant(UserFactory.create(), AppPermission.MANAGE_COMPANY_TASKS)
     res = _create(
-        api_client, company, model, scope=TaskScope.COMPANY, connectors=[connector.uid], tools=["datasource_query"]
+        api_client,
+        company,
+        model,
+        scope=TaskScope.COMPANY,
+        skills=[{"skill": _company_skill().uid, "version": 1}],
+        connectors=[connector.uid],
+        tools=["datasource_query"],
     )
     assert res.status_code == 400
     assert "このタスクでは使えません" in res.json()["connectors"][0]
@@ -192,7 +206,12 @@ def test_skill_declared_connector_must_be_in_the_task(api_client, model):
 def test_sensitive_connector_needs_a_sensitive_task_with_a_local_model(api_client, model):
     admin = grant(UserFactory.create(), AppPermission.MANAGE_COMPANY_TASKS)
     connector = ConnectorFactory.create(version__is_sensitive=True)
-    body = {"scope": TaskScope.COMPANY, "connectors": [connector.uid], "tools": ["datasource_query"]}
+    body = {
+        "scope": TaskScope.COMPANY,
+        "skills": [{"skill": _company_skill().uid, "version": 1}],
+        "connectors": [connector.uid],
+        "tools": ["datasource_query"],
+    }
     res = _create(api_client, admin, model, **body)
     assert res.status_code == 400
     assert "機密" in res.json()["connectors"][0]
@@ -321,12 +340,14 @@ def test_outputs_of_a_task_run_are_downloaded_by_the_managers(api_client, app_us
     assert api_client.get(f"{artifacts}{output.uid}/download/").status_code == 404
 
 
-def test_number_input_rejects_infinity(api_client, app_user, model):
+def test_number_input_rejects_infinity_and_huge_numbers(api_client, app_user, model):
     inputs = [{"name": "amount", "label": "金額", "type": "number", "required": True}]
     task = _create(api_client, app_user, model, prompt_template="{{ inputs.amount }}円", inputs=inputs).json()
-    res = api_client.post(_url(task, "run/"), '{"inputs": {"amount": 1e999}}', content_type="application/json")
-    assert res.status_code == 400
-    assert "amount" in res.json()["inputs"]
+    for value in ("1e999", "1" + "0" * 400):
+        body = f'{{"inputs": {{"amount": {value}}}}}'
+        res = api_client.post(_url(task, "run/"), body, content_type="application/json")
+        assert res.status_code == 400
+        assert "amount" in res.json()["inputs"]
 
 
 def test_result_schema_needs_a_model_with_tools(api_client, app_user):
@@ -334,3 +355,11 @@ def test_result_schema_needs_a_model_with_tools(api_client, app_user):
     res = _create(api_client, app_user, model, output_schema={"type": "object", "properties": {}})
     assert res.status_code == 400
     assert "Toolを使えるモデル" in res.json()["model_profile"][0]
+
+
+def test_tools_that_no_skill_allows_are_refused(api_client, app_user, model):
+    """実行時はSkillとタスクの両方にあるToolだけを出すので、どのSkillも使わないToolは保存させない"""
+    skill = _company_skill(tools=["read"])
+    res = _create(api_client, app_user, model, skills=[{"skill": skill.uid, "version": 1}], tools=["read", "shell"])
+    assert res.status_code == 400
+    assert "shell" in res.json()["tools"][0]

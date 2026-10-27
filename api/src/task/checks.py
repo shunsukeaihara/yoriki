@@ -169,6 +169,13 @@ def _check_skills(
         else:
             schemas += 1 if version.output_schema else 0
             _check_declarations(skill, version, content, errors)
+    # Toolは、固定したSkillの「使ってよいTool」との積だけを実行時に出すので、どのSkillも使わないToolは保存させない
+    skill_tools = {t for _s, v in skills.values() if v is not None for t in v.tools}
+    if unused := [t for t in content["tools"] if t not in skill_tools]:
+        errors.add(
+            "tools",
+            _("登録したSkillのどれも使わないToolがあります：%(tools)s") % {"tools": "、".join(unused)},
+        )
     if schemas > 1 and not content["output_schema"]:
         errors.add(
             "output_schema", _("業務結果の形を決めているSkillが複数あります。タスクの業務結果のSchemaを決めてください")

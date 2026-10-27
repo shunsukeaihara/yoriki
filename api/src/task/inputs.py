@@ -14,6 +14,8 @@ from .checks import PLACEHOLDER_RE
 from .models import TaskInputType
 
 DEFAULT_MAX_LENGTH = 1000
+# 数値の入力の絶対値の上限
+MAX_NUMBER = 10**15
 
 
 def clean_inputs(definitions: list[dict[str, Any]], values: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
@@ -48,15 +50,21 @@ def _clean_string(definition: dict[str, Any], value: Any) -> Any:
 
 
 def _clean_number(definition: dict[str, Any], value: Any) -> Any:
-    # 無限大・NaN（JSONの 1e999 等）は保存できないので断る
-    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
+    if isinstance(value, bool) or not isinstance(value, int | float):
         raise ValueError(_("数値を入力してください"))
-    return value
+    return _in_range(value)
 
 
 def _clean_integer(definition: dict[str, Any], value: Any) -> Any:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(_("整数を入力してください"))
+    return _in_range(value)
+
+
+def _in_range(value: int | float) -> int | float:
+    """無限大・NaN（JSONの 1e999 等）と、桁の多すぎる数を断る（整数は浮動小数点数へ変換せずに比べる）"""
+    if (isinstance(value, float) and not math.isfinite(value)) or abs(value) > MAX_NUMBER:
+        raise ValueError(_("%(limit)s以下の数値を入力してください") % {"limit": f"{MAX_NUMBER:.0e}"})
     return value
 
 

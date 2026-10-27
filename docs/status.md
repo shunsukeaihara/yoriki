@@ -211,8 +211,10 @@ cd frontend && pnpm install
 - 手元のmacOS（Node.js 26.12.1）では、フロントエンドの単体テストのうちコンポーネントをマウントしないファイル（`test/nuxt/composables/`、`api/client.test.ts` 等）が、Nuxtの環境の準備で止まって「Hook timed out」になる（`main` でも同じ。CIでは通る。原因は未調査）。コンポーネントのテストのファイルと一緒に `pnpm vitest run <ファイル>` で動かすと、同じ実行の中では通ることがある。
 - 変更前に、AGENTS.md と、触る範囲の規約を読む。作業の進め方（ブランチ、コミット、Pull Request、CI、マージ）は development.md に従う。
 - 作業の区切りでは、本書の §1・§3・§4 を更新する。Pull Requestで進めた作業は、マージの前にそのPull Requestの中で更新する（マージの後に `main` へ別にコミットしない）。
-- Codexのレビュー：手元で `codex review --base main -c 'developer_instructions="レビューの指摘とまとめは、すべて日本語で書いてください。"'` を実行し（数分かかる。出力の `[P1]`・`[P2]` の行と末尾を読む）、指摘をコードで確かめて直し（テストも足す）、コミットして、指摘がなくなるまで繰り返す。PRの前に回してよい。
-- 敵対的なレビュー：普通のレビューと並行して、`node ~/.claude/plugins/cache/openai-codex/codex/<版>/scripts/codex-companion.mjs adversarial-review --wait --base main "<日本語で答えること、重点、議論し直さなくてよい合意済みの方針>"` も回す（権限や設計の変更で特に効く）。毎回何かを出す性質なので、指摘が細部の詰めに移ったら、利用者と相談して区切る（#45 では15回で区切った）。
+- Codexのレビュー：手元で `codex review --base main -c 'developer_instructions="<指示>"'` を実行し（数分かかる。出力の `[P1]`・`[P2]` の行と末尾を読む）、指摘をコードで確かめて直し（テストも足す）、コミットして、指摘がなくなるまで繰り返す。PRの前に回してよい。`--base` と引数の指示文は一緒に使えないので、見る対象は `developer_instructions` で指定する。変更の種類で見る対象を変える：
+  - 文書だけの変更（`docs/` 等）：文書を対象にする。指示は「レビューの指摘とまとめは、すべて日本語で書いてください。この変更は文書だけです。変えた文書と、関係する docs/ の文書（design.md・authorization.md・harness.md・各規約・status.md）の間の食い違い、古くなった記述、今の実装（api/・frontend/）と合わない記述を見てください。」
+  - コードの変更：コードと文書を対象にする。指示は「レビューの指摘とまとめは、すべて日本語で書いてください。コードの不具合に加えて、変更が docs/ の設計書・規約（design.md・authorization.md・harness.md・各規約）と食い違っていないか、文書の直し漏れがないか（status.md を含む）も見てください。」
+- 敵対的なレビュー：普通のレビューと並行して、`node ~/.claude/plugins/cache/openai-codex/codex/<版>/scripts/codex-companion.mjs adversarial-review --wait --base main "<日本語で答えること、見る対象、重点、議論し直さなくてよい合意済みの方針>"` も回す（権限や設計の変更で特に効く）。見る対象は普通のレビューと同じく、文書だけの変更なら文書、コードの変更ならコードと文書（設計書・規約との食い違いと直し漏れ）にする。毎回何かを出す性質なので、指摘が細部の詰めに移ったら、利用者と相談して区切る（#45 では15回で区切った）。
 - ブランチの名前は `<種類>/<内容>`（development.md §1。例：`feature/skill-models`）。
 - Pull Requestの進め方（AGENTS.md）：コードの変更は手元のブランチで作り、PRはユーザーに依頼されてから作る。マージはユーザーが指示したときに限り行う。本書の状況の更新や誤字の修正のように判断を含まない文書の変更は、PRを作らずに `main` へ直接コミットする。design.md や規約の判断を変える変更はPRにする（development.md §1）。PRごとにCodexのレビューを受け、指摘をコードで確かめてから直す。CIが通ったら報告し、マージの指示を待つ（squash merge。`[skip ci]` は development.md §4.1）。作業の中で見つけた小さな問題は、別のPRにせず、今のPRで直す。PRのページは消せないので、試しのPRや取り消しのPRは作らない。
 - 設計の判断を変える話が出たら、コードを書く前に design.md と本書を直し、合意してから実装する。

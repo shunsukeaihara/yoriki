@@ -16,6 +16,7 @@ from skill.models import (
     SkillEvaluationCase,
 )
 
+from ..untrusted import untrusted
 from .base import Effect, Tool, ToolContext, ToolResult
 from .skill_admin import NO_TARGET, _target
 
@@ -182,7 +183,8 @@ def _case_lines(result) -> list[str]:
         lines.append(f"  AI judge: {result.judge_note}")
     if reply := (check.get("reply") or "").strip():
         excerpt = reply if len(reply) <= REPLY_EXCERPT else reply[:REPLY_EXCERPT] + "…"
-        lines.append(f"  Draft's final reply: {excerpt}")
+        # 評価のRunの回答は、読んだファイル等の内容を含みうるので、信頼しない内容として囲む（harness.md §6.3）
+        lines.append(f"  Draft's final reply: {untrusted(excerpt, 'evaluation_reply')}")
     return lines
 
 

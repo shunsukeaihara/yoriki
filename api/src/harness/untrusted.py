@@ -14,5 +14,5 @@ def untrusted(text: str, source: str, *, block: bool = False) -> str:
     """`block` なら囲みの中を別の行にする（複数行のデータ）。文の中に埋め込む値は1行のまま囲む"""
     body = text.replace("</untrusted_content", "<\\/untrusted_content")
     if block:
-        body = f"\n{body}\n"
+        body = "\n" + body.rstrip("\n") + "\n"
     return f'<untrusted_content source="{_escape(source)}">{body}</untrusted_content>'

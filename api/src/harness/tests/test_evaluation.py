@@ -167,6 +167,10 @@ def test_checks_and_judge_finish_the_evaluation(app_user, model, monkeypatch):
     assert request.forced_tool == "report_verdict"
     assert "照合の誤りがない" in request.messages[1].text
     assert "旧版の回答" in request.messages[1].text and "新版の回答" in request.messages[1].text
+    # 判定するRunの回答と業務結果はデータとして囲む（harness.md §6.3）
+    assert '<untrusted_content source="run_A">\n旧版の回答\n</untrusted_content>' in request.messages[1].text
+    assert '<untrusted_content source="run_B_result">\n{"ok": true}\n</untrusted_content>' in request.messages[1].text
+    assert "<untrusted_content>" in request.messages[0].text
     # 判定の利用量はDraftの側のRunに記録する
     assert UsageLedger.objects.filter(run=result.draft_run, purpose=UsagePurpose.EVALUATION_JUDGE).count() == 1
     # 何度呼んでも判定し直さない
@@ -543,6 +547,7 @@ def test_test_skill_draft_waits_for_the_evaluation_and_resumes(app_user, monkeyp
     assert "1 of 1 cases passed" in text
     assert '"通常の請求書": passed' in text
     assert "about the same" in text
+    assert 'Draft\'s final reply: <untrusted_content source="evaluation_reply">照合しました。</untrusted_content>' in text
     assert result.data["value"]["passed"] == 1
 
     adapter = FakeAdapter([reply("評価は通りました。")])

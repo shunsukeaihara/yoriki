@@ -11,6 +11,7 @@ from typing import Any
 from llm.providers.base import ImagePart, Part, TextPart
 
 from ..sandbox import WORKSPACE, workspace_path
+from ..untrusted import untrusted
 from .base import Effect, Tool, ToolContext, ToolResult
 from .output import limited
 
@@ -153,13 +154,18 @@ def execute_read(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     result = call_helper(context, "read", request)
     if not result.get("ok"):
         return helper_error(result)
-    text = "\n".join([*_read_header(result, images), "", result.get("text", ""), *_read_footer(result)])
     hint = "Read a smaller part with offset/limit (or pages, or sheet and range)."
+    content = result.get("text", "")
+    # ファイルの中身は信頼しない内容として囲む。見出しと続きの案内は囲みの外に書く（harness.md §6.3）
+    body = (
+        limited(context, content, head_ratio=1, hint=hint, source=f"file:{result['path']}") if content.strip() else ""
+    )
+    text = "\n".join([*_read_header(result, images), "", body, *_read_footer(result)])
     meta: dict[str, Any] = {"path": result["path"], "kind": result.get("kind")}
     if shown := result.get("images"):
         meta["images"] = [{k: i.get(k) for k in ("page", "mime", "width", "height") if i.get(k)} for i in shown]
     return ToolResult(
-        (TextPart(limited(context, text, head_ratio=1, full_text=result.get("text", ""), hint=hint)), *_images(result)),
+        (TextPart(text.rstrip("\n")), *_images(result)),
         value=file_value(result),
         meta=meta,
     )
@@ -275,7 +281,9 @@ def execute_edit(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     if not result.get("ok"):
         return helper_error(result)
     count = result.get("replacements", 0)
-    text = f"Replaced {count} occurrence{'s' if count != 1 else ''} in {result['path']}.\n{result.get('snippet', '')}"
+    text = f"Replaced {count} occurrence{'s' if count != 1 else ''} in {result['path']}."
+    if snippet := result.get("snippet", ""):
+        text += "\n" + untrusted(snippet, f"file:{result['path']}", block=True)
     return ToolResult.text(text, value=file_value(result), meta={"path": result["path"]})
 
 
@@ -374,14 +382,17 @@ def execute_grep(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         return ToolResult.text(f"No matches for {arguments['pattern']!r} in {base}.", value=value)
     if output == "files":
         lines = [f"{f['path']}: {f['matches']}" for f in result.get("files", [])]
+        body = limited(context, "\n".join(lines), head_ratio=1)
     elif output == "lines":
+        # 一致した行はファイルの中身なので、信頼しない内容として囲む（harness.md §6.3）
         lines = [f"{line['path']}:{line['line']}: {line['text']}" for line in result.get("lines", [])]
+        body = limited(context, "\n".join(lines), head_ratio=1, source="grep")
     else:
-        lines = []
+        body = ""
+    text = "\n".join(part for part in [summary, body] if part)
     if result.get("truncated"):
-        lines.append("[results truncated at 250; narrow the pattern, path or include]")
-    text = "\n".join([summary, *lines])
-    return ToolResult.text(limited(context, text, head_ratio=1), value=value)
+        text += "\n[results truncated at 250; narrow the pattern, path or include]"
+    return ToolResult.text(text, value=value)
 
 
 GREP = Tool(

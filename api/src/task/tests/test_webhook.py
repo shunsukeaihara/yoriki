@@ -543,3 +543,12 @@ def test_system_user_does_not_reuse_an_employee_account():
     assert (user.is_system, user.is_active) == (True, False)
     User.objects.filter(pk=user.pk).update(is_active=True)
     assert system_user().is_active is False
+
+
+def test_form_with_invalid_utf8_is_refused(api_client, integrator):
+    task = TaskDefinitionFactory.create(scope=TaskScope.COMPANY, revision__inputs=[])
+    key = _create_binding(api_client, integrator, task, event_id_path="$.event_id").json()["key"]
+    api_client.logout()
+    res = _send(api_client, task, key, "event_id=%FF", content_type="application/x-www-form-urlencoded")
+    assert (res.status_code, res.json()["code"]) == (400, "invalid_form")
+    assert not Run.objects.exists()

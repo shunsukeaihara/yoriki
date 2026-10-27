@@ -127,6 +127,14 @@ def start_evaluation(
             raise CannotEvaluate(_("システムのConnectorを使うSkillは、まだ評価できません。"))
         if reason := skill_connectors.unusable_reason(draft, actor, sensitive=sensitive):
             raise CannotEvaluate(reason)
+        # Skillの範囲に合わないConnector（部門のSkillに別の部門のもの等）は、評価のRunでも読ませない。評価の結果は
+        # そのSkillを編集できる人が見るので（公開と同じ範囲の検証。design.md §4.9.1）
+        declared = skill_connectors.load([draft])
+        if any(
+            (c := declared.get(uid)) is not None and not skill_connectors.scope_allows(skill, c)
+            for uid in skill_connectors.declared_uids(draft)
+        ):
+            raise CannotEvaluate(_("このSkillの範囲では使えないConnectorを宣言しています。"))
         # 公開中の版を評価する人が動かせなければ（使えなくなったConnectorやシステムのConnectorを宣言している）、
         # 最初の公開の前と同じくDraftだけで評価する（その宣言を外したDraftを評価して公開できるように）
         base = skill.current_version
@@ -246,6 +254,16 @@ def _start_run(
         ]
         Artifact.attach(conversation, attachments)
         message.attachments.set(attachments)
+    # 評価を依頼した人が使えるConnector。宣言したものを先に並べる
+    connector_catalog = (
+        build_connector_catalog(
+            actor,
+            sensitive=sensitive,
+            explicit=[{"connector": uid} for uid in skill_connectors.declared_uids(content)],
+        )
+        if version.supports_tools
+        else None
+    )
     run = Run.objects.create(
         conversation=conversation,
         owner=actor,
@@ -265,15 +283,7 @@ def _start_run(
                 "skill_catalog": None,
                 # 評価を依頼した人が使えるConnector。Draftの「使ってよいTool」にConnectorの操作があれば使う
                 "connectors": [],
-                "connector_catalog": (
-                    build_connector_catalog(
-                        actor,
-                        sensitive=sensitive,
-                        explicit=[{"connector": uid} for uid in skill_connectors.declared_uids(content)],
-                    )
-                    if version.supports_tools
-                    else None
-                ),
+                "connector_catalog": connector_catalog,
                 "evaluation": {"evaluation": evaluation.uid, "side": side},
             },
             "appended": [],
@@ -283,7 +293,12 @@ def _start_run(
     message.save(update_fields=["run"])
     RunEvent.record(run, RunEventKind.STATUS, {"status": RunStatus.QUEUED}, actor=actor)
     text = f"{case.prompt}\n\n{NO_RESPONDER_NOTE}"
-    RunEvent.record(run, RunEventKind.USER_MESSAGE, user_message_data(message, text, skills=[entry]), actor=actor)
+    RunEvent.record(
+        run,
+        RunEventKind.USER_MESSAGE,
+        user_message_data(message, text, skills=[entry], connector_catalog=connector_catalog),
+        actor=actor,
+    )
     enqueue_run(run)
     return run
 

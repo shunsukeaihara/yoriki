@@ -335,10 +335,12 @@ def connectors_text(version: SkillContentSource, names: dict[str, str] | None = 
     return "\n".join(lines)
 
 
-def explicit_text(entries: list[dict[str, Any]]) -> str:
-    """`/` で指定したSkillの本文。最初の発言に添える（モデルに `skill` を呼ばせない）"""
+def explicit_text(entries: list[dict[str, Any]], connector_catalog: dict[str, Any] | None = None) -> str:
+    """`/` で指定したSkillの本文。最初の発言に添える（モデルに `skill` を呼ばせない）。Connectorの名前は、Runに
+    固定したConnectorの一覧（`connector_catalog`）のものを使う（Toolが受け付ける名前と合わせる）"""
     contents = load_contents(entries)
-    blocks = [render(contents[content_key(e)].skill, contents[content_key(e)]) for e in entries]
+    names = {e["connector"]: e["name"] for e in (connector_catalog or {}).get("connectors", [])}
+    blocks = [render(contents[content_key(e)].skill, contents[content_key(e)], connector_names=names) for e in entries]
     head = "The user chose these skills for this request. Follow them:"
     return head + "\n" + "\n\n".join(blocks)
 

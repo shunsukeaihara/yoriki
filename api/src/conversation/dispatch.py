@@ -1,5 +1,7 @@
 """会話のメッセージの受付と、Runの開始（design.md §5.1、§5.5）"""
 
+from typing import Any
+
 from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
@@ -59,18 +61,20 @@ def user_message_data(
     first: bool = False,
     skills: list[dict[str, object]] | None = None,
     connectors: list[dict[str, object]] | None = None,
+    connector_catalog: dict[str, Any] | None = None,
 ) -> dict[str, object]:
     """利用者の発言のRunEventの内容。添付は /workspace/input の場所とあわせて残す（harness/context.py が読む）。
 
     Runの最初の発言（first）には、同じ会話でそれまでに送った添付も添える。/workspace/input には会話の添付が
     すべてあり、作業ファイルも前の依頼のCheckpointから引き継ぐので、前の依頼のファイルを使う依頼に答えられるように。
     `skills` は `/` で指定してRun開始時に解決したSkill（Manifestの内容）。本文も添え、モデルに `skill` を呼ばせない。
-    `connectors` は `@` で指定したConnector。公開している表の説明を添える（harness.md §10.2）
+    `connectors` は `@` で指定したConnector。公開している表の説明を添える（harness.md §10.2）。
+    `connector_catalog` はRunに固定したConnectorの一覧で、Skillの本文のConnectorの名前に使う
     """
     data: dict[str, object] = {"text": text, "message": message.uid}
     if skills:
         data["skills"] = skills
-        data["skills_text"] = explicit_text(skills)
+        data["skills_text"] = explicit_text(skills, connector_catalog)
     if connectors:
         data["connectors"] = connectors
         data["connectors_text"] = explicit_connectors_text(connectors)
@@ -355,7 +359,9 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
     message.run = run
     message.save(update_fields=["run"])
     RunEvent.record(run, RunEventKind.STATUS, {"status": RunStatus.QUEUED}, actor=actor)
-    data = user_message_data(message, message.body, first=True, skills=skills, connectors=connectors)
+    data = user_message_data(
+        message, message.body, first=True, skills=skills, connectors=connectors, connector_catalog=connector_catalog
+    )
     RunEvent.record(run, RunEventKind.USER_MESSAGE, data, actor=actor)
     enqueue_run(run)
     return run

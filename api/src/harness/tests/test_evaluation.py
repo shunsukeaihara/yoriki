@@ -279,6 +279,26 @@ def test_published_version_the_evaluator_cannot_run_is_not_compared(app_user, mo
 
 
 @pytest.mark.django_db
+def test_draft_declaring_a_connector_outside_the_skill_scope_is_not_evaluated(app_user, model):
+    """部門AのSkillのDraftに部門BのConnectorを宣言しても、評価のRunで部門Bのデータを読ませない"""
+    department_a, department_b = DepartmentFactory.create(), DepartmentFactory.create()
+    for department in (department_a, department_b):
+        DepartmentMembershipFactory.create(department=department, user=app_user)
+    editor = grant(app_user, AppPermission.EDIT_DEPARTMENT_SKILLS)
+    connector = ConnectorFactory.create(scope=ConnectorScope.DEPARTMENT, department=department_b)
+    declaration = {"connector": connector.uid, "operations": ["datasource_query"], "tables": []}
+    skill = skill_with_draft(
+        editor,
+        scope=SkillScope.DEPARTMENT,
+        department=department_a,
+        tools=["datasource_query"],
+        connectors=[declaration],
+    )
+    with pytest.raises(CannotEvaluate, match="範囲"):
+        start_evaluation(skill, cases=[case(skill)], actor=editor, model_version=model.current_version)
+
+
+@pytest.mark.django_db
 def test_cancel_stops_the_runs_and_closes_the_cases(app_user, model):
     skill = skill_with_draft(app_user)
     evaluation = start_evaluation(skill, cases=[case(skill)], actor=app_user, model_version=model.current_version)

@@ -9,7 +9,7 @@ from conversation.factories import ConversationFactory
 from conversation.models import Conversation
 from llm.factories import LLMConnectionFactory, ModelProfileFactory
 from llm.models import ProviderKind
-from run.models import Run, RunEndReason, RunStatus
+from run.models import Run, RunEndReason, RunEventKind, RunStatus
 from skill.factories import SkillDraftFactory, SkillFactory, SkillVersionFactory
 from user.factories import DepartmentFactory
 
@@ -260,3 +260,25 @@ def test_skill_whose_declared_table_is_no_longer_published_is_not_used(app_user)
     run = execute(run, FakeAdapter([]))
     assert run.status == RunStatus.FAILED
     assert "公開していません" in run.error
+
+
+@pytest.mark.django_db
+def test_chosen_skill_names_connectors_as_the_run_lists_them(app_user, monkeypatch):
+    """`/` で指定したSkillの本文も、Runに固定したConnectorの一覧の名前を使う"""
+    from conversation import dispatch as dispatch_module  # noqa: PLC0415
+
+    connector = ConnectorFactory.create(name="販売管理", version__tables=TABLES)
+    skill, _version = _declaring(app_user, connector)
+    build = dispatch_module.build_connector_catalog
+
+    def renaming(*args, **kwargs):
+        catalog = build(*args, **kwargs)
+        connector.name = "販売管理（新）"
+        connector.save(update_fields=["name"])
+        return catalog
+
+    monkeypatch.setattr(dispatch_module, "build_connector_catalog", renaming)
+    run = _start(ConversationFactory.create(owner=app_user), skills=[skill])
+    event = run.events.filter(kind=RunEventKind.USER_MESSAGE).first()
+    assert event is not None
+    assert "販売管理 — datasource_query" in event.data["skills_text"]

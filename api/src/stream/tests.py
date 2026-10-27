@@ -11,8 +11,9 @@ from django.test import RequestFactory
 
 from conversation.factories import ConversationFactory
 from run.factories import RunFactory
-from run.models import RunEvent, RunEventKind, RunStatus
+from run.models import RunEvent, RunEventKind, RunLaunch, RunStatus
 
+from . import views
 from .notifier import get_listener, notify, notify_delta
 from .views import run_stream
 
@@ -132,3 +133,47 @@ def test_run_stream_reads_a_long_backlog_to_the_end():
             await get_listener().close()
 
     assert asyncio.run(last_id()) == "id: 700"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_run_stream_ends_when_the_viewer_loses_the_permission(monkeypatch, default_runtime):
+    """タスクの管理の権限を外された人には、開いたままの接続からもRunのログを送らない（authorization.md §7.1）"""
+    from task.dispatch import start_task_run  # noqa: PLC0415
+    from task.factories import TaskDefinitionFactory  # noqa: PLC0415
+    from task.models import TaskScope  # noqa: PLC0415
+    from user.factories import UserFactory, grant  # noqa: PLC0415
+    from utils.permissions import AppPermission  # noqa: PLC0415
+
+    monkeypatch.setattr(views, "KEEPALIVE_SECONDS", 0.2)
+    monkeypatch.setattr(views, "RECHECK_SECONDS", 0.2)
+    admin = grant(UserFactory.create(), AppPermission.MANAGE_SYSTEM_TASKS)
+    task = TaskDefinitionFactory.create(scope=TaskScope.SYSTEM, created_by=admin)
+    run = start_task_run(task, inputs={}, actor=admin, launch=RunLaunch.MANUAL)
+    request = RequestFactory().get(f"/api/app/v1/runs/{run.uid}/stream/")
+
+    async def auser():
+        return admin
+
+    request.auser = auser
+
+    async def read() -> list[str]:
+        response = await run_stream(request, run.uid)
+        assert isinstance(response, StreamingHttpResponse)
+        stream: Any = response.streaming_content.__aiter__()  # type: ignore[union-attr]
+        chunks: list[str] = []
+        try:
+            chunks.append(await asyncio.wait_for(stream.__anext__(), timeout=5))
+            await sync_to_async(admin.user_permissions.clear)()
+            while True:
+                chunks.append(await asyncio.wait_for(stream.__anext__(), timeout=5))
+        except StopAsyncIteration:
+            return chunks
+        finally:
+            await stream.aclose()
+            await get_listener().close()
+
+    chunks = [c if isinstance(c, str) else c.decode() for c in asyncio.run(read())]
+    assert chunks[0].startswith("retry:")
+    assert (
+        chunks[1:] == []
+    )  # 権限を外した後は、記録済みのイベントも送らずに接続を終える  # 権限を外した後のイベントは送らない

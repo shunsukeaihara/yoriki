@@ -2,6 +2,9 @@
 
 import pytest
 
+from artifact.factories import ArtifactFactory
+from artifact.models import ArtifactKind
+from artifact.tests.test_api import body_of
 from connector.factories import ConnectorFactory
 from connector.models import ConnectorScope
 from conversation.models import Conversation, ConversationPurpose
@@ -291,3 +294,28 @@ def test_runs_are_seen_by_the_managers_of_the_recorded_scope(api_client, app_use
     api_client.force_login(member)
     assert api_client.get(f"/api/app/v1/runs/{run_id}/").status_code == 404
     assert api_client.get(f"/api/app/v1/runs/{run_id}/events/").status_code == 404
+
+
+def test_outputs_of_a_task_run_are_downloaded_by_the_managers(api_client, app_user, model):
+    department = DepartmentFactory.create()
+    manager = _department_manager(app_user, department)
+    task = _create(api_client, manager, model, scope=TaskScope.DEPARTMENT, department=department.uid).json()
+    run = Run.objects.get(
+        uid=api_client.post(_url(task, "run/"), {"inputs": {"vendor": "A"}}, format="json").json()["id"]
+    )
+    output = ArtifactFactory.create(
+        conversation=run.conversation, run=run, kind=ArtifactKind.OUTPUT, name="結果.csv", content=b"ok\n"
+    )
+    artifacts = f"/api/app/v1/runs/{run.uid}/artifacts/"
+
+    colleague = _department_manager(UserFactory.create(), department)
+    api_client.force_login(colleague)
+    assert [a["id"] for a in api_client.get(artifacts).json()["results"]] == [output.uid]
+    res = api_client.get(f"{artifacts}{output.uid}/download/")
+    assert res.status_code == 200
+    assert body_of(res) == b"ok\n"
+
+    # 管理の権限を外せば、起動した人でも取得できない（取得のたびに判定し直す）
+    manager.user_permissions.clear()
+    api_client.force_login(UserFactory._meta.model.objects.get(pk=manager.pk))
+    assert api_client.get(f"{artifacts}{output.uid}/download/").status_code == 404

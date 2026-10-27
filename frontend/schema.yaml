@@ -678,6 +678,120 @@ paths:
               schema:
                 $ref: '#/components/schemas/PaginatedRunList'
           description: ''
+  /api/app/v1/runs/{run}/artifacts/:
+    get:
+      operationId: app_v1_runs_artifacts_list
+      description: Runの添付と成果物（Runの結果とログを見られる人。authorization.md §7.1）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - in: query
+        name: kind
+        schema:
+          type: integer
+          title: 種別
+          enum:
+          - 1
+          - 2
+          - 3
+        description: |-
+          * `1` - 添付
+          * `2` - 成果物
+          * `3` - Connectorの結果
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: path
+        name: run
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - app/run/artifact
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedArtifactList'
+          description: ''
+  /api/app/v1/runs/{run}/artifacts/{uid}/:
+    get:
+      operationId: app_v1_runs_artifacts_retrieve
+      description: Runの添付と成果物（Runの結果とログを見られる人。authorization.md §7.1）
+      parameters:
+      - in: path
+        name: run
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/run/artifact
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Artifact'
+          description: ''
+  /api/app/v1/runs/{run}/artifacts/{uid}/download/:
+    get:
+      operationId: app_v1_runs_artifacts_download_retrieve
+      description: ファイルを取得する（ダウンロードとして返す）
+      parameters:
+      - in: path
+        name: run
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/run/artifact
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+          description: ファイル
   /api/app/v1/runs/{run}/clarifications/:
     get:
       operationId: app_v1_runs_clarifications_list

@@ -81,11 +81,6 @@ class AppTaskViewSet(
     def perform_update(self, serializer):
         serializer.save(actor=self.request.user)
 
-    def update(self, request, *args, **kwargs):
-        response = super().update(request, *args, **kwargs)
-        response.data = TaskDefinitionSerializer(self.get_object(), context=self.get_serializer_context()).data
-        return response
-
     @extend_schema(
         description="停止する。新しいRunを受け付けず、順番待ち・実行中のRunも次の区切りで止める",
         request=None,

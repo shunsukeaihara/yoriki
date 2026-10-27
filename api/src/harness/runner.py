@@ -254,9 +254,11 @@ class Runner:
         ClarificationRequest.objects.filter(
             run=self.run_obj, kind__in=TOOL_CLARIFICATIONS, status=ClarificationStatus.OPEN
         ).update(status=ClarificationStatus.CANCELLED)
+        # 停止・削除したタスクのRunでは、読むだけのToolもやり直さない（次の区切りで止める。authorization.md §6）
+        revoked = bool(tasks.revoked_task(self.run_obj))
         for call in pending_tool_calls(events):
             tool = tools.get(call["name"])
-            if tool is not None and tool.replay_safe:
+            if tool is not None and tool.replay_safe and not revoked:
                 # 読むだけのToolは、同じ引数で実行し直す
                 self._run_tool(tool, ToolCall(call["id"], call["name"], call["arguments"]))
                 continue

@@ -283,6 +283,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/app/v1/runs/{run}/artifacts/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Runの添付と成果物（Runの結果とログを見られる人。authorization.md §7.1） */
+        get: operations["app_v1_runs_artifacts_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/runs/{run}/artifacts/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Runの添付と成果物（Runの結果とログを見られる人。authorization.md §7.1） */
+        get: operations["app_v1_runs_artifacts_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/runs/{run}/artifacts/{uid}/download/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description ファイルを取得する（ダウンロードとして返す） */
+        get: operations["app_v1_runs_artifacts_download_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/app/v1/runs/{run}/clarifications/": {
         parameters: {
             query?: never;
@@ -5300,6 +5351,87 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaginatedRunList"];
+                };
+            };
+        };
+    };
+    app_v1_runs_artifacts_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /**
+                 * @description * `1` - 添付
+                 *     * `2` - 成果物
+                 *     * `3` - Connectorの結果
+                 */
+                kind?: 1 | 2 | 3;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                run: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedArtifactList"];
+                };
+            };
+        };
+    };
+    app_v1_runs_artifacts_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Artifact"];
+                };
+            };
+        };
+    };
+    app_v1_runs_artifacts_download_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description ファイル */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
                 };
             };
         };

@@ -7,7 +7,7 @@ from connector.factories import ConnectorFactory
 from connector.models import ConnectorScope
 from harness.tests.test_connectors import TABLES, execute, fixture_fake_datasource, results, text_of
 from llm.factories import ModelProfileFactory
-from run.models import Run, RunEndReason, RunLaunch, RunStatus
+from run.models import Run, RunEndReason, RunEvent, RunEventKind, RunLaunch, RunStatus
 from skill.factories import SkillFactory, SkillVersionFactory
 from skill.models import SkillScope
 from task.dispatch import start_task_run
@@ -151,3 +151,25 @@ def test_task_run_is_refused_when_a_fixed_skill_left_the_scope(admin):
     skill.save(update_fields=["deleted"])
     with pytest.raises(CannotRun):
         _start(task, admin)
+
+
+def test_suspended_task_does_not_replay_a_pending_tool_call(admin, fake_datasource):
+    """障害の後のAttemptでも、停止したタスクの読むだけのToolをやり直さない"""
+    connector = ConnectorFactory.create(name="経理DB", scope=ConnectorScope.SYSTEM, version__tables=TABLES)
+    skill = _system_skill(tools=["datasource_query"])
+    task = TaskDefinitionFactory.create(
+        scope=TaskScope.SYSTEM,
+        created_by=admin,
+        revision__skills=[{"skill": skill.uid, "version": 1}],
+        revision__connectors=[connector.uid],
+        revision__tools=["datasource_query"],
+    )
+    run = _start(task, admin)
+    call = {"id": "c1", "name": "datasource_query", "arguments": {"connector": "経理DB", "sql": "SELECT 1"}}
+    RunEvent.record(run, RunEventKind.ASSISTANT_MESSAGE, {"step": 1, "text": "", "tool_calls": [call]})
+    task.set_suspended(True)
+    run = execute(run, FakeAdapter([]))
+    assert fake_datasource.calls == []
+    [result] = results(run, "datasource_query")
+    assert "interrupted" in text_of(result)  # やり直さず、結果の分からない呼出しとして閉じた
+    assert (run.status, run.end_reason) == (RunStatus.FAILED, RunEndReason.TASK)

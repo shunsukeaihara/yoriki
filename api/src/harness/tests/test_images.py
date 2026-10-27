@@ -144,15 +144,22 @@ def test_image_file(app_user):
     execute(run, adapter, result)
 
     content = tool_result(run)["content"]
-    assert [p["type"] for p in content] == ["text", "image"]
+    # 画像もファイルの中身なので囲む。囲みの印は画像に付く文にする（harness.md §6.3）
+    assert [p["type"] for p in content] == ["text", "text", "image", "text"]
     assert "The image follows (shown at 800x1131)." in content[0]["text"]
+    assert content[1] == {
+        "type": "text",
+        "text": '<untrusted_content source="file:/workspace/input/写真.png">',
+        "with_media": True,
+    }
+    assert content[3] == {"type": "text", "text": "</untrusted_content>", "with_media": True}
 
 
 def test_switching_to_a_model_without_images_replaces_them():
     messages = [Message("user", "読んで"), Message("tool", (TextPart("page 1"), ImagePart("image/png", PNG)))]
     fitted = fit_to_model(messages, images=False)
     assert fitted[0] == messages[0]
-    assert fitted[1].parts == (TextPart("page 1"), TextPart(IMAGE_UNSUPPORTED))
+    assert fitted[1].parts == (TextPart("page 1"), TextPart(IMAGE_UNSUPPORTED, with_media=True))
     assert fit_to_model(messages, images=True) == messages
 
 
@@ -161,13 +168,15 @@ def test_only_the_newest_images_are_sent():
     newer = Message("tool", tuple(ImagePart("image/png", b"new") for _ in range(10)))
     fitted = fit_to_model([older, newer], images=True)
     assert fitted[1] == newer
-    assert fitted[0].parts[:5] == (TextPart(IMAGE_OMITTED),) * 5
+    assert fitted[0].parts[:5] == (TextPart(IMAGE_OMITTED, with_media=True),) * 5
     assert all(isinstance(p, ImagePart) for p in fitted[0].parts[5:])
 
 
 def test_missing_blob_becomes_a_notice():
     parts = parts_from_json([{"type": "image", "media_type": "image/png", "blob": "missing"}])
-    assert fit_to_model([Message("tool", parts)], images=True)[0].parts == (TextPart(IMAGE_UNAVAILABLE),)
+    assert fit_to_model([Message("tool", parts)], images=True)[0].parts == (
+        TextPart(IMAGE_UNAVAILABLE, with_media=True),
+    )
 
 
 def stored_images(count: int) -> Message:
@@ -189,7 +198,7 @@ def test_only_the_images_to_send_are_read(monkeypatch):
     fitted = fit_to_model([message], images=True)[0]
     assert len(opened) == MAX_IMAGES_PER_REQUEST
     assert [p.data[-1] for p in fitted.parts if isinstance(p, ImagePart)] == list(range(5, 25))
-    assert fit_to_model([message], images=False)[0].parts == (TextPart(IMAGE_UNSUPPORTED),) * 25
+    assert fit_to_model([message], images=False)[0].parts == (TextPart(IMAGE_UNSUPPORTED, with_media=True),) * 25
     assert len(opened) == MAX_IMAGES_PER_REQUEST
 
 
@@ -214,8 +223,9 @@ def test_repeat_notice_keeps_the_images(app_user, monkeypatch):
     execute(run, adapter)
     content = tool_result(run)["content"]
     assert sum(1 for p in content if p["type"] == "image") == 5
-    # ページの見出しと画像の並びを保ち、注意は末尾に足す
-    assert [p.get("text") for p in content[1:3]] == ["[page 1]", None]
+    # ページの見出しと画像の並びを保ち、注意は末尾（囲みの外）に足す
+    assert [p.get("text") for p in content[2:4]] == ["[page 1]", None]
+    assert content[-2]["text"] == "</untrusted_content>"
     assert content[-1]["text"].startswith("[You are repeating")
 
 
@@ -261,7 +271,7 @@ def test_storage_failure_is_not_cached(monkeypatch):
         raise StorageError("temporarily unavailable")
 
     monkeypatch.setattr(BlobObject, "open", failing)
-    assert fit_to_model([message], images=True)[0].parts == (TextPart(IMAGE_UNAVAILABLE),)
+    assert fit_to_model([message], images=True)[0].parts == (TextPart(IMAGE_UNAVAILABLE, with_media=True),)
     monkeypatch.setattr(BlobObject, "open", original)
     assert isinstance(fit_to_model([message], images=True)[0].parts[0], ImagePart)
 

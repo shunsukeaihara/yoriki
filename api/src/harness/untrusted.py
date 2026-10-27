@@ -7,6 +7,8 @@
 
 import re
 
+OPEN = "<untrusted_content source="
+CLOSE = "</untrusted_content>"
 # 値の中の閉じる印と開く印。大文字・小文字と空白の揺れも崩す
 CLOSING = re.compile(r"<\s*/\s*(untrusted_content)", re.IGNORECASE)
 OPENING = re.compile(r"<\s*(untrusted_content)", re.IGNORECASE)
@@ -16,16 +18,17 @@ def _escape(value: str) -> str:
     return value.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
 
 
+def opening(source: str) -> str:
+    """囲みの開く印だけ。文にできない画像を囲むときに、閉じる印（CLOSE）と組で使う"""
+    return f'<untrusted_content source="{_escape(source)}">'
+
+
 def untrusted(text: str, source: str, *, block: bool = False) -> str:
     """`block` なら囲みの中を別の行にする（複数行のデータ）。文の中に埋め込む値は1行のまま囲む"""
     body = OPENING.sub(r"&lt;\1", CLOSING.sub(r"<\\/\1", text))
     if block:
         body = "\n" + body.rstrip("\n") + "\n"
-    return f'<untrusted_content source="{_escape(source)}">{body}</untrusted_content>'
-
-
-OPEN = "<untrusted_content source="
-CLOSE = "</untrusted_content>"
+    return f"{opening(source)}{body}{CLOSE}"
 
 
 def close_cut(text: str) -> str:

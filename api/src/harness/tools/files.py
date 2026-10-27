@@ -11,7 +11,7 @@ from typing import Any
 from llm.providers.base import ImagePart, Part, TextPart
 
 from ..sandbox import WORKSPACE, workspace_path
-from ..untrusted import untrusted
+from ..untrusted import CLOSE, opening, untrusted
 from .base import Effect, Tool, ToolContext, ToolResult
 from .output import estimate_tokens, limited
 
@@ -127,7 +127,9 @@ def _scanned_notice(scanned: list[int], shown: list[int], images: bool) -> str:
 
 
 def _images(result: dict[str, Any]) -> list[Part]:
-    """補助コマンドが返した画像（base64）。PDFのページには、どのページかの文を前に置く"""
+    """補助コマンドが返した画像（base64）。PDFのページには、どのページかの文を前に置く。画像もファイルの中身なので、
+    信頼しない内容として囲む（harness.md §6.3）。囲みの印と見出しは画像に付く文にする（画像を文と別に送るAPIでも
+    一緒に移す）"""
     parts: list[Part] = []
     for image in result.get("images", []):
         try:
@@ -135,9 +137,12 @@ def _images(result: dict[str, Any]) -> list[Part]:
         except (KeyError, binascii.Error):
             continue
         if image.get("page"):
-            parts.append(TextPart(f"[page {image['page']}]"))
+            parts.append(TextPart(f"[page {image['page']}]", with_media=True))
         parts.append(ImagePart(image.get("mime", "image/png"), data))
-    return parts
+    if not parts:
+        return []
+    source = f"file:{result['path']}"
+    return [TextPart(opening(source), with_media=True), *parts, TextPart(CLOSE, with_media=True)]
 
 
 def _read_footer(result: dict[str, Any]) -> list[str]:

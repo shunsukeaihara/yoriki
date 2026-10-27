@@ -42,7 +42,7 @@ def parts_to_json(parts: Iterable[Part]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for part in parts:
         if isinstance(part, TextPart):
-            result.append({"type": "text", "text": part.text})
+            result.append({"type": "text", "text": part.text, **({"with_media": True} if part.with_media else {})})
         elif isinstance(part, ImagePart):
             blob = BlobObject.put(io.BytesIO(part.data))
             result.append({"type": "image", "media_type": part.media_type, "blob": blob.uid, "size": blob.size})
@@ -62,7 +62,7 @@ def parts_from_json(data: list[dict[str, Any]]) -> tuple[Part, ...]:
     parts: list[Part] = []
     for item in data:
         if item.get("type") == "text":
-            parts.append(TextPart(item["text"]))
+            parts.append(TextPart(item["text"], with_media=bool(item.get("with_media"))))
         elif item.get("type") == "image":
             parts.append(StoredImagePart(item["media_type"], b"", item["blob"]))
     return tuple(parts)
@@ -98,12 +98,15 @@ def fit_to_model(messages: list[Message], *, images: bool) -> list[Message]:
         for part in reversed(message.parts):
             if isinstance(part, ImagePart):
                 keep -= 1
+                # 置き換えた文も画像の位置に残す（画像に付く文と一緒に動く）
                 if keep < 0:
-                    parts.append(TextPart(IMAGE_OMITTED if images else IMAGE_UNSUPPORTED))
+                    parts.append(TextPart(IMAGE_OMITTED if images else IMAGE_UNSUPPORTED, with_media=True))
                     continue
                 if isinstance(part, StoredImagePart):
                     content = _blob_bytes(part.blob)
-                    parts.append(ImagePart(part.media_type, content) if content else TextPart(IMAGE_UNAVAILABLE))
+                    parts.append(
+                        ImagePart(part.media_type, content) if content else TextPart(IMAGE_UNAVAILABLE, with_media=True)
+                    )
                     continue
             parts.append(part)
         result.append(replace(message, content=tuple(reversed(parts))))

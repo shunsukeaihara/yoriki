@@ -32,7 +32,7 @@ from llm.providers.base import (
     is_context_overflow,
     object_schema,
 )
-from llm.providers.gemini import gemini_schema
+from llm.providers.gemini import MEDIA_NOTE, gemini_schema
 
 WEATHER = ToolDefinition("get_weather", "天気を返す", {"type": "object", "properties": {"city": {"type": "string"}}})
 REQUEST = ChatRequest(
@@ -74,7 +74,17 @@ def _media_request(provider_state: dict | None = None, **kwargs) -> ChatRequest:
                 ),
                 provider_state=provider_state,
             ),
-            Message("tool", (TextPart("1ページ目"), IMAGE), tool_call_id="call_1", tool_name="render_page"),
+            Message(
+                "tool",
+                (
+                    TextPart("1ページ目"),
+                    TextPart("<open>", with_media=True),
+                    IMAGE,
+                    TextPart("</close>", with_media=True),
+                ),
+                tool_call_id="call_1",
+                tool_name="render_page",
+            ),
             Message("tool", "見つかりません", tool_call_id="call_2", tool_name="get_weather", is_error=True),
         ],
         tools=[WEATHER],
@@ -247,9 +257,12 @@ class TestOpenAIResponses:
         assert items[1] == self.REASONING
         assert items[2] == {"role": "assistant", "content": "表を見ます"}
         # Toolの結果の画像は function_call_output の部品にする
+        # 画像に付く文（囲みの印）も、順を保って並べる
         assert items[5]["output"] == [
             {"type": "input_text", "text": "1ページ目"},
+            {"type": "input_text", "text": "<open>"},
             {"type": "input_image", "image_url": f"data:image/png;base64,{_b64(PNG)}"},
+            {"type": "input_text", "text": "</close>"},
         ]
         assert items[6]["output"] == "見つかりません"
 
@@ -426,12 +439,21 @@ class TestChatCompletions:
         assert [m["role"] for m in messages] == ["system", "assistant", "tool", "tool", "user"]
         # 推論の途中経過は戻さない
         assert set(messages[1]) == {"role", "content", "tool_calls"}
-        assert messages[2] == {"role": "tool", "tool_call_id": "call_1", "content": "1ページ目"}
+        assert messages[2] == {
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "content": "1ページ目\n[The images of this result follow in the next message.]",
+        }
         assert messages[3] == {"role": "tool", "tool_call_id": "call_2", "content": "見つかりません"}
-        # toolのメッセージはテキストだけなので、画像は続くtoolのメッセージの後に利用者の発言として添える
-        assert messages[4]["content"] == [
-            {"type": "text", "text": "Tool呼出し call_1 が返した画像"},
+        # toolのメッセージはテキストだけなので、画像は続くtoolのメッセージの後に別の発言として添える。
+        # 利用者の発言ではなくToolが返したデータだと示し、画像に付く文（囲みの印）を順を保って一緒に移す
+        assert messages[4]["content"][0]["text"].startswith(
+            "[Not a message from the user. These are the images returned by tool call call_1."
+        )
+        assert messages[4]["content"][1:] == [
+            {"type": "text", "text": "<open>"},
             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{_b64(PNG)}"}},
+            {"type": "text", "text": "</close>"},
         ]
 
     @pytest.mark.django_db
@@ -613,7 +635,9 @@ class TestAnthropic:
         assert messages[2]["content"] == [
             {"type": "tool_result", "tool_use_id": "call_1", "content": [
                 {"type": "text", "text": "1ページ目"},
+                {"type": "text", "text": "<open>"},
                 {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": _b64(PNG)}},
+                {"type": "text", "text": "</close>"},
             ]},
             {"type": "tool_result", "tool_use_id": "call_2", "is_error": True,
              "content": [{"type": "text", "text": "見つかりません"}]},
@@ -772,7 +796,8 @@ class TestGemini:
         assert "thoughtSignature" not in model[2]
         # 並列のTool呼出しの結果は1つの発言にまとめる。画像は FunctionResponse の部品にする
         results = contents[2]["parts"]
-        assert results[0]["functionResponse"]["response"] == {"result": "1ページ目"}
+        # 文と画像の順を混ぜられないので、画像に付く文の代わりに、画像がデータであることを文で示す
+        assert results[0]["functionResponse"]["response"] == {"result": "1ページ目\n\n" + MEDIA_NOTE}
         assert results[0]["functionResponse"]["parts"] == [
             {"inline_data": {"mime_type": "image/png", "data": _b64(PNG)}}
         ]

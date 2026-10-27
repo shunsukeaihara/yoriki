@@ -389,7 +389,9 @@ def test_scanned_pdf_pages_are_sent_as_images(app_user):
     run = execute(run, adapter)
     assert run.status == RunStatus.COMPLETED
     content = results(run)["c2"]["content"]
-    assert [p["type"] for p in content] == ["text", "text", "image"]
+    # 画像は囲み、ページの見出しと囲みの印は画像に付く文にする
+    assert [p["type"] for p in content] == ["text", "text", "text", "image", "text"]
+    assert [p.get("with_media", False) for p in content] == [False, True, True, False, True]
     sent = adapter.requests[2].messages[-1]
     image = next(p for p in sent.parts if isinstance(p, ImagePart))
     assert image.media_type == "image/png"

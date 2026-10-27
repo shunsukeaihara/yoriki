@@ -26,9 +26,9 @@ const { data: models } = await useAsyncData('app-model-profiles', () => api.mode
 const { items: visibleSkills, fetchAll: fetchSkills } = useFetchAll(() => api.skills().list({ pageSize: 200 }))
 const usableSkills = computed(() => visibleSkills.value.filter((s) => s.version > 0 && !s.suspended))
 const editableSkills = computed(() => visibleSkills.value.filter((s) => s.canEdit))
-// 入力欄の `@` の一覧。機密の Connector は、会話のモデルがローカル LLM のときだけ選べる
+// 入力欄の `@` の一覧。機密の Connector は、個人情報・機密情報を扱う会話でだけ選べる
 const { items: usableConnectors, fetchAll: fetchConnectors } = useFetchAll(() => api.connectors.list({ pageSize: 200 }))
-const localModel = computed(() => conversation.value?.modelProfileInfo?.isLocal ?? false)
+const sensitive = computed(() => conversation.value?.handlesSensitiveData ?? false)
 
 const messages = useConversationMessages(conversationId)
 const { items: runs, fetchAll: fetchRuns } = useFetchAll(() =>
@@ -144,10 +144,6 @@ const mode = ref<string>(MessageMode.AUTO)
 const selectedSkills = ref<Skill[]>([])
 const skillEdit = ref<SkillEditChoice | null>(null)
 const selectedConnectors = ref<AppConnector[]>([])
-// クラウドのモデルに替えたら、選んでいた機密の Connector を外す（送ってもサーバーが断る）
-watch(localModel, (local) => {
-  if (!local) selectedConnectors.value = selectedConnectors.value.filter((c) => isConnectorUsableWith(c, local))
-})
 const sending = ref(false)
 // 送信に失敗して送り直すときは同じ ID を使い、サーバーで二重に受け付けないようにする（design.md §5.5）
 let clientMessageId = crypto.randomUUID()
@@ -371,7 +367,7 @@ const menuItems = computed(() => [
             :skills="usableSkills"
             :editable-skills="editableSkills"
             :connectors="usableConnectors"
-            :local-model="localModel"
+            :sensitive="sensitive"
             :has-open-question="hasOpenQuestion"
             :attachments="attachments.items.value"
             :sending="sending"

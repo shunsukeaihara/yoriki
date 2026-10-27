@@ -242,7 +242,9 @@ def _start_run(evaluation: SkillEvaluation, case: SkillEvaluationCase, files: li
                 "skill_catalog": None,
                 # 評価を依頼した人が使えるConnector。Draftの「使ってよいTool」にConnectorの操作があれば使う
                 "connectors": [],
-                "connector_catalog": build_connector_catalog(actor, version) if version.supports_tools else None,
+                "connector_catalog": (
+                    build_connector_catalog(actor, sensitive=False) if version.supports_tools else None
+                ),
                 "evaluation": {"evaluation": evaluation.uid, "side": side},
             },
             "appended": [],

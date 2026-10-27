@@ -21,8 +21,8 @@ const props = defineProps<{
   editableSkills?: Skill[]
   /** 指定できる Connector */
   connectors?: AppConnector[]
-  /** 会話のモデルがローカル LLM（機密の Connector を選べる） */
-  localModel?: boolean
+  /** 個人情報・機密情報を扱う会話（機密の Connector を選べる） */
+  sensitive?: boolean
   sending?: boolean
   stopping?: boolean
   disabled?: boolean
@@ -231,7 +231,7 @@ const onSubmit = () => {
           v-model:search-term="connectorSearch"
           :connectors="connectors ?? []"
           :selected="selectedConnectors.map((c) => c.id)"
-          :local-model="localModel ?? false"
+          :sensitive="sensitive ?? false"
           :full="connectorsFull"
           :disabled="disabled"
           @select="selectConnector"

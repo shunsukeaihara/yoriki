@@ -57,9 +57,6 @@ class ConversationSerializer(serializers.ModelSerializer):
 
     def get_fields(self):
         fields = super().get_fields()
-        if self.instance is not None:
-            # 扱うデータの区分は、会話を始めるときのウィザードで決め、後から変えない
-            fields["handles_sensitive_data"].read_only = True
         return fields
 
     @extend_schema_field(RunSerializer(allow_null=True))
@@ -75,6 +72,10 @@ class ConversationSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"model_profile": _("モデル設定を選んでください")})
             attrs["model_profile"] = profile
         sensitive = attrs.get("handles_sensitive_data", getattr(self.instance, "handles_sensitive_data", False))
+        if self.instance is not None and self.instance.handles_sensitive_data and not sensitive:
+            raise serializers.ValidationError(
+                {"handles_sensitive_data": _("個人情報・機密情報を扱う会話は、扱わない会話に戻せません")}
+            )
         version = profile.current_version
         if version is None:
             raise serializers.ValidationError({"model_profile": _("このモデル設定は使えません")})
@@ -102,18 +103,32 @@ class ConversationSerializer(serializers.ModelSerializer):
     def update(self, instance: Conversation, validated_data) -> Conversation:
         actor = validated_data.pop("actor", None)
         with transaction.atomic():
-            # 機密のConnectorを使ったRunが、同時に会話を機密にすることがある（harness/tools/datasource.py）。
-            # 会話の行をロックして読み直し、機密になっていればクラウドのモデルへ変えさせない（古い値で上書きもしない）
+            # 機密にした会話は戻せない。同時に別の更新が機密にしていれば、古い値で上書きせず、クラウドのモデルへ
+            # 変えさせない（会話の行をロックして読み直す）
             locked = Conversation.objects.select_for_update().get(pk=instance.pk)
-            instance.handles_sensitive_data = locked.handles_sensitive_data
-            profile = validated_data.get("model_profile")
-            if locked.handles_sensitive_data and profile is not None and not profile.current_version.is_local:
-                raise serializers.ValidationError(
-                    {"model_profile": _("個人情報や機密情報を扱う会話では、ローカルLLMのモデルを選んでください")}
-                )
+            if locked.handles_sensitive_data:
+                if not validated_data.get("handles_sensitive_data", True):
+                    raise serializers.ValidationError(
+                        {"handles_sensitive_data": _("個人情報・機密情報を扱う会話は、扱わない会話に戻せません")}
+                    )
+                validated_data["handles_sensitive_data"] = True
+                profile = validated_data.get("model_profile") or locked.model_profile
+                if profile.current_version is None or not profile.current_version.is_local:
+                    raise serializers.ValidationError(
+                        {"model_profile": _("個人情報や機密情報を扱う会話では、ローカルLLMのモデルを選んでください")}
+                    )
+            becomes_sensitive = (
+                validated_data.get("handles_sensitive_data", False) and not locked.handles_sensitive_data
+            )
             instance = super().update(instance, validated_data)
             if "model_profile" in validated_data or "effort" in validated_data:
                 self._switch_active_run(instance, actor)
+            if becomes_sensitive:
+                # 実行中のRunも、モデルの切り替えの候補をローカルLLMだけにする。機密のConnector・Skillの一覧は
+                # Run開始時に決めるので、次の依頼から出る
+                Run.objects.filter(conversation=instance, status__in=ACTIVE_STATUSES).update(
+                    handles_sensitive_data=True
+                )
         return instance
 
     @staticmethod

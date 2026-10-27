@@ -13,17 +13,14 @@ import tempfile
 from collections.abc import Callable
 from typing import Any
 
-from django.utils import timezone
-
 from artifact.models import CONNECTOR_RESULTS_DIR, Artifact, BlobObject
 from connector.adapters import get_adapter
 from connector.adapters.base import QueryResult, TableInfo
 from connector.errors import ConnectorError
 from connector.limits import connection_slot, run_holding
 from connector.models import Connector, ConnectorAction, ConnectorVersion
-from conversation.models import Conversation
 
-from ..connectors import DATASOURCE_TOOL_NAMES, catalog, is_allowed_for_model
+from ..connectors import DATASOURCE_TOOL_NAMES, catalog, is_allowed_for
 from .base import Effect, Tool, ToolContext, ToolResult
 from .output import clip, limit_for, limited
 
@@ -118,10 +115,13 @@ def _resolve(arguments: dict[str, Any], context: ToolContext) -> tuple[Connector
         )
     version = connector.current_version
     assert version is not None  # can() が確かめた
-    if not is_allowed_for_model(version, run.model_version):
+    # 機密の会話はローカルLLMだけで、機密をやめられない。Runは開始時の会話の区分を持つ
+    if not is_allowed_for(version, sensitive=run.handles_sensitive_data) or (
+        version.is_sensitive and not run.model_version.is_local
+    ):
         return ToolResult.error(
-            "This connector holds confidential data and can be used only with a local model. Do not use it in "
-            "this work, and tell the user."
+            "This connector holds confidential data and can be used only in confidential work with a local model. "
+            "Do not use it in this work, and tell the user."
         )
     return connector, version
 
@@ -167,9 +167,6 @@ def describe(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     if isinstance(resolved, ToolResult):
         return resolved
     connector, version = resolved
-    # 表・列の名前も機密のConnectorの情報なので、文脈に入れる前に会話を機密にする
-    if version.is_sensitive and (refused := _mark_sensitive(context, connector)):
-        return refused
     adapter = get_adapter(connector, version)
     try:
         with _slot(connector, version, context) as renew:
@@ -218,8 +215,6 @@ def query(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     if isinstance(resolved, ToolResult):
         return resolved
     connector, version = resolved
-    if version.is_sensitive and (refused := _mark_sensitive(context, connector)):
-        return refused
     sql, params = arguments["sql"], list(arguments.get("params") or [])
     adapter = get_adapter(connector, version)
     keep = PREVIEW_ROWS if _can_read_files(context) else INLINE_ROWS
@@ -296,35 +291,6 @@ def _render_result(connector: Connector, version: ConnectorVersion, result: Quer
         lines.append(f'<untrusted_content source="connector:{_escape(connector.name)}">\n{rows}\n</untrusted_content>')
     lines.append("</connector_result>")
     return "\n".join(lines)
-
-
-def _mark_sensitive(context: ToolContext, connector: Connector) -> ToolResult | None:
-    """機密のConnectorの情報（表・列の名前、結果）を扱う前に、Runと会話に印を付ける（harness.md §10.2）。以後、この
-    会話はローカルLLMのモデルだけになり、次の依頼で引き継ぐ文脈もクラウドのモデルへ送らない。印を付ける
-    transactionの中でモデルを確かめ直す（利用者が同時にクラウドのモデルへ切り替えていたら、使わない）。
-    fenced() は会話 → Runの順にロックするので、会話のモデルの変更（同じ順。ConversationSerializer.update()）と
-    互いに待つことはない"""
-    with context.run.fenced(context.attempt) as run:
-        if not run.model_version.is_local:
-            return ToolResult.error(
-                "This connector holds confidential data and can be used only with a local model. Do not use it in "
-                "this work, and tell the user."
-            )
-        now = timezone.now()
-        Conversation.objects.filter(pk=run.conversation_id, handles_sensitive_data=False).update(
-            handles_sensitive_data=True, updated=now
-        )
-        marked = any(
-            e.get("kind") == "sensitive_connector" and e.get("connector") == connector.uid
-            for e in (run.manifest or {}).get("appended", [])
-        )
-        if not marked:
-            run.append_manifest("sensitive_connector", {"connector": connector.uid, "name": connector.name})
-        run.handles_sensitive_data = True
-        run.save(update_fields=["handles_sensitive_data", "manifest", "updated"])
-        context.run.handles_sensitive_data = True
-        context.run.manifest = run.manifest
-    return None
 
 
 # 引数のenumを持たない定義。Skillの「使ってよいTool」の選択肢に使う（名前と説明だけ）

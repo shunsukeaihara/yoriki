@@ -238,10 +238,12 @@ def chosen_connectors(message: ConversationMessage) -> list[Connector]:
     return [found[uid] for uid in ids]
 
 
-def resolve_connectors(message: ConversationMessage, user, version, skills: list[dict[str, object]]):
+def resolve_connectors(
+    message: ConversationMessage, user, version, skills: list[dict[str, object]], *, sensitive: bool
+):
     """`@` で指定したConnectorを確かめる。`/` で指定したSkillがConnectorのToolを許さなければ使えないので断る"""
     try:
-        connectors = resolve_explicit_connectors(chosen_connectors(message), user, version)
+        connectors = resolve_explicit_connectors(chosen_connectors(message), user, version, sensitive=sensitive)
     except ConnectorUnavailable as exc:
         raise CannotStart(_("指定したConnectorを使えません。%(reason)s") % {"reason": exc}) from exc
     if connectors and skills:
@@ -282,14 +284,13 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
     )
     # エージェントが使えるConnectorの一覧も固定する（Toolの引数をRunの中で変えない。harness.md §10.2）。
     # 使えるかは操作のたびに確かめ直す
-    connectors = resolve_connectors(message, conversation.owner, version, skills)
-    if any(c["sensitive"] for c in connectors) and not conversation.handles_sensitive_data:
-        # `@` で指定した機密のConnectorの説明（表の名前と説明）を最初の発言に入れるので、会話を機密にする
-        # （以後はローカルLLMのモデルだけ。harness.md §10.2）。会話の行ロックの中で呼ばれる
-        conversation.handles_sensitive_data = True
-        conversation.save(update_fields=["handles_sensitive_data", "updated"])
+    # 機密のConnectorは、機密の会話のRunにだけ出す（design.md §4.9.1）
+    sensitive = conversation.handles_sensitive_data
+    connectors = resolve_connectors(message, conversation.owner, version, skills, sensitive=sensitive)
     connector_catalog = (
-        build_connector_catalog(conversation.owner, version, explicit=connectors) if version.supports_tools else None
+        build_connector_catalog(conversation.owner, sensitive=sensitive, explicit=connectors)
+        if version.supports_tools
+        else None
     )
     fixed: dict[str, object] = {
         "model_version": version.pk,

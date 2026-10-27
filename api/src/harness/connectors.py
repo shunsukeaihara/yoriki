@@ -39,16 +39,18 @@ def _escape(value: str) -> str:
     return value.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
 
 
-def is_allowed_for_model(version: ConnectorVersion, model_version) -> bool:
-    """機密のConnectorは、ローカルLLMのモデルのときだけ使える（design.md §4.9.1）"""
-    return not version.is_sensitive or model_version.is_local
+def is_allowed_for(version: ConnectorVersion, *, sensitive: bool) -> bool:
+    """機密のConnectorは、機密（個人情報・機密情報を扱う）の会話・タスクでだけ使える（design.md §4.9.1）。
+    機密の会話はローカルLLMのモデルだけを使い、機密をやめられないので、クラウドのモデルへは渡らない"""
+    return not version.is_sensitive or sensitive
 
 
-def build_catalog(user, model_version, *, explicit: Sequence[dict[str, Any]] = ()) -> dict[str, Any] | None:
-    """エージェントに見せる一覧：依頼した人が使えるConnector（部門・全社）の名前と説明。なければNone。
-    `@` で指定したもの（`explicit`）は、数の上限で外れないように先に並べる"""
+def build_catalog(user, *, sensitive: bool, explicit: Sequence[dict[str, Any]] = ()) -> dict[str, Any] | None:
+    """エージェントに見せる一覧：依頼した人が使えるConnector（部門・全社）の名前と説明。機密のConnectorは機密の
+    Runのときだけ（`sensitive`）。なければNone。`@` で指定したもの（`explicit`）は、数の上限で外れないように
+    先に並べる"""
     connectors = Connector.objects.usable_by(user).select_related("current_version").order_by("name", "pk")
-    usable = [c for c in connectors if c.current_version and is_allowed_for_model(c.current_version, model_version)]
+    usable = [c for c in connectors if c.current_version and is_allowed_for(c.current_version, sensitive=sensitive)]
     chosen = [e["connector"] for e in explicit]
     usable.sort(key=lambda c: chosen.index(c.uid) if c.uid in chosen else len(chosen))
     if not usable:
@@ -83,7 +85,7 @@ def catalog_text(value: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def resolve_explicit(connectors: list[Connector], user, model_version) -> list[dict[str, Any]]:
+def resolve_explicit(connectors: list[Connector], user, model_version, *, sensitive: bool) -> list[dict[str, Any]]:
     """入力欄の `@` で指定したConnectorを確かめて、Manifestに固定する内容にする。使えなければ ConnectorUnavailable"""
     if len(connectors) > MAX_EXPLICIT_CONNECTORS:
         raise ConnectorUnavailable(_("指定できるConnectorは%(limit)s個までです") % {"limit": MAX_EXPLICIT_CONNECTORS})
@@ -94,9 +96,9 @@ def resolve_explicit(connectors: list[Connector], user, model_version) -> list[d
         if not connector.can(user, ConnectorAction.USE):
             raise ConnectorUnavailable(_("%(name)s：使う権限がないか、無効です") % {"name": connector.name})
         assert connector.current_version is not None  # can() が確かめた
-        if not is_allowed_for_model(connector.current_version, model_version):
+        if not is_allowed_for(connector.current_version, sensitive=sensitive):
             raise ConnectorUnavailable(
-                _("%(name)s：機密のConnectorは、ローカルLLMのモデルでだけ使えます") % {"name": connector.name}
+                _("%(name)s：機密のConnectorは、個人情報・機密情報を扱う会話でだけ使えます") % {"name": connector.name}
             )
         version = connector.current_version
         # 説明は確かめた版から作る（作る間に別の版になっても、確かめていない版の中身を入れない）
@@ -105,7 +107,6 @@ def resolve_explicit(connectors: list[Connector], user, model_version) -> list[d
                 "connector": connector.uid,
                 "name": connector.name,
                 "version": version.pk,
-                "sensitive": version.is_sensitive,
             }
         )
     return entries

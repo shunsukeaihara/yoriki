@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * 入力欄の `@` の一覧（harness.md §10.2）。ボタンか、入力欄で `@` を打つと開き、名前と説明で絞り込める。
- * 利用者が会話で使える Connector を選ぶ。機密の Connector は、会話のモデルがローカル LLM のときだけ選べる
+ * 利用者が会話で使える Connector を選ぶ。機密の Connector は、個人情報・機密情報を扱う会話でだけ選べる
  * （選べないものも、理由を添えて一覧に出す）。
  */
 const props = defineProps<{
@@ -9,8 +9,8 @@ const props = defineProps<{
   connectors: AppConnector[]
   /** 選んでいる ID（一覧から外す） */
   selected: string[]
-  /** 会話のモデルがローカル LLM */
-  localModel: boolean
+  /** 個人情報・機密情報を扱う会話 */
+  sensitive: boolean
   /** これ以上選べない */
   full?: boolean
   disabled?: boolean
@@ -32,14 +32,14 @@ const groups = computed(() => [
       : props.connectors
           .filter((c) => !props.selected.includes(c.id))
           .map((connector) => {
-            const usable = isConnectorUsableWith(connector, props.localModel)
+            const usable = isConnectorUsableIn(connector, props.sensitive)
             return {
               id: connector.id,
               label: connector.name,
               suffix: connector.isSensitive ? `${scopeLabel(connector)}・${t('機密')}` : scopeLabel(connector),
               description: usable
                 ? connector.description || undefined
-                : t('機密のConnectorは、ローカルLLMのモデルの会話でだけ使えます'),
+                : t('機密のConnectorは、個人情報・機密情報を扱う会話でだけ使えます'),
               icon: connector.isSensitive ? 'i-lucide-shield' : 'i-lucide-database',
               disabled: !usable,
               onSelect: () => {

@@ -268,52 +268,59 @@ def test_query_error_is_returned_to_the_agent(conversation, fake_datasource):
 
 
 @pytest.mark.django_db
-def test_sensitive_connector_is_listed_only_for_local_models(app_user, local_model):
+def test_sensitive_connector_is_listed_only_in_confidential_work(app_user):
     ConnectorFactory.create(name="人事", version__is_sensitive=True)
-    cloud = ModelProfileFactory.create(version__supports_tools=True)
-    assert build_catalog(app_user, cloud.current_version) is None
-    catalog = build_catalog(app_user, local_model.current_version)
+    assert build_catalog(app_user, sensitive=False) is None
+    catalog = build_catalog(app_user, sensitive=True)
     assert catalog is not None
     assert [e["name"] for e in catalog["connectors"]] == ["人事"]
 
 
 @pytest.mark.django_db
-def test_using_a_sensitive_connector_makes_the_conversation_confidential(app_user, local_model):
-    connector = ConnectorFactory.create(name="人事", version__is_sensitive=True, version__tables=TABLES)
-    ModelProfileFactory.create(name="クラウド", version__supports_tools=True)
-    conversation = ConversationFactory.create(owner=app_user, model_profile=local_model)
+def test_confidential_conversation_uses_a_sensitive_connector(app_user, local_model):
+    ConnectorFactory.create(name="人事", version__is_sensitive=True, version__tables=TABLES)
+    conversation = ConversationFactory.create(owner=app_user, model_profile=local_model, handles_sensitive_data=True)
     run = start(conversation)
+    assert [e["name"] for e in run.manifest["fixed"]["connector_catalog"]["connectors"]] == ["人事"]
     adapter = FakeAdapter(
         [calls(("c1", "datasource_query", {"connector": "人事", "sql": "SELECT code FROM vendors"})), reply("ok")]
     )
     run = execute(run, adapter)
-
-    assert run.handles_sensitive_data
-    conversation.refresh_from_db()
-    assert conversation.handles_sensitive_data
-    marks = [e for e in run.manifest["appended"] if e["kind"] == "sensitive_connector"]
-    assert [m["connector"] for m in marks] == [connector.uid]
-    # 以後は、切り替えの候補もローカルLLMのモデルだけ
+    [result] = results(run, "datasource_query")
+    assert not result["is_error"]
     assert all(p.current_version and p.current_version.is_local for p in switch_candidates(run))
 
 
 @pytest.mark.django_db
-def test_sensitive_connector_is_refused_after_switching_to_a_cloud_model(app_user, local_model):
+def test_sensitive_connector_is_not_listed_in_a_local_conversation_that_is_not_confidential(app_user, local_model):
     ConnectorFactory.create(name="人事", version__is_sensitive=True, version__tables=TABLES)
     conversation = ConversationFactory.create(owner=app_user, model_profile=local_model)
     run = start(conversation)
-    cloud = ModelProfileFactory.create(version__supports_tools=True)
-    run.switch_model(cloud.current_version, "", trigger="user")
+    assert run.manifest["fixed"]["connector_catalog"] is None
+
+
+@pytest.mark.django_db
+def test_sensitive_connector_is_refused_with_a_cloud_model(app_user, local_model):
+    ConnectorFactory.create(name="人事", version__is_sensitive=True, version__tables=TABLES)
+    conversation = ConversationFactory.create(owner=app_user, model_profile=local_model, handles_sensitive_data=True)
+    run = start(conversation)
+    # 機密の会話ではクラウドのモデルを選べないが、Runの記録が食い違っても使わない
+    run.switch_model(ModelProfileFactory.create(version__supports_tools=True).current_version, "", trigger="user")
     adapter = FakeAdapter(
         [calls(("c1", "datasource_query", {"connector": "人事", "sql": "SELECT code FROM vendors"})), reply("ok")]
     )
     run = execute(run, adapter)
-
     [result] = results(run, "datasource_query")
     assert result["is_error"]
-    assert "local model" in text_of(result)
-    assert not run.handles_sensitive_data
     assert FakeDatasource.calls == []
+
+
+@pytest.mark.django_db
+def test_chosen_sensitive_connector_needs_a_confidential_conversation(app_user, local_model):
+    connector = ConnectorFactory.create(name="人事", version__is_sensitive=True)
+    conversation = ConversationFactory.create(owner=app_user, model_profile=local_model)
+    with pytest.raises(CannotStart, match="個人情報・機密情報を扱う会話"):
+        start(conversation, connectors=[connector])
 
 
 @pytest.mark.django_db
@@ -322,7 +329,7 @@ def test_chosen_connector_is_described_in_the_first_message(conversation):
     run = start(conversation, connectors=[connector])
 
     assert run.manifest["fixed"]["connectors"] == [
-        {"connector": connector.uid, "name": "販売管理", "version": connector.current_version_id, "sensitive": False}
+        {"connector": connector.uid, "name": "販売管理", "version": connector.current_version_id}
     ]
     data = RunEvent.objects.get(run=run, kind=RunEventKind.USER_MESSAGE).data
     assert '<connector name="販売管理">' in data["connectors_text"]
@@ -331,37 +338,6 @@ def test_chosen_connector_is_described_in_the_first_message(conversation):
     execute(run, adapter)
     first_user = next(m.text for m in adapter.requests[0].messages if m.role == "user" and "取引先を調べて" in m.text)
     assert "public.vendors — 取引先" in first_user
-
-
-@pytest.mark.django_db
-def test_chosen_sensitive_connector_needs_a_local_model(conversation):
-    connector = ConnectorFactory.create(name="人事", version__is_sensitive=True)
-    with pytest.raises(CannotStart, match="ローカルLLM"):
-        start(conversation, connectors=[connector])
-
-
-@pytest.mark.django_db
-def test_chosen_sensitive_connector_makes_the_conversation_confidential(app_user, local_model):
-    connector = ConnectorFactory.create(name="人事", version__is_sensitive=True, version__tables=TABLES)
-    conversation = ConversationFactory.create(owner=app_user, model_profile=local_model)
-    run = start(conversation, connectors=[connector])
-    # 表の名前と説明を最初の発言に入れるので、Runを始めるときに機密にする
-    assert run.handles_sensitive_data
-    assert run.manifest["fixed"]["handles_sensitive_data"]
-    conversation.refresh_from_db()
-    assert conversation.handles_sensitive_data
-
-
-@pytest.mark.django_db
-def test_describing_a_sensitive_connector_makes_the_conversation_confidential(app_user, local_model):
-    ConnectorFactory.create(name="人事", version__is_sensitive=True, version__tables=TABLES)
-    conversation = ConversationFactory.create(owner=app_user, model_profile=local_model)
-    run = start(conversation)
-    adapter = FakeAdapter([calls(("c1", "datasource_describe", {"connector": "人事"})), reply("ok")])
-    run = execute(run, adapter)
-    assert run.handles_sensitive_data
-    conversation.refresh_from_db()
-    assert conversation.handles_sensitive_data
 
 
 @pytest.mark.django_db
@@ -550,7 +526,9 @@ def test_busy_connection_is_reported_to_the_agent(conversation, monkeypatch):
 @pytest.mark.django_db
 def test_chosen_connector_is_described_from_the_checked_version(conversation):
     connector = ConnectorFactory.create(name="販売管理", version__description="確かめた版", version__tables=TABLES)
-    [entry] = resolve_explicit([connector], conversation.owner, conversation.model_profile.current_version)
+    [entry] = resolve_explicit(
+        [connector], conversation.owner, conversation.model_profile.current_version, sensitive=False
+    )
     # 確かめた後に、管理者が機密の版にした
     connector.revise(
         actor=connector.created_by,

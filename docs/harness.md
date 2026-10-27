@@ -642,11 +642,11 @@ Runが使うSkill（`/` で指定したものと、読み込んだもの）が�
 
 - `datasource_describe`・`datasource_query`（design.md §4.9.2）。Toolの名前にはプロバイダの制約で `.` を使えないので、`_` にする。
 - 一覧：Run開始時に、依頼した人が使えるConnector（`Connector.objects.usable_by()`）の名前と説明を決めてManifestに固定し（`fixed.connector_catalog`）、`<connectors>` で見せる。Toolの `connector` の引数は、その名前のenumにする。使えるConnectorがなければ、ConnectorのToolを出さない。`/` でSkillを指定したRunでは、Skillの「使ってよいTool」にあるものだけを出す。
-- 操作のたびに、依頼した人が今も使えるか（範囲・所属・停止・削除）と、機密のConnectorならRunのモデルがローカルLLMかを確かめ直す（一覧に出したことを根拠にしない。authorization.md §6）。境界（公開する表・上限）はその時点の版を使い、使った版をToolInvocationに記録する（authorization.md §7.2）。
+- 操作のたびに、依頼した人が今も使えるか（範囲・所属・停止・削除）と、機密のConnectorなら機密のRunでモデルがローカルLLMかを確かめ直す（一覧に出したことを根拠にしない。authorization.md §6）。境界（公開する表・上限）はその時点の版を使い、使った版をToolInvocationに記録する（authorization.md §7.2）。
 - 接続先への操作は、接続の同時実行数の上限の中で行う。枠（ConnectionLease）は接続の行をロックして数えてから取り、全Workerとapi（管理画面の接続の確認・表の一覧・説明・試し実行）を通して数える。空かなければ60秒まで（管理画面は10秒まで）待ち、それでも空かなければエラーとしてモデルに返す。操作は別のスレッドで行い、待つ間はAttemptのleaseと枠の期限を延ばす（実行時間の上限はleaseより長く設定でき、DBの上限は文ごとに効くため）。
 - 結果はArtifact（種別「Connectorの結果」）として保存し、Sandboxの `/workspace/input/connectors/{invocation_id}/result.csv` に読取り専用で置く。同じ会話の次の依頼でも読める（authorization.md §6.1）。モデルには、件数・列名・先頭の10行・ファイルの場所だけを返し、行は `<untrusted_content>` で囲む（§6.3）（design.md §4.9.1）。ファイルを読むTool（`read`・`shell`）のないRunでは、上限の中の結果を表として返す。
 - `@` で明示したConnectorは、Run開始時に使えるかを確かめ（使えなければRunを始めない）、公開している表の名前と説明を最初の `message.user` に入れる（列の型は `datasource_describe` で確かめさせる。Run開始時に接続先へつながない）。`@` を指定したメッセージは、実行中なら次の依頼として受け付ける（一覧をRun開始時に決めるため）。`/` で指定したSkillがConnectorのToolを許さなければ、指定を断る。
-- 機密のフラグの付いたConnectorは、ローカルLLMのモデルを使うRunにだけ一覧に出す。`datasource_query` で使う前に、Runと会話に「個人情報・機密情報を扱う」印を付け（Manifestにも追記する）、以後その会話はローカルLLMのモデルだけになる。モデルの切り替えの候補と、利用者が会話のモデルを変えるときの条件に使う（design.md §4.8）。次の依頼は前の文脈を引き継ぐので、会話ごと機密にする。表・列の名前も機密のConnectorの情報として扱い、`datasource_describe` の前と、`@` で指定したRunの開始時にも印を付ける（`@` の説明は、使えるかを確かめた版から作る）。`<connectors>` の一覧に名前と管理者の説明を載せるだけでは印を付けない（中身のデータではないため。付けると、ローカルLLMの会話がどれも機密になる）。
+- 機密のフラグの付いたConnectorは、機密の会話・タスクのRun（`handles_sensitive_data`。開始時の会話の区分を持つ）にだけ一覧に出し、使わせる。機密の会話はローカルLLMのモデルだけで、扱わない会話に戻せないので、Connectorの情報はクラウドのモデルへ渡らない。`@` で機密のConnectorを指定できるのも機密の会話だけ。会話を途中で機密にしたら、実行中のRunにも印を付け（モデルの切り替えの候補がローカルLLMだけになる）、機密のConnectorは次の依頼から一覧に出す。操作のたびにも、Runの区分とモデル（ローカルLLMか）を確かめる。
 - Skillのスクリプトからの呼出し（design.md §4.9.6）も、同じConnectorの処理とToolInvocationの記録を通す。
 
 ### 10.3 確認待ち（`ask_user`）

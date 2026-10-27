@@ -98,30 +98,38 @@ class TestConversation:
         run.refresh_from_db()
         assert run.status == RunStatus.CANCELLED
 
-    def test_conversation_made_confidential_during_the_update_keeps_a_local_model(self, app_user, local_profile):
+    def test_conversation_can_become_confidential_but_not_back(self, api_client, app_user, local_profile):
+        conversation = ConversationFactory.create(owner=app_user)
+        url = f"/api/app/v1/conversations/{conversation.uid}/"
+        # 機密にするにはローカルLLMのモデルが要る
+        res = api_client.patch(url, {"handles_sensitive_data": True}, format="json")
+        assert res.status_code == 400
+        assert "model_profile" in res.data
+        run = RunFactory.create(conversation=conversation, status=RunStatus.RUNNING)
+        res = api_client.patch(url, {"handles_sensitive_data": True, "model_profile": local_profile.uid}, format="json")
+        assert res.status_code == 200, res.data
+        run.refresh_from_db()
+        assert run.handles_sensitive_data
+        assert run.model_version == local_profile.current_version
+        res = api_client.patch(url, {"handles_sensitive_data": False}, format="json")
+        assert res.status_code == 400
+        assert "handles_sensitive_data" in res.data
+        assert Conversation.objects.get(pk=conversation.pk).handles_sensitive_data
+
+    def test_conversation_made_confidential_during_the_update_is_not_reverted(self, app_user, local_profile):
         conversation = ConversationFactory.create(owner=app_user, model_profile=local_profile)
         cloud = ModelProfileFactory.create(version__supports_tools=True)
         serializer = ConversationSerializer(
             conversation, data={"model_profile": cloud.uid}, partial=True, context={"request": None}
         )
         assert serializer.is_valid(), serializer.errors
-        # 検証の後に、機密のConnectorを使ったRunが会話を機密にした
+        # 検証の後に、別の更新が会話を機密にした
         Conversation.objects.filter(pk=conversation.pk).update(handles_sensitive_data=True)
         with pytest.raises(ValidationError):
             serializer.save()
         conversation.refresh_from_db()
         assert conversation.handles_sensitive_data
         assert conversation.model_profile == local_profile
-
-    def test_sensitivity_cannot_be_changed_later(self, api_client, app_user, local_profile):
-        conversation = ConversationFactory.create(
-            owner=app_user, model_profile=local_profile, handles_sensitive_data=True
-        )
-        res = api_client.patch(
-            f"/api/app/v1/conversations/{conversation.uid}/", {"handles_sensitive_data": False}, format="json"
-        )
-        assert res.status_code == 200
-        assert Conversation.objects.get(pk=conversation.pk).handles_sensitive_data
 
 
 @pytest.mark.django_db
@@ -217,7 +225,6 @@ class TestMessage:
                 "connector": connector.uid,
                 "name": "販売管理",
                 "version": connector.current_version_id,
-                "sensitive": False,
             }
         ]
 

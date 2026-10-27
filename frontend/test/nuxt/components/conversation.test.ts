@@ -164,20 +164,20 @@ type PickerItem = { id: string; disabled: boolean; description?: string; onSelec
 type Picker = { groups: { items: PickerItem[] }[] }
 
 describe('ConversationConnectorPicker', () => {
-  it('機密のConnectorは、ローカルLLMのモデルの会話でだけ選べる', async () => {
+  it('機密のConnectorは、個人情報・機密情報を扱う会話でだけ選べる', async () => {
     const connectors = [connector('sales'), connector('hr', true)]
     const cloud = await mountSuspended(ConversationConnectorPicker, {
-      props: { connectors, selected: [], localModel: false },
+      props: { connectors, selected: [], sensitive: false },
     })
     const items = (cloud.vm as unknown as Picker).groups[0]!.items
     expect(items.map((i) => [i.id, i.disabled])).toEqual([
       ['sales', false],
       ['hr', true],
     ])
-    expect(items[1]!.description).toContain('ローカルLLM')
+    expect(items[1]!.description).toContain('個人情報・機密情報を扱う会話')
 
     const local = await mountSuspended(ConversationConnectorPicker, {
-      props: { connectors, selected: ['sales'], localModel: true },
+      props: { connectors, selected: ['sales'], sensitive: true },
     })
     const [hr] = (local.vm as unknown as Picker).groups[0]!.items
     expect(hr!.id).toBe('hr')

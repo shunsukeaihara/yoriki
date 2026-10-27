@@ -17,8 +17,8 @@ from .output import estimate_tokens, limited
 
 WRITABLE = ("/workspace/work", "/workspace/output")
 PATH_DESCRIPTION = "Absolute path inside /workspace, e.g. /workspace/input/invoice.pdf."
-# CSVの見出しに出す列名の上限（文字）
-CSV_COLUMNS_LIMIT = 2000
+# CSVの見出しに出す列名の上限（文字）。Tool結果の上限の最小（1,000 token）の中に見出しが収まるように
+CSV_COLUMNS_LIMIT = 500
 
 
 def _always(_args: dict[str, Any]) -> bool:

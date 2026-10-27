@@ -5,6 +5,11 @@
 権限の境界にはしない。
 """
 
+import re
+
+# 値の中の閉じる印。大文字・小文字と空白の揺れも崩す
+CLOSING = re.compile(r"<\s*/\s*(untrusted_content)", re.IGNORECASE)
+
 
 def _escape(value: str) -> str:
     return value.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
@@ -12,7 +17,7 @@ def _escape(value: str) -> str:
 
 def untrusted(text: str, source: str, *, block: bool = False) -> str:
     """`block` なら囲みの中を別の行にする（複数行のデータ）。文の中に埋め込む値は1行のまま囲む"""
-    body = text.replace("</untrusted_content", "<\\/untrusted_content")
+    body = CLOSING.sub(r"<\\/\1", text)
     if block:
         body = "\n" + body.rstrip("\n") + "\n"
     return f'<untrusted_content source="{_escape(source)}">{body}</untrusted_content>'

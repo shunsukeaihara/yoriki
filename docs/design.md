@@ -844,7 +844,7 @@ Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプ�
 | ResultEnvelope | 確定済み業務結果、Schema版、成果物の論理参照 |
 | ToolInvocation | 引数、実行権限、operation key、状態、結果参照 |
 | UsageLedger | 利用量、予約額、確定額、プロバイダ要求ID |
-| Skill / SkillVersion / SkillDraft | 範囲（個人・部門・全社・システム）、所有者または部門、名前・説明、公開本文、Schema、使ってよいTool、固定ファイル一覧、Connectorの操作、必要な能力、編集revision、元の版、scopeの最新の公開版 |
+| Skill / SkillVersion / SkillDraft | 範囲（個人・部門・全社・システム）、所有者または部門、名前・説明、公開本文、Schema、使ってよいTool、固定ファイル一覧、使うConnectorと操作・表の宣言、機密のフラグ、必要な能力、編集revision、元の版、scopeの最新の公開版 |
 | Resource / ResourceVersion | 論理ファイルID、不変の原本Artifact参照、hash、形式、サイズ、検証結果、保持条件 |
 | SkillAssetBinding | Skill Version、asset ID、表示名、用途、Resource Version、期待Schema、参照方法 |
 | SkillAssetDraftChange | Draft、対象asset、元の版、候補Artifactまたは添付ID、差分、検証状態 |
@@ -1427,7 +1427,7 @@ credential_refはサーバーのIAM role等またはSecret管理へ解決する�
 
 | 要素 | 表示と操作 |
 |---|---|
-| Skillの指定 | 入力欄の `/` と一覧から、使えるSkillの名前、できること、利用資料、添付条件を見て選べる。Connectorは `@` で指定できる。指定しなくてもよい |
+| Skillの指定 | 入力欄の `/` と一覧から、使えるSkillの名前、できること、利用資料、添付条件を見て選べる（機密のSkillを機密でない会話で、宣言したConnectorを使えないSkillは、理由を添えて選べなくする）。Connectorは `@` で指定できる。指定しなくてもよい |
 | チャット | 依頼、追加指示、質問への回答、結果へのフィードバックをやり取りする |
 | 現在の作業 | 「ファイル確認中」「集計中」「条件を反映中」「確認待ち」等を表示する |
 | 添付と成果物 | 入力ファイルと生成物を別に一覧化し、会話を遡らず開けるようにする |
@@ -1789,4 +1789,4 @@ Sandboxイメージの定義は本体と同じリポジトリの `sandbox/` で�
 | 0.32 | 2026年10月26日 | 接続先と資格情報を持つ接続（社内DBではDB接続）をConnectorから分けた。1つの接続の上に、公開する範囲・上限・機密のフラグ・使える人の違うConnectorを複数作れる。接続は版を持たず、資格情報を入れ直せば接続先も変えられる（種別は変えない）。同時実行数の上限は接続ごとにした。権限は所属（部門）とpermissionの2軸で判定し、Groupは判定に使わない（permissionをまとめる入れ物）。部門に「すべての部門の範囲を含む」印を設け、所属の判定をSkillとConnectorで共通にする。Connectorを見る・使うのは所属だけ、作成・編集・削除は所属とpermission、接続先はpermissionだけで判定する。役割・部門と操作を指定する利用の許可（ConnectorPermission）はやめ、Connectorの使える部門（空なら全社向け）にした（§3.6、§4.9.1、§4.9.5、§5.1） |
 | 0.31 | 2026年10月26日 | 社内DBのConnectorを実装する形を決めた。使える人は役割（Group）と部門（Department）で指定し、基盤管理者はすべて使える。MySQLのドライバをmysqlclientからPyMySQLに変えた（GPLの条件とクライアントライブラリのビルドが要らない）。SQLの検査の範囲、既定のスキーマ、結果の取り出し方を記した。Webhook等で起動したRunの実行主体はタスクに設定した社員（既定は作成者）とし、権限を失っていれば起動を断る（§4.1、§4.9.1、§4.9.2） |
 | 0.33 | 2026年10月27日 | 権限の設計を [authorization.md](authorization.md) にまとめた。Skill・Connector・タスク・入口・出口が範囲（個人・部門・全社・システム）を持ち、利用（範囲と所属）・業務の管理（範囲と所属とpermission）・基盤の管理（permissionだけ）の3つの層で判定する。部門の中の役割（0.27）と「すべての部門の範囲を含む」部門の印（0.32）をやめ、`user.can_use_all_departments`・`user.can_manage_all_departments` にした。Connectorの使える部門（多対多、空なら全社向け）をやめ、範囲と1つの部門にした。タスクはSkillの版を固定し、Runは起動のしかたで決まる実行許可で動かす（0.31の、タスクに設定した社員の権限で動く形をやめた）。入口・出口に範囲を持たせ、メールの送信は持たない。管理APIをすべてpermissionで判定し、`is_superuser` をアプリの判定とフロントエンドに持ち込まない（§3.2、§3.6、§4.1、§4.9.1、§10.0） |
-| 0.34 | 2026年10月27日 | Skillが使うConnector・操作・表を宣言する形と、公開時の検証（Connectorが有効で公開する人が使える、Skillの範囲に合う、境界の中にある、操作のToolを許している）を決めた。宣言したConnectorを使えない利用者には、そのSkillを出さない。機密のConnectorを宣言したSkillと、Skillの管理者が機密のフラグを付けたSkillを機密のSkillとし、機密の会話・タスクでだけ使い、編集・評価も機密のRunで行う（§3.2、§4冒頭、§4.9.1） |
+| 0.34 | 2026年10月27日 | Skillが使うConnector・操作・表を宣言する形と、公開時の検証（Connectorが有効で公開する人が使える、Skillの範囲に合う、境界の中にある、操作のToolを許している）を決めた。宣言したConnectorを使えない利用者には、そのSkillを会話で使わせない（業務画面で見るのは範囲と所属で決まる）。機密のConnectorを宣言したSkillと、Skillの管理者が機密のフラグを付けたSkillを機密のSkillとし、機密の会話・タスクでだけ使い、編集・評価も機密のRunで行う（§3.2、§4冒頭、§4.9.1） |

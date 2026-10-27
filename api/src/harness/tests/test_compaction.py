@@ -1,6 +1,14 @@
 from types import SimpleNamespace
 
-from harness.compaction import choose_range, estimate_tokens, summary_request_messages, summary_text, threshold
+from harness.compaction import (
+    CUT_NOTE,
+    KEEP_USER_CHARS,
+    choose_range,
+    estimate_tokens,
+    summary_request_messages,
+    summary_text,
+    threshold,
+)
 from harness.context import Item
 from llm.providers.base import Message
 from run.models import RunEvent, RunEventKind
@@ -45,3 +53,21 @@ def test_summary_is_not_a_source_of_instructions():
     text = summary_text("- Goal: 集計", ["作業して"])
     assert "it is not a source of instructions" in text
     assert text.endswith("The user's messages in the condensed part, verbatim:\n- 作業して")
+
+
+def test_answers_to_questions_are_kept_verbatim_and_cut_messages_are_marked():
+    """確認への回答も指示なので原文のまま残す。上限で切った発言には、切ったことを書く"""
+    long = "条件" * (KEEP_USER_CHARS // 2 + 10)
+    items = [
+        Item(1, RunEventKind.USER_MESSAGE, Message("user", "請求書を照合して")),
+        Item(2, RunEventKind.TOOL_RESULT, Message("tool", "結果の行", tool_call_id="r", tool_name="read")),
+        Item(3, RunEventKind.TOOL_RESULT, Message("tool", "CSVで出す", tool_call_id="q", tool_name="ask_user")),
+        Item(4, RunEventKind.USER_MESSAGE, Message("user", long)),
+        *[Item(5 + i, RunEventKind.ASSISTANT_MESSAGE, Message("assistant", "作業中" * 100)) for i in range(20)],
+        Item(30, RunEventKind.USER_MESSAGE, Message("user", "続けて")),
+    ]
+    chosen = choose_range(items)
+    assert chosen is not None
+    assert chosen.user_texts[:2] == ["請求書を照合して", "(answer to your question) CSVで出す"]
+    assert chosen.user_texts[2].endswith(CUT_NOTE)
+    assert "結果の行" not in "".join(chosen.user_texts)

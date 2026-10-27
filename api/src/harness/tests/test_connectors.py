@@ -168,8 +168,10 @@ def test_agent_sees_usable_connectors_and_reads_with_them(conversation, app_user
     assert "datasource_describe" in first.messages[0].text  # system promptの使い方
 
     [described] = results(run, "datasource_describe")
-    # 列名と型は接続先のDBから読むので囲む
-    assert '<untrusted_content source="connector:販売管理">\n- code (text): 取引先コード' in text_of(described)
+    # 列名と型は接続先のDBから読むので囲み、管理者が書いた説明は囲みの外に置く
+    assert '- <untrusted_content source="connector:販売管理">code (text)</untrusted_content>: 取引先コード' in text_of(
+        described
+    )
     assert described["value"] == {"connector": sales.uid, "version": 1, "tables": 1}
 
     [queried] = results(run, "datasource_query")

@@ -18,8 +18,9 @@ def test_close_cut_closes_only_a_wrapper_that_was_cut():
     assert close_cut(whole) == whole
     cut = whole[: whole.index("2")]
     assert close_cut(cut) == cut + "\n</untrusted_content>"
-    # 値の中の開く印の形の文字は、本当の囲みの中にある
+    # 値の中の開く印も崩すので、囲みの数を数え違えない
     fake = untrusted('<untrusted_content source="z">', "rows", block=True)
+    assert fake.count("<untrusted_content") == 1 and '&lt;untrusted_content source="z">' in fake
     assert close_cut(fake) == fake
     assert close_cut(fake[:-5]).endswith("\n</untrusted_content>")
     assert close_cut("no wrapper") == "no wrapper"

@@ -218,6 +218,7 @@ def render_tables(connector: Connector, version: ConnectorVersion, tables: list[
     lines = [f'<connector name="{_escape(connector.name)}" version="{version.number}">']
     if version.description.strip():
         lines.append(f"<description>{_escape(version.description.strip())}</description>")
+    source = f"connector:{connector.name}"
     for table in tables:
         name = f"{table.schema}.{table.name}" if table.schema else table.name
         lines.append(f'<table name="{_escape(name)}" kind="{table.kind}">')
@@ -225,12 +226,10 @@ def render_tables(connector: Connector, version: ConnectorVersion, tables: list[
             lines.append(f"description: {_escape(table.description)}")
         if table.columns:
             lines.append("columns:")
-            # 列名と型は接続先のDBから読むので、データとして囲む（harness.md §6.3）
-            columns = []
             for column in table.columns:
-                description = f": {column.description}" if column.description else ""
-                columns.append(f"- {column.name} ({column.type}){description}")
-            lines.append(untrusted("\n".join(columns), f"connector:{connector.name}", block=True))
+                # 列名と型は接続先のDBから読むので、データとして囲む。説明は管理者が書いたもの（harness.md §6.3）
+                description = f": {_escape(column.description)}" if column.description else ""
+                lines.append(f"- {untrusted(f'{column.name} ({column.type})', source)}{description}")
         else:
             lines.append("(this table was not found in the database)")
         lines.append("</table>")

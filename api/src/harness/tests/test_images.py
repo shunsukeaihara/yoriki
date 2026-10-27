@@ -22,6 +22,7 @@ from harness.context import (
     parts_from_json,
 )
 from harness.runner import Runner
+from harness.tools.files import PAGE_LIST_LIMIT, _page_list
 from llm.providers.base import ImagePart, Message, TextPart
 from run.models import Run, RunEvent, RunEventKind, RunStatus
 from run.tasks import claim_run
@@ -115,7 +116,7 @@ def test_scanned_pages_are_shown_as_images(app_user):
     assert [i["page"] for i in data["meta"]["images"]] == [1, 2, 3, 4, 5]
     text = "".join(p["text"] for p in data["content"] if p["type"] == "text")
     assert "The images of pages [1, 2, 3, 4, 5] follow, in this order." in text
-    assert "Pages [6] are not shown" in text
+    assert "Pages 6 are not shown" in text
     assert "[page 1]" in text
 
     # 次の要求で、RunEventから読み戻した画像をTool結果としてモデルに送る
@@ -291,3 +292,11 @@ def test_sent_images_are_recorded(app_user):
     execute(run, adapter)
     replies = RunEvent.objects.filter(run=run, kind=RunEventKind.ASSISTANT_MESSAGE).order_by("sequence")
     assert [e.data["images_sent"] for e in replies] == [0, 5]
+
+
+def test_page_lists_in_the_heading_are_short():
+    """見出しのページの一覧は、続くページを範囲にまとめ、長ければ切る（見出しも上限に含める）"""
+    assert _page_list([1, 2, 3, 5, 7, 8]) == "1-3, 5, 7-8"
+    assert _page_list(list(range(1, 2001))) == "1-2000"
+    many = _page_list(list(range(1, 2000, 2)))
+    assert len(many) == PAGE_LIST_LIMIT + 1 and many.endswith("…")

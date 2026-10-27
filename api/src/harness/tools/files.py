@@ -17,6 +17,8 @@ from .output import estimate_tokens, limited
 
 WRITABLE = ("/workspace/work", "/workspace/output")
 PATH_DESCRIPTION = "Absolute path inside /workspace, e.g. /workspace/input/invoice.pdf."
+# 見出しに出すページの一覧の上限（文字）
+PAGE_LIST_LIMIT = 200
 # CSVの見出しに出す列名の上限（文字）。Tool結果の上限の最小（1,000 token）の中に見出しが収まるように
 CSV_COLUMNS_LIMIT = 500
 
@@ -99,9 +101,9 @@ def _read_header(result: dict[str, Any], images: bool) -> list[str]:
             + untrusted(columns, f"file:{result['path']}")
         )
     if kind == "pdf":
-        lines.append(f"PDF: {result.get('total_pages')} pages; showing pages {result.get('pages')}.")
+        lines.append(f"PDF: {result.get('total_pages')} pages; showing pages {_page_list(result.get('pages'))}.")
         if scanned := result.get("pages_without_text"):
-            lines.append(f"Pages without text (scanned images): {scanned}.")
+            lines.append(f"Pages without text (scanned images): {_page_list(scanned)}.")
             lines.append(_scanned_notice(scanned, [i.get("page") for i in result.get("images", [])], images))
     if kind == "image":
         if images:
@@ -110,6 +112,20 @@ def _read_header(result: dict[str, Any], images: bool) -> list[str]:
         else:
             lines.append("The current model does not accept images, so only the format and size are shown.")
     return lines
+
+
+def _page_list(pages: Any) -> str:
+    """ページの一覧を、続くページを範囲にまとめて短くする（見出しもTool結果の上限に含めるため。harness.md §7.7）"""
+    if not isinstance(pages, list) or not all(isinstance(p, int) for p in pages):
+        return str(pages)[:PAGE_LIST_LIMIT]
+    runs: list[str] = []
+    for page in sorted(set(pages)):
+        if runs and runs[-1].split("-")[-1] == str(page - 1):
+            runs[-1] = f"{runs[-1].split('-')[0]}-{page}"
+        else:
+            runs.append(str(page))
+    text = ", ".join(runs)
+    return text if len(text) <= PAGE_LIST_LIMIT else text[:PAGE_LIST_LIMIT] + "…"
 
 
 def _scanned_notice(scanned: list[int], shown: list[int], images: bool) -> str:
@@ -122,7 +138,7 @@ def _scanned_notice(scanned: list[int], shown: list[int], images: bool) -> str:
     # 画像だけを別にまとめて送るAPI（Chat Completions、Gemini）もあるので、並びの順をここで示す
     notice = f"The images of pages {shown} follow, in this order."
     if rest:
-        notice += f" Pages {rest} are not shown; read them with pages (up to 5 images per call)."
+        notice += f" Pages {_page_list(rest)} are not shown; read them with pages (up to 5 images per call)."
     return notice
 
 

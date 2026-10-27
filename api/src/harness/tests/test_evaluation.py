@@ -256,17 +256,26 @@ def test_skill_declaring_a_system_connector_is_not_evaluated_yet(app_user, model
     skill = skill_with_draft(app_user, tools=["datasource_query"], connectors=[declaration])
     with pytest.raises(CannotEvaluate, match="システムのConnector"):
         start_evaluation(skill, cases=[case(skill)], actor=app_user, model_version=model.current_version)
-    # 公開中の版だけが宣言していても、比べるRunが使えないので断る
-    published_only = skill_with_draft(app_user)
-    assert published_only.current_version is not None
-    SkillVersion.objects.filter(pk=published_only.current_version.pk).update(
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("scope", [ConnectorScope.SYSTEM, ConnectorScope.DEPARTMENT])
+def test_published_version_the_evaluator_cannot_run_is_not_compared(app_user, model, scope):
+    """公開中の版だけが、評価する人の使えないConnectorを宣言していれば、Draftだけで評価する（宣言を外したDraftを
+    評価して公開できるように）"""
+    department = DepartmentFactory.create() if scope == ConnectorScope.DEPARTMENT else None
+    connector = ConnectorFactory.create(scope=scope, department=department)
+    skill = skill_with_draft(app_user)
+    assert skill.current_version is not None
+    declaration = {"connector": connector.uid, "operations": ["datasource_query"], "tables": []}
+    SkillVersion.objects.filter(pk=skill.current_version.pk).update(
         tools=["datasource_query"], connectors=[declaration]
     )
-    published_only.refresh_from_db()
-    with pytest.raises(CannotEvaluate, match="システムのConnector"):
-        start_evaluation(
-            published_only, cases=[case(published_only)], actor=app_user, model_version=model.current_version
-        )
+    skill.refresh_from_db()
+    evaluation = start_evaluation(skill, cases=[case(skill)], actor=app_user, model_version=model.current_version)
+    assert evaluation.base_version is None
+    [result] = evaluation.results.all()
+    assert result.base_run is None and result.draft_run is not None
 
 
 @pytest.mark.django_db

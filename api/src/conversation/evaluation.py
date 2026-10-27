@@ -122,12 +122,19 @@ def start_evaluation(
         sensitive = skill_connectors.skill_is_sensitive(skill)
         if sensitive and not model_version.is_local:
             raise CannotEvaluate(_("機密のSkillは、ローカルLLMのモデルで評価してください。"))
-        compared = [draft] if skill.current_version is None else [draft, skill.current_version]
-        if any(skill_connectors.declares_system_connector(content) for content in compared):
+        if skill_connectors.declares_system_connector(draft):
             # システムのConnectorは会話のRunから使えないので、評価のRunでも使えない（システムのタスクの段階で扱う）
             raise CannotEvaluate(_("システムのConnectorを使うSkillは、まだ評価できません。"))
         if reason := skill_connectors.unusable_reason(draft, actor, sensitive=sensitive):
             raise CannotEvaluate(reason)
+        # 公開中の版を評価する人が動かせなければ（使えなくなったConnectorやシステムのConnectorを宣言している）、
+        # 最初の公開の前と同じくDraftだけで評価する（その宣言を外したDraftを評価して公開できるように）
+        base = skill.current_version
+        if base is not None and (
+            skill_connectors.declares_system_connector(base)
+            or skill_connectors.unusable_reason(base, actor, sensitive=sensitive)
+        ):
+            base = None
         runtime_version = RuntimeProfile.default_version()
         if runtime_version is None:
             raise CannotEvaluate(
@@ -139,7 +146,7 @@ def start_evaluation(
             skill=skill,
             draft_uid=draft.uid,
             draft_revision=draft.revision,
-            base_version=skill.current_version,
+            base_version=base,
             model_version=model_version,
             effort=effort,
             requested_by=actor,
@@ -174,7 +181,7 @@ def start_evaluation(
                 case_updated=case.updated,
             )
             fields = []
-            if skill.current_version is not None:
+            if base is not None:
                 result.base_run = _start_run(evaluation, case, files, runtime_version, "base", sensitive=sensitive)
                 fields.append("base_run")
             result.draft_run = _start_run(evaluation, case, files, runtime_version, "draft", sensitive=sensitive)
@@ -209,7 +216,7 @@ def _start_run(
     actor = evaluation.requested_by
     version = evaluation.model_version
     skill = evaluation.skill
-    base = skill.current_version
+    base = evaluation.base_version
     entry = evaluation_entry(evaluation) if side == "draft" or base is None else manifest_entry(skill, base)
     content = evaluation if side == "draft" or base is None else base
     conversation = Conversation.objects.create(

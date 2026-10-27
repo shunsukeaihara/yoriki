@@ -22,7 +22,7 @@ from task.models import (
     TriggerReceipt,
 )
 from task.serializers import TriggerBindingSerializer
-from task.webhook import PayloadError
+from task.webhook import PayloadError, extract, parse_path
 from user.factories import UserFactory, grant
 from user.models import SYSTEM_USERNAME, User, system_user
 
@@ -566,3 +566,12 @@ def test_resending_an_old_event_after_a_new_one_collides_on_the_new_path(api_cli
     assert _send(api_client, task, key, event_b).status_code == 202
     res = _send(api_client, task, key, event_a)
     assert (res.status_code, res.json()["run_id"]) == (200, run_a)
+
+
+def test_quoted_path_keys_use_json_escapes():
+    assert parse_path('$.data["vendor\\u0020name"][0]') == ["data", "vendor name", 0]
+    assert parse_path('$["a\\"b"]') == ['a"b']
+    assert parse_path("$['it\\'s']") == ["it's"]
+    assert extract({"data": {"vendor name": "ACME"}}, '$.data["vendor\\u0020name"]') == (True, "ACME")
+    with pytest.raises(ValueError):
+        parse_path('$["\\x"]')

@@ -54,14 +54,24 @@ def parse_path(path: str) -> list[str | int]:
         if index is not None:
             tokens.append(int(index))
         else:
-            quoted = double if double is not None else single
-            tokens.append(name if name is not None else re.sub(r"\\(.)", r"\1", quoted))
+            tokens.append(name if name is not None else _unquote(double, single))
         pos = match.end()
     if not tokens:
         raise ValueError(_("取り出す場所を書いてください（例：$.data.vendor）"))
     if len(tokens) > MAX_PATH_DEPTH:
         raise ValueError(_("深さは%(limit)sまでです") % {"limit": MAX_PATH_DEPTH})
     return tokens
+
+
+def _unquote(double: str | None, single: str | None) -> str:
+    """`["..."]` の中はJSONの文字列として読む（`\\u0020`・`\\"` 等）。`['...']` の中は `\\'`・`\\\\` だけを戻す"""
+    if double is not None:
+        try:
+            return json.loads(f'"{double}"')
+        except ValueError:
+            raise ValueError(_("引用符の中の書き方が正しくありません")) from None
+    assert single is not None
+    return re.sub(r"\\(.)", r"\1", single)
 
 
 def extract(data: Any, path: str) -> tuple[bool, Any]:

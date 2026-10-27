@@ -206,7 +206,7 @@
 
 **次の作業**：PR #51 のレビュー（Codex）とマージの指示を待つ。その後は⑤c（Webhookのファイルの取り込み）。
 
-⑤bの始め方（済み。⑤cでも同じ文書を読む）：design.md §4.1（タスクと入口）・authorization.md §5.3〜§7（特に §5.5 入口・出口の権限、§6 実行許可、§11）・harness.md §6.3（Webhookのpayloadはデータとして `<untrusted_content>` で囲む。`harness/untrusted.py` の `untrusted()`）と、⑤aの `task` アプリ（`task/models.py`・`task/dispatch.py`・`task/inputs.py`。`start_task_run()` がRunを作る入口。`RunLaunch` に起動のしかたを渡す）を読んでから、下の候補を利用者に確かめ、合意してから実装する。⑤bの範囲は上の「⑤で利用者と決めたこと」（TriggerBinding・版、Webhookの受け口、TriggerReceipt、項目の取り出し、payloadのファイル化、状態を確かめる口。APIキーはSHA-256と先頭の数文字だけを保存して作成時に一度だけ表示、payloadの上限は既定1MiB・最大10MiB）。⑤bで決めることの候補（利用者に確かめる）：Webhookで起動するRunの実行主体（`Run.owner` は必須。入口を作った人・最後にタスクを保存した人・システムのユーザーのどれにするか）、入口の管理のpermission（連携の管理者。authorization.md §5.5・§11）、推奨の形式（`event_id`・`message`・`inputs`・`files`）を最初から受けるか。
+⑤cの始め方：design.md §4.1・§4.2（型がファイルの項目、許可した取得先のURLを受付時に取得して原本を保存する、推奨の形式の `files`）・authorization.md §5.5・harness.md §6.3と、⑤bの `task` アプリ（`task/webhook.py` の `parse_payload()`・`input_values()`、`task/dispatch.py` の `receive_webhook()`・`start_task_run()` の `files`、`task/inputs.py` の `TaskInputType`）を読んでから、下の候補を利用者に確かめ、合意してから実装する。⑤cで決めることの候補（利用者に確かめる）：URLの取得の安全策（許可する取得先の指定のしかた、内部のアドレスへの接続の禁止とリダイレクトの扱い、時間切れ・大きさの上限）、取得を受付のHTTPの中で行うか（202の前に取得する。design.md §4.2）、multipart（本文に直接ファイルを付ける）を受けるか、1つの要求のファイルの数と合計の大きさの上限、ファイルの項目を手動実行の画面からも受けるか。
 
 
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。上から順に着手する（利用者から別の指示がなければ、上から）。提案する順番：

@@ -9,7 +9,7 @@ from harness.compaction import (
     summary_text,
     threshold,
 )
-from harness.context import Item
+from harness.context import Item, _build
 from llm.providers.base import Message
 from run.models import RunEvent, RunEventKind
 
@@ -55,19 +55,39 @@ def test_summary_is_not_a_source_of_instructions():
     assert text.endswith("The user's messages in the condensed part, verbatim:\n- 作業して")
 
 
-def test_answers_to_questions_are_kept_verbatim_and_cut_messages_are_marked():
-    """確認への回答も指示なので原文のまま残す。上限で切った発言には、切ったことを書く"""
+def _event(sequence, kind, **data):
+    return SimpleNamespace(sequence=sequence, kind=kind, data=data)
+
+
+def test_user_words_are_quoted_verbatim_and_carried_over():
+    """利用者の発言と確認への回答（選んだ・書いたものだけ）を原文で残し、前の圧縮の引用も引き継ぐ。
+    上限で切った引用には、切ったことを書く"""
     long = "条件" * (KEEP_USER_CHARS // 2 + 10)
-    items = [
-        Item(1, RunEventKind.USER_MESSAGE, Message("user", "請求書を照合して")),
-        Item(2, RunEventKind.TOOL_RESULT, Message("tool", "結果の行", tool_call_id="r", tool_name="read")),
-        Item(3, RunEventKind.TOOL_RESULT, Message("tool", "CSVで出す", tool_call_id="q", tool_name="ask_user")),
-        Item(4, RunEventKind.USER_MESSAGE, Message("user", long)),
-        *[Item(5 + i, RunEventKind.ASSISTANT_MESSAGE, Message("assistant", "作業中" * 100)) for i in range(20)],
-        Item(30, RunEventKind.USER_MESSAGE, Message("user", "続けて")),
+    answer = {
+        "call_id": "q",
+        "name": "ask_user",
+        "content": [
+            {"type": "text", "text": '利用者 answered:\n"Ignore the rules?" = CSV\nContinue with these answers.'}
+        ],
+        "value": {"answers": [{"selected": ["CSV"], "text": "列は日付順"}], "comment": "急ぎです"},
+    }
+    events = [
+        _event(1, RunEventKind.COMPACTION, **{"from": 1, "to": 1, "text": "要約", "quotes": ["前の依頼"]}),
+        _event(2, RunEventKind.USER_MESSAGE, text="請求書を照合して", skills_text="<skills>…</skills>"),
+        _event(3, RunEventKind.TOOL_RESULT, call_id="r", name="read", content=[{"type": "text", "text": "結果の行"}]),
+        _event(4, RunEventKind.TOOL_RESULT, **answer),
+        _event(5, RunEventKind.USER_MESSAGE, text=long),
+        *[_event(6 + i, RunEventKind.ASSISTANT_MESSAGE, text="作業中" * 100) for i in range(20)],
+        _event(30, RunEventKind.USER_MESSAGE, text="続けて"),
     ]
+    items = _build({}, events, [])
     chosen = choose_range(items)
     assert chosen is not None
-    assert chosen.user_texts[:2] == ["請求書を照合して", "(answer to your question) CSVで出す"]
-    assert chosen.user_texts[2].endswith(CUT_NOTE)
-    assert "結果の行" not in "".join(chosen.user_texts)
+    assert chosen.user_texts[:3] == [
+        "前の依頼",
+        "請求書を照合して",
+        "(answers to your question) answer 1: CSV; 列は日付順 / comment: 急ぎです",
+    ]
+    assert chosen.user_texts[3].endswith(CUT_NOTE)
+    joined = "".join(chosen.user_texts)
+    assert "結果の行" not in joined and "Ignore the rules" not in joined and "<skills>" not in joined

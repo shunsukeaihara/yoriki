@@ -16,7 +16,6 @@ KEEP_USER_CHARS = 20_000
 # 画像1枚のtoken数の見積もり（長辺1568pxまでに縮小した画像。各社は1枚で千数百token）
 IMAGE_TOKENS = 1_600
 
-ASK_USER = "ask_user"
 CUT_NOTE = " […the rest was cut to save context; see section 2 of the summary]"
 
 SUMMARY_INSTRUCTION = """You are now acting as a context compaction engine. Condense the conversation ABOVE into a \
@@ -130,20 +129,13 @@ def choose_range(items: list[Item]) -> CompactionRange | None:
     if cut >= len(items):
         return None
     covered = items[:cut]
-    # 利用者の発言と確認への回答（ask_user の結果）は指示なので、原文のまま残す（harness.md §6.3）
+    # 利用者の発言と確認への回答は指示なので、原文のまま残す。前の圧縮が残したものも引き継ぐ（harness.md §6.3）
     user_texts, total = [], 0
-    for item in covered:
+    for quote in (q for item in covered for q in item.quotes):
         if total >= KEEP_USER_CHARS:
             break
-        if item.kind == RunEventKind.USER_MESSAGE:
-            prefix = ""
-        elif item.kind == RunEventKind.TOOL_RESULT and item.message.tool_name == ASK_USER and not item.message.is_error:
-            prefix = "(answer to your question) "
-        else:
-            continue
-        whole = item.message.text
-        text = whole[: KEEP_USER_CHARS - total]
-        user_texts.append(prefix + text + (CUT_NOTE if len(text) < len(whole) else ""))
+        text = quote[: KEEP_USER_CHARS - total]
+        user_texts.append(text + (CUT_NOTE if len(text) < len(quote) else ""))
         total += len(text)
     return CompactionRange(covered[0].sequence, covered[-1].sequence, user_texts)
 

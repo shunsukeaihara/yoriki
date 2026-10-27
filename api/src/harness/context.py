@@ -125,6 +125,8 @@ class Item:
     sequence: int
     kind: int
     message: Message
+    # 圧縮で原文のまま残す利用者の言葉（発言、確認への回答、前の圧縮が残したもの。harness.md §9.3）
+    quotes: tuple[str, ...] = ()
 
 
 # 引き継いだ文脈の項目の sequence。このRunの記録（1から）より前に並び、圧縮では1つのまとまりとして扱う
@@ -148,7 +150,7 @@ def inherited_items(run: Run) -> list[Item]:
     """親のRun（同じ会話の前の依頼）の、最後にモデルへ送った文脈と同じ履歴。親のさらに前も、親が引き継いだものとして
     含む。親は終わっていて記録は変わらないので、Runnerは1回だけ読む。結果のないまま終わったTool呼出しには、
     結果が分からないことを結果として添える（プロバイダは呼出しと結果の対応を求める）"""
-    return [Item(INHERITED_SEQUENCE, item.kind, item.message) for item in _ancestor_items(run, provider_key(run))]
+    return [replace(item, sequence=INHERITED_SEQUENCE) for item in _ancestor_items(run, provider_key(run))]
 
 
 def _ancestor_items(run: Run, key: dict[str, str]) -> list[Item]:
@@ -158,7 +160,7 @@ def _ancestor_items(run: Run, key: dict[str, str]) -> list[Item]:
     events = list(RunEvent.objects.filter(run=parent).order_by("sequence"))
     # 親が引き継いだ部分をまるごと圧縮していれば、さらに前は読まなくてよい
     covered = any(e.kind == RunEventKind.COMPACTION and e.data["from"] <= INHERITED_SEQUENCE for e in events)
-    above = [] if covered else [Item(INHERITED_SEQUENCE, i.kind, i.message) for i in _ancestor_items(parent, key)]
+    above = [] if covered else [replace(i, sequence=INHERITED_SEQUENCE) for i in _ancestor_items(parent, key)]
     return _close_unfinished_calls(_build(key, events, above))
 
 
@@ -198,7 +200,8 @@ def _build(key: dict[str, str], events: Iterable[RunEvent], items: list[Item]) -
                     text = f"{text}\n\n{attachments_text(data['attachments'])}".strip()
                 if data.get("earlier_attachments"):
                     text = f"{text}\n\n{attachments_text(data['earlier_attachments'], earlier=True)}".strip()
-                items.append(Item(event.sequence, event.kind, Message("user", text)))
+                quotes = (data["text"],) if data["text"].strip() else ()
+                items.append(Item(event.sequence, event.kind, Message("user", text), quotes))
             case RunEventKind.CONTEXT | RunEventKind.JOB_FINISHED:
                 items.append(Item(event.sequence, event.kind, Message("user", data["text"])))
             case RunEventKind.ASSISTANT_MESSAGE:
@@ -214,13 +217,28 @@ def _build(key: dict[str, str], events: Iterable[RunEvent], items: list[Item]) -
                     tool_name=data["name"],
                     is_error=data.get("is_error", False),
                 )
-                items.append(Item(event.sequence, event.kind, message))
+                items.append(Item(event.sequence, event.kind, message, _answer_quotes(data)))
             case RunEventKind.COMPACTION:
                 start, end = data["from"], data["to"]
                 position = sum(1 for item in items if item.sequence < start)
                 items = [item for item in items if not start <= item.sequence <= end]
-                items.insert(position, Item(start, event.kind, Message("user", data["text"])))
+                quotes = tuple(data.get("quotes", []))
+                items.insert(position, Item(start, event.kind, Message("user", data["text"]), quotes))
     return items
+
+
+def _answer_quotes(data: dict[str, Any]) -> tuple[str, ...]:
+    """確認への回答のうち、利用者が書いた・選んだものだけ。質問文や案内（エージェントとRunnerが書いたもの）は含めない"""
+    value = data.get("value") or {}
+    if data.get("name") != "ask_user" or data.get("is_error") or "answers" not in value:
+        return ()
+    answers = []
+    for number, answer in enumerate(value["answers"], start=1):
+        chosen = ", ".join(answer.get("selected", []))
+        answers.append(f"answer {number}: " + ("; ".join(v for v in (chosen, answer.get("text", "")) if v) or "-"))
+    if value.get("comment"):
+        answers.append(f"comment: {value['comment']}")
+    return ("(answers to your question) " + " / ".join(answers),)
 
 
 def build_messages(run: Run, events: Iterable[RunEvent]) -> list[Message]:

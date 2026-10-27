@@ -29,6 +29,10 @@ const editableSkills = computed(() => visibleSkills.value.filter((s) => s.canEdi
 // 入力欄の `@` の一覧。機密の Connector は、個人情報・機密情報を扱う会話でだけ選べる
 const { items: usableConnectors, fetchAll: fetchConnectors } = useFetchAll(() => api.connectors.list({ pageSize: 200 }))
 const sensitive = computed(() => conversation.value?.handlesSensitiveData ?? false)
+// Tool を使えないモデルでは Connector を使えないので、一覧に出さない（送ってもサーバーが断る）
+const connectorChoices = computed(() =>
+  conversation.value?.modelProfileInfo?.supportsTools ? usableConnectors.value : [],
+)
 
 const messages = useConversationMessages(conversationId)
 const { items: runs, fetchAll: fetchRuns } = useFetchAll(() =>
@@ -366,7 +370,7 @@ const menuItems = computed(() => [
             :active-run="activeRun"
             :skills="usableSkills"
             :editable-skills="editableSkills"
-            :connectors="usableConnectors"
+            :connectors="connectorChoices"
             :sensitive="sensitive"
             :has-open-question="hasOpenQuestion"
             :attachments="attachments.items.value"

@@ -116,6 +116,23 @@ class TestConversation:
         assert "handles_sensitive_data" in res.data
         assert Conversation.objects.get(pk=conversation.pk).handles_sensitive_data
 
+    def test_making_it_confidential_switches_the_active_run_to_the_local_model(
+        self, api_client, app_user, local_profile
+    ):
+        conversation = ConversationFactory.create(owner=app_user, model_profile=local_profile)
+        cloud = ModelProfileFactory.create(version__supports_tools=True)
+        # 実行中のRunは、会話のモデル設定と違うクラウドのモデルを使っている
+        run = RunFactory.create(
+            conversation=conversation, status=RunStatus.RUNNING, model_version=cloud.current_version
+        )
+        res = api_client.patch(
+            f"/api/app/v1/conversations/{conversation.uid}/", {"handles_sensitive_data": True}, format="json"
+        )
+        assert res.status_code == 200, res.data
+        run.refresh_from_db()
+        assert run.handles_sensitive_data
+        assert run.model_version == local_profile.current_version
+
     def test_making_it_confidential_checks_the_model_saved_by_another_update(self, app_user, local_profile):
         conversation = ConversationFactory.create(owner=app_user, model_profile=local_profile)
         serializer = ConversationSerializer(

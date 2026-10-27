@@ -129,7 +129,9 @@ class ConversationSerializer(serializers.ModelSerializer):
             )
             # 読み直した会話を更新する（検証の前に読んだ古い値、例えば機密にする前のクラウドのモデルを書き戻さない）
             instance = super().update(locked, validated_data)
-            if "model_profile" in validated_data or "effort" in validated_data:
+            # 機密にするときは、実行中のRunが別のモデル（モデル設定の前の版等）を使っていても、会話のモデル
+            # （ローカルLLM）に切り替える
+            if "model_profile" in validated_data or "effort" in validated_data or becomes_sensitive:
                 self._switch_active_run(instance, actor)
             if becomes_sensitive:
                 # 実行中のRunも、モデルの切り替えの候補をローカルLLMだけにする。機密のConnector・Skillの一覧は

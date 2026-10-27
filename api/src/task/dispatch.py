@@ -14,7 +14,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from artifact.models import Artifact, ArtifactKind, BlobObject, clean_filename, guess_content_type
+from artifact.models import Artifact, ArtifactKind, BlobLocation, BlobObject, clean_filename, guess_content_type
 from artifact.storage import get_storage
 from conversation.dispatch import user_message_data
 from conversation.models import Conversation, ConversationMessage, ConversationPurpose, MessageRole
@@ -258,11 +258,15 @@ def store_files(files: Sequence[InputFile]) -> list[InputFile]:
 
 
 def discard_files(files: Sequence[InputFile]) -> None:
-    """store_files() で書いたが記録しなかったものを、保存先から消す（消せなければ、参照のないobjectとして清掃で消す）"""
+    """store_files() で書いたが記録しなかったものを、保存先から消す（消せなければ、参照のないobjectとして清掃で消す）。
+
+    DBに記録されているもの（commitした後のQ2への送信の失敗等で呼ばれたとき）は、Runの添付なので消さない"""
     for file in files:
         if file.stored is None:
             continue
         stored, backend = file.stored
+        if BlobLocation.objects.filter(backend=backend, key=stored.key).exists():
+            continue
         file.stored = None
         try:
             get_storage(backend).delete(stored.key)

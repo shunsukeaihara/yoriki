@@ -15,8 +15,9 @@ from artifact.models import ArtifactKind, BlobObject
 from artifact.tests.test_api import body_of
 from conversation.models import ConversationPurpose
 from run.models import Run, RunEndReason, RunEvent, RunEventKind, RunLaunch, RunStatus, RunTrigger
-from task.dispatch import WEBHOOK_NOTE, receive_webhook
+from task.dispatch import WEBHOOK_NOTE, discard_files, receive_webhook, store_files
 from task.factories import TaskDefinitionFactory
+from task.inputs import InputFile
 from task.models import (
     REVISION_FIELDS,
     TaskDefinition,
@@ -449,6 +450,18 @@ def test_a_failed_write_deletes_the_files_written_before_it(api_client, integrat
         _send_multipart(api_client, task, key, data)
     assert delete.call_count == 1  # payloadの分
     assert not Run.objects.exists()
+
+
+def test_files_recorded_by_a_run_are_not_discarded():
+    """commitした後のQ2への送信の失敗等で discard_files() が呼ばれても、記録したRunの添付は消さない"""
+    recorded, unrecorded = InputFile("a.pdf", b"1"), InputFile("b.pdf", b"2")
+    store_files([recorded, unrecorded])
+    assert recorded.stored is not None and unrecorded.stored is not None
+    BlobObject.register(*recorded.stored)
+    unrecorded_key = unrecorded.stored[0].key
+    with mock.patch("artifact.storage.LocalStorage.delete", autospec=True) as delete:
+        discard_files([recorded, unrecorded])
+    assert [c.args[1] for c in delete.call_args_list] == [unrecorded_key]
 
 
 def test_a_json_value_shaped_like_a_file_is_not_the_same_input(api_client, integrator):

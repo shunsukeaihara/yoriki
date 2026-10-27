@@ -432,8 +432,9 @@ class TaskRunCreateSerializer(serializers.Serializer):
                     error = _("ファイルを送るか、値は inputs に入れて送ってください")
                     raise serializers.ValidationError({"inputs": {name: error}})
                 continue
-            if len(uploaded) > 1 or name == "inputs":
-                raise serializers.ValidationError({"inputs": {name: _("1つの項目に付けられるファイルは1つです")}})
+            if len(items) > 1 or name == "inputs":
+                # 2つ目のファイルや、ファイルと一緒に送った文字を黙って捨てない
+                raise serializers.ValidationError({"inputs": {name: _("1つの項目にはファイルを1つだけ送ってください")}})
             limit = settings.YORIKI_UPLOAD_MAX_MB
             if (uploaded[0].size or 0) > limit * 1024 * 1024:
                 raise serializers.ValidationError(

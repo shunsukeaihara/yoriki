@@ -283,6 +283,11 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
     # エージェントが使えるConnectorの一覧も固定する（Toolの引数をRunの中で変えない。harness.md §10.2）。
     # 使えるかは操作のたびに確かめ直す
     connectors = resolve_connectors(message, conversation.owner, version, skills)
+    if any(c["sensitive"] for c in connectors) and not conversation.handles_sensitive_data:
+        # `@` で指定した機密のConnectorの説明（表の名前と説明）を最初の発言に入れるので、会話を機密にする
+        # （以後はローカルLLMのモデルだけ。harness.md §10.2）。会話の行ロックの中で呼ばれる
+        conversation.handles_sensitive_data = True
+        conversation.save(update_fields=["handles_sensitive_data", "updated"])
     connector_catalog = (
         build_connector_catalog(conversation.owner, version, explicit=connectors) if version.supports_tools else None
     )

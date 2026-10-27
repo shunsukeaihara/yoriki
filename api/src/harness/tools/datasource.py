@@ -10,6 +10,9 @@
 
 import io
 import tempfile
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from typing import Any
 
 from django.utils import timezone
@@ -30,6 +33,8 @@ DESCRIBE_NAME, QUERY_NAME = DATASOURCE_TOOL_NAMES
 
 # 接続の同時実行の枠が空くのを待つ上限（秒）
 SLOT_WAIT_SECONDS = 60
+# 接続先への操作の間に、Attemptのleaseを延ばす間隔（秒）
+HEARTBEAT_SECONDS = 15
 # モデルに見せる先頭の行数。Sandboxのない（ファイルを読めない）Runでは、上限の中で多めに見せる
 PREVIEW_ROWS = 10
 INLINE_ROWS = 200
@@ -105,7 +110,10 @@ def _resolve(arguments: dict[str, Any], context: ToolContext) -> tuple[Connector
         .filter(uid=entry["connector"])
         .first()
     )
-    if connector is None or not connector.can(run.owner, ConnectorAction.USE):
+    # 依頼した人は操作のたびにDBから読む（無効にされた・所属を外されたら、次の操作から使わせない。
+    # 所属の判定はユーザーのオブジェクトに保存されるので、Runが持つものを使い回さない）
+    owner = type(run.owner).objects.get(pk=run.owner_id)
+    if connector is None or not connector.can(owner, ConnectorAction.USE):
         return ToolResult.error(
             "This connector cannot be used now: it was disabled or deleted, or the user can no longer use it. "
             "Continue without it, and tell the user."
@@ -128,6 +136,18 @@ def _slot(connector: Connector, version: ConnectorVersion, context: ToolContext)
         wait_seconds=SLOT_WAIT_SECONDS,
         on_wait=context.attempt.heartbeat,
     )
+
+
+def _keep_alive[T](context: ToolContext, operation: Callable[[], T]) -> T:
+    """接続先への操作を別のスレッドで行い、終わるのを待つ間もAttemptのleaseを延ばす（実行時間の上限はleaseより
+    長く設定できる）。別のスレッドはDjangoのDBに触らない（接続先のドライバだけを使う）"""
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="connector") as pool:
+        future = pool.submit(operation)
+        while True:
+            try:
+                return future.result(timeout=HEARTBEAT_SECONDS)
+            except FutureTimeout:
+                context.attempt.heartbeat()
 
 
 def _failed(exc: ConnectorError, connector: Connector, version: ConnectorVersion) -> ToolResult:
@@ -156,9 +176,13 @@ def describe(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     if isinstance(resolved, ToolResult):
         return resolved
     connector, version = resolved
+    # 表・列の名前も機密のConnectorの情報なので、文脈に入れる前に会話を機密にする
+    if version.is_sensitive and (refused := _mark_sensitive(context, connector)):
+        return refused
+    adapter = get_adapter(connector, version)
     try:
         with _slot(connector, version, context):
-            tables = get_adapter(connector, version).describe()
+            tables = _keep_alive(context, adapter.describe)
     except ConnectorError as exc:
         return _failed(exc, connector, version)
     text = render_tables(connector, version, tables)
@@ -213,7 +237,7 @@ def query(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         out = io.TextIOWrapper(raw, encoding="utf-8", newline="")
         try:
             with _slot(connector, version, context):
-                result = adapter.query(sql, params, keep_rows=keep, csv_out=out)
+                result = _keep_alive(context, lambda: adapter.query(sql, params, keep_rows=keep, csv_out=out))
         except ConnectorError as exc:
             return _failed(exc, connector, version)
         out.flush()
@@ -282,9 +306,11 @@ def _render_result(connector: Connector, version: ConnectorVersion, result: Quer
 
 
 def _mark_sensitive(context: ToolContext, connector: Connector) -> ToolResult | None:
-    """機密のConnectorの結果を扱う前に、Runと会話に印を付ける（harness.md §10.2）。以後、この会話はローカルLLMの
-    モデルだけになり、次の依頼で引き継ぐ文脈もクラウドのモデルへ送らない。印を付けるtransactionの中でモデルを
-    確かめ直す（利用者が同時にクラウドのモデルへ切り替えていたら、使わない）"""
+    """機密のConnectorの情報（表・列の名前、結果）を扱う前に、Runと会話に印を付ける（harness.md §10.2）。以後、この
+    会話はローカルLLMのモデルだけになり、次の依頼で引き継ぐ文脈もクラウドのモデルへ送らない。印を付ける
+    transactionの中でモデルを確かめ直す（利用者が同時にクラウドのモデルへ切り替えていたら、使わない）。
+    fenced() は会話 → Runの順にロックするので、会話のモデルの変更（同じ順。ConversationSerializer.update()）と
+    互いに待つことはない"""
     with context.run.fenced(context.attempt) as run:
         if not run.model_version.is_local:
             return ToolResult.error(

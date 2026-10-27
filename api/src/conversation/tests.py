@@ -212,7 +212,9 @@ class TestMessage:
         assert res.status_code == 201, res.data
         assert res.data["connectors_info"] == [{"id": connector.uid, "name": "販売管理"}]
         run = Run.objects.get(conversation=conversation)
-        assert run.manifest["fixed"]["connectors"] == [{"connector": connector.uid, "name": "販売管理"}]
+        assert run.manifest["fixed"]["connectors"] == [
+            {"connector": connector.uid, "name": "販売管理", "sensitive": False}
+        ]
 
     def test_connector_the_user_cannot_use_is_rejected(self, api_client, app_user):
         conversation = ConversationFactory.create(owner=app_user)

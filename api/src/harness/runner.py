@@ -225,7 +225,12 @@ class Runner:
         return list(RunEvent.objects.filter(run=self.run_obj).order_by("sequence"))
 
     def _refresh(self) -> Run:
-        run = Run.objects.select_related("model_version__connection", "model_version__profile").get(pk=self.run_obj.pk)
+        run = Run.objects.select_related("owner", "model_version__connection", "model_version__profile").get(
+            pk=self.run_obj.pk
+        )
+        # 依頼した人も読み直す（無効にされた・所属を外されたら、Skill・Connectorを次の区切りから使わせない。
+        # 所属の判定はユーザーのオブジェクトに保存されるので、前のものを使い回さない）
+        self.run_obj.owner = run.owner
         self.run_obj.status = run.status
         self.run_obj.model_version = run.model_version
         self.run_obj.effort = run.effort

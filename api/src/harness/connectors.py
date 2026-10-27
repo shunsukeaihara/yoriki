@@ -98,7 +98,9 @@ def resolve_explicit(connectors: list[Connector], user, model_version) -> list[d
             raise ConnectorUnavailable(
                 _("%(name)s：機密のConnectorは、ローカルLLMのモデルでだけ使えます") % {"name": connector.name}
             )
-        entries.append({"connector": connector.uid, "name": connector.name})
+        entries.append(
+            {"connector": connector.uid, "name": connector.name, "sensitive": connector.current_version.is_sensitive}
+        )
     return entries
 
 

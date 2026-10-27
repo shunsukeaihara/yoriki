@@ -1,6 +1,7 @@
 """会話でConnectorを使う（harness.md §10.2）。一覧の固定、`datasource_describe`・`datasource_query`、`@` での指定、
 機密のConnector、権限の確かめ直し、結果のファイル"""
 
+import time
 from datetime import timedelta
 
 import pytest
@@ -320,7 +321,7 @@ def test_chosen_connector_is_described_in_the_first_message(conversation):
     connector = ConnectorFactory.create(name="販売管理", version__description="受注と取引先", version__tables=TABLES)
     run = start(conversation, connectors=[connector])
 
-    assert run.manifest["fixed"]["connectors"] == [{"connector": connector.uid, "name": "販売管理"}]
+    assert run.manifest["fixed"]["connectors"] == [{"connector": connector.uid, "name": "販売管理", "sensitive": False}]
     data = RunEvent.objects.get(run=run, kind=RunEventKind.USER_MESSAGE).data
     assert '<connector name="販売管理">' in data["connectors_text"]
     assert "public.vendors — 取引先" in data["connectors_text"]
@@ -335,6 +336,109 @@ def test_chosen_sensitive_connector_needs_a_local_model(conversation):
     connector = ConnectorFactory.create(name="人事", version__is_sensitive=True)
     with pytest.raises(CannotStart, match="ローカルLLM"):
         start(conversation, connectors=[connector])
+
+
+@pytest.mark.django_db
+def test_chosen_sensitive_connector_makes_the_conversation_confidential(app_user, local_model):
+    connector = ConnectorFactory.create(name="人事", version__is_sensitive=True, version__tables=TABLES)
+    conversation = ConversationFactory.create(owner=app_user, model_profile=local_model)
+    run = start(conversation, connectors=[connector])
+    # 表の名前と説明を最初の発言に入れるので、Runを始めるときに機密にする
+    assert run.handles_sensitive_data
+    assert run.manifest["fixed"]["handles_sensitive_data"]
+    conversation.refresh_from_db()
+    assert conversation.handles_sensitive_data
+
+
+@pytest.mark.django_db
+def test_describing_a_sensitive_connector_makes_the_conversation_confidential(app_user, local_model):
+    ConnectorFactory.create(name="人事", version__is_sensitive=True, version__tables=TABLES)
+    conversation = ConversationFactory.create(owner=app_user, model_profile=local_model)
+    run = start(conversation)
+    adapter = FakeAdapter([calls(("c1", "datasource_describe", {"connector": "人事"})), reply("ok")])
+    run = execute(run, adapter)
+    assert run.handles_sensitive_data
+    conversation.refresh_from_db()
+    assert conversation.handles_sensitive_data
+
+
+@pytest.mark.django_db
+def test_user_deactivated_during_the_run_cannot_use_connectors(conversation, app_user):
+    ConnectorFactory.create(name="販売管理", version__tables=TABLES)
+    run = start(conversation)
+
+    class Deactivate(FakeAdapter):
+        def stream(self, request):
+            # モデルの応答の間に、利用者が無効にされた
+            type(app_user).objects.filter(pk=app_user.pk).update(is_active=False)
+            yield from super().stream(request)
+
+    adapter = Deactivate(
+        [calls(("c1", "datasource_query", {"connector": "販売管理", "sql": "SELECT code FROM vendors"})), reply("ok")]
+    )
+    run = execute(run, adapter)
+    [result] = results(run, "datasource_query")
+    assert result["is_error"]
+    assert FakeDatasource.calls == []
+
+
+@pytest.mark.django_db
+def test_membership_removed_between_steps_stops_using_the_department_connector(conversation, app_user):
+    department = DepartmentFactory.create()
+    membership = DepartmentMembershipFactory.create(department=department, user=app_user)
+    ConnectorFactory.create(name="経理", scope=ConnectorScope.DEPARTMENT, department=department, version__tables=TABLES)
+    run = start(conversation)
+    query = {"connector": "経理", "sql": "SELECT code FROM vendors"}
+
+    class RemoveMembership(FakeAdapter):
+        def stream(self, request):
+            if len(self.requests) == 1:
+                # 1回目の操作の後に、所属が外された
+                membership.delete()
+            yield from super().stream(request)
+
+    adapter = RemoveMembership(
+        [calls(("c1", "datasource_query", query)), calls(("c2", "datasource_query", query)), reply("ok")]
+    )
+    run = execute(run, adapter)
+    first, second = results(run, "datasource_query")
+    assert not first["is_error"]
+    assert second["is_error"]
+
+
+@pytest.mark.django_db
+def test_long_query_keeps_the_lease(conversation, fake_datasource, monkeypatch):
+    ConnectorFactory.create(name="販売管理", version__tables=TABLES)
+    monkeypatch.setattr(datasource_module, "HEARTBEAT_SECONDS", 0.01)
+    beats: list[int] = []
+    during: list[int] = []
+    original = fake_datasource.query
+
+    def slow_query(self, *args, **kwargs):
+        before = len(beats)
+        time.sleep(0.2)
+        during.append(len(beats) - before)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(fake_datasource, "query", slow_query)
+    run = start(conversation)
+    adapter = FakeAdapter(
+        [calls(("c1", "datasource_query", {"connector": "販売管理", "sql": "SELECT code FROM vendors"})), reply("ok")]
+    )
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    heartbeat = attempt.heartbeat
+
+    def counted() -> None:
+        beats.append(1)
+        heartbeat()
+
+    monkeypatch.setattr(attempt, "heartbeat", counted)
+    Runner(attempt, adapter_factory=adapter, sleep=lambda _s: None).run()
+    run.refresh_from_db()
+    assert run.status == RunStatus.COMPLETED
+    # 問い合わせを待つ間にもleaseを延ばした
+    assert during and during[0] > 0
 
 
 @pytest.mark.django_db

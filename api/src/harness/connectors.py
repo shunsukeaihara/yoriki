@@ -45,12 +45,21 @@ def is_allowed_for(version: ConnectorVersion, *, sensitive: bool) -> bool:
     return not version.is_sensitive or sensitive
 
 
+def _usable(user, *, sensitive: bool) -> list[Connector]:
+    connectors = Connector.objects.usable_by(user).select_related("current_version").order_by("name", "pk")
+    return [c for c in connectors if c.current_version and is_allowed_for(c.current_version, sensitive=sensitive)]
+
+
+def usable_uids(user, *, sensitive: bool) -> set[str]:
+    """このRunで使えるConnectorのID（一覧の数の上限で外す前）"""
+    return {c.uid for c in _usable(user, sensitive=sensitive)}
+
+
 def build_catalog(user, *, sensitive: bool, explicit: Sequence[dict[str, Any]] = ()) -> dict[str, Any] | None:
     """エージェントに見せる一覧：依頼した人が使えるConnector（部門・全社）の名前と説明。機密のConnectorは機密の
     Runのときだけ（`sensitive`）。なければNone。`@` で指定したものと `/` で指定したSkillが宣言したもの（`explicit`）は、
     数の上限で外れないように先に並べる"""
-    connectors = Connector.objects.usable_by(user).select_related("current_version").order_by("name", "pk")
-    usable = [c for c in connectors if c.current_version and is_allowed_for(c.current_version, sensitive=sensitive)]
+    usable = _usable(user, sensitive=sensitive)
     chosen = [e["connector"] for e in explicit]
     usable.sort(key=lambda c: chosen.index(c.uid) if c.uid in chosen else len(chosen))
     if not usable:

@@ -54,7 +54,7 @@ def execute(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     """対象を確かめて確認の内容を返す。確認の作成と確認待ちへの遷移は、Runnerが同じtransactionで行う"""
     skill = None
     if name := arguments["skill"].strip():
-        skill, problem = find_editable(context.run.owner, name)
+        skill, problem = find_editable(context.run.owner, name, sensitive=context.run.handles_sensitive_data)
         if skill is None:
             return ToolResult.error(problem)
         # 機密のSkillは、機密の会話でだけ編集する（harness.md §10.9）

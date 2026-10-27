@@ -176,3 +176,47 @@ def test_agent_declares_connectors_by_the_catalog_names(app_user):
         {"connector": connector.uid, "operations": ["datasource_query"], "tables": ["public.vendors"]}
     ]
     assert not draft.is_sensitive
+
+
+@pytest.mark.django_db
+def test_skill_stays_listed_when_its_connector_is_beyond_the_catalog_limit(app_user, monkeypatch):
+    from harness import connectors as connectors_module  # noqa: PLC0415
+
+    monkeypatch.setattr(connectors_module, "MAX_CATALOG_CONNECTORS", 1)
+    ConnectorFactory.create(name="あ先頭の接続", version__tables=TABLES)
+    declared = ConnectorFactory.create(name="販売管理", version__tables=TABLES)
+    _declaring(app_user, declared)
+    run = _start(ConversationFactory.create(owner=app_user))
+    assert _catalog_names(run) == ["取引先の照合"]
+    assert [e["name"] for e in run.manifest["fixed"]["connector_catalog"]["connectors"]] == ["販売管理"]
+
+
+@pytest.mark.django_db
+def test_edit_run_stops_when_the_skill_becomes_sensitive(app_user):
+    skill = SkillFactory.create(name="取引先の照合", created_by=app_user)
+    SkillVersionFactory.create(skill=skill)
+    run = _start(ConversationFactory.create(owner=app_user), skill_edit={"id": skill.uid, "name": skill.name})
+    SkillDraftFactory.create(skill=skill, is_sensitive=True)
+    run = execute(run, FakeAdapter([reply("ok")]))
+    assert run.status == RunStatus.FAILED
+    assert run.end_reason == RunEndReason.SKILL
+    assert "機密" in run.error
+
+
+@pytest.mark.django_db
+def test_sensitive_skill_names_are_not_offered_to_a_conversation_that_is_not_confidential(app_user):
+    secret = SkillFactory.create(name="人事の照会", created_by=app_user)
+    SkillVersionFactory.create(skill=secret, is_sensitive=True)
+    publish(app_user, name="取引先の照合")
+    run = _start(ConversationFactory.create(owner=app_user))
+    adapter = FakeAdapter([calls(("c1", "request_skill_edit", {"skill": "存在しない", "summary": "s"})), reply("ok")])
+    run = execute(run, adapter)
+    [result] = results(run, "request_skill_edit")
+    text = result["content"][0]["text"]
+    assert "取引先の照合" in text and "人事の照会" not in text
+    # 名前を当てても、機密のSkillは編集の対象にしない
+    run = _start(ConversationFactory.create(owner=app_user))
+    adapter = FakeAdapter([calls(("c1", "request_skill_edit", {"skill": "人事の照会", "summary": "s"})), reply("ok")])
+    run = execute(run, adapter)
+    [result] = results(run, "request_skill_edit")
+    assert result["is_error"]

@@ -86,6 +86,7 @@ from .context import runtime_context as build_runtime_context
 from .prompts import system_prompt
 from .recovery import request_model_switch
 from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, SandboxSession
+from .skill_edit import revoked_edit
 from .skills import explicit_versions, revoked_skill
 from .tools import ALL_TOOLS, SANDBOX_TOOLS, WORKSPACE_WRITING_TOOLS
 from .tools.base import Effect, Tool, ToolContext, ToolResult
@@ -422,8 +423,9 @@ class Runner:
             return False
         if run.status != RunStatus.RUNNING:
             raise LeaseLost(f"run={run.uid} status={run.status}")
-        if reason := revoked_skill(run):
-            # 停止・権限の失効は、始めた後のRunでも次の区切りから使わせない（design.md §3.2）
+        if reason := revoked_skill(run) or revoked_edit(run):
+            # 停止・権限の失効は、始めた後のRunでも次の区切りから使わせない（design.md §3.2）。編集の対象が機密に
+            # なったら、読んだ中身を次のモデルの呼出しで送らない（harness.md §10.9）
             self._fail(RunEndReason.SKILL, reason)
             return False
         self._apply_instructions()

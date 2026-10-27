@@ -106,8 +106,12 @@ def build_catalog(user, model_version, *, sensitive: bool, connectors: set[str])
         while name in taken:
             name, number = f"{base} ({number})", number + 1
         taken.add(name)
-        description = skill.current_version.description if skill.current_version else ""
-        entries.append({"skill": skill.uid, "name": name, "description": description})
+        version = skill.current_version
+        entry = {"skill": skill.uid, "name": name, "description": version.description if version else ""}
+        if version is not None and version.connectors:
+            # Connectorの一覧に、宣言したConnectorを先に並べるため（restrict_catalog()）
+            entry["connectors"] = skill_connectors.declared_uids(version)
+        entries.append(entry)
     budget = int(model_version.max_input_tokens * CATALOG_CONTEXT_RATIO)
     for limit in DESCRIPTION_LIMITS:
         shortened = [{**e, "description": _one_line(e["description"], limit)} for e in entries]
@@ -121,6 +125,17 @@ def build_catalog(user, model_version, *, sensitive: bool, connectors: set[str])
             break
         listed.append(entry)
     return {"skills": listed, "omitted": len(entries) - len(listed)}
+
+
+def catalog_connectors(catalog: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """一覧のSkillが宣言したConnector。Connectorの一覧から数の上限で外れないように、先に並べる"""
+    return [{"connector": uid} for e in (catalog or {}).get("skills", []) for uid in e.get("connectors", [])]
+
+
+def restrict_catalog(catalog: dict[str, Any], listed: set[str]) -> dict[str, Any]:
+    """宣言したConnectorがRunのConnectorの一覧にないSkillを外す（Connectorが多すぎて一覧に載らなかったとき）"""
+    kept = [e for e in catalog["skills"] if all(uid in listed for uid in e.get("connectors", []))]
+    return {"skills": kept, "omitted": catalog.get("omitted", 0) + len(catalog["skills"]) - len(kept)}
 
 
 def catalog_text(catalog: dict[str, Any]) -> str:

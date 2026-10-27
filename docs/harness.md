@@ -621,7 +621,7 @@ Runnerは、shell以外のToolの処理もSandboxの中で行う。ファイル�
 </skill>
 ```
 
-- `<connectors>` は、Skillが宣言したConnector（design.md §4.9.1）の名前、操作のTool、表（宣言していなければ「公開する表のどれでも」）。宣言したConnectorは、このRunの `<connectors>` の一覧にあるので、`datasource_*` の `connector` にその名前を使う。
+- `<connectors>` は、Skillが宣言したConnector（design.md §4.9.1）の名前、操作のTool、表（宣言していなければ「公開する表のどれでも」）。一覧に出すSkillと `/` で指定したSkillが宣言したConnectorは、このRunのConnectorの一覧の先に並べる（数の上限で外れないように）ので、`datasource_*` の `connector` にその名前を使う。
 - 途中で読み込んだSkillに業務結果のSchemaがあっても、Toolの一覧は変えないので `submit_result` はない。その場合は、Schemaの形で最後の応答に書くよう結果に添える。業務結果を確定させたいときは、`/` かTask DefinitionでSkillを指定する。
 
 資料はSandboxを起動するときに `/workspace/master` へ展開する（design.md §3.8）。`/workspace/master` は、Workerの作業領域のディレクトリを読取り専用でbind mountしたもので（添付の `/workspace/input` と同じ方式。sandbox/CONTRACT.md §2）、Runnerはその中に `skills/{skill_id}/{資料のkey}/{ファイル名}` で置く。Sandboxを起動した後に読み込んだSkillは、次のように扱う。
@@ -734,7 +734,7 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 - 公開・切戻しは、ToolInvocationのoperation keyをSkillChangeに渡し、再試行で版を重ねない。SkillChangeには編集のRunを記録する。
 - 結果の `value` に、Skillの名前・範囲・状態（変更案を保存・公開・切戻し）・版・変更点を持たせ、画面はそれを会話に表示し、Skillの画面（版の中身・切戻し）へのリンクを置く（design.md §11.6）。
 - 編集のRunで公開しても、進行中・確認待ちの業務のRunは元の版を使い続ける。次の依頼から新しい版を使う。
-- 機密のSkill（公開中の版かDraftが機密のフラグを持つか、機密のConnectorを宣言しているもの。design.md §4冒頭）は、機密の会話の編集のRunでだけ扱う。機密でないRunでは、編集の依頼を受け付けず、`get_skill` も中身を返さない。
+- 機密のSkill（公開中の版かDraftが機密のフラグを持つか、機密のConnectorを宣言しているもの。design.md §4冒頭）は、機密の会話の編集のRunでだけ扱う。機密でないRunでは、編集の依頼を受け付けず、`request_skill_edit` の候補にも名前を出さず、`get_skill` も中身を返さない。編集の途中で機密になったら、読んだ中身を次のモデルの呼出しで送らないように、毎ステップの区切りで止める。
 
 ---
 

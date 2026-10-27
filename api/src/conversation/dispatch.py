@@ -10,7 +10,16 @@ from harness.connectors import DATASOURCE_TOOL_NAMES, ConnectorUnavailable
 from harness.connectors import build_catalog as build_connector_catalog
 from harness.connectors import explicit_text as explicit_connectors_text
 from harness.connectors import resolve_explicit as resolve_explicit_connectors
-from harness.skills import SkillUnavailable, build_catalog, declared_connectors, explicit_text, resolve_explicit
+from harness.connectors import usable_uids as usable_connector_uids
+from harness.skills import (
+    SkillUnavailable,
+    build_catalog,
+    catalog_connectors,
+    declared_connectors,
+    explicit_text,
+    resolve_explicit,
+    restrict_catalog,
+)
 from run.dispatch import enqueue_run
 from run.models import (
     ACTIVE_STATUSES,
@@ -292,27 +301,31 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
         )
     except SkillUnavailable as exc:
         raise CannotStart(_("指定したSkillを使えません。%(reason)s") % {"reason": exc}) from exc
-    # エージェントが使えるConnectorの一覧も固定する（Toolの引数をRunの中で変えない。harness.md §10.2）。
-    # 使えるかは操作のたびに確かめ直す。`@` で指定したものと、`/` で指定したSkillが宣言したものを先に並べる
-    connectors = resolve_connectors(message, conversation.owner, version, skills, sensitive=sensitive)
-    connector_catalog = (
-        build_connector_catalog(
-            conversation.owner, sensitive=sensitive, explicit=[*connectors, *declared_connectors(skills)]
-        )
-        if version.supports_tools
-        else None
-    )
-    # Skillの一覧には、宣言したConnectorがこのRunのConnectorの一覧にあるものだけを出す（design.md §4.9.1）
+    # Skillの一覧には、宣言したConnectorをこのRunで使えるものだけを出す（design.md §4.9.1）
     catalog = (
         build_catalog(
             conversation.owner,
             version,
             sensitive=sensitive,
-            connectors={e["connector"] for e in (connector_catalog or {}).get("connectors", [])},
+            connectors=usable_connector_uids(conversation.owner, sensitive=sensitive),
         )
         if not skills and skill_edit is None and version.supports_tools
         else None
     )
+    # エージェントが使えるConnectorの一覧も固定する（Toolの引数をRunの中で変えない。harness.md §10.2）。
+    # 使えるかは操作のたびに確かめ直す。`@` で指定したものと、Skillが宣言したものを先に並べる
+    connectors = resolve_connectors(message, conversation.owner, version, skills, sensitive=sensitive)
+    connector_catalog = (
+        build_connector_catalog(
+            conversation.owner,
+            sensitive=sensitive,
+            explicit=[*connectors, *declared_connectors(skills), *catalog_connectors(catalog)],
+        )
+        if version.supports_tools
+        else None
+    )
+    if catalog is not None:
+        catalog = restrict_catalog(catalog, {e["connector"] for e in (connector_catalog or {}).get("connectors", [])})
     fixed: dict[str, object] = {
         "model_version": version.pk,
         "effort": effort,

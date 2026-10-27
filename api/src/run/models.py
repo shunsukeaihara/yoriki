@@ -66,6 +66,7 @@ class RunLaunch(models.IntegerChoices):
     """タスクのRunの起動のしかた（authorization.md §6）。会話・評価のRunでは空"""
 
     MANUAL = 1, _("タスクの画面からの手動実行")
+    WEBHOOK = 2, _("Webhook")
 
 
 class RunKind(models.IntegerChoices):

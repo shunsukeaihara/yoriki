@@ -190,7 +190,7 @@ cd frontend && pnpm dev
 | `/` | frontend:3000 | — |
 | `/api/` | api:8000（パスはそのまま転送。Djangoは `/api/` の下にURLを置く） | 通常のAPI |
 | `/api/app/v1/stream/`、`/api/app/v1/runs/{id}/stream/` | api:8000 | SSE用（§4.2）。`location ~ ^/api/app/v1/(runs/[^/]+/)?stream/$` で両方に合わせる |
-| `/api/hooks/` | api:8000 | Webhook・Channelの受信。bodyの上限を小さくし、rate limitを強くする |
+| `/api/hooks/` | api:8000 | Webhook・Channelの受信。rate limitを強くする。bodyの上限は入口ごとの設定の最大（10MiB）にし、入口ごとの上限（既定1MiB）はapiで確かめる |
 | `/api/admin/`、`/api/schema/` | api:8000 | ログインとpermissionで守る（Django管理画面は基盤管理者、スキーマとSwagger UIはどの環境でもログインした利用者）。IPの制限は導入先が任意で追加する |
 | `/api/accounts/` | api:8000 | SSOのログイン開始と認証基盤からのコールバック |
 | `/api/files/<token>/` | api:8000 | 出口（Zapier等）へ渡した成果物の期限付き取得。セッションを使わずtokenを確認する。rate limitを付ける。社員向けのダウンロードには使わない（セッションで認証し、取得のたびに閲覧の判定をし直す。authorization.md §7.1） |

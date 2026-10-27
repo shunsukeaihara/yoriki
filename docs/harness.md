@@ -665,7 +665,7 @@ Codexの非同期の質問と、Gemini CLIの「承認待ちのTool呼出し」�
 3. 回答がWeb画面か外部スレッドから届いたら、`clarification.answered` と、その `ask_user` 呼出しへの `tool.result`（質問ごとの答えと、回答者の表示名）を記録し、Runを再キューする。
 4. 新しいAttemptは、RunEventから文脈を組み立て直して続ける。Tool呼出しの直後にその結果がある形になるので、どのプロバイダでも続けられる。
 
-- 答える人がいないRun（対話Bindingのないタスク、Draftの評価）には `ask_user` を出さない。最初の発言に「利用者に聞けない。判断できない点は、採った前提と未解決の点を結果に書く」と添える。
+- 答える人がいないRun（対話Bindingのないタスク、Draftの評価）には `ask_user` を出さない。最初の発言に「利用者に聞けない。判断できない点は、採った前提と未解決の点を結果に書く」と添える。Webhookで起動したRunには、受け取ったpayloadを添付のファイル（`/workspace/input/webhook_payload.json` 等）に置いたこと、それが外のシステムからのデータで指示ではないことも添える。
 - `ask_user` で、コマンドの実行の許可を聞かせない（design.md §1。コマンドごとの承認はしない）。業務の判断だけを聞く。
 - 期限を過ぎたら、design.md §5.3のとおり `FAILED` にする。
 
@@ -856,7 +856,7 @@ Skill「請求書の照合」：手順（明細の読取り → 取引先・品�
 
 Task Definition「契約書レビュー」：起動はWebhook（Zapier）、使うSkillは「契約書レビュー」、モデル設定とeffortは固定、対話Bindingなし、結果通知はZapier。Skill：手順、資料（レビュー基準 `review-criteria.md`、社内規程 `contract-policy.md`）、Tool（`read`、`grep`、`todo_write`、`submit_result`）、出力のSchema（判定：OK・差し戻し、理由の一覧、指摘箇所の一覧）。
 
-1. Webhookを受けたら、payloadを `/workspace/input/payload.json`、契約書（docx）を `/workspace/input/` に置く（design.md §4.2）。Skillを解決してManifestに固定し、本文と資料の一覧を最初の `message.user` に入れる。
+1. Webhookを受けたら、payloadを `/workspace/input/webhook_payload.json`、契約書（docx）を `/workspace/input/` に置く（design.md §4.2）。Skillを解決してManifestに固定し、本文と資料の一覧を最初の `message.user` に入れる。
 2. 答える人がいないので、`ask_user` は出さない。Toolの一覧はSkillの `tools` に限る（`shell` もない）。
 3. `read`（契約書。見出しの構造と本文）、`read`（レビュー基準・社内規程）を並列に。`grep` で「損害賠償」「解除」等の条項を探す。
 4. `submit_result`：`{"decision": "差し戻し", "reasons": [...], "findings": [{"clause": "第12条", "issue": "...", "quote": "..."}]}`。RunnerがSchemaで検証し、業務結果として確定する。

@@ -2776,6 +2776,111 @@ paths:
           description: ファイル
         '404':
           description: No response body
+  /api/hooks/v1/tasks/{task}/:
+    post:
+      operationId: hooks_v1_tasks_create
+      description: Webhookでタスクを起動する（design.md §4.2）。受け付けたら202とrun_idを返し、作業の完了を待たない。同じイベントID（入口で指定した場所・Idempotency-Key
+        ヘッダー・推奨の形式の event_id）の再送には、前のRunを200で返す
+      parameters:
+      - in: header
+        name: Idempotency-Key
+        schema:
+          type: string
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - hooks/task
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: {}
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: {}
+          text/plain:
+            schema:
+              type: string
+      security:
+      - hookKey: []
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HookReceived'
+          description: ''
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HookReceived'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HookError'
+          description: payloadの形・項目の誤り（Runは作らない）
+        '401':
+          description: 鍵がないか、正しくない
+        '403':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HookError'
+          description: 入口が停止中
+        '409':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HookError'
+          description: 同じイベントIDで違う内容を受け取った、またはタスクを今は実行できない
+        '413':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HookError'
+          description: payloadが入口の上限より大きい
+        '415':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HookError'
+          description: 受け付けない形式
+  /api/hooks/v1/tasks/{task}/runs/{run_id}/:
+    get:
+      operationId: hooks_v1_tasks_runs_retrieve
+      description: Webhookで起動したRunの状態（authorization.md §7.1）。状態と決まった失敗のコードだけを返す
+      parameters:
+      - in: path
+        name: run_id
+        schema:
+          type: string
+        required: true
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - hooks/task/run
+      security:
+      - hookKey: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HookRun'
+          description: ''
   /api/ping/:
     get:
       operationId: ping_retrieve
@@ -4765,6 +4870,408 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/trigger_bindings/:
+    get:
+      operationId: v1_trigger_bindings_list
+      description: タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（連携の管理者。authorization.md §5.5）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: suspended
+        schema:
+          type: boolean
+      tags:
+      - manage/trigger_binding
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTriggerBindingList'
+          description: ''
+    post:
+      operationId: v1_trigger_bindings_create
+      description: タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（連携の管理者。authorization.md §5.5）
+      tags:
+      - manage/trigger_binding
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerBindingRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TriggerBindingRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TriggerBindingRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerBindingKey'
+          description: ''
+  /api/v1/trigger_bindings/{binding}/receipts/:
+    get:
+      operationId: v1_trigger_bindings_receipts_list
+      description: 入口の受付の履歴（Runの状態まで。結果・ログはタスクの画面で、タスクを管理できる人が見る）
+      parameters:
+      - in: path
+        name: binding
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - manage/trigger_binding/receipt
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTriggerReceiptList'
+          description: ''
+  /api/v1/trigger_bindings/{binding}/revisions/:
+    get:
+      operationId: v1_trigger_bindings_revisions_list
+      description: 入口の受け取り方の版の履歴
+      parameters:
+      - in: path
+        name: binding
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - manage/trigger_binding/revision
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTriggerBindingRevisionList'
+          description: ''
+  /api/v1/trigger_bindings/{binding}/revisions/{number}/:
+    get:
+      operationId: v1_trigger_bindings_revisions_retrieve
+      description: 入口の受け取り方の版の履歴
+      parameters:
+      - in: path
+        name: binding
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: number
+        schema:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          title: 版
+        required: true
+      tags:
+      - manage/trigger_binding/revision
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerBindingRevision'
+          description: ''
+  /api/v1/trigger_bindings/{uid}/:
+    get:
+      operationId: v1_trigger_bindings_retrieve
+      description: タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（連携の管理者。authorization.md §5.5）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/trigger_binding
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerBinding'
+          description: ''
+    put:
+      operationId: v1_trigger_bindings_update
+      description: タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（連携の管理者。authorization.md §5.5）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/trigger_binding
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerBindingUpdateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TriggerBindingUpdateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TriggerBindingUpdateRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerBinding'
+          description: ''
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、他の人が版を作った）
+    patch:
+      operationId: v1_trigger_bindings_partial_update
+      description: タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（連携の管理者。authorization.md §5.5）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/trigger_binding
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTriggerBindingUpdateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTriggerBindingUpdateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTriggerBindingUpdateRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerBinding'
+          description: ''
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、他の人が版を作った）
+    delete:
+      operationId: v1_trigger_bindings_destroy
+      description: 入口を消す。鍵はすぐに使えなくなる（受け付けたRunは止めない）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/trigger_binding
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/trigger_bindings/{uid}/resume/:
+    post:
+      operationId: v1_trigger_bindings_resume_create
+      description: 停止を解く
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/trigger_binding
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerBinding'
+          description: ''
+  /api/v1/trigger_bindings/{uid}/rotate_key/:
+    post:
+      operationId: v1_trigger_bindings_rotate_key_create
+      description: 鍵を作り直す。前の鍵はすぐに使えなくなる。新しい鍵は応答で一度だけ返す
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/trigger_binding
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerBindingKey'
+          description: ''
+  /api/v1/trigger_bindings/{uid}/suspend/:
+    post:
+      operationId: v1_trigger_bindings_suspend_create
+      description: 停止する。新しい要求を受け付けない
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/trigger_binding
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerBinding'
+          description: ''
+  /api/v1/trigger_bindings/tasks/:
+    get:
+      operationId: v1_trigger_bindings_tasks_list
+      description: 入口を付けられるタスク（部門・全社・システム。まだWebhookの入口がないもの）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: suspended
+        schema:
+          type: boolean
+      tags:
+      - manage/trigger_binding
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTriggerTaskList'
+          description: ''
   /api/v1/users/:
     get:
       operationId: v1_users_list
@@ -6853,6 +7360,68 @@ components:
           title: 名前
       required:
       - name
+    HookError:
+      type: object
+      properties:
+        code:
+          type: string
+          description: 決まった誤りのコード（例：invalid_inputs）
+        detail:
+          type: string
+        inputs:
+          type: object
+          additionalProperties:
+            type: string
+          description: 入力の項目ごとの誤り（invalid_inputs のとき）
+      required:
+      - code
+      - detail
+    HookReceived:
+      type: object
+      description: |-
+        Webhookの送り元に返すRunの状態（authorization.md §7.1）。状態と決まった失敗のコードだけで、エラーの本文や
+        ログ由来の情報は返さない
+      properties:
+        run_id:
+          type: string
+        status:
+          type: string
+          readOnly: true
+          description: queued・running・waiting_user・retry_wait・cancelling・completed・failed・cancelled
+        failure_code:
+          type: string
+          nullable: true
+          readOnly: true
+          description: 失敗・停止したときの終わり方（例：step_limit）
+        duplicate:
+          type: boolean
+          description: 前に受け付けた要求の再送（新しいRunは作っていない）
+      required:
+      - duplicate
+      - failure_code
+      - run_id
+      - status
+    HookRun:
+      type: object
+      description: |-
+        Webhookの送り元に返すRunの状態（authorization.md §7.1）。状態と決まった失敗のコードだけで、エラーの本文や
+        ログ由来の情報は返さない
+      properties:
+        run_id:
+          type: string
+        status:
+          type: string
+          readOnly: true
+          description: queued・running・waiting_user・retry_wait・cancelling・completed・failed・cancelled
+        failure_code:
+          type: string
+          nullable: true
+          readOnly: true
+          description: 失敗・停止したときの終わり方（例：step_limit）
+      required:
+      - failure_code
+      - run_id
+      - status
     InstructionInfo:
       type: object
       properties:
@@ -8714,6 +9283,82 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TaskDefinitionRevision'
+    PaginatedTriggerBindingList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TriggerBinding'
+    PaginatedTriggerBindingRevisionList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TriggerBindingRevision'
+    PaginatedTriggerReceiptList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TriggerReceipt'
+    PaginatedTriggerTaskList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TriggerTask'
     PatchedConnectorUpdateRequest:
       type: object
       description: Connectorの更新。使うDB接続と範囲・部門は変えられないので、読み取り専用にする
@@ -9246,6 +9891,37 @@ components:
         output_schema:
           nullable: true
           description: 業務結果のSchema。なければSkillのもの
+        change_reason:
+          type: string
+          writeOnly: true
+          maxLength: 500
+    PatchedTriggerBindingUpdateRequest:
+      type: object
+      description: 入口の更新。タスクは変えられない
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        version:
+          type: integer
+          minimum: 0
+          description: 今の版。更新では、編集を始めた時点の値を送る（作成では送らない）
+        event_id_path:
+          type: string
+          description: 重複の判定に使う送り元のイベントIDの場所（JSONのpath）。空なら Idempotency-Key ヘッダーか、推奨の形式の
+            event_id。どれもなければ重複を判定せず、送り元が再送すると二重に実行する
+          maxLength: 200
+        inputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/TriggerInputRequest'
+          description: 項目の取り出し。空なら推奨の形式の inputs をそのまま使う。型と必須かはタスクの入力の項目で決まる
+        max_payload_bytes:
+          type: integer
+          maximum: 10485760
+          minimum: 1024
+          description: payloadの大きさの上限（バイト。既定1MiB、最大10MiB）
         change_reason:
           type: string
           writeOnly: true
@@ -11362,6 +12038,12 @@ components:
           type: boolean
           readOnly: true
           description: 今、手動で実行できるか（停止中でなく、版がある）
+        triggers:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskTrigger'
+          readOnly: true
+          description: このタスクの入口（作る・変えるのは連携の管理者）
         created_by:
           allOf:
           - $ref: '#/components/schemas/MinimumUser'
@@ -11388,6 +12070,7 @@ components:
       - scope
       - scope_display
       - suspended
+      - triggers
       - updated
     TaskDefinitionRequest:
       type: object
@@ -11752,6 +12435,41 @@ components:
       required:
       - skill
       - version
+    TaskTrigger:
+      type: object
+      description: タスクの画面に出す入口（タスクを管理できる人が見る。作る・変えるのは連携の管理者）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/TriggerKindEnum'
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+          title: 名前
+          maxLength: 100
+        suspended:
+          type: boolean
+          readOnly: true
+          title: 停止中
+        key_prefix:
+          type: string
+          readOnly: true
+          title: 鍵の先頭
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created
+      - id
+      - key_prefix
+      - kind
+      - name
+      - suspended
     TextDiff:
       type: object
       properties:
@@ -11866,6 +12584,441 @@ components:
         * `todo_write` - todo_write
         * `datasource_describe` - datasource_describe
         * `datasource_query` - datasource_query
+    TriggerBinding:
+      type: object
+      description: |-
+        入口の作成と表示（連携の管理者。authorization.md §5.5）。受け取り方は今の版の値を平らに出す。
+
+        タスクは作成時に決め、変えない（付け替えるときは入口を作り直す）。鍵は作成時と作り直したときに一度だけ返す。
+        更新では、編集を始めた時点の `version` を送り、その間に他の人が版を作っていたら409になる
+      properties:
+        id:
+          type: string
+          readOnly: true
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/TriggerKindEnum'
+          readOnly: true
+        task:
+          type: string
+          description: 起動するタスク（部門・全社・システム）。作成した後は変えられない
+        task_info:
+          allOf:
+          - $ref: '#/components/schemas/TriggerTask'
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        suspended:
+          type: boolean
+          readOnly: true
+          title: 停止中
+        version:
+          type: integer
+          minimum: 0
+          description: 今の版。更新では、編集を始めた時点の値を送る（作成では送らない）
+        event_id_path:
+          type: string
+          default: ''
+          description: 重複の判定に使う送り元のイベントIDの場所（JSONのpath）。空なら Idempotency-Key ヘッダーか、推奨の形式の
+            event_id。どれもなければ重複を判定せず、送り元が再送すると二重に実行する
+          maxLength: 200
+        inputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/TriggerInput'
+          description: 項目の取り出し。空なら推奨の形式の inputs をそのまま使う。型と必須かはタスクの入力の項目で決まる
+        max_payload_bytes:
+          type: integer
+          maximum: 10485760
+          minimum: 1024
+          default: 1048576
+          description: payloadの大きさの上限（バイト。既定1MiB、最大10MiB）
+        url:
+          type: string
+          readOnly: true
+          description: 送り元に設定するURL（/api/ からのパス）
+        key_prefix:
+          type: string
+          readOnly: true
+          title: 鍵の先頭
+        key_rotated:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 鍵を作った日時
+        created_by:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created
+      - created_by
+      - id
+      - key_prefix
+      - key_rotated
+      - kind
+      - name
+      - suspended
+      - task
+      - task_info
+      - updated
+      - url
+    TriggerBindingKey:
+      type: object
+      description: 作成・鍵の作り直しの応答。鍵はこのときだけ返す（再表示はできない）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/TriggerKindEnum'
+          readOnly: true
+        task:
+          type: string
+          description: 起動するタスク（部門・全社・システム）。作成した後は変えられない
+        task_info:
+          allOf:
+          - $ref: '#/components/schemas/TriggerTask'
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        suspended:
+          type: boolean
+          readOnly: true
+          title: 停止中
+        version:
+          type: integer
+          minimum: 0
+          description: 今の版。更新では、編集を始めた時点の値を送る（作成では送らない）
+        event_id_path:
+          type: string
+          default: ''
+          description: 重複の判定に使う送り元のイベントIDの場所（JSONのpath）。空なら Idempotency-Key ヘッダーか、推奨の形式の
+            event_id。どれもなければ重複を判定せず、送り元が再送すると二重に実行する
+          maxLength: 200
+        inputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/TriggerInput'
+          description: 項目の取り出し。空なら推奨の形式の inputs をそのまま使う。型と必須かはタスクの入力の項目で決まる
+        max_payload_bytes:
+          type: integer
+          maximum: 10485760
+          minimum: 1024
+          default: 1048576
+          description: payloadの大きさの上限（バイト。既定1MiB、最大10MiB）
+        url:
+          type: string
+          readOnly: true
+          description: 送り元に設定するURL（/api/ からのパス）
+        key_prefix:
+          type: string
+          readOnly: true
+          title: 鍵の先頭
+        key_rotated:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 鍵を作った日時
+        created_by:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+        key:
+          type: string
+          readOnly: true
+          description: 入口の鍵。いま一度だけ表示する
+      required:
+      - created
+      - created_by
+      - id
+      - key
+      - key_prefix
+      - key_rotated
+      - kind
+      - name
+      - suspended
+      - task
+      - task_info
+      - updated
+      - url
+    TriggerBindingRequest:
+      type: object
+      description: |-
+        入口の作成と表示（連携の管理者。authorization.md §5.5）。受け取り方は今の版の値を平らに出す。
+
+        タスクは作成時に決め、変えない（付け替えるときは入口を作り直す）。鍵は作成時と作り直したときに一度だけ返す。
+        更新では、編集を始めた時点の `version` を送り、その間に他の人が版を作っていたら409になる
+      properties:
+        task:
+          type: string
+          minLength: 1
+          description: 起動するタスク（部門・全社・システム）。作成した後は変えられない
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        version:
+          type: integer
+          minimum: 0
+          description: 今の版。更新では、編集を始めた時点の値を送る（作成では送らない）
+        event_id_path:
+          type: string
+          default: ''
+          description: 重複の判定に使う送り元のイベントIDの場所（JSONのpath）。空なら Idempotency-Key ヘッダーか、推奨の形式の
+            event_id。どれもなければ重複を判定せず、送り元が再送すると二重に実行する
+          maxLength: 200
+        inputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/TriggerInputRequest'
+          description: 項目の取り出し。空なら推奨の形式の inputs をそのまま使う。型と必須かはタスクの入力の項目で決まる
+        max_payload_bytes:
+          type: integer
+          maximum: 10485760
+          minimum: 1024
+          default: 1048576
+          description: payloadの大きさの上限（バイト。既定1MiB、最大10MiB）
+        change_reason:
+          type: string
+          writeOnly: true
+          maxLength: 500
+      required:
+      - name
+      - task
+    TriggerBindingRevision:
+      type: object
+      description: 表示専用のModelSerializer。すべての項目を読み取り専用にする
+      properties:
+        id:
+          type: string
+          readOnly: true
+        number:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          readOnly: true
+          title: 版
+        event_id_path:
+          type: string
+          readOnly: true
+          title: イベントIDの場所
+          maxLength: 200
+        inputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/TriggerInput'
+          readOnly: true
+        max_payload_bytes:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          readOnly: true
+          title: Payloadの大きさの上限
+        change_reason:
+          type: string
+          readOnly: true
+          title: 変更理由
+          maxLength: 500
+        created_by:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - change_reason
+      - created
+      - created_by
+      - event_id_path
+      - id
+      - inputs
+      - max_payload_bytes
+      - number
+    TriggerBindingUpdateRequest:
+      type: object
+      description: 入口の更新。タスクは変えられない
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        version:
+          type: integer
+          minimum: 0
+          description: 今の版。更新では、編集を始めた時点の値を送る（作成では送らない）
+        event_id_path:
+          type: string
+          description: 重複の判定に使う送り元のイベントIDの場所（JSONのpath）。空なら Idempotency-Key ヘッダーか、推奨の形式の
+            event_id。どれもなければ重複を判定せず、送り元が再送すると二重に実行する
+          maxLength: 200
+        inputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/TriggerInputRequest'
+          description: 項目の取り出し。空なら推奨の形式の inputs をそのまま使う。型と必須かはタスクの入力の項目で決まる
+        max_payload_bytes:
+          type: integer
+          maximum: 10485760
+          minimum: 1024
+          description: payloadの大きさの上限（バイト。既定1MiB、最大10MiB）
+        change_reason:
+          type: string
+          writeOnly: true
+          maxLength: 500
+    TriggerInput:
+      type: object
+      properties:
+        name:
+          type: string
+          description: タスクの入力の項目の名前
+          pattern: ^[a-z][a-z0-9_]{0,49}$
+        path:
+          type: string
+          description: payloadの中の場所（JSONのpath。例：$.data.vendor_name）
+          maxLength: 200
+      required:
+      - name
+      - path
+    TriggerInputRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: タスクの入力の項目の名前
+          pattern: ^[a-z][a-z0-9_]{0,49}$
+        path:
+          type: string
+          minLength: 1
+          description: payloadの中の場所（JSONのpath。例：$.data.vendor_name）
+          maxLength: 200
+      required:
+      - name
+      - path
+    TriggerKindEnum:
+      enum:
+      - 1
+      type: integer
+      description: '* `1` - Webhook'
+    TriggerReceipt:
+      type: object
+      description: 入口の受付の履歴（連携の管理者）。Runの結果・ログは返さない（タスクを管理できる人がタスクの画面で見る）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        binding_version:
+          type: integer
+          readOnly: true
+        dedup_key:
+          type: string
+          readOnly: true
+          title: 重複のキー
+          maxLength: 220
+        payload_size:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          readOnly: true
+          title: Payloadの大きさ
+        content_type:
+          type: string
+          readOnly: true
+          title: 形式
+          maxLength: 100
+        run:
+          type: string
+          readOnly: true
+        run_status:
+          allOf:
+          - $ref: '#/components/schemas/RunStatusEnum'
+          readOnly: true
+        run_status_display:
+          type: string
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 受付日時
+      required:
+      - binding_version
+      - content_type
+      - created
+      - dedup_key
+      - id
+      - payload_size
+      - run
+      - run_status
+      - run_status_display
+    TriggerTask:
+      type: object
+      description: 入口の画面に出すタスク（名前と範囲と入力の項目。項目の取り出しの設定に使う）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+          title: 名前
+          maxLength: 100
+        scope:
+          allOf:
+          - $ref: '#/components/schemas/SkillScopeEnum'
+          readOnly: true
+          title: 範囲
+          minimum: 0
+          maximum: 32767
+        scope_display:
+          type: string
+          readOnly: true
+        department:
+          allOf:
+          - $ref: '#/components/schemas/MinimumDepartment'
+          readOnly: true
+          nullable: true
+        suspended:
+          type: boolean
+          readOnly: true
+          title: 停止中
+        inputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskInput'
+          readOnly: true
+      required:
+      - department
+      - id
+      - inputs
+      - name
+      - scope
+      - scope_display
+      - suspended
     UserStreamEvent:
       type: object
       description: ログインユーザー宛ての通知：自分のRunの状態の変更
@@ -11893,3 +13046,7 @@ components:
       type: apiKey
       in: cookie
       name: sessionid
+    hookKey:
+      type: http
+      scheme: bearer
+      description: 入口の鍵（作成時・作り直したときに一度だけ表示）

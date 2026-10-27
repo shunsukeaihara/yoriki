@@ -453,12 +453,13 @@ trigger:
   config:
     endpoint: /api/hooks/v1/tasks/invoice-check/
     credential_ref: accounting-hook-key
-    event_id: $.event.id         # 重複の判定に使う送り元のイベントID（省略時は Idempotency-Key ヘッダー。どちらもなければ判定しない）
+    # 例はmultipart/form-dataで送る送り元（フィールドは平らな名前と値。JSONで送る送り元なら $.data.invoice.vendor_name のようにネストした場所も書ける）
+    event_id: $.event_id         # 重複の判定に使う送り元のイベントID（省略時は Idempotency-Key ヘッダー。どちらもなければ判定しない）
     inputs:                      # 項目の取り出し（任意）。型と必須はタスクの入力の項目で決め、合わない要求は受付時に400
       - name: vendor
-        path: $.data.invoice.vendor_name
+        path: $.vendor_name
       - name: amount
-        path: $.data.invoice.total_amount
+        path: $.total_amount       # フォームの値は文字で届くので、数値の項目は読み替える
       - name: invoice_file         # タスクの入力の型がファイルの項目。multipartで付けたファイルを指す（URLは取得しない）
         path: $.invoice_pdf
     max_payload_bytes: 1048576   # 本文（multipartのファイルを含む）の上限

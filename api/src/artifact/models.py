@@ -90,11 +90,16 @@ class BlobObject(models.Model):
         return blob
 
     @classmethod
+    def write(cls, src: IO[bytes]) -> tuple[StoredObject, str]:
+        """既定の保存先に書くだけで、記録しない。（書いたもの、保存先）。後で register() で記録する（DBの行ロックを
+        持つ前に書いておくため。記録しなかったものは、参照のないobjectとして清掃で消す）"""
+        storage = get_storage()
+        return storage.put_immutable(cls.new_key(), src), storage.backend_id
+
+    @classmethod
     def put(cls, src: IO[bytes]) -> "BlobObject":
         """既定の保存先に書いてから記録する"""
-        storage = get_storage()
-        stored = storage.put_immutable(cls.new_key(), src)
-        return cls.register(stored, storage.backend_id)
+        return cls.register(*cls.write(src))
 
     def location(self) -> "BlobLocation":
         return self.locations.order_by("-pk")[0]

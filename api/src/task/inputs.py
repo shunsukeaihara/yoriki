@@ -15,6 +15,7 @@ from typing import IO, Any
 
 from django.utils.translation import gettext as _
 
+from artifact.storage import StoredObject
 from harness.untrusted import untrusted
 
 from .checks import PLACEHOLDER_RE
@@ -35,6 +36,8 @@ class InputFile:
     content: bytes = b""
     upload: IO[bytes] | None = None
     path: str = ""
+    # 保存先に書いたもの（BlobObject.write()）。タスク・入口の行ロックを持つ前に書く（task/dispatch.py）
+    stored: tuple[StoredObject, str] | None = None
 
     @cached_property
     def sha256(self) -> str:

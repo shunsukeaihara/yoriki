@@ -63,6 +63,9 @@ def start_task_run(
     `inputs` は値か、ロックした後の今の版から値を作る関数（Webhookでは、項目の型を今の版で決めるため）。型がファイルの
     項目の値は InputFile。`files` は項目の値のほかに /workspace/input に置くファイル（Webhookのpayload等）。呼び出し元の
     transactionの中で呼べば、Runの受付と同時に確定させたいもの（TriggerReceipt）を同じtransactionで作れる"""
+    # 保存先への書き込みは、タスクの行をロックする前に行う（保存先が遅くても、同じタスクの受付や更新を待たせない）
+    values = inputs.values() if isinstance(inputs, dict) else ()
+    store_files([*files, *(v for v in values if isinstance(v, InputFile))])
     with transaction.atomic():
         # 停止・版の更新と同時に受け付けないよう、タスクの行をロックする
         task = (
@@ -224,6 +227,13 @@ def _first_message(text: str, inputs: dict[str, Any], launch: RunLaunch) -> str:
     return "\n\n".join(parts)
 
 
+def store_files(files: Sequence[InputFile]) -> None:
+    """まだ書いていないファイルを保存先に書く（記録は _place_files() でRunと同じtransactionで行う）"""
+    for file in files:
+        if file.stored is None:
+            file.stored = BlobObject.write(file.open())
+
+
 def _place_files(
     conversation: Conversation, files: Sequence[InputFile], inputs: dict[str, Any], *, actor
 ) -> tuple[list[Artifact], dict[str, Any]]:
@@ -239,7 +249,7 @@ def _place_files(
         Artifact.objects.create(
             owner=actor,
             conversation=conversation,
-            blob=BlobObject.put(file.open()),
+            blob=BlobObject.register(*file.stored) if file.stored else BlobObject.put(file.open()),
             kind=ArtifactKind.ATTACHMENT,
             name=clean_filename(file.name),
             content_type=guess_content_type(clean_filename(file.name)),
@@ -268,6 +278,10 @@ def receive_webhook(
     受け付けられない要求は PayloadError（形の誤り・鍵・停止）、InvalidInputs（項目の誤り）、CannotRun（タスクを
     始められない）"""
     payload = parse_payload(body, content_type)
+    payload_file = InputFile(payload.file_name, payload.file_bytes)
+    # 保存先への書き込みは、入口とタスクの行をロックする前に行う（受け付けなかった要求の分は、参照のないobjectとして
+    # 清掃で消す）
+    store_files([payload_file, *payload.files])
     with transaction.atomic():
         # タスク → 入口の順にロックする（タスクの削除と同じ順）
         TaskDefinition.objects.select_for_update(of=("self",)).filter(pk=binding.task_id).first()
@@ -297,7 +311,7 @@ def receive_webhook(
             inputs=lambda task_revision: input_values(payload, revision.inputs, task_revision.inputs),
             actor=system_user(),
             launch=RunLaunch.WEBHOOK,
-            files=[InputFile(payload.file_name, payload.file_bytes), *payload.files],
+            files=[payload_file, *payload.files],
         )
         TriggerReceipt.objects.create(
             binding=current,

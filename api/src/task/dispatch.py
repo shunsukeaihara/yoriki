@@ -10,7 +10,7 @@ import json
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from django.db import IntegrityError, transaction
+from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
@@ -57,12 +57,12 @@ def start_task_run(
     inputs: dict[str, Any] | Callable[[TaskDefinitionRevision], dict[str, Any]],
     actor,
     launch: RunLaunch,
-    files: Sequence[tuple[str, BlobObject]] = (),
+    files: Sequence[tuple[str, bytes]] = (),
 ) -> Run:
     """タスクの今の版でRunを始める。始められなければ CannotRun（入力の誤りは InvalidInputs）。
 
     `inputs` は値か、ロックした後の今の版から値を作る関数（Webhookでは、項目の型を今の版で決めるため）。
-    `files` は /workspace/input に置くファイル（名前と中身）。呼び出し元のtransactionの中で呼べば、Runの受付と同時に
+    `files` は /workspace/input に置くファイル（名前とbytes）。呼び出し元のtransactionの中で呼べば、Runの受付と同時に
     確定させたいもの（TriggerReceipt）を同じtransactionで作れる"""
     with transaction.atomic():
         # 停止・版の更新と同時に受け付けないよう、タスクの行をロックする
@@ -94,7 +94,7 @@ def _start(
     *,
     actor,
     launch,
-    files: Sequence[tuple[str, BlobObject]],
+    files: Sequence[tuple[str, bytes]],
 ) -> Run:
     profile = revision.model_profile
     version = profile.current_version
@@ -222,20 +222,22 @@ def _first_message(text: str, inputs: dict[str, Any], launch: RunLaunch) -> str:
     return "\n\n".join(parts)
 
 
-def _attach_files(message: ConversationMessage, files: Sequence[tuple[str, BlobObject]], *, actor) -> None:
-    """ファイルを最初の発言の添付にする（/workspace/input に読取り専用で置く）"""
+def _attach_files(message: ConversationMessage, files: Sequence[tuple[str, bytes]], *, actor) -> None:
+    """ファイルを最初の発言の添付にする（/workspace/input に読取り専用で置く）。入力とタスクを確かめた後に、Runと同じ
+    transactionで記録する（受け付けなかった要求の中身をDBに残さない。transactionが戻ったときの保存先のbytesは、
+    参照のないobjectとして清掃で消す）"""
     conversation = message.conversation
     artifacts = [
         Artifact.objects.create(
             owner=actor,
             conversation=conversation,
-            blob=blob,
+            blob=BlobObject.put(io.BytesIO(content)),
             kind=ArtifactKind.ATTACHMENT,
             name=name,
             content_type=guess_content_type(name),
             expires=Artifact.default_expires(),
         )
-        for name, blob in files
+        for name, content in files
     ]
     Artifact.attach(conversation, artifacts)
     message.attachments.set(artifacts)
@@ -246,51 +248,78 @@ def receive_webhook(
 ) -> tuple[Run, bool]:
     """Webhookの要求を受け付けて、タスクのRunを始める（design.md §4.2）。（Run、新しく作ったか）。
 
-    重複のキーがあり、同じキーの受付が既にあれば、同じ入力なら既存のRunを返し、違う入力なら断る（409）。payloadは
-    そのままファイルとして作業場所に置き、TriggerReceiptはRunと同じtransactionで作る。受け付けられない要求は
-    PayloadError（形の誤り）、InvalidInputs（項目の誤り）、CannotRun（タスクを始められない）"""
-    revision = binding.current_revision
-    if revision is None:
-        raise CannotRun(_("入口の設定がありません"))
+    `binding` は認証したときに読んだ入口。タスクと入口の行をロックしてから、鍵（作り直されていないか）・停止・今の版を
+    確かめ直し、重複の判定・Runの作成・TriggerReceiptの作成を同じtransactionで行う（鍵の作り直しや停止の後に、
+    認証済みの要求でRunを作らないように。同じ入口への要求はここで直列になる）。
+
+    重複の判定は今の版のキーで行い、同じキーの受付があれば、同じ入力なら既存のRunを返し、違う入力なら断る（409）。
+    イベントIDの場所を変えた後の再送も新しいRunにしないよう、前の版の場所で取り出したキーでも、同じ入力の受付が
+    あれば既存のRunを返す。payloadはそのままファイルとして作業場所に置く（入力とタスクを確かめた後に保存する）。
+    受け付けられない要求は PayloadError（形の誤り・鍵・停止）、InvalidInputs（項目の誤り）、CannotRun（タスクを
+    始められない）"""
     payload = parse_payload(body, content_type)
-    key = dedup_key(payload, revision.event_id_path, idempotency_key)
-    if key is not None and (existing := _received_run(binding, key, payload)) is not None:
-        return existing, False
-    # ファイルの中身は先に書き、DBの参照をtransactionで確定する（失敗したら参照のないobjectとして清掃で消す）
-    blob = BlobObject.put(io.BytesIO(payload.file_bytes))
-    try:
-        with transaction.atomic():
-            current = TriggerBinding.objects.filter(pk=binding.pk).first()
-            if current is None or not current.in_service() or current.current_revision_id != revision.pk:
-                raise CannotRun(_("入口が停止中か、設定が変わりました。もう一度送ってください"))
-            run = start_task_run(
-                binding.task,
-                inputs=lambda task_revision: input_values(payload, revision.inputs, task_revision.inputs),
-                actor=system_user(),
-                launch=RunLaunch.WEBHOOK,
-                files=[(payload.file_name, blob)],
-            )
-            TriggerReceipt.objects.create(
-                binding=binding,
-                binding_revision=revision,
-                dedup_key=key or "",
-                payload_sha256=payload.sha256,
-                payload_size=len(body),
-                content_type=payload.content_type,
-                run=run,
-            )
-    except IntegrityError:
-        # 同じキーの要求を同時に受けた。先に確定した方を返す
-        if key is None or (existing := _received_run(binding, key, payload)) is None:
-            raise
-        return existing, False
+    with transaction.atomic():
+        # タスク → 入口の順にロックする（タスクの削除と同じ順）
+        TaskDefinition.objects.select_for_update(of=("self",)).filter(pk=binding.task_id).first()
+        current = (
+            TriggerBinding.objects.select_for_update(of=("self",))
+            .select_related("task", "current_revision")
+            .filter(pk=binding.pk)
+            .first()
+        )
+        if current is None or current.deleted or current.key_hash != binding.key_hash:
+            raise PayloadError("invalid_key", _("鍵が正しくありません"), status=401)
+        revision = current.current_revision
+        if current.suspended or revision is None:
+            raise PayloadError("trigger_suspended", _("この入口は停止中です"), status=403)
+        key = dedup_key(payload, revision.event_id_path, idempotency_key)
+        if (existing := _received_run(current, key, payload, idempotency_key)) is not None:
+            return existing, False
+        run = start_task_run(
+            current.task,
+            inputs=lambda task_revision: input_values(payload, revision.inputs, task_revision.inputs),
+            actor=system_user(),
+            launch=RunLaunch.WEBHOOK,
+            files=[(payload.file_name, payload.file_bytes)],
+        )
+        TriggerReceipt.objects.create(
+            binding=current,
+            binding_revision=revision,
+            dedup_key=key or "",
+            payload_sha256=payload.sha256,
+            payload_size=len(body),
+            content_type=payload.content_type,
+            run=run,
+        )
     return run, True
 
 
-def _received_run(binding: TriggerBinding, key: str, payload: Payload) -> Run | None:
-    receipt = TriggerReceipt.objects.filter(binding=binding, dedup_key=key).select_related("run").first()
-    if receipt is None:
+def _received_run(
+    binding: TriggerBinding, key: str | None, payload: Payload, idempotency_key: str | None
+) -> Run | None:
+    """前に受け付けた同じ要求のRun。今の版のキーで同じキーの違う入力があれば PayloadError（409）"""
+    if key is not None:
+        receipt = TriggerReceipt.objects.filter(binding=binding, dedup_key=key).select_related("run").first()
+        if receipt is not None:
+            if receipt.payload_sha256 != payload.sha256:
+                raise PayloadError("event_id_reused", _("同じイベントIDで、前と違う内容を受け取りました"), status=409)
+            return receipt.run
+    # 前の版のイベントIDの場所で取り出したキー。偶然同じ値の別の出来事と区別できないので、同じ入力のときだけ使う
+    keys = set()
+    paths = set(binding.revisions.values_list("event_id_path", flat=True))
+    for path in paths:
+        try:
+            keys.add(dedup_key(payload, path, idempotency_key))
+        except PayloadError:
+            continue
+    keys.discard(None)
+    keys.discard(key)
+    if not keys:
         return None
-    if receipt.payload_sha256 != payload.sha256:
-        raise PayloadError("event_id_reused", _("同じイベントIDで、前と違う内容を受け取りました"), status=409)
-    return receipt.run
+    receipt = (
+        TriggerReceipt.objects.filter(binding=binding, dedup_key__in=keys, payload_sha256=payload.sha256)
+        .select_related("run")
+        .order_by("pk")
+        .first()
+    )
+    return receipt.run if receipt else None

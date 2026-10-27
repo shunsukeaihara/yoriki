@@ -6,12 +6,13 @@ from urllib.parse import urlencode
 
 import pytest
 
-from artifact.models import ArtifactKind
+from artifact.models import ArtifactKind, BlobObject
 from conversation.models import ConversationPurpose
 from run.models import Run, RunEndReason, RunEvent, RunEventKind, RunLaunch, RunStatus, RunTrigger
-from task.dispatch import WEBHOOK_NOTE
+from task.dispatch import WEBHOOK_NOTE, receive_webhook
 from task.factories import TaskDefinitionFactory
 from task.models import TaskDefinition, TaskScope, TriggerBinding, TriggerBindingRevision, TriggerReceipt
+from task.webhook import PayloadError
 from user.factories import UserFactory, grant
 from user.models import User, system_user
 
@@ -393,3 +394,46 @@ def test_system_user_cannot_log_in_and_is_hidden_from_user_admin(api_client, pla
     emails = [u["id"] for u in api_client.get("/api/v1/users/").json()["results"]]
     assert user.uid not in emails
     assert api_client.get(f"/api/v1/users/{user.uid}/").status_code == 404
+
+
+def test_a_key_rotated_or_suspended_after_authentication_cannot_start_a_run(task, webhook):
+    binding, _key = webhook
+    authenticated = TriggerBinding.objects.get(pk=binding.pk)  # 認証したときに読んだ入口
+    binding.rotate_key()
+    with pytest.raises(PayloadError) as exc:
+        receive_webhook(
+            authenticated, body=json.dumps(_payload()).encode(), content_type="application/json", idempotency_key=None
+        )
+    assert exc.value.status == 401
+
+    authenticated = TriggerBinding.objects.get(pk=binding.pk)
+    TriggerBinding.objects.filter(pk=binding.pk).update(suspended=True)
+    with pytest.raises(PayloadError) as exc:
+        receive_webhook(
+            authenticated, body=json.dumps(_payload()).encode(), content_type="application/json", idempotency_key=None
+        )
+    assert exc.value.status == 403
+    assert not Run.objects.exists()
+
+
+def test_resending_after_changing_the_event_id_path_returns_the_same_run(api_client, integrator, task, webhook):
+    binding, key = webhook
+    first = _send(api_client, task, key, _payload()).json()["run_id"]
+    api_client.force_login(integrator)
+    api_client.patch(f"{BINDINGS}{binding.uid}/", {"version": 1, "event_id_path": "$.data.vendor_name"}, format="json")
+    api_client.logout()
+    res = _send(api_client, task, key, _payload())
+    assert (res.status_code, res.json()["run_id"]) == (200, first)
+    # 前の版の場所のキーが同じでも、入力が違えば別の出来事として受け付ける
+    res = _send(api_client, task, key, _payload(vendor="別の会社"))
+    assert res.status_code == 202
+    assert Run.objects.count() == 2
+
+
+def test_refused_requests_leave_no_payload(api_client, task, webhook):
+    _binding, key = webhook
+    before = BlobObject.objects.count()
+    assert _send(api_client, task, key, {"data": {}}).status_code == 400
+    task.set_suspended(True)
+    assert _send(api_client, task, key, _payload()).status_code == 409
+    assert BlobObject.objects.count() == before

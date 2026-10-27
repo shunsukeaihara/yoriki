@@ -35,7 +35,8 @@ async def run_stream(request: HttpRequest, run: str) -> HttpResponseBase:
     user = await request.auser()
     if not user.is_authenticated:
         return HttpResponse(status=401)
-    target = await my_runs(user).filter(uid=run).values("pk", "uid").afirst()
+    # 見られるRunの条件はpermission・所属を読むので（同期のDBの処理）、threadで組み立てて読む
+    target = await sync_to_async(lambda: my_runs(user).filter(uid=run).values("pk", "uid").first())()
     if target is None:
         return HttpResponse(status=404)
     after = _last_event_id(request)

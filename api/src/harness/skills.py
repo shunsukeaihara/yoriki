@@ -24,6 +24,8 @@ from skill.models import (
     SkillVersion,
 )
 
+from . import tasks
+
 # Runが使うSkillの中身。公開した版か、Draftの評価に写したDraftの中身（design.md §3.7.1）
 SkillContentSource = SkillVersion | SkillEvaluation
 
@@ -243,9 +245,13 @@ def loaded_skills(run: Run) -> list[tuple[dict[str, Any], Skill | None, SkillCon
 def revoked_skill(run: Run) -> str:
     """Runが使うSkillのうち、停止・削除されたか、利用者が使えなくなったか（宣言したConnectorを使えなくなったものも）、
     機密でないRunで機密のSkillになった（宣言したConnectorに機密のフラグが付いた）ものがあれば、その理由。過去の版でも、
-    実行時には拒否する（design.md §3.2・§4冒頭・§4.9.1）"""
+    実行時には拒否する（design.md §3.2・§4冒頭・§4.9.1）。タスクのRunでは、タスクの範囲で判定する"""
     for entry, skill, version in loaded_skills(run):
-        if skill is None or skill.deleted:
+        if tasks.is_task_run(run):
+            # タスクのRunは、起動した人ではなくタスクの範囲で判定する（authorization.md §6）
+            if not (reason := tasks.skill_problem(run, skill, version)):
+                continue
+        elif skill is None or skill.deleted:
             reason = _("削除されました")
         elif skill.suspended:
             reason = _("停止中です")

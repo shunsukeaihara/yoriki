@@ -759,6 +759,146 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/app/v1/tasks/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description タスクの一覧・作成・変更・停止・手動実行 */
+        get: operations["app_v1_tasks_list"];
+        put?: never;
+        /** @description タスクの一覧・作成・変更・停止・手動実行 */
+        post: operations["app_v1_tasks_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/tasks/{task}/revisions/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description タスクの版の履歴 */
+        get: operations["app_v1_tasks_revisions_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/tasks/{task}/revisions/{number}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description タスクの版の履歴 */
+        get: operations["app_v1_tasks_revisions_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/tasks/{task}/runs/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description タスクのRunの履歴（結果とログを見られるもの。authorization.md §7.1） */
+        get: operations["app_v1_tasks_runs_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/tasks/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description タスクの一覧・作成・変更・停止・手動実行 */
+        get: operations["app_v1_tasks_retrieve"];
+        /** @description タスクの一覧・作成・変更・停止・手動実行 */
+        put: operations["app_v1_tasks_update"];
+        post?: never;
+        /** @description タスクを削除する。順番待ち・実行中のRunも次の区切りで止まる */
+        delete: operations["app_v1_tasks_destroy"];
+        options?: never;
+        head?: never;
+        /** @description タスクの一覧・作成・変更・停止・手動実行 */
+        patch: operations["app_v1_tasks_partial_update"];
+        trace?: never;
+    };
+    "/api/app/v1/tasks/{uid}/resume/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 停止を解く */
+        post: operations["app_v1_tasks_resume_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/tasks/{uid}/run/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description タスクの今の版で、手動で実行する（タスクを管理できる人。authorization.md §6）。入力はタスクの定義で決めた項目だけを受け付け、自由な依頼文は受けない */
+        post: operations["app_v1_tasks_run_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/tasks/{uid}/suspend/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 停止する。新しいRunを受け付けず、順番待ち・実行中のRunも次の区切りで止める */
+        post: operations["app_v1_tasks_suspend_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/files/{token}/": {
         parameters: {
             query?: never;
@@ -3240,6 +3380,32 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["Skill"][];
         };
+        PaginatedTaskDefinitionList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["TaskDefinition"][];
+        };
+        PaginatedTaskDefinitionRevisionList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["TaskDefinitionRevision"][];
+        };
         /** @description Connectorの更新。使うDB接続と範囲・部門は変えられないので、読み取り専用にする */
         PatchedConnectorUpdateRequest: {
             /** 名前 */
@@ -3482,6 +3648,28 @@ export interface components {
             /** 名前 */
             name?: string;
         };
+        /** @description タスクの更新。範囲と部門は変えられないので、読み取り専用にする */
+        PatchedTaskDefinitionUpdateRequest: {
+            name?: string;
+            /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
+            version?: number;
+            description?: string;
+            prompt_template?: string;
+            skills?: components["schemas"]["TaskSkillRequest"][];
+            /** @description 使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う */
+            connectors?: string[];
+            /** @description 使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う */
+            tools?: components["schemas"]["ToolsEnum"][];
+            model_profile?: string;
+            /** @description 空ならモデルの既定 */
+            effort?: string;
+            /** @description 個人情報・機密情報を扱うタスク。機密のSkill・Connectorを使え、ローカルLLMのモデルだけを使う */
+            handles_sensitive_data?: boolean;
+            inputs?: components["schemas"]["TaskInputRequest"][];
+            /** @description 業務結果のSchema。なければSkillのもの */
+            output_schema?: unknown;
+            change_reason?: string;
+        };
         Ping: {
             readonly status: string;
         };
@@ -3575,10 +3763,11 @@ export interface components {
          *     * `17` - 回答期限切れ
          *     * `18` - 実行環境を使えない
          *     * `19` - Skillを使えない
+         *     * `20` - タスクを続けられない
          *     * `99` - 内部のエラー
          * @enum {integer}
          */
-        RunEndReasonEnum: 1 | 2 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 99;
+        RunEndReasonEnum: 1 | 2 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 99;
         /**
          * @description * `1` - 状態の遷移
          *     * `10` - 利用者の発言
@@ -4260,6 +4449,218 @@ export interface components {
             layout_after: string | null;
             texts: components["schemas"]["TextDiff"][];
             elements: components["schemas"]["ElementDiff"][];
+        };
+        /**
+         * @description タスクの作成と表示（定義を管理できる人だけが見る。authorization.md §5.3）。中身は今の版の値を平らに出す。
+         *
+         *     中身を変えて保存すると、サーバーが新しい版を作る。更新では、編集を始めた時点の `version` を送り、その間に他の人が
+         *     版を作っていたら409になる。範囲と部門は作成時に決め、更新では変えない
+         */
+        TaskDefinition: {
+            readonly id: string;
+            /**
+             * @description 範囲。作成した後は変えられない
+             *
+             *     * `1` - 個人
+             *     * `2` - 部門
+             *     * `3` - 全社
+             *     * `4` - システム
+             */
+            scope: components["schemas"]["SkillScopeEnum"];
+            readonly scope_display: string;
+            /** @description 部門の範囲では必須。作成した後は変えられない */
+            department?: string | null;
+            readonly department_info: components["schemas"]["MinimumDepartment"] | null;
+            readonly owner: components["schemas"]["MinimumUser"] | null;
+            name: string;
+            /** 停止中 */
+            readonly suspended: boolean;
+            /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
+            version?: number;
+            /** @default  */
+            description: string;
+            /** @description Runの最初の依頼文。{{ inputs.名前 }} に入力の値を文字として埋め込む */
+            prompt_template: string;
+            skills?: components["schemas"]["TaskSkill"][];
+            /** @description 使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う */
+            connectors?: string[];
+            /** @description 使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う */
+            tools?: components["schemas"]["ToolsEnum"][];
+            model_profile: string;
+            /**
+             * @description 空ならモデルの既定
+             * @default
+             */
+            effort: string;
+            /**
+             * @description 個人情報・機密情報を扱うタスク。機密のSkill・Connectorを使え、ローカルLLMのモデルだけを使う
+             * @default false
+             */
+            handles_sensitive_data: boolean;
+            inputs?: components["schemas"]["TaskInput"][];
+            /** @description 業務結果のSchema。なければSkillのもの */
+            output_schema?: unknown;
+            readonly model_profile_info: components["schemas"]["AppModelProfile"];
+            /** @description 今、手動で実行できるか（停止中でなく、版がある） */
+            readonly can_run: boolean;
+            readonly created_by: components["schemas"]["MinimumUser"];
+            /** Format: date-time */
+            readonly created: string;
+            /** Format: date-time */
+            readonly updated: string;
+        };
+        /**
+         * @description タスクの作成と表示（定義を管理できる人だけが見る。authorization.md §5.3）。中身は今の版の値を平らに出す。
+         *
+         *     中身を変えて保存すると、サーバーが新しい版を作る。更新では、編集を始めた時点の `version` を送り、その間に他の人が
+         *     版を作っていたら409になる。範囲と部門は作成時に決め、更新では変えない
+         */
+        TaskDefinitionRequest: {
+            /**
+             * @description 範囲。作成した後は変えられない
+             *
+             *     * `1` - 個人
+             *     * `2` - 部門
+             *     * `3` - 全社
+             *     * `4` - システム
+             */
+            scope: components["schemas"]["SkillScopeEnum"];
+            /** @description 部門の範囲では必須。作成した後は変えられない */
+            department?: string | null;
+            name: string;
+            /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
+            version?: number;
+            /** @default  */
+            description: string;
+            /** @description Runの最初の依頼文。{{ inputs.名前 }} に入力の値を文字として埋め込む */
+            prompt_template: string;
+            skills?: components["schemas"]["TaskSkillRequest"][];
+            /** @description 使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う */
+            connectors?: string[];
+            /** @description 使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う */
+            tools?: components["schemas"]["ToolsEnum"][];
+            model_profile: string;
+            /**
+             * @description 空ならモデルの既定
+             * @default
+             */
+            effort: string;
+            /**
+             * @description 個人情報・機密情報を扱うタスク。機密のSkill・Connectorを使え、ローカルLLMのモデルだけを使う
+             * @default false
+             */
+            handles_sensitive_data: boolean;
+            inputs?: components["schemas"]["TaskInputRequest"][];
+            /** @description 業務結果のSchema。なければSkillのもの */
+            output_schema?: unknown;
+            change_reason?: string;
+        };
+        /** @description 版の表示（履歴） */
+        TaskDefinitionRevision: {
+            readonly id: string;
+            /** 版 */
+            readonly number: number;
+            /** 説明 */
+            readonly description: string;
+            /** プロンプトのテンプレート */
+            readonly prompt_template: string;
+            readonly skills: components["schemas"]["TaskSkill"][];
+            /** 使うConnector */
+            readonly connectors: string[];
+            /** 使ってよいTool */
+            readonly tools: string[];
+            readonly model_profile: string;
+            readonly effort: string;
+            /** 個人情報・機密情報を扱う */
+            readonly handles_sensitive_data: boolean;
+            readonly inputs: components["schemas"]["TaskInput"][];
+            /** 業務結果のSchema */
+            readonly output_schema: unknown;
+            /** 変更理由 */
+            readonly change_reason: string;
+            readonly created_by: components["schemas"]["MinimumUser"];
+            /** Format: date-time */
+            readonly created: string;
+        };
+        /** @description タスクの更新。範囲と部門は変えられないので、読み取り専用にする */
+        TaskDefinitionUpdateRequest: {
+            name?: string;
+            /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
+            version?: number;
+            description?: string;
+            prompt_template?: string;
+            skills?: components["schemas"]["TaskSkillRequest"][];
+            /** @description 使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う */
+            connectors?: string[];
+            /** @description 使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う */
+            tools?: components["schemas"]["ToolsEnum"][];
+            model_profile?: string;
+            /** @description 空ならモデルの既定 */
+            effort?: string;
+            /** @description 個人情報・機密情報を扱うタスク。機密のSkill・Connectorを使え、ローカルLLMのモデルだけを使う */
+            handles_sensitive_data?: boolean;
+            inputs?: components["schemas"]["TaskInputRequest"][];
+            /** @description 業務結果のSchema。なければSkillのもの */
+            output_schema?: unknown;
+            change_reason?: string;
+        };
+        TaskInput: {
+            /** @description 項目の名前（英小文字・数字・_）。テンプレートでは {{ inputs.名前 }} */
+            name: string;
+            /** @description 画面に出す名前 */
+            label: string;
+            type: components["schemas"]["TaskInputTypeEnum"];
+            /** @default false */
+            required: boolean;
+            /** @default  */
+            description: string;
+            /** @description 型が選択肢のときの選べる値 */
+            choices?: string[];
+            /** @description 文字の長さの上限 */
+            max_length?: number | null;
+        };
+        TaskInputRequest: {
+            /** @description 項目の名前（英小文字・数字・_）。テンプレートでは {{ inputs.名前 }} */
+            name: string;
+            /** @description 画面に出す名前 */
+            label: string;
+            type: components["schemas"]["TaskInputTypeEnum"];
+            /** @default false */
+            required: boolean;
+            /** @default  */
+            description: string;
+            /** @description 型が選択肢のときの選べる値 */
+            choices?: string[];
+            /** @description 文字の長さの上限 */
+            max_length?: number | null;
+        };
+        /**
+         * @description * `string` - 文字
+         *     * `number` - 数値
+         *     * `integer` - 整数
+         *     * `boolean` - 真偽
+         *     * `date` - 日付
+         *     * `choice` - 選択肢
+         * @enum {string}
+         */
+        TaskInputTypeEnum: "string" | "number" | "integer" | "boolean" | "date" | "choice";
+        TaskRunCreateRequest: {
+            /** @description 入力の項目の名前と値。タスクの定義で決めた項目だけを受け付ける */
+            inputs?: {
+                [key: string]: unknown;
+            };
+        };
+        TaskSkill: {
+            /** @description SkillのID */
+            skill: string;
+            /** @description 固定する版の番号。Skillが新しい版を公開しても変わらない */
+            version: number;
+        };
+        TaskSkillRequest: {
+            /** @description SkillのID */
+            skill: string;
+            /** @description 固定する版の番号。Skillが新しい版を公開しても変わらない */
+            version: number;
         };
         TextDiff: {
             shape: string;
@@ -6141,6 +6542,344 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Skill"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description 部門 */
+                department?: string;
+                /** @description 名前 */
+                name?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /**
+                 * @description 範囲
+                 *
+                 *     * `1` - 個人
+                 *     * `2` - 部門
+                 *     * `3` - 全社
+                 *     * `4` - システム
+                 */
+                scope?: 1 | 2 | 3 | 4;
+                /** @description A search term. */
+                search?: string;
+                suspended?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedTaskDefinitionList"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskDefinitionRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["TaskDefinitionRequest"];
+                "multipart/form-data": components["schemas"]["TaskDefinitionRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDefinition"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_revisions_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                task: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedTaskDefinitionRevisionList"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_revisions_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                number: number;
+                task: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDefinitionRevision"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_runs_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+                /**
+                 * @description * `1` - 順番待ち
+                 *     * `2` - 作業中
+                 *     * `3` - 確認待ち
+                 *     * `4` - 再試行待ち
+                 *     * `5` - 停止中
+                 *     * `10` - 完了
+                 *     * `20` - 失敗
+                 *     * `30` - 停止済み
+                 */
+                status?: 1 | 10 | 2 | 20 | 3 | 30 | 4 | 5;
+            };
+            header?: never;
+            path: {
+                task: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedRunList"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDefinition"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["TaskDefinitionUpdateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["TaskDefinitionUpdateRequest"];
+                "multipart/form-data": components["schemas"]["TaskDefinitionUpdateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDefinition"];
+                };
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、他の人が版を作った） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    app_v1_tasks_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    app_v1_tasks_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedTaskDefinitionUpdateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedTaskDefinitionUpdateRequest"];
+                "multipart/form-data": components["schemas"]["PatchedTaskDefinitionUpdateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDefinition"];
+                };
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、他の人が版を作った） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    app_v1_tasks_resume_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDefinition"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_run_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["TaskRunCreateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["TaskRunCreateRequest"];
+                "multipart/form-data": components["schemas"]["TaskRunCreateRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_suspend_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDefinition"];
                 };
             };
         };

@@ -350,19 +350,19 @@ Runの中身が外へ出る経路をすべて列挙し、どれにも「結果�
 
 ## 11 初期のGroup
 
-最初に一度だけ作る。後から名前・中身を変えても、消しても、作り直さない。
+最初に一度だけ作る。後から名前・中身を変えても、消しても、作り直さない。後の段階で足すpermission（タスク等）は、その段階のマイグレーションで一度だけ、新しいGroupを作るか既にあるGroupに足す（消したGroupは作り直さない）。
 
 | Group | permission |
 |---|---|
 | 部門のSkill編集者 | `skill.can_edit_department_skills` |
 | 部門のSkill公開者 | `skill.can_edit_department_skills`、`skill.can_publish_department_skills` |
 | 全社のSkill公開者 | `skill.can_edit_company_skills`、`skill.can_publish_company_skills` |
-| 部門のタスク管理者 | `task.can_manage_department_tasks`（タスクの段階で作る） |
-| 全社のタスク管理者 | `task.can_manage_company_tasks`（タスクの段階で作る） |
+| 部門のタスク管理者 | `task.can_manage_department_tasks` |
+| 全社のタスク管理者 | `task.can_manage_company_tasks` |
 | 全件利用者 | `user.can_use_all_departments` |
 | 全件管理者 | `user.can_manage_all_departments`と、部門・全社のSkill・タスクのpermission |
 | Connector管理者 | `connector.*_connector`、`connector.*_<接続のModel>` |
-| システム管理者 | `skill.can_edit_system_skills`、`skill.can_publish_system_skills`、`task.can_manage_system_tasks`（タスクの段階で作る）、`connector.view_connector`（システムタスクに登録するConnectorの定義を見るため） |
+| システム管理者 | `skill.can_edit_system_skills`、`skill.can_publish_system_skills`、`task.can_manage_system_tasks`、`connector.view_connector`（システムタスクに登録するConnectorの定義を見るため） |
 | 連携の管理者 | 入口・出口のModelのpermission（タスク・配信の段階で作る） |
 | ユーザー管理者 | `user.*_user`、`user.*_department` |
 

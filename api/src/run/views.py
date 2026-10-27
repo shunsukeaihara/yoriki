@@ -23,12 +23,13 @@ CONFLICT = OpenApiResponse(description="他の処理と競合した")
 
 
 def my_runs(user):
-    """ログインユーザーの会話のRun。SSEのストリームの権限の判定にも使う（realtime.md §4）"""
-    return Run.objects.filter(owner=user, conversation__owner=user, conversation__deleted=False)
+    """ログインユーザーが結果とログを見られるRun（自分の会話のRunと、管理できるタスクのRun。authorization.md §7.1）。
+    SSEのストリームの権限の判定にも使う（realtime.md §4）"""
+    return Run.objects.visible_to(user)
 
 
 class MyRunMixin:
-    """URLのrunを、ログインユーザーの会話のRunに限定して取得する"""
+    """URLのrunを、ログインユーザーが見られるRunに限定して取得する"""
 
     kwargs: dict[str, str]
 

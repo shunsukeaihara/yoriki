@@ -423,7 +423,7 @@ Task Definitionは「起動方法＋実行プロンプト＋使うSkillとモデ
 |---|---|
 | task_idと名前 | 業務タスクの識別子 |
 | trigger | Plugin・Binding、接続設定、起動元の認証、項目の取り出し（任意）、重複のキー、ファイルの取り込み、上限（§4.2）。payloadは取り出しの有無によらず、そのままファイルとしても渡す |
-| 実行内容 | 使うSkill（固定の版。payloadの読み方を書いたSkillを含む）、Connector、Tool、モデル設定とeffort、プロンプトテンプレート、入力の形と制限、業務結果Schema。タスクの定義も版を持ち、Runは受付時の版に固定する |
+| 実行内容 | 使うSkill（固定の版。payloadの読み方を書いたSkillを含む）、Connector、Tool、モデル設定とeffort、プロンプトテンプレート、入力の形と制限、業務結果Schema。タスクの定義も版を持ち、Runは受付時の版に固定する。版はConnectorと同じく保存のたびにサーバーが作り、SkillのようなDraftと評価は持たない |
 | 実行条件 | 範囲（個人・部門・全社・システム）、チャットから起動できるか、利用枠、回答待ちの期限。誰の権限で動くかは起動のしかたで決まる（下記） |
 | interaction | 任意の双方向Channel Plugin・Binding、チャネル、返信モード、スレッドの運用方針 |
 | notification | 任意の結果通知Plugin・Binding、通知Skill、対象イベント、通知内容、一つのDestination |
@@ -852,7 +852,7 @@ Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプ�
 | SkillEvaluationCase / SkillEvaluation | 評価ケース（依頼の文、添付、確認する観点、期待する業務結果、公開の前に必須か）。評価は、写したDraftの中身とrevision、比べた公開中の版、モデル、依頼者・編集Run、ケースごとの評価Run・機械的な検証・LLMの判定（§3.7.1） |
 | RuntimeProfile / RuntimeProfileVersion | 名前・説明、有効か、既定か（1つだけ）。版はimage（repositoryとindex＝manifest listのdigest。Workerは自分のplatformのmanifestを解決し、そのdigestをAttemptに記録する）、契約番号、対応platform、Python版、資源上限（メモリ、CPU、pids、tmpfsの大きさ、コマンド・ジョブの時間）。中身を変えると新しい版を作る（§7.3） |
 | EnvironmentRevision / PackageBundle | 完全な依存lock、wheelのhash、対応ABIとplatform、保管参照、元revision |
-| TaskDefinition / TaskDefinitionRevision | フローの起動・対話・結果通知Binding、使うSkill、モデル設定とeffort（固定か自動か）、許可したConnectorの操作、プロンプト、公開版 |
+| TaskDefinition / TaskDefinitionRevision | 範囲（個人・部門・全社・システム）と持ち主・部門、停止、今の版。版は説明、プロンプトのテンプレート、使うSkillと固定の版、Connector、使ってよいTool、モデル設定とeffort（空なら既定）、機密、入力の項目（名前・型・必須・選択肢）、業務結果Schema（なければSkillのもの）、保存した人。フローの起動・対話・結果通知Bindingは各段階で足す |
 | PluginExtension | 拡張種別、Adapter実装版、契約版、設定Schema、対応能力、有効状態 |
 | TriggerBinding / TriggerBindingRevision | 安定ID、起動Plugin版、認証参照、範囲と使ってよい範囲、タスク（Webhookは1対1）、設定版 |
 | TriggerReceipt | 起動Binding、外部イベントID、入力hash、対応Run・会話操作、受付時刻 |

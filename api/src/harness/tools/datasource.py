@@ -1,8 +1,9 @@
 """社内DBのConnectorを使うTool（harness.md §10.2、design.md §4.9.2）。
 
 引数の `connector` は、Run開始時に固定した一覧（Manifest）の名前のenumにする。一覧に載っていることを権限の
-根拠にせず、操作のたびに、依頼した人が今も使えるか（範囲・所属・停止）と、機密のConnectorならローカルLLMの
-モデルかを確かめ直す（authorization.md §6）。境界（公開する表・上限）はその時点の版を使い、使った版を記録する。
+根拠にせず、操作のたびに、依頼した人が今も使えるか（範囲・所属・停止。タスクのRunでは、タスクに固定したもので
+タスクの範囲の中にあるか）と、機密のConnectorならローカルLLMのモデルかを確かめ直す（authorization.md §6）。
+境界（公開する表・上限）はその時点の版を使い、使った版を記録する。
 
 接続先への操作は、接続の同時実行数の上限の中で行う（connector/limits.py）。結果はCSVのArtifactにして
 /workspace/input/connectors/<呼出し>/result.csv に置き、モデルには件数・列名・先頭の行・場所だけを返す。
@@ -21,6 +22,7 @@ from connector.limits import connection_slot, run_holding
 from connector.models import Connector, ConnectorAction, ConnectorVersion
 
 from ..connectors import DATASOURCE_TOOL_NAMES, catalog, is_allowed_for
+from ..tasks import connector_permitted, is_task_run
 from .base import Effect, Tool, ToolContext, ToolResult
 from .output import clip, limit_for, limited
 
@@ -105,10 +107,17 @@ def _resolve(arguments: dict[str, Any], context: ToolContext) -> tuple[Connector
         .filter(uid=entry["connector"])
         .first()
     )
-    # 依頼した人は操作のたびにDBから読む（無効にされた・所属を外されたら、次の操作から使わせない。
-    # 所属の判定はユーザーのオブジェクトに保存されるので、Runが持つものを使い回さない）
-    owner = type(run.owner).objects.get(pk=run.owner_id)
-    if connector is None or not connector.can(owner, ConnectorAction.USE):
+    if connector is None:
+        permitted = False
+    elif is_task_run(run):
+        # タスクのRunは、タスクに固定したもので、今も有効でタスクの範囲の中にあるものだけ（authorization.md §6）
+        permitted = connector_permitted(run, connector)
+    else:
+        # 依頼した人は操作のたびにDBから読む（無効にされた・所属を外されたら、次の操作から使わせない。
+        # 所属の判定はユーザーのオブジェクトに保存されるので、Runが持つものを使い回さない）
+        owner = type(run.owner).objects.get(pk=run.owner_id)
+        permitted = connector.can(owner, ConnectorAction.USE)
+    if connector is None or not permitted:
         return ToolResult.error(
             "This connector cannot be used now: it was disabled or deleted, or the user can no longer use it. "
             "Continue without it, and tell the user."

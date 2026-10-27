@@ -70,7 +70,7 @@ from skill.models import SkillEvaluation
 from stream.notifier import notify_delta
 from usage.models import UsageLedger, UsagePurpose
 
-from . import compaction
+from . import compaction, tasks
 from .connectors import catalog_names as connector_names
 from .context import (
     ADDITIONAL_INSTRUCTION_PREFIX,
@@ -423,6 +423,10 @@ class Runner:
             return False
         if run.status != RunStatus.RUNNING:
             raise LeaseLost(f"run={run.uid} status={run.status}")
+        if reason := tasks.revoked_task(run):
+            # タスクの停止・削除は、順番待ちのRunにも実行中のRunにも次の区切りから効く（authorization.md §6）
+            self._fail(RunEndReason.TASK, reason)
+            return False
         if reason := revoked_skill(run) or revoked_edit(run):
             # 停止・権限の失効は、始めた後のRunでも次の区切りから使わせない（design.md §3.2）。編集の対象が機密に
             # なったら、読んだ中身を次のモデルの呼出しで送らない（harness.md §10.9）
@@ -511,6 +515,13 @@ class Runner:
             tools = (*ALL_TOOLS, *datasource, *SKILL_ADMIN_TOOLS, TEST_SKILL_DRAFT)
             if not ((self.run_obj.manifest or {}).get("fixed") or {}).get("skill_edit", {}).get("skill"):
                 tools += (CREATE_SKILL,)
+        elif tasks.is_task_run(self.run_obj):
+            # タスクのRun：固定したSkillの「使ってよいTool」とタスクのToolの一覧の両方に入っているものだけ。
+            # 業務結果のSchemaはタスクのもの（なければSkillのもの）。`skill` は出さない（authorization.md §5.4）
+            allowed = tasks.allowed_tools(self.run_obj, {name for version in explicit for name in version.tools})
+            tools = tuple(t for t in (*ALL_TOOLS, *datasource) if t.name in allowed)
+            if schema := tasks.output_schema(self.run_obj):
+                tools += (make_submit_result_tool(schema),)
         elif explicit:
             allowed = {name for version in explicit for name in version.tools}
             tools = tuple(t for t in (*ALL_TOOLS, *datasource) if t.name in allowed)

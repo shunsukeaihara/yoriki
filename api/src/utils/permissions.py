@@ -36,6 +36,10 @@ class AppPermission(Enum):
     PUBLISH_COMPANY_SKILLS = "skill", "can_publish_company_skills", _("全社のSkillを公開できる")
     EDIT_SYSTEM_SKILLS = "skill", "can_edit_system_skills", _("システムのSkillを編集できる")
     PUBLISH_SYSTEM_SKILLS = "skill", "can_publish_system_skills", _("システムのSkillを公開できる")
+    # 範囲ごとのタスクの管理（authorization.md §5.3）。部門の範囲は、管理できる部門のタスクだけに効く
+    MANAGE_DEPARTMENT_TASKS = "task", "can_manage_department_tasks", _("部門のタスクを管理できる")
+    MANAGE_COMPANY_TASKS = "task", "can_manage_company_tasks", _("全社のタスクを管理できる")
+    MANAGE_SYSTEM_TASKS = "task", "can_manage_system_tasks", _("システムのタスクを管理できる")
 
     def __init__(self, app_label: str, codename: str, label: "str | StrPromise"):
         self.app_label = app_label

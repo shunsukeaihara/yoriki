@@ -2702,7 +2702,8 @@ paths:
   /api/app/v1/tasks/{uid}/run/:
     post:
       operationId: app_v1_tasks_run_create
-      description: タスクの今の版で、手動で実行する（タスクを管理できる人。authorization.md §6）。入力はタスクの定義で決めた項目だけを受け付け、自由な依頼文は受けない
+      description: タスクの今の版で、手動で実行する（タスクを管理できる人。authorization.md §6）。入力はタスクの定義で決めた項目だけを受け付け、自由な依頼文は受けない。型がファイルの項目があれば
+        multipart/form-dataで送る（ファイルは項目の名前で付ける）
       parameters:
       - in: path
         name: uid
@@ -2714,9 +2715,6 @@ paths:
       requestBody:
         content:
           application/json:
-            schema:
-              $ref: '#/components/schemas/TaskRunCreateRequest'
-          application/x-www-form-urlencoded:
             schema:
               $ref: '#/components/schemas/TaskRunCreateRequest'
           multipart/form-data:
@@ -2780,7 +2778,7 @@ paths:
     post:
       operationId: hooks_v1_tasks_create
       description: Webhookでタスクを起動する（design.md §4.2）。受け付けたら202とrun_idを返し、作業の完了を待たない。同じイベントID（入口で指定した場所・Idempotency-Key
-        ヘッダー・推奨の形式の event_id）の再送には、前のRunを200で返す
+        ヘッダー・推奨の形式の event_id）の再送には、前のRunを200で返す。ファイルは multipart/form-data で付ける（URLの取得はしない）
       parameters:
       - in: header
         name: Idempotency-Key
@@ -2801,6 +2799,10 @@ paths:
               type: object
               additionalProperties: {}
           application/x-www-form-urlencoded:
+            schema:
+              type: object
+              additionalProperties: {}
+          multipart/form-data:
             schema:
               type: object
               additionalProperties: {}
@@ -12390,6 +12392,7 @@ components:
       - boolean
       - date
       - choice
+      - file
       type: string
       description: |-
         * `string` - 文字
@@ -12398,14 +12401,18 @@ components:
         * `boolean` - 真偽
         * `date` - 日付
         * `choice` - 選択肢
+        * `file` - ファイル
     TaskRunCreateRequest:
       type: object
+      description: |-
+        手動実行の入力。型がファイルの項目があれば multipart/form-data で送り、`inputs` はJSONの文字列にして、
+        ファイルは項目の名前をフィールドの名前にして付ける
       properties:
         inputs:
           type: object
           additionalProperties:
             nullable: true
-          description: 入力の項目の名前と値。タスクの定義で決めた項目だけを受け付ける
+          description: 入力の項目の名前と値。タスクの定義で決めた項目だけを受け付ける。multipart/form-dataではJSONの文字列にし、型がファイルの項目は項目の名前でファイルを付ける
     TaskSkill:
       type: object
       properties:

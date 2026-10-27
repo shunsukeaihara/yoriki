@@ -1,11 +1,16 @@
+import json
 from typing import Any
 
 import jsonschema
+from django.conf import settings
+from django.core.files.uploadedfile import UploadedFile
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
+from rest_framework.fields import empty
+from rest_framework.utils import html
 
 from harness.tools import SKILL_TOOLS
 from harness.tools.base import schema_problem
@@ -20,6 +25,7 @@ from utils.serializers import ReadOnlyModelSerializer
 
 from . import checks
 from .errors import VersionConflict
+from .inputs import InputFile
 from .models import (
     DEFAULT_MAX_PAYLOAD_BYTES,
     MAX_PAYLOAD_BYTES,
@@ -384,13 +390,57 @@ class TaskSuspendSerializer(serializers.Serializer):
         return TaskDefinitionSerializer(instance, context=self.context).data
 
 
+class InputValuesField(serializers.DictField):
+    """入力の値。multipart/form-dataではJSONの文字列で送る"""
+
+    def get_value(self, dictionary):
+        if html.is_html_input(dictionary):
+            return dictionary.get(self.field_name, empty)
+        return super().get_value(dictionary)
+
+    def to_internal_value(self, data):
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except ValueError:
+                raise serializers.ValidationError(_("JSONのオブジェクトで入力してください")) from None
+        return super().to_internal_value(data)
+
+
 class TaskRunCreateSerializer(serializers.Serializer):
-    inputs = serializers.DictField(
+    """手動実行の入力。型がファイルの項目があれば multipart/form-data で送り、`inputs` はJSONの文字列にして、
+    ファイルは項目の名前をフィールドの名前にして付ける"""
+
+    inputs = InputValuesField(
         child=serializers.JSONField(allow_null=True),
         required=False,
         default=dict,
-        help_text=_("入力の項目の名前と値。タスクの定義で決めた項目だけを受け付ける"),
+        help_text=_(
+            "入力の項目の名前と値。タスクの定義で決めた項目だけを受け付ける。multipart/form-dataではJSONの"
+            "文字列にし、型がファイルの項目は項目の名前でファイルを付ける"
+        ),
     )
+
+    def validate(self, attrs):
+        files: dict[str, InputFile] = {}
+        data = self.initial_data
+        for name, items in data.lists() if hasattr(data, "lists") else ():
+            uploaded = [i for i in items if isinstance(i, UploadedFile)]
+            if not uploaded:
+                continue
+            if len(uploaded) > 1 or name == "inputs":
+                raise serializers.ValidationError({"inputs": {name: _("1つの項目に付けられるファイルは1つです")}})
+            limit = settings.YORIKI_UPLOAD_MAX_MB
+            if (uploaded[0].size or 0) > limit * 1024 * 1024:
+                raise serializers.ValidationError(
+                    {"inputs": {name: _("ファイルが大きすぎます（%(limit)sMBまで）") % {"limit": limit}}}
+                )
+            files[name] = InputFile(name=uploaded[0].name or "file", content=uploaded[0].read())
+        if both := set(files) & set(attrs["inputs"]):
+            errors = {name: _("値とファイルの両方が送られました") for name in both}
+            raise serializers.ValidationError({"inputs": errors})
+        attrs["inputs"] = {**attrs["inputs"], **files}
+        return attrs
 
 
 class TriggerInputSerializer(serializers.Serializer):

@@ -1,6 +1,9 @@
 """タスクの定義のAPI（authorization.md §5.3〜§5.4）。範囲ごとの管理、登録できるもの、版、手動実行、Runの見え方"""
 
+import json
+
 import pytest
+from django.core.files.uploadedfile import SimpleUploadedFile
 
 from artifact.factories import ArtifactFactory
 from artifact.models import ArtifactKind
@@ -286,6 +289,56 @@ def test_manual_run_accepts_only_the_defined_inputs(api_client, app_user, model)
     res = api_client.post(_url(task, "run/"), {"inputs": {"memo": "これも見て"}}, format="json")
     assert res.status_code == 400
     assert set(res.json()["inputs"]) == {"vendor", "memo"}  # 必須がない、定義にない
+    assert not Run.objects.exists()
+
+
+def test_manual_run_takes_files_for_file_inputs(api_client, app_user, model):
+    inputs = [
+        {"name": "vendor", "label": "取引先", "type": "string", "required": True},
+        {"name": "invoice", "label": "請求書", "type": "file", "required": True},
+    ]
+    template = "{{ inputs.vendor }} の請求書 {{ inputs.invoice }} を確認してください。"
+    task = _create(api_client, app_user, model, inputs=inputs, prompt_template=template).json()
+    assert task["inputs"][1]["type"] == "file"
+
+    invoice = SimpleUploadedFile("請求書 1月.pdf", b"%PDF-1.7")
+    res = api_client.post(_url(task, "run/"), {"inputs": json.dumps({"vendor": "A商事"}), "invoice": invoice})
+    assert res.status_code == 201, res.json()
+    run = Run.objects.get(uid=res.json()["id"])
+    path = "/workspace/input/請求書 1月.pdf"
+    assert run.manifest["fixed"]["task"]["inputs"] == {"vendor": "A商事", "invoice": path}
+    artifact = run.conversation.messages.get().attachments.get()
+    assert (artifact.kind, artifact.path, artifact.run) == (ArtifactKind.ATTACHMENT, "請求書 1月.pdf", run)
+    with artifact.blob.open() as f:
+        assert f.read() == b"%PDF-1.7"
+    first = RunEvent.objects.get(run=run, kind=RunEventKind.USER_MESSAGE).data
+    assert f'<untrusted_content source="input:invoice">{path}</untrusted_content> を確認してください。' in first["text"]
+    assert first["attachments"][0]["path"] == path
+
+
+def test_manual_run_refuses_mismatched_files(api_client, app_user, model):
+    inputs = [
+        {"name": "vendor", "label": "取引先", "type": "string"},
+        {"name": "invoice", "label": "請求書", "type": "file", "required": True},
+    ]
+    task = _create(api_client, app_user, model, inputs=inputs).json()
+    # ファイルの項目に文字、文字の項目にファイル
+    res = api_client.post(
+        _url(task, "run/"),
+        {"inputs": json.dumps({"invoice": "a.pdf"}), "vendor": SimpleUploadedFile("a.txt", b"x")},
+    )
+    assert res.status_code == 400
+    assert set(res.json()["inputs"]) == {"vendor", "invoice"}
+    # 1つの項目に2つのファイル、値とファイルの両方
+    two = [SimpleUploadedFile("a.pdf", b"1"), SimpleUploadedFile("b.pdf", b"2")]
+    res = api_client.post(_url(task, "run/"), {"invoice": two})
+    assert (res.status_code, set(res.json()["inputs"])) == (400, {"invoice"})
+    res = api_client.post(
+        _url(task, "run/"), {"inputs": json.dumps({"invoice": "x"}), "invoice": SimpleUploadedFile("a.pdf", b"1")}
+    )
+    assert (res.status_code, set(res.json()["inputs"])) == (400, {"invoice"})
+    res = api_client.post(_url(task, "run/"), {"inputs": "{", "invoice": SimpleUploadedFile("a.pdf", b"1")})
+    assert res.status_code == 400
     assert not Run.objects.exists()
 
 

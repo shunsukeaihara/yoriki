@@ -55,7 +55,7 @@ class TaskAction(Enum):
 
 
 class TaskInputType(models.TextChoices):
-    """入力の項目の型（authorization.md §5.4の入力の制限）。ファイルはWebhookの入口の段階で足す"""
+    """入力の項目の型（authorization.md §5.4の入力の制限）。ファイルは /workspace/input に置き、値はそのパスにする"""
 
     STRING = "string", _("文字")
     NUMBER = "number", _("数値")
@@ -63,6 +63,7 @@ class TaskInputType(models.TextChoices):
     BOOLEAN = "boolean", _("真偽")
     DATE = "date", _("日付")
     CHOICE = "choice", _("選択肢")
+    FILE = "file", _("ファイル")
 
 
 # 範囲ごとの管理のpermission（authorization.md §5.3）。個人は本人だけで、permissionを見ない

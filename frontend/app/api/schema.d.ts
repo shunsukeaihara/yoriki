@@ -925,7 +925,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description タスクの今の版で、手動で実行する（タスクを管理できる人。authorization.md §6）。入力はタスクの定義で決めた項目だけを受け付け、自由な依頼文は受けない */
+        /** @description タスクの今の版で、手動で実行する（タスクを管理できる人。authorization.md §6）。入力はタスクの定義で決めた項目だけを受け付け、自由な依頼文は受けない。型がファイルの項目があれば multipart/form-dataで送る（ファイルは項目の名前で付ける） */
         post: operations["app_v1_tasks_run_create"];
         delete?: never;
         options?: never;
@@ -976,7 +976,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description Webhookでタスクを起動する（design.md §4.2）。受け付けたら202とrun_idを返し、作業の完了を待たない。同じイベントID（入口で指定した場所・Idempotency-Key ヘッダー・推奨の形式の event_id）の再送には、前のRunを200で返す */
+        /** @description Webhookでタスクを起動する（design.md §4.2）。受け付けたら202とrun_idを返し、作業の完了を待たない。同じイベントID（入口で指定した場所・Idempotency-Key ヘッダー・推奨の形式の event_id）の再送には、前のRunを200で返す。ファイルは multipart/form-data で付ける（URLの取得はしない） */
         post: operations["hooks_v1_tasks_create"];
         delete?: never;
         options?: never;
@@ -4983,11 +4983,16 @@ export interface components {
          *     * `boolean` - 真偽
          *     * `date` - 日付
          *     * `choice` - 選択肢
+         *     * `file` - ファイル
          * @enum {string}
          */
-        TaskInputTypeEnum: "string" | "number" | "integer" | "boolean" | "date" | "choice";
+        TaskInputTypeEnum: "string" | "number" | "integer" | "boolean" | "date" | "choice" | "file";
+        /**
+         * @description 手動実行の入力。型がファイルの項目があれば multipart/form-data で送り、`inputs` はJSONの文字列にして、
+         *     ファイルは項目の名前をフィールドの名前にして付ける
+         */
         TaskRunCreateRequest: {
-            /** @description 入力の項目の名前と値。タスクの定義で決めた項目だけを受け付ける */
+            /** @description 入力の項目の名前と値。タスクの定義で決めた項目だけを受け付ける。multipart/form-dataではJSONの文字列にし、型がファイルの項目は項目の名前でファイルを付ける */
             inputs?: {
                 [key: string]: unknown;
             };
@@ -7473,7 +7478,6 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": components["schemas"]["TaskRunCreateRequest"];
-                "application/x-www-form-urlencoded": components["schemas"]["TaskRunCreateRequest"];
                 "multipart/form-data": components["schemas"]["TaskRunCreateRequest"];
             };
         };
@@ -7555,6 +7559,9 @@ export interface operations {
                     [key: string]: unknown;
                 };
                 "application/x-www-form-urlencoded": {
+                    [key: string]: unknown;
+                };
+                "multipart/form-data": {
                     [key: string]: unknown;
                 };
                 "text/plain": string;

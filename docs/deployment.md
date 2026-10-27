@@ -190,7 +190,7 @@ cd frontend && pnpm dev
 | `/` | frontend:3000 | — |
 | `/api/` | api:8000（パスはそのまま転送。Djangoは `/api/` の下にURLを置く） | 通常のAPI |
 | `/api/app/v1/stream/`、`/api/app/v1/runs/{id}/stream/` | api:8000 | SSE用（§4.2）。`location ~ ^/api/app/v1/(runs/[^/]+/)?stream/$` で両方に合わせる |
-| `/api/hooks/` | api:8000 | Webhook・Channelの受信。rate limitを強くする。bodyの上限は入口ごとの設定の最大（10MiB）にし、入口ごとの上限（既定1MiB）はapiで確かめる |
+| `/api/hooks/` | api:8000 | Webhook・Channelの受信。rate limitを強くする。bodyの上限（multipartのファイルを含む）は入口ごとの設定の最大（10MiB）にし、入口ごとの上限（既定1MiB）はapiで確かめる |
 | `/api/admin/`、`/api/schema/` | api:8000 | ログインとpermissionで守る（Django管理画面は基盤管理者、スキーマとSwagger UIはどの環境でもログインした利用者）。IPの制限は導入先が任意で追加する |
 | `/api/accounts/` | api:8000 | SSOのログイン開始と認証基盤からのコールバック |
 | `/api/files/<token>/` | api:8000 | 出口（Zapier等）へ渡した成果物の期限付き取得。セッションを使わずtokenを確認する。rate limitを付ける。社員向けのダウンロードには使わない（セッションで認証し、取得のたびに閲覧の判定をし直す。authorization.md §7.1） |
@@ -205,7 +205,7 @@ cd frontend && pnpm dev
 - HSTS、`X-Content-Type-Options`、`Referrer-Policy`、フロントエンド向けのCSPを付ける（`deploy/nginx/snippets/`）。HSTSはHTTPSで受けたときだけ付ける。
 - CSPは、NuxtのSPAがHTMLにインラインのスクリプト（色モードの初期化、`window.__NUXT__` の設定）を含むため、`script-src` に `'unsafe-inline'` を許可している。インラインのスクリプトのハッシュかnonceで絞るのは今後の課題とする。
 - nginxの設定は2種類ある。nginxでTLSを終端して直接公開する `sites/tls.conf`（`compose.yaml`）と、前段（Cloudflare Tunnel、認証プロキシ、エッジのnginx）がTLSを終端し、80番で受ける `sites/http.conf`（`compose.app.yaml`、`compose.cloudflare.yaml`）。`http.conf` は前段が付けた `X-Forwarded-For`・`X-Forwarded-Proto` を、私設のアドレスからのものだけ信頼するので、インターネットへ直接公開しない。
-- `client_max_body_size` はパスごとに決める（通常のAPIは小さく、添付のアップロードだけ大きくする）。
+- `client_max_body_size` はパスごとに決める（通常のAPIは小さく、会話への添付のアップロードと、タスクの手動実行（型がファイルの項目を付ける。`/api/app/v1/tasks/{id}/run/`）だけ大きくする）。
 - 成果物のダウンロード（Local保存）は、apiが権限（社員はセッションで、取得のたびに結果を見られるかを判定する。出口は期限付きtokenと出口の有効性・範囲）を確認した後、`X-Accel-Redirect` でnginxの内部location（`location /_protected/ { internal; }`）からファイルを返す。nginxから保存先のディレクトリを直接公開しない。
 
 ### 4.2 SSE

@@ -1,10 +1,12 @@
 """タスクの入口（Webhook。design.md §4.2、authorization.md §5.5）。入口の管理、鍵、受付、重複の判定、項目の取り出し、
 payloadのファイル化、状態を確かめる口"""
 
+import hashlib
 import json
 from urllib.parse import urlencode
 
 import pytest
+from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.exceptions import ValidationError
 
 from artifact.models import ArtifactKind, BlobObject
@@ -315,6 +317,130 @@ def test_form_values_and_text(api_client, integrator, task):
     assert (res.status_code, res.json()["code"]) == (415, "unsupported_media_type")
     res = _send(api_client, task, key, "{", content_type="application/json")
     assert (res.status_code, res.json()["code"]) == (400, "invalid_json")
+
+
+FILE_INPUTS = [*INPUTS, {"name": "invoice", "label": "請求書", "type": "file", "required": True}]
+
+
+def _send_multipart(api_client, task, key, data, **headers):
+    return api_client.post(_hook(task), data, format="multipart", HTTP_AUTHORIZATION=f"Bearer {key}", **headers)
+
+
+def _file_task(api_client, integrator, **binding):
+    task = TaskDefinitionFactory.create(
+        scope=TaskScope.COMPANY,
+        revision__prompt_template="{{ inputs.invoice }} を確認してください。",
+        revision__inputs=FILE_INPUTS,
+    )
+    res = _create_binding(api_client, integrator, task, **binding)
+    api_client.logout()
+    return task, res.json()["key"]
+
+
+def _extra_files():
+    return [SimpleUploadedFile("memo.txt", "前回と同じ".encode()), SimpleUploadedFile("webhook_payload.json", b"{}")]
+
+
+def test_multipart_files_are_placed_and_file_inputs_point_to_them(api_client, integrator):
+    mapping = [{"name": "vendor", "path": "$.vendor"}, {"name": "invoice", "path": "$.document"}]
+    task, key = _file_task(api_client, integrator, inputs=mapping, event_id_path="$.id")
+    data = {
+        "id": "evt-1",
+        "vendor": "ACME",
+        "document": SimpleUploadedFile("invoice.pdf", b"%PDF-1.7"),
+        "files": _extra_files(),
+    }
+    res = _send_multipart(api_client, task, key, data)
+    assert res.status_code == 202, res.json()
+    run = Run.objects.get(uid=res.json()["run_id"])
+    assert run.manifest["fixed"]["task"]["inputs"] == {"vendor": "ACME", "invoice": "/workspace/input/invoice.pdf"}
+
+    # ファイルはすべて置く。payloadのファイルが先で、同じ名前のファイルは「(2)」にする
+    attachments = run.conversation.messages.get().attachments.order_by("pk")
+    assert [a.path for a in attachments] == [
+        "webhook_payload.json",
+        "invoice.pdf",
+        "memo.txt",
+        "webhook_payload (2).json",
+    ]
+    assert all(a.run == run for a in attachments)
+    with attachments[0].blob.open() as f:
+        payload = json.loads(f.read())
+    assert payload["vendor"] == "ACME"
+    assert payload["document"] == {
+        "file": "invoice.pdf",
+        "size": 8,
+        "sha256": hashlib.sha256(b"%PDF-1.7").hexdigest(),
+    }
+    assert [f["file"] for f in payload["files"]] == ["memo.txt", "webhook_payload.json"]
+    text = RunEvent.objects.get(run=run, kind=RunEventKind.USER_MESSAGE).data["text"]
+    assert '<untrusted_content source="input:invoice">/workspace/input/invoice.pdf</untrusted_content>' in text
+
+    # 同じイベントの再送は、ファイルも同じなら前のRun、違えば409
+    data["document"] = SimpleUploadedFile("invoice.pdf", b"%PDF-1.7")
+    data["files"] = _extra_files()
+    again = _send_multipart(api_client, task, key, data)
+    assert (again.status_code, again.json()["run_id"]) == (200, run.uid)
+    data["document"] = SimpleUploadedFile("invoice.pdf", b"%PDF-2.0")
+    data["files"] = []
+    changed = _send_multipart(api_client, task, key, data)
+    assert (changed.status_code, changed.json()["code"]) == (409, "event_id_reused")
+
+
+def test_recommended_format_in_multipart(api_client, integrator):
+    task, key = _file_task(api_client, integrator)
+    data = {
+        "event_id": "z-1",
+        "inputs[vendor]": "ACME",
+        "inputs[amount]": "300",
+        "inputs[invoice]": SimpleUploadedFile("a.pdf", b"1"),
+    }
+    res = _send_multipart(api_client, task, key, data)
+    assert res.status_code == 202, res.json()
+    run = Run.objects.get(uid=res.json()["run_id"])
+    assert run.manifest["fixed"]["task"]["inputs"] == {
+        "vendor": "ACME",
+        "amount": 300,
+        "invoice": "/workspace/input/a.pdf",
+    }
+    assert TriggerReceipt.objects.get(run=run).dedup_key == "event:z-1"
+
+    # フォームの値でも `inputs[名前]` は推奨の形式の inputs になる
+    form = urlencode({"inputs[vendor]": "ACME"})
+    res = _send(api_client, task, key, form, content_type="application/x-www-form-urlencoded")
+    assert (res.status_code, set(res.json()["inputs"])) == (400, {"invoice"})
+
+
+def test_file_inputs_need_files(api_client, integrator):
+    task, key = _file_task(api_client, integrator)
+    # JSONでは、ファイルの項目にURLや文字を送っても取り込まない
+    res = _send(api_client, task, key, {"inputs": {"vendor": "ACME", "invoice": "https://example.com/a.pdf"}})
+    assert (res.status_code, res.json()["code"], set(res.json()["inputs"])) == (400, "invalid_inputs", {"invoice"})
+    # 文字の項目にファイル
+    res = _send_multipart(
+        api_client,
+        task,
+        key,
+        {"inputs[vendor]": SimpleUploadedFile("v.txt", b"x"), "inputs[invoice]": SimpleUploadedFile("a.pdf", b"1")},
+    )
+    assert (res.status_code, set(res.json()["inputs"])) == (400, {"vendor"})
+    assert not Run.objects.exists()
+
+
+def test_multipart_limits_and_encoding(api_client, integrator, settings):
+    task, key = _file_task(api_client, integrator)
+    settings.YORIKI_ATTACHMENTS_PER_MESSAGE = 3
+    files = [SimpleUploadedFile(f"{i}.txt", b"x") for i in range(3)]
+    res = _send_multipart(api_client, task, key, {"inputs[vendor]": "ACME", "files": files})
+    assert (res.status_code, res.json()["code"]) == (400, "too_many_files")
+
+    # 不正なUTF-8の値は置換文字にせず断る（違う値が同じ値にならないように）
+    body = b'--B\r\nContent-Disposition: form-data; name="inputs[vendor]"\r\n\r\nAC\xffME\r\n--B--\r\n'
+    res = _send(api_client, task, key, body, content_type="multipart/form-data; boundary=B")
+    assert (res.status_code, res.json()["code"]) == (400, "invalid_form")
+    res = _send(api_client, task, key, b"x", content_type="multipart/form-data")
+    assert (res.status_code, res.json()["code"]) == (400, "invalid_form")
+    assert not Run.objects.exists()
 
 
 def test_text_payload_is_kept_as_a_text_file(api_client, integrator):

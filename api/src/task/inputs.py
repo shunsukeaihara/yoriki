@@ -2,10 +2,14 @@
 
 入力は、タスクの定義で型と取りうる値を決めた項目だけを受け取る（自由な依頼文は受けない。authorization.md §6）。
 値はプロンプトのテンプレートの `{{ inputs.名前 }}` に文字として埋め込むだけで、式やコードとして評価しない。
+型がファイルの項目は、受付時にファイルを /workspace/input に置き、値をそのパスにする（task/dispatch.py）。
 """
 
 import datetime
+import hashlib
 import math
+from dataclasses import dataclass
+from functools import cached_property
 from typing import Any
 
 from django.utils.translation import gettext as _
@@ -18,6 +22,22 @@ from .models import TaskInputType
 DEFAULT_MAX_LENGTH = 1000
 # 数値の入力の絶対値の上限
 MAX_NUMBER = 10**15
+
+
+@dataclass(eq=False)
+class InputFile:
+    """送られたファイル（手動実行・Webhookのmultipart）。`name` は送り元が付けた名前"""
+
+    name: str
+    content: bytes
+
+    @cached_property
+    def sha256(self) -> str:
+        return hashlib.sha256(self.content).hexdigest()
+
+    def describe(self) -> dict[str, Any]:
+        """payloadのファイル（JSON）に書く形"""
+        return {"file": self.name, "size": len(self.content), "sha256": self.sha256}
 
 
 def clean_inputs(definitions: list[dict[str, Any]], values: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
@@ -89,6 +109,12 @@ def _clean_choice(definition: dict[str, Any], value: Any) -> Any:
     return value
 
 
+def _clean_file(definition: dict[str, Any], value: Any) -> Any:
+    if not isinstance(value, InputFile):
+        raise ValueError(_("ファイルを送ってください"))
+    return value
+
+
 CLEANERS = {
     TaskInputType.STRING: _clean_string,
     TaskInputType.NUMBER: _clean_number,
@@ -96,6 +122,7 @@ CLEANERS = {
     TaskInputType.BOOLEAN: _clean_boolean,
     TaskInputType.DATE: _clean_date,
     TaskInputType.CHOICE: _clean_choice,
+    TaskInputType.FILE: _clean_file,
 }
 
 

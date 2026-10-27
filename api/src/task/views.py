@@ -136,8 +136,9 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
 
     @extend_schema(
         description="タスクの今の版で、手動で実行する（タスクを管理できる人。authorization.md §6）。"
-        "入力はタスクの定義で決めた項目だけを受け付け、自由な依頼文は受けない",
-        request=TaskRunCreateSerializer,
+        "入力はタスクの定義で決めた項目だけを受け付け、自由な依頼文は受けない。型がファイルの項目があれば "
+        "multipart/form-dataで送る（ファイルは項目の名前で付ける）",
+        request={"application/json": TaskRunCreateSerializer, "multipart/form-data": TaskRunCreateSerializer},
         responses={201: RunSerializer},
     )
     @action(detail=True, methods=["post"], serializer_class=TaskRunCreateSerializer)
@@ -349,11 +350,12 @@ HOOK_ERRORS = {
 @extend_schema(
     description="Webhookでタスクを起動する（design.md §4.2）。受け付けたら202とrun_idを返し、作業の完了を待たない。"
     "同じイベントID（入口で指定した場所・Idempotency-Key ヘッダー・推奨の形式の event_id）の再送には、前のRunを"
-    "200で返す",
+    "200で返す。ファイルは multipart/form-data で付ける（URLの取得はしない）",
     tags=["hooks/task"],
     request={
         "application/json": OpenApiTypes.OBJECT,
         "application/x-www-form-urlencoded": OpenApiTypes.OBJECT,
+        "multipart/form-data": OpenApiTypes.OBJECT,
         "text/plain": OpenApiTypes.STR,
     },
     parameters=[OpenApiParameter("Idempotency-Key", str, OpenApiParameter.HEADER, required=False)],

@@ -14,7 +14,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from artifact.models import Artifact, ArtifactKind, BlobObject, guess_content_type
+from artifact.models import Artifact, ArtifactKind, BlobObject, clean_filename, guess_content_type
 from conversation.dispatch import user_message_data
 from conversation.models import Conversation, ConversationMessage, ConversationPurpose, MessageRole
 from harness.connectors import fixed_catalog, is_allowed_for
@@ -27,7 +27,7 @@ from user.models import system_user
 
 from . import checks
 from .errors import CannotRun
-from .inputs import clean_inputs, render
+from .inputs import InputFile, clean_inputs, render
 from .models import TaskAction, TaskDefinition, TaskDefinitionRevision, TaskScope, TriggerBinding, TriggerReceipt
 from .webhook import Payload, PayloadError, dedup_key, input_values, parse_payload
 
@@ -57,13 +57,13 @@ def start_task_run(
     inputs: dict[str, Any] | Callable[[TaskDefinitionRevision], dict[str, Any]],
     actor,
     launch: RunLaunch,
-    files: Sequence[tuple[str, bytes]] = (),
+    files: Sequence[InputFile] = (),
 ) -> Run:
     """タスクの今の版でRunを始める。始められなければ CannotRun（入力の誤りは InvalidInputs）。
 
-    `inputs` は値か、ロックした後の今の版から値を作る関数（Webhookでは、項目の型を今の版で決めるため）。
-    `files` は /workspace/input に置くファイル（名前とbytes）。呼び出し元のtransactionの中で呼べば、Runの受付と同時に
-    確定させたいもの（TriggerReceipt）を同じtransactionで作れる"""
+    `inputs` は値か、ロックした後の今の版から値を作る関数（Webhookでは、項目の型を今の版で決めるため）。型がファイルの
+    項目の値は InputFile。`files` は項目の値のほかに /workspace/input に置くファイル（Webhookのpayload等）。呼び出し元の
+    transactionの中で呼べば、Runの受付と同時に確定させたいもの（TriggerReceipt）を同じtransactionで作れる"""
     with transaction.atomic():
         # 停止・版の更新と同時に受け付けないよう、タスクの行をロックする
         task = (
@@ -94,7 +94,7 @@ def _start(
     *,
     actor,
     launch,
-    files: Sequence[tuple[str, bytes]],
+    files: Sequence[InputFile],
 ) -> Run:
     profile = revision.model_profile
     version = profile.current_version
@@ -152,6 +152,7 @@ def _start(
         title=task.name[:200],
         last_posted=timezone.now(),
     )
+    attachments, inputs = _place_files(conversation, files, inputs, actor=actor)
     text = render(revision.prompt_template, inputs)
     message = ConversationMessage.objects.create(
         conversation=conversation, sender=actor, role=MessageRole.USER, body=text
@@ -195,8 +196,10 @@ def _start(
     )
     message.run = run
     message.save(update_fields=["run"])
-    if files:
-        _attach_files(message, run, files, actor=actor)
+    if attachments:
+        # Runの結果とログを見られる人（タスクを管理できる人）が、Runのファイルのapiで取得できるようにする
+        Artifact.objects.filter(pk__in=[a.pk for a in attachments]).update(run=run)
+        message.attachments.set(attachments)
     RunEvent.record(run, RunEventKind.STATUS, {"status": RunStatus.QUEUED}, actor=actor)
     RunEvent.record(
         run,
@@ -222,27 +225,33 @@ def _first_message(text: str, inputs: dict[str, Any], launch: RunLaunch) -> str:
     return "\n\n".join(parts)
 
 
-def _attach_files(message: ConversationMessage, run: Run, files: Sequence[tuple[str, bytes]], *, actor) -> None:
-    """ファイルを最初の発言の添付にする（/workspace/input に読取り専用で置く）。Runにも紐付け、Runの結果とログを
-    見られる人（タスクを管理できる人）がRunのファイルのAPIで取得できるようにする。入力とタスクを確かめた後に、Runと同じ
-    transactionで記録する（受け付けなかった要求の中身をDBに残さない。transactionが戻ったときの保存先のbytesは、
-    参照のないobjectとして清掃で消す）"""
-    conversation = message.conversation
+def _place_files(
+    conversation: Conversation, files: Sequence[InputFile], inputs: dict[str, Any], *, actor
+) -> tuple[list[Artifact], dict[str, Any]]:
+    """`files` と、型がファイルの項目の値を、最初の発言の添付（/workspace/input に読取り専用で置く）として保存し、
+    項目の値をそのパスにする。（添付、パスにした入力の値）。同じファイルを指す項目が複数あっても1つだけ置く。
+
+    入力とタスクを確かめた後に、Runと同じtransactionで記録する（受け付けなかった要求の中身をDBに残さない。
+    transactionが戻ったときの保存先のbytesは、参照のないobjectとして清掃で消す）"""
+    placed = list(dict.fromkeys([*files, *(v for v in inputs.values() if isinstance(v, InputFile))]))
+    if not placed:
+        return [], inputs
     artifacts = [
         Artifact.objects.create(
             owner=actor,
             conversation=conversation,
-            run=run,
-            blob=BlobObject.put(io.BytesIO(content)),
+            blob=BlobObject.put(io.BytesIO(file.content)),
             kind=ArtifactKind.ATTACHMENT,
-            name=name,
-            content_type=guess_content_type(name),
+            name=clean_filename(file.name),
+            content_type=guess_content_type(clean_filename(file.name)),
             expires=Artifact.default_expires(),
         )
-        for name, content in files
+        for file in placed
     ]
     Artifact.attach(conversation, artifacts)
-    message.attachments.set(artifacts)
+    paths = {id(file): artifact.describe()["path"] for file, artifact in zip(placed, artifacts, strict=True)}
+    values = {name: paths[id(v)] if isinstance(v, InputFile) else v for name, v in inputs.items()}
+    return artifacts, values
 
 
 def receive_webhook(
@@ -289,7 +298,7 @@ def receive_webhook(
             inputs=lambda task_revision: input_values(payload, revision.inputs, task_revision.inputs),
             actor=system_user(),
             launch=RunLaunch.WEBHOOK,
-            files=[(payload.file_name, payload.file_bytes)],
+            files=[InputFile(payload.file_name, payload.file_bytes), *payload.files],
         )
         TriggerReceipt.objects.create(
             binding=current,

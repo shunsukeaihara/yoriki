@@ -29,8 +29,21 @@ CLOSE = "</untrusted_content>"
 
 
 def close_cut(text: str) -> str:
-    """囲みの途中で切った文に、閉じる印を足す。中の値の開く印・閉じる印は崩してあるので、最後の開く印が最後の
+    """囲みの途中で切った文（`clip()` の先頭だけの結果。末尾に切った印 `…` がある）に、閉じる印を足す。
+    印の途中で切れていれば、その断片を除く。中の値の開く印・閉じる印は崩してあるので、最後の開く印が最後の
     閉じる印より後ろにあれば、囲みの中で切れている"""
-    if text.rfind(OPEN) > text.rfind(CLOSE):
-        return text + "\n" + CLOSE
+    body, marker = (text[:-2], text[-2:]) if text.endswith("\n…") else (text, "")
+    body = _drop_cut_tag(body)
+    if body.rfind(OPEN) > body.rfind(CLOSE):
+        return body + marker + "\n" + CLOSE
+    return body + marker
+
+
+def _drop_cut_tag(text: str) -> str:
+    start = text.rfind("<")
+    tail = text[start:]
+    if start < 0 or ">" in tail:
+        return text
+    if OPEN.startswith(tail) or tail.startswith(OPEN) or CLOSE.startswith(tail):
+        return text[:start]
     return text

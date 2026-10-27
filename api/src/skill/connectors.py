@@ -69,18 +69,31 @@ def unusable_reason(
     available: set[str] | None = None,
     connectors: dict[str, Connector] | None = None,
 ) -> str:
-    """利用者がこのRunでこの中身を使えない理由（使えれば空文字）。宣言したConnectorを使えないか、機密のSkillを機密で
-    ないRunで使おうとしたとき。`available` は、このRunのConnectorの一覧のID（宣言したものがなければ使えない）"""
+    """利用者がこのRunでこの中身を使えない理由（使えれば空文字）。宣言したConnectorを使えないか、宣言した操作・表が
+    Connectorの今の版にない（公開した後に外された）か、機密のSkillを機密でないRunで使おうとしたとき。`available` は、
+    このRunのConnectorの一覧のID（宣言したものがなければ使えない）"""
     connectors = load([content]) if connectors is None else connectors
     if not sensitive and is_sensitive(content, connectors):
         return _("機密のSkillは、個人情報・機密情報を扱う会話でだけ使えます")
-    for uid in declared_uids(content):
-        connector = connectors.get(uid)
+    for declaration in content.connectors or []:
+        connector = connectors.get(declaration["connector"])
         if connector is None or not connector.can(user, ConnectorAction.USE):
             return _("このSkillが使うConnectorを使えません")
-        if available is not None and uid not in available:
+        if available is not None and connector.uid not in available:
             return _("このSkillが使うConnector「%(name)s」を、この依頼では使えません") % {"name": connector.name}
+        if out_of_bounds(declaration, connector):
+            return _("このSkillが使う表・操作を、Connector「%(name)s」が今は公開していません") % {
+                "name": connector.name
+            }
     return ""
+
+
+def out_of_bounds(declaration: dict[str, Any], connector: Connector) -> list[str]:
+    """宣言した操作・表のうち、Connectorの今の版の境界の外にあるもの"""
+    version = connector.current_version
+    exposed = {table_key(t) for t in version.tables} if version is not None else set()
+    operations = [o for o in declaration["operations"] if o not in connector.operations]
+    return operations + [t for t in declaration.get("tables", []) if t not in exposed]
 
 
 def publish_errors(content: Any, skill, actor) -> list[str]:

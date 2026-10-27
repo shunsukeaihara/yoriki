@@ -9,7 +9,7 @@ from connector.factories import ConnectorFactory
 from connector.models import VERSION_FIELDS, ConnectorScope
 from skill.factories import SkillDraftFactory, SkillFactory, SkillVersionFactory
 from skill.models import Skill, SkillScope
-from user.factories import DepartmentFactory, DepartmentMembershipFactory
+from user.factories import DepartmentFactory, DepartmentMembershipFactory, grant
 
 from .test_api import SKILLS, _create, _department_editor, _draft, _publish, _skill_publisher
 
@@ -209,3 +209,18 @@ def test_skill_with_a_sensitive_draft_is_edited_only_in_confidential_work(api_cl
     api_client.force_login(app_user)
     [item] = api_client.get(SKILLS).json()["results"]
     assert not item["sensitive"] and item["edit_sensitive"]
+
+
+@pytest.mark.django_db
+def test_system_connectors_are_offered_only_to_those_who_can_view_them(api_client, app_user):
+    system = ConnectorFactory.create(scope=ConnectorScope.SYSTEM, version__tables=TABLES)
+    ConnectorFactory.create(name="全社の接続")
+    api_client.force_login(app_user)
+    assert [c["name"] for c in api_client.get("/api/app/v1/connectors/").json()["results"]] == ["全社の接続"]
+    assert api_client.get("/api/app/v1/connectors/?scope=4").json()["results"] == []
+    assert api_client.get(f"/api/app/v1/connectors/{system.uid}/").status_code == 404
+    api_client.force_login(grant(app_user, "connector.view_connector"))
+    assert [c["id"] for c in api_client.get("/api/app/v1/connectors/?scope=4").json()["results"]] == [system.uid]
+    # `@` の候補（scopeを付けない一覧）には出さない
+    assert [c["name"] for c in api_client.get("/api/app/v1/connectors/").json()["results"]] == ["全社の接続"]
+    assert api_client.get(f"/api/app/v1/connectors/{system.uid}/").status_code == 200

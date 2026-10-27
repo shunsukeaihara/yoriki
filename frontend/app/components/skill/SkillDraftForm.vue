@@ -7,7 +7,12 @@
  * 資料の追加・置換でも Draft の revision が増えるので、revision は v-model の Draft に合わせ続け、入力中の文は残す。
  * 中身を Draft から入れ直すのは、別の Draft を開いたときと reset() を呼んだときだけ
  */
-const props = defineProps<{ skillId: string; canChangeTools: boolean }>()
+const props = defineProps<{
+  skillId: string
+  canChangeTools: boolean
+  /** Skill の範囲と部門（宣言できる Connector の候補を絞る） */
+  skill?: Pick<Skill, 'scope' | 'departmentInfo'>
+}>()
 const api = useAPI()
 const toast = useToast()
 const { t } = useI18n()
@@ -135,6 +140,7 @@ defineExpose({ onSubmit, loading, canPost, dirty, reset })
     />
     <SkillConnectorsField
       v-model="form.connectors"
+      :skill="skill"
       :info="modelValue?.connectorsInfo ?? []"
       :error-messages="errors.connectors"
     />

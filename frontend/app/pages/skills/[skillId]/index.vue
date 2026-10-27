@@ -300,6 +300,7 @@ const onDelete = async () => {
                   ref="formRef"
                   v-model="draft"
                   :skill-id="skillId"
+                  :skill="skill"
                   :can-change-tools="canPublish"
                   @failed="onFailed"
                 />

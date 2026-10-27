@@ -1,10 +1,14 @@
 <script setup lang="ts">
 /**
- * Skill が使う Connector と操作・表の宣言（design.md §4.9.1）。候補は、編集する人が会話で使える Connector。
+ * Skill が使う Connector と操作・表の宣言（design.md §4.9.1）。候補は、編集する人が使える Connector のうち、Skill の
+ * 範囲で宣言できるもの（部門の Skill はその部門か全社、全社の Skill は全社、システムの Skill はシステム・部門・全社。
+ * authorization.md §5.4）。システムの Connector は、見る権限を持つ人にだけ返る。
  * 表は Connector の公開する表から選び、選ばなければ公開する表のどれでも使う。宣言は要件で、宣言した Connector を
  * 使えない人には、その Skill は出ない。範囲・境界・Tool は公開するときにサーバーが確かめる。
  */
 const props = defineProps<{
+  /** 宣言する Skill の範囲と部門 */
+  skill?: Pick<Skill, 'scope' | 'departmentInfo'>
   /** 保存済みの宣言の名前（候補にない Connector の名前を出すため） */
   info: readonly DeclaredConnector[]
   errorMessages?: string[]
@@ -13,7 +17,22 @@ const modelValue = defineModel<ConnectorDeclaration[]>({ required: true })
 const api = useAPI()
 const { t } = useI18n()
 
+const isSystem = computed(() => props.skill?.scope === SkillScope.SYSTEM)
 const { items: usable, fetchAll } = useFetchAll(() => api.connectors.list({ pageSize: 200 }))
+const { items: system, fetchAll: fetchSystem } = useFetchAll(() =>
+  api.connectors.list({ pageSize: 200, scope: SkillScope.SYSTEM }),
+)
+/** Skill の範囲で宣言できるか（サーバーも公開するときに確かめる） */
+const fits = (connector: AppConnector) => {
+  switch (props.skill?.scope) {
+    case SkillScope.DEPARTMENT:
+      return connector.scope === SkillScope.COMPANY || connector.departmentInfo?.id === props.skill.departmentInfo?.id
+    case SkillScope.COMPANY:
+      return connector.scope === SkillScope.COMPANY
+    default:
+      return true
+  }
+}
 // 宣言した Connector の公開する表（使えない Connector は null）
 const details = ref<Record<string, AppConnectorDetail | null>>({})
 const loadDetail = async (id: string) => {
@@ -26,7 +45,7 @@ const loadDetail = async (id: string) => {
   }
 }
 onMounted(async () => {
-  await fetchAll()
+  await Promise.all([fetchAll(), isSystem.value ? fetchSystem() : null])
   await Promise.all(modelValue.value.map((d) => loadDetail(d.connector)))
 })
 watch(
@@ -49,8 +68,8 @@ const tableItems = (id: string) =>
   (details.value[id]?.tables ?? []).map((table) => ({ value: table.name, title: table.name, description: table.description }))
 
 const choices = computed(() =>
-  usable.value
-    .filter((c) => !modelValue.value.some((d) => d.connector === c.id))
+  [...(isSystem.value ? system.value : []), ...usable.value]
+    .filter((c) => fits(c) && !modelValue.value.some((d) => d.connector === c.id))
     .map((c) => ({ value: c.id, title: c.isSensitive ? `${c.name}（${t('機密')}）` : c.name, description: c.description })),
 )
 const adding = ref<string | null>(null)

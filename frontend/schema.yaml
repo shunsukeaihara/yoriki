@@ -149,6 +149,11 @@ paths:
         description: Number of results to return per page.
         schema:
           type: integer
+      - in: query
+        name: scope
+        schema:
+          type: integer
+        description: 4ならシステムのConnector（見る権限を持つ人だけ）。省けば会話で使えるもの
       - name: search
         required: false
         in: query

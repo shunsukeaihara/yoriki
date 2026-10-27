@@ -247,3 +247,16 @@ def test_loaded_skill_names_connectors_as_the_run_lists_them(app_user):
     run = execute(run, FakeAdapter([calls(("c1", "skill", {"name": "取引先の照合"})), reply("ok")]))
     [result] = results(run, "skill")
     assert "販売管理 — datasource_query" in result["content"][0]["text"]
+
+
+@pytest.mark.django_db
+def test_skill_whose_declared_table_is_no_longer_published_is_not_used(app_user):
+    connector = ConnectorFactory.create(name="販売管理", version__tables=TABLES)
+    skill, _version = _declaring(app_user, connector)
+    run = _start(ConversationFactory.create(owner=app_user), skills=[skill])
+    content = {name: getattr(connector.current_version, name) for name in VERSION_FIELDS}
+    connector.revise(actor=connector.created_by, expected_version=1, **content | {"tables": []})
+    assert "取引先の照合" not in _catalog_names(_start(ConversationFactory.create(owner=app_user)))
+    run = execute(run, FakeAdapter([]))
+    assert run.status == RunStatus.FAILED
+    assert "公開していません" in run.error

@@ -4472,6 +4472,8 @@ export interface operations {
                 ordering?: string;
                 /** @description Number of results to return per page. */
                 page_size?: number;
+                /** @description 4ならシステムのConnector（見る権限を持つ人だけ）。省けば会話で使えるもの */
+                scope?: number;
                 /** @description A search term. */
                 search?: string;
             };

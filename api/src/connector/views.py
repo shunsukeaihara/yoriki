@@ -340,9 +340,23 @@ class ConnectorVersionViewSet(ConnectorMixin, ReadOnlyModelViewSet):
 @extend_schema(
     description="会話で使えるConnector（入力欄の `@` の候補と、Skillで宣言するConnectorの候補）", tags=["app/connector"]
 )
+@extend_schema_view(
+    list=extend_schema(
+        parameters=[
+            OpenApiParameter(
+                "scope",
+                int,
+                description="4ならシステムのConnector（見る権限を持つ人だけ）。省けば会話で使えるもの",
+            )
+        ]
+    )
+)
 class AppConnectorViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
     """依頼した人が会話で使えるConnector（部門のものは使える部門の人、全社のものは全員。authorization.md §5.2）。
-    機密のものも返す（ローカルLLMのモデルの会話でだけ使える。画面で出し分ける）"""
+    機密のものも返す（ローカルLLMのモデルの会話でだけ使える。画面で出し分ける）。
+
+    システムのConnectorは会話では使わないが、システムのSkillに宣言する候補として、見る権限を持つ人（システムの
+    Skillの管理者）に `scope=4` を付けたときだけ返す（authorization.md §5.4。詳細も同じ人だけ）"""
 
     permission_classes = [AppUser]
     queryset = Connector.objects.select_related("connection", "current_version", "department")
@@ -357,4 +371,12 @@ class AppConnectorViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
         return super().get_serializer_class()
 
     def get_queryset(self):
-        return super().get_queryset().filter(pk__in=Connector.objects.usable_by(self.request.user).values("pk"))
+        user = self.request.user
+        visible = Connector.objects.usable_by(user)
+        if user.has_perm("connector.view_connector"):
+            visible = visible | Connector.objects.in_service().filter(scope=ConnectorScope.SYSTEM)
+        qs = super().get_queryset().filter(pk__in=visible.values("pk"))
+        if self.action == "list":
+            system = self.request.query_params.get("scope") == str(ConnectorScope.SYSTEM)
+            qs = qs.filter(scope=ConnectorScope.SYSTEM) if system else qs.exclude(scope=ConnectorScope.SYSTEM)
+        return qs

@@ -272,6 +272,13 @@ def receive_webhook(
         revision = current.current_revision
         if current.suspended or revision is None:
             raise PayloadError("trigger_suspended", _("この入口は停止中です"), status=403)
+        # 本文を読んだ後に上限を下げられていても、今の版の上限で断る
+        if len(body) > revision.max_payload_bytes:
+            raise PayloadError(
+                "payload_too_large",
+                _("payloadが大きすぎます（上限 %(limit)s バイト）") % {"limit": revision.max_payload_bytes},
+                status=413,
+            )
         key = dedup_key(payload, revision.event_id_path, idempotency_key)
         if (existing := _received_run(current, key, payload, idempotency_key)) is not None:
             return existing, False

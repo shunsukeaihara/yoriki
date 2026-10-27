@@ -5,6 +5,7 @@ import json
 from urllib.parse import urlencode
 
 import pytest
+from rest_framework.exceptions import ValidationError
 
 from artifact.models import ArtifactKind, BlobObject
 from conversation.models import ConversationPurpose
@@ -12,6 +13,7 @@ from run.models import Run, RunEndReason, RunEvent, RunEventKind, RunLaunch, Run
 from task.dispatch import WEBHOOK_NOTE, receive_webhook
 from task.factories import TaskDefinitionFactory
 from task.models import TaskDefinition, TaskScope, TriggerBinding, TriggerBindingRevision, TriggerReceipt
+from task.serializers import TriggerBindingSerializer
 from task.webhook import PayloadError
 from user.factories import UserFactory, grant
 from user.models import User, system_user
@@ -437,3 +439,41 @@ def test_refused_requests_leave_no_payload(api_client, task, webhook):
     task.set_suspended(True)
     assert _send(api_client, task, key, _payload()).status_code == 409
     assert BlobObject.objects.count() == before
+
+
+def test_the_current_payload_limit_applies_after_locking(task, webhook):
+    binding, _key = webhook
+    authenticated = TriggerBinding.objects.get(pk=binding.pk)  # 上限が1MiBのときに認証した
+    binding.revise(actor=binding.created_by, expected_version=1, **{**_content(binding), "max_payload_bytes": 1024})
+    body = json.dumps(_payload(vendor="あ" * 400)).encode()
+    with pytest.raises(PayloadError) as exc:
+        receive_webhook(authenticated, body=body, content_type="application/json", idempotency_key=None)
+    assert exc.value.status == 413
+
+
+def test_creating_a_second_webhook_after_the_check_is_refused(api_client, integrator, task):
+    """作成前の確かめの後に、別の要求が同じタスクに入口を作った場合も、500ではなく入力の誤りにする"""
+    serializer = TriggerBindingSerializer(
+        data={"task": task.uid, "name": "A"}, context={"request": type("R", (), {"user": integrator})()}
+    )
+    assert serializer.is_valid(), serializer.errors
+    assert _create_binding(api_client, integrator, task).status_code == 201
+    with pytest.raises(ValidationError):
+        serializer.save(actor=integrator)
+    assert TriggerBinding.objects.alive().filter(task=task).count() == 1
+
+
+def _content(binding):
+    revision = binding.current_revision
+    return {name: getattr(revision, name) for name in ("event_id_path", "inputs", "max_payload_bytes")}
+
+
+def test_form_with_too_many_fields_is_refused(api_client, integrator, settings):
+    settings.DATA_UPLOAD_MAX_NUMBER_FIELDS = 3
+    task = TaskDefinitionFactory.create(scope=TaskScope.COMPANY, revision__inputs=[])
+    key = _create_binding(api_client, integrator, task).json()["key"]
+    api_client.logout()
+    body = urlencode({f"f{n}": "x" for n in range(4)})
+    res = _send(api_client, task, key, body, content_type="application/x-www-form-urlencoded")
+    assert (res.status_code, res.json()["code"]) == (400, "too_many_fields")
+    assert not Run.objects.exists()

@@ -534,6 +534,10 @@ class TriggerBindingSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data) -> TriggerBinding:
+        # 同じタスクへの同時の作成を、タスクの行のロックで直列にしてから確かめ直す（1対1）
+        task = TaskDefinition.objects.select_for_update(of=("self",)).get(pk=validated_data["task"].pk)
+        if task.deleted or TriggerBinding.objects.alive().filter(task=task, kind=TriggerKind.WEBHOOK).exists():
+            raise serializers.ValidationError({"task": _("このタスクには、もうWebhookの入口があります")})
         binding, key = TriggerBinding.create_with_revision(
             task=validated_data["task"],
             name=validated_data["name"],

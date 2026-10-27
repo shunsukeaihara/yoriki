@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import parse_qs
 
+from django.conf import settings
 from django.utils.translation import gettext as _
 
 from .models import TaskInputType
@@ -117,9 +118,15 @@ def parse_payload(body: bytes, content_type: str) -> Payload:
         )
     if media_type == "application/x-www-form-urlencoded":
         try:
-            parsed = parse_qs(body.decode("utf-8"), keep_blank_values=True, strict_parsing=False)
-        except (UnicodeDecodeError, ValueError):
+            text = body.decode("utf-8")
+        except UnicodeDecodeError:
             raise PayloadError("invalid_form", _("本文をフォームの値として読めません")) from None
+        # 短い項目を大量に詰めた本文で資源を使わせないよう、項目数をDjangoのフォームと同じ上限に限る
+        limit = settings.DATA_UPLOAD_MAX_NUMBER_FIELDS
+        try:
+            parsed = parse_qs(text, keep_blank_values=True, max_num_fields=limit)
+        except ValueError:
+            raise PayloadError("too_many_fields", _("フォームの項目は%(limit)s個までです") % {"limit": limit}) from None
         # 同じ名前が1つなら値、複数なら並びにする。Skillが読みやすいよう、ファイルはJSONにして置く
         data = {key: values[0] if len(values) == 1 else values for key, values in parsed.items()}
         canonical = _canonical(data)

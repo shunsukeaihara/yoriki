@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-27（#47 会話でのConnectorのPRの中。マージの前）
+- 最終更新：2026-10-27（#47 会話でのConnectorのPRの中。このコミットの後にマージする）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -117,7 +117,7 @@
 
 ## 4 次の作業
 
-**今の状態（2026-10-27）**：Skillの段階（下の1）は #41 までで揃った。下の2（Connectorとタスク・配信）は、①（Connectorの土台）が #42、②（Connectorの管理画面）が #44 で済んだ。そのあと利用者の指示で、③より先に権限の設計をやり直し、#45（文書だけ）で [authorization.md](authorization.md) にまとめ、#46 で実装を合わせた。権限は authorization.md を正とする（design.md §3.6・§4.1・§4.9.1・§10.0はその要約）。③（会話でのConnector）は、利用者と相談して「③a 会話でのConnector（#47）→ ③b Skillが宣言するConnectorと公開時の検証」に分けた。
+**今の状態（2026-10-27）**：Skillの段階（下の1）は #41 までで揃った。下の2（Connectorとタスク・配信）は、①（Connectorの土台）が #42、②（Connectorの管理画面）が #44 で済んだ。そのあと利用者の指示で、③より先に権限の設計をやり直し、#45（文書だけ）で [authorization.md](authorization.md) にまとめ、#46 で実装を合わせた。権限は authorization.md を正とする（design.md §3.6・§4.1・§4.9.1・§10.0はその要約）。③（会話でのConnector）は、利用者と相談して「③a 会話でのConnector（#47。済み）→ ③b Skillが宣言するConnectorと公開時の検証」に分けた。次は③b。
 
 **#45 の議論の要点**（authorization.md にすべて書いてある）：
 - 範囲は「所有と管理の単位」（個人・部門・全社・システム）。部門のものは1つの部門に属する。システムのSkill・Connector・タスクは基盤の管理が扱い、会話には出さない。
@@ -133,15 +133,19 @@
 
 - レビュー：`codex review --base main` は5回目で指摘なし。敵対的なレビューは5回で、指摘（招待の受け入れ・ユーザーの更新・所属の付け外しと権限の変更の競合）を直し、Skillの公開などの操作全般とリクエストの途中の権限の取り消しの競合という細部に移ったところで、利用者と相談して区切った。
 
-**③aで利用者と決めたこと**：機密のConnector（③bで機密のSkillも）は、機密の会話・タスクでだけ一覧に出し、使わせる。会話は途中で機密にできるが、一度機密にしたら戻せない（機密の会話はローカルLLMだけなので、機密の情報はクラウドのモデルへ渡らない）。出口にも機密のフラグを付け、機密の会話・タスクの結果は機密の結果を送ってよい出口にだけ送る（利用者の提案。design.md §4冒頭に書き、⑥で作る）。Skillに機密を入れるかは③bで決める（利用者は悩んでいる。案は下の次の作業）。
+**③aで利用者と決めたこと**：機密のConnector（③bで機密のSkillも）は、機密の会話・タスクでだけ一覧に出し、使わせる。会話は途中で機密にできるが、一度機密にしたら戻せない（機密の会話はローカルLLMだけなので、機密の情報はクラウドのモデルへ渡らない）。出口にも機密のフラグを付け、機密の会話・タスクの結果は機密の結果を送ってよい出口にだけ送る（利用者の提案。design.md §4冒頭に書き、⑥で作る。フラグの細かい形（誰が付けるか、既定値）は⑥の設計で利用者に確かめる）。Skillに機密を入れるかは③bで決める（利用者は悩んでいる。案は下の次の作業）。
 
 **③aで私（Claude）の判断で決めた点**（異論があれば直す）：
 - `datasource_*` は並べずに1つずつ実行する（harness.md §7.4の「並列：可」を改めた）。
 - `@` を指定したメッセージは、Skillの指定と同じく、実行中なら次の依頼にする。`/` で指定したSkillがConnectorのToolを許さなければ、`@` の指定を断る。
 - `datasource_query` の `params` は文字列の並び（全プロバイダで通るSchemaに型の組合せを書けないため。数や日付はSQLでCASTさせる）。
 - 管理画面の接続の確認・表の一覧・説明・試し実行も、エージェントと同じ接続の同時実行数の上限の中で行う（待つのは10秒まで）。
+- 本文が空で `@` だけの依頼は送れない（Skillは本文がなくても手順が依頼になるが、Connectorだけでは何を頼むかが決まらない）。Codexのレビューが何度か指摘したが、意図した仕様として残した。
+- Toolを使えないモデル（モデル設定の能力「Tool呼出し」がないもの）の会話では、`@` の一覧にConnectorを出さない（Toolを1つも出さないので、Connectorを使えない）。
 
-**次の作業**：このPRのマージの後、下の2の③b（Skillが宣言するConnectorと公開時の検証：Skillの版・Draftの項目、編集画面、`update_skill_draft`、`skill` の結果の `<connectors>`、公開時に宣言した操作がConnectorの境界の中にあるかの検証）。Skillの機密は、③bで決める。私の案：機密のConnectorを宣言したSkillは機密のSkillとして扱い（宣言から決まるので別のフラグは要らない）、機密の会話にだけ一覧に出す。資料そのものに個人情報を含むSkillのために、Skillの管理者が付けるフラグも足すかは、利用者と相談する。作業ブランチは `main` から新しく切る。
+- レビュー：`codex review --base main` は10回目で指摘なし。敵対的なレビューは5回で、指摘（leaseの延長、利用者の読み直し、枠の延長と失効、枠を待つ間の権限の変化、会話の更新の競合）を直し、細かい競合の詰めに移ったところで区切った。
+
+**次の作業**：下の2の③b（Skillが宣言するConnectorと公開時の検証：Skillの版・Draftの項目、編集画面、`update_skill_draft`、`skill` の結果の `<connectors>`、公開時に宣言した操作がConnectorの境界の中にあるかの検証）。Skillの機密は、③bで決める。私の案：機密のConnectorを宣言したSkillは機密のSkillとして扱い（宣言から決まるので別のフラグは要らない）、機密の会話にだけ一覧に出す。資料そのものに個人情報を含むSkillのために、Skillの管理者が付けるフラグも足すかは、利用者と相談する。作業ブランチは `main` から新しく切る。
 
 
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。上から順に着手する（利用者から別の指示がなければ、上から）。提案する順番：
@@ -183,6 +187,7 @@ cd frontend && pnpm install
 - 手元のDocker Desktopの仮想ディスク（37GB）が満杯になると、PostgreSQLが `No space left on device` で止まり、テストが大量にエラーになる。#36 ではビルドキャッシュ（`docker builder prune -f`）を消して空けた。`docker system df` で確かめる。
 - 環境変数はリポジトリルートの `.envrc`（direnv）。テストやmypyは、`.envrc` を読み込んだ状態で実行する。エージェントが `.envrc` を読めない設定のときは、`.envrc.example` の `export` の行と、新しく生成した `YORIKI_SECRET_ENCRYPTION_KEYS`（Fernet）・`YORIKI_SANDBOX_RUNTIME=runc` を一時ファイルに書き、リポジトリのルートでコマンドごとに `source` する（`$PWD` を使う行があるため）。`api/` で `source` すると保存先が `api/.objects` になり、既存の資料・添付の原本が見つからない（Sandboxの起動が「cannot prepare ... not found」で失敗する）。
 - Sandboxの補助コマンド（`sandbox/helper/`）を変えたら、イメージをビルドし直す（#33で `read` の画像の符号化を変えた）。手元のレジストリのRuntime Profileで会話を動かすときは、pushし直して管理画面で新しいdigestに更新する。`pytest -m sandbox` は `YORIKI_SANDBOX_TEST_IMAGE=yoriki-sandbox-docs:dev` を付けて動かす。
+- 会話でのConnectorを手元で確かめるとき（#47 で行った方法）：開発用のDB（`yoriki-dev-postgres-1`）の中に確認用のスキーマ（例 `connector_check`）と読取り用のロールを作り（`GRANT USAGE ON SCHEMA`・`GRANT SELECT`）、管理画面か `manage.py shell` でそのロールのPostgreSQLの接続と、範囲が全社のConnector（既定のスキーマを確認用のスキーマに）を登録する。偽のLLMは、要求の `tools` に `datasource_query` があれば `datasource_describe` → `datasource_query`（`params` は文字列）→ 結果の `file:` の行のパスを `read` → 文で答える、と決める70行ほどのOpenAI互換のスクリプトを `127.0.0.1:8765` で動かした（リポジトリには置いていない）。接続のパスワードは今の暗号化の鍵で暗号化されるので、`.envrc` と違う鍵で作った接続は確かめた後に消す（`rotate_secret_encryption` が読めない行で止まらないように）。機密のConnectorを試すときは、会話を機密で始めるか、会話の設定の盾のボタンで機密にする（ローカルLLMのモデルが要る。開発用のDBの「確認用の偽モデル」はローカルLLM）。今の開発用のDBにConnectorと接続は残っていない（どれも削除済み）。
 - ConnectorのAdapterのテスト（`connector/tests/test_adapters.py`）は、PostgreSQLの分はいつも動き、MySQL・SQL Serverの分は管理者の接続先（`YORIKI_CONNECTOR_TEST_MYSQL`・`YORIKI_CONNECTOR_TEST_SQLSERVER`。`.envrc.example`）を渡したときだけ動く。#42 では一時のコンテナ（`docker run -d --rm --name yoriki-connector-mysql -p 127.0.0.1:3307:3306 -e MYSQL_ROOT_PASSWORD=... mysql:8.0`、`docker run -d --rm --platform linux/amd64 --name yoriki-connector-mssql -p 127.0.0.1:1434:1433 -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD=... mcr.microsoft.com/mssql/server:2022-latest`）で試した。手元のmacOSのODBC Driver 18（18.7.1.1まで）は `/opt/homebrew/opt/openssl/lib/` のOpenSSL 3以前を探すので、Homebrewの `openssl` が4系だと読み込めない。`export DYLD_LIBRARY_PATH=/opt/homebrew/opt/openssl@3/lib` を付け、`uv run` ではなく `.venv/bin/python -m pytest ...` で動かす（`uv run` を通すと `DYLD_LIBRARY_PATH` がPythonに届かない）。本体のイメージ（`docker build -t yoriki-api:dev api`）の中で、リポジトリを読取り専用でmountして動かしてもよい（`--user root` で `pip install uv`・`UV_PROJECT_ENVIRONMENT=/tmp/venv uv sync --locked`・`uv run --no-sync pytest ...`。DBのホストは `host.docker.internal`）。手元の `mysql@8.4`（Homebrew）は利用者のものなので使わない。
 - 画面をブラウザで確かめるときは、api（上記）と `cd frontend && pnpm dev` を起動し、Playwright（Python）で操作する。手元のブラウザのキャッシュ（chromium-1208）に合う版は `uv run --no-project --with playwright==1.58.0 python <script>`。基盤管理者は `/login?method=password` でログインし、`storage_state` を保存して使い回す。SSOの社員はパスワードでログインできないので、`manage.py shell` でその社員のセッションを作り（`BACKEND_SESSION_KEY` は `utils.backends.PasswordBackend`）、Cookie `sessionid` に入れる。開発用のDBには、#35 で使った基盤管理者 `skill-admin@example.co.jp`（パスワード `check-pass-123`）、社員 `skill-member@example.co.jp`（部門「経理部」の所属とGroup「部門のSkill編集者」。以前の「編集」の役割の代わり）、委任したユーザー管理者 `user-admin@example.co.jp`（Group「ユーザー管理者」。パスワードはないので、セッションを作って使う）、システムのSkill「部門横断の照合（確認用）」（未公開）、部門のSkill「請求書の照合」（版3まで）が残っている。
 - 手元のmacOS（Node.js 26.12.1）では、フロントエンドの単体テストのうちコンポーネントをマウントしないファイル（`test/nuxt/composables/`、`api/client.test.ts` 等）が、Nuxtの環境の準備で止まって「Hook timed out」になる（`main` でも同じ。CIでは通る。原因は未調査）。コンポーネントのテストのファイルと一緒に `pnpm vitest run <ファイル>` で動かすと、同じ実行の中では通ることがある。

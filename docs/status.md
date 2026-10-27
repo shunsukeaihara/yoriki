@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-27（⑤a タスクの定義と版・タスクのRun、ブランチ `feature/task-definition` の中）
+- 最終更新：2026-10-27（⑤a タスクの定義と版・タスクのRun、ブランチ `feature/task-definition` のPRの中。このコミットの後にマージする）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -116,14 +116,14 @@
 - 接続の同時実行数・1分あたりの要求数の上限は、項目があるだけで、まだ守らせていない（Runnerの段階）。
 - 契約テストの代表的なコマンドは111件。harness.md §8.5の目標（数百）へ、Skillで使われたコマンドから増やす。
 - 認証プロキシの裏に置く場合は、前段のnginxが利用者のIPアドレスを `CF-Connecting-IP` 等で解決して `X-Forwarded-For` を上書きしているかを、導入先で確かめる（deployment.md §8.6）。解決していないと、ログインの試行回数の制限で、多くの利用者が同じIPアドレスとして数えられる。
-- 信頼しない内容の囲み：harness.md §6.3は、添付・コマンドの出力・ファイルの内容も `<untrusted_content>` で囲むと定めるが、今囲んでいるのはConnectorの結果の行とタスクの入力の値だけ（`read`・`grep`・`shell` 等のTool結果は囲んでいない。⑤aのレビューで分かった。進め方を利用者に確かめる）。
+- 信頼しない内容の囲み：harness.md §6.3は、添付・コマンドの出力・ファイルの内容も `<untrusted_content>` で囲むと定めるが、今囲んでいるのはConnectorの結果の行とタスクの入力の値だけ（`read`・`grep`・`shell` 等のTool結果は囲んでいない。⑤aのレビューで分かった。利用者と決めて、別のPRで直す）。
 - ハーネスで後回しにしたもの：予算の上限の強制（今は利用量を記録するだけ。クオータの設定とあわせて作る）、圧縮の1・2段（大きいTool結果の退避と置き換え。harness.md §9.1）、添付ファイル（Artifactの段階）。
 - フロントエンドのSPAを静的なファイルにして `yoriki-api` のイメージに入れ、`frontend` のコンテナをなくす（`ssr: false` なのでNode.jsのサーバーは要らない。アプリのイメージが1つになる）。
 - 招待のリンクはYorikiからメールで送らない（画面でコピーして渡す）。メールの送信は必要になった時点で追加する（design.md §10.0）。
 
 ## 4 次の作業
 
-**今の状態（2026-10-27）**：下の2の⑤（タスクとWebhookでの起動）を、利用者と決めたとおり⑤aと⑤bに分けて進めている。⑤a（タスクの定義と版・タスクのRun）はブランチ `feature/task-definition` で作業中（backendだけ）。次は⑤b（Webhookの入口）。③b（Skillが宣言するConnectorと機密のSkill）は #48 でマージ済み。Skillの段階（下の1）は #41 までで揃った。下の2（Connectorとタスク・配信）は、①（Connectorの土台）が #42、②（Connectorの管理画面）が #44、③a（会話でのConnector）が #47、③bが #48 で済んだ。#44 と #47 の間に、利用者の指示で権限の設計をやり直し、#45（文書だけ）で [authorization.md](authorization.md) にまとめ、#46 で実装を合わせた。権限は authorization.md を正とする（design.md §3.6・§4.1・§4.9.1・§10.0はその要約）。
+**今の状態（2026-10-27）**：下の2の⑤（タスクとWebhookでの起動）を、利用者と決めたとおり⑤aと⑤bに分けて進めている。⑤a（タスクの定義と版・タスクのRun。backendだけ）はブランチ `feature/task-definition` で、レビューを終えてPRにした。次は⑤b（Webhookの入口）。③b（Skillが宣言するConnectorと機密のSkill）は #48 でマージ済み。Skillの段階（下の1）は #41 までで揃った。下の2（Connectorとタスク・配信）は、①（Connectorの土台）が #42、②（Connectorの管理画面）が #44、③a（会話でのConnector）が #47、③bが #48 で済んだ。#44 と #47 の間に、利用者の指示で権限の設計をやり直し、#45（文書だけ）で [authorization.md](authorization.md) にまとめ、#46 で実装を合わせた。権限は authorization.md を正とする（design.md §3.6・§4.1・§4.9.1・§10.0はその要約）。
 
 **#45 の議論の要点**（authorization.md にすべて書いてある）：
 - 範囲は「所有と管理の単位」（個人・部門・全社・システム）。部門のものは1つの部門に属する。システムのSkill・Connector・タスクは基盤の管理が扱い、会話には出さない。
@@ -180,7 +180,9 @@
 - 利用者と決めたこと：データがコンテキストに入るときは、利用者の指示ではないデータだと分かるように囲う。入力の値は、テンプレートに埋め込んだものも添えたJSONも `<untrusted_content>` で囲む（`harness/untrusted.py`）。モデル設定の新しい版が固定したeffortを受け付けなくなったら、受付時に黙って既定のeffortにする（会話と同じ）。
 - タスクの停止・削除・個人のタスクの持ち主の無効化で止めたRunの終わり方は「タスクを続けられない」（Skillを使えないこととは分けた）。
 
-**次の作業**：⑤aのレビュー（`codex review --base main` と敵対的なレビュー）とPR。その後に⑤b（Webhookの入口。backend）。⑤bの作業ブランチは `main` から新しく切る。⑤bで決めることの候補（利用者に確かめる）：Webhookで起動するRunの実行主体（`Run.owner` は必須。入口を作った人・最後にタスクを保存した人・システムのユーザーのどれにするか）、入口の管理のpermission（連携の管理者。authorization.md §5.5・§11）、推奨の形式（`event_id`・`message`・`inputs`・`files`）を最初から受けるか。
+- レビュー：`codex review --base main` は5回目で指摘なし。敵対的なレビューは5回で、指摘（再開時のToolのやり直し、SSEの接続中の権限、Runの成果物、部門の無効化、業務結果のSchemaとモデルのTool（保存時・受付時）、数値の境界、どのSkillも使わないTool、個人のタスクの手動実行、停止で順番待ちのRunに停止を依頼、呼出しの間の確認、入力の値の囲み）を直し、利用者と相談して区切った。
+
+**次の作業**：⑤aのPRのマージの指示を待つ。その後は、Tool結果を信頼しない内容として囲む別のPR（§3の「信頼しない内容の囲み」）と、⑤b（Webhookの入口。backend）。⑤bの作業ブランチは `main` から新しく切る。⑤bで決めることの候補（利用者に確かめる）：Webhookで起動するRunの実行主体（`Run.owner` は必須。入口を作った人・最後にタスクを保存した人・システムのユーザーのどれにするか）、入口の管理のpermission（連携の管理者。authorization.md §5.5・§11）、推奨の形式（`event_id`・`message`・`inputs`・`files`）を最初から受けるか。
 
 
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。上から順に着手する（利用者から別の指示がなければ、上から）。提案する順番：

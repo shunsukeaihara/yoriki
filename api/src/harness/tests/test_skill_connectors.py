@@ -125,6 +125,19 @@ def test_run_stops_when_a_declared_connector_becomes_sensitive(app_user):
 
 
 @pytest.mark.django_db
+def test_run_stops_when_the_user_can_no_longer_use_a_declared_connector(app_user):
+    connector = ConnectorFactory.create(name="販売管理", version__tables=TABLES)
+    skill, _version = _declaring(app_user, connector)
+    run = _start(ConversationFactory.create(owner=app_user), skills=[skill])
+    connector.is_active = False
+    connector.save(update_fields=["is_active"])
+    run = execute(run, FakeAdapter([]))
+    assert run.status == RunStatus.FAILED
+    assert run.end_reason == RunEndReason.SKILL
+    assert "Connector" in run.error
+
+
+@pytest.mark.django_db
 def test_sensitive_skill_is_edited_only_in_a_confidential_conversation(app_user, local_model):
     skill = SkillFactory.create(name="人事の照会", created_by=app_user)
     SkillDraftFactory.create(skill=skill, is_sensitive=True)

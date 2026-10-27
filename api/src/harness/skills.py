@@ -226,9 +226,9 @@ def loaded_skills(run: Run) -> list[tuple[dict[str, Any], Skill | None, SkillCon
 
 
 def revoked_skill(run: Run) -> str:
-    """Runが使うSkillのうち、停止・削除されたか、利用者が使えなくなったか、機密でないRunで機密のSkillになった
-    （宣言したConnectorに機密のフラグが付いた）ものがあれば、その理由。過去の版でも、実行時には拒否する
-    （design.md §3.2・§4冒頭）"""
+    """Runが使うSkillのうち、停止・削除されたか、利用者が使えなくなったか（宣言したConnectorを使えなくなったものも）、
+    機密でないRunで機密のSkillになった（宣言したConnectorに機密のフラグが付いた）ものがあれば、その理由。過去の版でも、
+    実行時には拒否する（design.md §3.2・§4冒頭・§4.9.1）"""
     for entry, skill, version in loaded_skills(run):
         if skill is None or skill.deleted:
             reason = _("削除されました")
@@ -236,8 +236,10 @@ def revoked_skill(run: Run) -> str:
             reason = _("停止中です")
         elif not skill.can(run.owner, SkillAction.VIEW):
             reason = _("使う権限がありません")
-        elif version is not None and not run.handles_sensitive_data and skill_connectors.is_sensitive(version):
-            reason = _("機密のSkillになりました")
+        elif version is not None and (
+            problem := skill_connectors.unusable_reason(version, run.owner, sensitive=run.handles_sensitive_data)
+        ):
+            reason = problem
         else:
             continue
         return _("Skill「%(name)s」を使えなくなったので、作業を止めました（%(reason)s）。") % {

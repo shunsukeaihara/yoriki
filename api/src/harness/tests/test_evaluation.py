@@ -5,6 +5,8 @@ from typing import Any
 
 import pytest
 
+from connector.factories import ConnectorFactory
+from connector.models import ConnectorScope
 from conversation import evaluation as evaluation_module
 from conversation.dispatch import MessageMode, post_message
 from conversation.evaluation import cancel_evaluation, match_expected, progress_evaluation, start_evaluation
@@ -244,6 +246,15 @@ def test_sensitive_skill_is_evaluated_with_a_local_model_as_confidential_work(ap
         assert run is not None
         assert run.handles_sensitive_data and run.manifest["fixed"]["handles_sensitive_data"]
         assert run.conversation.handles_sensitive_data
+
+
+@pytest.mark.django_db
+def test_skill_declaring_a_system_connector_is_not_evaluated_yet(app_user, model):
+    connector = ConnectorFactory.create(scope=ConnectorScope.SYSTEM)
+    declaration = {"connector": connector.uid, "operations": ["datasource_query"], "tables": []}
+    skill = skill_with_draft(app_user, tools=["datasource_query"], connectors=[declaration])
+    with pytest.raises(CannotEvaluate, match="システムのConnector"):
+        start_evaluation(skill, cases=[case(skill)], actor=app_user, model_version=model.current_version)
 
 
 @pytest.mark.django_db

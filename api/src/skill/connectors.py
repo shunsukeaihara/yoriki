@@ -155,3 +155,10 @@ def skill_is_sensitive(skill) -> bool:
         contents.append(skill.current_version)
     connectors = load(contents)
     return any(is_sensitive(c, connectors) for c in contents)
+
+
+def declares_system_connector(content: Any) -> bool:
+    connectors = load([content])
+    return any(
+        (c := connectors.get(uid)) is not None and c.scope == ConnectorScope.SYSTEM for uid in declared_uids(content)
+    )

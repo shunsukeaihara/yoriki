@@ -184,3 +184,18 @@ def test_connector_detail_returns_published_tables_to_users_who_can_use_it(api_c
     assert res.json()["operations"] == ["datasource_describe", "datasource_query"]
     assert "connection" not in res.json()
     assert api_client.get(f"/api/app/v1/connectors/{hidden.uid}/").status_code == 404
+
+
+@pytest.mark.django_db
+def test_rollback_checks_the_declarations_of_the_old_version(api_client, app_user):
+    connector = ConnectorFactory.create(version__tables=TABLES)
+    skill = SkillFactory.create(created_by=app_user)
+    SkillVersionFactory.create(skill=skill, tools=["datasource_query"], connectors=[_declaration(connector)])
+    SkillVersionFactory.create(skill=skill, number=2)
+    # 第1版が使う表を、Connectorが公開しなくなった
+    content = {name: getattr(connector.current_version, name) for name in VERSION_FIELDS}
+    connector.revise(actor=app_user, expected_version=1, **{**content, "tables": TABLES[1:]})
+    api_client.force_login(app_user)
+    res = api_client.post(f"{SKILLS}{skill.uid}/rollback/", {"number": 1, "expected_version": 2}, format="json")
+    assert res.status_code == 400
+    assert "切り戻せません" in str(res.json())

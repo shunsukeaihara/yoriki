@@ -485,6 +485,13 @@ class Skill(models.Model):
             raise InvalidDraft(_("切り戻す版がありません"))
         if source.pk == current.current_version_id:
             raise InvalidDraft(_("公開中の版には切り戻せません"))
+        # 過去の版の宣言も、今のConnectorの境界と切り戻す人の権限で確かめる（公開と同じ。design.md §4.9.1）
+        from .connectors import publish_errors  # noqa: PLC0415  skill.connectorsがこのモジュールを使うため
+
+        if errors := publish_errors(source, current, actor):
+            raise InvalidDraft(
+                _("この版が使うConnectorに問題があるので、切り戻せません：%(errors)s") % {"errors": "／".join(errors)}
+            )
 
         previous = current.current_version
         version = SkillVersion.objects.create(

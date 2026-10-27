@@ -81,7 +81,8 @@ def _output(context: ToolContext, job: Job) -> str:
         failed.extend([] if ok else [True])
         return ok
 
-    text = limited(context, shown, head_ratio=HEAD_RATIO, spill_to=save)
+    # コマンドの出力は信頼しない内容として囲む（harness.md §6.3）
+    text = limited(context, shown, head_ratio=HEAD_RATIO, spill_to=save, source="command_output")
     if failed:
         # 切った部分を後で読めるよう、読んだ位置を進めない
         return text + (

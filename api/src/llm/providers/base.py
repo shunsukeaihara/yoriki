@@ -38,6 +38,8 @@ class ToolCall:
 @dataclass(frozen=True)
 class TextPart:
     text: str
+    # 画像に付く文（見出し、信頼しない内容の囲みの印）。Toolの結果の画像を文と別に送るAPIでは、画像と一緒に移す
+    with_media: bool = False
 
 
 @dataclass(frozen=True)

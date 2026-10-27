@@ -16,6 +16,7 @@ from skill.models import (
     SkillEvaluationCase,
 )
 
+from ..untrusted import untrusted
 from .base import Effect, Tool, ToolContext, ToolResult
 from .skill_admin import NO_TARGET, _target
 
@@ -177,23 +178,31 @@ def _case_lines(result) -> list[str]:
         state = "FAILED: " + "; ".join(_problems(check))
     lines = [f'- "{result.case_name}"{required}: {state}']
     if result.verdict is not None:
-        lines.append(f"  AI judge: the draft is {_verdict_word(result.verdict)} — {result.judge_reason}")
+        # 判定の理由は評価のRunの回答を読んだモデルが書くので、データとして囲む
+        reason = untrusted(result.judge_reason, "evaluation_judge")
+        lines.append(f"  AI judge: the draft is {_verdict_word(result.verdict)} — {reason}")
     elif result.judge_note:
-        lines.append(f"  AI judge: {result.judge_note}")
+        # 判定に失敗したときは、プロバイダーのエラー文を含む
+        lines.append(f"  AI judge: {untrusted(result.judge_note, 'evaluation_judge')}")
     if reply := (check.get("reply") or "").strip():
         excerpt = reply if len(reply) <= REPLY_EXCERPT else reply[:REPLY_EXCERPT] + "…"
-        lines.append(f"  Draft's final reply: {excerpt}")
+        # 評価のRunの回答は、読んだファイル等の内容を含みうるので、信頼しない内容として囲む（harness.md §6.3）
+        lines.append(f"  Draft's final reply: {untrusted(excerpt, 'evaluation_reply')}")
     return lines
 
 
 def _problems(check: dict[str, Any]) -> list[str]:
     problems = []
     if not check.get("completed"):
-        problems.append(f"the work did not complete ({check.get('error') or check.get('status_display', '')})")
+        # Runの終わりの理由は、プロバイダーのエラー文を含みうる
+        reason = untrusted(str(check.get("error") or check.get("status_display", "")), "evaluation_run")
+        problems.append(f"the work did not complete ({reason})")
     if check.get("result_required") and not check.get("result_submitted"):
         problems.append("no result was submitted")
     for mismatch in (check.get("mismatches") or [])[:5]:
-        problems.append(f"{mismatch['path']}: expected {mismatch['expected']!r}, got {mismatch.get('actual')!r}")
+        # 実際の値は評価のRunが出した業務結果なので、データとして囲む
+        actual = untrusted(repr(mismatch.get("actual")), "evaluation_result")
+        problems.append(f"{mismatch['path']}: expected {mismatch['expected']!r}, got {actual}")
     return problems or ["unknown"]
 
 

@@ -98,7 +98,12 @@ def answer_result(
         "name": "ask_user",
         "content": [{"type": "text", "text": text}],
         "is_error": False,
-        "value": {"clarification": clarification.uid, "answers": clarification.answers},
+        # 圧縮で利用者の回答だけを原文のまま引用するのに、補足も値に残す（harness.md §9.3）
+        "value": {
+            "clarification": clarification.uid,
+            "answers": clarification.answers,
+            "comment": clarification.comment,
+        },
     }
 
 

@@ -1108,6 +1108,8 @@ class Runner:
                     "from": chosen.start,
                     "to": chosen.end,
                     "text": compaction.summary_text(response.text, chosen.user_texts),
+                    # 次の圧縮で、この原文の引用を引き継ぐ
+                    "quotes": chosen.user_texts,
                 },
             )
             UsageLedger.record(

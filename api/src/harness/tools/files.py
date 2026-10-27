@@ -11,11 +11,16 @@ from typing import Any
 from llm.providers.base import ImagePart, Part, TextPart
 
 from ..sandbox import WORKSPACE, workspace_path
+from ..untrusted import CLOSE, opening, untrusted
 from .base import Effect, Tool, ToolContext, ToolResult
-from .output import limited
+from .output import estimate_tokens, limited
 
 WRITABLE = ("/workspace/work", "/workspace/output")
 PATH_DESCRIPTION = "Absolute path inside /workspace, e.g. /workspace/input/invoice.pdf."
+# 見出しに出すページの一覧の上限（文字）
+PAGE_LIST_LIMIT = 200
+# CSVの見出しに出す列名の上限（文字）。Tool結果の上限の最小（1,000 token）の中に見出しが収まるように
+CSV_COLUMNS_LIMIT = 500
 
 
 def _always(_args: dict[str, Any]) -> bool:
@@ -87,13 +92,18 @@ def _read_header(result: dict[str, Any], images: bool) -> list[str]:
         lines.append(f"Showing {span}.")
     if kind == "csv" and result.get("csv"):
         info = result["csv"]
+        # 列名はファイルの中身なので囲む（harness.md §6.3）。長ければ切る
+        columns = str(info.get("columns"))
+        if len(columns) > CSV_COLUMNS_LIMIT:
+            columns = columns[:CSV_COLUMNS_LIMIT] + "…"
         lines.append(
-            f"CSV: delimiter {info.get('delimiter')!r}, {info.get('rows')} rows, columns {info.get('columns')}"
+            f"CSV: delimiter {info.get('delimiter')!r}, {info.get('rows')} rows, columns "
+            + untrusted(columns, f"file:{result['path']}")
         )
     if kind == "pdf":
-        lines.append(f"PDF: {result.get('total_pages')} pages; showing pages {result.get('pages')}.")
+        lines.append(f"PDF: {result.get('total_pages')} pages; showing pages {_page_list(result.get('pages'))}.")
         if scanned := result.get("pages_without_text"):
-            lines.append(f"Pages without text (scanned images): {scanned}.")
+            lines.append(f"Pages without text (scanned images): {_page_list(scanned)}.")
             lines.append(_scanned_notice(scanned, [i.get("page") for i in result.get("images", [])], images))
     if kind == "image":
         if images:
@@ -102,6 +112,20 @@ def _read_header(result: dict[str, Any], images: bool) -> list[str]:
         else:
             lines.append("The current model does not accept images, so only the format and size are shown.")
     return lines
+
+
+def _page_list(pages: Any) -> str:
+    """ページの一覧を、続くページを範囲にまとめて短くする（見出しもTool結果の上限に含めるため。harness.md §7.7）"""
+    if not isinstance(pages, list) or not all(isinstance(p, int) for p in pages):
+        return str(pages)[:PAGE_LIST_LIMIT]
+    runs: list[str] = []
+    for page in sorted(set(pages)):
+        if runs and runs[-1].split("-")[-1] == str(page - 1):
+            runs[-1] = f"{runs[-1].split('-')[0]}-{page}"
+        else:
+            runs.append(str(page))
+    text = ", ".join(runs)
+    return text if len(text) <= PAGE_LIST_LIMIT else text[:PAGE_LIST_LIMIT] + "…"
 
 
 def _scanned_notice(scanned: list[int], shown: list[int], images: bool) -> str:
@@ -114,12 +138,14 @@ def _scanned_notice(scanned: list[int], shown: list[int], images: bool) -> str:
     # 画像だけを別にまとめて送るAPI（Chat Completions、Gemini）もあるので、並びの順をここで示す
     notice = f"The images of pages {shown} follow, in this order."
     if rest:
-        notice += f" Pages {rest} are not shown; read them with pages (up to 5 images per call)."
+        notice += f" Pages {_page_list(rest)} are not shown; read them with pages (up to 5 images per call)."
     return notice
 
 
 def _images(result: dict[str, Any]) -> list[Part]:
-    """補助コマンドが返した画像（base64）。PDFのページには、どのページかの文を前に置く"""
+    """補助コマンドが返した画像（base64）。PDFのページには、どのページかの文を前に置く。画像もファイルの中身なので、
+    信頼しない内容として囲む（harness.md §6.3）。囲みの印と見出しは画像に付く文にする（画像を文と別に送るAPIでも
+    一緒に移す）"""
     parts: list[Part] = []
     for image in result.get("images", []):
         try:
@@ -127,9 +153,12 @@ def _images(result: dict[str, Any]) -> list[Part]:
         except (KeyError, binascii.Error):
             continue
         if image.get("page"):
-            parts.append(TextPart(f"[page {image['page']}]"))
+            parts.append(TextPart(f"[page {image['page']}]", with_media=True))
         parts.append(ImagePart(image.get("mime", "image/png"), data))
-    return parts
+    if not parts:
+        return []
+    source = f"file:{result['path']}"
+    return [TextPart(opening(source), with_media=True), *parts, TextPart(CLOSE, with_media=True)]
 
 
 def _read_footer(result: dict[str, Any]) -> list[str]:
@@ -152,14 +181,34 @@ def execute_read(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
             request[name] = arguments[name]
     result = call_helper(context, "read", request)
     if not result.get("ok"):
-        return helper_error(result)
-    text = "\n".join([*_read_header(result, images), "", result.get("text", ""), *_read_footer(result)])
+        # 読めなかった理由はファイルの中身（シート名、壊れたファイルの解析の誤り）を含みうるので囲む
+        error = result.get("error") or {}
+        message = error.get("message") or "unknown"
+        return ToolResult.error(
+            f"The file could not be read ({error.get('code', 'unknown')}): {untrusted(message, f'file:{path}')}"
+        )
     hint = "Read a smaller part with offset/limit (or pages, or sheet and range)."
+    header = _read_header(result, images)
+    content = result.get("text", "")
+    # ファイルの中身は信頼しない内容として囲む。見出しと続きの案内は囲みの外に書く（harness.md §6.3）
+    body = (
+        limited(
+            context,
+            content,
+            head_ratio=1,
+            hint=hint,
+            source=f"file:{result['path']}",
+            reserve=estimate_tokens("\n".join(header)),
+        )
+        if content.strip()
+        else ""
+    )
+    text = "\n".join([*header, "", body, *_read_footer(result)])
     meta: dict[str, Any] = {"path": result["path"], "kind": result.get("kind")}
     if shown := result.get("images"):
         meta["images"] = [{k: i.get(k) for k in ("page", "mime", "width", "height") if i.get(k)} for i in shown]
     return ToolResult(
-        (TextPart(limited(context, text, head_ratio=1, full_text=result.get("text", ""), hint=hint)), *_images(result)),
+        (TextPart(text.rstrip("\n")), *_images(result)),
         value=file_value(result),
         meta=meta,
     )
@@ -275,7 +324,9 @@ def execute_edit(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     if not result.get("ok"):
         return helper_error(result)
     count = result.get("replacements", 0)
-    text = f"Replaced {count} occurrence{'s' if count != 1 else ''} in {result['path']}.\n{result.get('snippet', '')}"
+    text = f"Replaced {count} occurrence{'s' if count != 1 else ''} in {result['path']}."
+    if snippet := result.get("snippet", ""):
+        text += "\n" + untrusted(snippet, f"file:{result['path']}", block=True)
     return ToolResult.text(text, value=file_value(result), meta={"path": result["path"]})
 
 
@@ -374,14 +425,17 @@ def execute_grep(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         return ToolResult.text(f"No matches for {arguments['pattern']!r} in {base}.", value=value)
     if output == "files":
         lines = [f"{f['path']}: {f['matches']}" for f in result.get("files", [])]
+        body = limited(context, "\n".join(lines), head_ratio=1)
     elif output == "lines":
+        # 一致した行はファイルの中身なので、信頼しない内容として囲む（harness.md §6.3）
         lines = [f"{line['path']}:{line['line']}: {line['text']}" for line in result.get("lines", [])]
+        body = limited(context, "\n".join(lines), head_ratio=1, source="grep")
     else:
-        lines = []
+        body = ""
+    text = "\n".join(part for part in [summary, body] if part)
     if result.get("truncated"):
-        lines.append("[results truncated at 250; narrow the pattern, path or include]")
-    text = "\n".join([summary, *lines])
-    return ToolResult.text(limited(context, text, head_ratio=1), value=value)
+        text += "\n[results truncated at 250; narrow the pattern, path or include]"
+    return ToolResult.text(text, value=value)
 
 
 GREP = Tool(

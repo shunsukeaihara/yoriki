@@ -150,7 +150,8 @@ class Artifact(models.Model):
         related_name="artifacts",
         verbose_name=_("会話"),
     )
-    # 成果物・Connectorの結果を作ったRun。添付では空
+    # 成果物・Connectorの結果を作ったRun。会話の添付では空で、タスクのRunが受け取ったファイル（Webhookのpayload）では
+    # そのRun
     run = models.ForeignKey(
         "run.Run", on_delete=models.CASCADE, null=True, blank=True, related_name="artifacts", verbose_name=_("実行")
     )

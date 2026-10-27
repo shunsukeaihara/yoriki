@@ -8,6 +8,7 @@ import pytest
 from rest_framework.exceptions import ValidationError
 
 from artifact.models import ArtifactKind, BlobObject
+from artifact.tests.test_api import body_of
 from conversation.models import ConversationPurpose
 from run.models import Run, RunEndReason, RunEvent, RunEventKind, RunLaunch, RunStatus, RunTrigger
 from task.dispatch import WEBHOOK_NOTE, receive_webhook
@@ -477,3 +478,21 @@ def test_form_with_too_many_fields_is_refused(api_client, integrator, settings):
     res = _send(api_client, task, key, body, content_type="application/x-www-form-urlencoded")
     assert (res.status_code, res.json()["code"]) == (400, "too_many_fields")
     assert not Run.objects.exists()
+
+
+def test_lone_surrogates_are_refused(api_client, task, webhook):
+    _binding, key = webhook
+    body = json.dumps(_payload())[:-1] + ', "message": "\\ud800"}'
+    res = _send(api_client, task, key, body)
+    assert (res.status_code, res.json()["code"]) == (400, "invalid_json")
+    assert not Run.objects.exists()
+
+
+def test_task_managers_can_download_the_received_payload(api_client, platform_admin, task, webhook):
+    _binding, key = webhook
+    run_id = _send(api_client, task, key, _payload()).json()["run_id"]
+    api_client.force_login(platform_admin)
+    files = api_client.get(f"/api/app/v1/runs/{run_id}/artifacts/").json()["results"]
+    assert [f["name"] for f in files] == ["webhook_payload.json"]
+    res = api_client.get(f"/api/app/v1/runs/{run_id}/artifacts/{files[0]['id']}/download/")
+    assert json.loads(body_of(res)) == _payload()

@@ -156,8 +156,6 @@ def _start(
     message = ConversationMessage.objects.create(
         conversation=conversation, sender=actor, role=MessageRole.USER, body=text
     )
-    if files:
-        _attach_files(message, files, actor=actor)
     fixed: dict[str, Any] = {
         "model_version": version.pk,
         "effort": effort,
@@ -197,6 +195,8 @@ def _start(
     )
     message.run = run
     message.save(update_fields=["run"])
+    if files:
+        _attach_files(message, run, files, actor=actor)
     RunEvent.record(run, RunEventKind.STATUS, {"status": RunStatus.QUEUED}, actor=actor)
     RunEvent.record(
         run,
@@ -222,8 +222,9 @@ def _first_message(text: str, inputs: dict[str, Any], launch: RunLaunch) -> str:
     return "\n\n".join(parts)
 
 
-def _attach_files(message: ConversationMessage, files: Sequence[tuple[str, bytes]], *, actor) -> None:
-    """ファイルを最初の発言の添付にする（/workspace/input に読取り専用で置く）。入力とタスクを確かめた後に、Runと同じ
+def _attach_files(message: ConversationMessage, run: Run, files: Sequence[tuple[str, bytes]], *, actor) -> None:
+    """ファイルを最初の発言の添付にする（/workspace/input に読取り専用で置く）。Runにも紐付け、Runの結果とログを
+    見られる人（タスクを管理できる人）がRunのファイルのAPIで取得できるようにする。入力とタスクを確かめた後に、Runと同じ
     transactionで記録する（受け付けなかった要求の中身をDBに残さない。transactionが戻ったときの保存先のbytesは、
     参照のないobjectとして清掃で消す）"""
     conversation = message.conversation
@@ -231,6 +232,7 @@ def _attach_files(message: ConversationMessage, files: Sequence[tuple[str, bytes
         Artifact.objects.create(
             owner=actor,
             conversation=conversation,
+            run=run,
             blob=BlobObject.put(io.BytesIO(content)),
             kind=ArtifactKind.ATTACHMENT,
             name=name,

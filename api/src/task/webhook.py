@@ -96,7 +96,12 @@ class Payload:
 
 
 def _canonical(data: Any) -> bytes:
-    return json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    """並び順と空白によらない形。対になっていないサロゲート（JSONの "\\ud800" 等）はUTF-8にできないので断る
+    （DBの入力の値やファイルにも書けないため）"""
+    try:
+        return json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    except UnicodeEncodeError:
+        raise PayloadError("invalid_json", _("本文に文字として正しくない値があります")) from None
 
 
 def parse_payload(body: bytes, content_type: str) -> Payload:

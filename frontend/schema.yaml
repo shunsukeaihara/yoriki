@@ -9669,7 +9669,7 @@ components:
         connectors_usable:
           type: boolean
           readOnly: true
-          description: 公開中の版が宣言したConnectorを、利用者がすべて使えるか（使えなければ会話で使えない）
+          description: 公開中の版が宣言したConnectorを、利用者がすべて使え、宣言した操作・表をConnectorが今も公開しているか（でなければ会話で使えない）
         draft:
           type: string
           nullable: true

@@ -148,6 +148,11 @@ def test_skill_declaring_a_sensitive_connector_is_sensitive(api_client, app_user
     connector.revise(actor=app_user, expected_version=1, **{**content, "is_sensitive": True})
     [item] = api_client.get(SKILLS).json()["results"]
     assert item["sensitive"]
+    # 宣言した表を公開しなくなったら、会話で使えないことを示す
+    connector.revise(actor=app_user, expected_version=2, **{**content, "is_sensitive": True, "tables": TABLES[1:]})
+    [item] = api_client.get(SKILLS).json()["results"]
+    assert not item["connectors_usable"]
+    connector.revise(actor=app_user, expected_version=3, **{**content, "is_sensitive": True})
     # 使えなくなったら、会話で使えないことを示す
     connector.is_active = False
     connector.save()

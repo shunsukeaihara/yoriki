@@ -47,9 +47,15 @@ const requirementLabel = (value: number) => skillRequirementItems(t).find((i) =>
         </p>
       </div>
     </section>
-    <section v-if="version.isSensitive" class="grid gap-1">
+    <section v-if="version.sensitive" class="grid gap-1">
       <h3 class="text-sm font-semibold text-muted">{{ $t('機密') }}</h3>
-      <p class="text-sm">{{ $t('機密のSkill（個人情報・機密情報を扱う会話でだけ使えます）') }}</p>
+      <p class="text-sm">
+        {{
+          version.isSensitive
+            ? $t('機密のSkill（個人情報・機密情報を扱う会話でだけ使えます）')
+            : $t('機密のConnectorを使うので、機密のSkillです（個人情報・機密情報を扱う会話でだけ使えます）')
+        }}
+      </p>
     </section>
     <section v-if="version.requires.length" class="grid gap-1">
       <h3 class="text-sm font-semibold text-muted">{{ $t('必要な能力') }}</h3>

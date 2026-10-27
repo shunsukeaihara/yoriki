@@ -414,7 +414,10 @@ class SkillSerializer(serializers.ModelSerializer):
         help_text=_("公開中の版かDraftが機密のSkillか（機密の会話でだけ編集できる）")
     )
     connectors_usable = serializers.SerializerMethodField(
-        help_text=_("公開中の版が宣言したConnectorを、利用者がすべて使えるか（使えなければ会話で使えない）")
+        help_text=_(
+            "公開中の版が宣言したConnectorを、利用者がすべて使え、宣言した操作・表をConnectorが今も公開しているか"
+            "（でなければ会話で使えない）"
+        )
     )
 
     class Meta:
@@ -476,9 +479,12 @@ class SkillSerializer(serializers.ModelSerializer):
         if version is None or request is None or not version.connectors:
             return True
         declared = self._declared(obj, [version])
+        # 宣言した操作・表をConnectorの今の版が公開しなくなったものも、会話では使えない
         return all(
-            (c := declared.get(uid)) is not None and c.can(request.user, ConnectorAction.USE)
-            for uid in skill_connectors.declared_uids(version)
+            (c := declared.get(d["connector"])) is not None
+            and c.can(request.user, ConnectorAction.USE)
+            and not skill_connectors.out_of_bounds(d, c)
+            for d in version.connectors
         )
 
     def get_draft(self, obj: Skill) -> str | None:

@@ -99,12 +99,12 @@ const tabs = computed(() => [
     </template>
     <template #footer>
       <!-- 削除はサーバー側でも権限を確認し、権限がなければ403になる -->
-      <DBtn v-if="hasPermission(PermissionCode.CHANGE_MODEL_PROFILE)" color="error" variant="ghost" @click="onDelete">
+      <DBtn v-if="hasPermission(PermissionCode.DELETE_MODEL_PROFILE)" color="error" variant="ghost" @click="onDelete">
         {{ $t('削除') }}
       </DBtn>
       <div class="flex-1" />
       <DBtn
-        v-if="tab === 'settings'"
+        v-if="tab === 'settings' && hasPermission(PermissionCode.CHANGE_MODEL_PROFILE)"
         :disabled="!formRef?.canPost"
         :loading="formRef?.loading"
         @click="formRef?.onSubmit()"

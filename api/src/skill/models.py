@@ -1,18 +1,21 @@
 """Skill（design.md §3）。
 
-Skillは可変の入れ物で、公開範囲（個人・部門・全社）と、公開中の版（current_version）を持つ。中身（説明、手順、
+Skillは可変の入れ物で、範囲（個人・部門・全社・システム）と、公開中の版（current_version）を持つ。中身（説明、手順、
 使ってよいTool、必要な能力、入出力のSchema、資料）は、編集中のSkillDraftと、公開した不変のSkillVersionが持つ。
 DraftはSkillごとに1つで、revisionで同時の編集を検出し、公開すると閉じる（design.md §3.7）。
 公開・切戻し・停止はSkillChangeに記録し、operation keyで再送による重複を防ぐ。
 
-誰が使え、誰が編集・公開できるかは公開範囲で決まる（design.md §3.6。`Skill.access_of()`）。
+誰が見て・使い・編集・公開できるかは、範囲と所属とpermissionで決まる（authorization.md §5.1。一覧は
+`SkillQuerySet`、1件は `Skill.can()`。どちらも `SCOPE_PERMISSIONS` と部門の判定を読む）。
 Skillの本文は権限の根拠にしない。実行するときのToolの許可は、利用者・Skill・Runの範囲をサーバーで照合して決める。
 """
 
 import hashlib
 import io
+import operator
 from collections.abc import Callable
-from enum import IntEnum
+from enum import Enum
+from functools import reduce
 from typing import IO, Any
 
 from auditlog.registry import auditlog
@@ -25,7 +28,7 @@ from django.utils.translation import gettext_lazy as _
 from artifact.models import clean_filename
 from resources import formats
 from resources.models import Resource, ResourceVersion
-from user.models import Department, DepartmentRole
+from user.models import Department, manageable_department_ids, usable_department_ids
 from utils.fields import NanoidField
 from utils.permissions import AppPermission
 
@@ -36,15 +39,20 @@ class SkillScope(models.IntegerChoices):
     PERSONAL = 1, _("個人")
     DEPARTMENT = 2, _("部門")
     COMPANY = 3, _("全社")
+    SYSTEM = 4, _("システム")
 
 
-class SkillAccess(IntEnum):
-    """利用者がSkillに対してできること。上は下を含む（design.md §3.6）"""
+# 業務画面と会話に出す範囲。システムのSkillはシステムタスクだけが使い、管理画面で扱う（authorization.md §2）
+CONVERSATION_SCOPES = (SkillScope.PERSONAL, SkillScope.DEPARTMENT, SkillScope.COMPANY)
 
-    NONE = 0
-    USE = 1  # 使う・見る
-    EDIT = 2  # Draftを変更する（本文・説明・Schema・資料）
-    PUBLISH = 3  # 公開・切戻し・停止・削除。Toolを変える
+
+class SkillAction(Enum):
+    """Skillに対する操作（authorization.md §5.1）。`Skill.can()` で判定する"""
+
+    VIEW = "view"  # 一覧・詳細で見る。使うだけの人には公開中のものだけ
+    USE = "use"  # 会話で使う（公開中で停止していないもの。システムのSkillは会話で使わない）
+    EDIT = "edit"  # Draftを変更する（本文・資料・評価ケース）
+    PUBLISH = "publish"  # 公開・切戻し・停止・削除、名前とToolの変更、資料の検証の条件と必須の評価ケースの変更
 
 
 class SkillRequirement(models.IntegerChoices):
@@ -82,11 +90,19 @@ REQUIREMENT_CAPABILITIES = {
 
 # Draftと版が持つ中身。版を作るときにDraftからそのまま写す
 CONTENT_FIELDS = ("description", "instructions", "tools", "requires", "input_schema", "output_schema")
-DEPARTMENT_ACCESS = {
-    DepartmentRole.MEMBER: SkillAccess.USE,
-    DepartmentRole.EDITOR: SkillAccess.EDIT,
-    DepartmentRole.PUBLISHER: SkillAccess.PUBLISH,
+# 範囲ごとの規則（authorization.md §5.1）。個人は本人がすべてでき、ほかの範囲はここで決まる
+# - 使う：部門は使える部門の人、全社は全員、システムは会話で使わない
+# - 編集・公開：範囲ごとの（編集、公開）のpermission。部門は管理できる部門のSkillにだけ効く。公開できる人は編集もできる
+SCOPE_PERMISSIONS = {
+    SkillScope.DEPARTMENT: (AppPermission.EDIT_DEPARTMENT_SKILLS, AppPermission.PUBLISH_DEPARTMENT_SKILLS),
+    SkillScope.COMPANY: (AppPermission.EDIT_COMPANY_SKILLS, AppPermission.PUBLISH_COMPANY_SKILLS),
+    SkillScope.SYSTEM: (AppPermission.EDIT_SYSTEM_SKILLS, AppPermission.PUBLISH_SYSTEM_SKILLS),
 }
+
+
+def _scope_has_perm(user, scope: SkillScope, *, publish: bool) -> bool:
+    edit_perm, publish_perm = SCOPE_PERMISSIONS[scope]
+    return user.has_perm(publish_perm.perm) or (not publish and user.has_perm(edit_perm.perm))
 
 
 class SkillContent(models.Model):
@@ -129,44 +145,57 @@ class SkillContent(models.Model):
 
 
 class SkillQuerySet(models.QuerySet):
-    def visible_to(self, user) -> "SkillQuerySet":
-        """利用者が使える（見える）Skill。個人は本人、部門は所属する人、全社は全社員（design.md §3.6）。
+    """一覧の絞り込み。1件の判定（`Skill.can()`）と同じ規則をSQLの条件にする"""
 
-        使うだけの人には公開中の版があるものだけを見せ、編集できる人には未公開のものも見せる（`Skill.access_of()`）
-        """
+    def _managed(self, user, *, publish: bool) -> Q:
+        """編集（publish=Trueなら公開）できるSkillの条件"""
+        conditions = [Q(scope=SkillScope.PERSONAL, owner=user)]
+        for scope in SCOPE_PERMISSIONS:
+            if _scope_has_perm(user, scope, publish=publish):
+                condition = Q(scope=scope)
+                if scope == SkillScope.DEPARTMENT:
+                    condition &= Q(department__in=Department.objects.manageable_by(user))
+                conditions.append(condition)
+        return reduce(operator.or_, conditions)
+
+    def _usable(self, user) -> Q:
+        """範囲から使えるSkillの条件（公開済みか・停止中かは見ない）"""
+        return (
+            Q(scope=SkillScope.PERSONAL, owner=user)
+            | Q(scope=SkillScope.DEPARTMENT, department__in=Department.objects.usable_by(user))
+            | Q(scope=SkillScope.COMPANY)
+        )
+
+    def visible_to(self, user) -> "SkillQuerySet":
+        """見えるSkill（`SkillAction.VIEW`）。使うだけの人には公開中のものだけ、編集できる人には未公開のものも"""
         if not user.is_active:
             return self.none()
-        published = Q(current_version__isnull=False)
-        departments = Department.objects.filter(deleted=False)
-        if user.is_superuser:
-            editable_departments = departments
-        else:
-            departments = departments.filter(memberships__user=user)
-            editable_departments = departments.filter(
-                memberships__user=user, memberships__role__gte=DepartmentRole.EDITOR
-            )
-        company = Q(scope=SkillScope.COMPANY)
-        if not user.has_perm(AppPermission.EDIT_COMPANY_SKILLS.perm) and not user.has_perm(
-            AppPermission.PUBLISH_COMPANY_SKILLS.perm
-        ):
-            company &= published
         return self.filter(
-            Q(scope=SkillScope.PERSONAL, owner=user)
-            | Q(scope=SkillScope.DEPARTMENT, department__in=editable_departments)
-            | Q(published, scope=SkillScope.DEPARTMENT, department__in=departments)
-            | company,
+            self._managed(user, publish=False) | (self._usable(user) & Q(current_version__isnull=False)),
             deleted=False,
         )
 
     def usable_by(self, user) -> "SkillQuerySet":
-        """利用者が会話・タスクで使えるSkill：見えるもののうち、公開中の版があり、停止していないもの"""
-        return self.visible_to(user).filter(current_version__isnull=False, suspended=False)
+        """会話で使えるSkill（`SkillAction.USE`）：公開中の版があり、停止していないもの。システムのSkillは含まない"""
+        if not user.is_active:
+            return self.none()
+        return self.filter(self._usable(user), current_version__isnull=False, suspended=False, deleted=False)
+
+    def editable_by(self, user) -> "SkillQuerySet":
+        """Draftを変更できるSkill（`SkillAction.EDIT`）"""
+        if not user.is_active:
+            return self.none()
+        return self.filter(self._managed(user, publish=False), deleted=False)
+
+    def in_conversation(self) -> "SkillQuerySet":
+        """業務画面と会話に出す範囲のSkill（システムのSkillを除く）"""
+        return self.filter(scope__in=CONVERSATION_SCOPES)
 
 
 class Skill(models.Model):
     uid = NanoidField(unique=True)
-    scope = models.PositiveSmallIntegerField(_("公開範囲"), choices=SkillScope.choices)
-    # 個人の範囲では持ち主、部門の範囲では部門。範囲は作成時に決めて変えない（design.md §3.6）
+    scope = models.PositiveSmallIntegerField(_("範囲"), choices=SkillScope.choices)
+    # 個人の範囲では持ち主、部門の範囲では部門。範囲は作成時に決めて変えない（authorization.md §5.1）
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
@@ -203,13 +232,13 @@ class Skill(models.Model):
     class Meta:
         verbose_name = _("Skill")
         verbose_name_plural = verbose_name
-        permissions = [AppPermission.EDIT_COMPANY_SKILLS.meta, AppPermission.PUBLISH_COMPANY_SKILLS.meta]
+        permissions = [perm.meta for pair in SCOPE_PERMISSIONS.values() for perm in pair]
         constraints = [
             models.CheckConstraint(
                 condition=(
                     Q(scope=SkillScope.PERSONAL, owner__isnull=False, department__isnull=True)
                     | Q(scope=SkillScope.DEPARTMENT, owner__isnull=True, department__isnull=False)
-                    | Q(scope=SkillScope.COMPANY, owner__isnull=True, department__isnull=True)
+                    | Q(scope__in=[SkillScope.COMPANY, SkillScope.SYSTEM], owner__isnull=True, department__isnull=True)
                 ),
                 name="skill_scope_owner",
             ),
@@ -229,44 +258,53 @@ class Skill(models.Model):
                 condition=Q(scope=SkillScope.COMPANY, deleted=False),
                 name="uniq_company_skill_name",
             ),
+            models.UniqueConstraint(
+                fields=["name"],
+                condition=Q(scope=SkillScope.SYSTEM, deleted=False),
+                name="uniq_system_skill_name",
+            ),
         ]
 
     def __str__(self):
         return self.name
 
-    def access_of(self, user) -> SkillAccess:
-        """利用者がこのSkillに対してできること（design.md §3.6）。まだ公開していなければ、使うだけの人には見えない"""
-        access = self.scope_access_of(user)
-        if access == SkillAccess.USE and self.current_version_id is None:
-            return SkillAccess.NONE
-        return access
-
-    def scope_access_of(self, user) -> SkillAccess:
-        """公開範囲から決まる、利用者ができること（公開済みかは見ない。作る前の権限の判定にも使う）"""
+    def can(self, user, action: SkillAction) -> bool:
+        """利用者がこの操作をできるか（authorization.md §5.1）。一覧の SkillQuerySet と同じ規則。
+        作る前の判定にも使う（保存していないSkillでも、範囲・持ち主・部門があれば判定できる）"""
         if not user.is_active or self.deleted:
-            return SkillAccess.NONE
-        if self.scope == SkillScope.PERSONAL:
-            return SkillAccess.PUBLISH if self.owner_id == user.pk else SkillAccess.NONE
-        if self.scope == SkillScope.DEPARTMENT:
-            assert self.department is not None
-            role = self.department.role_of(user)
-            return DEPARTMENT_ACCESS[role] if role is not None else SkillAccess.NONE
-        if user.has_perm(AppPermission.PUBLISH_COMPANY_SKILLS.perm):
-            return SkillAccess.PUBLISH
-        if user.has_perm(AppPermission.EDIT_COMPANY_SKILLS.perm):
-            return SkillAccess.EDIT
-        return SkillAccess.USE
+            return False
+        scope = SkillScope(self.scope)
+        if scope == SkillScope.PERSONAL:
+            # 個人のものは持ち主だけ（permissionを見ないので、基盤管理者にも見えない）
+            mine = self.owner_id == user.pk
+            return mine and (action != SkillAction.USE or self._in_service())
+        if action in (SkillAction.VIEW, SkillAction.USE):
+            if scope == SkillScope.DEPARTMENT:
+                usable = self.department_id in usable_department_ids(user)
+            else:
+                usable = scope == SkillScope.COMPANY
+            if action == SkillAction.USE:
+                return usable and self._in_service()
+            return (usable and self.current_version_id is not None) or self.can(user, SkillAction.EDIT)
+        if scope == SkillScope.DEPARTMENT and self.department_id not in manageable_department_ids(user):
+            return False
+        return _scope_has_perm(user, scope, publish=action == SkillAction.PUBLISH)
+
+    def _in_service(self) -> bool:
+        return self.current_version_id is not None and not self.suspended
 
     def unusable_reason(self, user, model_version) -> str:
         """利用者がこのモデル設定の版で使えない理由（使えれば空文字）。Run開始時とエージェントが読み込むときに、
         その時点の公開中の版で確かめる（design.md §3.2・§4.8）"""
-        if self.access_of(user) < SkillAccess.USE:
+        if self.scope not in CONVERSATION_SCOPES or not self.can(user, SkillAction.VIEW):
             return str(_("このSkillを使う権限がありません"))
         if self.suspended:
             return str(_("このSkillは停止中です"))
         version = self.current_version
         if version is None:
             return str(_("このSkillはまだ公開されていません"))
+        if not self.can(user, SkillAction.USE):
+            return str(_("このSkillを使う権限がありません"))
         return version.unsupported_by(model_version)
 
     @property
@@ -667,7 +705,7 @@ class SkillDraft(SkillContent):
             raise InvalidDraft(_("同じkeyの資料があります"))
         data = src.read()
         resource_version = Resource.create_from_upload(io.BytesIO(data), filename, actor=actor)
-        # 外してから同じkeyで加え直しても、元の版の検証の条件を引き継ぐ（条件を変えるのは公開の役割だけ）
+        # 外してから同じkeyで加え直しても、元の版の検証の条件を引き継ぐ（条件を変えるのは公開の権限を持つ人だけ）
         base = current.base_asset(key)
         checks = formats.normalize_checks(checks if checks is not None else base.checks if base else None)
         asset = SkillDraftAsset.objects.create(
@@ -832,7 +870,7 @@ class SkillDraftAsset(models.Model):
     resource_version = models.ForeignKey(
         ResourceVersion, on_delete=models.PROTECT, related_name="+", verbose_name=_("資料の版")
     )
-    # 検証の条件は公開の役割だけが変える。検証の結果（formats.inspect()）は、原本か条件を変えるたびに取り直す。
+    # 検証の条件は公開の権限を持つ人だけが変える。検証の結果（formats.inspect()）は、原本か条件を変えるたびに取り直す。
     # 差分は、Draftの元の版の同じkeyの資料とのもの
     checks = models.JSONField(_("検証の条件"), default=dict, blank=True)
     validation = models.JSONField(_("検証の結果"), default=dict, blank=True)
@@ -975,7 +1013,7 @@ class SkillEvaluationCase(models.Model):
     criteria = models.TextField(_("確認する観点"), blank=True)
     # 業務結果（submit_result の値）のうち、一致を確かめる項目
     expected_result = models.JSONField(_("期待する業務結果"), null=True, blank=True)
-    # 部門・全社のSkillで、公開の前に今のDraftで通過していることを求める。付け外しと変更は公開の役割だけ
+    # 部門・全社のSkillで、公開の前に今のDraftで通過していることを求める。付け外しと変更は公開の権限を持つ人だけ
     required = models.BooleanField(_("公開の前に必須"), default=False)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+", verbose_name=_("作成者")

@@ -1,13 +1,7 @@
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AxiosError, AxiosHeaders } from 'axios'
-import {
-  ConnectorForm,
-  ConnectorDepartmentsForm,
-  ConnectorQueryPanel,
-  ConnectorTablesForm,
-  DatabaseConnectionForm,
-} from '#components'
+import { ConnectorForm, ConnectorQueryPanel, ConnectorTablesForm, DatabaseConnectionForm } from '#components'
 
 const { create, patch, tables, query, emptyList, connectionCreate, connectionPatch } = vi.hoisted(() => ({
   create: vi.fn(),
@@ -74,8 +68,10 @@ const connector: Connector = {
   maxResultBytes: 1_500_000,
   timeoutSeconds: 30,
   isSensitive: false,
-  departments: ['d1'],
-  departmentInfos: [{ id: 'd1', name: '経理部' }],
+  scope: ConnectorScope.DEPARTMENT,
+  scopeDisplay: '部門',
+  department: 'dep1',
+  departmentInfo: { id: 'dep1', name: '経理部' },
   createdBy: 'u1',
   created: '2026-10-26T00:00:00Z',
   updated: '2026-10-26T00:00:00Z',
@@ -140,24 +136,37 @@ describe('ConnectorForm', () => {
 
   type Form = Exposed & { form: { name: string; connection: string | null } }
 
-  it('作成では使うDB接続を送り、DB接続を選ぶまで保存できない', async () => {
+  it('作成では使うDB接続と範囲を送り、DB接続と（部門の範囲なら）部門を選ぶまで保存できない', async () => {
     const wrapper = await mountSuspended(ConnectorForm, { props: { modelValue: null } })
-    const vm = wrapper.vm as unknown as Form
+    const vm = wrapper.vm as unknown as Form & { form: { scope: number; department: string | null } }
     vm.form.name = '受注実績'
+    vm.form.connection = 'd1'
     await nextTick()
     expect(vm.canPost).toBe(false)
-    vm.form.connection = 'd1'
-    ;(vm.form as unknown as { departments: string[] }).departments = ['dep1']
+    vm.form.department = 'dep1'
     await nextTick()
+    expect(vm.canPost).toBe(true)
     await vm.onSubmit()
     const data = create.mock.calls[0]![0]
     expect(data).toMatchObject({
       name: '受注実績',
       connection: 'd1',
-      departments: ['dep1'],
+      scope: ConnectorScope.DEPARTMENT,
+      department: 'dep1',
       maxResultBytes: 10 * 1024 * 1024,
     })
     expect(data.defaultSchema).toBe('')
+  })
+
+  it('全社・システムの範囲では部門を送らない', async () => {
+    const wrapper = await mountSuspended(ConnectorForm, { props: { modelValue: null } })
+    const vm = wrapper.vm as unknown as Form & { form: { scope: number; department: string | null } }
+    vm.form.name = '受注実績'
+    vm.form.connection = 'd1'
+    vm.form.department = 'dep1'
+    vm.form.scope = ConnectorScope.SYSTEM
+    await vm.onSubmit()
+    expect(create.mock.calls[0]![0]).toMatchObject({ scope: ConnectorScope.SYSTEM, department: null })
   })
 
   it('更新では編集を始めた時点の版を送り、DB接続とMBで割り切れない上限は変えない', async () => {
@@ -166,7 +175,11 @@ describe('ConnectorForm', () => {
     const data = patch.mock.calls[0]![0]
     expect(data).toMatchObject({ version: 2, maxResultBytes: 1_500_000, defaultSchema: 'dbo' })
     expect(data).not.toHaveProperty('connection')
+    // 範囲と部門は作成した後は変えない
+    expect(data).not.toHaveProperty('scope')
+    expect(data).not.toHaveProperty('department')
     expect(wrapper.text()).toContain('販売管理DB')
+    expect(wrapper.text()).toContain('経理部')
   })
 
   it('別のタブの保存でConnectorが変わっても、未保存の入力を残して版だけを最新にする。reset() で捨てる', async () => {
@@ -232,27 +245,6 @@ describe('ConnectorTablesForm', () => {
       ],
       changeReason: undefined,
     })
-  })
-})
-
-describe('ConnectorDepartmentsForm', () => {
-  beforeEach(() => {
-    patch.mockReset().mockResolvedValue(connector)
-  })
-
-  type Form = Exposed & { form: { departments: string[] } }
-
-  it('部門を変えたら、編集を始めた時点の版と使える部門を送る。空なら全社向けと示す', async () => {
-    const wrapper = await mountSuspended(ConnectorDepartmentsForm, { props: { modelValue: connector } })
-    const vm = wrapper.vm as unknown as Form
-    expect(vm.canPost).toBe(false)
-    vm.form.departments = []
-    await nextTick()
-    expect(vm.canPost).toBe(true)
-    expect(wrapper.text()).toContain('全社向けです。すべての社員が使えます')
-    vm.form.departments = ['d1', 'd2']
-    await vm.onSubmit()
-    expect(patch.mock.calls[0]![0]).toEqual({ version: 2, departments: ['d1', 'd2'] })
   })
 })
 

@@ -1,7 +1,10 @@
 import factory
+from django.contrib.auth.models import Permission
 from factory.django import DjangoModelFactory
 
-from .models import Department, DepartmentMembership, DepartmentRole, SSOKind, SSOProvider, User
+from utils.permissions import AppPermission, to_perm_str
+
+from .models import Department, DepartmentMembership, SSOKind, SSOProvider, User
 
 
 class UserFactory(DjangoModelFactory[User]):
@@ -39,4 +42,14 @@ class DepartmentMembershipFactory(DjangoModelFactory[DepartmentMembership]):
 
     department = factory.SubFactory(DepartmentFactory)
     user = factory.SubFactory(UserFactory)
-    role = DepartmentRole.MEMBER
+
+
+def grant(user: User, *perms: AppPermission | str) -> User:
+    """ユーザーにpermissionを直接付け、permissionのキャッシュのない新しいオブジェクトを返す。
+
+    判定のテストは、superuserではなく必要なpermissionだけを付けたユーザーで行う（authorization.md §7.2）
+    """
+    for perm in perms:
+        app_label, codename = to_perm_str(perm).split(".", 1)
+        user.user_permissions.add(Permission.objects.get(content_type__app_label=app_label, codename=codename))
+    return User.objects.get(pk=user.pk)

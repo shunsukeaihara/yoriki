@@ -122,8 +122,10 @@ const tabs = computed(() => [
     </template>
     <template #footer>
       <!-- 削除・既定の変更はサーバー側でも権限を確認し、権限がなければ403になる -->
+      <DBtn v-if="hasPermission(PermissionCode.DELETE_RUNTIME_PROFILE)" color="error" variant="ghost" @click="onDelete">
+        {{ $t('削除') }}
+      </DBtn>
       <template v-if="hasPermission(PermissionCode.CHANGE_RUNTIME_PROFILE)">
-        <DBtn color="error" variant="ghost" @click="onDelete">{{ $t('削除') }}</DBtn>
         <DBtn
           v-if="profile && !profile.isDefault"
           color="neutral"
@@ -138,7 +140,7 @@ const tabs = computed(() => [
       </template>
       <div class="flex-1" />
       <DBtn
-        v-if="tab === 'settings'"
+        v-if="tab === 'settings' && hasPermission(PermissionCode.CHANGE_RUNTIME_PROFILE)"
         :disabled="!formRef?.canPost"
         :loading="formRef?.loading"
         @click="formRef?.onSubmit()"

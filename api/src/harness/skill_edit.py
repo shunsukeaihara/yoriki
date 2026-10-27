@@ -9,7 +9,7 @@ from typing import Any
 from django.utils.translation import gettext as _
 
 from run.models import Run, RunKind
-from skill.models import Skill, SkillAccess, SkillScope
+from skill.models import Skill, SkillAction, SkillScope
 
 from .skills import scope_label
 
@@ -35,9 +35,9 @@ def edit_target(run: Run) -> Skill | None:
 
 
 def editable_skills(user) -> list[Skill]:
-    """利用者がDraftを変更できるSkill（個人・部門・全社の順）"""
-    skills = Skill.objects.visible_to(user).select_related("department", "current_version").order_by("scope", "name")
-    return [s for s in skills if s.scope_access_of(user) >= SkillAccess.EDIT]
+    """利用者がDraftを変更できるSkill（個人・部門・全社の順。システムのSkillは会話で扱わない）"""
+    skills = Skill.objects.editable_by(user).in_conversation()
+    return list(skills.select_related("department", "current_version").order_by("scope", "name"))
 
 
 def labeled_name(skill: Skill) -> str:
@@ -67,8 +67,8 @@ def find_editable(user, name: str) -> tuple[Skill | None, str]:
     )
 
 
-def access_label(access: SkillAccess) -> str:
-    return "publish" if access >= SkillAccess.PUBLISH else "edit"
+def access_label(skill: Skill, user) -> str:
+    return "publish" if skill.can(user, SkillAction.PUBLISH) else "edit"
 
 
 def runtime_text(run: Run) -> str:
@@ -79,10 +79,9 @@ def runtime_text(run: Run) -> str:
     skill = edit_target(run)
     if skill is None:
         return '  <skill_edit new="true" />'
-    access = skill.scope_access_of(run.owner)
     return (
         f'  <skill_edit skill="{_escape(skill.name)}" scope="{_escape(scope_label(skill))}" '
-        f'version="{skill.version_number}" your_access="{access_label(access)}" />'
+        f'version="{skill.version_number}" your_access="{access_label(skill, run.owner)}" />'
     )
 
 

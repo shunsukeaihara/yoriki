@@ -3,6 +3,9 @@ from django.apps import apps
 from django.contrib.auth.models import AnonymousUser, Group, Permission
 from django.core.exceptions import ImproperlyConfigured
 from django.test import RequestFactory
+from django.urls import URLResolver, get_resolver
+from rest_framework.routers import APIRootView
+from rest_framework.views import APIView
 
 from llm.factories import LLMConnectionFactory
 from user.factories import SSOProviderFactory, UserFactory
@@ -11,7 +14,7 @@ from .backends import PasswordBackend
 from .crypto import encrypt_secret
 from .fields import ENCRYPTED_SECRET_FIELDS
 from .lock import lock
-from .permissions import AppUser, PlatformAdmin, require_permission
+from .permissions import AppUser, DenyAll, require_permission
 
 
 @pytest.mark.django_db
@@ -32,17 +35,17 @@ class TestPermissions:
     @pytest.mark.parametrize(
         ("user_kwargs", "expected"),
         [
-            # AppUser, PlatformAdmin
+            # AppUser, DenyAll
             ({}, (True, False)),
-            ({"is_superuser": True}, (True, True)),
+            ({"is_superuser": True}, (True, False)),
             ({"is_active": False}, (False, False)),
         ],
     )
-    def test_app_user_and_platform_admin(self, user_kwargs, expected):
+    def test_app_user_and_deny_all(self, user_kwargs, expected):
         user = UserFactory.create(**user_kwargs)
-        assert (_allowed(AppUser, user), _allowed(PlatformAdmin, user)) == expected
+        assert (_allowed(AppUser, user), _allowed(DenyAll, user)) == expected
 
-    @pytest.mark.parametrize("permission", [AppUser, PlatformAdmin, require_permission("user.view_user")])
+    @pytest.mark.parametrize("permission", [AppUser, DenyAll, require_permission("user.view_user")])
     def test_anonymous_is_denied(self, permission):
         assert _allowed(permission, AnonymousUser()) is False
 
@@ -56,8 +59,8 @@ class TestPermissions:
 
     @pytest.mark.django_db
     def test_require_permission_by_group(self, app_user):
-        # 役割（Group）に付けたpermissionでも許可される
-        group = Group.objects.create(name="テスト用の役割")
+        # Groupに付けたpermissionでも許可される
+        group = Group.objects.create(name="テスト用のGroup")
         group.permissions.add(Permission.objects.get(codename="view_user"))
         app_user.groups.add(group)
         assert _allowed(require_permission("user.view_user"), app_user) is True
@@ -65,6 +68,27 @@ class TestPermissions:
     @pytest.mark.django_db
     def test_platform_admin_has_every_permission(self, platform_admin):
         assert _allowed(require_permission("user.view_user"), platform_admin) is True
+
+    def test_every_view_declares_permission_classes(self):
+        """既定（DenyAll）のままのViewがない。書き忘れたViewは誰も使えないので、ここで見つける。
+        ルーターが作るAPIの一覧のページ（APIRootView）は使わないので、閉じたままにする"""
+        missing = [
+            pattern.lookup_str
+            for pattern in _url_patterns(get_resolver().url_patterns)
+            if (cls := getattr(pattern.callback, "cls", None)) is not None
+            and issubclass(cls, APIView)
+            and not issubclass(cls, APIRootView)
+            and DenyAll in cls.permission_classes
+        ]
+        assert missing == []
+
+
+def _url_patterns(patterns):
+    for pattern in patterns:
+        if isinstance(pattern, URLResolver):
+            yield from _url_patterns(pattern.url_patterns)
+        else:
+            yield pattern
 
 
 class TestPasswordBackend:

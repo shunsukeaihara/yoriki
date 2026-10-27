@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** 部門の所属の一覧。追加・役割の変更・外す */
+/** 部門の所属の一覧。追加・外す（部門の変更の権限が要る） */
 import type { TableColumn } from '@nuxt/ui'
 
 const props = defineProps<{ departmentId: string }>()
@@ -8,6 +8,8 @@ const api = useAPI()
 const toast = useToast()
 const confirm = useConfirmDialog()
 const { t } = useI18n()
+const { hasPermission } = usePermission()
+const canChange = computed(() => hasPermission(PermissionCode.CHANGE_DEPARTMENT))
 const reloadKey = ref(0)
 const reload = () => (reloadKey.value = Date.now())
 
@@ -15,7 +17,6 @@ const params = ref<DepartmentMembershipListParams>({})
 
 const columns: TableColumn<DepartmentMembership>[] = [
   { accessorKey: 'userInfo', header: t('社員') },
-  { accessorKey: 'roleDisplay', header: t('部門の中の役割') },
   { id: 'actions', header: '' },
 ]
 
@@ -27,7 +28,7 @@ const onSaved = () => {
 const onRemove = async (membership: DepartmentMembership) => {
   const ok = await confirm({
     title: t('{name}を部門から外しますか？', { name: membership.userInfo.displayName || membership.userInfo.email }),
-    description: t('この部門のSkillを使えなくなります'),
+    description: t('この部門のSkill・Connectorを使えなくなります'),
     confirmLabel: t('外す'),
     color: 'error',
   })
@@ -46,7 +47,7 @@ const onRemove = async (membership: DepartmentMembership) => {
   <div class="grid gap-3">
     <div class="flex items-center justify-between">
       <h3 class="font-semibold">{{ $t('所属') }}</h3>
-      <DepartmentMemberDialog :department-id="departmentId" @saved="onSaved">
+      <DepartmentMemberDialog v-if="canChange" :department-id="departmentId" @saved="onSaved">
         <template #trigger="{ on }">
           <DBtn icon="i-lucide-plus" variant="outline" v-on="on">{{ $t('所属を追加') }}</DBtn>
         </template>
@@ -63,19 +64,7 @@ const onRemove = async (membership: DepartmentMembership) => {
         <div v-if="row.original.userInfo.displayName" class="text-xs text-muted">{{ row.original.userInfo.email }}</div>
       </template>
       <template #actions-cell="{ row }">
-        <div class="flex justify-end gap-1">
-          <DepartmentMemberDialog :department-id="departmentId" :membership="row.original" @saved="onSaved">
-            <template #trigger="{ on }">
-              <DBtn
-                size="sm"
-                color="neutral"
-                variant="ghost"
-                icon="i-lucide-pencil"
-                :aria-label="$t('役割を変更')"
-                v-on="on"
-              />
-            </template>
-          </DepartmentMemberDialog>
+        <div v-if="canChange" class="flex justify-end gap-1">
           <DBtn
             size="sm"
             color="error"

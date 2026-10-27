@@ -16,14 +16,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet, ModelViewSet, ReadOnlyModelViewSet
 
-from utils.permissions import AppUser, CsrfProtected, PlatformAdmin
+from utils.permissions import AppUser, CsrfProtected, ModelPermissions
 from utils.views import SoftDeleteMixin
 
-from .models import Department, DepartmentMembership, DepartmentRole, Invitation, SSOProvider, User
+from .models import ACCOUNT_PERMISSIONS_PREFETCH, Department, DepartmentMembership, Invitation, SSOProvider, User
 from .serializers import (
     AuthMethodsSerializer,
     DepartmentMembershipSerializer,
-    DepartmentMembershipUpdateSerializer,
     DepartmentSerializer,
     GroupSerializer,
     InvitationAcceptSerializer,
@@ -38,6 +37,7 @@ from .serializers import (
     SessionSerializer,
     SSOProviderSerializer,
     SSOProviderUpdateSerializer,
+    check_membership_change,
 )
 
 PASSWORD_BACKEND = "utils.backends.PasswordBackend"
@@ -138,7 +138,7 @@ class MyUserAPIView(APIView):
         return Response(MyUserSerializer(request.user).data)
 
 
-@extend_schema(description="社内SSOの設定の管理API（基盤管理者だけ）", tags=["manage/sso_provider"])
+@extend_schema(description="社内SSOの設定の管理API", tags=["manage/sso_provider"])
 @extend_schema_view(
     update=extend_schema(request=SSOProviderUpdateSerializer, responses=SSOProviderSerializer),
     partial_update=extend_schema(request=SSOProviderUpdateSerializer, responses=SSOProviderSerializer),
@@ -146,8 +146,8 @@ class MyUserAPIView(APIView):
 class SSOProviderViewSet(SoftDeleteMixin, ModelViewSet):
     """有効な設定が1つでもあれば、社員はSSOだけでログインする（design.md §10.0）"""
 
-    # client secretを扱い、誰がログインできるかを決めるので、基盤管理者だけにする
-    permission_classes = [PlatformAdmin]
+    # client secretを扱い、誰がログインできるかを決める。permissionは既定では基盤管理者だけが持つ
+    permission_classes = [ModelPermissions]
     lookup_field = "uid"
     queryset = SSOProvider.objects.filter(deleted=False).select_related("created_by")
     serializer_class = SSOProviderSerializer
@@ -175,14 +175,14 @@ class SSOProviderViewSet(SoftDeleteMixin, ModelViewSet):
 
 
 class ManageUserFilter(filters.FilterSet):
-    group = filters.CharFilter(label=_("役割"), field_name="groups__name")
+    group = filters.CharFilter(label=_("Group"), field_name="groups__name")
 
     class Meta:
         model = User
-        fields = ["is_active", "is_superuser", "group"]
+        fields = ["is_active", "group"]
 
 
-@extend_schema(description="ユーザーの管理API（基盤管理者だけ）", tags=["manage/user"])
+@extend_schema(description="ユーザーの管理API", tags=["manage/user"])
 @extend_schema_view(
     create=extend_schema(request=ManageUserCreateSerializer, responses={201: ManageUserCreateSerializer}),
     update=extend_schema(request=ManageUserUpdateSerializer, responses=ManageUserSerializer),
@@ -195,14 +195,15 @@ class ManageUserViewSet(
     mixins.UpdateModelMixin,
     GenericViewSet,
 ):
-    """Yorikiのアカウントの作成、役割の割り当て、無効化、招待・再設定のリンクの発行。
+    """Yorikiのアカウントの作成、Groupの割り当て、無効化、招待・再設定のリンクの発行。
 
     ユーザーは削除せず、無効にする（会話・成果物・監査ログの持ち主として残す）
     """
 
-    permission_classes = [PlatformAdmin]
+    permission_classes = [ModelPermissions]
+    action_permissions = {"invitation": "change"}
     lookup_field = "uid"
-    queryset = User.objects.prefetch_related("groups", "socialaccount_set")
+    queryset = User.objects.prefetch_related("groups", "socialaccount_set", *ACCOUNT_PERMISSIONS_PREFETCH)
     serializer_class = ManageUserSerializer
     filterset_class = ManageUserFilter
     search_fields = ("email", "display_name")
@@ -234,24 +235,27 @@ class ManageUserViewSet(
         return Response(InvitationLinkSerializer(link).data, status=status.HTTP_201_CREATED)
 
 
-@extend_schema(description="役割（Group）の一覧（基盤管理者だけ）", tags=["manage/group"])
+@extend_schema(description="Group（permissionの集まり）の一覧。ユーザーに割り当てる選択肢", tags=["manage/group"])
 class GroupViewSet(ReadOnlyModelViewSet):
-    permission_classes = [PlatformAdmin]
+    # ユーザーにGroupを割り当てる人が選択肢として読む。中身の編集はDjangoの管理画面で行う
+    permission_classes = [ModelPermissions]
+    permission_model = User
     lookup_field = "name"
     queryset = Group.objects.all()
     serializer_class = GroupSerializer
-    pagination_class = None  # 役割は少ないので、ページングしない
+    pagination_class = None  # Groupは少ないので、ページングしない
     filter_backends = []
 
     def get_queryset(self):
         return super().get_queryset().order_by("name")
 
 
-@extend_schema(description="部門の管理API（基盤管理者だけ）", tags=["manage/department"])
+@extend_schema(description="部門の管理API", tags=["manage/department"])
 class DepartmentViewSet(SoftDeleteMixin, ModelViewSet):
-    """部門はSkillの部門の範囲に使う（design.md §3.6）。削除しても所属は残り、その部門のSkillは使えなくなる"""
+    """部門のSkill・Connector等の所有の単位（authorization.md §4）。削除しても所属は残り、
+    その部門のものは使えなくなる"""
 
-    permission_classes = [PlatformAdmin]
+    permission_classes = [ModelPermissions]
     lookup_field = "uid"
     queryset = Department.objects.filter(deleted=False).annotate(member_count=Count("memberships"))
     serializer_class = DepartmentSerializer
@@ -278,37 +282,40 @@ class DepartmentMixin:
 
 
 class DepartmentMembershipFilter(filters.FilterSet):
-    role = filters.ChoiceFilter(label=_("部門の中の役割"), choices=DepartmentRole.choices)
     q = filters.CharFilter(label=_("社員"), method="filter_user")
 
     class Meta:
         model = DepartmentMembership
-        fields = ["role"]
+        fields: list[str] = []
 
     def filter_user(self, queryset, name, value):
         return queryset.filter(Q(user__email__icontains=value) | Q(user__display_name__icontains=value))
 
 
-@extend_schema(description="部門の所属の管理API（基盤管理者だけ）", tags=["manage/department/member"])
-@extend_schema_view(
-    update=extend_schema(request=DepartmentMembershipUpdateSerializer, responses=DepartmentMembershipSerializer),
-    partial_update=extend_schema(
-        request=DepartmentMembershipUpdateSerializer, responses=DepartmentMembershipSerializer
-    ),
-)
-class DepartmentMembershipViewSet(DepartmentMixin, ModelViewSet):
-    permission_classes = [PlatformAdmin]
+@extend_schema(description="部門の所属の管理API", tags=["manage/department/member"])
+class DepartmentMembershipViewSet(
+    DepartmentMixin,
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.CreateModelMixin,
+    mixins.DestroyModelMixin,
+    GenericViewSet,
+):
+    """所属の付け外しは、部門の変更として部門のpermissionで判定する"""
+
+    permission_classes = [ModelPermissions]
+    permission_model = Department
+    action_permissions = {"create": "change", "destroy": "change"}
     lookup_field = "uid"
     queryset = DepartmentMembership.objects.select_related("user")
     serializer_class = DepartmentMembershipSerializer
     filterset_class = DepartmentMembershipFilter
     ordering = ("user__email", "pk")
 
-    def get_serializer_class(self):
-        # 所属の社員は変えられない（別の社員にするなら、所属を消して作り直す）
-        if self.action in ("update", "partial_update"):
-            return DepartmentMembershipUpdateSerializer
-        return super().get_serializer_class()
-
     def perform_create(self, serializer):
         serializer.save(department=self.department)
+
+    @transaction.atomic
+    def perform_destroy(self, instance: DepartmentMembership):
+        check_membership_change(self.request.user, instance.user, lock=True)  # type: ignore[arg-type]
+        instance.delete()

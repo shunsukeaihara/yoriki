@@ -45,11 +45,16 @@ const onDelete = async () => {
     </template>
     <template #footer>
       <!-- 削除はサーバー側でも権限を確認し、権限がなければ403になる -->
-      <DBtn v-if="hasPermission(PermissionCode.CHANGE_SSO_PROVIDER)" color="error" variant="ghost" @click="onDelete">
+      <DBtn v-if="hasPermission(PermissionCode.DELETE_SSO_PROVIDER)" color="error" variant="ghost" @click="onDelete">
         {{ $t('削除') }}
       </DBtn>
       <div class="flex-1" />
-      <DBtn :disabled="!formRef?.canPost" :loading="formRef?.loading" @click="formRef?.onSubmit()">
+      <DBtn
+        v-if="hasPermission(PermissionCode.CHANGE_SSO_PROVIDER)"
+        :disabled="!formRef?.canPost"
+        :loading="formRef?.loading"
+        @click="formRef?.onSubmit()"
+      >
         {{ $t('更新') }}
       </DBtn>
     </template>

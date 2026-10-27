@@ -6,7 +6,7 @@ from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
-from user.models import Department, covers_all_departments
+from user.models import Department
 from user.serializers import MinimumDepartmentSerializer
 from utils.crypto import is_encryption_configured
 from utils.exceptions import Conflict
@@ -17,6 +17,7 @@ from .models import (
     VERSION_FIELDS,
     Connector,
     ConnectorKind,
+    ConnectorScope,
     ConnectorVersion,
     DatabaseConnection,
 )
@@ -221,9 +222,8 @@ class ConnectorSerializer(serializers.ModelSerializer):
     境界を変えて保存すると、サーバーが新しい版を作る。更新では、編集を始めた時点の `version` を送り、
     その間に他の人が版を作っていたら409になる。使うDB接続は作成した後は変えられない。
 
-    使える部門（所属の軸）は版に入れない。指定しなければ全社向け。足し引きできるのは自分が所属している部門だけで、
-    全社向けにする・やめる（部門を空にする・空から指定する）のは、すべての部門の範囲を持つ人（基盤管理者か、
-    印のある部門の所属者）だけ
+    範囲（部門・全社・システム）と部門は作成時に決め、更新では変えない（authorization.md §5.2）。作成・編集は
+    所属を問わず、permissionだけで判定する
     """
 
     id = serializers.CharField(source="uid", read_only=True)
@@ -276,14 +276,16 @@ class ConnectorSerializer(serializers.ModelSerializer):
         help_text=_("個人情報を主な中身とする範囲。ローカルLLMのモデルを使うタスク・会話にだけ割り当てる"),
     )
     change_reason = serializers.CharField(max_length=500, required=False, allow_blank=True, write_only=True)
-    departments: "serializers.SlugRelatedField[Department]" = serializers.SlugRelatedField(
-        many=True,
+    scope = serializers.ChoiceField(choices=ConnectorScope.choices, help_text=_("範囲。作成した後は変えられない"))
+    scope_display = serializers.CharField(source="get_scope_display", read_only=True)
+    department: "serializers.SlugRelatedField[Department]" = serializers.SlugRelatedField(
         slug_field="uid",
-        queryset=Department.objects.filter(deleted=False),
+        queryset=Department.objects.active(),
         required=False,
-        help_text=_("使える部門。空なら全社向け。更新では、送ると全体を置き換える"),
+        allow_null=True,
+        help_text=_("部門の範囲では必須。作成した後は変えられない"),
     )
-    department_infos = MinimumDepartmentSerializer(source="departments", many=True, read_only=True)
+    department_info = MinimumDepartmentSerializer(source="department", read_only=True, allow_null=True)
     created_by: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(slug_field="uid", read_only=True)
 
     class Meta:
@@ -299,8 +301,10 @@ class ConnectorSerializer(serializers.ModelSerializer):
             "version",
             *VERSION_FIELDS,
             "change_reason",
-            "departments",
-            "department_infos",
+            "scope",
+            "scope_display",
+            "department",
+            "department_info",
             "created_by",
             "created",
             "updated",
@@ -325,12 +329,13 @@ class ConnectorSerializer(serializers.ModelSerializer):
         return value
 
     def _validate_scope(self, attrs) -> None:
-        if self.instance is not None and "departments" not in attrs:
+        if self.instance is not None:
             return
-        current = set(self.instance.departments.all()) if self.instance else set()
-        check_department_change(
-            self.context["request"].user, current, set(attrs.get("departments", [])), self.instance is None
-        )
+        if attrs["scope"] == ConnectorScope.DEPARTMENT:
+            if attrs.get("department") is None:
+                raise serializers.ValidationError({"department": _("部門を選んでください")})
+        else:
+            attrs["department"] = None
 
     def validate(self, attrs):
         if self.instance is not None and "version_number" not in attrs:
@@ -370,7 +375,6 @@ class ConnectorSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def create(self, validated_data) -> Connector:
         validated_data.pop("version_number", None)
-        departments = validated_data.pop("departments", [])
         actor = validated_data.pop("created_by")
         change_reason = validated_data.pop("change_reason", "")
         # 同時にDB接続が削除されていないことを、行をロックして確かめる（削除の側も同じ行をロックする）
@@ -381,7 +385,6 @@ class ConnectorSerializer(serializers.ModelSerializer):
         connector = Connector.create_with_version(
             actor=actor, change_reason=change_reason, content=content, **validated_data
         )
-        connector.departments.set(departments)
         return connector
 
     @transaction.atomic
@@ -395,18 +398,6 @@ class ConnectorSerializer(serializers.ModelSerializer):
             )
         except VersionConflict as exc:
             raise Conflict() from exc
-        departments = validated_data.pop("departments", None)
-        if departments is not None:
-            # validate() は取得した時点の部門で確かめた。Connectorの行は revise() でロックしているので、最新の部門で
-            # 確かめ直す（その間に別の部門が足されていたら、所属していない部門を外すことになる）
-            # 先読み（prefetch_related）した取得時の一覧ではなく、DBから読み直す
-            latest = set(
-                Department.objects.filter(
-                    pk__in=instance.departments.through.objects.filter(connector_id=instance.pk).values("department_id")
-                )
-            )
-            check_department_change(self.context["request"].user, latest, set(departments), creating=False)
-            instance.departments.set(departments)
         for name, value in validated_data.items():
             setattr(instance, name, value)
         # 変えた項目だけを保存する（取得した後に他の要求が変えた項目を書き戻さない。行は revise() でロックしている）
@@ -414,23 +405,12 @@ class ConnectorSerializer(serializers.ModelSerializer):
         return instance
 
 
-def check_department_change(user, current: set[Department], departments: set[Department], creating: bool) -> None:
-    """使える部門の変更を、利用者の所属の範囲で確かめる。足し引きできるのは自分が所属している部門だけで、
-    全社向け（部門の指定なし）にする・やめるのは、すべての部門の範囲を持つ人だけ"""
-    if covers_all_departments(user):
-        return
-    if not departments or (not creating and not current):
-        raise serializers.ValidationError(
-            {"departments": _("全社向け（部門の指定なし）にする・やめるのは、すべての部門の範囲を持つ人だけです")}
-        )
-    if (departments ^ current) - set(Department.objects.of(user)):
-        raise serializers.ValidationError({"departments": _("所属していない部門は、足し引きできません")})
-
-
 class ConnectorUpdateSerializer(ConnectorSerializer):
-    """Connectorの更新。使うDB接続は変えられないので、読み取り専用にする"""
+    """Connectorの更新。使うDB接続と範囲・部門は変えられないので、読み取り専用にする"""
 
     connection = serializers.SlugRelatedField(slug_field="uid", read_only=True)
+    scope = serializers.ChoiceField(choices=ConnectorScope.choices, read_only=True)
+    department = serializers.SlugRelatedField(slug_field="uid", read_only=True)
 
     class Meta(ConnectorSerializer.Meta):
         pass

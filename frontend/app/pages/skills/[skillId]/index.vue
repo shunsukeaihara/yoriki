@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
  * Skillの詳細。公開中の版の中身、Draftの編集と資料・公開、評価ケースとDraftの評価、版の履歴と切戻し、変更の記録。
- * 何ができるかは Skill.access で決まり（design.md §3.6）、ボタンを隠すだけで、サーバーでも必ず確かめる（403）
+ * 何ができるかはサーバーが判定した Skill.canEdit・canPublish で決まり（authorization.md §5.1）、ボタンを隠すだけで、
+ * サーバーでも必ず確かめる（403）
  */
 import { AxiosError } from 'axios'
 import SkillDraftForm from '~/components/skill/SkillDraftForm.vue'
@@ -16,8 +17,10 @@ const skillId = route.params.skillId as string
 const { data: skill, error, refresh } = await useAsyncData(`skill-${skillId}`, () => api.skills(skillId).get())
 if (error.value) throw createError(error.value) // 404 / 403 はエラー画面にする
 
-const canEdit = computed(() => (skill.value?.access ?? 0) >= SkillAccess.EDIT)
-const canPublish = computed(() => (skill.value?.access ?? 0) >= SkillAccess.PUBLISH)
+// システムのSkillは管理画面の一覧から開く
+const listPath = computed(() => (skill.value?.scope === SkillScope.SYSTEM ? '/manage/system_skills' : '/skills'))
+const canEdit = computed(() => Boolean(skill.value?.canEdit))
+const canPublish = computed(() => Boolean(skill.value?.canPublish))
 
 // 公開中の版の中身
 const current = ref<SkillVersion | null>(null)
@@ -168,7 +171,7 @@ const onDelete = async () => {
   try {
     await api.skills(skillId).delete()
     toast.add({ title: t('削除しました'), color: 'success' })
-    await navigateTo('/skills')
+    await navigateTo(listPath.value)
   } catch (err) {
     toast.add({ title: t('エラー'), description: makeErrorMsg(err), color: 'error' })
   }
@@ -180,7 +183,7 @@ const onDelete = async () => {
     <template #header>
       <UDashboardNavbar :title="skill?.name">
         <template #leading>
-          <DBtn to="/skills" color="neutral" variant="ghost" icon="i-lucide-arrow-left" :aria-label="$t('一覧へ')" />
+          <DBtn :to="listPath" color="neutral" variant="ghost" icon="i-lucide-arrow-left" :aria-label="$t('一覧へ')" />
         </template>
         <template #right>
           <!-- 名前の変更・停止・削除は公開の権限が要る。サーバー側でも確認し、権限がなければ403になる -->

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 
-definePageMeta({ permission: PermissionCode.CHANGE_SSO_PROVIDER })
+definePageMeta({ permission: ManagePagePermissions.SSO_PROVIDER })
 
+const { hasPermission } = usePermission()
 const api = useAPI()
 const { t } = useI18n()
 const reloadKey = ref(0)
@@ -26,7 +27,7 @@ const columns: TableColumn<SSOProvider>[] = [
         :description="$t('社員がログインに使う社内SSOの認証基盤を登録します。種別ごとに1つ登録できます')"
       >
         <template #end>
-          <SsoProviderDialog @saved="reload">
+          <SsoProviderDialog v-if="hasPermission(PermissionCode.ADD_SSO_PROVIDER)" @saved="reload">
             <template #trigger="{ on }">
               <DBtn icon="i-lucide-plus" v-on="on">{{ $t('SSOの設定を追加') }}</DBtn>
             </template>

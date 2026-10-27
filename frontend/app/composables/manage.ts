@@ -11,20 +11,18 @@ export type ManageMenuLink = NavigationMenuItem & {
 export type ManageMenuGroup = NavigationMenuItem & { label: string; children: ManageMenuItem[] }
 export type ManageMenuItem = ManageMenuLink | ManageMenuGroup
 
-/** 接続先の管理画面に入れるpermission（いずれかの操作） */
-export const DATABASE_CONNECTION_PERMISSIONS: PermissionCode[] = [
-  PermissionCode.VIEW_DATABASE_CONNECTION,
-  PermissionCode.ADD_DATABASE_CONNECTION,
-  PermissionCode.CHANGE_DATABASE_CONNECTION,
-  PermissionCode.DELETE_DATABASE_CONNECTION,
-]
-
-/** Connectorの管理画面に入れるpermission（作成・編集・削除のいずれか） */
-export const CONNECTOR_EDIT_PERMISSIONS: PermissionCode[] = [
-  PermissionCode.ADD_CONNECTOR,
-  PermissionCode.CHANGE_CONNECTOR,
-  PermissionCode.DELETE_CONNECTOR,
-]
+/** 管理画面のページに入れるpermission（見るか変えるか。authorization.md §10）。リンク先の definePageMeta と同じにする */
+export const ManagePagePermissions = {
+  LLM_CONNECTION: [PermissionCode.VIEW_LLM_CONNECTION, PermissionCode.CHANGE_LLM_CONNECTION],
+  MODEL_PROFILE: [PermissionCode.VIEW_MODEL_PROFILE, PermissionCode.CHANGE_MODEL_PROFILE],
+  RUNTIME_PROFILE: [PermissionCode.VIEW_RUNTIME_PROFILE, PermissionCode.CHANGE_RUNTIME_PROFILE],
+  DATABASE_CONNECTION: [PermissionCode.VIEW_DATABASE_CONNECTION, PermissionCode.CHANGE_DATABASE_CONNECTION],
+  CONNECTOR: [PermissionCode.VIEW_CONNECTOR, PermissionCode.CHANGE_CONNECTOR],
+  SYSTEM_SKILL: [PermissionCode.EDIT_SYSTEM_SKILLS, PermissionCode.PUBLISH_SYSTEM_SKILLS],
+  USER: [PermissionCode.VIEW_USER, PermissionCode.CHANGE_USER],
+  DEPARTMENT: [PermissionCode.VIEW_DEPARTMENT, PermissionCode.CHANGE_DEPARTMENT],
+  SSO_PROVIDER: [PermissionCode.VIEW_SSO_PROVIDER, PermissionCode.CHANGE_SSO_PROVIDER],
+} satisfies Record<string, PermissionCode[]>
 
 const isGroup = (item: ManageMenuItem): item is ManageMenuGroup => 'children' in item && Array.isArray(item.children)
 
@@ -42,19 +40,19 @@ export const useManageMenu = () => {
       label: $i18n.t('LLMの接続'),
       icon: 'i-lucide-plug',
       to: '/manage/llm_connections',
-      permission: PermissionCode.CHANGE_LLM_CONNECTION,
+      permission: ManagePagePermissions.LLM_CONNECTION,
     },
     {
       label: $i18n.t('モデル設定'),
       icon: 'i-lucide-cpu',
       to: '/manage/model_profiles',
-      permission: PermissionCode.CHANGE_MODEL_PROFILE,
+      permission: ManagePagePermissions.MODEL_PROFILE,
     },
     {
       label: $i18n.t('Runtime Profile'),
       icon: 'i-lucide-box',
       to: '/manage/runtime_profiles',
-      permission: PermissionCode.CHANGE_RUNTIME_PROFILE,
+      permission: ManagePagePermissions.RUNTIME_PROFILE,
     },
     {
       label: $i18n.t('Connector'),
@@ -70,36 +68,42 @@ export const useManageMenu = () => {
               label: $i18n.t('接続先'),
               icon: 'i-lucide-server',
               to: '/manage/database_connections',
-              permission: DATABASE_CONNECTION_PERMISSIONS,
+              permission: ManagePagePermissions.DATABASE_CONNECTION,
             },
             {
               label: $i18n.t('Connector'),
               icon: 'i-lucide-table-2',
               to: '/manage/connectors',
-              // 一覧は所属で絞る。管理画面のメニューには、作成・編集・削除のいずれかができる人にだけ出す
-              permission: CONNECTOR_EDIT_PERMISSIONS,
+              // 部門・全社・システムのConnectorを全件扱う（所属は問わない）
+              permission: ManagePagePermissions.CONNECTOR,
             },
           ],
         },
       ],
     },
     {
+      label: $i18n.t('システムのSkill'),
+      icon: 'i-lucide-book-lock',
+      to: '/manage/system_skills',
+      permission: ManagePagePermissions.SYSTEM_SKILL,
+    },
+    {
       label: $i18n.t('ユーザー'),
       icon: 'i-lucide-users',
       to: '/manage/users',
-      permission: PermissionCode.CHANGE_USER,
+      permission: ManagePagePermissions.USER,
     },
     {
       label: $i18n.t('部門'),
       icon: 'i-lucide-building-2',
       to: '/manage/departments',
-      permission: PermissionCode.CHANGE_DEPARTMENT,
+      permission: ManagePagePermissions.DEPARTMENT,
     },
     {
       label: $i18n.t('SSOの設定'),
       icon: 'i-lucide-key-round',
       to: '/manage/sso_providers',
-      permission: PermissionCode.CHANGE_SSO_PROVIDER,
+      permission: ManagePagePermissions.SSO_PROVIDER,
     },
   ])
 

@@ -7,7 +7,7 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
 from utils.exceptions import Conflict
-from utils.permissions import PlatformAdmin
+from utils.permissions import ModelPermissions
 from utils.views import SoftDeleteMixin
 
 from .models import RuntimeProfile, RuntimeProfileVersion
@@ -24,7 +24,7 @@ class RuntimeProfileFilter(filters.FilterSet):
         fields = ["name", "is_active"]
 
 
-@extend_schema(description="Runtime Profileの管理API（基盤管理者だけ）", tags=["manage/runtime_profile"])
+@extend_schema(description="Runtime Profileの管理API", tags=["manage/runtime_profile"])
 @extend_schema_view(
     update=extend_schema(responses={200: RuntimeProfileSerializer, 409: CONFLICT}),
     partial_update=extend_schema(responses={200: RuntimeProfileSerializer, 409: CONFLICT}),
@@ -32,7 +32,8 @@ class RuntimeProfileFilter(filters.FilterSet):
 class RuntimeProfileViewSet(SoftDeleteMixin, ModelViewSet):
     """中身（イメージ、資源の上限）を変えて保存すると新しい版ができる。始まっているRunは固定した版を使い続ける"""
 
-    permission_classes = [PlatformAdmin]
+    permission_classes = [ModelPermissions]
+    action_permissions = {"make_default": "change"}
     lookup_field = "uid"
     queryset = RuntimeProfile.objects.filter(deleted=False).select_related("created_by", "current_version__created_by")
     serializer_class = RuntimeProfileSerializer
@@ -79,9 +80,10 @@ class RuntimeProfileMixin:
         return super().get_queryset().filter(profile=self.runtime_profile)  # type: ignore[misc]
 
 
-@extend_schema(description="Runtime Profileの版の履歴（基盤管理者だけ）", tags=["manage/runtime_profile/version"])
+@extend_schema(description="Runtime Profileの版の履歴", tags=["manage/runtime_profile/version"])
 class RuntimeProfileVersionViewSet(RuntimeProfileMixin, ReadOnlyModelViewSet):
-    permission_classes = [PlatformAdmin]
+    permission_classes = [ModelPermissions]
+    permission_model = RuntimeProfile
     lookup_field = "number"  # 版番号で識別する子リソースの例外（backend-conventions.md §4.1）
     queryset = RuntimeProfileVersion.objects.select_related("created_by")
     serializer_class = RuntimeProfileVersionSerializer

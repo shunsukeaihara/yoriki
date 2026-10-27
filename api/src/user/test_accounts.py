@@ -4,16 +4,17 @@
 """
 
 import threading
+import time
 from datetime import timedelta
 
 import pytest
-from django.contrib.auth.models import Group
+from django.contrib.auth.models import Group, Permission
 from django.db import IntegrityError, connection, transaction
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from .factories import SSOProviderFactory, UserFactory
-from .models import Invitation, InvitationPurpose, User
+from .factories import SSOProviderFactory, UserFactory, grant
+from .models import Invitation, InvitationPurpose, User, lock_accounts
 
 SESSION = "/api/app/v1/auth/session/"
 VERIFY = "/api/app/v1/auth/invitations/verify/"
@@ -157,12 +158,12 @@ def _token(url: str) -> str:
 class TestInvitation:
     @pytest.mark.django_db
     def test_create_user_and_accept_invitation(self, admin_client, platform_admin):
-        Group.objects.get_or_create(name="業務管理者")
-        res = _create_user(admin_client, email=" Hanako@Example.co.jp ", groups=["業務管理者"])
+        Group.objects.get_or_create(name="テスト用のGroup")
+        res = _create_user(admin_client, email=" Hanako@Example.co.jp ", groups=["テスト用のGroup"])
         assert res.status_code == 201, res.json()
         data = res.json()
         assert data["email"] == "hanako@example.co.jp"
-        assert data["groups"] == ["業務管理者"]
+        assert data["groups"] == ["テスト用のGroup"]
         assert data["has_password"] is False
         assert data["invitation"]["purpose"] == InvitationPurpose.INVITE
         token = _token(data["invitation"]["url"])
@@ -346,17 +347,17 @@ class TestManageUser:
 
     @pytest.mark.django_db
     def test_update_groups_and_keep_email(self, admin_client, password_user):
-        Group.objects.get_or_create(name="Skill公開者")
+        Group.objects.get_or_create(name="全社のSkill公開者")
         res = admin_client.patch(
             f"{USERS}{password_user.uid}/",
-            {"groups": ["Skill公開者"], "email": "other@example.co.jp", "display_name": "太郎"},
+            {"groups": ["全社のSkill公開者"], "email": "other@example.co.jp", "display_name": "太郎"},
             format="json",
         )
         assert res.status_code == 200, res.json()
         password_user.refresh_from_db()
         assert password_user.email == "taro@example.co.jp"
         assert password_user.display_name == "太郎"
-        assert list(password_user.groups.values_list("name", flat=True)) == ["Skill公開者"]
+        assert list(password_user.groups.values_list("name", flat=True)) == ["全社のSkill公開者"]
 
     @pytest.mark.django_db
     def test_deactivate_ends_session(self, admin_client, password_user):
@@ -374,8 +375,206 @@ class TestManageUser:
 
     @pytest.mark.django_db
     def test_search_and_groups(self, admin_client, password_user):
+        Group.objects.get_or_create(name="全社のSkill公開者")
         results = admin_client.get(USERS, {"search": "taro"}).json()["results"]
         assert [r["id"] for r in results] == [password_user.uid]
         names = [g["name"] for g in admin_client.get("/api/v1/groups/").json()]
         assert names == sorted(names)
-        assert "業務管理者" in names
+        assert "全社のSkill公開者" in names
+
+
+USER_ADMIN_PERMS = ("user.view_user", "user.add_user", "user.change_user")
+
+
+@pytest.fixture(name="user_admin")
+def fixture_user_admin(db) -> User:
+    """基盤管理者ではないユーザー管理者"""
+    return grant(UserFactory.create(), *USER_ADMIN_PERMS)
+
+
+class TestDelegatedUserAdmin:
+    """管理を委任したときの防止策（authorization.md §10）"""
+
+    @pytest.mark.django_db
+    def test_can_change_is_returned_per_account(self, api_client, user_admin, password_user, platform_admin):
+        stronger = grant(UserFactory.create(), "skill.can_publish_company_skills")
+        api_client.force_login(user_admin)
+        rows = {r["id"]: r for r in api_client.get(USERS).json()["results"]}
+        assert rows[password_user.uid]["can_change"] is True
+        assert rows[password_user.uid]["can_issue_invitation"] is True
+        assert rows[stronger.uid]["can_change"] is False
+        assert rows[platform_admin.uid]["can_change"] is False
+        assert rows[platform_admin.uid]["can_issue_invitation"] is False
+        assert "is_platform_admin" not in rows[platform_admin.uid]
+
+    @pytest.mark.django_db
+    def test_cannot_change_stronger_or_platform_admin_account(self, api_client, user_admin, platform_admin):
+        stronger = grant(UserFactory.create(), "skill.can_publish_company_skills")
+        inactive = grant(UserFactory.create(is_active=False), "skill.can_publish_company_skills")
+        api_client.force_login(user_admin)
+        for user in (stronger, platform_admin, inactive):
+            res = api_client.patch(f"{USERS}{user.uid}/", {"is_active": True, "display_name": "x"}, format="json")
+            assert res.status_code == 403, user
+            assert api_client.post(f"{USERS}{user.uid}/invitation/").status_code == 403
+        # 同じpermissionまでなら変えられる
+        same = grant(UserFactory.create(), "user.view_user")
+        assert api_client.patch(f"{USERS}{same.uid}/", {"display_name": "x"}, format="json").status_code == 200
+
+    @pytest.mark.django_db
+    def test_groups_with_permissions_not_owned_cannot_be_assigned(self, api_client, user_admin, password_user):
+        strong = Group.objects.create(name="強いGroup")
+        strong.permissions.add(*_permissions("connector.add_connector"))
+        weak = Group.objects.create(name="弱いGroup")
+        weak.permissions.add(*_permissions("user.view_user"))
+        api_client.force_login(user_admin)
+        url = f"{USERS}{password_user.uid}/"
+        res = api_client.patch(url, {"groups": ["強いGroup"]}, format="json")
+        assert res.status_code == 400
+        assert "groups" in res.json()
+        assert api_client.patch(url, {"groups": ["弱いGroup"]}, format="json").status_code == 200
+        res = _create_user(api_client, email="new@example.co.jp", groups=["強いGroup"])
+        assert res.status_code == 400
+
+    @pytest.mark.django_db
+    def test_cannot_change_own_groups(self, api_client, user_admin):
+        Group.objects.create(name="空のGroup")
+        api_client.force_login(user_admin)
+        res = api_client.patch(f"{USERS}{user_admin.uid}/", {"groups": ["空のGroup"]}, format="json")
+        assert res.status_code == 400
+        assert "groups" in res.json()
+        res = api_client.patch(f"{USERS}{user_admin.uid}/", {"display_name": "自分"}, format="json")
+        assert res.status_code == 200
+
+    @pytest.mark.django_db
+    def test_only_display_name_active_and_groups_are_writable(self, api_client, user_admin, password_user):
+        api_client.force_login(user_admin)
+        res = api_client.patch(
+            f"{USERS}{password_user.uid}/",
+            {"is_superuser": True, "user_permissions": [1], "is_staff": True},
+            format="json",
+        )
+        assert res.status_code == 200
+        password_user.refresh_from_db()
+        assert not password_user.is_superuser
+        assert not password_user.is_staff
+        assert not password_user.user_permissions.exists()
+
+    @pytest.mark.django_db
+    @pytest.mark.parametrize("change", ["issuer_lost_permission", "target_promoted", "issuer_inactive"])
+    def test_link_is_checked_again_when_accepted(self, api_client, user_admin, password_user, change):
+        api_client.force_login(user_admin)
+        token = _token(api_client.post(f"{USERS}{password_user.uid}/invitation/").json()["url"])
+        if change == "issuer_lost_permission":
+            password_user.user_permissions.add(*_permissions("user.add_user"))
+            user_admin.user_permissions.remove(*_permissions("user.add_user"))
+        elif change == "target_promoted":
+            password_user.user_permissions.add(*_permissions("connector.add_connector"))
+        else:
+            User.objects.filter(pk=user_admin.pk).update(is_active=False)
+        res = APIClient().post(ACCEPT, {"token": token, "password": PASSWORD}, format="json")
+        assert res.status_code == 400
+        assert "token" in res.json()
+
+
+def _permissions(*codes: str) -> list[Permission]:
+    return [Permission.objects.get(content_type__app_label=c.split(".")[0], codename=c.split(".")[1]) for c in codes]
+
+
+class TestAcceptRace:
+    @pytest.mark.django_db(transaction=True)
+    @pytest.mark.parametrize("change", ["issuer_lost_permission", "target_promoted"])
+    def test_accept_waits_for_a_concurrent_permission_change(self, password_user, change):
+        """権限の変更（ユーザーの管理APIと同じく行をロックする）の途中に受け入れが来ても、変更の確定を待って
+        最新の権限で確かめ直す（authorization.md §10）"""
+        user_admin = grant(UserFactory.create(), *USER_ADMIN_PERMS)
+        password_user = grant(password_user, "user.view_user")
+        _invitation, token = Invitation.issue(user=password_user, actor=user_admin)
+        locked = threading.Event()
+        errors: list[BaseException] = []
+
+        def change_permissions():
+            try:
+                with transaction.atomic():
+                    target = user_admin if change == "issuer_lost_permission" else password_user
+                    lock_accounts(target)
+                    locked.set()
+                    time.sleep(2)  # 受け入れの要求がロックを待つ間に、権限を変える
+                    if change == "issuer_lost_permission":
+                        user_admin.user_permissions.remove(*_permissions("user.view_user"))
+                    else:
+                        password_user.user_permissions.add(*_permissions("connector.add_connector"))
+            except BaseException as exc:
+                errors.append(exc)
+            finally:
+                connection.close()
+
+        thread = threading.Thread(target=change_permissions)
+        thread.start()
+        assert locked.wait(timeout=5)
+        res = APIClient().post(ACCEPT, {"token": token, "password": PASSWORD}, format="json")
+        thread.join()
+        assert errors == []
+        assert res.status_code == 400
+        assert "token" in res.json()
+
+
+class TestUpdateRace:
+    @pytest.mark.django_db(transaction=True)
+    def test_update_keeps_a_password_set_while_waiting_for_the_lock(self, password_user):
+        """ユーザーの更新は、ロックの後に読み直した行を保存する（待つ間に受け入れが設定したパスワードを書き戻さない）"""
+        user_admin = grant(UserFactory.create(), *USER_ADMIN_PERMS)
+        locked = threading.Event()
+        errors: list[BaseException] = []
+
+        def accept():
+            try:
+                with transaction.atomic():
+                    lock_accounts(password_user)
+                    locked.set()
+                    time.sleep(2)  # 更新の要求がロックを待つ間に、パスワードを変える
+                    user = User.objects.get(pk=password_user.pk)
+                    user.set_password("another-horse-battery-staple")
+                    user.save(update_fields=["password"])
+            except BaseException as exc:
+                errors.append(exc)
+            finally:
+                connection.close()
+
+        client = APIClient()
+        client.force_login(user_admin)
+        thread = threading.Thread(target=accept)
+        thread.start()
+        assert locked.wait(timeout=5)
+        res = client.patch(f"{USERS}{password_user.uid}/", {"display_name": "太郎"}, format="json")
+        thread.join()
+        assert errors == []
+        assert res.status_code == 200, res.json()
+        password_user.refresh_from_db()
+        assert password_user.display_name == "太郎"
+        assert password_user.check_password("another-horse-battery-staple")
+
+    @pytest.mark.django_db(transaction=True)
+    def test_update_is_refused_when_the_actor_loses_permission_while_waiting(self, password_user):
+        user_admin = grant(UserFactory.create(), *USER_ADMIN_PERMS)
+        locked = threading.Event()
+
+        def revoke():
+            try:
+                with transaction.atomic():
+                    lock_accounts(user_admin)
+                    locked.set()
+                    time.sleep(2)  # 更新の要求がロックを待つ間に、操作する人の権限を外す
+                    user_admin.user_permissions.clear()
+            finally:
+                connection.close()
+
+        client = APIClient()
+        client.force_login(user_admin)
+        thread = threading.Thread(target=revoke)
+        thread.start()
+        assert locked.wait(timeout=5)
+        res = client.patch(f"{USERS}{password_user.uid}/", {"display_name": "太郎"}, format="json")
+        thread.join()
+        assert res.status_code == 403
+        password_user.refresh_from_db()
+        assert password_user.display_name != "太郎"

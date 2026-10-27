@@ -766,10 +766,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Connectorの管理API（所属とpermissionで判定する） */
+        /** @description Connectorの管理API（permissionで判定する） */
         get: operations["v1_connectors_list"];
         put?: never;
-        /** @description Connectorの管理API（所属とpermissionで判定する） */
+        /** @description Connectorの管理API（permissionで判定する） */
         post: operations["v1_connectors_create"];
         delete?: never;
         options?: never;
@@ -784,7 +784,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Connectorの版の履歴（所属で判定する） */
+        /** @description Connectorの版の履歴 */
         get: operations["v1_connectors_versions_list"];
         put?: never;
         post?: never;
@@ -801,7 +801,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Connectorの版の履歴（所属で判定する） */
+        /** @description Connectorの版の履歴 */
         get: operations["v1_connectors_versions_retrieve"];
         put?: never;
         post?: never;
@@ -818,16 +818,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Connectorの管理API（所属とpermissionで判定する） */
+        /** @description Connectorの管理API（permissionで判定する） */
         get: operations["v1_connectors_retrieve"];
-        /** @description Connectorの管理API（所属とpermissionで判定する） */
+        /** @description Connectorの管理API（permissionで判定する） */
         put: operations["v1_connectors_update"];
         post?: never;
-        /** @description Connectorの管理API（所属とpermissionで判定する） */
+        /** @description Connectorの管理API（permissionで判定する） */
         delete: operations["v1_connectors_destroy"];
         options?: never;
         head?: never;
-        /** @description Connectorの管理API（所属とpermissionで判定する） */
+        /** @description Connectorの管理API（permissionで判定する） */
         patch: operations["v1_connectors_partial_update"];
         trace?: never;
     };
@@ -889,7 +889,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Connectorの作成で選べる、有効な接続先の一覧（`search` で名前を絞り込む） */
+        /** @description Connectorの作成と一覧の絞り込みで選べる、有効な接続先の一覧（`search` で名前を絞り込む） */
         get: operations["v1_connectors_connections_list"];
         put?: never;
         post?: never;
@@ -906,7 +906,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description 使える部門として選べる部門（自分の所属の範囲。すべての部門の範囲を持つ人はすべて）。`search` で名前を絞り込む */
+        /** @description 部門の範囲のConnectorの作成と一覧の絞り込みで選べる部門（有効なすべての部門。所属は問わない）。`search` で名前を絞り込む */
         get: operations["v1_connectors_departments_list"];
         put?: never;
         post?: never;
@@ -995,10 +995,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description 部門の管理API（基盤管理者だけ） */
+        /** @description 部門の管理API */
         get: operations["v1_departments_list"];
         put?: never;
-        /** @description 部門の管理API（基盤管理者だけ） */
+        /** @description 部門の管理API */
         post: operations["v1_departments_create"];
         delete?: never;
         options?: never;
@@ -1013,10 +1013,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description 部門の所属の管理API（基盤管理者だけ） */
+        /** @description 部門の所属の管理API */
         get: operations["v1_departments_members_list"];
         put?: never;
-        /** @description 部門の所属の管理API（基盤管理者だけ） */
+        /** @description 部門の所属の管理API */
         post: operations["v1_departments_members_create"];
         delete?: never;
         options?: never;
@@ -1031,17 +1031,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description 部門の所属の管理API（基盤管理者だけ） */
+        /** @description 部門の所属の管理API */
         get: operations["v1_departments_members_retrieve"];
-        /** @description 部門の所属の管理API（基盤管理者だけ） */
-        put: operations["v1_departments_members_update"];
+        put?: never;
         post?: never;
-        /** @description 部門の所属の管理API（基盤管理者だけ） */
+        /** @description 部門の所属の管理API */
         delete: operations["v1_departments_members_destroy"];
         options?: never;
         head?: never;
-        /** @description 部門の所属の管理API（基盤管理者だけ） */
-        patch: operations["v1_departments_members_partial_update"];
+        patch?: never;
         trace?: never;
     };
     "/api/v1/departments/{uid}/": {
@@ -1051,16 +1049,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description 部門の管理API（基盤管理者だけ） */
+        /** @description 部門の管理API */
         get: operations["v1_departments_retrieve"];
-        /** @description 部門の管理API（基盤管理者だけ） */
+        /** @description 部門の管理API */
         put: operations["v1_departments_update"];
         post?: never;
-        /** @description 部門の管理API（基盤管理者だけ） */
+        /** @description 部門の管理API */
         delete: operations["v1_departments_destroy"];
         options?: never;
         head?: never;
-        /** @description 部門の管理API（基盤管理者だけ） */
+        /** @description 部門の管理API */
         patch: operations["v1_departments_partial_update"];
         trace?: never;
     };
@@ -1071,7 +1069,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description 役割（Group）の一覧（基盤管理者だけ） */
+        /** @description Group（permissionの集まり）の一覧。ユーザーに割り当てる選択肢 */
         get: operations["v1_groups_list"];
         put?: never;
         post?: never;
@@ -1088,7 +1086,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description 役割（Group）の一覧（基盤管理者だけ） */
+        /** @description Group（permissionの集まり）の一覧。ユーザーに割り当てる選択肢 */
         get: operations["v1_groups_retrieve"];
         put?: never;
         post?: never;
@@ -1105,10 +1103,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description LLMのプロバイダ接続の管理API（基盤管理者だけ） */
+        /** @description LLMのプロバイダ接続の管理API */
         get: operations["v1_llm_connections_list"];
         put?: never;
-        /** @description LLMのプロバイダ接続の管理API（基盤管理者だけ） */
+        /** @description LLMのプロバイダ接続の管理API */
         post: operations["v1_llm_connections_create"];
         delete?: never;
         options?: never;
@@ -1123,16 +1121,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description LLMのプロバイダ接続の管理API（基盤管理者だけ） */
+        /** @description LLMのプロバイダ接続の管理API */
         get: operations["v1_llm_connections_retrieve"];
-        /** @description LLMのプロバイダ接続の管理API（基盤管理者だけ） */
+        /** @description LLMのプロバイダ接続の管理API */
         put: operations["v1_llm_connections_update"];
         post?: never;
-        /** @description LLMのプロバイダ接続の管理API（基盤管理者だけ） */
+        /** @description LLMのプロバイダ接続の管理API */
         delete: operations["v1_llm_connections_destroy"];
         options?: never;
         head?: never;
-        /** @description LLMのプロバイダ接続の管理API（基盤管理者だけ） */
+        /** @description LLMのプロバイダ接続の管理API */
         patch: operations["v1_llm_connections_partial_update"];
         trace?: never;
     };
@@ -1160,10 +1158,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description モデル設定の管理API（基盤管理者だけ） */
+        /** @description モデル設定の管理API */
         get: operations["v1_model_profiles_list"];
         put?: never;
-        /** @description モデル設定の管理API（基盤管理者だけ） */
+        /** @description モデル設定の管理API */
         post: operations["v1_model_profiles_create"];
         delete?: never;
         options?: never;
@@ -1178,7 +1176,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description モデル設定の版の履歴（基盤管理者だけ） */
+        /** @description モデル設定の版の履歴 */
         get: operations["v1_model_profiles_versions_list"];
         put?: never;
         post?: never;
@@ -1195,7 +1193,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description モデル設定の版の履歴（基盤管理者だけ） */
+        /** @description モデル設定の版の履歴 */
         get: operations["v1_model_profiles_versions_retrieve"];
         put?: never;
         post?: never;
@@ -1212,16 +1210,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description モデル設定の管理API（基盤管理者だけ） */
+        /** @description モデル設定の管理API */
         get: operations["v1_model_profiles_retrieve"];
-        /** @description モデル設定の管理API（基盤管理者だけ） */
+        /** @description モデル設定の管理API */
         put: operations["v1_model_profiles_update"];
         post?: never;
-        /** @description モデル設定の管理API（基盤管理者だけ） */
+        /** @description モデル設定の管理API */
         delete: operations["v1_model_profiles_destroy"];
         options?: never;
         head?: never;
-        /** @description モデル設定の管理API（基盤管理者だけ） */
+        /** @description モデル設定の管理API */
         patch: operations["v1_model_profiles_partial_update"];
         trace?: never;
     };
@@ -1249,10 +1247,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Runtime Profileの管理API（基盤管理者だけ） */
+        /** @description Runtime Profileの管理API */
         get: operations["v1_runtime_profiles_list"];
         put?: never;
-        /** @description Runtime Profileの管理API（基盤管理者だけ） */
+        /** @description Runtime Profileの管理API */
         post: operations["v1_runtime_profiles_create"];
         delete?: never;
         options?: never;
@@ -1267,7 +1265,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Runtime Profileの版の履歴（基盤管理者だけ） */
+        /** @description Runtime Profileの版の履歴 */
         get: operations["v1_runtime_profiles_versions_list"];
         put?: never;
         post?: never;
@@ -1284,7 +1282,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Runtime Profileの版の履歴（基盤管理者だけ） */
+        /** @description Runtime Profileの版の履歴 */
         get: operations["v1_runtime_profiles_versions_retrieve"];
         put?: never;
         post?: never;
@@ -1301,16 +1299,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description Runtime Profileの管理API（基盤管理者だけ） */
+        /** @description Runtime Profileの管理API */
         get: operations["v1_runtime_profiles_retrieve"];
-        /** @description Runtime Profileの管理API（基盤管理者だけ） */
+        /** @description Runtime Profileの管理API */
         put: operations["v1_runtime_profiles_update"];
         post?: never;
-        /** @description Runtime Profileの管理API（基盤管理者だけ） */
+        /** @description Runtime Profileの管理API */
         delete: operations["v1_runtime_profiles_destroy"];
         options?: never;
         head?: never;
-        /** @description Runtime Profileの管理API（基盤管理者だけ） */
+        /** @description Runtime Profileの管理API */
         patch: operations["v1_runtime_profiles_partial_update"];
         trace?: never;
     };
@@ -1338,10 +1336,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description 社内SSOの設定の管理API（基盤管理者だけ） */
+        /** @description 社内SSOの設定の管理API */
         get: operations["v1_sso_providers_list"];
         put?: never;
-        /** @description 社内SSOの設定の管理API（基盤管理者だけ） */
+        /** @description 社内SSOの設定の管理API */
         post: operations["v1_sso_providers_create"];
         delete?: never;
         options?: never;
@@ -1356,16 +1354,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description 社内SSOの設定の管理API（基盤管理者だけ） */
+        /** @description 社内SSOの設定の管理API */
         get: operations["v1_sso_providers_retrieve"];
-        /** @description 社内SSOの設定の管理API（基盤管理者だけ） */
+        /** @description 社内SSOの設定の管理API */
         put: operations["v1_sso_providers_update"];
         post?: never;
-        /** @description 社内SSOの設定の管理API（基盤管理者だけ） */
+        /** @description 社内SSOの設定の管理API */
         delete: operations["v1_sso_providers_destroy"];
         options?: never;
         head?: never;
-        /** @description 社内SSOの設定の管理API（基盤管理者だけ） */
+        /** @description 社内SSOの設定の管理API */
         patch: operations["v1_sso_providers_partial_update"];
         trace?: never;
     };
@@ -1376,10 +1374,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description ユーザーの管理API（基盤管理者だけ） */
+        /** @description ユーザーの管理API */
         get: operations["v1_users_list"];
         put?: never;
-        /** @description ユーザーの管理API（基盤管理者だけ） */
+        /** @description ユーザーの管理API */
         post: operations["v1_users_create"];
         delete?: never;
         options?: never;
@@ -1394,15 +1392,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description ユーザーの管理API（基盤管理者だけ） */
+        /** @description ユーザーの管理API */
         get: operations["v1_users_retrieve"];
-        /** @description ユーザーの管理API（基盤管理者だけ） */
+        /** @description ユーザーの管理API */
         put: operations["v1_users_update"];
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
-        /** @description ユーザーの管理API（基盤管理者だけ） */
+        /** @description ユーザーの管理API */
         patch: operations["v1_users_partial_update"];
         trace?: never;
     };
@@ -1511,7 +1509,7 @@ export interface components {
              */
             file: string;
         };
-        /** @description 資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の役割だけが変えられる */
+        /** @description 資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の権限を持つ人だけが変えられる */
         AssetChecks: {
             /**
              * @description 空なら自動で判別する
@@ -1537,7 +1535,7 @@ export interface components {
             /** @description 列ごとの値の型（文字列なら省く） */
             column_types?: components["schemas"]["ColumnType"][];
         };
-        /** @description 資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の役割だけが変えられる */
+        /** @description 資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の権限を持つ人だけが変えられる */
         AssetChecksRequest: {
             /**
              * @description 空なら自動で判別する
@@ -1752,9 +1750,8 @@ export interface components {
          *     境界を変えて保存すると、サーバーが新しい版を作る。更新では、編集を始めた時点の `version` を送り、
          *     その間に他の人が版を作っていたら409になる。使うDB接続は作成した後は変えられない。
          *
-         *     使える部門（所属の軸）は版に入れない。指定しなければ全社向け。足し引きできるのは自分が所属している部門だけで、
-         *     全社向けにする・やめる（部門を空にする・空から指定する）のは、すべての部門の範囲を持つ人（基盤管理者か、
-         *     印のある部門の所属者）だけ
+         *     範囲（部門・全社・システム）と部門は作成時に決め、更新では変えない（authorization.md §5.2）。作成・編集は
+         *     所属を問わず、permissionだけで判定する
          */
         Connector: {
             readonly id: string;
@@ -1788,9 +1785,18 @@ export interface components {
              * @default false
              */
             is_sensitive: boolean;
-            /** @description 使える部門。空なら全社向け。更新では、送ると全体を置き換える */
-            departments?: string[];
-            readonly department_infos: components["schemas"]["MinimumDepartment"][];
+            /**
+             * @description 範囲。作成した後は変えられない
+             *
+             *     * `2` - 部門
+             *     * `3` - 全社
+             *     * `4` - システム
+             */
+            scope: components["schemas"]["ConnectorScopeEnum"];
+            readonly scope_display: string;
+            /** @description 部門の範囲では必須。作成した後は変えられない */
+            department?: string | null;
+            readonly department_info: components["schemas"]["MinimumDepartment"] | null;
             readonly created_by: string;
             /** Format: date-time */
             readonly created: string;
@@ -1847,9 +1853,8 @@ export interface components {
          *     境界を変えて保存すると、サーバーが新しい版を作る。更新では、編集を始めた時点の `version` を送り、
          *     その間に他の人が版を作っていたら409になる。使うDB接続は作成した後は変えられない。
          *
-         *     使える部門（所属の軸）は版に入れない。指定しなければ全社向け。足し引きできるのは自分が所属している部門だけで、
-         *     全社向けにする・やめる（部門を空にする・空から指定する）のは、すべての部門の範囲を持つ人（基盤管理者か、
-         *     印のある部門の所属者）だけ
+         *     範囲（部門・全社・システム）と部門は作成時に決め、更新では変えない（authorization.md §5.2）。作成・編集は
+         *     所属を問わず、permissionだけで判定する
          */
         ConnectorRequest: {
             /** 名前 */
@@ -1880,9 +1885,24 @@ export interface components {
              */
             is_sensitive: boolean;
             change_reason?: string;
-            /** @description 使える部門。空なら全社向け。更新では、送ると全体を置き換える */
-            departments?: string[];
+            /**
+             * @description 範囲。作成した後は変えられない
+             *
+             *     * `2` - 部門
+             *     * `3` - 全社
+             *     * `4` - システム
+             */
+            scope: components["schemas"]["ConnectorScopeEnum"];
+            /** @description 部門の範囲では必須。作成した後は変えられない */
+            department?: string | null;
         };
+        /**
+         * @description * `2` - 部門
+         *     * `3` - 全社
+         *     * `4` - システム
+         * @enum {integer}
+         */
+        ConnectorScopeEnum: 2 | 3 | 4;
         /** @description DBの表・ビューと列 */
         ConnectorTable: {
             readonly schema: string;
@@ -1934,7 +1954,7 @@ export interface components {
             readonly detail: string;
             readonly tables: components["schemas"]["ConnectorTable"][];
         };
-        /** @description Connectorの更新。使うDB接続は変えられないので、読み取り専用にする */
+        /** @description Connectorの更新。使うDB接続と範囲・部門は変えられないので、読み取り専用にする */
         ConnectorUpdateRequest: {
             /** 名前 */
             name: string;
@@ -1962,8 +1982,6 @@ export interface components {
              */
             is_sensitive: boolean;
             change_reason?: string;
-            /** @description 使える部門。空なら全社向け。更新では、送ると全体を置き換える */
-            departments?: string[];
         };
         /** @description 版の表示（履歴） */
         ConnectorVersion: {
@@ -2131,11 +2149,6 @@ export interface components {
             readonly id: string;
             /** 名前 */
             name: string;
-            /**
-             * すべての部門の範囲を含む
-             * @description 所属する人を、すべての部門に所属しているものとして扱う（すべてを見る人の管理に使う）
-             */
-            covers_all_departments?: boolean;
             /** @description 所属する人数 */
             readonly member_count: number;
             /** Format: date-time */
@@ -2143,46 +2156,24 @@ export interface components {
             /** Format: date-time */
             readonly updated: string;
         };
-        /** @description 部門の所属。社員は作成時だけ指定し、後からは役割だけを変える */
+        /** @description 部門の所属。変えるときは、所属を消して作り直す */
         DepartmentMembership: {
             readonly id: string;
             user: string;
             readonly user_info: components["schemas"]["MinimumUser"];
-            /** 部門の中の役割 */
-            role: components["schemas"]["DepartmentRoleEnum"];
-            readonly role_display: string;
             /** Format: date-time */
             readonly created: string;
             /** Format: date-time */
             readonly updated: string;
         };
-        /** @description 部門の所属。社員は作成時だけ指定し、後からは役割だけを変える */
+        /** @description 部門の所属。変えるときは、所属を消して作り直す */
         DepartmentMembershipRequest: {
             user: string;
-            /** 部門の中の役割 */
-            role: components["schemas"]["DepartmentRoleEnum"];
-        };
-        /** @description 部門の所属。社員は作成時だけ指定し、後からは役割だけを変える */
-        DepartmentMembershipUpdateRequest: {
-            /** 部門の中の役割 */
-            role: components["schemas"]["DepartmentRoleEnum"];
         };
         DepartmentRequest: {
             /** 名前 */
             name: string;
-            /**
-             * すべての部門の範囲を含む
-             * @description 所属する人を、すべての部門に所属しているものとして扱う（すべてを見る人の管理に使う）
-             */
-            covers_all_departments?: boolean;
         };
-        /**
-         * @description * `1` - 利用
-         *     * `2` - 編集
-         *     * `3` - 公開
-         * @enum {integer}
-         */
-        DepartmentRoleEnum: 1 | 2 | 3;
         ElementDiff: {
             kind: string;
             before: number;
@@ -2234,7 +2225,7 @@ export interface components {
          * @enum {integer}
          */
         EvaluationVerdictEnum: 1 | 2 | 3;
-        /** @description 役割（Group）。ユーザーへの割り当てでは名前で指定する */
+        /** @description Group（permissionの集まり）。ユーザーへの割り当てでは名前で指定する */
         Group: {
             /** 名前 */
             readonly name: string;
@@ -2358,25 +2349,34 @@ export interface components {
             email: string;
             password: string;
         };
-        /** @description ユーザーの作成・表示（基盤管理者だけ）。Yorikiのアカウントのパスワードは、本人が招待のリンクで設定する */
+        /**
+         * @description ユーザーの作成・表示。Yorikiのアカウントのパスワードは、本人が招待のリンクで設定する。
+         *
+         *     書ける項目は表示名・有効・Groupだけ（permissionの直接の付与、`is_superuser`、SSOの識別子は出さない）。
+         *     管理を任された人が自分の権限を超えられないよう、自分の持たないpermissionを含むGroupは付け外しできず、
+         *     自分の持たないpermissionを持つアカウントと基盤管理者のアカウントは変更できない（authorization.md §10）
+         */
         ManageUser: {
             readonly id: string;
             /** Format: email */
             email: string;
             /** 表示名 */
             display_name?: string;
-            /** @description 役割の名前 */
+            /** @description Groupの名前 */
             groups?: string[];
             /**
              * 有効
              * @description ユーザーがアクティブかどうかを示します。アカウントを削除する代わりに選択を解除してください。
              */
             is_active?: boolean;
-            readonly is_platform_admin: boolean;
             /** @description パスワードを設定済みか */
             readonly has_password: boolean;
             /** @description 紐付いているSSOの認証基盤 */
             readonly sso_providers: string[];
+            /** @description 操作する人がこのアカウントを変更できるか */
+            readonly can_change: boolean;
+            /** @description 操作する人がこのアカウントに招待・再設定のリンクを発行できるか */
+            readonly can_issue_invitation: boolean;
             /**
              * 最終ログイン
              * Format: date-time
@@ -2394,18 +2394,21 @@ export interface components {
             email: string;
             /** 表示名 */
             display_name?: string;
-            /** @description 役割の名前 */
+            /** @description Groupの名前 */
             groups?: string[];
             /**
              * 有効
              * @description ユーザーがアクティブかどうかを示します。アカウントを削除する代わりに選択を解除してください。
              */
             is_active?: boolean;
-            readonly is_platform_admin: boolean;
             /** @description パスワードを設定済みか */
             readonly has_password: boolean;
             /** @description 紐付いているSSOの認証基盤 */
             readonly sso_providers: string[];
+            /** @description 操作する人がこのアカウントを変更できるか */
+            readonly can_change: boolean;
+            /** @description 操作する人がこのアカウントに招待・再設定のリンクを発行できるか */
+            readonly can_issue_invitation: boolean;
             /**
              * 最終ログイン
              * Format: date-time
@@ -2423,7 +2426,7 @@ export interface components {
             email: string;
             /** 表示名 */
             display_name?: string;
-            /** @description 役割の名前 */
+            /** @description Groupの名前 */
             groups?: string[];
             /**
              * 有効
@@ -2435,7 +2438,7 @@ export interface components {
         ManageUserUpdateRequest: {
             /** 表示名 */
             display_name?: string;
-            /** @description 役割の名前 */
+            /** @description Groupの名前 */
             groups?: string[];
             /**
              * 有効
@@ -2769,14 +2772,13 @@ export interface components {
             /** Format: date-time */
             readonly created: string;
         };
-        /** @description 所属する部門と、部門の中の役割 */
+        /** @description 表示専用のModelSerializer。すべての項目を読み取り専用にする */
         MyDepartment: {
             readonly id: string;
+            /** 名前 */
             readonly name: string;
-            readonly role: components["schemas"]["DepartmentRoleEnum"];
-            readonly role_display: string;
         };
-        /** @description ログイン中の利用者。画面の表示と権限の判定に使う */
+        /** @description ログイン中の利用者。画面の出し分けの元になるもの（permissionと所属）をすべて返す（authorization.md §4.1.1） */
         MyUser: {
             readonly id: string;
             /**
@@ -2788,9 +2790,13 @@ export interface components {
             readonly email: string;
             /** 表示名 */
             readonly display_name: string;
-            readonly is_platform_admin: boolean;
             readonly all_permissions: string[];
+            /** @description 実際に所属している部門 */
             readonly departments: components["schemas"]["MyDepartment"][];
+            /** @description 使える部門（一覧の絞り込みの選択肢） */
+            readonly usable_departments: components["schemas"]["MyDepartment"][];
+            /** @description 管理できる部門（部門のSkill・タスクを作るときの選択肢） */
+            readonly manageable_departments: components["schemas"]["MyDepartment"][];
         };
         /** @enum {unknown} */
         NullEnum: null;
@@ -3106,7 +3112,7 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["Skill"][];
         };
-        /** @description Connectorの更新。使うDB接続は変えられないので、読み取り専用にする */
+        /** @description Connectorの更新。使うDB接続と範囲・部門は変えられないので、読み取り専用にする */
         PatchedConnectorUpdateRequest: {
             /** 名前 */
             name?: string;
@@ -3134,8 +3140,6 @@ export interface components {
              */
             is_sensitive: boolean;
             change_reason?: string;
-            /** @description 使える部門。空なら全社向け。更新では、送ると全体を置き換える */
-            departments?: string[];
         };
         /** @description 自分の会話。モデル設定を省くと既定のモデル設定にする。実行中に変えると、次のステップから切り替わる */
         PatchedConversationRequest: {
@@ -3170,19 +3174,9 @@ export interface components {
             /** 有効 */
             is_active?: boolean;
         };
-        /** @description 部門の所属。社員は作成時だけ指定し、後からは役割だけを変える */
-        PatchedDepartmentMembershipUpdateRequest: {
-            /** 部門の中の役割 */
-            role?: components["schemas"]["DepartmentRoleEnum"];
-        };
         PatchedDepartmentRequest: {
             /** 名前 */
             name?: string;
-            /**
-             * すべての部門の範囲を含む
-             * @description 所属する人を、すべての部門に所属しているものとして扱う（すべてを見る人の管理に使う）
-             */
-            covers_all_departments?: boolean;
         };
         /** @description プロバイダ接続の更新。種別とbase URL（接続先）は変えられないので、読み取り専用にする */
         PatchedLLMConnectionUpdateRequest: {
@@ -3203,7 +3197,7 @@ export interface components {
         PatchedManageUserUpdateRequest: {
             /** 表示名 */
             display_name?: string;
-            /** @description 役割の名前 */
+            /** @description Groupの名前 */
             groups?: string[];
             /**
              * 有効
@@ -3756,7 +3750,7 @@ export interface components {
         /** @description Skillと公開中の版の概要。中身は版（versions）とDraft（drafts）で扱う */
         Skill: {
             readonly id: string;
-            /** 公開範囲 */
+            /** 範囲 */
             readonly scope: components["schemas"]["SkillScopeEnum"];
             readonly scope_display: string;
             readonly owner_info: components["schemas"]["MinimumUser"] | null;
@@ -3770,8 +3764,10 @@ export interface components {
             readonly suspended: boolean;
             /** @description 開いているDraftのID。なければnull。Draftを編集できる人にだけ出す */
             readonly draft: string | null;
-            /** @description 利用者ができること（1：使う、2：Draftを変更する、3：公開・切戻し・停止・削除・Toolの変更） */
-            readonly access: number;
+            /** @description Draftを変更できるか（本文・資料・評価ケース） */
+            readonly can_edit: boolean;
+            /** @description 公開・切戻し・停止・削除、名前とToolの変更、資料の検証の条件と必須の評価ケースの変更ができるか */
+            readonly can_publish: boolean;
             /** Format: date-time */
             readonly created: string;
             /** Format: date-time */
@@ -3874,7 +3870,7 @@ export interface components {
             readonly checks: components["schemas"]["AssetChecks"];
             readonly validation: components["schemas"]["AssetValidation"];
         };
-        /** @description 資料の検証の条件を変える（公開の役割だけ）。変えると検証し直す */
+        /** @description 資料の検証の条件を変える（公開の権限を持つ人だけ）。変えると検証し直す */
         SkillDraftAssetChecksRequest: {
             /** @description 編集を始めた時点のDraftのrevision */
             revision: number;
@@ -4066,9 +4062,10 @@ export interface components {
          * @description * `1` - 個人
          *     * `2` - 部門
          *     * `3` - 全社
+         *     * `4` - システム
          * @enum {integer}
          */
-        SkillScopeEnum: 1 | 2 | 3;
+        SkillScopeEnum: 1 | 2 | 3 | 4;
         SkillSuspendRequest: {
             reason?: string;
         };
@@ -4880,6 +4877,8 @@ export interface operations {
                 cursor?: string;
                 /** @description 部門 */
                 department?: string;
+                /** @description 編集できるものだけ */
+                editable?: boolean;
                 /** @description 名前 */
                 name?: string;
                 /** @description Which field to use when ordering the results. */
@@ -4894,8 +4893,9 @@ export interface operations {
                  *     * `1` - 個人
                  *     * `2` - 部門
                  *     * `3` - 全社
+                 *     * `4` - システム
                  */
-                scope?: 1 | 2 | 3;
+                scope?: 1 | 2 | 3 | 4;
                 /** @description A search term. */
                 search?: string;
                 suspended?: boolean;
@@ -5988,6 +5988,8 @@ export interface operations {
                 connection?: string;
                 /** @description The pagination cursor value. */
                 cursor?: string;
+                /** @description 部門 */
+                department?: string;
                 is_active?: boolean;
                 /** @description 機密 */
                 is_sensitive?: boolean;
@@ -6005,6 +6007,14 @@ export interface operations {
                 ordering?: string;
                 /** @description Number of results to return per page. */
                 page_size?: number;
+                /**
+                 * @description 範囲
+                 *
+                 *     * `2` - 部門
+                 *     * `3` - 全社
+                 *     * `4` - システム
+                 */
+                scope?: 2 | 3 | 4;
                 /** @description A search term. */
                 search?: string;
             };
@@ -6600,14 +6610,6 @@ export interface operations {
                 page_size?: number;
                 /** @description 社員 */
                 q?: string;
-                /**
-                 * @description 部門の中の役割
-                 *
-                 *     * `1` - 利用
-                 *     * `2` - 編集
-                 *     * `3` - 公開
-                 */
-                role?: 1 | 2 | 3;
                 /** @description A search term. */
                 search?: string;
             };
@@ -6678,34 +6680,6 @@ export interface operations {
             };
         };
     };
-    v1_departments_members_update: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                department: string;
-                uid: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DepartmentMembershipUpdateRequest"];
-                "application/x-www-form-urlencoded": components["schemas"]["DepartmentMembershipUpdateRequest"];
-                "multipart/form-data": components["schemas"]["DepartmentMembershipUpdateRequest"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DepartmentMembership"];
-                };
-            };
-        };
-    };
     v1_departments_members_destroy: {
         parameters: {
             query?: never;
@@ -6724,34 +6698,6 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
-            };
-        };
-    };
-    v1_departments_members_partial_update: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                department: string;
-                uid: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["PatchedDepartmentMembershipUpdateRequest"];
-                "application/x-www-form-urlencoded": components["schemas"]["PatchedDepartmentMembershipUpdateRequest"];
-                "multipart/form-data": components["schemas"]["PatchedDepartmentMembershipUpdateRequest"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DepartmentMembership"];
-                };
             };
         };
     };
@@ -7708,10 +7654,9 @@ export interface operations {
             query?: {
                 /** @description The pagination cursor value. */
                 cursor?: string;
-                /** @description 役割 */
+                /** @description Group */
                 group?: string;
                 is_active?: boolean;
-                is_superuser?: boolean;
                 /** @description Which field to use when ordering the results. */
                 ordering?: string;
                 /** @description Number of results to return per page. */

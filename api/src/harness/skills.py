@@ -14,7 +14,7 @@ from django.utils.translation import gettext as _
 from run.models import Run
 from skill.models import (
     Skill,
-    SkillAccess,
+    SkillAction,
     SkillAssetBinding,
     SkillEvaluation,
     SkillEvaluationAsset,
@@ -216,7 +216,7 @@ def revoked_skill(run: Run) -> str:
             reason = _("削除されました")
         elif skill.suspended:
             reason = _("停止中です")
-        elif skill.access_of(run.owner) < SkillAccess.USE:
+        elif not skill.can(run.owner, SkillAction.VIEW):
             reason = _("使う権限がありません")
         else:
             continue

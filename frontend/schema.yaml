@@ -856,6 +856,11 @@ paths:
           type: string
         description: 部門
       - in: query
+        name: editable
+        schema:
+          type: boolean
+        description: 編集できるものだけ
+      - in: query
         name: name
         schema:
           type: string
@@ -881,17 +886,19 @@ paths:
         name: scope
         schema:
           type: integer
-          title: 公開範囲
+          title: 範囲
           enum:
           - 1
           - 2
           - 3
+          - 4
         description: |-
           公開範囲
 
           * `1` - 個人
           * `2` - 部門
           * `3` - 全社
+          * `4` - システム
       - name: search
         required: false
         in: query
@@ -2186,7 +2193,7 @@ paths:
   /api/v1/connectors/:
     get:
       operationId: v1_connectors_list
-      description: Connectorの管理API（所属とpermissionで判定する）
+      description: Connectorの管理API（permissionで判定する）
       parameters:
       - in: query
         name: connection
@@ -2199,6 +2206,11 @@ paths:
         description: The pagination cursor value.
         schema:
           type: string
+      - in: query
+        name: department
+        schema:
+          type: string
+        description: 部門
       - in: query
         name: is_active
         schema:
@@ -2240,6 +2252,21 @@ paths:
         description: Number of results to return per page.
         schema:
           type: integer
+      - in: query
+        name: scope
+        schema:
+          type: integer
+          title: 範囲
+          enum:
+          - 2
+          - 3
+          - 4
+        description: |-
+          範囲
+
+          * `2` - 部門
+          * `3` - 全社
+          * `4` - システム
       - name: search
         required: false
         in: query
@@ -2259,7 +2286,7 @@ paths:
           description: ''
     post:
       operationId: v1_connectors_create
-      description: Connectorの管理API（所属とpermissionで判定する）
+      description: Connectorの管理API（permissionで判定する）
       tags:
       - manage/connector
       requestBody:
@@ -2286,7 +2313,7 @@ paths:
   /api/v1/connectors/{connector}/versions/:
     get:
       operationId: v1_connectors_versions_list
-      description: Connectorの版の履歴（所属で判定する）
+      description: Connectorの版の履歴
       parameters:
       - in: path
         name: connector
@@ -2332,7 +2359,7 @@ paths:
   /api/v1/connectors/{connector}/versions/{number}/:
     get:
       operationId: v1_connectors_versions_retrieve
-      description: Connectorの版の履歴（所属で判定する）
+      description: Connectorの版の履歴
       parameters:
       - in: path
         name: connector
@@ -2362,7 +2389,7 @@ paths:
   /api/v1/connectors/{uid}/:
     get:
       operationId: v1_connectors_retrieve
-      description: Connectorの管理API（所属とpermissionで判定する）
+      description: Connectorの管理API（permissionで判定する）
       parameters:
       - in: path
         name: uid
@@ -2382,7 +2409,7 @@ paths:
           description: ''
     put:
       operationId: v1_connectors_update
-      description: Connectorの管理API（所属とpermissionで判定する）
+      description: Connectorの管理API（permissionで判定する）
       parameters:
       - in: path
         name: uid
@@ -2416,7 +2443,7 @@ paths:
           description: 他の変更と競合した（編集を始めた後に、別の版ができている）
     patch:
       operationId: v1_connectors_partial_update
-      description: Connectorの管理API（所属とpermissionで判定する）
+      description: Connectorの管理API（permissionで判定する）
       parameters:
       - in: path
         name: uid
@@ -2449,7 +2476,7 @@ paths:
           description: 他の変更と競合した（編集を始めた後に、別の版ができている）
     delete:
       operationId: v1_connectors_destroy
-      description: Connectorの管理API（所属とpermissionで判定する）
+      description: Connectorの管理API（permissionで判定する）
       parameters:
       - in: path
         name: uid
@@ -2541,7 +2568,7 @@ paths:
   /api/v1/connectors/connections/:
     get:
       operationId: v1_connectors_connections_list
-      description: Connectorの作成で選べる、有効な接続先の一覧（`search` で名前を絞り込む）
+      description: Connectorの作成と一覧の絞り込みで選べる、有効な接続先の一覧（`search` で名前を絞り込む）
       parameters:
       - name: cursor
         required: false
@@ -2580,7 +2607,7 @@ paths:
   /api/v1/connectors/departments/:
     get:
       operationId: v1_connectors_departments_list
-      description: 使える部門として選べる部門（自分の所属の範囲。すべての部門の範囲を持つ人はすべて）。`search` で名前を絞り込む
+      description: 部門の範囲のConnectorの作成と一覧の絞り込みで選べる部門（有効なすべての部門。所属は問わない）。`search` で名前を絞り込む
       parameters:
       - name: cursor
         required: false
@@ -2851,7 +2878,7 @@ paths:
   /api/v1/departments/:
     get:
       operationId: v1_departments_list
-      description: 部門の管理API（基盤管理者だけ）
+      description: 部門の管理API
       parameters:
       - name: cursor
         required: false
@@ -2890,7 +2917,7 @@ paths:
           description: ''
     post:
       operationId: v1_departments_create
-      description: 部門の管理API（基盤管理者だけ）
+      description: 部門の管理API
       tags:
       - manage/department
       requestBody:
@@ -2917,7 +2944,7 @@ paths:
   /api/v1/departments/{department}/members/:
     get:
       operationId: v1_departments_members_list
-      description: 部門の所属の管理API（基盤管理者だけ）
+      description: 部門の所属の管理API
       parameters:
       - name: cursor
         required: false
@@ -2948,21 +2975,6 @@ paths:
         schema:
           type: string
         description: 社員
-      - in: query
-        name: role
-        schema:
-          type: integer
-          title: 部門の中の役割
-          enum:
-          - 1
-          - 2
-          - 3
-        description: |-
-          部門の中の役割
-
-          * `1` - 利用
-          * `2` - 編集
-          * `3` - 公開
       - name: search
         required: false
         in: query
@@ -2982,7 +2994,7 @@ paths:
           description: ''
     post:
       operationId: v1_departments_members_create
-      description: 部門の所属の管理API（基盤管理者だけ）
+      description: 部門の所属の管理API
       parameters:
       - in: path
         name: department
@@ -3016,7 +3028,7 @@ paths:
   /api/v1/departments/{department}/members/{uid}/:
     get:
       operationId: v1_departments_members_retrieve
-      description: 部門の所属の管理API（基盤管理者だけ）
+      description: 部門の所属の管理API
       parameters:
       - in: path
         name: department
@@ -3031,81 +3043,6 @@ paths:
         required: true
       tags:
       - manage/department/member
-      security:
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DepartmentMembership'
-          description: ''
-    put:
-      operationId: v1_departments_members_update
-      description: 部門の所属の管理API（基盤管理者だけ）
-      parameters:
-      - in: path
-        name: department
-        schema:
-          type: string
-          pattern: ^[^/]+$
-        required: true
-      - in: path
-        name: uid
-        schema:
-          type: string
-        required: true
-      tags:
-      - manage/department/member
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/DepartmentMembershipUpdateRequest'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/DepartmentMembershipUpdateRequest'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/DepartmentMembershipUpdateRequest'
-        required: true
-      security:
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/DepartmentMembership'
-          description: ''
-    patch:
-      operationId: v1_departments_members_partial_update
-      description: 部門の所属の管理API（基盤管理者だけ）
-      parameters:
-      - in: path
-        name: department
-        schema:
-          type: string
-          pattern: ^[^/]+$
-        required: true
-      - in: path
-        name: uid
-        schema:
-          type: string
-        required: true
-      tags:
-      - manage/department/member
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PatchedDepartmentMembershipUpdateRequest'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/PatchedDepartmentMembershipUpdateRequest'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/PatchedDepartmentMembershipUpdateRequest'
       security:
       - cookieAuth: []
       responses:
@@ -3117,7 +3054,7 @@ paths:
           description: ''
     delete:
       operationId: v1_departments_members_destroy
-      description: 部門の所属の管理API（基盤管理者だけ）
+      description: 部門の所属の管理API
       parameters:
       - in: path
         name: department
@@ -3140,7 +3077,7 @@ paths:
   /api/v1/departments/{uid}/:
     get:
       operationId: v1_departments_retrieve
-      description: 部門の管理API（基盤管理者だけ）
+      description: 部門の管理API
       parameters:
       - in: path
         name: uid
@@ -3160,7 +3097,7 @@ paths:
           description: ''
     put:
       operationId: v1_departments_update
-      description: 部門の管理API（基盤管理者だけ）
+      description: 部門の管理API
       parameters:
       - in: path
         name: uid
@@ -3192,7 +3129,7 @@ paths:
           description: ''
     patch:
       operationId: v1_departments_partial_update
-      description: 部門の管理API（基盤管理者だけ）
+      description: 部門の管理API
       parameters:
       - in: path
         name: uid
@@ -3223,7 +3160,7 @@ paths:
           description: ''
     delete:
       operationId: v1_departments_destroy
-      description: 部門の管理API（基盤管理者だけ）
+      description: 部門の管理API
       parameters:
       - in: path
         name: uid
@@ -3240,7 +3177,7 @@ paths:
   /api/v1/groups/:
     get:
       operationId: v1_groups_list
-      description: 役割（Group）の一覧（基盤管理者だけ）
+      description: Group（permissionの集まり）の一覧。ユーザーに割り当てる選択肢
       tags:
       - manage/group
       security:
@@ -3257,7 +3194,7 @@ paths:
   /api/v1/groups/{name}/:
     get:
       operationId: v1_groups_retrieve
-      description: 役割（Group）の一覧（基盤管理者だけ）
+      description: Group（permissionの集まり）の一覧。ユーザーに割り当てる選択肢
       parameters:
       - in: path
         name: name
@@ -3279,7 +3216,7 @@ paths:
   /api/v1/llm_connections/:
     get:
       operationId: v1_llm_connections_list
-      description: LLMのプロバイダ接続の管理API（基盤管理者だけ）
+      description: LLMのプロバイダ接続の管理API
       parameters:
       - name: cursor
         required: false
@@ -3344,7 +3281,7 @@ paths:
           description: ''
     post:
       operationId: v1_llm_connections_create
-      description: LLMのプロバイダ接続の管理API（基盤管理者だけ）
+      description: LLMのプロバイダ接続の管理API
       tags:
       - manage/llm_connection
       requestBody:
@@ -3371,7 +3308,7 @@ paths:
   /api/v1/llm_connections/{uid}/:
     get:
       operationId: v1_llm_connections_retrieve
-      description: LLMのプロバイダ接続の管理API（基盤管理者だけ）
+      description: LLMのプロバイダ接続の管理API
       parameters:
       - in: path
         name: uid
@@ -3391,7 +3328,7 @@ paths:
           description: ''
     put:
       operationId: v1_llm_connections_update
-      description: LLMのプロバイダ接続の管理API（基盤管理者だけ）
+      description: LLMのプロバイダ接続の管理API
       parameters:
       - in: path
         name: uid
@@ -3423,7 +3360,7 @@ paths:
           description: ''
     patch:
       operationId: v1_llm_connections_partial_update
-      description: LLMのプロバイダ接続の管理API（基盤管理者だけ）
+      description: LLMのプロバイダ接続の管理API
       parameters:
       - in: path
         name: uid
@@ -3454,7 +3391,7 @@ paths:
           description: ''
     delete:
       operationId: v1_llm_connections_destroy
-      description: LLMのプロバイダ接続の管理API（基盤管理者だけ）
+      description: LLMのプロバイダ接続の管理API
       parameters:
       - in: path
         name: uid
@@ -3492,7 +3429,7 @@ paths:
   /api/v1/model_profiles/:
     get:
       operationId: v1_model_profiles_list
-      description: モデル設定の管理API（基盤管理者だけ）
+      description: モデル設定の管理API
       parameters:
       - in: query
         name: connection
@@ -3545,7 +3482,7 @@ paths:
           description: ''
     post:
       operationId: v1_model_profiles_create
-      description: モデル設定の管理API（基盤管理者だけ）
+      description: モデル設定の管理API
       tags:
       - manage/model_profile
       requestBody:
@@ -3572,7 +3509,7 @@ paths:
   /api/v1/model_profiles/{model_profile}/versions/:
     get:
       operationId: v1_model_profiles_versions_list
-      description: モデル設定の版の履歴（基盤管理者だけ）
+      description: モデル設定の版の履歴
       parameters:
       - name: cursor
         required: false
@@ -3618,7 +3555,7 @@ paths:
   /api/v1/model_profiles/{model_profile}/versions/{number}/:
     get:
       operationId: v1_model_profiles_versions_retrieve
-      description: モデル設定の版の履歴（基盤管理者だけ）
+      description: モデル設定の版の履歴
       parameters:
       - in: path
         name: model_profile
@@ -3648,7 +3585,7 @@ paths:
   /api/v1/model_profiles/{uid}/:
     get:
       operationId: v1_model_profiles_retrieve
-      description: モデル設定の管理API（基盤管理者だけ）
+      description: モデル設定の管理API
       parameters:
       - in: path
         name: uid
@@ -3668,7 +3605,7 @@ paths:
           description: ''
     put:
       operationId: v1_model_profiles_update
-      description: モデル設定の管理API（基盤管理者だけ）
+      description: モデル設定の管理API
       parameters:
       - in: path
         name: uid
@@ -3702,7 +3639,7 @@ paths:
           description: 他の変更と競合した（編集を始めた後に、別の版ができている）
     patch:
       operationId: v1_model_profiles_partial_update
-      description: モデル設定の管理API（基盤管理者だけ）
+      description: モデル設定の管理API
       parameters:
       - in: path
         name: uid
@@ -3735,7 +3672,7 @@ paths:
           description: 他の変更と競合した（編集を始めた後に、別の版ができている）
     delete:
       operationId: v1_model_profiles_destroy
-      description: モデル設定の管理API（基盤管理者だけ）
+      description: モデル設定の管理API
       parameters:
       - in: path
         name: uid
@@ -3773,7 +3710,7 @@ paths:
   /api/v1/runtime_profiles/:
     get:
       operationId: v1_runtime_profiles_list
-      description: Runtime Profileの管理API（基盤管理者だけ）
+      description: Runtime Profileの管理API
       parameters:
       - name: cursor
         required: false
@@ -3821,7 +3758,7 @@ paths:
           description: ''
     post:
       operationId: v1_runtime_profiles_create
-      description: Runtime Profileの管理API（基盤管理者だけ）
+      description: Runtime Profileの管理API
       tags:
       - manage/runtime_profile
       requestBody:
@@ -3848,7 +3785,7 @@ paths:
   /api/v1/runtime_profiles/{runtime_profile}/versions/:
     get:
       operationId: v1_runtime_profiles_versions_list
-      description: Runtime Profileの版の履歴（基盤管理者だけ）
+      description: Runtime Profileの版の履歴
       parameters:
       - name: cursor
         required: false
@@ -3894,7 +3831,7 @@ paths:
   /api/v1/runtime_profiles/{runtime_profile}/versions/{number}/:
     get:
       operationId: v1_runtime_profiles_versions_retrieve
-      description: Runtime Profileの版の履歴（基盤管理者だけ）
+      description: Runtime Profileの版の履歴
       parameters:
       - in: path
         name: number
@@ -3924,7 +3861,7 @@ paths:
   /api/v1/runtime_profiles/{uid}/:
     get:
       operationId: v1_runtime_profiles_retrieve
-      description: Runtime Profileの管理API（基盤管理者だけ）
+      description: Runtime Profileの管理API
       parameters:
       - in: path
         name: uid
@@ -3944,7 +3881,7 @@ paths:
           description: ''
     put:
       operationId: v1_runtime_profiles_update
-      description: Runtime Profileの管理API（基盤管理者だけ）
+      description: Runtime Profileの管理API
       parameters:
       - in: path
         name: uid
@@ -3978,7 +3915,7 @@ paths:
           description: 他の変更と競合した（編集を始めた後に、別の版ができている）
     patch:
       operationId: v1_runtime_profiles_partial_update
-      description: Runtime Profileの管理API（基盤管理者だけ）
+      description: Runtime Profileの管理API
       parameters:
       - in: path
         name: uid
@@ -4011,7 +3948,7 @@ paths:
           description: 他の変更と競合した（編集を始めた後に、別の版ができている）
     delete:
       operationId: v1_runtime_profiles_destroy
-      description: Runtime Profileの管理API（基盤管理者だけ）
+      description: Runtime Profileの管理API
       parameters:
       - in: path
         name: uid
@@ -4049,7 +3986,7 @@ paths:
   /api/v1/sso_providers/:
     get:
       operationId: v1_sso_providers_list
-      description: 社内SSOの設定の管理API（基盤管理者だけ）
+      description: 社内SSOの設定の管理API
       parameters:
       - name: cursor
         required: false
@@ -4103,7 +4040,7 @@ paths:
           description: ''
     post:
       operationId: v1_sso_providers_create
-      description: 社内SSOの設定の管理API（基盤管理者だけ）
+      description: 社内SSOの設定の管理API
       tags:
       - manage/sso_provider
       requestBody:
@@ -4130,7 +4067,7 @@ paths:
   /api/v1/sso_providers/{uid}/:
     get:
       operationId: v1_sso_providers_retrieve
-      description: 社内SSOの設定の管理API（基盤管理者だけ）
+      description: 社内SSOの設定の管理API
       parameters:
       - in: path
         name: uid
@@ -4150,7 +4087,7 @@ paths:
           description: ''
     put:
       operationId: v1_sso_providers_update
-      description: 社内SSOの設定の管理API（基盤管理者だけ）
+      description: 社内SSOの設定の管理API
       parameters:
       - in: path
         name: uid
@@ -4182,7 +4119,7 @@ paths:
           description: ''
     patch:
       operationId: v1_sso_providers_partial_update
-      description: 社内SSOの設定の管理API（基盤管理者だけ）
+      description: 社内SSOの設定の管理API
       parameters:
       - in: path
         name: uid
@@ -4213,7 +4150,7 @@ paths:
           description: ''
     delete:
       operationId: v1_sso_providers_destroy
-      description: 社内SSOの設定の管理API（基盤管理者だけ）
+      description: 社内SSOの設定の管理API
       parameters:
       - in: path
         name: uid
@@ -4230,7 +4167,7 @@ paths:
   /api/v1/users/:
     get:
       operationId: v1_users_list
-      description: ユーザーの管理API（基盤管理者だけ）
+      description: ユーザーの管理API
       parameters:
       - name: cursor
         required: false
@@ -4242,13 +4179,9 @@ paths:
         name: group
         schema:
           type: string
-        description: 役割
+        description: Group
       - in: query
         name: is_active
-        schema:
-          type: boolean
-      - in: query
-        name: is_superuser
         schema:
           type: boolean
       - name: ordering
@@ -4282,7 +4215,7 @@ paths:
           description: ''
     post:
       operationId: v1_users_create
-      description: ユーザーの管理API（基盤管理者だけ）
+      description: ユーザーの管理API
       tags:
       - manage/user
       requestBody:
@@ -4309,7 +4242,7 @@ paths:
   /api/v1/users/{uid}/:
     get:
       operationId: v1_users_retrieve
-      description: ユーザーの管理API（基盤管理者だけ）
+      description: ユーザーの管理API
       parameters:
       - in: path
         name: uid
@@ -4329,7 +4262,7 @@ paths:
           description: ''
     put:
       operationId: v1_users_update
-      description: ユーザーの管理API（基盤管理者だけ）
+      description: ユーザーの管理API
       parameters:
       - in: path
         name: uid
@@ -4360,7 +4293,7 @@ paths:
           description: ''
     patch:
       operationId: v1_users_partial_update
-      description: ユーザーの管理API（基盤管理者だけ）
+      description: ユーザーの管理API
       parameters:
       - in: path
         name: uid
@@ -4574,7 +4507,7 @@ components:
       - file
     AssetChecks:
       type: object
-      description: 資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の役割だけが変えられる
+      description: 資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の権限を持つ人だけが変えられる
       properties:
         encoding:
           description: "空なら自動で判別する\n\n* `` - \n* `utf-8` - utf-8\n* `utf-8-sig` -
@@ -4607,7 +4540,7 @@ components:
           description: 列ごとの値の型（文字列なら省く）
     AssetChecksRequest:
       type: object
-      description: 資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の役割だけが変えられる
+      description: 資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の権限を持つ人だけが変えられる
       properties:
         encoding:
           description: "空なら自動で判別する\n\n* `` - \n* `utf-8` - utf-8\n* `utf-8-sig` -
@@ -5076,9 +5009,8 @@ components:
         境界を変えて保存すると、サーバーが新しい版を作る。更新では、編集を始めた時点の `version` を送り、
         その間に他の人が版を作っていたら409になる。使うDB接続は作成した後は変えられない。
 
-        使える部門（所属の軸）は版に入れない。指定しなければ全社向け。足し引きできるのは自分が所属している部門だけで、
-        全社向けにする・やめる（部門を空にする・空から指定する）のは、すべての部門の範囲を持つ人（基盤管理者か、
-        印のある部門の所属者）だけ
+        範囲（部門・全社・システム）と部門は作成時に決め、更新では変えない（authorization.md §5.2）。作成・編集は
+        所属を問わず、permissionだけで判定する
       properties:
         id:
           type: string
@@ -5140,16 +5072,27 @@ components:
           type: boolean
           default: false
           description: 個人情報を主な中身とする範囲。ローカルLLMのモデルを使うタスク・会話にだけ割り当てる
-        departments:
-          type: array
-          items:
-            type: string
-          description: 使える部門。空なら全社向け。更新では、送ると全体を置き換える
-        department_infos:
-          type: array
-          items:
-            $ref: '#/components/schemas/MinimumDepartment'
+        scope:
+          allOf:
+          - $ref: '#/components/schemas/ConnectorScopeEnum'
+          description: |-
+            範囲。作成した後は変えられない
+
+            * `2` - 部門
+            * `3` - 全社
+            * `4` - システム
+        scope_display:
+          type: string
           readOnly: true
+        department:
+          type: string
+          nullable: true
+          description: 部門の範囲では必須。作成した後は変えられない
+        department_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumDepartment'
+          readOnly: true
+          nullable: true
         created_by:
           type: string
           readOnly: true
@@ -5166,11 +5109,13 @@ components:
       - connection_info
       - created
       - created_by
-      - department_infos
+      - department_info
       - id
       - kind
       - kind_display
       - name
+      - scope
+      - scope_display
       - updated
     ConnectorCheck:
       type: object
@@ -5301,9 +5246,8 @@ components:
         境界を変えて保存すると、サーバーが新しい版を作る。更新では、編集を始めた時点の `version` を送り、
         その間に他の人が版を作っていたら409になる。使うDB接続は作成した後は変えられない。
 
-        使える部門（所属の軸）は版に入れない。指定しなければ全社向け。足し引きできるのは自分が所属している部門だけで、
-        全社向けにする・やめる（部門を空にする・空から指定する）のは、すべての部門の範囲を持つ人（基盤管理者か、
-        印のある部門の所属者）だけ
+        範囲（部門・全社・システム）と部門は作成時に決め、更新では変えない（authorization.md §5.2）。作成・編集は
+        所属を問わず、permissionだけで判定する
       properties:
         name:
           type: string
@@ -5357,15 +5301,34 @@ components:
           type: string
           writeOnly: true
           maxLength: 500
-        departments:
-          type: array
-          items:
-            type: string
-            minLength: 1
-          description: 使える部門。空なら全社向け。更新では、送ると全体を置き換える
+        scope:
+          allOf:
+          - $ref: '#/components/schemas/ConnectorScopeEnum'
+          description: |-
+            範囲。作成した後は変えられない
+
+            * `2` - 部門
+            * `3` - 全社
+            * `4` - システム
+        department:
+          type: string
+          minLength: 1
+          nullable: true
+          description: 部門の範囲では必須。作成した後は変えられない
       required:
       - connection
       - name
+      - scope
+    ConnectorScopeEnum:
+      enum:
+      - 2
+      - 3
+      - 4
+      type: integer
+      description: |-
+        * `2` - 部門
+        * `3` - 全社
+        * `4` - システム
     ConnectorTable:
       type: object
       description: DBの表・ビューと列
@@ -5473,7 +5436,7 @@ components:
       - tables
     ConnectorUpdateRequest:
       type: object
-      description: Connectorの更新。使うDB接続は変えられないので、読み取り専用にする
+      description: Connectorの更新。使うDB接続と範囲・部門は変えられないので、読み取り専用にする
       properties:
         name:
           type: string
@@ -5523,12 +5486,6 @@ components:
           type: string
           writeOnly: true
           maxLength: 500
-        departments:
-          type: array
-          items:
-            type: string
-            minLength: 1
-          description: 使える部門。空なら全社向け。更新では、送ると全体を置き換える
       required:
       - name
     ConnectorVersion:
@@ -5914,10 +5871,6 @@ components:
           type: string
           title: 名前
           maxLength: 100
-        covers_all_departments:
-          type: boolean
-          title: すべての部門の範囲を含む
-          description: 所属する人を、すべての部門に所属しているものとして扱う（すべてを見る人の管理に使う）
         member_count:
           type: integer
           readOnly: true
@@ -5938,7 +5891,7 @@ components:
       - updated
     DepartmentMembership:
       type: object
-      description: 部門の所属。社員は作成時だけ指定し、後からは役割だけを変える
+      description: 部門の所属。変えるときは、所属を消して作り直す
       properties:
         id:
           type: string
@@ -5948,15 +5901,6 @@ components:
         user_info:
           allOf:
           - $ref: '#/components/schemas/MinimumUser'
-          readOnly: true
-        role:
-          allOf:
-          - $ref: '#/components/schemas/DepartmentRoleEnum'
-          title: 部門の中の役割
-          minimum: 0
-          maximum: 32767
-        role_display:
-          type: string
           readOnly: true
         created:
           type: string
@@ -5969,39 +5913,18 @@ components:
       required:
       - created
       - id
-      - role
-      - role_display
       - updated
       - user
       - user_info
     DepartmentMembershipRequest:
       type: object
-      description: 部門の所属。社員は作成時だけ指定し、後からは役割だけを変える
+      description: 部門の所属。変えるときは、所属を消して作り直す
       properties:
         user:
           type: string
           minLength: 1
-        role:
-          allOf:
-          - $ref: '#/components/schemas/DepartmentRoleEnum'
-          title: 部門の中の役割
-          minimum: 0
-          maximum: 32767
       required:
-      - role
       - user
-    DepartmentMembershipUpdateRequest:
-      type: object
-      description: 部門の所属。社員は作成時だけ指定し、後からは役割だけを変える
-      properties:
-        role:
-          allOf:
-          - $ref: '#/components/schemas/DepartmentRoleEnum'
-          title: 部門の中の役割
-          minimum: 0
-          maximum: 32767
-      required:
-      - role
     DepartmentRequest:
       type: object
       properties:
@@ -6010,22 +5933,8 @@ components:
           minLength: 1
           title: 名前
           maxLength: 100
-        covers_all_departments:
-          type: boolean
-          title: すべての部門の範囲を含む
-          description: 所属する人を、すべての部門に所属しているものとして扱う（すべてを見る人の管理に使う）
       required:
       - name
-    DepartmentRoleEnum:
-      enum:
-      - 1
-      - 2
-      - 3
-      type: integer
-      description: |-
-        * `1` - 利用
-        * `2` - 編集
-        * `3` - 公開
     ElementDiff:
       type: object
       properties:
@@ -6147,7 +6056,7 @@ components:
         * `3` - 悪くなった
     Group:
       type: object
-      description: 役割（Group）。ユーザーへの割り当てでは名前で指定する
+      description: Group（permissionの集まり）。ユーザーへの割り当てでは名前で指定する
       properties:
         name:
           type: string
@@ -6469,7 +6378,12 @@ components:
       - password
     ManageUser:
       type: object
-      description: ユーザーの作成・表示（基盤管理者だけ）。Yorikiのアカウントのパスワードは、本人が招待のリンクで設定する
+      description: |-
+        ユーザーの作成・表示。Yorikiのアカウントのパスワードは、本人が招待のリンクで設定する。
+
+        書ける項目は表示名・有効・Groupだけ（permissionの直接の付与、`is_superuser`、SSOの識別子は出さない）。
+        管理を任された人が自分の権限を超えられないよう、自分の持たないpermissionを含むGroupは付け外しできず、
+        自分の持たないpermissionを持つアカウントと基盤管理者のアカウントは変更できない（authorization.md §10）
       properties:
         id:
           type: string
@@ -6487,14 +6401,11 @@ components:
           items:
             type: string
             title: 名前
-          description: 役割の名前
+          description: Groupの名前
         is_active:
           type: boolean
           title: 有効
           description: ユーザーがアクティブかどうかを示します。アカウントを削除する代わりに選択を解除してください。
-        is_platform_admin:
-          type: boolean
-          readOnly: true
         has_password:
           type: boolean
           readOnly: true
@@ -6505,6 +6416,14 @@ components:
             type: string
           readOnly: true
           description: 紐付いているSSOの認証基盤
+        can_change:
+          type: boolean
+          readOnly: true
+          description: 操作する人がこのアカウントを変更できるか
+        can_issue_invitation:
+          type: boolean
+          readOnly: true
+          description: 操作する人がこのアカウントに招待・再設定のリンクを発行できるか
         last_login:
           type: string
           format: date-time
@@ -6520,11 +6439,12 @@ components:
           format: date-time
           readOnly: true
       required:
+      - can_change
+      - can_issue_invitation
       - created
       - email
       - has_password
       - id
-      - is_platform_admin
       - last_login
       - sso_providers
       - updated
@@ -6548,14 +6468,11 @@ components:
           items:
             type: string
             title: 名前
-          description: 役割の名前
+          description: Groupの名前
         is_active:
           type: boolean
           title: 有効
           description: ユーザーがアクティブかどうかを示します。アカウントを削除する代わりに選択を解除してください。
-        is_platform_admin:
-          type: boolean
-          readOnly: true
         has_password:
           type: boolean
           readOnly: true
@@ -6566,6 +6483,14 @@ components:
             type: string
           readOnly: true
           description: 紐付いているSSOの認証基盤
+        can_change:
+          type: boolean
+          readOnly: true
+          description: 操作する人がこのアカウントを変更できるか
+        can_issue_invitation:
+          type: boolean
+          readOnly: true
+          description: 操作する人がこのアカウントに招待・再設定のリンクを発行できるか
         last_login:
           type: string
           format: date-time
@@ -6586,12 +6511,13 @@ components:
           nullable: true
           readOnly: true
       required:
+      - can_change
+      - can_issue_invitation
       - created
       - email
       - has_password
       - id
       - invitation
-      - is_platform_admin
       - last_login
       - sso_providers
       - updated
@@ -6614,7 +6540,7 @@ components:
             type: string
             minLength: 1
             title: 名前
-          description: 役割の名前
+          description: Groupの名前
         is_active:
           type: boolean
           title: 有効
@@ -6635,7 +6561,7 @@ components:
             type: string
             minLength: 1
             title: 名前
-          description: 役割の名前
+          description: Groupの名前
         is_active:
           type: boolean
           title: 有効
@@ -7374,7 +7300,7 @@ components:
       - supports_video
     MyDepartment:
       type: object
-      description: 所属する部門と、部門の中の役割
+      description: 表示専用のModelSerializer。すべての項目を読み取り専用にする
       properties:
         id:
           type: string
@@ -7382,21 +7308,15 @@ components:
         name:
           type: string
           readOnly: true
-        role:
-          allOf:
-          - $ref: '#/components/schemas/DepartmentRoleEnum'
-          readOnly: true
-        role_display:
-          type: string
-          readOnly: true
+          title: 名前
+          maxLength: 100
       required:
       - id
       - name
-      - role
-      - role_display
     MyUser:
       type: object
-      description: ログイン中の利用者。画面の表示と権限の判定に使う
+      description: ログイン中の利用者。画面の出し分けの元になるもの（permissionと所属）をすべて返す（authorization.md
+        §4.1.1）
       properties:
         id:
           type: string
@@ -7422,9 +7342,6 @@ components:
           readOnly: true
           title: 表示名
           maxLength: 150
-        is_platform_admin:
-          type: boolean
-          readOnly: true
         all_permissions:
           type: array
           items:
@@ -7435,13 +7352,27 @@ components:
           items:
             $ref: '#/components/schemas/MyDepartment'
           readOnly: true
+          description: 実際に所属している部門
+        usable_departments:
+          type: array
+          items:
+            $ref: '#/components/schemas/MyDepartment'
+          readOnly: true
+          description: 使える部門（一覧の絞り込みの選択肢）
+        manageable_departments:
+          type: array
+          items:
+            $ref: '#/components/schemas/MyDepartment'
+          readOnly: true
+          description: 管理できる部門（部門のSkill・タスクを作るときの選択肢）
       required:
       - all_permissions
       - departments
       - display_name
       - email
       - id
-      - is_platform_admin
+      - manageable_departments
+      - usable_departments
       - username
     NullEnum:
       enum:
@@ -7904,7 +7835,7 @@ components:
             $ref: '#/components/schemas/Skill'
     PatchedConnectorUpdateRequest:
       type: object
-      description: Connectorの更新。使うDB接続は変えられないので、読み取り専用にする
+      description: Connectorの更新。使うDB接続と範囲・部門は変えられないので、読み取り専用にする
       properties:
         name:
           type: string
@@ -7954,12 +7885,6 @@ components:
           type: string
           writeOnly: true
           maxLength: 500
-        departments:
-          type: array
-          items:
-            type: string
-            minLength: 1
-          description: 使える部門。空なら全社向け。更新では、送ると全体を置き換える
     PatchedConversationRequest:
       type: object
       description: 自分の会話。モデル設定を省くと既定のモデル設定にする。実行中に変えると、次のステップから切り替わる
@@ -8031,16 +7956,6 @@ components:
         is_active:
           type: boolean
           title: 有効
-    PatchedDepartmentMembershipUpdateRequest:
-      type: object
-      description: 部門の所属。社員は作成時だけ指定し、後からは役割だけを変える
-      properties:
-        role:
-          allOf:
-          - $ref: '#/components/schemas/DepartmentRoleEnum'
-          title: 部門の中の役割
-          minimum: 0
-          maximum: 32767
     PatchedDepartmentRequest:
       type: object
       properties:
@@ -8049,10 +7964,6 @@ components:
           minLength: 1
           title: 名前
           maxLength: 100
-        covers_all_departments:
-          type: boolean
-          title: すべての部門の範囲を含む
-          description: 所属する人を、すべての部門に所属しているものとして扱う（すべてを見る人の管理に使う）
     PatchedLLMConnectionUpdateRequest:
       type: object
       description: プロバイダ接続の更新。種別とbase URL（接続先）は変えられないので、読み取り専用にする
@@ -8100,7 +8011,7 @@ components:
             type: string
             minLength: 1
             title: 名前
-          description: 役割の名前
+          description: Groupの名前
         is_active:
           type: boolean
           title: 有効
@@ -9399,7 +9310,7 @@ components:
           allOf:
           - $ref: '#/components/schemas/SkillScopeEnum'
           readOnly: true
-          title: 公開範囲
+          title: 範囲
         scope_display:
           type: string
           readOnly: true
@@ -9434,10 +9345,14 @@ components:
           nullable: true
           description: 開いているDraftのID。なければnull。Draftを編集できる人にだけ出す
           readOnly: true
-        access:
-          type: integer
-          description: 利用者ができること（1：使う、2：Draftを変更する、3：公開・切戻し・停止・削除・Toolの変更）
+        can_edit:
+          type: boolean
           readOnly: true
+          description: Draftを変更できるか（本文・資料・評価ケース）
+        can_publish:
+          type: boolean
+          readOnly: true
+          description: 公開・切戻し・停止・削除、名前とToolの変更、資料の検証の条件と必須の評価ケースの変更ができるか
         created:
           type: string
           format: date-time
@@ -9447,7 +9362,8 @@ components:
           format: date-time
           readOnly: true
       required:
-      - access
+      - can_edit
+      - can_publish
       - created
       - department_info
       - description
@@ -9735,7 +9651,7 @@ components:
       - validation
     SkillDraftAssetChecksRequest:
       type: object
-      description: 資料の検証の条件を変える（公開の役割だけ）。変えると検証し直す
+      description: 資料の検証の条件を変える（公開の権限を持つ人だけ）。変えると検証し直す
       properties:
         revision:
           type: integer
@@ -10207,11 +10123,13 @@ components:
       - 1
       - 2
       - 3
+      - 4
       type: integer
       description: |-
         * `1` - 個人
         * `2` - 部門
         * `3` - 全社
+        * `4` - システム
     SkillSuspendRequest:
       type: object
       properties:

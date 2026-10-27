@@ -38,7 +38,7 @@ class ProviderKind(models.IntegerChoices):
 
 
 class LLMConnection(models.Model):
-    """プロバイダ接続。基盤管理者だけが登録・変更する。
+    """プロバイダ接続。permissionを持つ人（既定では基盤管理者）だけが登録・変更する。
 
     種別とbase URL（接続先）は作成した後は変えない（更新用のSerializerと管理画面に項目を置かない）。
     接続先ごとに接続を作り、API keyは差し替えられる。接続先を後から変えられると、登録済みのAPI keyが

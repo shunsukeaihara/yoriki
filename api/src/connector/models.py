@@ -8,13 +8,14 @@
 エージェントが扱える範囲（境界。公開する表・ビュー、上限、機密のフラグ）は不変の版（ConnectorVersion）で持つ。
 Runは開始時の版を固定して使う。
 
-権限は所属とpermissionの2軸で判定する（design.md §4.9.1）。見る・使うのは所属だけ（Connectorの使える部門に
-所属しているか、使える部門を指定していない全社向け）。作成・編集・削除は所属に加えて、Django標準のpermission
-（`connector.add_connector` 等）を要する。使える部門は版に入れず、変えるとすぐに効く（権限の失効を固定した版にも
-適用するため。design.md §3.11）。
+Connectorは範囲（部門・全社・システム）を持つ（authorization.md §5.2）。範囲と部門は作成時に決めて変えない。
+会話で使えるのは、部門のものは使える部門の人、全社のものは全員で、システムのものは会話では使わない
+（`ConnectorQuerySet.usable_by()`、`Connector.can()`）。作成・編集・削除と管理画面での参照は、所属を問わず
+Django標準のpermission（`connector.add_connector` 等）だけで判定する（基盤の管理）。
 接続は版を持たず、変えると次の操作から効く。
 """
 
+from enum import Enum
 from typing import Any
 
 from auditlog.registry import auditlog
@@ -22,7 +23,7 @@ from django.conf import settings
 from django.db import models, transaction
 from django.utils.translation import gettext_lazy as _
 
-from user.models import Department, covers_all_departments
+from user.models import Department, usable_department_ids
 from utils.fields import EncryptedSecretField, NanoidField
 
 from .errors import VersionConflict
@@ -65,7 +66,7 @@ DATASOURCE_OPERATIONS = (Operation.DATASOURCE_DESCRIBE, Operation.DATASOURCE_QUE
 
 
 class DatabaseConnection(models.Model):
-    """社内DBへの接続先と資格情報。基盤管理者だけが登録・変更する。エージェントには見せない。
+    """社内DBへの接続先と資格情報。permissionを持つ人（既定では基盤管理者）だけが登録・変更する。エージェントには見せない。
 
     種別は作成した後は変えない（SQLの方言と既定のスキーマの意味が変わるため）。接続先（ホスト・ポート・DB名）は
     変えられるが、そのときはパスワードを入れ直す（登録済みのパスワードを別のサーバーへ送らないため。
@@ -107,29 +108,44 @@ class DatabaseConnection(models.Model):
         return self.name
 
 
-class ConnectorQuerySet(models.QuerySet):
-    def visible_to(self, user) -> "ConnectorQuerySet":
-        """利用者が見られるConnector（使える部門を指定していない全社向けか、使える部門に所属している）。
-        無効なものも含む（管理画面の一覧）"""
-        qs = self.filter(deleted=False)
-        if covers_all_departments(user):
-            return qs
-        return qs.filter(
-            models.Q(departments__isnull=True) | models.Q(departments__in=Department.objects.of(user))
-        ).distinct()
+class ConnectorScope(models.IntegerChoices):
+    """Connectorの範囲（authorization.md §2）。値はSkillの範囲（skill.models.SkillScope）とそろえる。
+    個人（本人のOAuthのtoken）は、会話でConnectorを使う段階で足す"""
 
-    def usable_by(self, user) -> "ConnectorQuerySet":
-        """利用者が使えるConnector（見られるもののうち、Connectorと接続が有効で、版がある）"""
-        return self.visible_to(user).filter(
+    DEPARTMENT = 2, _("部門")
+    COMPANY = 3, _("全社")
+    SYSTEM = 4, _("システム")
+
+
+class ConnectorAction(Enum):
+    """Connectorに対する操作。管理画面の操作はpermissionだけで判定するので、ここには持たない"""
+
+    USE = "use"  # 会話で使う
+
+
+class ConnectorQuerySet(models.QuerySet):
+    def in_service(self) -> "ConnectorQuerySet":
+        """Connectorと接続が有効で、版があるもの"""
+        return self.filter(
+            deleted=False,
             is_active=True,
             current_version__isnull=False,
             connection__deleted=False,
             connection__is_active=True,
         )
 
+    def usable_by(self, user) -> "ConnectorQuerySet":
+        """会話で使えるConnector（`ConnectorAction.USE`）。部門のものは使える部門の人、全社のものは全員"""
+        if not user.is_active:
+            return self.none()
+        return self.in_service().filter(
+            models.Q(scope=ConnectorScope.DEPARTMENT, department__in=Department.objects.usable_by(user))
+            | models.Q(scope=ConnectorScope.COMPANY)
+        )
+
 
 class Connector(models.Model):
-    """1つの接続の上で、エージェントが扱える範囲（境界）と、使える部門を決める。
+    """1つの接続の上で、エージェントが扱える範囲（境界）を決める。
 
     使う接続は作成した後は変えない（公開した表・ビューは、その接続のDBのものなので）。今は社内DBのConnectorだけで、
     他の種類（SharePoint等）を足すときは、種類ごとの接続を持たせる
@@ -148,8 +164,11 @@ class Connector(models.Model):
         related_name="+",
         verbose_name=_("現在の版"),
     )
-    # 所属の軸。使える部門の所属者が見られ、使える。指定しなければ全社向け（全員）
-    departments = models.ManyToManyField(Department, blank=True, related_name="+", verbose_name=_("使える部門"))
+    scope = models.PositiveSmallIntegerField(_("範囲"), choices=ConnectorScope.choices)
+    # 部門の範囲の部門。範囲と部門は作成時に決めて変えない（別の部門へ移すのは組織の再編の操作。authorization.md §9）
+    department = models.ForeignKey(
+        Department, on_delete=models.PROTECT, null=True, blank=True, related_name="+", verbose_name=_("部門")
+    )
     is_active = models.BooleanField(_("有効"), default=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+", verbose_name=_("作成者")
@@ -165,6 +184,13 @@ class Connector(models.Model):
         verbose_name = _("Connector")
         verbose_name_plural = verbose_name
         constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(scope=ConnectorScope.DEPARTMENT, department__isnull=False)
+                    | models.Q(scope__in=[ConnectorScope.COMPANY, ConnectorScope.SYSTEM], department__isnull=True)
+                ),
+                name="connector_scope_department",
+            ),
             models.UniqueConstraint(fields=["name"], condition=models.Q(deleted=False), name="uniq_connector_name"),
         ]
 
@@ -187,15 +213,26 @@ class Connector(models.Model):
         """このConnectorが提供する操作"""
         return DATASOURCE_OPERATIONS
 
+    def in_service(self) -> bool:
+        return (
+            not self.deleted
+            and self.is_active
+            and self.current_version_id is not None
+            and not self.connection.deleted
+            and self.connection.is_active
+        )
+
+    def can(self, user, action: ConnectorAction) -> bool:
+        """利用者がこの操作をできるか。一覧の `ConnectorQuerySet.usable_by()` と同じ規則"""
+        if not user.is_active or not self.in_service():
+            return False
+        if self.scope == ConnectorScope.DEPARTMENT:
+            return self.department_id in usable_department_ids(user)
+        return self.scope == ConnectorScope.COMPANY
+
     def operations_for(self, user) -> set[Operation]:
-        """利用者がこのConnectorで使える操作。使うのは所属だけで決まるので、使えるならすべての操作"""
-        if not user.is_active or self.deleted or not self.is_active:
-            return set()
-        if self.connection.deleted or not self.connection.is_active:
-            return set()
-        if not Connector.objects.visible_to(user).filter(pk=self.pk).exists():
-            return set()
-        return set(self.operations)
+        """利用者がこのConnectorで使える操作。使えるならすべての操作"""
+        return set(self.operations) if self.can(user, ConnectorAction.USE) else set()
 
     @classmethod
     @transaction.atomic
@@ -288,5 +325,5 @@ class ConnectorVersion(models.Model):
 
 # パスワードは暗号化した値でも監査ログに残さない
 auditlog.register(DatabaseConnection, exclude_fields=["password", "updated"])
-auditlog.register(Connector, exclude_fields=["updated"], m2m_fields={"departments"})
+auditlog.register(Connector, exclude_fields=["updated"])
 auditlog.register(ConnectorVersion)

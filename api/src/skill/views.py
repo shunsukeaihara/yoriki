@@ -21,9 +21,10 @@ from utils.views import SoftDeleteMixin
 
 from .errors import VersionConflict
 from .models import (
+    CONVERSATION_SCOPES,
     EvaluationStatus,
     Skill,
-    SkillAccess,
+    SkillAction,
     SkillAssetBinding,
     SkillChange,
     SkillDraft,
@@ -67,17 +68,23 @@ class SkillFilter(filters.FilterSet):
     published = filters.BooleanFilter(
         label=_("公開済み"), field_name="current_version", lookup_expr="isnull", exclude=True
     )
+    editable = filters.BooleanFilter(label=_("編集できるものだけ"), method="filter_editable")
 
     class Meta:
         model = Skill
-        fields = ["name", "scope", "department", "suspended", "published"]
+        fields = ["name", "scope", "department", "suspended", "published", "editable"]
+
+    def filter_editable(self, queryset, name, value):
+        if not value:
+            return queryset
+        return queryset.filter(pk__in=Skill.objects.editable_by(self.request.user).values("pk"))
 
 
 class CanOperateSkill(BasePermission):
-    """操作に要る権限（ViewSetの `required_access`）を、利用者がこのSkillに持つか（design.md §3.6）"""
+    """操作に要る権限（ViewSetの `required_actions`。書いていない操作は公開の権限）を、利用者がこのSkillに持つか"""
 
     def has_object_permission(self, request, view, obj) -> bool:
-        return obj.access_of(request.user) >= view.required_access.get(view.action, SkillAccess.PUBLISH)
+        return obj.can(request.user, view.required_actions.get(view.action, SkillAction.PUBLISH))
 
 
 @extend_schema(description="Skillの一覧・作成・公開・切戻し・停止", tags=["app/skill"])
@@ -90,13 +97,14 @@ class CanOperateSkill(BasePermission):
 class AppSkillViewSet(
     SoftDeleteMixin, mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.DestroyModelMixin, ReadOnlyModelViewSet
 ):
-    """利用者が使える（見える）Skill。個人は本人、部門は所属する人、全社は全社員（design.md §3.6）。
+    """利用者に見えるSkill（authorization.md §5.1）。一覧は個人・部門・全社で、システムのSkillは `scope` で
+    指定したときだけ返す（管理画面の一覧。業務画面には出さない）。
 
     作るとDraftが開く。中身の編集はDraft（drafts）で行い、公開（publish）で版になる
     """
 
     permission_classes = [AppUser, CanOperateSkill]
-    required_access = {"retrieve": SkillAccess.USE}
+    required_actions = {"retrieve": SkillAction.VIEW}
     lookup_field = "uid"
     queryset = (
         Skill.objects.filter(deleted=False)
@@ -109,7 +117,10 @@ class AppSkillViewSet(
     ordering = ("name", "pk")
 
     def get_queryset(self):
-        return super().get_queryset().filter(pk__in=Skill.objects.visible_to(self.request.user).values("pk"))
+        qs = super().get_queryset().filter(pk__in=Skill.objects.visible_to(self.request.user).values("pk"))
+        if self.action == "list" and self.request.query_params.get("scope") != str(SkillScope.SYSTEM):
+            qs = qs.filter(scope__in=CONVERSATION_SCOPES)
+        return qs
 
     def get_serializer_class(self):
         if self.action == "create":
@@ -170,10 +181,10 @@ class AppSkillViewSet(
 
 
 class SkillMixin:
-    """URLのskillを、利用者が見えるSkillに限定して取得する。操作に要る権限（`skill_access`）がなければ403"""
+    """URLのskillを、利用者が見えるSkillに限定して取得する。操作に要る権限（`skill_action`）がなければ403"""
 
     kwargs: dict[str, str]
-    skill_access = SkillAccess.USE
+    skill_action = SkillAction.VIEW
     skill_lookup = "skill"  # 一覧の行からSkillへの参照
 
     @property
@@ -183,7 +194,7 @@ class SkillMixin:
             skill = get_object_or_404(
                 Skill.objects.visible_to(user).select_related("department"), uid=self.kwargs["skill"]
             )
-            if skill.access_of(user) < self.skill_access:
+            if not skill.can(user, self.skill_action):
                 raise PermissionDenied(_("このSkillを操作する権限がありません"))
             self._skill = skill
         return self._skill
@@ -238,7 +249,7 @@ class AppSkillDraftViewSet(
     GenericViewSet,
 ):
     permission_classes = [AppUser]
-    skill_access = SkillAccess.EDIT
+    skill_action = SkillAction.EDIT
     lookup_field = "uid"
     queryset = SkillDraft.objects.select_related("skill", "base_version", "updated_by").prefetch_related(
         "assets__resource_version__resource", "assets__resource_version__blob", "assets__resource_version__created_by"
@@ -272,7 +283,7 @@ class AppSkillDraftViewSet(
 class SkillDraftMixin(SkillMixin):
     """URLのdraftを、URLのSkillのDraftに限定して取得する（Draftを編集できる人だけ）"""
 
-    skill_access = SkillAccess.EDIT
+    skill_action = SkillAction.EDIT
     skill_lookup = "draft__skill"
 
     @property
@@ -371,7 +382,7 @@ class AppSkillFileViewSet(SkillMixin, mixins.RetrieveModelMixin, GenericViewSet)
     def get_queryset(self):
         # このSkillの版が使う原本。Draftを編集できる人には、Draftの原本も
         used = Q(pk__in=SkillAssetBinding.objects.filter(version__skill=self.skill).values("resource_version"))
-        if self.skill.access_of(self.request.user) >= SkillAccess.EDIT:
+        if self.skill.can(self.request.user, SkillAction.EDIT):
             used |= Q(pk__in=SkillDraftAsset.objects.filter(draft__skill=self.skill).values("resource_version"))
             # 評価に写したDraftの資料と、評価ケースの添付
             used |= Q(
@@ -403,7 +414,7 @@ class AppSkillEvaluationCaseViewSet(
     """作成・変更・削除はDraftを編集できる人。公開の前に必須のケースは、公開の権限が要る"""
 
     permission_classes = [AppUser]
-    skill_access = SkillAccess.EDIT
+    skill_action = SkillAction.EDIT
     lookup_field = "uid"
     queryset = SkillEvaluationCase.objects.select_related("updated_by").prefetch_related(
         "files__resource", "files__blob", "files__created_by"
@@ -424,7 +435,7 @@ class AppSkillEvaluationCaseViewSet(
         # 公開の判定（Skillの行をロックする）と重ならないよう、Skill → ケースの順にロックしてから消す
         Skill.objects.select_for_update().filter(pk=instance.skill_id).first()
         instance = SkillEvaluationCase.objects.select_for_update().get(pk=instance.pk)
-        if instance.required and self.skill.access_of(self.request.user) < SkillAccess.PUBLISH:
+        if instance.required and not self.skill.can(self.request.user, SkillAction.PUBLISH):
             raise PermissionDenied(_("公開の前に必須の評価ケースを消すには、この範囲の公開の権限が要ります"))
         instance.delete()
 
@@ -441,7 +452,7 @@ class AppSkillEvaluationViewSet(
     SkillMixin, mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.CreateModelMixin, GenericViewSet
 ):
     permission_classes = [AppUser]
-    skill_access = SkillAccess.EDIT
+    skill_action = SkillAction.EDIT
     lookup_field = "uid"
     queryset = SkillEvaluation.objects.select_related(
         "base_version", "model_version__profile", "requested_by"

@@ -27,7 +27,7 @@ from .models import (
     MAX_CASES_PER_EVALUATION,
     MAX_EVALUATION_CASES,
     Skill,
-    SkillAccess,
+    SkillAction,
     SkillAssetBinding,
     SkillChange,
     SkillDraft,
@@ -61,9 +61,9 @@ def _schema_or_none(value: Any) -> Any:
     return value
 
 
-def _access(skill: Skill, context: Mapping[str, Any]) -> SkillAccess:
+def _can(skill: Skill, context: Mapping[str, Any], action: SkillAction) -> bool:
     request = context.get("request")
-    return skill.access_of(request.user) if request else SkillAccess.NONE
+    return request is not None and skill.can(request.user, action)
 
 
 # --- 版と資料 ---
@@ -88,7 +88,7 @@ class ColumnTypeSerializer(serializers.Serializer):
 
 
 class AssetChecksSerializer(serializers.Serializer):
-    """資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の役割だけが変えられる"""
+    """資料の検証の条件（design.md §3.9）。CSVだけが使う。公開の権限を持つ人だけが変えられる"""
 
     encoding = serializers.ChoiceField(
         choices=["", *formats.CSV_ENCODINGS], required=False, allow_blank=True, help_text=_("空なら自動で判別する")
@@ -304,7 +304,10 @@ class SkillSerializer(serializers.ModelSerializer):
     version = serializers.IntegerField(source="version_number", read_only=True, help_text=_("公開中の版。未公開は0"))
     description = serializers.CharField(source="current_version.description", read_only=True, allow_null=True)
     draft = serializers.SerializerMethodField()
-    access = serializers.SerializerMethodField()
+    can_edit = serializers.SerializerMethodField(help_text=_("Draftを変更できるか（本文・資料・評価ケース）"))
+    can_publish = serializers.SerializerMethodField(
+        help_text=_("公開・切戻し・停止・削除、名前とToolの変更、資料の検証の条件と必須の評価ケースの変更ができるか")
+    )
 
     class Meta:
         model = Skill
@@ -319,7 +322,8 @@ class SkillSerializer(serializers.ModelSerializer):
             "description",
             "suspended",
             "draft",
-            "access",
+            "can_edit",
+            "can_publish",
             "created",
             "updated",
         ]
@@ -327,16 +331,18 @@ class SkillSerializer(serializers.ModelSerializer):
 
     def get_draft(self, obj: Skill) -> str | None:
         """開いているDraftのID。なければnull。Draftを編集できる人にだけ出す"""
-        if _access(obj, self.context) < SkillAccess.EDIT:
+        if not _can(obj, self.context, SkillAction.EDIT):
             return None
         drafts = getattr(obj, "open_drafts", None)
         if drafts is None:
             drafts = list(obj.drafts.all())
         return drafts[0].uid if drafts else None
 
-    def get_access(self, obj: Skill) -> int:
-        """利用者ができること（1：使う、2：Draftを変更する、3：公開・切戻し・停止・削除・Toolの変更）"""
-        return int(_access(obj, self.context))
+    def get_can_edit(self, obj: Skill) -> bool:
+        return _can(obj, self.context, SkillAction.EDIT)
+
+    def get_can_publish(self, obj: Skill) -> bool:
+        return _can(obj, self.context, SkillAction.PUBLISH)
 
     def validate_name(self, value: str) -> str:
         value = value.strip()
@@ -394,12 +400,11 @@ class SkillCreateSerializer(SkillContentSerializer):
             raise serializers.ValidationError({"department": _("部門を選んでください")})
         name = attrs["name"].strip()
         _check_unique_name(scope, user, department, name)
-        # 作る人がその範囲で持つ権限。未保存のSkillで判定する（design.md §3.6）
-        access = Skill(scope=scope, owner=user if scope == SkillScope.PERSONAL else None, department=department)
-        level = access.scope_access_of(user)
-        if level < SkillAccess.EDIT:
+        # 作る人がその範囲で持つ権限。未保存のSkillで判定する（authorization.md §5.1）
+        new = Skill(scope=scope, owner=user if scope == SkillScope.PERSONAL else None, department=department)
+        if not new.can(user, SkillAction.EDIT):
             raise PermissionDenied(_("この範囲にSkillを作る権限がありません"))
-        if attrs.get("tools") and level < SkillAccess.PUBLISH:
+        if attrs.get("tools") and not new.can(user, SkillAction.PUBLISH):
             raise PermissionDenied(_("使ってよいToolを決めるには、この範囲の公開の権限が要ります"))
         attrs["name"] = name
         attrs["department"] = department
@@ -623,16 +628,15 @@ class SkillDraftAssetSerializer(serializers.ModelSerializer):
 
 
 class SkillDraftAssetChecksSerializer(serializers.Serializer):
-    """資料の検証の条件を変える（公開の役割だけ）。変えると検証し直す"""
+    """資料の検証の条件を変える（公開の権限を持つ人だけ）。変えると検証し直す"""
 
     revision = serializers.IntegerField(min_value=1, help_text=_("編集を始めた時点のDraftのrevision"))
     checks = AssetChecksSerializer()
 
     def validate(self, attrs):
         asset: SkillDraftAsset = self.instance  # type: ignore[assignment]
-        if (
-            attrs["checks"] != formats.normalize_checks(asset.checks)
-            and _access(asset.draft.skill, self.context) < SkillAccess.PUBLISH
+        if attrs["checks"] != formats.normalize_checks(asset.checks) and not _can(
+            asset.draft.skill, self.context, SkillAction.PUBLISH
         ):
             # 条件を緩めて誤りを隠せないように、本文を編集できる人でも条件は変えられない（design.md §3.9）
             raise PermissionDenied(_("検証の条件を変えるには、この範囲の公開の権限が要ります"))
@@ -729,7 +733,7 @@ class SkillDraftSerializer(SkillContentSerializer):
         if (
             "tools" in attrs
             and attrs["tools"] != draft.tools
-            and _access(draft.skill, self.context) < SkillAccess.PUBLISH
+            and not _can(draft.skill, self.context, SkillAction.PUBLISH)
         ):
             # 本文を編集できても、Toolは増やせない（design.md §3.6）
             raise PermissionDenied(_("使ってよいToolを変えるには、この範囲の公開の権限が要ります"))
@@ -843,7 +847,7 @@ class SkillEvaluationCaseSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         skill: Skill = self.context["skill"]
         case: SkillEvaluationCase | None = self.instance
-        publisher = _access(skill, self.context) >= SkillAccess.PUBLISH
+        publisher = _can(skill, self.context, SkillAction.PUBLISH)
         required = attrs.get("required", case.required if case else False)
         if required and skill.scope == SkillScope.PERSONAL:
             raise serializers.ValidationError({"required": _("個人のSkillには、公開の前に必須の印を付けません")})
@@ -888,7 +892,7 @@ class SkillEvaluationCaseSerializer(serializers.ModelSerializer):
         # 公開の判定（Skillの行をロックする）と重ならないよう、Skill → ケースの順にロックしてから変える
         Skill.objects.select_for_update().filter(pk=instance.skill_id).first()
         instance = SkillEvaluationCase.objects.select_for_update().get(pk=instance.pk)
-        if instance.required and _access(instance.skill, self.context) < SkillAccess.PUBLISH:
+        if instance.required and not _can(instance.skill, self.context, SkillAction.PUBLISH):
             # 確かめた後に、公開の権限を持つ人が必須にした
             raise PermissionDenied(_("公開の前に必須の評価ケースを作る・変えるには、この範囲の公開の権限が要ります"))
         add_files = validated_data.pop("add_files", [])

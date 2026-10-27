@@ -5,7 +5,7 @@ from typing import Any
 from django.utils.translation import gettext as _
 
 from run.models import RunEvent, RunEventKind
-from skill.models import Skill, SkillAccess, SkillVersion
+from skill.models import Skill, SkillAction, SkillVersion
 
 from ..skills import loaded_entries, manifest_entry, render
 from .base import Effect, Tool, ToolContext, ToolResult
@@ -77,7 +77,7 @@ def execute(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
 
 def _load_again(skill: Skill, loaded: dict[str, Any], name: str, context: ToolContext) -> ToolResult:
     """同じRunでは追記した版を返す（途中で公開し直されても切り替えない）。停止や権限の失効は確かめ直す"""
-    if skill.access_of(context.run.owner) < SkillAccess.USE or skill.suspended:
+    if not skill.can(context.run.owner, SkillAction.VIEW) or skill.suspended:
         return _unusable(_("このSkillは使えなくなりました"))
     version = SkillVersion.objects.prefetch_related("assets__resource_version").get(pk=loaded["version"])
     return _loaded(skill, version, name, context)

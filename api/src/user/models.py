@@ -1,7 +1,8 @@
 import hashlib
 import secrets
+from collections.abc import Callable
 from datetime import timedelta
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from auditlog.registry import auditlog
 from django.conf import settings
@@ -37,10 +38,9 @@ class User(AbstractUser):
     """社員のアカウント。SSOで初めてログインした時点で作成し、通常社員として始める。
     同じメールアドレスのユーザーがいれば、SSOのアカウントをそのユーザーに紐付ける（user/adapters.py）。
 
-    基盤管理者は `is_superuser` で表す（最初の1人は `createsuperuser` で作る）。
-    業務管理者・Skill公開者などの役割はDjangoのGroup（permissionの組）で表し、管理画面で割り当てる
-    （`user/roles.py`、design.md §10.0）。権限の判定は、役割ではなく個々のpermissionで行う
-    （`utils.permissions.AppPermission`）。部門（Skillの部門の範囲）は、役割とは別に Department の所属で表す
+    基盤管理者は `is_superuser` で表す（最初の1人は `createsuperuser` で作る）。アプリの判定では `is_superuser` を
+    見ず、permissionだけで判定する（authorization.md §4.1）。permissionはDjangoのGroup（permissionの集まり）で
+    まとめて付け、管理画面で割り当てる。どの部門のものを扱えるかは、Groupとは別に Department の所属で表す
     """
 
     objects: ClassVar[YorikiUserManager] = YorikiUserManager()
@@ -54,13 +54,46 @@ class User(AbstractUser):
     class Meta:
         verbose_name = _("ユーザー")
         verbose_name_plural = verbose_name
+        permissions = [AppPermission.USE_ALL_DEPARTMENTS.meta, AppPermission.MANAGE_ALL_DEPARTMENTS.meta]
 
     def __str__(self):
         return self.display_name or self.email or self.username
 
-    @property
-    def is_platform_admin(self) -> bool:
-        return self.is_superuser
+
+def granted_permissions(user: User) -> set[str]:
+    """ユーザーに付いているpermission（直接とGroup経由。有効かどうか・superuserかは見ない）。
+
+    `get_all_permissions()` は無効なユーザーには空を返すので、無効なアカウントを有効に戻す変更の判定に使えない。
+    一覧では `ACCOUNT_PERMISSIONS_PREFETCH` を先読みしておけば、行ごとにクエリを増やさない
+    """
+    perms = [*user.user_permissions.all(), *(p for g in user.groups.all() for p in g.permissions.all())]
+    return {f"{p.content_type.app_label}.{p.codename}" for p in perms}
+
+
+def lock_accounts(*users: User) -> None:
+    """アカウントの行をpkの順にロックする（呼び出し元のtransactionの終わりまで）。
+
+    ユーザーの管理APIでの変更（Group・有効）と招待の受け入れを直列にし、ロックの後に読み直したpermissionで
+    確かめ直すために使う。Django管理画面でのGroupの中身の変更は、このロックを取らない（基盤管理者だけの操作）
+    """
+    list(User.objects.select_for_update().filter(pk__in={u.pk for u in users}).order_by("pk").values_list("pk"))
+
+
+# granted_permissions() が使う関連の先読み
+ACCOUNT_PERMISSIONS_PREFETCH = ("user_permissions__content_type", "groups__permissions__content_type")
+
+
+def can_manage_account(actor: User, target: User) -> bool:
+    """actorがtargetのアカウントを変更し、招待・再設定のリンクを発行してよいか（authorization.md §10）。
+
+    基盤管理者のアカウントは基盤管理者だけ（permissionの比較とは別に判定する）。それ以外は、targetのpermissionが
+    すべてactorのpermissionに含まれるときだけ（管理を任された人が、自分より強いアカウントを奪えないように）
+    """
+    if not actor.is_active:
+        return False
+    if target.is_superuser:
+        return actor.is_superuser
+    return granted_permissions(target) <= actor.get_all_permissions()
 
 
 class SSOKind(models.TextChoices):
@@ -226,7 +259,7 @@ class Invitation(models.Model):
 
     @classmethod
     def find_usable(cls, token: str, *, for_update: bool = False) -> "Invitation | None":
-        queryset = cls.objects.usable().select_related("user")
+        queryset = cls.objects.usable().select_related("user", "created_by")
         if for_update:
             queryset = queryset.select_for_update(of=("self",))
         return queryset.filter(token_hash=_hash_token(token)).first()
@@ -249,49 +282,65 @@ class Invitation(models.Model):
         return user
 
 
-class DepartmentRole(models.IntegerChoices):
-    """部門の中の役割。上の役割は下の役割のできることを含む（design.md §3.6）"""
-
-    MEMBER = 1, _("利用")  # 部門のSkillを使う
-    EDITOR = 2, _("編集")  # 部門のSkillのDraftを変更する
-    PUBLISHER = 3, _("公開")  # 部門のSkillを公開・切戻し・停止する。Toolを変える
-
-
 class DepartmentQuerySet(models.QuerySet):
-    def of(self, user) -> "DepartmentQuerySet":
-        """利用者が所属している部門（所属の軸の判定はここに集める）。
+    """所属の判定（authorization.md §4.1）。所属はここの3つのメソッドだけで判定し、ほかの場所で
+    DepartmentMembership を直接引かない。どれも有効な部門（削除していない部門）だけを返す"""
 
-        「すべての部門の範囲を含む」部門に所属していれば、すべての部門に所属しているものとして扱う。基盤管理者もすべて
-        """
-        qs = self.filter(deleted=False)
+    def active(self) -> "DepartmentQuerySet":
+        return self.filter(deleted=False)
+
+    def joined_by(self, user) -> "DepartmentQuerySet":
+        """実際に所属している部門（permissionで広がらない。本人の所属の表示、部門タスクのチャットからの起動）"""
         if not user.is_active:
-            return qs.none()
-        if covers_all_departments(user):
-            return qs
-        return qs.filter(memberships__user=user)
+            return self.none()
+        return self.active().filter(memberships__user=user)
+
+    def usable_by(self, user) -> "DepartmentQuerySet":
+        """使える部門：所属している部門。すべての部門を使える・管理できる人はすべての部門"""
+        if not user.is_active:
+            return self.none()
+        if user.has_perm(AppPermission.USE_ALL_DEPARTMENTS.perm) or user.has_perm(
+            AppPermission.MANAGE_ALL_DEPARTMENTS.perm
+        ):
+            return self.active()
+        return self.joined_by(user)
+
+    def manageable_by(self, user) -> "DepartmentQuerySet":
+        """管理できる部門：所属している部門。すべての部門を管理できる人だけ、すべての部門（使えるだけでは広がらない）"""
+        if not user.is_active:
+            return self.none()
+        if user.has_perm(AppPermission.MANAGE_ALL_DEPARTMENTS.perm):
+            return self.active()
+        return self.joined_by(user)
 
 
-def covers_all_departments(user) -> bool:
-    """利用者が、すべての部門に所属しているものとして扱われるか（基盤管理者か、印のある部門に所属している）"""
-    if not user.is_active:
-        return False
-    if user.is_superuser:
-        return True
-    return DepartmentMembership.objects.filter(
-        user=user, department__deleted=False, department__covers_all_departments=True
-    ).exists()
+def usable_department_ids(user) -> frozenset[int]:
+    """使える部門のID。1件ごとの判定で使い回すため、利用者のオブジェクトに持たせる（Djangoのpermissionのキャッシュと
+    同じく、所属・Groupを変えた後は使わない。Workerは確かめ直すたびにユーザーをDBから読む）"""
+    return _cached_ids(user, "_usable_department_ids", Department.objects.usable_by)
+
+
+def manageable_department_ids(user) -> frozenset[int]:
+    """管理できる部門のID（usable_department_ids と同じくキャッシュする）"""
+    return _cached_ids(user, "_manageable_department_ids", Department.objects.manageable_by)
+
+
+def _cached_ids(user, attr: str, departments: Callable[[Any], "DepartmentQuerySet"]) -> frozenset[int]:
+    if not hasattr(user, attr):
+        setattr(user, attr, frozenset(departments(user).values_list("pk", flat=True)))
+    return getattr(user, attr)
 
 
 class Department(models.Model):
-    """部門。Skill・Connectorの部門の範囲（所属の軸。誰が使えるか）に使う（design.md §3.6、§4.9.1）。
+    """部門。人の集まりで、入れ子にしない（authorization.md §4）。部門のSkill・Connector等は1つの部門に属する。
 
-    役割（Group。permissionの組）とは別に管理する。基盤管理者が管理画面で登録し、所属を割り当てる。
-    「すべての部門の範囲を含む」部門の所属者は、すべての部門に所属しているものとして扱う（全部を見る人の管理）
+    Group（permissionの集まり）とは別に管理する。ユーザー管理者が管理画面で登録し、所属を割り当てる。部門の中で
+    何ができるかは、その人のpermissionで決まる（部門ごとの役割は持たない）。削除しても所属と履歴は残り、
+    その部門のものは使えなくなる
     """
 
     uid = NanoidField(unique=True)
     name = models.CharField(_("名前"), max_length=100)
-    covers_all_departments = models.BooleanField(_("すべての部門の範囲を含む"), default=False)
     members = models.ManyToManyField(
         settings.AUTH_USER_MODEL, through="DepartmentMembership", related_name="departments", verbose_name=_("所属")
     )
@@ -312,18 +361,9 @@ class Department(models.Model):
     def __str__(self):
         return self.name
 
-    def role_of(self, user) -> DepartmentRole | None:
-        """利用者の部門の中の役割。所属していなければNone。基盤管理者は公開の役割として扱う"""
-        if not user.is_active or self.deleted:
-            return None
-        if user.is_superuser:
-            return DepartmentRole.PUBLISHER
-        role = DepartmentMembership.objects.filter(department=self, user=user).values_list("role", flat=True).first()
-        return DepartmentRole(role) if role is not None else None
-
 
 class DepartmentMembership(models.Model):
-    """部門の所属と、部門の中の役割"""
+    """部門の所属"""
 
     uid = NanoidField(unique=True)
     department = models.ForeignKey(
@@ -335,7 +375,6 @@ class DepartmentMembership(models.Model):
         related_name="department_memberships",
         verbose_name=_("社員"),
     )
-    role = models.PositiveSmallIntegerField(_("部門の中の役割"), choices=DepartmentRole.choices)
 
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)

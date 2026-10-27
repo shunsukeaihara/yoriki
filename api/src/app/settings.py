@@ -203,7 +203,7 @@ REST_FRAMEWORK = {
         "rest_framework.filters.SearchFilter",
     ),
     "DEFAULT_AUTHENTICATION_CLASSES": ("utils.authentication.SessionAuthentication",),
-    "DEFAULT_PERMISSION_CLASSES": ("utils.permissions.PlatformAdmin",),  # 指定漏れは最も厳しい権限で閉じる
+    "DEFAULT_PERMISSION_CLASSES": ("utils.permissions.DenyAll",),  # 指定漏れは誰も通さない
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "EXCEPTION_HANDLER": "utils.handlers.exception_handler",
 }
@@ -231,8 +231,8 @@ SPECTACULAR_SETTINGS = {
         "InstructionKindEnum": "conversation.models.InstructionKind",
         "InstructionStateEnum": "conversation.models.InstructionState",
         "MessageRoleEnum": "conversation.models.MessageRole",
-        "DepartmentRoleEnum": "user.models.DepartmentRole",
         "SkillScopeEnum": "skill.models.SkillScope",
+        "ConnectorScopeEnum": "connector.models.ConnectorScope",
         "SkillRequirementEnum": "skill.models.SkillRequirement",
         "SkillAssetRoleEnum": "skill.models.SkillAssetRole",
         "SkillChangeKindEnum": "skill.models.SkillChangeKind",

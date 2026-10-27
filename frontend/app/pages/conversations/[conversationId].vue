@@ -25,7 +25,7 @@ const { data: models } = await useAsyncData('app-model-profiles', () => api.mode
 // 入力欄の `/` の一覧。見える Skill から、使えるもの（公開中で停止していない）と編集できるものに分ける
 const { items: visibleSkills, fetchAll: fetchSkills } = useFetchAll(() => api.skills().list({ pageSize: 200 }))
 const usableSkills = computed(() => visibleSkills.value.filter((s) => s.version > 0 && !s.suspended))
-const editableSkills = computed(() => visibleSkills.value.filter((s) => s.access >= SkillAccess.EDIT))
+const editableSkills = computed(() => visibleSkills.value.filter((s) => s.canEdit))
 
 const messages = useConversationMessages(conversationId)
 const { items: runs, fetchAll: fetchRuns } = useFetchAll(() =>

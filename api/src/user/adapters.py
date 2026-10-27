@@ -87,7 +87,7 @@ class SocialAccountAdapter(DefaultSocialAccountAdapter):
             raise _login_error("not_allowed")
         if sociallogin.is_existing:
             return
-        # 初めてのSSOのログインで、同じメールアドレスのユーザーがいれば紐付けて、役割・会話等を引き継ぐ。
+        # 初めてのSSOのログインで、同じメールアドレスのユーザーがいれば紐付けて、Group・所属・会話等を引き継ぐ。
         # テナント・ドメインを固定し、許可したドメインのメールアドレスだけを受け付けているので、
         # メールアドレスの一致を本人の確認とみなす（design.md §10.0）
         user = User.objects.filter(email__iexact=sociallogin.user.email).first()

@@ -8,7 +8,6 @@ from run.models import ClarificationStatus, Run, RunEvent, RunEventKind, RunKind
 from skill.factories import SkillFactory, SkillVersionFactory
 from skill.models import SkillRequirement, SkillScope
 from user.factories import DepartmentFactory, DepartmentMembershipFactory
-from user.models import DepartmentRole
 
 from .factories import ConversationFactory
 from .models import Conversation, InstructionKind, UserInstruction
@@ -218,7 +217,7 @@ class TestMessage:
     def test_edit_skill_needs_edit_access_and_a_body(self, api_client, app_user, other_user):
         conversation = ConversationFactory.create(owner=app_user)
         department = DepartmentFactory.create()
-        DepartmentMembershipFactory.create(department=department, user=app_user, role=DepartmentRole.MEMBER)
+        DepartmentMembershipFactory.create(department=department, user=app_user)
         shared = SkillVersionFactory.create(
             skill__created_by=other_user, skill__scope=SkillScope.DEPARTMENT, skill__department=department
         ).skill

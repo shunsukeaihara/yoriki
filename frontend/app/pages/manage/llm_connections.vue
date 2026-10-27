@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 
-definePageMeta({ permission: PermissionCode.CHANGE_LLM_CONNECTION })
+definePageMeta({ permission: ManagePagePermissions.LLM_CONNECTION })
 
+const { hasPermission } = usePermission()
 const api = useAPI()
 const { t } = useI18n()
 const reloadKey = ref(0)
@@ -33,7 +34,7 @@ const columns: TableColumn<LLMConnection>[] = [
         :description="$t('Agentが使うLLMのプロバイダと、そのAPI keyを登録します')"
       >
         <template #end>
-          <LlmConnectionDialog @saved="reload">
+          <LlmConnectionDialog v-if="hasPermission(PermissionCode.ADD_LLM_CONNECTION)" @saved="reload">
             <template #trigger="{ on }">
               <DBtn icon="i-lucide-plus" v-on="on">{{ $t('LLMの接続を追加') }}</DBtn>
             </template>

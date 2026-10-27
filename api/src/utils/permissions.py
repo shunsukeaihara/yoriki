@@ -1,8 +1,9 @@
 """APIのpermission（backend-conventions.md §6.3）。
 
-権限はDjangoのpermissionで判定する。Yorikiで定義するpermissionは `AppPermission` にまとめ、
-Modelの `Meta.permissions` で作り、Group（役割。`user/roles.py`）に割り当て、Groupをユーザーに割り当てる。
-役割の名前やUserのフラグでは判定しない。基盤管理者（`is_superuser`）はすべてのpermissionを持つ。
+権限は「所属」と「permission」の2軸で判定する（authorization.md）。Yorikiで定義するpermissionは `AppPermission` に
+まとめ、Modelの `Meta.permissions` で作り、Group（permissionの集まり）か個別にユーザーへ付ける。
+Groupの名前やUserのフラグでは判定しない。基盤管理者（`is_superuser`）は、Djangoの `has_perm()` で
+すべてのpermissionを持つ。
 """
 
 from enum import Enum
@@ -20,14 +21,21 @@ class AppPermission(Enum):
     """Yorikiで定義するpermission。値は（app_label、codename、表示名）。
 
     codenameは `can_<動詞>_<対象>` にする。追加したら、対象アプリのModelの `Meta.permissions` に
-    `AppPermission.XXX.meta` を書き、`user/roles.py` で役割に割り当てる。
+    `AppPermission.XXX.meta` を書く。初期のGroupに入れるものは、`user` のデータのマイグレーションで割り当てる。
 
     例：PUBLISH_COMPANY_SKILLS = "skill", "can_publish_company_skills", _("全社向けのSkillを公開できる")
     """
 
-    # 全社の範囲のSkill（design.md §3.6）
+    # 使える部門・管理できる部門を、すべての部門に広げる（authorization.md §4.1）
+    USE_ALL_DEPARTMENTS = "user", "can_use_all_departments", _("すべての部門のものを使える")
+    MANAGE_ALL_DEPARTMENTS = "user", "can_manage_all_departments", _("すべての部門の業務を管理できる")
+    # 範囲ごとのSkillの編集・公開（authorization.md §5.1）。部門の範囲は、管理できる部門のSkillだけに効く
+    EDIT_DEPARTMENT_SKILLS = "skill", "can_edit_department_skills", _("部門のSkillを編集できる")
+    PUBLISH_DEPARTMENT_SKILLS = "skill", "can_publish_department_skills", _("部門のSkillを公開できる")
     EDIT_COMPANY_SKILLS = "skill", "can_edit_company_skills", _("全社のSkillを編集できる")
     PUBLISH_COMPANY_SKILLS = "skill", "can_publish_company_skills", _("全社のSkillを公開できる")
+    EDIT_SYSTEM_SKILLS = "skill", "can_edit_system_skills", _("システムのSkillを編集できる")
+    PUBLISH_SYSTEM_SKILLS = "skill", "can_publish_system_skills", _("システムのSkillを公開できる")
 
     def __init__(self, app_label: str, codename: str, label: "str | StrPromise"):
         self.app_label = app_label
@@ -55,13 +63,14 @@ class _AppUser(BasePermission):
         return request.user.is_active
 
 
-class _PlatformAdmin(BasePermission):
+class DenyAll(BasePermission):
+    """どの要求も通さない（基盤管理者も）。`permission_classes` の書き忘れを閉じる既定（DEFAULT_PERMISSION_CLASSES）"""
+
     def has_permission(self, request, view) -> bool:
-        return request.user.is_superuser
+        return False
 
 
 AppUser = IsAuthenticated & _AppUser  # ログインしている社員
-PlatformAdmin = IsAuthenticated & _PlatformAdmin  # 基盤管理者
 
 
 def require_permission(perm: AppPermission | str) -> OperandHolder:
@@ -83,8 +92,8 @@ class _ModelPermission(BasePermission):
 
     対象のModelは `view.permission_model`（なければ `view.queryset.model`）。`@action` は
     `view.action_permissions = {"check": "view"}` のように、どの種類のpermissionで判定するかを書く。
-    `"login"` はpermissionを問わない（所属で `get_queryset` を絞る操作等）。書いていない操作は断る
-    （書き忘れたactionを開けない）。Djangoの管理画面と同じく、`change_*` を持つ人は `view` の操作もできる
+    書いていない操作は断る（書き忘れたactionを開けない）。所属は問わない（基盤の管理。authorization.md §3）。
+    Djangoの管理画面と同じく、`change_*` を持つ人は `view` の操作もできる
     """
 
     ACTIONS = {
@@ -100,8 +109,6 @@ class _ModelPermission(BasePermission):
         kind = {**self.ACTIONS, **getattr(view, "action_permissions", {})}.get(getattr(view, "action", None))
         if kind is None:
             return False
-        if kind == "login":
-            return request.user.is_active
         model = getattr(view, "permission_model", None) or view.queryset.model
         kinds = ("view", "change") if kind == "view" else (kind,)
         return any(request.user.has_perm(f"{model._meta.app_label}.{k}_{model._meta.model_name}") for k in kinds)

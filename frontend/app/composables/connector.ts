@@ -8,6 +8,24 @@ export const ConnectorKind = {
 } as const satisfies Record<string, ConnectorKindEnum>
 export type ConnectorKind = (typeof ConnectorKind)[keyof typeof ConnectorKind]
 
+// バックエンドの connector.models.ConnectorScope と同じ値。個人は会話でConnectorを使う段階で足す
+export const ConnectorScope = {
+  DEPARTMENT: 2,
+  COMPANY: 3,
+  SYSTEM: 4,
+} as const satisfies Record<string, ConnectorScopeEnum>
+
+/** 範囲の選択肢（作成と検索条件）。一覧の表示はサーバーの scopeDisplay を使う */
+export const connectorScopeItems = (t: T) => [
+  { value: ConnectorScope.DEPARTMENT, title: t('部門'), description: t('その部門の人が会話で使います') },
+  { value: ConnectorScope.COMPANY, title: t('全社'), description: t('全社員が会話で使います') },
+  {
+    value: ConnectorScope.SYSTEM,
+    title: t('システム'),
+    description: t('システムのタスクだけが使います（会話には出しません）'),
+  },
+]
+
 // バックエンドの connector.models.TLSMode と同じ値
 export const TlsMode = {
   DISABLE: 1,

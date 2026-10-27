@@ -6,17 +6,8 @@ export const SkillScope = {
   PERSONAL: 1,
   DEPARTMENT: 2,
   COMPANY: 3,
+  SYSTEM: 4,
 } as const satisfies Record<string, SkillScopeEnum>
-
-// 利用者がSkillに対してできること（Skill.access。skill.models.SkillAccess）。上は下を含む
-export const SkillAccess = {
-  NONE: 0,
-  USE: 1,
-  // Draftを変更する（説明・手順・Schema・資料）
-  EDIT: 2,
-  // 公開・切戻し・停止・削除・名前とToolの変更
-  PUBLISH: 3,
-} as const
 
 // skill.models.SkillAssetRole と同じ値
 export const SkillAssetRole = {
@@ -34,24 +25,45 @@ export const SkillChangeKind = {
   RESUME: 4,
 } as const satisfies Record<string, SkillChangeKindEnum>
 
-// user.models.DepartmentRole と同じ値
-export const DepartmentRole = {
-  MEMBER: 1,
-  EDITOR: 2,
-  PUBLISHER: 3,
-} as const satisfies Record<string, DepartmentRoleEnum>
-
 /** 入力欄で選んだ Skill の編集の依頼。skill が null なら新しい Skill を作る（design.md §11.6） */
 export type SkillEditChoice = { skill: Skill | null }
 
 type T = (key: string, params?: Record<string, unknown>) => string
 
-/** 公開範囲の選択肢（検索条件と作成）。一覧の表示はサーバーの scopeDisplay を使う */
+/** 範囲の選択肢（検索条件と作成）。一覧の表示はサーバーの scopeDisplay を使う。システムは管理画面だけで使う */
 export const skillScopeItems = (t: T) => [
   { value: SkillScope.PERSONAL, title: t('個人'), description: t('自分だけが使います') },
   { value: SkillScope.DEPARTMENT, title: t('部門'), description: t('部門に所属する人が使います') },
   { value: SkillScope.COMPANY, title: t('全社'), description: t('全社員が使います') },
+  {
+    value: SkillScope.SYSTEM,
+    title: t('システム'),
+    description: t('システムのタスクだけが使います（会話には出しません）'),
+  },
 ]
+
+/**
+ * 利用者が作れる範囲と、部門のSkillを作れる部門（authorization.md §7.3.1）。個人はいつでも、部門は管理できる部門と
+ * 部門のSkillの編集・公開のpermission、全社・システムはそれぞれのpermission。サーバーでも確かめ、なければ403
+ */
+export const useSkillCreatableScopes = () => {
+  const account = useAccountStore()
+  const { hasAny } = usePermission()
+  const departments = computed(() =>
+    hasAny([PermissionCode.EDIT_DEPARTMENT_SKILLS, PermissionCode.PUBLISH_DEPARTMENT_SKILLS])
+      ? (account.user?.manageableDepartments ?? [])
+      : [],
+  )
+  const scopes = computed<SkillScopeEnum[]>(() => [
+    SkillScope.PERSONAL,
+    ...(departments.value.length ? [SkillScope.DEPARTMENT] : []),
+    ...(hasAny([PermissionCode.EDIT_COMPANY_SKILLS, PermissionCode.PUBLISH_COMPANY_SKILLS])
+      ? [SkillScope.COMPANY]
+      : []),
+    ...(hasAny([PermissionCode.EDIT_SYSTEM_SKILLS, PermissionCode.PUBLISH_SYSTEM_SKILLS]) ? [SkillScope.SYSTEM] : []),
+  ])
+  return { scopes, departments }
+}
 
 export const skillAssetRoleItems = (t: T) => [
   { value: SkillAssetRole.REFERENCE, title: t('参照資料'), description: t('業務のルール・用語・手順（MD、PDF等）') },
@@ -82,12 +94,6 @@ export const skillToolItems = (t: T) =>
     { value: 'ask_user', title: 'ask_user', description: t('利用者に確認する') },
     { value: 'todo_write', title: 'todo_write', description: t('作業の計画を書く') },
   ] satisfies { value: ToolName; title: string; description: string }[]
-
-export const departmentRoleItems = (t: T) => [
-  { value: DepartmentRole.MEMBER, title: t('利用'), description: t('部門のSkillを使う') },
-  { value: DepartmentRole.EDITOR, title: t('編集'), description: t('部門のSkillのDraftを変更する') },
-  { value: DepartmentRole.PUBLISHER, title: t('公開'), description: t('部門のSkillを公開・切戻し・停止する') },
-]
 
 /** SkillChange の summary.fields の項目名 */
 export const skillFieldLabel = (name: string, t: T): string => {
@@ -148,7 +154,7 @@ export const parseSchemaText = (text: string, t: T): { value: unknown; error: st
 export const skillOwnerLabel = (skill: Skill, t: T): string => {
   if (skill.scope === SkillScope.DEPARTMENT) return skill.departmentInfo?.name ?? ''
   if (skill.scope === SkillScope.PERSONAL) return skill.ownerInfo?.displayName || skill.ownerInfo?.email || ''
-  return t('全社')
+  return skill.scope === SkillScope.SYSTEM ? t('システム') : t('全社')
 }
 
 /**

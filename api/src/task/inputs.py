@@ -26,10 +26,12 @@ MAX_NUMBER = 10**15
 
 @dataclass(eq=False)
 class InputFile:
-    """送られたファイル（手動実行・Webhookのmultipart）。`name` は送り元が付けた名前"""
+    """送られたファイル（手動実行・Webhookのmultipart）。`name` は送り元が付けた名前。`path` は /workspace/input の
+    中の名前（Webhookでpayloadのファイルに書くために、受付時に先に決める）"""
 
     name: str
     content: bytes
+    path: str = ""
 
     @cached_property
     def sha256(self) -> str:
@@ -37,7 +39,8 @@ class InputFile:
 
     def describe(self) -> dict[str, Any]:
         """payloadのファイル（JSON）に書く形"""
-        return {"file": self.name, "size": len(self.content), "sha256": self.sha256}
+        path = f"/workspace/input/{self.path}"
+        return {"file": self.name, "path": path, "size": len(self.content), "sha256": self.sha256}
 
 
 def clean_inputs(definitions: list[dict[str, Any]], values: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:

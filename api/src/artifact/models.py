@@ -39,6 +39,22 @@ def clean_filename(name: str) -> str:
     return name or "file"
 
 
+def input_paths(names: list[str], used: set[str]) -> list[str]:
+    """添付を置く /workspace/input の中の名前。`used` は会話で既に使った名前。同じ名前があれば「名前 (2).拡張子」の
+    ようにする（前の添付を置き換えない）。Connectorの結果を置くディレクトリと同じ名前にしない"""
+    used = {*used, CONNECTOR_RESULTS_DIR}
+    paths = []
+    for name in names:
+        stem, ext = posixpath.splitext(name)
+        path, number = name, 1
+        while path in used:
+            number += 1
+            path = f"{stem} ({number}){ext}"
+        used.add(path)
+        paths.append(path)
+    return paths
+
+
 def guess_content_type(name: str) -> str:
     """ファイル名から決める。ブラウザが送るContent-Typeは使わない（`text/html` と名乗らせない）"""
     return mimetypes.guess_type(name)[0] or "application/octet-stream"
@@ -206,22 +222,13 @@ class Artifact(models.Model):
 
     @classmethod
     def attach(cls, conversation, artifacts: list["Artifact"]) -> None:
-        """メッセージで送る添付に、/workspace/input の中の名前を決める。会話の行ロックの中で呼ぶ。
-        同じ名前の添付が既にあれば「名前 (2).拡張子」のようにする（前の添付を置き換えない）"""
+        """メッセージで送る添付に、/workspace/input の中の名前を決める（input_paths()）。会話の行ロックの中で呼ぶ"""
         used = set(
             cls.objects.filter(conversation=conversation, kind=ArtifactKind.ATTACHMENT)
             .exclude(path="")
             .values_list("path", flat=True)
         )
-        # Connectorの結果を置くディレクトリと同じ名前にしない
-        used.add(CONNECTOR_RESULTS_DIR)
-        for artifact in artifacts:
-            stem, ext = posixpath.splitext(artifact.name)
-            path, number = artifact.name, 1
-            while path in used:
-                number += 1
-                path = f"{stem} ({number}){ext}"
-            used.add(path)
+        for artifact, path in zip(artifacts, input_paths([a.name for a in artifacts], used), strict=True):
             artifact.path = path
             artifact.save(update_fields=["path"])
 

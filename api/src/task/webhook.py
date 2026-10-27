@@ -9,8 +9,9 @@ Runの作業場所に置き（取り出さなかった項目の読み方はSkill
 依頼文としては扱わない（入口は自由な依頼文を受けない。authorization.md §6）。
 
 ファイルはmultipart/form-dataで本文に付けて受け取る（URLの取得はしない）。ファイルはどの名前で送られても
-すべて /workspace/input に置き、payloadのファイルには名前・大きさ・SHA-256を書く。型がファイルの項目は、項目の
-取り出しのpath（`$.invoice`）か、推奨の形式の `inputs[名前]` で指す。項目に結び付かないファイルは `files` で送る。
+すべて /workspace/input に置き、payloadのファイルには名前・置いたパス・大きさ・SHA-256を書く。型がファイルの項目は、
+項目の取り出しのpath（`$.invoice`）か、推奨の形式の `inputs[名前]` で指す。項目に結び付かないファイルは `files` で
+送る。
 """
 
 import codecs
@@ -29,10 +30,13 @@ from django.core.files.uploadhandler import MemoryFileUploadHandler
 from django.http.multipartparser import MultiPartParser, MultiPartParserError
 from django.utils.translation import gettext as _
 
+from artifact.models import clean_filename, input_paths
+
 from .inputs import InputFile
 from .models import TaskInputType
 
 MAX_DEDUP_KEY_LENGTH = 200
+PAYLOAD_JSON = "webhook_payload.json"
 # 推奨の形式で、フォームの値・multipartの `inputs[名前]` を `inputs` の中の値にする
 FORM_INPUT_KEY_RE = re.compile(r"^inputs\[([^\[\]]+)\]$")
 # JSONのpathの1つの区切り：`.名前`、`["名前"]`・`['名前']`、`[番号]`
@@ -143,7 +147,7 @@ def _describe_file(value: Any) -> Any:
 
 
 def _canonical(data: Any) -> bytes:
-    """並び順と空白によらない形。ファイルは名前・大きさ・SHA-256にする（中身が違えば違う入力）。対になっていない
+    """並び順と空白によらない形。ファイルは名前・パス・大きさ・SHA-256にする（中身が違えば違う入力）。対になっていない
     サロゲート（JSONの "\\ud800" 等）はUTF-8にできないので断る（DBの入力の値やファイルにも書けないため）"""
     try:
         return json.dumps(
@@ -205,7 +209,7 @@ def parse_payload(body: bytes, content_type: str) -> Payload:
             raise PayloadError("invalid_json", _("本文をJSONとして読めません（UTF-8のJSONを送ってください）")) from None
         return Payload(
             data=data,
-            file_name="webhook_payload.json",
+            file_name=PAYLOAD_JSON,
             file_bytes=body,
             sha256=hashlib.sha256(_canonical(data)).hexdigest(),
             content_type="application/json",
@@ -247,10 +251,10 @@ def parse_payload(body: bytes, content_type: str) -> Payload:
 
 
 def _form_payload(data: dict[str, Any], media_type: str, files: list[InputFile] | None = None) -> Payload:
-    # Skillが読みやすいよう、payloadのファイルはJSONにして置く（ファイルは名前・大きさ・SHA-256）
+    # Skillが読みやすいよう、payloadのファイルはJSONにして置く（ファイルは名前・置いたパス・大きさ・SHA-256）
     return Payload(
         data=data,
-        file_name="webhook_payload.json",
+        file_name=PAYLOAD_JSON,
         file_bytes=json.dumps(data, ensure_ascii=False, indent=2, default=_describe_file).encode(),
         sha256=hashlib.sha256(_canonical(data)).hexdigest(),
         content_type=media_type,
@@ -276,9 +280,16 @@ def _parse_multipart(body: bytes, content_type: str) -> tuple[dict[str, Any], st
             file = InputFile(name=item.name or "file", content=item.read())
             files.append(file)
             pairs.append((key, file))
+    # RFC 2231の形（`name*=`・`filename*=`）はDjangoが先に置換文字で読むので、置換文字を含む名前は断る
+    if any("\ufffd" in name for name in [*(key for key, _value in pairs), *(f.name for f in files)]):
+        raise PayloadError("invalid_form", _("本文をmultipart/form-dataとして読めません"))
     limit = settings.YORIKI_ATTACHMENTS_PER_MESSAGE - 1
     if len(files) > limit:
         raise PayloadError("too_many_files", _("ファイルは%(limit)s個までです") % {"limit": limit})
+    # 作業場所に置く名前を先に決めて、payloadのファイルに書く（task/dispatch.py は payload → ファイルの順に置く）
+    names = [PAYLOAD_JSON, *(clean_filename(f.name) for f in files)]
+    for file, path in zip(files, input_paths(names, set())[1:], strict=True):
+        file.path = path
     return _form_data(pairs), "multipart/form-data", files
 
 

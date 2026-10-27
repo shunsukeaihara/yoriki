@@ -2719,7 +2719,15 @@ paths:
               $ref: '#/components/schemas/TaskRunCreateRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/TaskRunCreateRequest'
+              type: object
+              properties:
+                inputs:
+                  type: string
+                  description: ファイル以外の入力の項目の名前と値（JSONのオブジェクトの文字列）
+              additionalProperties:
+                type: string
+                format: binary
+                description: 型がファイルの項目。フィールドの名前は項目の名前
       security:
       - cookieAuth: []
       responses:

@@ -436,6 +436,8 @@ class TaskRunCreateSerializer(serializers.Serializer):
                     {"inputs": {name: _("ファイルが大きすぎます（%(limit)sMBまで）") % {"limit": limit}}}
                 )
             files[name] = InputFile(name=uploaded[0].name or "file", content=uploaded[0].read())
+        if len(files) > (limit := settings.YORIKI_ATTACHMENTS_PER_MESSAGE):
+            raise serializers.ValidationError(_("ファイルは%(limit)s個までです") % {"limit": limit})
         if both := set(files) & set(attrs["inputs"]):
             errors = {name: _("値とファイルの両方が送られました") for name in both}
             raise serializers.ValidationError({"inputs": errors})

@@ -316,7 +316,7 @@ def test_manual_run_takes_files_for_file_inputs(api_client, app_user, model):
     assert first["attachments"][0]["path"] == path
 
 
-def test_manual_run_refuses_mismatched_files(api_client, app_user, model):
+def test_manual_run_refuses_mismatched_files(api_client, app_user, model, settings):
     inputs = [
         {"name": "vendor", "label": "取引先", "type": "string"},
         {"name": "invoice", "label": "請求書", "type": "file", "required": True},
@@ -339,6 +339,11 @@ def test_manual_run_refuses_mismatched_files(api_client, app_user, model):
     assert (res.status_code, set(res.json()["inputs"])) == (400, {"invoice"})
     res = api_client.post(_url(task, "run/"), {"inputs": "{", "invoice": SimpleUploadedFile("a.pdf", b"1")})
     assert res.status_code == 400
+    # ファイルの数は、会話の1つの発言の添付と同じ上限まで
+    settings.YORIKI_ATTACHMENTS_PER_MESSAGE = 1
+    files = {"invoice": SimpleUploadedFile("a.pdf", b"1"), "vendor": SimpleUploadedFile("b.pdf", b"2")}
+    res = api_client.post(_url(task, "run/"), files)
+    assert (res.status_code, res.json()["non_field_errors"]) == (400, ["ファイルは1個までです"])
     assert not Run.objects.exists()
 
 

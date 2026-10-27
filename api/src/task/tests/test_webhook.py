@@ -369,10 +369,15 @@ def test_multipart_files_are_placed_and_file_inputs_point_to_them(api_client, in
     assert payload["vendor"] == "ACME"
     assert payload["document"] == {
         "file": "invoice.pdf",
+        "path": "/workspace/input/invoice.pdf",
         "size": 8,
         "sha256": hashlib.sha256(b"%PDF-1.7").hexdigest(),
     }
-    assert [f["file"] for f in payload["files"]] == ["memo.txt", "webhook_payload.json"]
+    # payloadのファイルには、送られた名前と実際に置いたパスを書く
+    assert [(f["file"], f["path"]) for f in payload["files"]] == [
+        ("memo.txt", "/workspace/input/memo.txt"),
+        ("webhook_payload.json", "/workspace/input/webhook_payload (2).json"),
+    ]
     text = RunEvent.objects.get(run=run, kind=RunEventKind.USER_MESSAGE).data["text"]
     assert '<untrusted_content source="input:invoice">/workspace/input/invoice.pdf</untrusted_content>' in text
 
@@ -440,6 +445,14 @@ def test_multipart_limits_and_encoding(api_client, integrator, settings):
     assert (res.status_code, res.json()["code"]) == (400, "invalid_form")
     res = _send(api_client, task, key, b"x", content_type="multipart/form-data")
     assert (res.status_code, res.json()["code"]) == (400, "invalid_form")
+    # RFC 2231の形の名前の不正なUTF-8も断る（Djangoは置換文字にするため）
+    for disposition in (
+        b"name=\"inputs[invoice]\"; filename*=utf-8''%FF.pdf",
+        b"name*=utf-8''inputs%5B%FF%5D; filename=\"a.pdf\"",
+    ):
+        body = b"--B\r\nContent-Disposition: form-data; " + disposition + b"\r\n\r\n1\r\n--B--\r\n"
+        res = _send(api_client, task, key, body, content_type="multipart/form-data; boundary=B")
+        assert (res.status_code, res.json()["code"]) == (400, "invalid_form")
     assert not Run.objects.exists()
 
 

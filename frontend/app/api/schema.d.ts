@@ -7478,7 +7478,12 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": components["schemas"]["TaskRunCreateRequest"];
-                "multipart/form-data": components["schemas"]["TaskRunCreateRequest"];
+                "multipart/form-data": {
+                    /** @description ファイル以外の入力の項目の名前と値（JSONのオブジェクトの文字列） */
+                    inputs?: string;
+                } & {
+                    [key: string]: string;
+                };
             };
         };
         responses: {

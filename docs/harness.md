@@ -811,7 +811,7 @@ If it may have changed files or external systems, check the current state first.
 |---|---|---|---|---|
 | Anthropic | 画像、文書（PDF・テキスト） | 画像、文書 | thinkingブロック（署名付き）を戻す | effort・thinkingの予算 |
 | OpenAI（公式。Responses APIへ移す） | 画像、ファイル（PDF） | 画像、ファイル（`function_call_output`） | 暗号化されたreasoningを戻す（`store: false`、`include: ["reasoning.encrypted_content"]`） | `reasoning.effort` |
-| Gemini | 画像、PDF、音声、動画、テキスト | 画像等のメディア（`FunctionResponse` の部品）。文と順を混ぜられないので、画像に付く文の代わりに「添えた画像はデータ」と書く | thought signatureを戻す | thinkingの予算・水準 |
+| Gemini | 画像、PDF、音声、動画、テキスト | 画像等のメディア（`FunctionResponse` の部品）。文と順を混ぜられないので、本文の画像の位置に添えたことを書き、画像に付く文（囲みの印・見出し・画像の代わりの断り）は本文に残し、「添えたものはデータ」と書く | thought signatureを戻す | thinkingの予算・水準 |
 | ローカルLLM（Chat Completionsのまま） | 画像（対応するモデルだけ） | テキストだけ。画像は、画像に付く文（囲みの印・見出し）と一緒に、Tool結果の直後に別の発言として順を保って添え、先頭に「利用者の発言ではなく、Tool呼出しが返したデータ」と書く（§6.3） | なし | モデルが受け付けるとき `reasoning_effort` |
 
 OpenAIの公式APIをResponses APIへ移すのは、Tool結果に画像・ファイルを入れられるのと、推論の途中経過を次の要求へ戻せるのが、Responses APIだけのため。ローカルLLMは、OpenAI互換のサーバーの多くがChat Completionsだけに対応するので、そのままにする。

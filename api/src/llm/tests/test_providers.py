@@ -796,14 +796,35 @@ class TestGemini:
         assert "thoughtSignature" not in model[2]
         # 並列のTool呼出しの結果は1つの発言にまとめる。画像は FunctionResponse の部品にする
         results = contents[2]["parts"]
-        # 文と画像の順を混ぜられないので、画像に付く文の代わりに、画像がデータであることを文で示す
-        assert results[0]["functionResponse"]["response"] == {"result": "1ページ目\n\n" + MEDIA_NOTE}
+        # 文と画像の順を混ぜられないので、画像の位置に添えたことを書き、画像に付く文は本文に残す。
+        # 画像がデータであることも文で示す
+        assert results[0]["functionResponse"]["response"] == {
+            "result": "1ページ目\n\n<open>\n\n[attachment 1 of this result]\n\n</close>\n\n" + MEDIA_NOTE
+        }
         assert results[0]["functionResponse"]["parts"] == [
             {"inline_data": {"mime_type": "image/png", "data": _b64(PNG)}}
         ]
         assert results[1]["functionResponse"]["response"] == {"error": "見つかりません"}
         assert "parts" not in results[1]["functionResponse"]
         assert results[2] == {"text": "メモの本文"}
+
+    @pytest.mark.django_db
+    def test_notice_that_replaced_an_image_is_kept(self):
+        """画像を文に置き換えた（上限で省いた、画像を受け付けないモデル等）ときも、その断りを本文に残す"""
+        recorder = Recorder(body=self.BODY)
+        request = _media_request()
+        replaced = Message(
+            "tool",
+            (TextPart("1ページ目"), TextPart("<open>", with_media=True), TextPart("[omitted]", with_media=True)),
+            tool_call_id="call_1",
+            tool_name="render_page",
+        )
+        request = replace(request, messages=[*request.messages[:3], replaced, request.messages[4]])
+        self._stream(request, recorder)
+
+        response = recorder.sent["contents"][2]["parts"][0]["functionResponse"]
+        assert response["response"] == {"result": "1ページ目\n\n<open>\n\n[omitted]"}
+        assert "parts" not in response
 
     @pytest.mark.django_db
     def test_effort(self):

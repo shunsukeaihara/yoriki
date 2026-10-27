@@ -122,7 +122,8 @@ def start_evaluation(
         sensitive = skill_connectors.skill_is_sensitive(skill)
         if sensitive and not model_version.is_local:
             raise CannotEvaluate(_("機密のSkillは、ローカルLLMのモデルで評価してください。"))
-        if skill_connectors.declares_system_connector(draft):
+        compared = [draft] if skill.current_version is None else [draft, skill.current_version]
+        if any(skill_connectors.declares_system_connector(content) for content in compared):
             # システムのConnectorは会話のRunから使えないので、評価のRunでも使えない（システムのタスクの段階で扱う）
             raise CannotEvaluate(_("システムのConnectorを使うSkillは、まだ評価できません。"))
         if reason := skill_connectors.unusable_reason(draft, actor, sensitive=sensitive):

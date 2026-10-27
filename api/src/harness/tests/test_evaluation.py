@@ -40,6 +40,7 @@ from skill.models import (
     SkillEvaluation,
     SkillEvaluationCase,
     SkillScope,
+    SkillVersion,
 )
 from usage.models import UsageLedger, UsagePurpose
 from user.factories import DepartmentFactory, DepartmentMembershipFactory, grant
@@ -255,6 +256,17 @@ def test_skill_declaring_a_system_connector_is_not_evaluated_yet(app_user, model
     skill = skill_with_draft(app_user, tools=["datasource_query"], connectors=[declaration])
     with pytest.raises(CannotEvaluate, match="システムのConnector"):
         start_evaluation(skill, cases=[case(skill)], actor=app_user, model_version=model.current_version)
+    # 公開中の版だけが宣言していても、比べるRunが使えないので断る
+    published_only = skill_with_draft(app_user)
+    assert published_only.current_version is not None
+    SkillVersion.objects.filter(pk=published_only.current_version.pk).update(
+        tools=["datasource_query"], connectors=[declaration]
+    )
+    published_only.refresh_from_db()
+    with pytest.raises(CannotEvaluate, match="システムのConnector"):
+        start_evaluation(
+            published_only, cases=[case(published_only)], actor=app_user, model_version=model.current_version
+        )
 
 
 @pytest.mark.django_db

@@ -163,7 +163,7 @@ def _keep_alive[T](context: ToolContext, operation: Callable[[], T], renew: Call
 
 def _failed(exc: ConnectorError, connector: Connector, version: ConnectorVersion) -> ToolResult:
     message = exc.message
-    if exc.kind in (ConnectorErrorKind.CONNECTION, ConnectorErrorKind.QUERY):
+    if exc.kind in (ConnectorErrorKind.CONNECTION, ConnectorErrorKind.QUERY, ConnectorErrorKind.UNAVAILABLE):
         # 接続先・ドライバーのエラー文は、列名や値を含みうるので、データとして囲む（harness.md §6.3）
         message = untrusted(message, f"connector:{connector.name}")
     return ToolResult.text(

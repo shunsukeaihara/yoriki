@@ -182,7 +182,8 @@ def _case_lines(result) -> list[str]:
         reason = untrusted(result.judge_reason, "evaluation_judge")
         lines.append(f"  AI judge: the draft is {_verdict_word(result.verdict)} — {reason}")
     elif result.judge_note:
-        lines.append(f"  AI judge: {result.judge_note}")
+        # 判定に失敗したときは、プロバイダーのエラー文を含む
+        lines.append(f"  AI judge: {untrusted(result.judge_note, 'evaluation_judge')}")
     if reply := (check.get("reply") or "").strip():
         excerpt = reply if len(reply) <= REPLY_EXCERPT else reply[:REPLY_EXCERPT] + "…"
         # 評価のRunの回答は、読んだファイル等の内容を含みうるので、信頼しない内容として囲む（harness.md §6.3）
@@ -193,7 +194,9 @@ def _case_lines(result) -> list[str]:
 def _problems(check: dict[str, Any]) -> list[str]:
     problems = []
     if not check.get("completed"):
-        problems.append(f"the work did not complete ({check.get('error') or check.get('status_display', '')})")
+        # Runの終わりの理由は、プロバイダーのエラー文を含みうる
+        reason = untrusted(str(check.get("error") or check.get("status_display", "")), "evaluation_run")
+        problems.append(f"the work did not complete ({reason})")
     if check.get("result_required") and not check.get("result_submitted"):
         problems.append("no result was submitted")
     for mismatch in (check.get("mismatches") or [])[:5]:

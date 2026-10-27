@@ -129,7 +129,7 @@ paths:
   /api/app/v1/connectors/:
     get:
       operationId: app_v1_connectors_list
-      description: 会話で使えるConnector（入力欄の `@` の候補）
+      description: 会話で使えるConnector（入力欄の `@` の候補と、Skillで宣言するConnectorの候補）
       parameters:
       - name: cursor
         required: false
@@ -149,6 +149,11 @@ paths:
         description: Number of results to return per page.
         schema:
           type: integer
+      - in: query
+        name: scope
+        schema:
+          type: integer
+        description: 4ならシステムのConnector（見る権限を持つ人だけ）。省けば会話で使えるもの
       - name: search
         required: false
         in: query
@@ -165,6 +170,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PaginatedAppConnectorList'
+          description: ''
+  /api/app/v1/connectors/{uid}/:
+    get:
+      operationId: app_v1_connectors_retrieve
+      description: 会話で使えるConnector（入力欄の `@` の候補と、Skillで宣言するConnectorの候補）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/connector
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AppConnectorDetail'
           description: ''
   /api/app/v1/conversations/:
     get:
@@ -4477,6 +4503,74 @@ components:
       - name
       - scope
       - scope_display
+    AppConnectorDetail:
+      type: object
+      description: |-
+        使えるConnectorの詳細。Skillで使う表を宣言するときの候補に、公開する表の名前と説明を返す（列の説明・接続先は
+        返さない）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+          title: 名前
+        kind_display:
+          type: string
+          readOnly: true
+        description:
+          type: string
+          readOnly: true
+        is_sensitive:
+          type: boolean
+          readOnly: true
+          description: 機密。ローカルLLMのモデルの会話でだけ使える
+        scope:
+          allOf:
+          - $ref: '#/components/schemas/ConnectorScopeEnum'
+          readOnly: true
+          title: 範囲
+        scope_display:
+          type: string
+          readOnly: true
+        department_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumDepartment'
+          readOnly: true
+          nullable: true
+        operations:
+          type: array
+          items:
+            $ref: '#/components/schemas/OperationsEnum'
+          readOnly: true
+        tables:
+          type: array
+          items:
+            $ref: '#/components/schemas/AppConnectorTable'
+          readOnly: true
+      required:
+      - department_info
+      - description
+      - id
+      - is_sensitive
+      - kind_display
+      - name
+      - operations
+      - scope
+      - scope_display
+      - tables
+    AppConnectorTable:
+      type: object
+      properties:
+        name:
+          type: string
+          description: 表の名前（スキーマがあれば `スキーマ.表`）
+        description:
+          type: string
+      required:
+      - description
+      - name
     AppModelProfile:
       type: object
       description: 社員が会話で選ぶためのモデル設定。接続先や単価は出さない
@@ -5236,6 +5330,54 @@ components:
       - description
       - name
       - type
+    ConnectorDeclaration:
+      type: object
+      description: Skillが宣言するConnectorと操作・表（design.md §4.9.1）
+      properties:
+        connector:
+          type: string
+          description: ConnectorのID
+          maxLength: 30
+        operations:
+          type: array
+          items:
+            $ref: '#/components/schemas/OperationsEnum'
+          maxItems: 2
+        tables:
+          type: array
+          items:
+            type: string
+            maxLength: 300
+          description: 使う表（`スキーマ.表`）。空ならConnectorの公開する表のどれでも
+          maxItems: 100
+      required:
+      - connector
+      - operations
+    ConnectorDeclarationRequest:
+      type: object
+      description: Skillが宣言するConnectorと操作・表（design.md §4.9.1）
+      properties:
+        connector:
+          type: string
+          minLength: 1
+          description: ConnectorのID
+          maxLength: 30
+        operations:
+          type: array
+          items:
+            $ref: '#/components/schemas/OperationsEnum'
+          maxItems: 2
+        tables:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 300
+          description: 使う表（`スキーマ.表`）。空ならConnectorの公開する表のどれでも
+          maxItems: 100
+      required:
+      - connector
+      - operations
     ConnectorKindEnum:
       enum:
       - 1
@@ -5950,6 +6092,31 @@ components:
       - host
       - name
       - username
+    DeclaredConnector:
+      type: object
+      description: 宣言したConnectorの表示。消えたConnectorは名前を空にする
+      properties:
+        connector:
+          type: string
+        name:
+          type: string
+        is_sensitive:
+          type: boolean
+          description: Connectorの今の版が機密か
+        operations:
+          type: array
+          items:
+            type: string
+        tables:
+          type: array
+          items:
+            type: string
+      required:
+      - connector
+      - is_sensitive
+      - name
+      - operations
+      - tables
     Department:
       type: object
       properties:
@@ -7493,6 +7660,14 @@ components:
     NullEnum:
       enum:
       - null
+    OperationsEnum:
+      enum:
+      - datasource_describe
+      - datasource_query
+      type: string
+      description: |-
+        * `datasource_describe` - 表・列の説明を見る
+        * `datasource_query` - SELECT文で読み取る
     PaginatedAppConnectorList:
       type: object
       required:
@@ -8388,6 +8563,14 @@ components:
           nullable: true
         output_schema:
           nullable: true
+        connectors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorDeclarationRequest'
+          description: 使うConnectorと操作・表の宣言。宣言したConnectorを使えない人には、このSkillを出さない
+        is_sensitive:
+          type: boolean
+          description: 機密。付けるのは編集の権限、外すのは公開の権限（authorization.md §5.1）
     PatchedSkillEvaluationCaseRequest:
       type: object
       description: |-
@@ -9475,6 +9658,18 @@ components:
           type: boolean
           readOnly: true
           title: 停止中
+        sensitive:
+          type: boolean
+          readOnly: true
+          description: 公開中の版が機密のSkillか（機密の会話でだけ使える）
+        edit_sensitive:
+          type: boolean
+          readOnly: true
+          description: 公開中の版かDraftが機密のSkillか（機密の会話でだけ編集できる）
+        connectors_usable:
+          type: boolean
+          readOnly: true
+          description: 公開中の版が宣言したConnectorを、利用者がすべて使え、宣言した操作・表をConnectorが今も公開しているか（でなければ会話で使えない）
         draft:
           type: string
           nullable: true
@@ -9499,15 +9694,18 @@ components:
       required:
       - can_edit
       - can_publish
+      - connectors_usable
       - created
       - department_info
       - description
       - draft
+      - edit_sensitive
       - id
       - name
       - owner_info
       - scope
       - scope_display
+      - sensitive
       - suspended
       - updated
       - version
@@ -9708,6 +9906,30 @@ components:
           nullable: true
         output_schema:
           nullable: true
+        connectors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorDeclaration'
+          description: 使うConnectorと操作・表の宣言。宣言したConnectorを使えない人には、このSkillを出さない
+        connectors_info:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeclaredConnector'
+          readOnly: true
+          description: 宣言したConnectorの名前と機密のフラグ
+        connector_problems:
+          type: array
+          items:
+            type: string
+          readOnly: true
+          description: 宣言したConnectorの、公開するときに止まる問題（範囲・境界・Tool）
+        is_sensitive:
+          type: boolean
+          description: 機密。付けるのは編集の権限、外すのは公開の権限（authorization.md §5.1）
+        sensitive:
+          type: boolean
+          readOnly: true
+          description: 機密のSkillか（機密のフラグか、宣言したConnectorの今の版が機密）
         assets:
           type: array
           items:
@@ -9734,9 +9956,12 @@ components:
       required:
       - assets
       - base_version
+      - connector_problems
+      - connectors_info
       - created
       - id
       - revision
+      - sensitive
       - unevaluated_cases
       - updated
       - updated_by_info
@@ -9892,6 +10117,14 @@ components:
           nullable: true
         output_schema:
           nullable: true
+        connectors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConnectorDeclarationRequest'
+          description: 使うConnectorと操作・表の宣言。宣言したConnectorを使えない人には、このSkillを出さない
+        is_sensitive:
+          type: boolean
+          description: 機密。付けるのは編集の権限、外すのは公開の権限（authorization.md §5.1）
       required:
       - revision
     SkillEvaluation:
@@ -10316,6 +10549,20 @@ components:
           readOnly: true
           nullable: true
           title: 業務結果のSchema
+        connectors:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeclaredConnector'
+          readOnly: true
+          description: 使うConnectorと操作・表の宣言
+        is_sensitive:
+          type: boolean
+          readOnly: true
+          title: 機密
+        sensitive:
+          type: boolean
+          readOnly: true
+          description: 機密のSkillか（機密のフラグか、宣言したConnectorの今の版が機密）
         assets:
           type: array
           items:
@@ -10341,16 +10588,19 @@ components:
       required:
       - assets
       - change_reason
+      - connectors
       - created
       - created_by_info
       - description
       - id
       - input_schema
       - instructions
+      - is_sensitive
       - number
       - output_schema
       - requires
       - rolled_back_from
+      - sensitive
       - tools
     SlideDiff:
       type: object

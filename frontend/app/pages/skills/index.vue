@@ -117,6 +117,7 @@ const onCreated = (skill: Skill) => navigateTo(`/skills/${skill.id}`)
             <div class="flex flex-wrap items-center gap-1.5">
               <NuxtLink :to="`/skills/${row.original.id}`" class="text-primary">{{ row.original.name }}</NuxtLink>
               <UBadge v-if="row.original.suspended" color="error" variant="subtle" size="sm">{{ $t('停止中') }}</UBadge>
+              <UBadge v-if="row.original.sensitive" color="warning" variant="subtle" size="sm">{{ $t('機密') }}</UBadge>
               <UBadge v-if="row.original.draft" color="warning" variant="subtle" size="sm">{{ $t('編集中') }}</UBadge>
             </div>
           </template>

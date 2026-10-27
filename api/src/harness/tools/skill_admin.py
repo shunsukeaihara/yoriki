@@ -15,8 +15,10 @@ from django.conf import settings
 from django.db import transaction
 from rest_framework import exceptions as drf_exceptions
 
+from connector.models import Operation
 from resources import formats
 from run.models import ToolInvocation
+from skill import connectors as skill_connectors
 from skill.errors import DraftExists, EvaluationRequired, InvalidDraft, VersionConflict
 from skill.models import (
     Skill,
@@ -32,6 +34,7 @@ from skill.serializers import ASSET_KEY_RE, AssetChecksSerializer, SkillCreateSe
 from user.models import Department
 from utils.exceptions import Conflict
 
+from ..connectors import catalog as connector_catalog
 from ..sandbox import workspace_path
 from ..skill_edit import access_label, edit_entry, edit_target
 from ..skills import asset_path, draft_asset_path, scope_label
@@ -56,6 +59,10 @@ NO_TARGET = "No skill has been created in this work yet. Create it with create_s
 DRAFT_CHANGED = (
     "The draft was changed by someone else (now revision {revision}). Call get_skill to read it again, then apply "
     "your change to the latest draft."
+)
+SENSITIVE_SKILL = (
+    "This skill handles personal or confidential data, so it can be read and edited only in a conversation that "
+    "handles such data. Stop and tell the user to edit it from such a conversation or on the skill screen."
 )
 NO_DRAFT = (
     "There is no draft now (it may have been published or discarded). Call get_skill, and use expected_revision 0 "
@@ -91,6 +98,9 @@ def _target(context: ToolContext, needed: SkillAction = SkillAction.EDIT) -> tup
         return None, ToolResult.error(
             "Only a person with the publish role for this skill can do this. Tell the user that it was not done."
         )
+    # 機密のSkillは、機密の会話の編集のRunでだけ扱う（harness.md §10.9）
+    if not context.run.handles_sensitive_data and skill_connectors.skill_is_sensitive(skill):
+        return None, ToolResult.error(SENSITIVE_SKILL)
     return skill, None
 
 
@@ -174,6 +184,17 @@ def _content_lines(content: SkillContent, assets: list[tuple[str, Any]]) -> list
     for name in ("input_schema", "output_schema"):
         value = getattr(content, name)
         lines.append(f"<{name}>{json.dumps(value, ensure_ascii=False) if value is not None else 'none'}</{name}>")
+    connectors = skill_connectors.load([content])
+    declared = []
+    for declaration in content.connectors:
+        connector = connectors.get(declaration["connector"])
+        name = connector.name if connector is not None and not connector.deleted else "(deleted connector)"
+        tables = ", ".join(declaration.get("tables", [])) or "any published table"
+        declared.append(f"  {name} — {', '.join(declaration['operations'])} (tables: {tables})")
+    lines.append(
+        "<connectors>\n" + "\n".join(declared) + "\n</connectors>" if declared else "<connectors>none</connectors>"
+    )
+    lines.append(f"<sensitive>{'true' if content.is_sensitive else 'false'}</sensitive>")
     if assets:
         lines.append("<assets>")
         for path, asset in assets:
@@ -339,7 +360,12 @@ UPDATE_DRAFT_DESCRIPTION = """Change the draft of the skill you are editing. Onl
 published version. If the draft changed meanwhile, the call fails: call get_skill and apply your change again.
 - Change only what the user asked for, and keep the rest of the text as it is: pass the whole new text of a field.
 - input_schema and output_schema are JSON Schemas written as a JSON string; an empty string clears them.
-- Changing tools needs the publish role."""
+- Changing tools needs the publish role.
+- connectors: the connectors the skill uses, by the names in <connectors>, with the operations (tools) and the \
+tables it reads (empty: any table the connector publishes). Pass the whole list; an empty list removes them. Add the \
+operations to tools as well. A user who cannot use a declared connector cannot use the skill.
+- is_sensitive: true when the skill's own files hold personal or confidential data. It can only be set, not \
+cleared, here."""
 
 UPDATE_DRAFT_PARAMETERS: dict[str, Any] = {
     "type": "object",
@@ -351,16 +377,33 @@ UPDATE_DRAFT_PARAMETERS: dict[str, Any] = {
         "requires": {"type": "array", "items": {"type": "string", "enum": list(REQUIREMENTS)}, "maxItems": 10},
         "input_schema": {"type": "string", "maxLength": 50000},
         "output_schema": {"type": "string", "maxLength": 50000},
+        "connectors": {
+            "type": "array",
+            "maxItems": skill_connectors.MAX_DECLARED_CONNECTORS,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "The connector name, as listed in <connectors>."},
+                    "operations": {"type": "array", "items": {"type": "string", "enum": list(Operation.values)}},
+                    "tables": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "maxItems": skill_connectors.MAX_DECLARED_TABLES,
+                    },
+                },
+                "required": ["name", "operations", "tables"],
+                "additionalProperties": False,
+            },
+        },
+        "is_sensitive": {"type": "boolean"},
     },
     "required": ["expected_revision"],
     "additionalProperties": False,
 }
 
 
-def execute_update_skill_draft(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
-    skill, error = _target(context)
-    if skill is None:
-        return error or ToolResult.error(NO_TARGET)
+def _content_changes(arguments: dict[str, Any]) -> dict[str, Any] | ToolResult:
+    """本文・Tool・能力・Schemaの変更。Schemaが読めなければ誤り"""
     data: dict[str, Any] = {}
     for name in ("description", "instructions", "tools"):
         if name in arguments:
@@ -374,6 +417,51 @@ def execute_update_skill_draft(arguments: dict[str, Any], context: ToolContext) 
                 data[name] = json.loads(text) if text else None
             except json.JSONDecodeError as exc:
                 return ToolResult.error(f"{name} is not valid JSON ({exc}). Pass a JSON Schema as a JSON string.")
+    return data
+
+
+def _declaration_changes(arguments: dict[str, Any], context: ToolContext) -> dict[str, Any] | ToolResult:
+    """宣言するConnectorと機密のフラグの変更。Connectorはこのrunの一覧の名前で指定させる（design.md §4.9.1）"""
+    data: dict[str, Any] = {}
+    if "connectors" in arguments:
+        listed = {e["name"]: e["connector"] for e in connector_catalog(context.run).get("connectors", [])}
+        unknown = [c["name"] for c in arguments["connectors"] if c["name"] not in listed]
+        if unknown:
+            names = ", ".join(f'"{name}"' for name in listed) or "none"
+            return ToolResult.error(
+                f"Unknown connectors: {', '.join(unknown)}. Use names listed in <connectors>: {names}."
+            )
+        data["connectors"] = [
+            {"connector": listed[c["name"]], "operations": c["operations"], "tables": c["tables"]}
+            for c in arguments["connectors"]
+        ]
+    if "is_sensitive" in arguments:
+        # 外すのは公開の権限を持つ人が画面で行う。機密でないRunで付けると、このRunでは続けて扱えなくなる
+        if not arguments["is_sensitive"]:
+            return ToolResult.error(
+                "The sensitive flag cannot be cleared here. Tell the user that a person with the publish role can "
+                "clear it on the skill screen."
+            )
+        if not context.run.handles_sensitive_data:
+            return ToolResult.error(
+                "Mark the skill as sensitive on the skill screen, or edit it from a conversation that handles "
+                "personal or confidential data. Tell the user."
+            )
+        data["is_sensitive"] = True
+    return data
+
+
+def execute_update_skill_draft(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+    skill, error = _target(context)
+    if skill is None:
+        return error or ToolResult.error(NO_TARGET)
+    data = _content_changes(arguments)
+    if isinstance(data, ToolResult):
+        return data
+    declarations = _declaration_changes(arguments, context)
+    if isinstance(declarations, ToolResult):
+        return declarations
+    data |= declarations
     if not data:
         return ToolResult.error("Pass at least one field to change.")
     actor = context.run.owner
@@ -387,7 +475,7 @@ def execute_update_skill_draft(arguments: dict[str, Any], context: ToolContext) 
                 return _invalid(serializer.errors)
             serializer.save(actor=actor)
         except drf_exceptions.PermissionDenied as exc:
-            return ToolResult.error(f"{exc.detail} Tell the user that the tools were not changed.")
+            return ToolResult.error(f"{exc.detail} Tell the user that the change was not saved.")
         return ToolResult.text(
             f"Saved the draft (now revision {draft.revision}). Changed: {', '.join(data)}. It is not published yet.",
             value=change_value(skill, "draft_saved", revision=draft.revision, summary={"fields": list(data)}),
@@ -791,6 +879,7 @@ def execute_rollback_skill(arguments: dict[str, Any], context: ToolContext) -> T
                 change_reason=arguments["change_reason"],
                 operation_key=key,
                 run=run,
+                allow_sensitive=run.handles_sensitive_data,
             )
         except VersionConflict:
             return ToolResult.error(

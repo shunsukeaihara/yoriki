@@ -5,13 +5,16 @@ from typing import Any
 
 import pytest
 
+from connector.factories import ConnectorFactory
+from connector.models import Connector, ConnectorScope
 from conversation import evaluation as evaluation_module
 from conversation.dispatch import MessageMode, post_message
 from conversation.evaluation import cancel_evaluation, match_expected, progress_evaluation, start_evaluation
 from conversation.factories import ConversationFactory
 from conversation.models import Conversation, ConversationPurpose
 from harness.runner import Runner
-from llm.factories import ModelProfileFactory
+from llm.factories import LLMConnectionFactory, ModelProfileFactory
+from llm.models import ProviderKind
 from resources.factories import ResourceVersionFactory
 from run.models import (
     ClarificationKind,
@@ -37,6 +40,7 @@ from skill.models import (
     SkillEvaluation,
     SkillEvaluationCase,
     SkillScope,
+    SkillVersion,
 )
 from usage.models import UsageLedger, UsagePurpose
 from user.factories import DepartmentFactory, DepartmentMembershipFactory, grant
@@ -224,6 +228,94 @@ def test_evaluation_cannot_start_twice_or_for_a_suspended_skill(app_user, model)
     suspended.refresh_from_db()
     with pytest.raises(CannotEvaluate, match="停止中"):
         start_evaluation(suspended, cases=[case(suspended)], actor=app_user, model_version=model.current_version)
+
+
+@pytest.mark.django_db
+def test_sensitive_skill_is_evaluated_with_a_local_model_as_confidential_work(app_user, model):
+    """機密のSkillは、ローカルLLMのモデルで、機密のRunとして評価する（design.md §3.7.1）"""
+    skill = skill_with_draft(app_user, is_sensitive=True)
+    target = case(skill)
+    with pytest.raises(CannotEvaluate, match="ローカルLLM"):
+        start_evaluation(skill, cases=[target], actor=app_user, model_version=model.current_version)
+    local = ModelProfileFactory.create(
+        version__connection=LLMConnectionFactory.create(kind=ProviderKind.LOCAL), version__supports_tools=True
+    )
+    assert local.current_version is not None
+    evaluation = start_evaluation(skill, cases=[target], actor=app_user, model_version=local.current_version)
+    [result] = evaluation.results.all()
+    for run in (result.base_run, result.draft_run):
+        assert run is not None
+        assert run.handles_sensitive_data and run.manifest["fixed"]["handles_sensitive_data"]
+        assert run.conversation.handles_sensitive_data
+
+
+@pytest.mark.django_db
+def test_skill_declaring_a_system_connector_is_not_evaluated_yet(app_user, model):
+    connector = ConnectorFactory.create(scope=ConnectorScope.SYSTEM)
+    declaration = {"connector": connector.uid, "operations": ["datasource_query"], "tables": []}
+    skill = skill_with_draft(app_user, tools=["datasource_query"], connectors=[declaration])
+    with pytest.raises(CannotEvaluate, match="システムのConnector"):
+        start_evaluation(skill, cases=[case(skill)], actor=app_user, model_version=model.current_version)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("scope", [ConnectorScope.SYSTEM, ConnectorScope.DEPARTMENT])
+def test_published_version_the_evaluator_cannot_run_is_not_compared(app_user, model, scope):
+    """公開中の版だけが、評価する人の使えないConnectorを宣言していれば、Draftだけで評価する（宣言を外したDraftを
+    評価して公開できるように）"""
+    department = DepartmentFactory.create() if scope == ConnectorScope.DEPARTMENT else None
+    connector = ConnectorFactory.create(scope=scope, department=department)
+    skill = skill_with_draft(app_user)
+    assert skill.current_version is not None
+    declaration = {"connector": connector.uid, "operations": ["datasource_query"], "tables": []}
+    SkillVersion.objects.filter(pk=skill.current_version.pk).update(
+        tools=["datasource_query"], connectors=[declaration]
+    )
+    skill.refresh_from_db()
+    evaluation = start_evaluation(skill, cases=[case(skill)], actor=app_user, model_version=model.current_version)
+    assert evaluation.base_version is None
+    [result] = evaluation.results.all()
+    assert result.base_run is None and result.draft_run is not None
+
+
+@pytest.mark.django_db
+def test_draft_declaring_a_connector_outside_the_skill_scope_is_not_evaluated(app_user, model):
+    """部門AのSkillのDraftに部門BのConnectorを宣言しても、評価のRunで部門Bのデータを読ませない"""
+    department_a, department_b = DepartmentFactory.create(), DepartmentFactory.create()
+    for department in (department_a, department_b):
+        DepartmentMembershipFactory.create(department=department, user=app_user)
+    editor = grant(app_user, AppPermission.EDIT_DEPARTMENT_SKILLS)
+    connector = ConnectorFactory.create(scope=ConnectorScope.DEPARTMENT, department=department_b)
+    declaration = {"connector": connector.uid, "operations": ["datasource_query"], "tables": []}
+    skill = skill_with_draft(
+        editor,
+        scope=SkillScope.DEPARTMENT,
+        department=department_a,
+        tools=["datasource_query"],
+        connectors=[declaration],
+    )
+    with pytest.raises(CannotEvaluate, match="範囲"):
+        start_evaluation(skill, cases=[case(skill)], actor=editor, model_version=model.current_version)
+
+
+@pytest.mark.django_db
+def test_published_version_whose_connector_moved_to_another_department_is_not_compared(app_user, model):
+    """公開した後にConnectorが別の部門へ付け替えられたら、評価する人が使えても、公開中の版は比べない"""
+    department_a, department_b = DepartmentFactory.create(), DepartmentFactory.create()
+    for department in (department_a, department_b):
+        DepartmentMembershipFactory.create(department=department, user=app_user)
+    editor = grant(app_user, AppPermission.EDIT_DEPARTMENT_SKILLS)
+    connector = ConnectorFactory.create(scope=ConnectorScope.DEPARTMENT, department=department_a)
+    skill = skill_with_draft(editor, scope=SkillScope.DEPARTMENT, department=department_a)
+    assert skill.current_version is not None
+    declaration = {"connector": connector.uid, "operations": ["datasource_query"], "tables": []}
+    SkillVersion.objects.filter(pk=skill.current_version.pk).update(
+        tools=["datasource_query"], connectors=[declaration]
+    )
+    skill.refresh_from_db()
+    Connector.objects.filter(pk=connector.pk).update(department=department_b)
+    evaluation = start_evaluation(skill, cases=[case(skill)], actor=editor, model_version=model.current_version)
+    assert evaluation.base_version is None
 
 
 @pytest.mark.django_db

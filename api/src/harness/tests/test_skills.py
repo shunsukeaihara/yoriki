@@ -149,7 +149,7 @@ def test_catalog_excludes_skills_the_model_cannot_run(app_user):
     assert version is not None
     publish(app_user, name="画像のSkill", requires=[SkillRequirement.IMAGE_INPUT])
     publish(app_user, name="文章のSkill")
-    names = [e["name"] for e in build_catalog(app_user, version)["skills"]]
+    names = [e["name"] for e in build_catalog(app_user, version, sensitive=False, connectors=set())["skills"]]
     assert names == ["文章のSkill"]
 
 
@@ -161,16 +161,16 @@ def test_catalog_separates_same_names_and_shortens_to_the_budget(app_user):
     publish(app_user, name="名寄せ")
     company = SkillFactory.create(name="名寄せ", scope=SkillScope.COMPANY, owner=None, created_by=app_user)
     SkillVersionFactory.create(skill=company)
-    names = [e["name"] for e in build_catalog(app_user, version)["skills"]]
+    names = [e["name"] for e in build_catalog(app_user, version, sensitive=False, connectors=set())["skills"]]
     assert names == ["名寄せ (個人)", "名寄せ (全社)"]
     publish(app_user, name="名寄せ (個人)")  # 範囲を添えた名前と同じ名前のSkill
-    names = [e["name"] for e in build_catalog(app_user, version)["skills"]]
+    names = [e["name"] for e in build_catalog(app_user, version, sensitive=False, connectors=set())["skills"]]
     assert sorted(names) == ["名寄せ (個人)", "名寄せ (個人) (2)", "名寄せ (全社)"]
 
     for n in range(39):
         publish(app_user, name=f"Skill{n:02d}", description="説明" * 200)
     version.max_input_tokens = 50_000  # 一覧は1000文字まで
-    catalog = build_catalog(app_user, version)
+    catalog = build_catalog(app_user, version, sensitive=False, connectors=set())
     assert catalog["omitted"] > 0
     assert all(len(e["description"]) <= 40 for e in catalog["skills"])
     assert len(catalog["skills"]) + catalog["omitted"] == 42

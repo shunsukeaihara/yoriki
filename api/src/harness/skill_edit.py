@@ -9,6 +9,7 @@ from typing import Any
 from django.utils.translation import gettext as _
 
 from run.models import Run, RunKind
+from skill.connectors import skill_is_sensitive
 from skill.models import Skill, SkillAction, SkillScope
 
 from .skills import scope_label
@@ -34,10 +35,12 @@ def edit_target(run: Run) -> Skill | None:
     return Skill.objects.select_related("current_version", "department").filter(uid=entry["skill"]).first()
 
 
-def editable_skills(user) -> list[Skill]:
-    """利用者がDraftを変更できるSkill（個人・部門・全社の順。システムのSkillは会話で扱わない）"""
+def editable_skills(user, *, sensitive: bool) -> list[Skill]:
+    """利用者がDraftを変更できるSkill（個人・部門・全社の順。システムのSkillは会話で扱わない）。機密でないRunでは、
+    機密のSkillを含めない（名前もモデルに見せない。harness.md §10.9）"""
     skills = Skill.objects.editable_by(user).in_conversation()
-    return list(skills.select_related("department", "current_version").order_by("scope", "name"))
+    found = list(skills.select_related("department", "current_version").order_by("scope", "name"))
+    return found if sensitive else [s for s in found if not skill_is_sensitive(s)]
 
 
 def labeled_name(skill: Skill) -> str:
@@ -45,10 +48,10 @@ def labeled_name(skill: Skill) -> str:
     return f"{skill.name} ({scope_label(skill)})"
 
 
-def find_editable(user, name: str) -> tuple[Skill | None, str]:
+def find_editable(user, name: str, *, sensitive: bool) -> tuple[Skill | None, str]:
     """名前（範囲を添えた名前も可）から、利用者が編集できるSkillを1つに決める。決まらなければ、モデル向けの理由"""
     name = name.strip()
-    skills = editable_skills(user)
+    skills = editable_skills(user, sensitive=sensitive)
     matches = [s for s in skills if labeled_name(s) == name] or [s for s in skills if s.name == name]
     if len(matches) == 1:
         return matches[0], ""
@@ -96,3 +99,16 @@ def confirmation_title(skill: Skill | None) -> str:
 
 def _escape(value: str) -> str:
     return value.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
+
+
+def revoked_edit(run: Run) -> str:
+    """機密でない編集のRunで、対象のSkillが機密になった（Draftにフラグが付いた、宣言したConnectorが機密になった）
+    ときの理由。読んだ中身を次のモデルの呼出しで送らないように、毎ステップの区切りで止める（harness.md §10.9）"""
+    if run.handles_sensitive_data:
+        return ""
+    skill = edit_target(run)
+    if skill is None or not skill_is_sensitive(skill):
+        return ""
+    return _(
+        "Skill「%(name)s」が機密のSkillになったので、作業を止めました。個人情報・機密情報を扱う会話で編集してください。"
+    ) % {"name": skill.name}

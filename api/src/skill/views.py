@@ -109,7 +109,13 @@ class AppSkillViewSet(
     queryset = (
         Skill.objects.filter(deleted=False)
         .select_related("owner", "department", "current_version")
-        .prefetch_related(Prefetch("drafts", queryset=SkillDraft.objects.only("uid", "skill"), to_attr="open_drafts"))
+        .prefetch_related(
+            Prefetch(
+                "drafts",
+                queryset=SkillDraft.objects.only("uid", "skill", "is_sensitive", "connectors"),
+                to_attr="open_drafts",
+            )
+        )
     )
     serializer_class = SkillSerializer
     filterset_class = SkillFilter

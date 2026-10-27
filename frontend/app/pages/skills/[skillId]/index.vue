@@ -225,6 +225,9 @@ const onDelete = async () => {
             {{ $t('版 {number} を公開中', { number: skill.version }) }}
           </UBadge>
           <UBadge v-else color="neutral" variant="subtle">{{ $t('未公開') }}</UBadge>
+          <UBadge v-if="skill.sensitive" color="warning" variant="subtle" icon="i-lucide-shield">
+            {{ $t('機密') }}
+          </UBadge>
         </div>
         <UAlert
           v-if="skill.suspended"
@@ -276,6 +279,14 @@ const onDelete = async () => {
                     { label: $t('評価へ'), color: 'warning', variant: 'outline', onClick: () => (tab = 'evaluation') },
                   ]"
                 />
+                <UAlert
+                  v-if="draft.connectorProblems.length"
+                  color="warning"
+                  variant="subtle"
+                  icon="i-lucide-database"
+                  :title="$t('使うConnectorに、公開できない問題があります')"
+                  :description="draft.connectorProblems.join('、')"
+                />
                 <p class="text-xs text-muted">
                   {{
                     $t('版 {base} から編集中・最後の保存 {updated}（{user}）', {
@@ -289,6 +300,7 @@ const onDelete = async () => {
                   ref="formRef"
                   v-model="draft"
                   :skill-id="skillId"
+                  :skill="skill"
                   :can-change-tools="canPublish"
                   @failed="onFailed"
                 />

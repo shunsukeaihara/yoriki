@@ -40,6 +40,7 @@ from run.models import (
     RunTrigger,
 )
 from runtime.models import RuntimeProfile
+from skill import connectors as skill_connectors
 from skill.errors import CannotEvaluate
 from skill.models import (
     MAX_CASES_PER_EVALUATION,
@@ -117,6 +118,29 @@ def start_evaluation(
             raise CannotEvaluate(_("評価するDraftがありません。"))
         if reason := draft.unsupported_by(model_version):
             raise CannotEvaluate(reason)
+        # 機密のSkill（公開中の版かDraft）は、ローカルLLMのモデルで、機密のRunとして評価する（design.md §3.7.1）
+        sensitive = skill_connectors.skill_is_sensitive(skill)
+        if sensitive and not model_version.is_local:
+            raise CannotEvaluate(_("機密のSkillは、ローカルLLMのモデルで評価してください。"))
+        if skill_connectors.declares_system_connector(draft):
+            # システムのConnectorは会話のRunから使えないので、評価のRunでも使えない（システムのタスクの段階で扱う）
+            raise CannotEvaluate(_("システムのConnectorを使うSkillは、まだ評価できません。"))
+        if reason := skill_connectors.unusable_reason(draft, actor, sensitive=sensitive):
+            raise CannotEvaluate(reason)
+        # Skillの範囲に合わないConnector（部門のSkillに別の部門のもの等）は、評価のRunでも読ませない。評価の結果は
+        # そのSkillを編集できる人が見るので（公開と同じ範囲の検証。design.md §4.9.1）
+        if skill_connectors.out_of_scope(draft, skill):
+            raise CannotEvaluate(_("このSkillの範囲では使えないConnectorを宣言しています。"))
+        # 公開中の版を評価する人が動かせなければ（使えなくなったConnector、システムのConnector、Skillの範囲に
+        # 合わなくなったConnectorを宣言している）、最初の公開の前と同じくDraftだけで評価する（その宣言を外した
+        # Draftを評価して公開できるように）
+        base = skill.current_version
+        if base is not None and (
+            skill_connectors.declares_system_connector(base)
+            or skill_connectors.unusable_reason(base, actor, sensitive=sensitive)
+            or skill_connectors.out_of_scope(base, skill)
+        ):
+            base = None
         runtime_version = RuntimeProfile.default_version()
         if runtime_version is None:
             raise CannotEvaluate(
@@ -128,7 +152,7 @@ def start_evaluation(
             skill=skill,
             draft_uid=draft.uid,
             draft_revision=draft.revision,
-            base_version=skill.current_version,
+            base_version=base,
             model_version=model_version,
             effort=effort,
             requested_by=actor,
@@ -163,10 +187,10 @@ def start_evaluation(
                 case_updated=case.updated,
             )
             fields = []
-            if skill.current_version is not None:
-                result.base_run = _start_run(evaluation, case, files, runtime_version, "base")
+            if base is not None:
+                result.base_run = _start_run(evaluation, case, files, runtime_version, "base", sensitive=sensitive)
                 fields.append("base_run")
-            result.draft_run = _start_run(evaluation, case, files, runtime_version, "draft")
+            result.draft_run = _start_run(evaluation, case, files, runtime_version, "draft", sensitive=sensitive)
             result.save(update_fields=[*fields, "draft_run"])
         return evaluation
 
@@ -191,18 +215,22 @@ def _check_startable(skill: Skill, cases: list[SkillEvaluationCase], actor, mode
         raise CannotEvaluate(_("このモデル設定は使えません。別のモデルを選んでください。"))
 
 
-def _start_run(evaluation: SkillEvaluation, case: SkillEvaluationCase, files: list, runtime_version, side: str) -> Run:
+def _start_run(
+    evaluation: SkillEvaluation, case: SkillEvaluationCase, files: list, runtime_version, side: str, *, sensitive: bool
+) -> Run:
     """ケースの依頼の文と添付を最初の発言にして、評価のRunを1つ始める。Runごとに一覧に出さない会話を作る"""
     actor = evaluation.requested_by
     version = evaluation.model_version
     skill = evaluation.skill
-    base = skill.current_version
+    base = evaluation.base_version
     entry = evaluation_entry(evaluation) if side == "draft" or base is None else manifest_entry(skill, base)
+    content = evaluation if side == "draft" or base is None else base
     conversation = Conversation.objects.create(
         owner=actor,
         model_profile=version.profile,
         effort=evaluation.effort,
         purpose=ConversationPurpose.EVALUATION,
+        handles_sensitive_data=sensitive,
         title=f"{evaluation.skill.name}：{case.name}"[:200],
         last_posted=timezone.now(),
     )
@@ -224,6 +252,16 @@ def _start_run(evaluation: SkillEvaluation, case: SkillEvaluationCase, files: li
         ]
         Artifact.attach(conversation, attachments)
         message.attachments.set(attachments)
+    # 評価を依頼した人が使えるConnector。宣言したものを先に並べる
+    connector_catalog = (
+        build_connector_catalog(
+            actor,
+            sensitive=sensitive,
+            explicit=[{"connector": uid} for uid in skill_connectors.declared_uids(content)],
+        )
+        if version.supports_tools
+        else None
+    )
     run = Run.objects.create(
         conversation=conversation,
         owner=actor,
@@ -232,19 +270,18 @@ def _start_run(evaluation: SkillEvaluation, case: SkillEvaluationCase, files: li
         model_version=version,
         effort=evaluation.effort,
         runtime_version=runtime_version,
+        handles_sensitive_data=sensitive,
         manifest={
             "fixed": {
                 "model_version": version.pk,
                 "effort": evaluation.effort,
                 "runtime_version": runtime_version.pk,
-                "handles_sensitive_data": False,
+                "handles_sensitive_data": sensitive,
                 "skills": [entry],
                 "skill_catalog": None,
                 # 評価を依頼した人が使えるConnector。Draftの「使ってよいTool」にConnectorの操作があれば使う
                 "connectors": [],
-                "connector_catalog": (
-                    build_connector_catalog(actor, sensitive=False) if version.supports_tools else None
-                ),
+                "connector_catalog": connector_catalog,
                 "evaluation": {"evaluation": evaluation.uid, "side": side},
             },
             "appended": [],
@@ -254,7 +291,12 @@ def _start_run(evaluation: SkillEvaluation, case: SkillEvaluationCase, files: li
     message.save(update_fields=["run"])
     RunEvent.record(run, RunEventKind.STATUS, {"status": RunStatus.QUEUED}, actor=actor)
     text = f"{case.prompt}\n\n{NO_RESPONDER_NOTE}"
-    RunEvent.record(run, RunEventKind.USER_MESSAGE, user_message_data(message, text, skills=[entry]), actor=actor)
+    RunEvent.record(
+        run,
+        RunEventKind.USER_MESSAGE,
+        user_message_data(message, text, skills=[entry], connector_catalog=connector_catalog),
+        actor=actor,
+    )
     enqueue_run(run)
     return run
 

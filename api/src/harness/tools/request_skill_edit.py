@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from django.utils.translation import gettext as _
 
 from run.models import ClarificationKind
+from skill.connectors import skill_is_sensitive
 
 from ..skill_edit import confirmation_title, find_editable
 from ..skills import scope_label
@@ -53,9 +54,16 @@ def execute(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     """対象を確かめて確認の内容を返す。確認の作成と確認待ちへの遷移は、Runnerが同じtransactionで行う"""
     skill = None
     if name := arguments["skill"].strip():
-        skill, problem = find_editable(context.run.owner, name)
+        skill, problem = find_editable(context.run.owner, name, sensitive=context.run.handles_sensitive_data)
         if skill is None:
             return ToolResult.error(problem)
+        # 機密のSkillは、機密の会話でだけ編集する（harness.md §10.9）
+        if not context.run.handles_sensitive_data and skill_is_sensitive(skill):
+            return ToolResult.error(
+                f"{name!r} handles personal or confidential data, so it can be edited only from a conversation that "
+                "handles such data. Do not call this tool for it; tell the user that the change applies only to this "
+                "work, and that they can edit the skill from such a conversation."
+            )
     summary = arguments["summary"].strip()
     question = {
         "header": _("Skillの編集"),

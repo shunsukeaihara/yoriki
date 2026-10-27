@@ -20,6 +20,7 @@ from .models import (
     ConnectorScope,
     ConnectorVersion,
     DatabaseConnection,
+    Operation,
 )
 
 MAX_TABLES = 500
@@ -455,6 +456,36 @@ class AppConnectorSerializer(serializers.ModelSerializer):
             "department_info",
         ]
         read_only_fields = fields
+
+
+class AppConnectorTableSerializer(serializers.Serializer):
+    name = serializers.CharField(help_text=_("表の名前（スキーマがあれば `スキーマ.表`）"))
+    description = serializers.CharField()
+
+
+class AppConnectorDetailSerializer(AppConnectorSerializer):
+    """使えるConnectorの詳細。Skillで使う表を宣言するときの候補に、公開する表の名前と説明を返す（列の説明・接続先は
+    返さない）"""
+
+    tables = serializers.SerializerMethodField()
+    operations = serializers.ListField(child=serializers.ChoiceField(choices=Operation.choices), read_only=True)
+
+    class Meta(AppConnectorSerializer.Meta):
+        fields = [*AppConnectorSerializer.Meta.fields, "operations", "tables"]
+        read_only_fields = fields
+
+    @extend_schema_field(AppConnectorTableSerializer(many=True))
+    def get_tables(self, obj: Connector) -> list[dict[str, str]]:
+        version = obj.current_version
+        if version is None:
+            return []
+        return [
+            {
+                "name": f"{t['schema']}.{t['name']}" if t.get("schema") else t["name"],
+                "description": t.get("description", ""),
+            }
+            for t in version.tables
+        ]
 
 
 class ConnectorVersionSerializer(serializers.ModelSerializer):

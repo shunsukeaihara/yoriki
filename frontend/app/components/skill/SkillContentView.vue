@@ -26,6 +26,37 @@ const requirementLabel = (value: number) => skillRequirementItems(t).find((i) =>
       </div>
       <p v-else class="text-sm text-muted">{{ $t('なし（コマンドを使わないSkill）') }}</p>
     </section>
+    <section v-if="version.connectors.length" class="grid gap-1">
+      <h3 class="text-sm font-semibold text-muted">{{ $t('使うConnector') }}</h3>
+      <div
+        v-for="declared in version.connectors"
+        :key="declared.connector"
+        class="grid gap-1 rounded-md border border-default px-3 py-2"
+      >
+        <div class="flex items-center gap-2">
+          <span class="text-sm font-semibold">{{ declared.name || $t('（削除されたConnector）') }}</span>
+          <UBadge v-if="declared.isSensitive" color="warning" variant="subtle" size="sm">{{ $t('機密') }}</UBadge>
+        </div>
+        <div class="flex flex-wrap gap-1">
+          <UBadge v-for="op in declared.operations" :key="op" color="neutral" variant="subtle" class="font-mono">
+            {{ op }}
+          </UBadge>
+        </div>
+        <p class="text-xs text-muted">
+          {{ declared.tables.length ? declared.tables.join(', ') : $t('公開する表のどれでも') }}
+        </p>
+      </div>
+    </section>
+    <section v-if="version.sensitive" class="grid gap-1">
+      <h3 class="text-sm font-semibold text-muted">{{ $t('機密') }}</h3>
+      <p class="text-sm">
+        {{
+          version.isSensitive
+            ? $t('機密のSkill（個人情報・機密情報を扱う会話でだけ使えます）')
+            : $t('機密のConnectorを使うので、機密のSkillです（個人情報・機密情報を扱う会話でだけ使えます）')
+        }}
+      </p>
+    </section>
     <section v-if="version.requires.length" class="grid gap-1">
       <h3 class="text-sm font-semibold text-muted">{{ $t('必要な能力') }}</h3>
       <div class="flex flex-wrap gap-1">

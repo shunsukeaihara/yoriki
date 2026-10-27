@@ -339,6 +339,10 @@ def test_manual_run_refuses_mismatched_files(api_client, app_user, model, settin
     assert (res.status_code, set(res.json()["inputs"])) == (400, {"invoice"})
     res = api_client.post(_url(task, "run/"), {"inputs": "{", "invoice": SimpleUploadedFile("a.pdf", b"1")})
     assert res.status_code == 400
+    # inputs 以外の文字のフィールドは捨てずに断る
+    data = {"vendor": "A商事", "invoice": SimpleUploadedFile("a.pdf", b"1")}
+    res = api_client.post(_url(task, "run/"), data, format="multipart")
+    assert (res.status_code, set(res.json()["inputs"])) == (400, {"vendor"})
     # ファイルの数は、会話の1つの発言の添付と同じ上限まで
     settings.YORIKI_ATTACHMENTS_PER_MESSAGE = 1
     files = {"invoice": SimpleUploadedFile("a.pdf", b"1"), "vendor": SimpleUploadedFile("b.pdf", b"2")}

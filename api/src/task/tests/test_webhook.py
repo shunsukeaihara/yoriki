@@ -2,6 +2,7 @@
 payloadのファイル化、状態を確かめる口"""
 
 import hashlib
+import io
 import json
 from unittest import mock
 from urllib.parse import urlencode
@@ -434,6 +435,20 @@ def test_resends_write_nothing_and_refused_requests_delete_what_was_written(api_
         assert (res.status_code, res.json()["code"]) == (400, "invalid_inputs")
         assert (write.call_count, delete.call_count) == (4, 2)
     assert Run.objects.count() == 1
+
+
+def test_a_failed_write_deletes_the_files_written_before_it(api_client, integrator):
+    task, key = _file_task(api_client, integrator)
+    data = {"inputs[vendor]": "ACME", "inputs[invoice]": SimpleUploadedFile("a.pdf", b"1")}
+    write = BlobObject.write
+    with (
+        mock.patch.object(BlobObject, "write", side_effect=[write(io.BytesIO(b"payload")), OSError("disk full")]),
+        mock.patch("artifact.storage.LocalStorage.delete", autospec=True) as delete,
+        pytest.raises(OSError),
+    ):
+        _send_multipart(api_client, task, key, data)
+    assert delete.call_count == 1  # payloadの分
+    assert not Run.objects.exists()
 
 
 def test_a_json_value_shaped_like_a_file_is_not_the_same_input(api_client, integrator):

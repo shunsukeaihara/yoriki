@@ -427,6 +427,10 @@ class TaskRunCreateSerializer(serializers.Serializer):
         for name, items in data.lists() if hasattr(data, "lists") else ():
             uploaded = [i for i in items if isinstance(i, UploadedFile)]
             if not uploaded:
+                if name != "inputs":
+                    # 文字の値は inputs に入れる。ほかのフィールドを黙って捨てない
+                    error = _("ファイルを送るか、値は inputs に入れて送ってください")
+                    raise serializers.ValidationError({"inputs": {name: error}})
                 continue
             if len(uploaded) > 1 or name == "inputs":
                 raise serializers.ValidationError({"inputs": {name: _("1つの項目に付けられるファイルは1つです")}})

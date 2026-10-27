@@ -245,11 +245,15 @@ def _first_message(text: str, inputs: dict[str, Any], launch: RunLaunch) -> str:
 
 def store_files(files: Sequence[InputFile]) -> list[InputFile]:
     """まだ書いていないファイルを保存先に書く（記録は _place_files() でRunと同じtransactionで行う）。書いたものを返す"""
-    written = []
-    for file in files:
-        if file.stored is None:
-            file.stored = BlobObject.write(file.open())
-            written.append(file)
+    written: list[InputFile] = []
+    try:
+        for file in files:
+            if file.stored is None:
+                file.stored = BlobObject.write(file.open())
+                written.append(file)
+    except BaseException:
+        discard_files(written)  # 途中で失敗したら、それまでに書いたものを消す
+        raise
     return written
 
 

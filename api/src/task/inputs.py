@@ -5,6 +5,7 @@
 """
 
 import datetime
+import math
 from typing import Any
 
 from django.utils.translation import gettext as _
@@ -47,7 +48,8 @@ def _clean_string(definition: dict[str, Any], value: Any) -> Any:
 
 
 def _clean_number(definition: dict[str, Any], value: Any) -> Any:
-    if isinstance(value, bool) or not isinstance(value, int | float):
+    # 無限大・NaN（JSONの 1e999 等）は保存できないので断る
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
         raise ValueError(_("数値を入力してください"))
     return value
 

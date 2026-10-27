@@ -57,6 +57,8 @@ def skill_allowed(task: TaskLike, skill: Skill) -> bool:
         return task.owner is not None and skill.can(task.owner, SkillAction.USE)
     if skill.scope not in SCOPE_SKILLS.get(task.scope, ()):
         return False
+    if skill.scope == SkillScope.DEPARTMENT and (skill.department is None or skill.department.deleted):
+        return False  # 無効にした部門のものは新しく使わない（authorization.md §9）
     return not (skill.scope == SkillScope.DEPARTMENT and skill.department_id != task.department_id)
 
 
@@ -68,6 +70,8 @@ def connector_allowed(task: TaskLike, connector: Connector) -> bool:
         return task.owner is not None and connector.can(task.owner, ConnectorAction.USE)
     if connector.scope not in SCOPE_CONNECTORS.get(task.scope, ()):
         return False
+    if connector.scope == ConnectorScope.DEPARTMENT and (connector.department is None or connector.department.deleted):
+        return False  # 無効にした部門のものは新しく使わない（authorization.md §9）
     if task.scope == TaskScope.DEPARTMENT and connector.scope == ConnectorScope.DEPARTMENT:
         return connector.department_id == task.department_id
     return True
@@ -209,7 +213,11 @@ def _check_model(content: dict[str, Any], skills: dict[str, tuple[Skill, SkillVe
         errors.add("model_profile", _("個人情報や機密情報を扱うタスクでは、ローカルLLMのモデルを選んでください"))
     if content["effort"] and content["effort"] not in version.effort_values:
         errors.add("effort", _("このモデルが受け付けるeffortの値から選んでください"))
-    if content["tools"] and not version.supports_tools:
+    schema = content["output_schema"] or any(v is not None and v.output_schema for _s, v in skills.values())
+    if schema and not version.supports_tools:
+        # 業務結果は submit_result で確定するので、Toolを使えないモデルでは確定できない（harness.md §10.5）
+        errors.add("model_profile", _("業務結果のSchemaがあるタスクには、Toolを使えるモデルを選んでください"))
+    elif content["tools"] and not version.supports_tools:
         errors.add("model_profile", _("このモデルはToolを使えません。Toolを使わないか、別のモデルを選んでください"))
     for _skill, skill_version in skills.values():
         if skill_version is not None and (reason := skill_version.unsupported_by(version)):
@@ -225,6 +233,8 @@ def task_problem(task) -> str:
         return _("タスクが削除されました")
     if task.suspended:
         return _("タスクが停止されました")
+    if task.scope == TaskScope.DEPARTMENT and (task.department is None or task.department.deleted):
+        return _("タスクの部門が無効にされました")  # 無効にした部門のタスクは起動しない（authorization.md §9）
     if task.scope == TaskScope.PERSONAL and (task.owner is None or not task.owner.is_active):
         return _("タスクの持ち主のアカウントが無効です")
     return ""

@@ -96,11 +96,13 @@ async def _run_events(run_pk: int, run_uid: str, after: int, user_pk: int) -> As
         last = after
         checked = loop.time()
         while True:
-            if not await _still_visible(user_pk, run_pk):
-                return
-            checked = loop.time()
-            # 読み切るまで続けて読む（再接続で多くのイベントが溜まっていても止まらない）
-            while page := await _events_after(run_pk, run_uid, last):
+            # 読み切るまで続けて読む（再接続で多くのイベントが溜まっていても止まらない）。ページごとに、見られるかを
+            # 確かめ直す
+            while True:
+                if not await _still_visible(user_pk, run_pk):
+                    return
+                checked = loop.time()
+                page = await _events_after(run_pk, run_uid, last)
                 for sequence, kind, data in page:
                     yield _format(kind, data, sequence)
                     last = sequence

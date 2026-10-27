@@ -14,7 +14,7 @@ from task.dispatch import start_task_run
 from task.errors import CannotRun
 from task.factories import TaskDefinitionFactory
 from task.models import TaskScope
-from user.factories import DepartmentFactory, UserFactory, grant
+from user.factories import DepartmentFactory, DepartmentMembershipFactory, UserFactory, grant
 from utils.permissions import AppPermission
 
 from .fakes import FakeAdapter, calls, reply
@@ -173,3 +173,40 @@ def test_suspended_task_does_not_replay_a_pending_tool_call(admin, fake_datasour
     [result] = results(run, "datasource_query")
     assert "interrupted" in text_of(result)  # やり直さず、結果の分からない呼出しとして閉じた
     assert (run.status, run.end_reason) == (RunStatus.FAILED, RunEndReason.TASK)
+
+
+def test_department_task_stops_when_the_department_is_disabled(app_user):
+    department = DepartmentFactory.create()
+    manager = grant(app_user, AppPermission.MANAGE_DEPARTMENT_TASKS)
+    DepartmentMembershipFactory.create(department=department, user=manager)
+    task = TaskDefinitionFactory.create(scope=TaskScope.DEPARTMENT, department=department, created_by=manager)
+    run = _start(task, manager)
+    department.deleted = True
+    department.save(update_fields=["deleted"])
+    run = execute(run, FakeAdapter([]))
+    assert (run.status, run.end_reason) == (RunStatus.FAILED, RunEndReason.TASK)
+    assert "部門が無効" in run.error
+
+
+def test_system_task_cannot_use_a_connector_of_a_disabled_department(admin):
+    department = DepartmentFactory.create()
+    connector = ConnectorFactory.create(
+        name="経理DB", scope=ConnectorScope.DEPARTMENT, department=department, version__tables=TABLES
+    )
+    skill = _system_skill(tools=["datasource_query"])
+    task = TaskDefinitionFactory.create(
+        scope=TaskScope.SYSTEM,
+        created_by=admin,
+        revision__skills=[{"skill": skill.uid, "version": 1}],
+        revision__connectors=[connector.uid],
+        revision__tools=["datasource_query"],
+    )
+    run = _start(task, admin)
+    department.deleted = True
+    department.save(update_fields=["deleted"])
+    run = execute(
+        run,
+        FakeAdapter([calls(("c1", "datasource_query", {"connector": "経理DB", "sql": "SELECT 1"})), reply("止めます")]),
+    )
+    [queried] = results(run, "datasource_query")
+    assert queried["is_error"]

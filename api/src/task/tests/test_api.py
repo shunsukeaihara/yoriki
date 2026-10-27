@@ -319,3 +319,18 @@ def test_outputs_of_a_task_run_are_downloaded_by_the_managers(api_client, app_us
     manager.user_permissions.clear()
     api_client.force_login(UserFactory._meta.model.objects.get(pk=manager.pk))
     assert api_client.get(f"{artifacts}{output.uid}/download/").status_code == 404
+
+
+def test_number_input_rejects_infinity(api_client, app_user, model):
+    inputs = [{"name": "amount", "label": "金額", "type": "number", "required": True}]
+    task = _create(api_client, app_user, model, prompt_template="{{ inputs.amount }}円", inputs=inputs).json()
+    res = api_client.post(_url(task, "run/"), '{"inputs": {"amount": 1e999}}', content_type="application/json")
+    assert res.status_code == 400
+    assert "amount" in res.json()["inputs"]
+
+
+def test_result_schema_needs_a_model_with_tools(api_client, app_user):
+    model = ModelProfileFactory.create(version__supports_tools=False)
+    res = _create(api_client, app_user, model, output_schema={"type": "object", "properties": {}})
+    assert res.status_code == 400
+    assert "Toolを使えるモデル" in res.json()["model_profile"][0]

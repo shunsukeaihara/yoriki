@@ -611,3 +611,27 @@ def test_connector_made_sensitive_while_waiting_for_a_slot_is_refused(conversati
     [result] = results(run, "datasource_query")
     assert result["is_error"]
     assert FakeDatasource.calls == []
+
+
+@pytest.mark.django_db
+def test_conversation_made_confidential_during_the_run_is_seen_from_the_next_step(app_user, local_model):
+    connector = ConnectorFactory.create(name="販売管理", version__tables=TABLES)
+    conversation = ConversationFactory.create(owner=app_user, model_profile=local_model)
+    run = start(conversation)
+    query = {"connector": "販売管理", "sql": "SELECT code FROM vendors"}
+
+    class MakeConfidential(FakeAdapter):
+        def stream(self, request):
+            if len(self.requests) == 1:
+                # 1回目の応答の間に、利用者が会話を機密にし、管理者が境界を機密にした
+                Run.objects.filter(pk=run.pk).update(handles_sensitive_data=True)
+                connector.revise(
+                    actor=connector.created_by, expected_version=1, **{**_content(connector), "is_sensitive": True}
+                )
+            yield from super().stream(request)
+
+    adapter = MakeConfidential([calls(("c1", "datasource_query", query)), reply("ok")])
+    run = execute(run, adapter)
+    [result] = results(run, "datasource_query")
+    # 機密のRunとして扱うので、機密になった境界でも使える（モデルはローカルLLM）
+    assert not result["is_error"]

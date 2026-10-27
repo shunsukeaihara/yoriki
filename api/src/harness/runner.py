@@ -232,6 +232,8 @@ class Runner:
         # 所属の判定はユーザーのオブジェクトに保存されるので、前のものを使い回さない）
         self.run_obj.owner = run.owner
         self.run_obj.status = run.status
+        # 実行中に会話を機密にしたら、次の区切りから機密のRunとして扱う（モデルの切り替え・Connectorの判定）
+        self.run_obj.handles_sensitive_data = run.handles_sensitive_data
         self.run_obj.model_version = run.model_version
         self.run_obj.effort = run.effort
         self.run_obj.step_count = run.step_count

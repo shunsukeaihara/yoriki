@@ -592,7 +592,7 @@ Runnerは、shell以外のToolの処理もSandboxの中で行う。ファイル�
 
 ### 10.1 Skill
 
-**一覧**：`context.snapshot` の `<skills>` に、利用者が使えて、使うモデルの能力を満たし、機密の制限に合うSkillの名前と説明だけを並べる（design.md §3.1・§4.8）。一覧の量は文脈の2%までにし、超えたら説明を短くして「ほかにN件」と書く（Codexの方式）。`skill` の引数 `name` は、一覧の名前のenumにする。
+**一覧**：`context.snapshot` の `<skills>` に、利用者が使えて、使うモデルの能力を満たし、宣言したConnectorを利用者が使えて、機密の制限に合うSkill（機密のSkillは機密のRunだけ。design.md §4冒頭）の名前と説明だけを並べる（design.md §3.1・§4.8・§4.9.1）。一覧の量は文脈の2%までにし、超えたら説明を短くして「ほかにN件」と書く（Codexの方式）。`skill` の引数 `name` は、一覧の名前のenumにする。
 
 - 一覧はRun開始時に決めてManifestに固定する（`fixed.skill_catalog`）。Toolの定義（`skill` のenum）をRunの中で変えないためで、Runの途中で公開されたSkillは次の依頼から一覧に出る。`/` でSkillを指定したRunには一覧を出さない。
 - 同じ名前のSkillが範囲（個人・部門・全社）の違いで重なれば、範囲を添えた名前にする（「名寄せ (個人)」）。並びは個人・部門・全社の順。
@@ -614,11 +614,14 @@ Runnerは、shell以外のToolの処理もSandboxの中で行う。ファイル�
   /workspace/master/skills/inv-check/check-script/ — reconcile.py（照合のスクリプト）
 </assets>
 <tools>shell, read</tools>
-<connectors>core-db: datasource_query</connectors>
+<connectors>
+  core-db — datasource_describe, datasource_query（表：sales.orders, sales.vendors）
+</connectors>
 <output_schema>…あれば…</output_schema>
 </skill>
 ```
 
+- `<connectors>` は、Skillが宣言したConnector（design.md §4.9.1）の名前、操作のTool、表（宣言していなければ「公開する表のどれでも」）。宣言したConnectorは、このRunの `<connectors>` の一覧にあるので、`datasource_*` の `connector` にその名前を使う。
 - 途中で読み込んだSkillに業務結果のSchemaがあっても、Toolの一覧は変えないので `submit_result` はない。その場合は、Schemaの形で最後の応答に書くよう結果に添える。業務結果を確定させたいときは、`/` かTask DefinitionでSkillを指定する。
 
 資料はSandboxを起動するときに `/workspace/master` へ展開する（design.md §3.8）。`/workspace/master` は、Workerの作業領域のディレクトリを読取り専用でbind mountしたもので（添付の `/workspace/input` と同じ方式。sandbox/CONTRACT.md §2）、Runnerはその中に `skills/{skill_id}/{資料のkey}/{ファイル名}` で置く。Sandboxを起動した後に読み込んだSkillは、次のように扱う。
@@ -719,7 +722,7 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 |---|---|---|
 | `get_skill` | なし | 公開中の版とDraft（あれば）の中身・revision・資料を返し、資料を `/workspace/master` に置く（公開中の版は `skills/{skill_id}/{key}/{ファイル名}`、Draftは `drafts/{skill_id}/r{revision}/{key}/{ファイル名}`） |
 | `create_skill` | `name`、`scope`（`personal`・`department`・`company`）、`department`、`description`、`instructions` | 新しいSkillとDraftを作る（新規の依頼のときだけ） |
-| `update_skill_draft` | `expected_revision`、`change_summary`、変える項目（`description`・`instructions`・`requires`・`input_schema`・`output_schema`・`tools`） | Draftを変える。Draftがなければ公開中の版から開く（`expected_revision` は0） |
+| `update_skill_draft` | `expected_revision`、`change_summary`、変える項目（`description`・`instructions`・`requires`・`input_schema`・`output_schema`・`tools`・`connectors`（宣言するConnectorの名前・操作・表。このRunの `<connectors>` にあるものだけ）・`is_sensitive`（機密のフラグ。付けることだけできる）） | Draftを変える。Draftがなければ公開中の版から開く（`expected_revision` は0） |
 | `stage_skill_asset` | `expected_revision`、`key`、`path`（Sandboxの中のファイル）、`role`、`description`、`checks`（CSVの検証の条件。変えるのは公開の権限を持つ人だけ） | Sandboxのファイルを、Draftの資料として追加・置換する（原本のbytesのまま。添付の `/workspace/input` のファイルもそのまま置換に使える）。形式ごとに検証し、結果に誤りと公開中の版との差分（MDの本文、CSVの行、PPTXのスライドごとのテキストと構造）を返す（design.md §3.9）。`/workspace/input` 以外のファイルは、エージェントが編集した候補として検証する |
 | `remove_skill_asset` | `expected_revision`、`key` | Draftから資料を外す |
 | `publish_skill_draft` | `expected_revision`、`change_reason` | Draftを公開する。公開の権限がなければ公開せず「変更案を保存」と返す |
@@ -731,6 +734,7 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 - 公開・切戻しは、ToolInvocationのoperation keyをSkillChangeに渡し、再試行で版を重ねない。SkillChangeには編集のRunを記録する。
 - 結果の `value` に、Skillの名前・範囲・状態（変更案を保存・公開・切戻し）・版・変更点を持たせ、画面はそれを会話に表示し、Skillの画面（版の中身・切戻し）へのリンクを置く（design.md §11.6）。
 - 編集のRunで公開しても、進行中・確認待ちの業務のRunは元の版を使い続ける。次の依頼から新しい版を使う。
+- 機密のSkill（公開中の版かDraftが機密のフラグを持つか、機密のConnectorを宣言しているもの。design.md §4冒頭）は、機密の会話の編集のRunでだけ扱う。機密でないRunでは、編集の依頼を受け付けず、`get_skill` も中身を返さない。
 
 ---
 

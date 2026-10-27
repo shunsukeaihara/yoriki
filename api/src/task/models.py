@@ -13,7 +13,7 @@
 import operator
 from enum import Enum
 from functools import reduce
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
 from auditlog.registry import auditlog
 from django.conf import settings
@@ -27,6 +27,9 @@ from utils.fields import NanoidField
 from utils.permissions import AppPermission
 
 from .errors import VersionConflict
+
+if TYPE_CHECKING:
+    from django_stubs_ext import StrPromise
 
 
 class TaskScope(models.IntegerChoices):
@@ -239,12 +242,31 @@ class TaskDefinition(models.Model):
         return revision
 
     @transaction.atomic
-    def set_suspended(self, suspended: bool) -> None:
+    def set_suspended(self, suspended: bool, *, actor=None) -> None:
+        """停止・再開する。停止では、順番待ち・実行中のRunにも停止を依頼する（すぐ再開しても、停止の前に受け付けた
+        Runは動かさない。authorization.md §6）"""
         current = TaskDefinition.objects.select_for_update(of=("self",)).get(pk=self.pk)
         if current.suspended != suspended:
             current.suspended = suspended
             current.save(update_fields=["suspended", "updated"])
         self.suspended = suspended
+        if suspended:
+            current.stop_runs(_("タスクが停止されました"), actor=actor)
+
+    @transaction.atomic
+    def soft_delete(self, *, actor=None) -> None:
+        current = TaskDefinition.objects.select_for_update(of=("self",)).get(pk=self.pk)
+        current.deleted = True
+        current.save(update_fields=["deleted", "updated"])
+        self.deleted = True
+        current.stop_runs(_("タスクが削除されました"), actor=actor)
+
+    def stop_runs(self, reason: "str | StrPromise", *, actor=None) -> None:
+        """このタスクの順番待ち・実行中のRunに停止を依頼する（実行中のRunはWorkerが次の区切りで止める）"""
+        from run.models import CANCELLABLE_STATUSES, Run  # noqa: PLC0415  runのModelがtaskを参照するため
+
+        for run in Run.objects.filter(task=self, status__in=CANCELLABLE_STATUSES).order_by("pk"):
+            run.request_cancel(str(reason), actor)
 
 
 # 版に入れる項目。変えると新しい版になる

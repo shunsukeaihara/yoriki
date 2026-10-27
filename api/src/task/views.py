@@ -11,7 +11,6 @@ from rest_framework.viewsets import GenericViewSet, ReadOnlyModelViewSet
 from run.models import Run, RunLaunch
 from run.serializers import RunSerializer
 from utils.permissions import AppUser
-from utils.views import SoftDeleteMixin
 
 from .dispatch import InvalidInputs, start_task_run
 from .errors import CannotRun
@@ -48,9 +47,7 @@ class TaskFilter(filters.FilterSet):
     ),
     destroy=extend_schema(description="タスクを削除する。順番待ち・実行中のRunも次の区切りで止まる"),
 )
-class AppTaskViewSet(
-    SoftDeleteMixin, mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.DestroyModelMixin, ReadOnlyModelViewSet
-):
+class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.DestroyModelMixin, ReadOnlyModelViewSet):
     """管理できるタスク（authorization.md §5.3）。一覧は個人・部門・全社で、システムのタスクは `scope` で指定したとき
     だけ返す（管理画面の一覧。業務画面には出さない）。定義は管理できる人だけに見せる"""
 
@@ -75,6 +72,9 @@ class AppTaskViewSet(
             return TaskDefinitionUpdateSerializer
         return super().get_serializer_class()
 
+    def perform_destroy(self, instance):
+        instance.soft_delete(actor=self.request.user)
+
     def perform_create(self, serializer):
         serializer.save(actor=self.request.user)
 
@@ -98,7 +98,7 @@ class AppTaskViewSet(
     def _set_suspended(self, request, *, suspended: bool) -> Response:
         serializer = self.get_serializer(instance=self.get_object(), data={})
         serializer.is_valid(raise_exception=True)
-        serializer.save(suspended=suspended)
+        serializer.save(suspended=suspended, actor=request.user)
         return Response(serializer.data)
 
     @extend_schema(

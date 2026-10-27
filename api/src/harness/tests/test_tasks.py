@@ -5,15 +5,17 @@ import pytest
 
 from connector.factories import ConnectorFactory
 from connector.models import ConnectorScope
+from harness.runner import Runner
 from harness.tests.test_connectors import TABLES, execute, fixture_fake_datasource, results, text_of
 from llm.factories import ModelProfileFactory
 from run.models import Run, RunEndReason, RunEvent, RunEventKind, RunLaunch, RunStatus
+from run.tasks import claim_run
 from skill.factories import SkillFactory, SkillVersionFactory
 from skill.models import SkillScope
 from task.dispatch import start_task_run
 from task.errors import CannotRun
 from task.factories import TaskDefinitionFactory
-from task.models import TaskScope
+from task.models import TaskDefinition, TaskScope
 from user.factories import DepartmentFactory, DepartmentMembershipFactory, UserFactory, grant
 from utils.permissions import AppPermission
 
@@ -102,15 +104,62 @@ def test_connector_disabled_during_the_task_run_is_refused(admin):
     assert "cannot be used now" in text_of(queried)
 
 
-def test_suspended_task_stops_the_queued_run(admin):
+def test_suspending_a_task_cancels_the_queued_run_even_if_resumed(admin):
     task = TaskDefinitionFactory.create(scope=TaskScope.SYSTEM, created_by=admin)
     run = _start(task, admin)
-    task.set_suspended(True)
+    task.set_suspended(True, actor=admin)
+    task.set_suspended(False, actor=admin)  # すぐ再開しても、停止の前に受け付けたRunは動かさない
+    run.refresh_from_db()
+    assert run.status == RunStatus.CANCELLED
+    assert claim_run(run.pk) is None
+
+
+def test_suspended_task_stops_the_queued_run_at_the_boundary(admin):
+    """停止の依頼より先にWorkerが受け取っていても、次の区切りで止める"""
+    task = TaskDefinitionFactory.create(scope=TaskScope.SYSTEM, created_by=admin)
+    run = _start(task, admin)
+    TaskDefinition.objects.filter(pk=task.pk).update(suspended=True)
     adapter = FakeAdapter([])
     run = execute(run, adapter)
     assert (run.status, run.end_reason) == (RunStatus.FAILED, RunEndReason.TASK)
     assert "タスクが停止されました" in run.error
     assert adapter.requests == []
+
+
+def test_deleting_a_task_stops_its_runs(api_client, admin):
+    task = TaskDefinitionFactory.create(scope=TaskScope.SYSTEM, created_by=admin)
+    run = _start(task, admin)
+    api_client.force_login(admin)
+    assert api_client.delete(f"/api/app/v1/tasks/{task.uid}/").status_code == 204
+    run.refresh_from_db()
+    assert run.status == RunStatus.CANCELLED
+
+
+def test_remaining_calls_are_not_run_after_the_skill_is_suspended(admin, fake_datasource, monkeypatch):
+    connector = ConnectorFactory.create(name="経理DB", scope=ConnectorScope.SYSTEM, version__tables=TABLES)
+    skill = _system_skill(tools=["datasource_query"])
+    task = TaskDefinitionFactory.create(
+        scope=TaskScope.SYSTEM,
+        created_by=admin,
+        revision__skills=[{"skill": skill.uid, "version": 1}],
+        revision__connectors=[connector.uid],
+        revision__tools=["datasource_query"],
+    )
+    run = _start(task, admin)
+    original = Runner._run_tool
+
+    def run_then_suspend(self, tool, call):
+        result = original(self, tool, call)
+        skill.set_suspended(True, actor=admin)  # 1つ目の呼出しの後にSkillを止める
+        return result
+
+    monkeypatch.setattr(Runner, "_run_tool", run_then_suspend)
+    query = {"connector": "経理DB", "sql": "SELECT 1"}
+    run = execute(run, FakeAdapter([calls(("c1", "datasource_query", query), ("c2", "datasource_query", query))]))
+    assert len([c for c in fake_datasource.calls if c[0] == "query"]) == 1
+    second = results(run, "datasource_query")[1]
+    assert "Not executed" in text_of(second)
+    assert (run.status, run.end_reason) == (RunStatus.FAILED, RunEndReason.SKILL)
 
 
 def test_suspended_skill_stops_the_task_run(admin):
@@ -167,7 +216,7 @@ def test_suspended_task_does_not_replay_a_pending_tool_call(admin, fake_datasour
     run = _start(task, admin)
     call = {"id": "c1", "name": "datasource_query", "arguments": {"connector": "経理DB", "sql": "SELECT 1"}}
     RunEvent.record(run, RunEventKind.ASSISTANT_MESSAGE, {"step": 1, "text": "", "tool_calls": [call]})
-    task.set_suspended(True)
+    TaskDefinition.objects.filter(pk=task.pk).update(suspended=True)  # Workerが受け取った後に止めた
     run = execute(run, FakeAdapter([]))
     assert fake_datasource.calls == []
     [result] = results(run, "datasource_query")

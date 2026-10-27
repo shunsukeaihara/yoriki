@@ -9,6 +9,7 @@ from connector.factories import ConnectorFactory
 from connector.models import ConnectorScope
 from conversation.models import Conversation, ConversationPurpose
 from llm.factories import LLMConnectionFactory, ModelProfileFactory
+from llm.models import VERSION_FIELDS as MODEL_VERSION_FIELDS
 from llm.models import ProviderKind
 from run.models import Run, RunEvent, RunEventKind, RunLaunch, RunStatus, RunTrigger
 from skill.factories import SkillFactory, SkillVersionFactory
@@ -363,3 +364,12 @@ def test_tools_that_no_skill_allows_are_refused(api_client, app_user, model):
     res = _create(api_client, app_user, model, skills=[{"skill": skill.uid, "version": 1}], tools=["read", "shell"])
     assert res.status_code == 400
     assert "shell" in res.json()["tools"][0]
+
+
+def test_task_whose_model_lost_tools_is_not_started(api_client, app_user, model):
+    task = _create(api_client, app_user, model, output_schema={"type": "object", "properties": {}}).json()
+    fields = {name: getattr(model.current_version, name) for name in MODEL_VERSION_FIELDS}
+    model.revise(actor=app_user, expected_version=1, **{**fields, "supports_tools": False})
+    res = api_client.post(_url(task, "run/"), {"inputs": {"vendor": "A"}}, format="json")
+    assert res.status_code == 400
+    assert "Toolを使えない" in res.json()["non_field_errors"][0]

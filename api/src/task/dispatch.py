@@ -104,6 +104,9 @@ def _start(task: TaskDefinition, revision: TaskDefinitionRevision, inputs: dict[
         (v.output_schema for _s, v in skills.values() if v is not None and v.output_schema), None
     )
 
+    if output_schema and not version.supports_tools:
+        # 業務結果は submit_result で確定するので、モデル設定の今の版がToolを使えなければ受け付けない
+        raise CannotRun(_("このタスクのモデル設定はToolを使えないので、業務結果を確定できません。"))
     conversation = Conversation.objects.create(
         owner=actor,
         model_profile=profile,

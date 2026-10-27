@@ -336,7 +336,7 @@ class TaskDefinitionRevisionSerializer(ReadOnlyModelSerializer):
 
 class TaskSuspendSerializer(serializers.Serializer):
     def update(self, instance: TaskDefinition, validated_data) -> TaskDefinition:
-        instance.set_suspended(validated_data["suspended"])
+        instance.set_suspended(validated_data["suspended"], actor=validated_data.get("actor"))
         return instance
 
     def create(self, validated_data):

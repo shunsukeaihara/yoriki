@@ -94,13 +94,16 @@ def limited(
     hint: str = "",
     spill_to: Callable[[str], bool] | None = None,
     source: str = "",
+    reserve: int = 0,
 ) -> str:
     """上限を超えたら切って退避し、そのことを末尾に書く。`full_text` があれば、それを退避する
     （表示用の見出しを除く等）。`spill_to` があれば、退避はそれに任せる（ジョブの出力をそのまま書く等）。
-    `source` があれば、見せる部分を信頼しない内容として囲む（harness.md §6.3）。切ったことの案内は囲みの外に書く"""
+    `source` があれば、見せる部分を信頼しない内容として囲む（harness.md §6.3）。切ったことの案内は囲みの外に書く。
+    `reserve` は、同じ結果に別に書く見出し等のtoken。上限からその分を引く"""
     if not text.strip():
         return NO_OUTPUT
-    clipped = clip(text, limit_for(context), head_ratio=head_ratio)
+    limit = limit_for(context)
+    clipped = clip(text, max(limit - reserve, limit // 2), head_ratio=head_ratio)
     body = untrusted(clipped.text, source, block=True) if source else clipped.text
     if not clipped.truncated:
         return body

@@ -13,7 +13,7 @@ from llm.providers.base import ImagePart, Part, TextPart
 from ..sandbox import WORKSPACE, workspace_path
 from ..untrusted import untrusted
 from .base import Effect, Tool, ToolContext, ToolResult
-from .output import limited
+from .output import estimate_tokens, limited
 
 WRITABLE = ("/workspace/work", "/workspace/output")
 PATH_DESCRIPTION = "Absolute path inside /workspace, e.g. /workspace/input/invoice.pdf."
@@ -160,14 +160,29 @@ def execute_read(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
             request[name] = arguments[name]
     result = call_helper(context, "read", request)
     if not result.get("ok"):
-        return helper_error(result)
+        # 読めなかった理由はファイルの中身（シート名、壊れたファイルの解析の誤り）を含みうるので囲む
+        error = result.get("error") or {}
+        message = error.get("message") or "unknown"
+        return ToolResult.error(
+            f"The file could not be read ({error.get('code', 'unknown')}): {untrusted(message, f'file:{path}')}"
+        )
     hint = "Read a smaller part with offset/limit (or pages, or sheet and range)."
+    header = _read_header(result, images)
     content = result.get("text", "")
     # ファイルの中身は信頼しない内容として囲む。見出しと続きの案内は囲みの外に書く（harness.md §6.3）
     body = (
-        limited(context, content, head_ratio=1, hint=hint, source=f"file:{result['path']}") if content.strip() else ""
+        limited(
+            context,
+            content,
+            head_ratio=1,
+            hint=hint,
+            source=f"file:{result['path']}",
+            reserve=estimate_tokens("\n".join(header)),
+        )
+        if content.strip()
+        else ""
     )
-    text = "\n".join([*_read_header(result, images), "", body, *_read_footer(result)])
+    text = "\n".join([*header, "", body, *_read_footer(result)])
     meta: dict[str, Any] = {"path": result["path"], "kind": result.get("kind")}
     if shown := result.get("images"):
         meta["images"] = [{k: i.get(k) for k in ("page", "mime", "width", "height") if i.get(k)} for i in shown]

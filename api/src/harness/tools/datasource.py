@@ -221,9 +221,12 @@ def render_tables(connector: Connector, version: ConnectorVersion, tables: list[
             lines.append(f"description: {_escape(table.description)}")
         if table.columns:
             lines.append("columns:")
+            # 列名と型は接続先のDBから読むので、データとして囲む（harness.md §6.3）
+            columns = []
             for column in table.columns:
-                description = f": {_escape(column.description)}" if column.description else ""
-                lines.append(f"- {_escape(column.name)} ({_escape(column.type)}){description}")
+                description = f": {column.description}" if column.description else ""
+                columns.append(f"- {column.name} ({column.type}){description}")
+            lines.append(untrusted("\n".join(columns), f"connector:{connector.name}", block=True))
         else:
             lines.append("(this table was not found in the database)")
         lines.append("</table>")
@@ -307,7 +310,8 @@ def _render_result(connector: Connector, version: ConnectorVersion, result: Quer
     lines = [
         f'<connector_result connector="{_escape(connector.name)}" version="{version.number}">',
         f"rows: {rows}",
-        f"columns: {', '.join(result.columns)}",
+        # 列名は接続先のDBとSQLから決まるので、データとして囲む（harness.md §6.3）
+        f"columns: {untrusted(', '.join(result.columns), f'connector:{connector.name}')}",
     ]
     if path:
         lines.append(f"file: {path}")

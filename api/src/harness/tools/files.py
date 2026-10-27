@@ -17,6 +17,8 @@ from .output import limited
 
 WRITABLE = ("/workspace/work", "/workspace/output")
 PATH_DESCRIPTION = "Absolute path inside /workspace, e.g. /workspace/input/invoice.pdf."
+# CSVの見出しに出す列名の上限（文字）
+CSV_COLUMNS_LIMIT = 2000
 
 
 def _always(_args: dict[str, Any]) -> bool:
@@ -88,8 +90,13 @@ def _read_header(result: dict[str, Any], images: bool) -> list[str]:
         lines.append(f"Showing {span}.")
     if kind == "csv" and result.get("csv"):
         info = result["csv"]
+        # 列名はファイルの中身なので囲む（harness.md §6.3）。長ければ切る
+        columns = str(info.get("columns"))
+        if len(columns) > CSV_COLUMNS_LIMIT:
+            columns = columns[:CSV_COLUMNS_LIMIT] + "…"
         lines.append(
-            f"CSV: delimiter {info.get('delimiter')!r}, {info.get('rows')} rows, columns {info.get('columns')}"
+            f"CSV: delimiter {info.get('delimiter')!r}, {info.get('rows')} rows, columns "
+            + untrusted(columns, f"file:{result['path']}")
         )
     if kind == "pdf":
         lines.append(f"PDF: {result.get('total_pages')} pages; showing pages {result.get('pages')}.")

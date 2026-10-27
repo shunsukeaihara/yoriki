@@ -178,7 +178,9 @@ def _case_lines(result) -> list[str]:
         state = "FAILED: " + "; ".join(_problems(check))
     lines = [f'- "{result.case_name}"{required}: {state}']
     if result.verdict is not None:
-        lines.append(f"  AI judge: the draft is {_verdict_word(result.verdict)} — {result.judge_reason}")
+        # 判定の理由は評価のRunの回答を読んだモデルが書くので、データとして囲む
+        reason = untrusted(result.judge_reason, "evaluation_judge")
+        lines.append(f"  AI judge: the draft is {_verdict_word(result.verdict)} — {reason}")
     elif result.judge_note:
         lines.append(f"  AI judge: {result.judge_note}")
     if reply := (check.get("reply") or "").strip():
@@ -195,7 +197,9 @@ def _problems(check: dict[str, Any]) -> list[str]:
     if check.get("result_required") and not check.get("result_submitted"):
         problems.append("no result was submitted")
     for mismatch in (check.get("mismatches") or [])[:5]:
-        problems.append(f"{mismatch['path']}: expected {mismatch['expected']!r}, got {mismatch.get('actual')!r}")
+        # 実際の値は評価のRunが出した業務結果なので、データとして囲む
+        actual = untrusted(repr(mismatch.get("actual")), "evaluation_result")
+        problems.append(f"{mismatch['path']}: expected {mismatch['expected']!r}, got {actual}")
     return problems or ["unknown"]
 
 

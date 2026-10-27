@@ -16,3 +16,15 @@ def untrusted(text: str, source: str, *, block: bool = False) -> str:
     if block:
         body = "\n" + body.rstrip("\n") + "\n"
     return f'<untrusted_content source="{_escape(source)}">{body}</untrusted_content>'
+
+
+OPEN = "<untrusted_content source="
+CLOSE = "</untrusted_content>"
+
+
+def close_cut(text: str) -> str:
+    """囲みの途中で切った文に、閉じる印を足す。中の値の閉じる印は崩してあるので、最後の開く印が最後の閉じる印より
+    後ろにあれば、囲みの中で切れている（値に開く印の形の文字があっても、その位置は本当の囲みの中にある）"""
+    if text.rfind(OPEN) > text.rfind(CLOSE):
+        return text + "\n" + CLOSE
+    return text

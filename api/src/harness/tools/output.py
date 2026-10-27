@@ -7,7 +7,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from ..untrusted import untrusted
+from ..untrusted import close_cut, untrusted
 from .base import ToolContext
 
 # Tool結果の既定の上限（token）。モデルの文脈長の5%を超えない
@@ -102,9 +102,9 @@ def limited(
     `reserve` は、同じ結果に別に書く見出し等のtoken。上限からその分を引く"""
     if not text.strip():
         return NO_OUTPUT
-    limit = limit_for(context)
-    clipped = clip(text, max(limit - reserve, limit // 2), head_ratio=head_ratio)
-    body = untrusted(clipped.text, source, block=True) if source else clipped.text
+    clipped = clip(text, max(limit_for(context) - reserve, 0), head_ratio=head_ratio)
+    # 囲みを含む文を切ったら、閉じる印を足して、切ったことの案内を囲みの外に出す
+    body = untrusted(clipped.text, source, block=True) if source else close_cut(clipped.text)
     if not clipped.truncated:
         return body
     if spill_to is not None:

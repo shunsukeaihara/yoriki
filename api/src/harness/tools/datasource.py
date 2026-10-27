@@ -17,13 +17,13 @@ from typing import Any
 from artifact.models import CONNECTOR_RESULTS_DIR, Artifact, BlobObject
 from connector.adapters import get_adapter
 from connector.adapters.base import QueryResult, TableInfo
-from connector.errors import ConnectorError
+from connector.errors import ConnectorError, ConnectorErrorKind
 from connector.limits import connection_slot, run_holding
 from connector.models import Connector, ConnectorAction, ConnectorVersion
 
 from ..connectors import DATASOURCE_TOOL_NAMES, catalog, is_allowed_for
 from ..tasks import connector_permitted, is_task_run
-from ..untrusted import untrusted
+from ..untrusted import close_cut, untrusted
 from .base import Effect, Tool, ToolContext, ToolResult
 from .output import clip, limit_for, limited
 
@@ -162,8 +162,12 @@ def _keep_alive[T](context: ToolContext, operation: Callable[[], T], renew: Call
 
 
 def _failed(exc: ConnectorError, connector: Connector, version: ConnectorVersion) -> ToolResult:
+    message = exc.message
+    if exc.kind in (ConnectorErrorKind.CONNECTION, ConnectorErrorKind.QUERY):
+        # 接続先・ドライバーのエラー文は、列名や値を含みうるので、データとして囲む（harness.md §6.3）
+        message = untrusted(message, f"connector:{connector.name}")
     return ToolResult.text(
-        f"The connector operation failed ({exc.kind}): {exc.message}",
+        f"The connector operation failed ({exc.kind}): {message}",
         is_error=True,
         value={"connector": connector.uid, "version": version.number, "error": exc.kind},
         meta={"connector": connector.name, "version": version.number},
@@ -202,7 +206,7 @@ def describe(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         text = limited(context, text, head_ratio=1)
     else:
         clipped = clip(text, limit_for(context), head_ratio=1)
-        text = clipped.text + ("\n[output truncated]" if clipped.truncated else "")
+        text = close_cut(clipped.text) + ("\n[output truncated]" if clipped.truncated else "")
     return ToolResult.text(
         text,
         value={"connector": connector.uid, "version": version.number, "tables": len(tables)},
@@ -278,7 +282,9 @@ def query(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
             limit_for(context),
             head_ratio=1,
         )
-        text = clipped.text + ("\n[output truncated: select fewer rows or columns]" if clipped.truncated else "")
+        text = close_cut(clipped.text) + (
+            "\n[output truncated: select fewer rows or columns]" if clipped.truncated else ""
+        )
     return ToolResult.text(
         text,
         value={

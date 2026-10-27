@@ -10,6 +10,8 @@ from typing import Any
 
 from django.utils.translation import gettext as _
 
+from harness.untrusted import untrusted
+
 from .checks import PLACEHOLDER_RE
 from .models import TaskInputType
 
@@ -111,5 +113,11 @@ def text_of(value: Any) -> str:
 
 
 def render(template: str, values: dict[str, Any]) -> str:
-    """プロンプトのテンプレートに入力の値を埋め込む。値のない項目は空にする"""
-    return PLACEHOLDER_RE.sub(lambda m: text_of(values[m.group(1)]) if m.group(1) in values else "", template)
+    """プロンプトのテンプレートに入力の値を埋め込む。値は利用者の指示ではないデータなので、信頼しない内容として
+    囲んで埋め込む（harness.md §6.3）。値のない項目は空にする"""
+
+    def value(match) -> str:
+        name = match.group(1)
+        return untrusted(text_of(values[name]), f"input:{name}") if name in values else ""
+
+    return PLACEHOLDER_RE.sub(value, template)

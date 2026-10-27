@@ -23,6 +23,7 @@ from connector.models import Connector, ConnectorAction, ConnectorVersion
 
 from ..connectors import DATASOURCE_TOOL_NAMES, catalog, is_allowed_for
 from ..tasks import connector_permitted, is_task_run
+from ..untrusted import untrusted
 from .base import Effect, Tool, ToolContext, ToolResult
 from .output import clip, limit_for, limited
 
@@ -315,8 +316,7 @@ def _render_result(connector: Connector, version: ConnectorVersion, result: Quer
         heading = "rows (CSV)" if shown == result.row_count else f"first {shown} rows (CSV)"
         lines.append(f"{heading}:")
         # DBの値はデータとして扱わせる（harness.md §6.3）。値で囲みを閉じさせない
-        rows = result.to_csv().rstrip("\n").replace("</untrusted_content", "<\\/untrusted_content")
-        lines.append(f'<untrusted_content source="connector:{_escape(connector.name)}">\n{rows}\n</untrusted_content>')
+        lines.append(untrusted(result.to_csv().rstrip("\n"), f"connector:{connector.name}", block=True))
     lines.append("</connector_result>")
     return "\n".join(lines)
 

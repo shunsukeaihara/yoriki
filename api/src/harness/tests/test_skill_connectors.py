@@ -234,3 +234,16 @@ def test_edit_run_does_not_roll_back_to_a_sensitive_version_outside_confidential
     assert result["is_error"] and "機密" in result["content"][0]["text"]
     skill.refresh_from_db()
     assert skill.version_number == 2
+
+
+@pytest.mark.django_db
+def test_loaded_skill_names_connectors_as_the_run_lists_them(app_user):
+    """Runの途中でConnectorの名前が変わっても、Toolが受け付ける（Run開始時の）名前で見せる"""
+    connector = ConnectorFactory.create(name="販売管理", version__tables=TABLES)
+    _declaring(app_user, connector)
+    run = _start(ConversationFactory.create(owner=app_user))
+    connector.name = "販売管理（新）"
+    connector.save(update_fields=["name"])
+    run = execute(run, FakeAdapter([calls(("c1", "skill", {"name": "取引先の照合"})), reply("ok")]))
+    [result] = results(run, "skill")
+    assert "販売管理 — datasource_query" in result["content"][0]["text"]

@@ -87,7 +87,13 @@ def _load_again(skill: Skill, loaded: dict[str, Any], name: str, context: ToolCo
 
 def _loaded(skill: Skill, version: SkillVersion, name: str, context: ToolContext) -> ToolResult:
     return ToolResult.text(
-        render(skill, version, name=name, result_tool=SUBMIT_RESULT in context.exposed),
+        render(
+            skill,
+            version,
+            name=name,
+            result_tool=SUBMIT_RESULT in context.exposed,
+            connector_names={e["connector"]: e["name"] for e in connector_catalog(context.run).get("connectors", [])},
+        ),
         value={"skill": skill.uid, "version": version.number},
         meta={"skill": skill.name, "version": version.number},
     )

@@ -273,11 +273,19 @@ def unsupported_skills(run: Run, model_version) -> list[str]:
     ]
 
 
-def render(skill: Skill, version: SkillContentSource, *, name: str = "", result_tool: bool = True) -> str:
+def render(
+    skill: Skill,
+    version: SkillContentSource,
+    *,
+    name: str = "",
+    result_tool: bool = True,
+    connector_names: dict[str, str] | None = None,
+) -> str:
     """Skillの本文と資料の場所（harness.md §10.1）。`skill` の結果と、`/` で指定したときの最初の発言に入れる。
 
     `result_tool` は、このRunに submit_result があるか。途中で読み込んだSkillにはない（Toolの一覧はRun開始時に
-    決める）ので、業務結果は最後の応答に書かせる
+    決める）ので、業務結果は最後の応答に書かせる。`connector_names` はRunのConnectorの一覧の名前（IDごと）で、
+    Toolが受け付ける名前と合わせる（Runの途中でConnectorの名前が変わっても）
     """
     lines = [f'<skill name="{_escape(name or skill.name)}" version="{version.number}">']
     lines.append(f"<instructions>\n{version.instructions.strip()}\n</instructions>")
@@ -295,7 +303,7 @@ def render(skill: Skill, version: SkillContentSource, *, name: str = "", result_
     else:
         lines.append("<tools>none (this skill does not run commands)</tools>")
     if version.connectors:
-        lines.append(connectors_text(version))
+        lines.append(connectors_text(version, connector_names))
     if version.output_schema:
         import json  # noqa: PLC0415  業務結果のSchemaがあるときだけ使う
 
@@ -310,8 +318,9 @@ def render(skill: Skill, version: SkillContentSource, *, name: str = "", result_
     return "\n".join(lines)
 
 
-def connectors_text(version: SkillContentSource) -> str:
-    """Skillが宣言したConnector（名前、操作のTool、表）。名前はこのRunのConnectorの一覧と同じもの"""
+def connectors_text(version: SkillContentSource, names: dict[str, str] | None = None) -> str:
+    """Skillが宣言したConnector（名前、操作のTool、表）。名前はこのRunのConnectorの一覧と同じもの（`names`）"""
+    names = names or {}
     connectors = skill_connectors.load([version])
     lines = ["<connectors>"]
     for declaration in version.connectors:
@@ -320,7 +329,8 @@ def connectors_text(version: SkillContentSource) -> str:
             continue
         operations = ", ".join(declaration["operations"]) or ", ".join(Operation.values)
         tables = ", ".join(declaration.get("tables", [])) or "any published table"
-        lines.append(f"  {_escape(connector.name)} — {operations} (tables: {_escape(tables)})")
+        name = names.get(connector.uid, connector.name)
+        lines.append(f"  {_escape(name)} — {operations} (tables: {_escape(tables)})")
     lines.append("</connectors>")
     return "\n".join(lines)
 

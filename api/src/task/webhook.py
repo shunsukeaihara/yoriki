@@ -5,25 +5,40 @@ Runの作業場所に置き（取り出さなかった項目の読み方はSkill
 タスクの入力の値にする。型と必須かどうかはタスクの版の入力の項目で決め、合わない要求はRunを作らずに400で断る。
 
 送る形を決められる送り元（Zapier等）向けの推奨の形式（`event_id`、`message`、`inputs`、`files`）で送れば、
-重複のキーと項目の取り出しは入口の設定なしで行う（`files` のファイルの取り込みはまだない）。`message` は他の値と
-同じくデータとしてpayloadのファイルに残すだけで、依頼文としては扱わない（入口は自由な依頼文を受けない。
-authorization.md §6）。
+重複のキーと項目の取り出しは入口の設定なしで行う。`message` は他の値と同じくデータとしてpayloadのファイルに残すだけで、
+依頼文としては扱わない（入口は自由な依頼文を受けない。authorization.md §6）。
+
+ファイルはmultipart/form-dataで本文に付けて受け取る（URLの取得はしない）。ファイルはどの名前で送られても
+すべて /workspace/input に置き、payloadのファイルには名前・置いたパス・大きさ・SHA-256を書く。型がファイルの項目は、
+項目の取り出しのpath（`$.invoice`）か、推奨の形式の `inputs[名前]` で指す。項目に結び付かないファイルは `files` で
+送る。
 """
 
+import codecs
 import hashlib
+import io
 import json
 import math
 import re
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import parse_qs
+from urllib.parse import parse_qsl
 
 from django.conf import settings
+from django.core.exceptions import RequestDataTooBig, SuspiciousOperation, TooManyFieldsSent, TooManyFilesSent
+from django.core.files.uploadhandler import MemoryFileUploadHandler
+from django.http.multipartparser import MultiPartParser, MultiPartParserError
 from django.utils.translation import gettext as _
 
+from artifact.models import clean_filename, input_paths
+
+from .inputs import InputFile
 from .models import TaskInputType
 
 MAX_DEDUP_KEY_LENGTH = 200
+PAYLOAD_JSON = "webhook_payload.json"
+# 推奨の形式で、フォームの値・multipartの `inputs[名前]` を `inputs` の中の値にする
+FORM_INPUT_KEY_RE = re.compile(r"^inputs\[([^\[\]]+)\]$")
 # JSONのpathの1つの区切り：`.名前`、`["名前"]`・`['名前']`、`[番号]`
 PATH_TOKEN_RE = re.compile(r"""\.([^.\[\]"'\s]+)|\[(\d+)\]|\["((?:[^"\\]|\\.)*)"\]|\['((?:[^'\\]|\\.)*)'\]""")
 MAX_PATH_DEPTH = 20
@@ -99,13 +114,15 @@ def extract(data: Any, path: str) -> tuple[bool, Any]:
 
 @dataclass
 class Payload:
-    """受け取ったpayload。`data` はJSON・フォームの値（本文のテキストでは None）。`file_*` は作業場所に置くファイル"""
+    """受け取ったpayload。`data` はJSON・フォームの値（本文のテキストでは None。multipartのファイルは InputFile）。
+    `file_*` は作業場所に置くpayloadのファイル、`files` はmultipartで送られたファイル（送られた順）"""
 
     data: Any
     file_name: str
     file_bytes: bytes
     sha256: str
     content_type: str
+    files: list[InputFile] = field(default_factory=list)
     size: int = field(init=False)
 
     def __post_init__(self):
@@ -123,19 +140,74 @@ def _finite_float(text: str) -> float:
     return value
 
 
+def _describe_file(value: Any) -> Any:
+    if isinstance(value, InputFile):
+        return value.describe()
+    raise TypeError(type(value).__name__)
+
+
+def _identify_file(value: Any) -> Any:
+    if isinstance(value, InputFile):
+        return value.describe(with_path=False)
+    raise TypeError(type(value).__name__)
+
+
 def _canonical(data: Any) -> bytes:
-    """並び順と空白によらない形。対になっていないサロゲート（JSONの "\\ud800" 等）はUTF-8にできないので断る
+    """並び順と空白によらない形。ファイルは名前・大きさ・SHA-256にする（中身が違えば違う入力。置いたパスは
+    パートの順番で変わるので含めない）。対になっていないサロゲート（JSONの "\\ud800" 等）はUTF-8にできないので断る
     （DBの入力の値やファイルにも書けないため）"""
     try:
-        return json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+        return json.dumps(
+            data, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=_identify_file
+        ).encode()
     except UnicodeEncodeError:
         raise PayloadError("invalid_json", _("本文に文字として正しくない値があります")) from None
 
 
-def parse_payload(body: bytes, content_type: str) -> Payload:
-    """本文を形式ごとに読む。JSON・フォームの値・本文のテキストを受け付ける（ファイルの取り込みはまだない）。
+def _form_data(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """フォームの値を辞書にする。同じ名前が1つなら値、複数なら並び。推奨の形式の `inputs[名前]` は `inputs` の中の値に
+    する（`inputs` という名前の値も送られていれば、取り違えないよう、どちらも送られた名前のまま残す）"""
+    grouped: dict[str, list[Any]] = {}
+    for key, value in pairs:
+        grouped.setdefault(key, []).append(value)
+    data = {key: values[0] if len(values) == 1 else values for key, values in grouped.items()}
+    nested = {m.group(1): data[key] for key in data if (m := FORM_INPUT_KEY_RE.match(key))}
+    if nested and "inputs" not in data:
+        data = {key: value for key, value in data.items() if not FORM_INPUT_KEY_RE.match(key)}
+        data["inputs"] = nested
+    return data
 
-    重複の判定の「同じ入力」には、JSONとフォームの値は並び順と空白によらない形のハッシュを使う"""
+
+def _strict_utf8(name: str) -> codecs.CodecInfo | None:
+    """渡されたエラーの扱いによらず、不正なUTF-8を断るUTF-8。Djangoのmultipartのparserは値とファイル名を
+    `errors="replace"` で読むが、置換文字にすると違う値が同じになる（重複のキーが重なる）ので、この名前を渡して
+    断らせる"""
+    if name != STRICT_UTF8:
+        return None
+    utf8 = codecs.lookup("utf-8")
+
+    def decode(data, errors="strict"):
+        return codecs.utf_8_decode(data, "strict", True)
+
+    return codecs.CodecInfo(name=STRICT_UTF8, encode=utf8.encode, decode=decode)
+
+
+STRICT_UTF8 = "yoriki_strict_utf_8"
+codecs.register(_strict_utf8)
+
+
+class _InMemoryUploadHandler(MemoryFileUploadHandler):
+    """multipartのファイルをいつもメモリに読む（本文は入口の上限（最大10MiB）まで読んだもの）"""
+
+    def handle_raw_input(self, *args, **kwargs):
+        self.activated = True
+
+
+def parse_payload(body: bytes, content_type: str) -> Payload:
+    """本文を形式ごとに読む。JSON・フォームの値（multipart/form-dataを含む）・本文のテキストを受け付ける。
+
+    重複の判定の「同じ入力」には、JSONとフォームの値は並び順と空白によらない形のハッシュを使う（ファイルは中身の
+    SHA-256で比べる）"""
     media_type = content_type.split(";", 1)[0].strip().lower()
     if media_type == "application/json" or media_type.endswith("+json"):
         try:
@@ -144,7 +216,7 @@ def parse_payload(body: bytes, content_type: str) -> Payload:
             raise PayloadError("invalid_json", _("本文をJSONとして読めません（UTF-8のJSONを送ってください）")) from None
         return Payload(
             data=data,
-            file_name="webhook_payload.json",
+            file_name=PAYLOAD_JSON,
             file_bytes=body,
             sha256=hashlib.sha256(_canonical(data)).hexdigest(),
             content_type="application/json",
@@ -158,21 +230,16 @@ def parse_payload(body: bytes, content_type: str) -> Payload:
         limit = settings.DATA_UPLOAD_MAX_NUMBER_FIELDS
         try:
             # 不正なUTF-8を置換文字にすると、違う値が同じになる（重複のキーが重なる）ので断る
-            parsed = parse_qs(text, keep_blank_values=True, max_num_fields=limit, errors="strict")
+            pairs = parse_qsl(text, keep_blank_values=True, max_num_fields=limit, errors="strict")
         except UnicodeDecodeError:
             raise PayloadError("invalid_form", _("本文をフォームの値として読めません")) from None
         except ValueError:
             raise PayloadError("too_many_fields", _("フォームの項目は%(limit)s個までです") % {"limit": limit}) from None
-        # 同じ名前が1つなら値、複数なら並びにする。Skillが読みやすいよう、ファイルはJSONにして置く
-        data = {key: values[0] if len(values) == 1 else values for key, values in parsed.items()}
-        canonical = _canonical(data)
-        return Payload(
-            data=data,
-            file_name="webhook_payload.json",
-            file_bytes=json.dumps(data, ensure_ascii=False, indent=2).encode(),
-            sha256=hashlib.sha256(canonical).hexdigest(),
-            content_type=media_type,
-        )
+        return _form_payload(_form_data(pairs), media_type)
+    if media_type == "multipart/form-data":
+        # Djangoのparserは小文字の `multipart/` だけを受け付けるので、形式の部分を小文字にして渡す
+        params = content_type.split(";", 1)[1] if ";" in content_type else ""
+        return _form_payload(*_parse_multipart(body, f"{media_type};{params}"))
     if media_type == "text/plain":
         try:
             body.decode("utf-8")
@@ -187,9 +254,66 @@ def parse_payload(body: bytes, content_type: str) -> Payload:
         )
     raise PayloadError(
         "unsupported_media_type",
-        _("JSON・フォームの値・テキストだけを受け付けます（Content-Type を確かめてください）"),
+        _("JSON・フォームの値（multipartを含む）・テキストだけを受け付けます（Content-Type を確かめてください）"),
         status=415,
     )
+
+
+def _form_payload(data: dict[str, Any], media_type: str, files: list[InputFile] | None = None) -> Payload:
+    # Skillが読みやすいよう、payloadのファイルはJSONにして置く（ファイルは名前・置いたパス・大きさ・SHA-256）
+    return Payload(
+        data=data,
+        file_name=PAYLOAD_JSON,
+        file_bytes=json.dumps(data, ensure_ascii=False, indent=2, default=_describe_file).encode(),
+        # multipartでは、ファイル以外の値は文字だけなので、印を付ければファイルの記述（辞書）をJSONやフォームの値と
+        # 取り違えない（ファイルの記述と同じ形の辞書をJSONで送っても、ファイルを付けた要求と同じ入力にならない）
+        sha256=hashlib.sha256((b"multipart:" if files is not None else b"") + _canonical(data)).hexdigest(),
+        content_type=media_type,
+        files=files or [],
+    )
+
+
+def _parse_multipart(body: bytes, content_type: str) -> tuple[dict[str, Any], str, list[InputFile]]:
+    """multipart/form-dataを読む。（値、形式、送られた順のファイル）。ファイルの数は、最初の発言に付けられる添付の
+    数からpayloadのファイルの分を引いた数まで"""
+    meta = {"CONTENT_TYPE": content_type, "CONTENT_LENGTH": str(len(body))}
+    try:
+        parser = MultiPartParser(meta, io.BytesIO(body), [_InMemoryUploadHandler()], STRICT_UTF8)
+        values, uploaded = parser.parse()
+    except (TooManyFieldsSent, TooManyFilesSent):
+        raise PayloadError("too_many_fields", _("フォームの項目かファイルが多すぎます")) from None
+    except RequestDataTooBig:
+        # ファイル以外の値の合計は、Djangoのフォームと同じ上限（DATA_UPLOAD_MAX_MEMORY_SIZE）まで
+        detail = _("ファイル以外の値は合わせて%(limit)sバイトまでです（大きな文章はJSONで送ってください）")
+        raise PayloadError(
+            "payload_too_large",
+            detail % {"limit": settings.DATA_UPLOAD_MAX_MEMORY_SIZE},
+            status=413,
+        ) from None
+    except (MultiPartParserError, SuspiciousOperation, UnicodeDecodeError, ValueError):
+        raise PayloadError("invalid_form", _("本文をmultipart/form-dataとして読めません")) from None
+    pairs: list[tuple[str, Any]] = [(key, value) for key, items in values.lists() for value in items]
+    # Djangoのparserは文字とファイルを分けて返し、同じ名前の文字とファイルの送られた順がわからないので断る
+    if mixed := set(values) & set(uploaded):
+        detail = _("同じ名前のフィールドに、文字とファイルを一緒に送れません：%(names)s")
+        raise PayloadError("invalid_form", detail % {"names": ", ".join(sorted(mixed))})
+    files: list[InputFile] = []
+    for key, items in uploaded.lists():
+        for item in items:
+            file = InputFile(name=item.name or "file", content=item.read())
+            files.append(file)
+            pairs.append((key, file))
+    # RFC 2231の形（`name*=`・`filename*=`）はDjangoが先に置換文字で読むので、置換文字を含む名前は断る
+    if any("\ufffd" in name for name in [*(key for key, _value in pairs), *(f.name for f in files)]):
+        raise PayloadError("invalid_form", _("本文をmultipart/form-dataとして読めません"))
+    limit = settings.YORIKI_ATTACHMENTS_PER_MESSAGE - 1
+    if len(files) > limit:
+        raise PayloadError("too_many_files", _("ファイルは%(limit)s個までです") % {"limit": limit})
+    # 作業場所に置く名前を先に決めて、payloadのファイルに書く（task/dispatch.py は payload → ファイルの順に置く）
+    names = [PAYLOAD_JSON, *(clean_filename(f.name) for f in files)]
+    for file, path in zip(files, input_paths(names, set())[1:], strict=True):
+        file.path = path
+    return _form_data(pairs), "multipart/form-data", files
 
 
 def dedup_key(payload: Payload, event_id_path: str, idempotency_key: str | None) -> str | None:

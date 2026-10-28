@@ -139,7 +139,8 @@ class TestUpload:
         assert send(api_client, conversation, "1", [first]).status_code == 201
         res = send(api_client, conversation, "2", [second, third], mode="next")
         assert res.status_code == 201, res.data
-        paths = [a["path"] for a in res.data["attachments_info"]]
+        # 添付の一覧は並び順を決めていないので、並び順によらずに比べる
+        paths = sorted(a["path"] for a in res.data["attachments_info"])
         assert paths == ["請求書 (2).pdf", "請求書 (3).pdf"]
 
     def test_cannot_send_an_attachment_twice(self, api_client, conversation):
@@ -260,6 +261,8 @@ class TestFileToken:
         ("", "file"),
         ("..", "file"),
         ("a" * 300 + ".xlsx", "a" * 195 + ".xlsx"),
+        # UTF-8のバイト数でも切る（Sandboxのファイルシステムの名前の上限）
+        ("請" * 150 + ".pdf", "請" * 75 + ".pdf"),
     ],
 )
 def test_clean_filename(name, expected):

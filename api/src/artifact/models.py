@@ -25,6 +25,8 @@ from .storage import StoredObject, get_storage
 # ファイル名に使わない文字（パスの区切り、制御文字、Windowsで使えない文字）
 UNSAFE_NAME_CHARS = re.compile(r'[\x00-\x1f\x7f/\\:*?"<>|]')
 MAX_NAME_LENGTH = 200
+# 多くのファイルシステムの名前の上限（255バイト）から、同じ名前のときに付ける「 (2)」等の分を残したUTF-8のバイト数
+MAX_NAME_BYTES = 230
 # Connectorの結果を置く /workspace/input の中のディレクトリ（harness.md §10.2）
 CONNECTOR_RESULTS_DIR = "connectors"
 
@@ -36,7 +38,20 @@ def clean_filename(name: str) -> str:
     if len(name) > MAX_NAME_LENGTH:
         stem, ext = posixpath.splitext(name)
         name = stem[: MAX_NAME_LENGTH - len(ext)] + ext if len(ext) <= 20 else name[:MAX_NAME_LENGTH]
-    return name or "file"
+    if len(name.encode()) > MAX_NAME_BYTES:
+        # 日本語の名前は1文字が3バイトなので、文字数の上限の中でもSandboxに置けないことがある
+        stem, ext = posixpath.splitext(name)
+        ext_bytes = len(ext.encode())
+        if ext_bytes <= 20:
+            name = _cut_bytes(stem, MAX_NAME_BYTES - ext_bytes) + ext
+        else:
+            name = _cut_bytes(name, MAX_NAME_BYTES)
+    return name.strip() or "file"
+
+
+def _cut_bytes(text: str, limit: int) -> str:
+    """UTF-8で `limit` バイト以内になるよう、文字の途中で切らずに切る"""
+    return text.encode()[:limit].decode("utf-8", "ignore")
 
 
 def input_paths(names: list[str], used: set[str]) -> list[str]:

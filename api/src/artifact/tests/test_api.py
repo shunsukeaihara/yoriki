@@ -261,6 +261,8 @@ class TestFileToken:
         ("", "file"),
         ("..", "file"),
         ("a" * 300 + ".xlsx", "a" * 195 + ".xlsx"),
+        # UTF-8のバイト数でも切る（Sandboxのファイルシステムの名前の上限）
+        ("請" * 150 + ".pdf", "請" * 75 + ".pdf"),
     ],
 )
 def test_clean_filename(name, expected):

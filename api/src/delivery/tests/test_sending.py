@@ -305,7 +305,11 @@ def test_reconcile_sends_left_over_deliveries_and_expires_stuck_ones(manager, re
     stuck.refresh_from_db()
     # 送信の途中でWorkerが止まった。届いたか分からないので、自動では送り直さない
     assert stuck.status == DeliveryStatus.UNKNOWN
-    assert stuck.attempts.get().outcome == AttemptOutcome.UNKNOWN
+    attempt = stuck.attempts.get()
+    assert attempt.outcome == AttemptOutcome.UNKNOWN
+    # 元のWorkerがまだ送っているかもしれないので、試行は終わったことにせず、送り直しも受け付けない
+    assert attempt.finished is None
+    assert "まだ終わっていません" in stuck.retry()
 
 
 def test_a_late_result_after_the_lease_expired_is_only_recorded(manager, receiver):

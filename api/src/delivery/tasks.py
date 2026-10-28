@@ -164,7 +164,9 @@ def _expire(delivery_id: int) -> None:
     delivery.lease_expires = None
     delivery.last_error = _("送信の途中でWorkerが止まりました。届いたか分からないので、自動では送り直しません")
     delivery.save(update_fields=["status", "lease_expires", "last_error", "updated"])
+    # 終了日時は埋めない（元のWorkerがまだ送っているかもしれない。戻ったときに _record() が埋め、それまでは人の
+    # 送り直しも受け付けない。Delivery.retry()）
     DeliveryAttempt.objects.filter(delivery=delivery, number=delivery.attempt_count, finished__isnull=True).update(
-        outcome=AttemptOutcome.UNKNOWN, error=delivery.last_error, finished=timezone.now()
+        outcome=AttemptOutcome.UNKNOWN, error=delivery.last_error
     )
     logger.warning("delivery %s: lease expired while sending", delivery.uid)

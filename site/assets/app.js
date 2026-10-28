@@ -27,7 +27,9 @@
 
   // Reveal sections as they scroll into view (no-op when reduced motion is requested).
   const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  const targets = document.querySelectorAll('.card, .steps li, .checks li, .stage, .arch, .origin__inner')
+  const targets = document.querySelectorAll(
+    '.card, .steps li, .checks li, .stage, .arch, .origin__inner, .flow__col, .conf-grid article',
+  )
   if (!reduce && 'IntersectionObserver' in window) {
     const io = new IntersectionObserver(
       (entries) => {

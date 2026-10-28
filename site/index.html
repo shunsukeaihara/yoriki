@@ -37,9 +37,9 @@
         <nav class="nav__links" aria-label="Primary">
           <a href="#features" data-i18n>Features</a>
           <a href="#how" data-i18n>How it works</a>
+          <a href="#automation" data-i18n>Automation</a>
           <a href="#security" data-i18n>Security</a>
           <a href="#deploy" data-i18n>Deploy</a>
-          <a href="#roadmap" data-i18n>Roadmap</a>
           <a href="https://github.com/shunsukeaihara/yoriki/tree/main/docs" data-i18n>Docs</a>
         </nav>
         <div class="nav__actions">
@@ -178,10 +178,6 @@
                       <dt data-i18n>Runtime</dt>
                       <dd>gVisor</dd>
                     </div>
-                    <div>
-                      <dt data-i18n>Image</dt>
-                      <dd class="mono">docs@sha256:9f3e…</dd>
-                    </div>
                   </dl>
                   <h4 data-i18n>Pinned</h4>
                   <dl>
@@ -296,8 +292,8 @@
               </div>
               <h3 data-i18n>Tasks and triggers</h3>
               <p data-i18n>
-                Turn a recurring job into a template: prompt, pinned Skill version, input fields. Run it by hand or from
-                a webhook, without a conversation. Results go where that task says.
+                Turn a recurring job into a task: prompt, pinned Skill version, input fields. Start it from a webhook,
+                by hand or from chat, and have the result delivered where that task says.
               </p>
             </article>
             <article class="card">
@@ -322,8 +318,8 @@
               </div>
               <h3 data-i18n>Sandbox by default</h3>
               <p data-i18n>
-                Commands run in containers with no network, from images pinned by digest, under gVisor in production.
-                Only this run's attachments and Skill files are mounted. Nothing else exists.
+                Commands run in containers on gVisor, with no network. Only this run's attachments and Skill files are
+                mounted. Nothing else exists.
               </p>
             </article>
           </div>
@@ -348,8 +344,8 @@
               <span class="steps__num">02</span>
               <h3 data-i18n>Plan</h3>
               <p data-i18n>
-                The Runner assembles context from the pinned Skill version and calls the LLM through the control plane,
-                using the connection and model profile your admins configured.
+                The harness inside the Worker assembles context from the pinned Skill version and calls the LLM with the
+                connection and model profile your admins configured.
               </p>
             </li>
             <li>
@@ -372,10 +368,10 @@
 
           <figure class="arch">
             <svg
-              viewBox="0 0 960 420"
+              viewBox="0 0 960 400"
               role="img"
               data-i18n-attr="aria-label"
-              aria-label="Architecture: browser, nginx, Nuxt and Django API, PostgreSQL, worker, sandbox and LLM providers"
+              aria-label="Architecture: browser, nginx, Nuxt and Django API, PostgreSQL, Worker with the harness, sandbox, LLM providers and internal databases"
             >
               <defs>
                 <marker
@@ -390,6 +386,10 @@
                   <path d="M0 0 10 5 0 10z" fill="currentColor" />
                 </marker>
               </defs>
+              <g class="arch__zone">
+                <rect x="400" y="30" width="540" height="350" rx="16" />
+                <text x="420" y="56" class="arch__zone-label" data-i18n>Control plane · your host</text>
+              </g>
               <g class="arch__box">
                 <rect x="20" y="170" width="140" height="80" rx="10" />
                 <text x="90" y="205" data-i18n>Employee</text>
@@ -400,34 +400,30 @@
                 <text x="280" y="205">nginx</text>
                 <text x="280" y="226" class="arch__sub">/ · /api/</text>
               </g>
-              <g class="arch__zone">
-                <rect x="400" y="40" width="540" height="340" rx="16" />
-                <text x="420" y="68" class="arch__zone-label" data-i18n>Control plane · your host</text>
+              <g class="arch__box">
+                <rect x="420" y="80" width="140" height="70" rx="10" />
+                <text x="490" y="110">Nuxt</text>
+                <text x="490" y="131" class="arch__sub" data-i18n>employee &amp; admin UI</text>
               </g>
               <g class="arch__box">
-                <rect x="430" y="90" width="150" height="70" rx="10" />
-                <text x="505" y="120">Nuxt</text>
-                <text x="505" y="141" class="arch__sub" data-i18n>employee &amp; admin UI</text>
-              </g>
-              <g class="arch__box arch__box--accent">
-                <rect x="430" y="180" width="150" height="70" rx="10" />
-                <text x="505" y="210">Django API</text>
-                <text x="505" y="231" class="arch__sub" data-i18n>REST · SSE</text>
-              </g>
-              <g class="arch__box">
-                <rect x="430" y="280" width="150" height="70" rx="10" />
-                <text x="505" y="310">Worker</text>
-                <text x="505" y="331" class="arch__sub" data-i18n>Django Q2 · Runner</text>
+                <rect x="420" y="170" width="140" height="70" rx="10" />
+                <text x="490" y="200">Django API</text>
+                <text x="490" y="221" class="arch__sub" data-i18n>REST · SSE</text>
               </g>
               <g class="arch__box arch__box--db">
-                <rect x="640" y="150" width="130" height="70" rx="10" />
-                <text x="705" y="180">PostgreSQL</text>
-                <text x="705" y="201" class="arch__sub" data-i18n>source of truth</text>
+                <rect x="420" y="280" width="140" height="70" rx="10" />
+                <text x="490" y="310">PostgreSQL</text>
+                <text x="490" y="331" class="arch__sub" data-i18n>source of truth</text>
+              </g>
+              <g class="arch__box arch__box--accent">
+                <rect x="600" y="160" width="150" height="90" rx="10" />
+                <text x="675" y="196">Worker</text>
+                <text x="675" y="218" class="arch__sub" data-i18n>Django Q2 · harness</text>
               </g>
               <g class="arch__box arch__box--sandbox">
-                <rect x="640" y="280" width="270" height="70" rx="10" />
-                <text x="775" y="310" data-i18n>Sandbox container</text>
-                <text x="775" y="331" class="arch__sub" data-i18n>network: none · gVisor · digest-pinned</text>
+                <rect x="600" y="290" width="310" height="70" rx="10" />
+                <text x="755" y="320" data-i18n>Sandbox container</text>
+                <text x="755" y="341" class="arch__sub" data-i18n>no network · gVisor</text>
               </g>
               <g class="arch__box arch__box--ext">
                 <rect x="790" y="60" width="130" height="70" rx="10" />
@@ -435,26 +431,109 @@
                 <text x="855" y="111" class="arch__sub">OpenAI · Anthropic · …</text>
               </g>
               <g class="arch__box arch__box--ext">
-                <rect x="790" y="150" width="130" height="70" rx="10" />
-                <text x="855" y="180" data-i18n>Internal DBs</text>
-                <text x="855" y="201" class="arch__sub" data-i18n>read-only connectors</text>
+                <rect x="790" y="160" width="130" height="70" rx="10" />
+                <text x="855" y="190" data-i18n>Internal DBs</text>
+                <text x="855" y="211" class="arch__sub" data-i18n>read-only connectors</text>
               </g>
               <g class="arch__lines">
                 <path d="M160 210h58" marker-end="url(#arr)" />
-                <path d="M340 195 L428 128" marker-end="url(#arr)" />
-                <path d="M340 215h88" marker-end="url(#arr)" />
-                <path d="M580 215h58" marker-end="url(#arr)" />
-                <path d="M580 315h58" marker-end="url(#arr)" />
-                <path d="M505 250v28" marker-end="url(#arr)" />
-                <path d="M580 300 L640 215" marker-end="url(#arr)" marker-start="url(#arr)" class="arch__thin" />
-                <path d="M580 200h30V95h178" marker-end="url(#arr)" class="arch__dashed" />
-                <path d="M770 185h18" marker-end="url(#arr)" class="arch__dashed" />
+                <path d="M340 195 L418 125" marker-end="url(#arr)" />
+                <path d="M340 210 L418 205" marker-end="url(#arr)" />
+                <path d="M490 240v38" marker-end="url(#arr)" />
+                <path d="M560 205h38" marker-end="url(#arr)" />
+                <path d="M600 242 L562 288" marker-end="url(#arr)" marker-start="url(#arr)" class="arch__thin" />
+                <path d="M675 250v38" marker-end="url(#arr)" />
+                <path d="M750 180 L788 105" marker-end="url(#arr)" class="arch__dashed" />
+                <path d="M750 200 L788 195" marker-end="url(#arr)" class="arch__dashed" />
               </g>
             </svg>
             <figcaption data-i18n>
-              Only the control plane talks to LLM providers and internal databases. The sandbox has no network at all.
+              Only the harness inside the Worker talks to LLM providers and internal databases. The sandbox has no
+              network at all.
             </figcaption>
           </figure>
+        </div>
+      </section>
+
+      <!-- Automation -->
+      <section class="automation" id="automation">
+        <div class="container">
+          <p class="kicker" data-i18n>Automation</p>
+          <h2 class="display display--md">
+            <span data-i18n>Routine work, started anywhere,</span> <em data-i18n>delivered anywhere.</em>
+          </h2>
+          <p class="lead" data-i18n>
+            Define a routine job once as a task: a prompt template, a pinned Skill version and input fields. Then let it
+            run without a conversation, started by whatever already happens in your tools, with the result showing up
+            where the team already looks.
+          </p>
+          <div class="flow">
+            <div class="flow__col">
+              <h3 data-i18n>Triggers</h3>
+              <ul>
+                <li>
+                  <span>Webhook</span>
+                  <small data-i18n>payload handed over as a file, duplicates dropped by event ID</small>
+                </li>
+                <li>
+                  <span data-i18n>Manual run</span>
+                  <small data-i18n>from the task list or the API</small>
+                </li>
+                <li>
+                  <span data-i18n>Chat</span><span class="tag" data-i18n>soon</span>
+                  <small data-i18n>start a task from a conversation</small>
+                </li>
+                <li>
+                  <span data-i18n>Schedule</span><span class="tag" data-i18n>planned</span>
+                  <small data-i18n>same contract, added later</small>
+                </li>
+              </ul>
+            </div>
+            <div class="flow__arrow" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="24" height="24"><path d="M4 12h15M13 6l6 6-6 6" /></svg>
+            </div>
+            <div class="flow__col flow__col--center">
+              <h3 data-i18n>One task, one run</h3>
+              <ul>
+                <li><span data-i18n>Prompt template and pinned Skill version</span></li>
+                <li><span data-i18n>Typed inputs, picked out of the payload</span></li>
+                <li><span data-i18n>Runs in the sandbox like any conversation</span></li>
+                <li><span data-i18n>Pauses for a human decision, then resumes</span></li>
+              </ul>
+            </div>
+            <div class="flow__arrow" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="24" height="24"><path d="M4 12h15M13 6l6 6-6 6" /></svg>
+            </div>
+            <div class="flow__col">
+              <h3 data-i18n>Destinations</h3>
+              <ul>
+                <li>
+                  <span data-i18n>In-app</span><span class="tag" data-i18n>soon</span>
+                  <small data-i18n>result and artifacts in Yoriki</small>
+                </li>
+                <li>
+                  <span>Webhook · Zapier</span><span class="tag" data-i18n>soon</span>
+                  <small data-i18n>a result payload and expiring file links</small>
+                </li>
+                <li>
+                  <span>Teams · Slack · Discord</span><span class="tag" data-i18n>planned</span>
+                  <small data-i18n>questions, answers and the report in one thread</small>
+                </li>
+              </ul>
+            </div>
+          </div>
+          <div class="automation__notes">
+            <p data-i18n>
+              A task names one trigger, at most one channel for questions, and at most one destination for the result.
+              There is no separate pipeline engine: a task run is the same Run as a conversation, with the same sandbox,
+              pinned versions and history.
+            </p>
+            <p data-i18n>
+              When the agent needs a decision during an automated run, it asks in the channel thread you chose. Anyone
+              in that thread can answer, and the same run resumes. Questions, progress and the final report stay in that
+              one thread.
+            </p>
+          </div>
         </div>
       </section>
 
@@ -516,6 +595,59 @@
         </div>
       </section>
 
+      <!-- Confidential data -->
+      <section class="confidential" id="confidential">
+        <div class="container">
+          <p class="kicker" data-i18n>Confidential data</p>
+          <h2 class="display display--md"><span data-i18n>One flag.</span> <em data-i18n>Enforced everywhere.</em></h2>
+          <p class="lead" data-i18n>
+            No system can tell which of your data may leave the company. Yoriki does not guess. Administrators mark what
+            is confidential, and the server keeps it on models you host.
+          </p>
+          <div class="conf-grid">
+            <article>
+              <span class="conf-grid__num">01</span>
+              <h3 data-i18n>Confidential connectors</h3>
+              <p data-i18n>
+                A connector whose main content is personal data, such as an HR database or customer records, gets the
+                flag from the platform admin. It is listed and usable only in confidential conversations and tasks.
+              </p>
+            </article>
+            <article>
+              <span class="conf-grid__num">02</span>
+              <h3 data-i18n>Confidential conversations and tasks</h3>
+              <p data-i18n>
+                When a conversation starts, the wizard asks whether personal or confidential information is involved. If
+                so, only local LLM models can be chosen. A conversation can become confidential midway, but never go
+                back. Tasks set it in their definition.
+              </p>
+            </article>
+            <article>
+              <span class="conf-grid__num">03</span>
+              <h3 data-i18n>Confidential Skills</h3>
+              <p data-i18n>
+                A Skill that declares a confidential connector, or whose files hold sensitive data, is confidential too.
+                Editing it from chat and evaluating drafts also run on local models. Setting the flag takes edit rights;
+                clearing it takes publish rights.
+              </p>
+            </article>
+            <article>
+              <span class="conf-grid__num">04</span>
+              <h3 data-i18n>Confidential destinations</h3>
+              <p data-i18n>
+                Results of confidential runs are delivered only to destinations explicitly allowed to receive them. A
+                confidential result never lands on a public webhook by accident.
+              </p>
+            </article>
+          </div>
+          <p class="confidential__foot" data-i18n>
+            Ordinary business documents such as invoices and contracts can go to a cloud provider under enterprise
+            terms. Data that is mostly personal information stays on models you host. The flag draws that line once, and
+            every run checks it.
+          </p>
+        </div>
+      </section>
+
       <!-- Deploy -->
       <section class="deploy" id="deploy">
         <div class="container deploy__grid">
@@ -532,7 +664,7 @@
                 Sign-in with Microsoft 365 or Google Workspace (OIDC), or invited accounts where there is no SSO
               </li>
               <li data-i18n>Artifacts on local disk or S3-compatible storage</li>
-              <li data-i18n>Sandbox images published on Docker Hub with provenance, pinned by digest</li>
+              <li data-i18n>Sandbox images published on Docker Hub</li>
               <li data-i18n>Add worker hosts on the same private network as you scale</li>
             </ul>
           </div>

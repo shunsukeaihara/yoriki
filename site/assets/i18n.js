@@ -40,7 +40,6 @@
     Network: 'ネットワーク',
     none: 'なし',
     Runtime: 'ランタイム',
-    Image: 'イメージ',
     Pinned: '固定した版',
     'read-only': '読取り専用',
     Model: 'モデル',
@@ -71,22 +70,16 @@
     'Read-only access to PostgreSQL, MySQL and SQL Server. Expose only the tables and columns you choose, with row caps, as immutable versions. Pick one in chat with @.':
       'PostgreSQL・MySQL・SQL Serverを読取り専用で。公開する表と列、行数の上限を不変の版として持ちます。会話では @ で指定します。',
     'Tasks and triggers': 'タスクと起動',
-    'Turn a recurring job into a template: prompt, pinned Skill version, input fields. Run it by hand or from a webhook, without a conversation. Results go where that task says.':
-      '繰り返す業務はテンプレートに。プロンプト、固定したSkillの版、入力の項目を定義し、会話を介さず手動やWebhookから実行します。結果はタスクごとの通知先へ。',
     'One control plane': 'ひとつの管理画面',
     'LLM connections (OpenAI, Anthropic, Gemini, local), model profiles, runtime profiles, users, departments, SSO and usage in one admin UI. API keys are encrypted at rest and never leave it.':
       'LLMの接続（OpenAI・Anthropic・Gemini・ローカル）、モデル設定、Runtime Profile、ユーザー・部門、SSO、利用量を一元管理。API keyは暗号化して保存し、外へ出しません。',
     'Sandbox by default': '既定でSandbox',
-    "Commands run in containers with no network, from images pinned by digest, under gVisor in production. Only this run's attachments and Skill files are mounted. Nothing else exists.":
-      'コマンドはネットワークのないコンテナで動きます。イメージはdigestで固定、本番はgVisor。マウントされるのは、このRunの添付とSkillの資料だけです。',
 
     // How
     'From a request to a result': '依頼から結果まで',
     Ask: '依頼する',
     'An employee opens a conversation, attaches files, and picks a Skill with / and a Connector with @, or leaves the choice to the agent.':
       '社員が会話を開き、ファイルを添付し、/ でSkill、@ でConnectorを指定します。エージェントに任せることもできます。',
-    'The Runner assembles context from the pinned Skill version and calls the LLM through the control plane, using the connection and model profile your admins configured.':
-      'Runnerが固定したSkillの版から文脈を組み立て、管理者が設定した接続とモデル設定で、Control Planeを通してLLMを呼びます。',
     Execute: '実行する',
     'Commands run in an isolated sandbox. Progress streams back live. If the agent needs a decision, the run waits for the answer and resumes where it left off.':
       'コマンドは隔離されたSandboxで動き、進捗は逐次返ります。判断が必要になればRunは回答を待ち、そこから再開します。',
@@ -103,12 +96,9 @@
     'Django Q2 · Runner': 'Django Q2 · Runner',
     'source of truth': '実行状態の正本',
     'Sandbox container': 'Sandboxのコンテナ',
-    'network: none · gVisor · digest-pinned': 'ネットワークなし · gVisor · digestで固定',
     'LLM providers': 'LLMプロバイダー',
     'Internal DBs': '社内DB',
     'read-only connectors': '読取り専用のConnector',
-    'Only the control plane talks to LLM providers and internal databases. The sandbox has no network at all.':
-      'LLMプロバイダーや社内DBと通信するのはControl Planeだけ。Sandboxにネットワークはありません。',
 
     // Security
     'Boundaries you can verify': '確かめられる境界',
@@ -140,8 +130,6 @@
     'Sign-in with Microsoft 365 or Google Workspace (OIDC), or invited accounts where there is no SSO':
       'Microsoft 365・Google Workspace（OIDC）でログイン。SSOのない環境では招待制のアカウント',
     'Artifacts on local disk or S3-compatible storage': '成果物はローカルディスクまたはS3互換ストレージへ',
-    'Sandbox images published on Docker Hub with provenance, pinned by digest':
-      'SandboxのイメージはDocker Hubでprovenance付きで公開し、digestで固定',
     'Add worker hosts on the same private network as you scale': '同じ私設ネットワークにWorkerのホストを追加して拡張',
     '# Single host, production': '# 単一ホスト、本番',
     '# Publish through Cloudflare Tunnel instead of opening a port': '# ポートを開けずにCloudflare Tunnelで公開する',
@@ -185,6 +173,72 @@
     Status: '状況',
     'MIT License': 'MITライセンス',
     'Released under the MIT License.': 'MITライセンスで公開しています。',
+    Automation: '自動実行',
+    'Turn a recurring job into a task: prompt, pinned Skill version, input fields. Start it from a webhook, by hand or from chat, and have the result delivered where that task says.':
+      '繰り返す業務はタスクに。プロンプト、固定したSkillの版、入力の項目を定義し、Webhook・手動・チャットから起動して、結果はタスクごとの通知先へ届けます。',
+    "Commands run in containers on gVisor, with no network. Only this run's attachments and Skill files are mounted. Nothing else exists.":
+      'コマンドはgVisorの上のコンテナで、ネットワークなしで動きます。マウントされるのは、このRunの添付とSkillの資料だけです。',
+    'The harness inside the Worker assembles context from the pinned Skill version and calls the LLM with the connection and model profile your admins configured.':
+      'Workerの中のハーネスが固定したSkillの版から文脈を組み立て、管理者が設定した接続とモデル設定でLLMを呼びます。',
+    'Architecture: browser, nginx, Nuxt and Django API, PostgreSQL, Worker with the harness, sandbox, LLM providers and internal databases':
+      '構成：ブラウザ、nginx、NuxtとDjango API、PostgreSQL、ハーネスを持つWorker、Sandbox、LLMプロバイダー、社内DB',
+    'Django Q2 · harness': 'Django Q2 · ハーネス',
+    'no network · gVisor': 'ネットワークなし · gVisor',
+    'Only the harness inside the Worker talks to LLM providers and internal databases. The sandbox has no network at all.':
+      'LLMプロバイダーや社内DBと通信するのは、Workerの中のハーネスだけ。Sandboxにネットワークはありません。',
+    'Sandbox images published on Docker Hub': 'SandboxのイメージはDocker Hubで公開',
+
+    // Automation
+    'Routine work, started anywhere,': '定型業務を、どこからでも起動し、',
+    'delivered anywhere.': 'どこへでも届ける。',
+    'Define a routine job once as a task: a prompt template, a pinned Skill version and input fields. Then let it run without a conversation, started by whatever already happens in your tools, with the result showing up where the team already looks.':
+      '定型業務は一度タスクとして定義します。プロンプトのテンプレート、固定したSkillの版、入力の項目。あとは会話を介さず、いつも使っているツールの出来事をきっかけに動かし、結果はチームがいつも見ている場所へ届けます。',
+    Triggers: '起動',
+    'payload handed over as a file, duplicates dropped by event ID':
+      'payloadはファイルとして渡し、イベントIDで重複を除く',
+    'Manual run': '手動実行',
+    'from the task list or the API': 'タスクの一覧かAPIから',
+    Chat: 'チャット',
+    soon: '近日',
+    'start a task from a conversation': '会話からタスクを起動する',
+    Schedule: 'スケジュール',
+    planned: '予定',
+    'same contract, added later': '同じ契約で後から追加',
+    'One task, one run': 'タスク1つ、Run1つ',
+    'Prompt template and pinned Skill version': 'プロンプトのテンプレートと固定したSkillの版',
+    'Typed inputs, picked out of the payload': '型のある入力を、payloadから取り出す',
+    'Runs in the sandbox like any conversation': '会話と同じSandboxで動く',
+    'Pauses for a human decision, then resumes': '人の判断が必要なら止まり、回答で再開する',
+    Destinations: '通知先',
+    'In-app': '画面内',
+    'result and artifacts in Yoriki': 'Yorikiの画面に結果と成果物',
+    'a result payload and expiring file links': '結果のpayloadと期限付きのファイルURL',
+    'questions, answers and the report in one thread': '質問・回答・報告を1つのスレッドに',
+    'A task names one trigger, at most one channel for questions, and at most one destination for the result. There is no separate pipeline engine: a task run is the same Run as a conversation, with the same sandbox, pinned versions and history.':
+      'タスクには起動が1つ、質問のためのチャネルが最大1つ、結果の通知先が最大1つ。別のパイプラインエンジンはありません。タスクのRunは会話のRunと同じもので、同じSandbox・固定した版・履歴を持ちます。',
+    'When the agent needs a decision during an automated run, it asks in the channel thread you chose. Anyone in that thread can answer, and the same run resumes. Questions, progress and the final report stay in that one thread.':
+      '自動実行の途中で判断が必要になると、エージェントは指定したチャネルのスレッドで質問します。スレッドの誰でも答えられ、同じRunが再開します。質問、進捗、完了の報告は、その1つのスレッドに集まります。',
+
+    // Confidential
+    'Confidential data': '機密の情報',
+    'One flag.': 'フラグはひとつ。',
+    'Enforced everywhere.': '効くのはすべての場所。',
+    'No system can tell which of your data may leave the company. Yoriki does not guess. Administrators mark what is confidential, and the server keeps it on models you host.':
+      'どのデータを社外へ出してよいかは、システムには判断できません。Yorikiは推測しません。管理者が機密の印を付け、サーバーがそれを自社でホストするモデルの中にとどめます。',
+    'Confidential connectors': '機密のConnector',
+    'A connector whose main content is personal data, such as an HR database or customer records, gets the flag from the platform admin. It is listed and usable only in confidential conversations and tasks.':
+      '人事DBや顧客の個人情報のように、個人情報を主な中身とする接続先のConnectorには、基盤管理者が機密のフラグを付けます。一覧に出るのも使えるのも、機密の会話・タスクの中だけです。',
+    'Confidential conversations and tasks': '機密の会話とタスク',
+    'When a conversation starts, the wizard asks whether personal or confidential information is involved. If so, only local LLM models can be chosen. A conversation can become confidential midway, but never go back. Tasks set it in their definition.':
+      '会話を始めるとき、ウィザードが個人情報や機密情報を扱うかを確かめます。扱うなら、選べるのはローカルLLMのモデルだけ。会話は途中から機密にできますが、戻すことはできません。タスクは定義で決めます。',
+    'Confidential Skills': '機密のSkill',
+    'A Skill that declares a confidential connector, or whose files hold sensitive data, is confidential too. Editing it from chat and evaluating drafts also run on local models. Setting the flag takes edit rights; clearing it takes publish rights.':
+      '機密のConnectorを宣言したSkillと、資料そのものに機密の情報を含むSkillも機密です。会話からの編集もDraftの評価も、ローカルLLMで動かします。フラグを付けるのは編集の権限、外せるのは公開の権限だけです。',
+    'Confidential destinations': '機密の通知先',
+    'Results of confidential runs are delivered only to destinations explicitly allowed to receive them. A confidential result never lands on a public webhook by accident.':
+      '機密のRunの結果は、機密の結果を送ってよいとした通知先にだけ届きます。機密の結果が誤って公開のWebhookへ出ることはありません。',
+    'Ordinary business documents such as invoices and contracts can go to a cloud provider under enterprise terms. Data that is mostly personal information stays on models you host. The flag draws that line once, and every run checks it.':
+      '請求書や契約書のような通常の業務文書は、法人向けの条件のもとでクラウドのプロバイダーへ渡せます。個人情報を主な内容とするデータは、自社でホストするモデルの中にとどめます。この線をフラグで一度引けば、あとはすべてのRunがそれを確かめます。',
   }
 
   const dictionaries = { en: null, ja }

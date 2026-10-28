@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="12" fill="#c8402b"/>
+  <rect x="5" y="5" width="54" height="54" rx="8" fill="none" stroke="#fff" stroke-opacity=".45" stroke-width="3"/>
+  <text x="32" y="25" font-family="Noto Serif JP, Hiragino Mincho ProN, Yu Mincho, serif" font-size="22" font-weight="600" fill="#fff" text-anchor="middle" dominant-baseline="middle">与</text>
+  <text x="32" y="46" font-family="Noto Serif JP, Hiragino Mincho ProN, Yu Mincho, serif" font-size="22" font-weight="600" fill="#fff" text-anchor="middle" dominant-baseline="middle">力</text>
+</svg>

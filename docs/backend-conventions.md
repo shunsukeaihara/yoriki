@@ -119,7 +119,7 @@ design.md §5.1の永続オブジェクトを、次の単位で分ける。実�
 | `run` | Run、ExecutionAttempt、RunEvent、ClarificationRequest、Checkpoint、ToolInvocation、ResultEnvelope、Outbox（`dispatch.py`） |
 | `artifact` | Artifact、BlobObject、BlobLocation、WorkspaceSnapshot |
 | `runtime` | RuntimeProfile、RuntimeProfileVersion、EnvironmentRevision、PackageBundle、Launcher |
-| `task` | TaskDefinition、TaskDefinitionRevision（初期は結果の通知の設定もここに持つ）、TriggerBinding、TriggerBindingRevision、TriggerReceipt、InteractionBinding、InteractionBindingRevision、NotificationBinding、NotificationBindingRevision |
+| `task` | TaskDefinition、TaskDefinitionRevision（初期は結果の通知の設定もここに持つ）、TriggerBinding、TriggerBindingRevision、TriggerReceipt、InteractionBinding、InteractionBindingRevision、NotificationBinding、NotificationBindingRevision（NotificationBindingは通知Skillの段階で作る。それまでは通知の設定をTaskDefinitionRevisionに持つ） |
 | `delivery` | Destination、DestinationRevision、Delivery、DeliveryAttempt、ExternalThreadBinding、ChannelMessageReceipt |
 | `worker` | Workerの登録情報 |
 | `usage` | UsageLedger、クオータ |

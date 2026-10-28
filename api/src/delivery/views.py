@@ -1,6 +1,5 @@
 from django.db import transaction
 from django.db.models import Q
-from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema, extend_schema_view
 from rest_framework import mixins, status
 from rest_framework.decorators import action
@@ -190,9 +189,7 @@ class AppTaskDeliveryViewSet(TaskMixin, ReadOnlyModelViewSet):
     def retry(self, request, *args, **kwargs):
         delivery = self.get_object()
         with transaction.atomic():
-            if not delivery.retry():
-                raise ValidationError(
-                    {"non_field_errors": [_("この配信は送り直せません（配信待ち・配信中・受付確認済み）")]}
-                )
+            if problem := delivery.retry():
+                raise ValidationError({"non_field_errors": [problem]})
             enqueue_delivery(delivery)
         return Response(self.get_serializer(self.get_object()).data)

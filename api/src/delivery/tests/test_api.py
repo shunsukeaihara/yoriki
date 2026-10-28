@@ -2,13 +2,16 @@
 §5.4・§7）"""
 
 import socket
+from datetime import timedelta
 from unittest import mock
 
 import pytest
+from django.utils import timezone
 
 from delivery.factories import DestinationFactory
 from delivery.models import (
     Delivery,
+    DeliveryAttempt,
     DeliveryStatus,
     Destination,
     DestinationKind,
@@ -377,6 +380,13 @@ def test_deliveries_are_listed_and_retried_by_task_managers(api_client, app_user
     # 配信待ちは送り直せない
     assert api_client.post(f"{url}{delivery.uid}/retry/").status_code == 400
     Delivery.objects.filter(pk=delivery.pk).update(status=DeliveryStatus.UNKNOWN, attempt_count=1)
+    # 持ち時間が切れて確認待ちにしても、前の送信が終わるまでは送り直さない（二重に送らない）
+    attempt = delivery.attempts.create(number=1)
+    res = api_client.post(f"{url}{delivery.uid}/retry/")
+    assert res.status_code == 400
+    assert "まだ終わっていません" in str(res.json())
+    # Q2がWorkerを止める時間を過ぎたら送り直せる
+    DeliveryAttempt.objects.filter(pk=attempt.pk).update(started=timezone.now() - timedelta(hours=2))
     res = api_client.post(f"{url}{delivery.uid}/retry/")
     assert res.status_code == 200, res.json()
     assert res.json()["status"] == DeliveryStatus.PENDING

@@ -28,6 +28,8 @@ logger = logging.getLogger(__name__)
 
 TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 USER_AGENT = "Yoriki-Delivery/1"
+# 1回の送信で試すアドレスの数（つながらないアドレスが多い送り先で、1回の送信を長引かせない）
+MAX_ADDRESSES = 3
 # 送り直してよい応答（一時的な障害）
 RETRYABLE_STATUSES = {408, 425, 429, 500, 502, 503, 504}
 
@@ -117,7 +119,7 @@ class WebhookAdapter:
         }
         # 確かめたアドレスを順に試す。つながらなかった（まだ何も送っていない）ときだけ次のアドレスへ進む
         outcome = Outcome(AttemptOutcome.RETRYABLE)
-        for address in addresses:
+        for address in addresses[:MAX_ADDRESSES]:
             outcome = self._post(url, address, body, headers)
             if not outcome.not_sent:
                 break

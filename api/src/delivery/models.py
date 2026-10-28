@@ -12,6 +12,7 @@
 
 import base64
 import secrets
+from datetime import timedelta
 from typing import Any, Self
 from urllib.parse import urlsplit
 
@@ -322,17 +323,23 @@ class Delivery(models.Model):
         return f"{self.run_id} {self.event_type}"
 
     @transaction.atomic
-    def retry(self) -> bool:
-        """人が送り直しを依頼する（失敗・確認待ち・取消のもの）。送る直前に出口を確かめ直す。受け付けたら True"""
+    def retry(self) -> str:
+        """人が送り直しを依頼する（失敗・確認待ち・取消のもの）。送る直前に出口を確かめ直す。受け付けたら空文字、
+        受け付けなければ理由"""
         current = Delivery.objects.select_for_update().get(pk=self.pk)
         if current.status not in RETRYABLE_BY_HAND:
-            return False
+            return gettext("この配信は送り直せません（配信待ち・配信中・受付確認済み）")
+        # 持ち時間が切れて確認待ちにした後も、元のWorkerがまだ送っているかもしれない。HTTPには送信全体の期限が
+        # ないので、その試行が終わるか、Q2がWorkerを止める時間（Q_CLUSTER_TIMEOUT）を過ぎるまでは送り直さない
+        running_since = timezone.now() - timedelta(seconds=settings.Q_CLUSTER_TIMEOUT)
+        if current.attempts.filter(finished__isnull=True, started__gt=running_since).exists():
+            return gettext("前の送信がまだ終わっていません。しばらくしてから送り直してください")
         current.status = DeliveryStatus.PENDING
         current.next_attempt = None
         current.retry_from = current.attempt_count
         current.save(update_fields=["status", "next_attempt", "retry_from", "updated"])
         self.status, self.next_attempt, self.retry_from = current.status, None, current.retry_from
-        return True
+        return ""
 
 
 class AttemptOutcome(models.IntegerChoices):

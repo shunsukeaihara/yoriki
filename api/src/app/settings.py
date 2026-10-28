@@ -261,11 +261,13 @@ SPECTACULAR_SETTINGS = {
 # クラスタは1つで、エージェントの実行（Run）も配信・Outbox・清掃も受け持つ。増やすときはqclusterの数で調整する
 # （backend-conventions.md §8.4、deployment.md §3.2）。Runは確認待ちまで長く動くので、timeoutは長くする
 Q_CLUSTER_WORKERS = int(os.getenv("YORIKI_Q_WORKERS", "4"))
+# taskの実行の上限（秒）。超えたらQ2がWorkerを止める（配信の送り直しも、この時間を過ぎた送信は止まったものとみなす）
+Q_CLUSTER_TIMEOUT = 3600
 Q_CLUSTER = {
     "name": "default",
     "orm": "default",
     "workers": Q_CLUSTER_WORKERS,
-    "timeout": 3600,
+    "timeout": Q_CLUSTER_TIMEOUT,
     "retry": 3660,
     "max_attempts": 1,
 }

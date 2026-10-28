@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Yoriki — AI agents for everyone at work, governed by your servers</title>
+    <title>Yoriki — AI agents your whole company can use with confidence</title>
     <meta
       name="description"
-      content="Yoriki is an open-source, self-hosted platform that lets employees delegate real work to AI agents through chat. Skills, connectors and sandboxes stay under your administrators' control."
+      content="Yoriki is an open-source, self-hosted platform for using AI agents at work. The company decides what data an agent may touch, where its commands run and where results go, and Yoriki enforces it in software."
     />
-    <meta property="og:title" content="Yoriki — AI agents for everyone at work" />
+    <meta property="og:title" content="Yoriki — AI agents your whole company can use with confidence" />
     <meta
       property="og:description"
-      content="Open-source, self-hosted AI agents for the workplace. Permissions are enforced by the server and the sandbox, never by the prompt."
+      content="Open-source, self-hosted AI agents for the workplace. Boundaries set by the company, enforced in software, not in prompts."
     />
     <meta property="og:type" content="website" />
     <meta name="theme-color" content="#f6f3ec" media="(prefers-color-scheme: light)" />
@@ -35,12 +35,12 @@
           <span class="brand__name">Yoriki</span>
         </a>
         <nav class="nav__links" aria-label="Primary">
-          <a href="#features" data-i18n>Features</a>
-          <a href="#how" data-i18n>How it works</a>
+          <a href="#fears" data-i18n>Why Yoriki</a>
+          <a href="#use" data-i18n>For employees</a>
+          <a href="#skills" data-i18n>Skills</a>
+          <a href="#data" data-i18n>Data</a>
           <a href="#automation" data-i18n>Automation</a>
-          <a href="#security" data-i18n>Security</a>
-          <a href="#deploy" data-i18n>Deploy</a>
-          <a href="https://github.com/shunsukeaihara/yoriki/tree/main/docs" data-i18n>Docs</a>
+          <a href="#it" data-i18n>For IT</a>
         </nav>
         <div class="nav__actions">
           <div class="lang" role="group" aria-label="Language">
@@ -86,15 +86,17 @@
           <div class="hero__copy">
             <p class="eyebrow">
               <span class="dot dot--live" aria-hidden="true"></span>
-              <span data-i18n>Open source · MIT · pre-alpha</span>
+              <span data-i18n>Open source · self-hosted · MIT</span>
             </p>
             <h1 class="display">
-              <span data-i18n>AI agents for everyone at work.</span>
-              <em data-i18n>Governed by your servers, not by the prompt.</em>
+              <span data-i18n>AI agents your whole company</span>
+              <em data-i18n>can use with confidence.</em>
             </h1>
             <p class="lead" data-i18n>
-              Yoriki is a self-hosted platform that lets employees delegate real work to AI agents through chat. Skills,
-              connectors and sandboxes stay under your administrators' control.
+              Using AI agents at work is no longer optional. But leaks, damaged systems, attacks on outsiders and
+              runaway agents are real fears. Yoriki lets the company decide what data an agent may touch, where its
+              commands run and where results go, and enforces that in software. Human judgement still matters. The agent
+              cannot step over the line on its own.
             </p>
             <div class="cta">
               <a class="btn btn--primary" href="https://github.com/shunsukeaihara/yoriki">
@@ -110,23 +112,14 @@
                   />
                 </svg>
               </a>
-              <a
-                class="btn btn--ghost"
-                href="https://github.com/shunsukeaihara/yoriki/blob/main/docs/design.md"
-                data-i18n
-                >Read the design</a
-              >
+              <a class="btn btn--ghost" href="#fears" data-i18n>How the fears are answered</a>
             </div>
-            <ul class="stack" aria-label="Built with">
-              <li>Django</li>
-              <li>Nuxt</li>
-              <li>PostgreSQL</li>
-              <li>Docker</li>
-              <li>gVisor</li>
+            <ul class="stack" aria-label="Facts">
+              <li data-i18n>Runs on your servers</li>
+              <li data-i18n>Cloud or local LLMs</li>
+              <li data-i18n>Sandboxed commands</li>
             </ul>
           </div>
-
-          <!-- Product mock -->
           <div class="hero__visual" aria-hidden="true">
             <div class="window">
               <div class="window__bar">
@@ -202,61 +195,140 @@
         </div>
       </section>
 
-      <!-- Name -->
-      <section class="origin">
-        <div class="container origin__inner">
-          <p class="origin__kanji" lang="ja" aria-hidden="true">与力</p>
-          <p class="origin__text">
-            <strong>Yoriki</strong>
-            <span data-i18n>
-              (与力) were the trusted officers of Edo-period Japan who carried out a magistrate's work. The name says
-              what the product does: capable hands that act within the authority they are given.
-            </span>
+      <!-- Fears -->
+      <section class="fears" id="fears">
+        <div class="container">
+          <p class="kicker" data-i18n>Why Yoriki</p>
+          <h2 class="display display--md">
+            <span data-i18n>Four fears.</span> <em data-i18n>Four boundaries, enforced in software.</em>
+          </h2>
+          <p class="lead" data-i18n>
+            These are the questions that stop a rollout. Each one is answered by a boundary that Yoriki's server and
+            execution environment enforce, not by a rule in a prompt that the model may or may not follow.
+          </p>
+          <div class="fear-grid">
+            <article class="fear">
+              <p class="fear__q" data-i18n>"Will the agent leak our data?"</p>
+              <h3 data-i18n>It only sees what administrators let it see.</h3>
+              <p data-i18n>
+                Which data the agent can read is decided by administrators, table by table and column by column. Work
+                that involves personal or confidential information is marked as such and runs only on LLMs you host.
+                Nothing typed into a prompt can widen that.
+              </p>
+              <ul>
+                <li data-i18n>Access scopes set in software, not in instructions</li>
+                <li data-i18n>Confidential work stays on local models</li>
+                <li data-i18n>API keys and credentials never reach the agent</li>
+              </ul>
+            </article>
+            <article class="fear">
+              <p class="fear__q" data-i18n>"Will it break a system or wipe data?"</p>
+              <h3 data-i18n>Commands run in a sandbox with nothing to break.</h3>
+              <p data-i18n>
+                Administrators restrict what the agent may do to databases and cloud storage at the software level.
+                Commands run in a disposable sandbox that holds only that job's files. The host, other jobs and your
+                systems are out of reach.
+              </p>
+              <ul>
+                <li data-i18n>Access to DBs and storage limited by configuration</li>
+                <li data-i18n>A fresh, isolated sandbox for every run, on gVisor</li>
+                <li data-i18n>Only this job's attachments and Skill files inside</li>
+              </ul>
+            </article>
+            <article class="fear">
+              <p class="fear__q" data-i18n>"Could it attack someone outside?"</p>
+              <h3 data-i18n>The sandbox has no network at all.</h3>
+              <p data-i18n>
+                No Internet, no office LAN, no DNS. An agent cannot scan, call or send anything from where its commands
+                run. The only outbound traffic is what Yoriki itself makes through managed paths: the LLM you chose and
+                the data sources you approved.
+              </p>
+              <ul>
+                <li data-i18n>No free outbound access from the agent</li>
+                <li data-i18n>Results go only to destinations you registered</li>
+                <li data-i18n>Nothing reaches outside without a managed path</li>
+              </ul>
+            </article>
+            <article class="fear">
+              <p class="fear__q" data-i18n>"What if it runs wild?"</p>
+              <h3 data-i18n>People set the goal. The agent cannot grow its own powers.</h3>
+              <p data-i18n>
+                People decide the purpose and the business calls; the agent chooses the method within its limits. Any
+                run can be stopped at once. Every tool call is checked on the server, the agent cannot grant itself
+                permissions, and every step is recorded and cannot be rewritten.
+              </p>
+              <ul>
+                <li data-i18n>Stop any run, any time</li>
+                <li data-i18n>Permissions checked on every call, server-side</li>
+                <li data-i18n>Immutable history of what was done</li>
+              </ul>
+            </article>
+          </div>
+          <p class="fears__note" data-i18n>
+            What people type in remains their judgement. Yoriki supports it: a confidential flag that keeps sensitive
+            work on local models, a check when a conversation starts, and data sources that are limited before anyone
+            asks a question.
           </p>
         </div>
       </section>
 
-      <!-- Principle -->
-      <section class="principle">
-        <div class="container">
-          <p class="kicker" data-i18n>The idea</p>
-          <h2 class="display display--md">
-            <span data-i18n>Trust the boundary,</span> <em data-i18n>not the model.</em>
-          </h2>
-          <div class="principle__cols">
-            <p data-i18n>
-              Most agent products ask the model to behave. Yoriki does not. Who can use which Skill, which tables a
-              Connector may read, and what a command can reach are decided by the server and the execution environment,
-              and are enforced there.
-            </p>
-            <p data-i18n>
-              Employees get a chat where they state the goal and make the business calls. The agent chooses the method
-              and does the work, inside a sandbox with no network, with only the files it was given. No approval prompt
-              for every command. No prompt-level permission theatre.
+      <!-- For employees -->
+      <section class="use" id="use">
+        <div class="container use__grid">
+          <div>
+            <p class="kicker" data-i18n>For employees</p>
+            <h2 class="display display--md" data-i18n>And still, people just get work done.</h2>
+            <p class="lead" data-i18n>
+              The boundaries sit underneath. On top, employees get a chat where they hand over real work: documents,
+              spreadsheets, PDFs, data from internal systems.
             </p>
           </div>
+          <ul class="checks">
+            <li>
+              <h3 data-i18n>Ask in plain language, attach files</h3>
+              <p data-i18n>
+                Describe the job, attach what is needed, and pick a Skill or a data source if you want to. Or let the
+                agent choose from what you are allowed to use.
+              </p>
+            </li>
+            <li>
+              <h3 data-i18n>Watch it plan and work</h3>
+              <p data-i18n>
+                The agent shows its plan and its progress as it goes. Add an instruction midway, answer a question, or
+                queue the next request.
+              </p>
+            </li>
+            <li>
+              <h3 data-i18n>No approval for every command</h3>
+              <p data-i18n>
+                Because the sandbox makes commands safe, nobody has to click "allow" for each step. Stop is always one
+                click away.
+              </p>
+            </li>
+            <li>
+              <h3 data-i18n>Close the tab, come back later</h3>
+              <p data-i18n>
+                Runs continue on the server. Results and files wait in the conversation, and the conversation stays open
+                for the next job.
+              </p>
+            </li>
+          </ul>
         </div>
       </section>
 
-      <!-- Features -->
-      <section class="features" id="features">
+      <!-- Skills -->
+      <section class="skills" id="skills">
         <div class="container">
-          <p class="kicker" data-i18n>What you get</p>
-          <h2 class="display display--md" data-i18n>One platform for the whole company</h2>
+          <p class="kicker" data-i18n>Skills</p>
+          <h2 class="display display--md">
+            <span data-i18n>Turn know-how into Skills</span> <em data-i18n>the whole company can use.</em>
+          </h2>
+          <p class="lead" data-i18n>
+            A Skill bundles how a job is done: the procedure, the rules of judgement, and the files it needs, such as a
+            Markdown guideline, a CSV master list or a PowerPoint template. Share it with a person, a department or the
+            whole company.
+          </p>
           <div class="grid">
-            <article class="card">
-              <div class="card__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24">
-                  <path d="M4 5h16v10H9l-5 4V5Z" />
-                  <path d="M8 9h8M8 12h5" />
-                </svg>
-              </div>
-              <h3 data-i18n>Conversations that do work</h3>
-              <p data-i18n>
-                Progress streams live over SSE. Interrupt, answer a confirmation, queue the next request, or stop.
-                Switch model and effort per conversation. Close the tab and the run keeps going.
-              </p>
-            </article>
             <article class="card">
               <div class="card__icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24">
@@ -264,49 +336,23 @@
                   <path d="M15 3v4h4M9 12h6M9 16h6" />
                 </svg>
               </div>
-              <h3 data-i18n>Skills, versioned</h3>
+              <h3 data-i18n>Shared, with a clear owner</h3>
               <p data-i18n>
-                Procedures, rules and files (Markdown, CSV, PPTX) bundled per job. Draft, evaluate, publish, roll back.
-                Scoped to a person, a department or the company. One kill switch stops a Skill everywhere.
+                Personal, department or company-wide. Who can use a Skill and who can change it is decided by its scope,
+                not by whoever happens to find it.
               </p>
             </article>
             <article class="card">
               <div class="card__icon" aria-hidden="true">
                 <svg viewBox="0 0 24 24">
-                  <ellipse cx="12" cy="6" rx="7" ry="3" />
-                  <path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3" />
+                  <path d="M4 5h16v10H9l-5 4V5Z" />
+                  <path d="M8 9h8M8 12h5" />
                 </svg>
               </div>
-              <h3 data-i18n>Connectors with limits</h3>
+              <h3 data-i18n>Maintained from the conversation</h3>
               <p data-i18n>
-                Read-only access to PostgreSQL, MySQL and SQL Server. Expose only the tables and columns you choose,
-                with row caps, as immutable versions. Pick one in chat with @.
-              </p>
-            </article>
-            <article class="card">
-              <div class="card__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24">
-                  <rect x="3" y="4" width="18" height="16" rx="2" />
-                  <path d="M3 9h18M8 2v4M16 2v4M8 14h3" />
-                </svg>
-              </div>
-              <h3 data-i18n>Tasks and triggers</h3>
-              <p data-i18n>
-                Turn a recurring job into a task: prompt, pinned Skill version, input fields. Start it from a webhook,
-                by hand or from chat, and have the result delivered where that task says.
-              </p>
-            </article>
-            <article class="card">
-              <div class="card__icon" aria-hidden="true">
-                <svg viewBox="0 0 24 24">
-                  <circle cx="12" cy="12" r="3" />
-                  <path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1" />
-                </svg>
-              </div>
-              <h3 data-i18n>One control plane</h3>
-              <p data-i18n>
-                LLM connections (OpenAI, Anthropic, Gemini, local), model profiles, runtime profiles, users,
-                departments, SSO and usage in one admin UI. API keys are encrypted at rest and never leave it.
+                "Make this procedure a Skill." "From now on, handle it this way." The agent drafts the change; people
+                with the right to publish make it live. Files can be replaced the same way.
               </p>
             </article>
             <article class="card">
@@ -316,142 +362,35 @@
                   <path d="m9 12 2 2 4-4" />
                 </svg>
               </div>
-              <h3 data-i18n>Sandbox by default</h3>
+              <h3 data-i18n>Versioned, reversible, stoppable</h3>
               <p data-i18n>
-                Commands run in containers on gVisor, with no network. Only this run's attachments and Skill files are
-                mounted. Nothing else exists.
+                Every published Skill is an immutable version. Running work keeps the version it started with. Roll back
+                in one step, or stop a Skill everywhere with one switch.
               </p>
             </article>
           </div>
         </div>
       </section>
 
-      <!-- How it works -->
-      <section class="how" id="how">
-        <div class="container">
-          <p class="kicker" data-i18n>How it works</p>
-          <h2 class="display display--md" data-i18n>From a request to a result</h2>
-          <ol class="steps">
-            <li>
-              <span class="steps__num">01</span>
-              <h3 data-i18n>Ask</h3>
-              <p data-i18n>
-                An employee opens a conversation, attaches files, and picks a Skill with / and a Connector with @, or
-                leaves the choice to the agent.
-              </p>
-            </li>
-            <li>
-              <span class="steps__num">02</span>
-              <h3 data-i18n>Plan</h3>
-              <p data-i18n>
-                The harness inside the Worker assembles context from the pinned Skill version and calls the LLM with the
-                connection and model profile your admins configured.
-              </p>
-            </li>
-            <li>
-              <span class="steps__num">03</span>
-              <h3 data-i18n>Execute</h3>
-              <p data-i18n>
-                Commands run in an isolated sandbox. Progress streams back live. If the agent needs a decision, the run
-                waits for the answer and resumes where it left off.
-              </p>
-            </li>
-            <li>
-              <span class="steps__num">04</span>
-              <h3 data-i18n>Deliver</h3>
-              <p data-i18n>
-                Artifacts are stored (local disk or S3), the full event history is kept, and the conversation stays open
-                for the next request.
-              </p>
-            </li>
-          </ol>
-
-          <figure class="arch">
-            <svg
-              viewBox="0 0 960 400"
-              role="img"
-              data-i18n-attr="aria-label"
-              aria-label="Architecture: browser, nginx, Nuxt and Django API, PostgreSQL, Worker with the harness, sandbox, LLM providers and internal databases"
-            >
-              <defs>
-                <marker
-                  id="arr"
-                  viewBox="0 0 10 10"
-                  refX="9"
-                  refY="5"
-                  markerWidth="7"
-                  markerHeight="7"
-                  orient="auto-start-reverse"
-                >
-                  <path d="M0 0 10 5 0 10z" fill="currentColor" />
-                </marker>
-              </defs>
-              <g class="arch__zone">
-                <rect x="400" y="30" width="540" height="350" rx="16" />
-                <text x="420" y="56" class="arch__zone-label" data-i18n>Control plane · your host</text>
-              </g>
-              <g class="arch__box">
-                <rect x="20" y="170" width="140" height="80" rx="10" />
-                <text x="90" y="205" data-i18n>Employee</text>
-                <text x="90" y="226" class="arch__sub" data-i18n>browser · SSO</text>
-              </g>
-              <g class="arch__box">
-                <rect x="220" y="170" width="120" height="80" rx="10" />
-                <text x="280" y="205">nginx</text>
-                <text x="280" y="226" class="arch__sub">/ · /api/</text>
-              </g>
-              <g class="arch__box">
-                <rect x="420" y="80" width="140" height="70" rx="10" />
-                <text x="490" y="110">Nuxt</text>
-                <text x="490" y="131" class="arch__sub" data-i18n>employee &amp; admin UI</text>
-              </g>
-              <g class="arch__box">
-                <rect x="420" y="170" width="140" height="70" rx="10" />
-                <text x="490" y="200">Django API</text>
-                <text x="490" y="221" class="arch__sub" data-i18n>REST · SSE</text>
-              </g>
-              <g class="arch__box arch__box--db">
-                <rect x="420" y="280" width="140" height="70" rx="10" />
-                <text x="490" y="310">PostgreSQL</text>
-                <text x="490" y="331" class="arch__sub" data-i18n>source of truth</text>
-              </g>
-              <g class="arch__box arch__box--accent">
-                <rect x="600" y="160" width="150" height="90" rx="10" />
-                <text x="675" y="196">Worker</text>
-                <text x="675" y="218" class="arch__sub" data-i18n>Django Q2 · harness</text>
-              </g>
-              <g class="arch__box arch__box--sandbox">
-                <rect x="600" y="290" width="310" height="70" rx="10" />
-                <text x="755" y="320" data-i18n>Sandbox container</text>
-                <text x="755" y="341" class="arch__sub" data-i18n>no network · gVisor</text>
-              </g>
-              <g class="arch__box arch__box--ext">
-                <rect x="790" y="60" width="130" height="70" rx="10" />
-                <text x="855" y="90" data-i18n>LLM providers</text>
-                <text x="855" y="111" class="arch__sub">OpenAI · Anthropic · …</text>
-              </g>
-              <g class="arch__box arch__box--ext">
-                <rect x="790" y="160" width="130" height="70" rx="10" />
-                <text x="855" y="190" data-i18n>Internal DBs</text>
-                <text x="855" y="211" class="arch__sub" data-i18n>read-only connectors</text>
-              </g>
-              <g class="arch__lines">
-                <path d="M160 210h58" marker-end="url(#arr)" />
-                <path d="M340 195 L418 125" marker-end="url(#arr)" />
-                <path d="M340 210 L418 205" marker-end="url(#arr)" />
-                <path d="M490 240v38" marker-end="url(#arr)" />
-                <path d="M560 205h38" marker-end="url(#arr)" />
-                <path d="M600 242 L562 288" marker-end="url(#arr)" marker-start="url(#arr)" class="arch__thin" />
-                <path d="M675 250v38" marker-end="url(#arr)" />
-                <path d="M750 180 L788 105" marker-end="url(#arr)" class="arch__dashed" />
-                <path d="M750 200 L788 195" marker-end="url(#arr)" class="arch__dashed" />
-              </g>
-            </svg>
-            <figcaption data-i18n>
-              Only the harness inside the Worker talks to LLM providers and internal databases. The sandbox has no
-              network at all.
-            </figcaption>
-          </figure>
+      <!-- Data -->
+      <section class="data" id="data">
+        <div class="container data__grid">
+          <div>
+            <p class="kicker" data-i18n>Data sources</p>
+            <h2 class="display display--md" data-i18n>Internal data, within limits the administrator sets.</h2>
+            <p class="lead" data-i18n>
+              Connect internal databases and give the agent exactly the slice it needs. Employees point at a source with
+              @ in the chat; the agent cannot see anything outside the slice, no matter how it is asked.
+            </p>
+          </div>
+          <ul class="bullets bullets--light">
+            <li data-i18n>PostgreSQL, MySQL and SQL Server today; storage and SaaS sources on the roadmap</li>
+            <li data-i18n>Expose only the tables and columns you choose, with caps on rows and runtime</li>
+            <li data-i18n>Several views on the same connection: one for accounting, another for sales</li>
+            <li data-i18n>Which departments may use each source is part of its configuration</li>
+            <li data-i18n>Sources holding personal data carry a confidential flag and are used only with local LLMs</li>
+            <li data-i18n>Every query is checked and recorded on the server before it runs</li>
+          </ul>
         </div>
       </section>
 
@@ -463,9 +402,9 @@
             <span data-i18n>Routine work, started anywhere,</span> <em data-i18n>delivered anywhere.</em>
           </h2>
           <p class="lead" data-i18n>
-            Define a routine job once as a task: a prompt template, a pinned Skill version and input fields. Then let it
-            run without a conversation, started by whatever already happens in your tools, with the result showing up
-            where the team already looks.
+            Put a routine job into a task: the instructions, the Skill version to use, and the inputs it takes. Then
+            start it from a webhook or by hand, without opening a conversation, and have the result show up where the
+            team already looks.
           </p>
           <div class="flow">
             <div class="flow__col">
@@ -473,7 +412,7 @@
               <ul>
                 <li>
                   <span>Webhook</span>
-                  <small data-i18n>payload handed over as a file, duplicates dropped by event ID</small>
+                  <small data-i18n>from your existing tools; duplicates dropped by event ID</small>
                 </li>
                 <li>
                   <span data-i18n>Manual run</span>
@@ -485,7 +424,7 @@
                 </li>
                 <li>
                   <span data-i18n>Schedule</span><span class="tag" data-i18n>planned</span>
-                  <small data-i18n>same contract, added later</small>
+                  <small data-i18n>same mechanism, added later</small>
                 </li>
               </ul>
             </div>
@@ -493,11 +432,11 @@
               <svg viewBox="0 0 24 24" width="24" height="24"><path d="M4 12h15M13 6l6 6-6 6" /></svg>
             </div>
             <div class="flow__col flow__col--center">
-              <h3 data-i18n>One task, one run</h3>
+              <h3 data-i18n>The task runs</h3>
               <ul>
-                <li><span data-i18n>Prompt template and pinned Skill version</span></li>
-                <li><span data-i18n>Typed inputs, picked out of the payload</span></li>
-                <li><span data-i18n>Runs in the sandbox like any conversation</span></li>
+                <li><span data-i18n>Same safe sandbox as a conversation</span></li>
+                <li><span data-i18n>Fixed Skill version, so results stay consistent</span></li>
+                <li><span data-i18n>Inputs picked out of the incoming payload</span></li>
                 <li><span data-i18n>Pauses for a human decision, then resumes</span></li>
               </ul>
             </div>
@@ -509,11 +448,11 @@
               <ul>
                 <li>
                   <span data-i18n>In-app</span><span class="tag" data-i18n>soon</span>
-                  <small data-i18n>result and artifacts in Yoriki</small>
+                  <small data-i18n>result and files in Yoriki</small>
                 </li>
                 <li>
                   <span>Webhook · Zapier</span><span class="tag" data-i18n>soon</span>
-                  <small data-i18n>a result payload and expiring file links</small>
+                  <small data-i18n>hand the result to any other system</small>
                 </li>
                 <li>
                   <span>Teams · Slack · Discord</span><span class="tag" data-i18n>planned</span>
@@ -522,222 +461,70 @@
               </ul>
             </div>
           </div>
-          <div class="automation__notes">
-            <p data-i18n>
-              A task names one trigger, at most one channel for questions, and at most one destination for the result.
-              There is no separate pipeline engine: a task run is the same Run as a conversation, with the same sandbox,
-              pinned versions and history.
-            </p>
-            <p data-i18n>
-              When the agent needs a decision during an automated run, it asks in the channel thread you chose. Anyone
-              in that thread can answer, and the same run resumes. Questions, progress and the final report stay in that
-              one thread.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <!-- Security -->
-      <section class="security" id="security">
-        <div class="container security__grid">
-          <div class="security__intro">
-            <p class="kicker" data-i18n>Security</p>
-            <h2 class="display display--md" data-i18n>Boundaries you can verify</h2>
-            <p class="lead" data-i18n>
-              The design doc lists acceptance tests for each boundary. These are not aspirations in a prompt; they are
-              properties of the server, the database and the container runtime.
-            </p>
-          </div>
-          <ul class="checks">
-            <li>
-              <h3 data-i18n>No network from the sandbox</h3>
-              <p data-i18n>
-                Shell and Python cannot reach the Internet, the office LAN or DNS. LLM calls, packages and connectors go
-                through managed paths in the control plane.
-              </p>
-            </li>
-            <li>
-              <h3 data-i18n>Only this run's files</h3>
-              <p data-i18n>
-                Another run's data, arbitrary host files, and database or OAuth credentials are not reachable from
-                inside the sandbox.
-              </p>
-            </li>
-            <li>
-              <h3 data-i18n>Permissions enforced server-side</h3>
-              <p data-i18n>
-                Permission classes, filtered querysets and sandbox limits decide what a user and their agent can do.
-                Skills and Connectors a user may not use are invisible even as candidates.
-              </p>
-            </li>
-            <li>
-              <h3 data-i18n>Immutable versions and history</h3>
-              <p data-i18n>
-                Skill, Connector and model profile versions never change once published. Running work keeps its pinned
-                version; messages, events and artifacts are retained.
-              </p>
-            </li>
-            <li>
-              <h3 data-i18n>Secrets stay in the control plane</h3>
-              <p data-i18n>
-                LLM API keys are encrypted at rest and never sent to the runner, the sandbox, logs or the UI. Key
-                rotation is a management command.
-              </p>
-            </li>
-            <li>
-              <h3 data-i18n>Exactly one attempt at a time</h3>
-              <p data-i18n>
-                PostgreSQL is the source of truth for every run. Claims, leases and fencing stop duplicate execution
-                even when a worker dies and a stale one comes back.
-              </p>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <!-- Confidential data -->
-      <section class="confidential" id="confidential">
-        <div class="container">
-          <p class="kicker" data-i18n>Confidential data</p>
-          <h2 class="display display--md"><span data-i18n>One flag.</span> <em data-i18n>Enforced everywhere.</em></h2>
-          <p class="lead" data-i18n>
-            No system can tell which of your data may leave the company. Yoriki does not guess. Administrators mark what
-            is confidential, and the server keeps it on models you host.
-          </p>
-          <div class="conf-grid">
-            <article>
-              <span class="conf-grid__num">01</span>
-              <h3 data-i18n>Confidential connectors</h3>
-              <p data-i18n>
-                A connector whose main content is personal data, such as an HR database or customer records, gets the
-                flag from the platform admin. It is listed and usable only in confidential conversations and tasks.
-              </p>
-            </article>
-            <article>
-              <span class="conf-grid__num">02</span>
-              <h3 data-i18n>Confidential conversations and tasks</h3>
-              <p data-i18n>
-                When a conversation starts, the wizard asks whether personal or confidential information is involved. If
-                so, only local LLM models can be chosen. A conversation can become confidential midway, but never go
-                back. Tasks set it in their definition.
-              </p>
-            </article>
-            <article>
-              <span class="conf-grid__num">03</span>
-              <h3 data-i18n>Confidential Skills</h3>
-              <p data-i18n>
-                A Skill that declares a confidential connector, or whose files hold sensitive data, is confidential too.
-                Editing it from chat and evaluating drafts also run on local models. Setting the flag takes edit rights;
-                clearing it takes publish rights.
-              </p>
-            </article>
-            <article>
-              <span class="conf-grid__num">04</span>
-              <h3 data-i18n>Confidential destinations</h3>
-              <p data-i18n>
-                Results of confidential runs are delivered only to destinations explicitly allowed to receive them. A
-                confidential result never lands on a public webhook by accident.
-              </p>
-            </article>
-          </div>
-          <p class="confidential__foot" data-i18n>
-            Ordinary business documents such as invoices and contracts can go to a cloud provider under enterprise
-            terms. Data that is mostly personal information stays on models you host. The flag draws that line once, and
-            every run checks it.
+          <p class="automation__note" data-i18n>
+            When an automated run needs a human decision, it asks in the channel you chose. Anyone in that thread can
+            answer, and the same run continues. Results go only to destinations an administrator registered, and
+            confidential results only to destinations allowed to receive them.
           </p>
         </div>
       </section>
 
-      <!-- Deploy -->
-      <section class="deploy" id="deploy">
-        <div class="container deploy__grid">
+      <!-- For IT -->
+      <section class="it" id="it">
+        <div class="container it__grid">
           <div>
-            <p class="kicker" data-i18n>Deploy</p>
-            <h2 class="display display--md" data-i18n>Your host. Your data. One compose file.</h2>
+            <p class="kicker" data-i18n>For IT</p>
+            <h2 class="display display--md" data-i18n>Your servers. Your identity provider. Your choice of LLM.</h2>
             <p class="lead" data-i18n>
-              Yoriki ships as Docker images with a single-host Compose setup. Grow to multiple app servers, dedicated
-              workers and a managed PostgreSQL when you need to. Publish through Cloudflare Tunnel without opening a
-              port, or behind your own load balancer.
+              Yoriki runs on a host you control, as a handful of containers. Nothing is sent to a vendor you did not
+              configure yourself.
             </p>
-            <ul class="bullets">
-              <li data-i18n>
-                Sign-in with Microsoft 365 or Google Workspace (OIDC), or invited accounts where there is no SSO
-              </li>
-              <li data-i18n>Artifacts on local disk or S3-compatible storage</li>
-              <li data-i18n>Sandbox images published on Docker Hub</li>
-              <li data-i18n>Add worker hosts on the same private network as you scale</li>
-            </ul>
           </div>
-          <div class="terminal" aria-label="Terminal">
-            <div class="terminal__bar"><i></i><i></i><i></i><span>bash</span></div>
-            <pre><code><span class="c" data-i18n># Single host, production</span>
-git clone https://github.com/shunsukeaihara/yoriki
-cd yoriki
-cp deploy/env/yoriki.env.example   /etc/yoriki/yoriki.env
-cp deploy/env/postgres.env.example /etc/yoriki/postgres.env
-
-docker compose -f deploy/compose.yaml up -d
-
-<span class="c" data-i18n># Publish through Cloudflare Tunnel instead of opening a port</span>
-docker compose -f deploy/compose.yaml \
-               -f deploy/compose.cloudflare.yaml up -d</code></pre>
-          </div>
+          <dl class="facts">
+            <div>
+              <dt data-i18n>Deployment</dt>
+              <dd data-i18n>
+                Docker Compose on a single host to start; add app servers and workers later. Publish via your load
+                balancer or Cloudflare Tunnel.
+              </dd>
+            </div>
+            <div>
+              <dt data-i18n>Sign-in</dt>
+              <dd data-i18n>
+                Microsoft 365 or Google Workspace (OIDC). Invited accounts with passwords where there is no SSO.
+              </dd>
+            </div>
+            <div>
+              <dt>LLM</dt>
+              <dd data-i18n>
+                OpenAI, Anthropic, Gemini, or a local server such as vLLM or Ollama. Keys are encrypted at rest and
+                never reach the agent, the sandbox or the logs.
+              </dd>
+            </div>
+            <div>
+              <dt data-i18n>Sandbox</dt>
+              <dd data-i18n>Containers on gVisor with no network. Images published on Docker Hub.</dd>
+            </div>
+            <div>
+              <dt data-i18n>Files</dt>
+              <dd data-i18n>Attachments and results on local disk or S3-compatible storage.</dd>
+            </div>
+            <div>
+              <dt data-i18n>Control</dt>
+              <dd data-i18n>Users, departments and permissions; usage per user; history of every run. One admin UI.</dd>
+            </div>
+          </dl>
         </div>
       </section>
 
-      <!-- Roadmap -->
-      <section class="roadmap" id="roadmap">
-        <div class="container">
-          <p class="kicker" data-i18n>Roadmap</p>
-          <h2 class="display display--md" data-i18n>Where it stands</h2>
-          <p class="lead roadmap__lead" data-i18n>
-            Yoriki is pre-alpha. The first stage of the design is being implemented in the open. Expect breaking
-            changes, and read the status document before relying on anything.
-          </p>
-          <ol class="stages">
-            <li class="stage stage--now">
-              <span class="stage__tag" data-i18n>Stage 1 · in progress</span>
-              <h3 data-i18n>Governed single-host execution</h3>
-              <p data-i18n>
-                Conversations with live progress, versioned Skills with files, read-only database Connectors, task
-                definitions, the harness with leases and resume, no-network sandboxes, SSO, admin UI, Compose deploy.
-              </p>
-              <p class="stage__todo">
-                <strong data-i18n>Not yet:</strong>
-                <span data-i18n
-                  >webhook triggers, notifications, Teams / Slack / Discord channels, the plugin registry, Python
-                  package additions, quotas.</span
-                >
-              </p>
-            </li>
-            <li class="stage">
-              <span class="stage__tag" data-i18n>Stage 2</span>
-              <h3 data-i18n>Resume and failure recovery</h3>
-              <p data-i18n>
-                Checkpoints and workspace snapshots, waiting on input, outbox delivery, the reconciler, and the full set
-                of failure drills: dead workers, stale leases, racing replies, publish conflicts.
-              </p>
-            </li>
-            <li class="stage">
-              <span class="stage__tag" data-i18n>Stage 3</span>
-              <h3 data-i18n>More worker hosts</h3>
-              <p data-i18n>
-                Worker-only servers on the same private network, capability-based assignment, drain, and cleanup,
-                sharing one PostgreSQL and one object store.
-              </p>
-            </li>
-          </ol>
-        </div>
-      </section>
-
-      <!-- CTA -->
+      <!-- Open source -->
       <section class="final">
         <div class="container final__inner">
           <span class="seal seal--lg" aria-hidden="true">与力</span>
-          <h2 class="display display--md" data-i18n>Read the design. Run it. Tell us what breaks.</h2>
+          <h2 class="display display--md" data-i18n>Open source, built in the open.</h2>
           <p class="lead" data-i18n>
-            Everything is in the repository: the design document, the conventions, the data model, and the acceptance
-            criteria. Issues and pull requests are welcome.
+            Yoriki is pre-alpha and MIT-licensed. The design, the conventions and the current status are all in the
+            repository. Read it, run it, and tell us what is missing.
           </p>
           <div class="cta cta--center">
             <a class="btn btn--primary" href="https://github.com/shunsukeaihara/yoriki" data-i18n>Star on GitHub</a>
@@ -755,17 +542,20 @@ docker compose -f deploy/compose.yaml \
           <span class="seal" aria-hidden="true">与力</span>
           <div>
             <strong>Yoriki</strong>
-            <p data-i18n>Open-source AI agents for the workplace, governed by your servers.</p>
+            <p data-i18n>
+              Named after the yoriki (与力), the officers of Edo-period Japan who carried out a magistrate's work within
+              the authority they were given.
+            </p>
           </div>
         </div>
         <div class="footer__cols">
           <div>
             <h4 data-i18n>Documentation</h4>
+            <a href="https://github.com/shunsukeaihara/yoriki/blob/main/README.md">README</a>
             <a href="https://github.com/shunsukeaihara/yoriki/blob/main/docs/design.md" data-i18n>Design</a>
             <a href="https://github.com/shunsukeaihara/yoriki/blob/main/docs/authorization.md" data-i18n
               >Authorization</a
             >
-            <a href="https://github.com/shunsukeaihara/yoriki/blob/main/docs/harness.md" data-i18n>Agent harness</a>
             <a href="https://github.com/shunsukeaihara/yoriki/blob/main/docs/deployment.md" data-i18n>Deployment</a>
           </div>
           <div>

@@ -7,22 +7,25 @@
 ;(function () {
   const ja = {
     'Skip to content': '本文へ移動',
-    Features: '機能',
-    'How it works': '仕組み',
-    Security: 'セキュリティ',
-    Deploy: '配備',
-    Roadmap: 'ロードマップ',
-    Docs: 'ドキュメント',
+    'Why Yoriki': 'なぜYoriki',
+    'For employees': '社員の方へ',
+    Skills: 'Skill',
+    Data: 'データ',
+    Automation: '自動実行',
+    'For IT': '管理者の方へ',
     'Toggle theme': 'テーマを切り替える',
 
     // Hero
-    'Open source · MIT · pre-alpha': 'オープンソース · MIT · pre-alpha',
-    'AI agents for everyone at work.': '社内の誰もが使える、業務用AIエージェント。',
-    'Governed by your servers, not by the prompt.': '権限を決めるのは、プロンプトではなくサーバー。',
-    "Yoriki is a self-hosted platform that lets employees delegate real work to AI agents through chat. Skills, connectors and sandboxes stay under your administrators' control.":
-      'Yorikiは、社員がチャットでAIエージェントに実際の業務を任せられる、セルフホストの基盤です。Skill・Connector・Sandboxは、管理者の管理のもとに置かれます。',
+    'Open source · self-hosted · MIT': 'オープンソース · セルフホスト · MIT',
+    'AI agents your whole company': 'AIエージェントを、',
+    'can use with confidence.': '全社で安心して使うための基盤。',
+    'Using AI agents at work is no longer optional. But leaks, damaged systems, attacks on outsiders and runaway agents are real fears. Yoriki lets the company decide what data an agent may touch, where its commands run and where results go, and enforces that in software. Human judgement still matters. The agent cannot step over the line on its own.':
+      '業務の効率化に、AIエージェントはもう欠かせない。でも、情報漏洩、システムやデータの破壊、社外への攻撃、暴走が怖い。Yorikiは、エージェントが触れるデータ、コマンドが動く場所、結果の届け先を会社が決め、ソフトウェアがそのとおりに守ります。人の判断に頼る部分はなくなりませんが、エージェントが自分で境界を越えることはありません。',
     'View on GitHub': 'GitHubで見る',
-    'Read the design': '設計書を読む',
+    'How the fears are answered': '不安への答えを見る',
+    'Runs on your servers': '自社のサーバーで動く',
+    'Cloud or local LLMs': 'クラウドでも社内のLLMでも',
+    'Sandboxed commands': 'コマンドはサンドボックスで',
 
     // Mock UI
     'Invoice intake': '請求書の取込',
@@ -44,158 +47,100 @@
     'read-only': '読取り専用',
     Model: 'モデル',
 
-    // Origin
-    "(与力) were the trusted officers of Edo-period Japan who carried out a magistrate's work. The name says what the product does: capable hands that act within the authority they are given.":
-      '（与力）は、江戸時代に奉行の下で実務を担った役人のこと。与えられた権限の範囲で、確実に仕事をこなす手。この製品がすることを、そのまま名前にしました。',
+    // Fears
+    'Four fears.': '4つの不安に、',
+    'Four boundaries, enforced in software.': 'ソフトウェアが守る4つの境界で答える。',
+    "These are the questions that stop a rollout. Each one is answered by a boundary that Yoriki's server and execution environment enforce, not by a rule in a prompt that the model may or may not follow.":
+      '導入を止めるのは、この4つの問いです。それぞれに、Yorikiのサーバーと実行環境が強制する境界で答えます。モデルが守るかどうか分からない、プロンプトの中の決まりではありません。',
+    '"Will the agent leak our data?"': '「エージェントが情報を漏らさないか」',
+    'It only sees what administrators let it see.': '管理者が見せると決めたものしか見えません。',
+    'Which data the agent can read is decided by administrators, table by table and column by column. Work that involves personal or confidential information is marked as such and runs only on LLMs you host. Nothing typed into a prompt can widen that.':
+      'エージェントが読めるデータは、管理者が表と列の単位で決めます。個人情報や機密情報を扱う業務にはその印を付け、自社でホストするLLMでだけ動かします。プロンプトに何を書いても、この範囲は広がりません。',
+    'Access scopes set in software, not in instructions': 'アクセスの範囲は指示文ではなく設定で決める',
+    'Confidential work stays on local models': '機密の業務は社内のモデルにとどまる',
+    'API keys and credentials never reach the agent': 'API keyや資格情報はエージェントに渡らない',
+    '"Will it break a system or wipe data?"': '「システムを壊したり、データを消したりしないか」',
+    'Commands run in a sandbox with nothing to break.': '壊せるものがないサンドボックスで、コマンドが動きます。',
+    "Administrators restrict what the agent may do to databases and cloud storage at the software level. Commands run in a disposable sandbox that holds only that job's files. The host, other jobs and your systems are out of reach.":
+      'DBやクラウドストレージに対してエージェントができることは、管理者がソフトウェアのレベルで制限します。コマンドは使い捨てのサンドボックスで動き、中にあるのはその仕事のファイルだけ。ホスト、他の仕事、社内のシステムには届きません。',
+    'Access to DBs and storage limited by configuration': 'DBやストレージへのアクセスは設定で制限',
+    'A fresh, isolated sandbox for every run, on gVisor': '実行のたびに新しい、gVisor上の隔離されたサンドボックス',
+    "Only this job's attachments and Skill files inside": '中にあるのは、その仕事の添付とSkillの資料だけ',
+    '"Could it attack someone outside?"': '「社外を攻撃する踏み台にならないか」',
+    'The sandbox has no network at all.': 'サンドボックスにネットワークはありません。',
+    'No Internet, no office LAN, no DNS. An agent cannot scan, call or send anything from where its commands run. The only outbound traffic is what Yoriki itself makes through managed paths: the LLM you chose and the data sources you approved.':
+      'インターネットも、社内LANも、DNSもありません。コマンドが動く場所から、何かを探したり、呼んだり、送ったりはできません。外へ出る通信は、Yoriki自身が管理された経路で行うものだけ。選んだLLMと、許可したデータソースです。',
+    'No free outbound access from the agent': 'エージェントからの自由な外部アクセスはない',
+    'Results go only to destinations you registered': '結果が届くのは登録した通知先だけ',
+    'Nothing reaches outside without a managed path': '管理された経路の外には何も出ない',
+    '"What if it runs wild?"': '「暴走しないか」',
+    'People set the goal. The agent cannot grow its own powers.':
+      '目的は人が決め、エージェントは自分の権限を増やせません。',
+    'People decide the purpose and the business calls; the agent chooses the method within its limits. Any run can be stopped at once. Every tool call is checked on the server, the agent cannot grant itself permissions, and every step is recorded and cannot be rewritten.':
+      '目的と業務上の判断は人が決め、エージェントは許された範囲で方法を選びます。実行はいつでもすぐ止められます。Toolの呼出しはすべてサーバーで確かめられ、エージェントは自分に権限を与えられず、すべての手順が記録され、書き換えられません。',
+    'Stop any run, any time': 'どの実行も、いつでも止められる',
+    'Permissions checked on every call, server-side': '権限は呼出しのたびにサーバー側で確認',
+    'Immutable history of what was done': '何をしたかの履歴は書き換えられない',
+    'What people type in remains their judgement. Yoriki supports it: a confidential flag that keeps sensitive work on local models, a check when a conversation starts, and data sources that are limited before anyone asks a question.':
+      '何を入力するかは、人の判断のままです。Yorikiはそれを支えます。機密の業務を社内のモデルにとどめる印、会話を始めるときの確認、そして質問される前から制限されたデータソースです。',
 
-    // Principle
-    'The idea': '考え方',
-    'Trust the boundary,': '信じるのは境界。',
-    'not the model.': 'モデルではなく。',
-    'Most agent products ask the model to behave. Yoriki does not. Who can use which Skill, which tables a Connector may read, and what a command can reach are decided by the server and the execution environment, and are enforced there.':
-      '多くのエージェント製品は、モデルに「行儀よくふるまうこと」を求めます。Yorikiはそうしません。誰がどのSkillを使えるか、Connectorがどの表を読めるか、コマンドがどこまで届くかは、サーバーと実行環境が決め、そこで強制します。',
-    'Employees get a chat where they state the goal and make the business calls. The agent chooses the method and does the work, inside a sandbox with no network, with only the files it was given. No approval prompt for every command. No prompt-level permission theatre.':
-      '社員はチャットで目的を伝え、業務上の判断を下します。エージェントは方法を選び、ネットワークのないSandboxの中で、渡されたファイルだけを使って作業します。コマンドごとの承認はありません。プロンプトで権限を演出することもありません。',
+    // For employees
+    'And still, people just get work done.': 'それでも、社員は普通に仕事を頼めます。',
+    'The boundaries sit underneath. On top, employees get a chat where they hand over real work: documents, spreadsheets, PDFs, data from internal systems.':
+      '境界は下に敷かれています。その上で社員は、文書、表計算、PDF、社内システムのデータといった実際の仕事を、チャットで任せられます。',
+    'Ask in plain language, attach files': '言葉で頼んで、ファイルを添付する',
+    'Describe the job, attach what is needed, and pick a Skill or a data source if you want to. Or let the agent choose from what you are allowed to use.':
+      '仕事を説明し、必要なものを添付し、使いたければSkillやデータソースを指定します。指定しなければ、エージェントが使える範囲から選びます。',
+    'Watch it plan and work': '計画と作業を見守る',
+    'The agent shows its plan and its progress as it goes. Add an instruction midway, answer a question, or queue the next request.':
+      'エージェントは計画と進捗を見せながら進めます。途中で指示を足す、質問に答える、次の依頼を積んでおくことができます。',
+    'No approval for every command': 'コマンドごとの承認はいらない',
+    'Because the sandbox makes commands safe, nobody has to click "allow" for each step. Stop is always one click away.':
+      'サンドボックスがコマンドを安全にしているので、手順ごとに「許可」を押す必要はありません。停止はいつでも1クリックです。',
+    'Close the tab, come back later': 'タブを閉じて、あとで戻る',
+    'Runs continue on the server. Results and files wait in the conversation, and the conversation stays open for the next job.':
+      '実行はサーバーで続きます。結果とファイルは会話の中で待っていて、会話はそのまま次の仕事に使えます。',
 
-    // Features
-    'What you get': '提供するもの',
-    'One platform for the whole company': '全社で使う、ひとつの基盤',
-    'Conversations that do work': '仕事が進む会話',
-    'Progress streams live over SSE. Interrupt, answer a confirmation, queue the next request, or stop. Switch model and effort per conversation. Close the tab and the run keeps going.':
-      '進捗はSSEで逐次表示。途中で指示を足す、確認に答える、次の依頼を積む、停止する。会話ごとにモデルとeffortを切り替えられます。タブを閉じても実行は続きます。',
-    'Skills, versioned': '版を持つSkill',
-    'Procedures, rules and files (Markdown, CSV, PPTX) bundled per job. Draft, evaluate, publish, roll back. Scoped to a person, a department or the company. One kill switch stops a Skill everywhere.':
-      '業務ごとの手順・判断基準・資料（Markdown、CSV、PPTX）をひとまとめに。Draft、評価、公開、切戻し。範囲は個人・部門・全社。緊急停止はすべてのRunに効きます。',
-    'Connectors with limits': '上限つきのConnector',
-    'Read-only access to PostgreSQL, MySQL and SQL Server. Expose only the tables and columns you choose, with row caps, as immutable versions. Pick one in chat with @.':
-      'PostgreSQL・MySQL・SQL Serverを読取り専用で。公開する表と列、行数の上限を不変の版として持ちます。会話では @ で指定します。',
-    'Tasks and triggers': 'タスクと起動',
-    'One control plane': 'ひとつの管理画面',
-    'LLM connections (OpenAI, Anthropic, Gemini, local), model profiles, runtime profiles, users, departments, SSO and usage in one admin UI. API keys are encrypted at rest and never leave it.':
-      'LLMの接続（OpenAI・Anthropic・Gemini・ローカル）、モデル設定、Runtime Profile、ユーザー・部門、SSO、利用量を一元管理。API keyは暗号化して保存し、外へ出しません。',
-    'Sandbox by default': '既定でSandbox',
+    // Skills
+    'Turn know-how into Skills': '業務の知識をSkillにして、',
+    'the whole company can use.': '全社で使う。',
+    'A Skill bundles how a job is done: the procedure, the rules of judgement, and the files it needs, such as a Markdown guideline, a CSV master list or a PowerPoint template. Share it with a person, a department or the whole company.':
+      'Skillは、仕事のやり方をひとまとめにしたものです。手順、判断の基準、そして必要な資料。Markdownのガイドライン、CSVのマスター、PowerPointのテンプレートなど。個人、部門、全社の単位で共有できます。',
+    'Shared, with a clear owner': '共有され、持ち主がはっきりしている',
+    'Personal, department or company-wide. Who can use a Skill and who can change it is decided by its scope, not by whoever happens to find it.':
+      '個人、部門、全社。誰が使え、誰が直せるかはSkillの範囲で決まります。たまたま見つけた人が変えることはできません。',
+    'Maintained from the conversation': '会話の中で育てる',
+    '"Make this procedure a Skill." "From now on, handle it this way." The agent drafts the change; people with the right to publish make it live. Files can be replaced the same way.':
+      '「この手順をSkillにして」「今後はこの基準で処理して」。エージェントが変更の下書きを作り、公開の権限を持つ人がそれを有効にします。資料の差し替えも同じやり方でできます。',
+    'Versioned, reversible, stoppable': '版があり、戻せて、止められる',
+    'Every published Skill is an immutable version. Running work keeps the version it started with. Roll back in one step, or stop a Skill everywhere with one switch.':
+      '公開したSkillは不変の版になります。実行中の仕事は始めたときの版を使い続けます。ひとつ前に戻すのも、すべての場所で止めるのも、ひとつの操作です。',
 
-    // How
-    'From a request to a result': '依頼から結果まで',
-    Ask: '依頼する',
-    'An employee opens a conversation, attaches files, and picks a Skill with / and a Connector with @, or leaves the choice to the agent.':
-      '社員が会話を開き、ファイルを添付し、/ でSkill、@ でConnectorを指定します。エージェントに任せることもできます。',
-    Execute: '実行する',
-    'Commands run in an isolated sandbox. Progress streams back live. If the agent needs a decision, the run waits for the answer and resumes where it left off.':
-      'コマンドは隔離されたSandboxで動き、進捗は逐次返ります。判断が必要になればRunは回答を待ち、そこから再開します。',
-    Deliver: '届ける',
-    'Artifacts are stored (local disk or S3), the full event history is kept, and the conversation stays open for the next request.':
-      '成果物はローカルまたはS3に保存され、イベントの履歴はすべて残ります。会話はそのまま次の依頼を待ちます。',
-    'Architecture: browser, nginx, Nuxt and Django API, PostgreSQL, worker, sandbox and LLM providers':
-      '構成：ブラウザ、nginx、NuxtとDjango API、PostgreSQL、Worker、Sandbox、LLMプロバイダー',
-    Employee: '社員',
-    'browser · SSO': 'ブラウザ · SSO',
-    'Control plane · your host': 'Control Plane · 自社のホスト',
-    'employee & admin UI': '社員向け・管理画面',
-    'REST · SSE': 'REST · SSE',
-    'Django Q2 · Runner': 'Django Q2 · Runner',
-    'source of truth': '実行状態の正本',
-    'Sandbox container': 'Sandboxのコンテナ',
-    'LLM providers': 'LLMプロバイダー',
-    'Internal DBs': '社内DB',
-    'read-only connectors': '読取り専用のConnector',
-
-    // Security
-    'Boundaries you can verify': '確かめられる境界',
-    'The design doc lists acceptance tests for each boundary. These are not aspirations in a prompt; they are properties of the server, the database and the container runtime.':
-      '設計書には、境界ごとの受入条件を書いています。プロンプトに書いた願望ではなく、サーバー・データベース・コンテナランタイムの性質です。',
-    'No network from the sandbox': 'Sandboxからネットワークに出られない',
-    'Shell and Python cannot reach the Internet, the office LAN or DNS. LLM calls, packages and connectors go through managed paths in the control plane.':
-      'shellとPythonからInternet・社内LAN・DNSへ接続できません。LLMの呼出し、パッケージ、Connectorは、Control Planeの管理された経路を通ります。',
-    "Only this run's files": 'このRunのファイルだけ',
-    "Another run's data, arbitrary host files, and database or OAuth credentials are not reachable from inside the sandbox.":
-      '別のRunのデータ、ホストの任意のファイル、DBやOAuthの認証情報には、Sandboxの中から届きません。',
-    'Permissions enforced server-side': '権限はサーバー側で強制',
-    'Permission classes, filtered querysets and sandbox limits decide what a user and their agent can do. Skills and Connectors a user may not use are invisible even as candidates.':
-      'permission、QuerySetの絞り込み、Sandboxの制限が、利用者とそのエージェントにできることを決めます。権限のないSkill・Connectorは、候補としても見えません。',
-    'Immutable versions and history': '不変の版と履歴',
-    'Skill, Connector and model profile versions never change once published. Running work keeps its pinned version; messages, events and artifacts are retained.':
-      'Skill・Connector・モデル設定の版は、公開した後は変わりません。実行中のRunは固定した版を使い続け、メッセージ・イベント・成果物は保存されます。',
-    'Secrets stay in the control plane': 'SecretはControl Planeの中に',
-    'LLM API keys are encrypted at rest and never sent to the runner, the sandbox, logs or the UI. Key rotation is a management command.':
-      'LLMのAPI keyは暗号化して保存し、Runner・Sandbox・ログ・画面へは出しません。鍵の交換は管理コマンドで行います。',
-    'Exactly one attempt at a time': '同時に動くAttemptはひとつ',
-    'PostgreSQL is the source of truth for every run. Claims, leases and fencing stop duplicate execution even when a worker dies and a stale one comes back.':
-      'すべてのRunの正本はPostgreSQL。claim・lease・fencingで、Workerが落ちても古いWorkerが戻ってきても、二重実行を防ぎます。',
-
-    // Deploy
-    'Your host. Your data. One compose file.': '自社のホストに。データは手元に。Composeひとつで。',
-    'Yoriki ships as Docker images with a single-host Compose setup. Grow to multiple app servers, dedicated workers and a managed PostgreSQL when you need to. Publish through Cloudflare Tunnel without opening a port, or behind your own load balancer.':
-      'YorikiはDockerイメージと、単一ホスト用のCompose構成で配布します。必要になれば、複数のアプリサーバー、専用のWorker、マネージドのPostgreSQLへ広げられます。ポートを開けずにCloudflare Tunnelで公開するか、自社のロードバランサーの裏に置けます。',
-    'Sign-in with Microsoft 365 or Google Workspace (OIDC), or invited accounts where there is no SSO':
-      'Microsoft 365・Google Workspace（OIDC）でログイン。SSOのない環境では招待制のアカウント',
-    'Artifacts on local disk or S3-compatible storage': '成果物はローカルディスクまたはS3互換ストレージへ',
-    'Add worker hosts on the same private network as you scale': '同じ私設ネットワークにWorkerのホストを追加して拡張',
-    '# Single host, production': '# 単一ホスト、本番',
-    '# Publish through Cloudflare Tunnel instead of opening a port': '# ポートを開けずにCloudflare Tunnelで公開する',
-
-    // Roadmap
-    'Where it stands': 'いまの状況',
-    'Yoriki is pre-alpha. The first stage of the design is being implemented in the open. Expect breaking changes, and read the status document before relying on anything.':
-      'Yorikiはpre-alphaです。設計の第1段階を公開しながら実装しています。互換性のない変更があります。使う前に状況の文書を読んでください。',
-    'Stage 1 · in progress': '第1段階 · 実装中',
-    'Governed single-host execution': '管理された単一ホスト実行',
-    'Conversations with live progress, versioned Skills with files, read-only database Connectors, task definitions, the harness with leases and resume, no-network sandboxes, SSO, admin UI, Compose deploy.':
-      '逐次表示のある会話、資料を持つ版つきSkill、読取り専用のDB Connector、タスクの定義、leaseと再開を持つハーネス、ネットワークのないSandbox、SSO、管理画面、Composeでの配備。',
-    'Not yet:': 'まだないもの：',
-    'webhook triggers, notifications, Teams / Slack / Discord channels, the plugin registry, Python package additions, quotas.':
-      'Webhookでの起動、通知、Teams / Slack / DiscordのChannel、Pluginの仕組み、Pythonパッケージの追加、クオータ。',
-    'Stage 2': '第2段階',
-    'Resume and failure recovery': '再開と障害復旧',
-    'Checkpoints and workspace snapshots, waiting on input, outbox delivery, the reconciler, and the full set of failure drills: dead workers, stale leases, racing replies, publish conflicts.':
-      'CheckpointとWorkspaceのsnapshot、入力待ち、Outboxによる配信、Reconciler、そして障害の検証一式：Workerの停止、失効したlease、競合する回答、公開の競合。',
-    'Stage 3': '第3段階',
-    'More worker hosts': 'Workerサーバーの追加',
-    'Worker-only servers on the same private network, capability-based assignment, drain, and cleanup, sharing one PostgreSQL and one object store.':
-      '同じ私設ネットワーク内のWorker専用サーバー、能力別の配分、drain、清掃。PostgreSQLとオブジェクトストレージは共有します。',
-
-    // Final
-    'Read the design. Run it. Tell us what breaks.': '設計を読んで、動かして、壊れたところを教えてください。',
-    'Everything is in the repository: the design document, the conventions, the data model, and the acceptance criteria. Issues and pull requests are welcome.':
-      '設計書、規約、データモデル、受入条件まで、すべてリポジトリにあります。IssueとPull Requestを歓迎します。',
-    'Star on GitHub': 'GitHubでStar',
-    'Current status': 'いまの状況',
-
-    // Footer
-    'Open-source AI agents for the workplace, governed by your servers.':
-      '自社のサーバーが権限を決める、オープンソースの業務用AIエージェント。',
-    Documentation: 'ドキュメント',
-    Design: '設計',
-    Authorization: '権限',
-    'Agent harness': 'エージェントのハーネス',
-    Deployment: '配備',
-    Project: 'プロジェクト',
-    Status: '状況',
-    'MIT License': 'MITライセンス',
-    'Released under the MIT License.': 'MITライセンスで公開しています。',
-    Automation: '自動実行',
-    'Turn a recurring job into a task: prompt, pinned Skill version, input fields. Start it from a webhook, by hand or from chat, and have the result delivered where that task says.':
-      '繰り返す業務はタスクに。プロンプト、固定したSkillの版、入力の項目を定義し、Webhook・手動・チャットから起動して、結果はタスクごとの通知先へ届けます。',
-    "Commands run in containers on gVisor, with no network. Only this run's attachments and Skill files are mounted. Nothing else exists.":
-      'コマンドはgVisorの上のコンテナで、ネットワークなしで動きます。マウントされるのは、このRunの添付とSkillの資料だけです。',
-    'The harness inside the Worker assembles context from the pinned Skill version and calls the LLM with the connection and model profile your admins configured.':
-      'Workerの中のハーネスが固定したSkillの版から文脈を組み立て、管理者が設定した接続とモデル設定でLLMを呼びます。',
-    'Architecture: browser, nginx, Nuxt and Django API, PostgreSQL, Worker with the harness, sandbox, LLM providers and internal databases':
-      '構成：ブラウザ、nginx、NuxtとDjango API、PostgreSQL、ハーネスを持つWorker、Sandbox、LLMプロバイダー、社内DB',
-    'Django Q2 · harness': 'Django Q2 · ハーネス',
-    'no network · gVisor': 'ネットワークなし · gVisor',
-    'Only the harness inside the Worker talks to LLM providers and internal databases. The sandbox has no network at all.':
-      'LLMプロバイダーや社内DBと通信するのは、Workerの中のハーネスだけ。Sandboxにネットワークはありません。',
-    'Sandbox images published on Docker Hub': 'SandboxのイメージはDocker Hubで公開',
+    // Data
+    'Data sources': 'データソース',
+    'Internal data, within limits the administrator sets.': '社内のデータは、管理者が決めた範囲で。',
+    'Connect internal databases and give the agent exactly the slice it needs. Employees point at a source with @ in the chat; the agent cannot see anything outside the slice, no matter how it is asked.':
+      '社内のデータベースをつなぎ、エージェントには必要な範囲だけを渡します。社員はチャットで @ を付けてデータソースを指定します。どう頼まれても、エージェントは範囲の外を見ることができません。',
+    'PostgreSQL, MySQL and SQL Server today; storage and SaaS sources on the roadmap':
+      '今はPostgreSQL・MySQL・SQL Server。ストレージやSaaSの接続先はロードマップに',
+    'Expose only the tables and columns you choose, with caps on rows and runtime':
+      '公開するのは選んだ表と列だけ。件数と実行時間に上限',
+    'Several views on the same connection: one for accounting, another for sales':
+      '同じ接続の上に、経理向け・営業向けなど複数の範囲を作れる',
+    'Which departments may use each source is part of its configuration':
+      'どの部門が使えるかは、データソースの設定の一部',
+    'Sources holding personal data carry a confidential flag and are used only with local LLMs':
+      '個人情報を持つデータソースには機密の印を付け、社内のLLMとだけ使う',
+    'Every query is checked and recorded on the server before it runs':
+      '問い合わせは実行前にサーバーで検査し、記録する',
 
     // Automation
     'Routine work, started anywhere,': '定型業務を、どこからでも起動し、',
     'delivered anywhere.': 'どこへでも届ける。',
-    'Define a routine job once as a task: a prompt template, a pinned Skill version and input fields. Then let it run without a conversation, started by whatever already happens in your tools, with the result showing up where the team already looks.':
-      '定型業務は一度タスクとして定義します。プロンプトのテンプレート、固定したSkillの版、入力の項目。あとは会話を介さず、いつも使っているツールの出来事をきっかけに動かし、結果はチームがいつも見ている場所へ届けます。',
+    'Put a routine job into a task: the instructions, the Skill version to use, and the inputs it takes. Then start it from a webhook or by hand, without opening a conversation, and have the result show up where the team already looks.':
+      '定型業務はタスクにまとめます。指示、使うSkillの版、受け取る入力。あとはWebhookや手動で、会話を開かずに起動し、結果はチームがいつも見ている場所へ届けます。',
     Triggers: '起動',
-    'payload handed over as a file, duplicates dropped by event ID':
-      'payloadはファイルとして渡し、イベントIDで重複を除く',
+    'from your existing tools; duplicates dropped by event ID': 'いつものツールから。重複はイベントIDで除く',
     'Manual run': '手動実行',
     'from the task list or the API': 'タスクの一覧かAPIから',
     Chat: 'チャット',
@@ -203,56 +148,70 @@
     'start a task from a conversation': '会話からタスクを起動する',
     Schedule: 'スケジュール',
     planned: '予定',
-    'same contract, added later': '同じ契約で後から追加',
-    'One task, one run': 'タスク1つ、Run1つ',
-    'Prompt template and pinned Skill version': 'プロンプトのテンプレートと固定したSkillの版',
-    'Typed inputs, picked out of the payload': '型のある入力を、payloadから取り出す',
-    'Runs in the sandbox like any conversation': '会話と同じSandboxで動く',
+    'same mechanism, added later': '同じ仕組みで後から追加',
+    'The task runs': 'タスクが動く',
+    'Same safe sandbox as a conversation': '会話と同じ安全なサンドボックスで',
+    'Fixed Skill version, so results stay consistent': 'Skillの版を固定し、結果がぶれない',
+    'Inputs picked out of the incoming payload': '届いたpayloadから入力を取り出す',
     'Pauses for a human decision, then resumes': '人の判断が必要なら止まり、回答で再開する',
     Destinations: '通知先',
     'In-app': '画面内',
-    'result and artifacts in Yoriki': 'Yorikiの画面に結果と成果物',
-    'a result payload and expiring file links': '結果のpayloadと期限付きのファイルURL',
+    'result and files in Yoriki': 'Yorikiの画面に結果とファイル',
+    'hand the result to any other system': '結果を他のシステムへ渡す',
     'questions, answers and the report in one thread': '質問・回答・報告を1つのスレッドに',
-    'A task names one trigger, at most one channel for questions, and at most one destination for the result. There is no separate pipeline engine: a task run is the same Run as a conversation, with the same sandbox, pinned versions and history.':
-      'タスクには起動が1つ、質問のためのチャネルが最大1つ、結果の通知先が最大1つ。別のパイプラインエンジンはありません。タスクのRunは会話のRunと同じもので、同じSandbox・固定した版・履歴を持ちます。',
-    'When the agent needs a decision during an automated run, it asks in the channel thread you chose. Anyone in that thread can answer, and the same run resumes. Questions, progress and the final report stay in that one thread.':
-      '自動実行の途中で判断が必要になると、エージェントは指定したチャネルのスレッドで質問します。スレッドの誰でも答えられ、同じRunが再開します。質問、進捗、完了の報告は、その1つのスレッドに集まります。',
+    'When an automated run needs a human decision, it asks in the channel you chose. Anyone in that thread can answer, and the same run continues. Results go only to destinations an administrator registered, and confidential results only to destinations allowed to receive them.':
+      '自動実行の途中で人の判断が必要になると、指定したチャネルで質問します。スレッドの誰でも答えられ、同じ実行が続きます。結果が届くのは管理者が登録した通知先だけで、機密の結果は、受け取ってよいとした通知先にだけ届きます。',
 
-    // Confidential
-    'Confidential data': '機密の情報',
-    'One flag.': 'フラグはひとつ。',
-    'Enforced everywhere.': '効くのはすべての場所。',
-    'No system can tell which of your data may leave the company. Yoriki does not guess. Administrators mark what is confidential, and the server keeps it on models you host.':
-      'どのデータを社外へ出してよいかは、システムには判断できません。Yorikiは推測しません。管理者が機密の印を付け、サーバーがそれを自社でホストするモデルの中にとどめます。',
-    'Confidential connectors': '機密のConnector',
-    'A connector whose main content is personal data, such as an HR database or customer records, gets the flag from the platform admin. It is listed and usable only in confidential conversations and tasks.':
-      '人事DBや顧客の個人情報のように、個人情報を主な中身とする接続先のConnectorには、基盤管理者が機密のフラグを付けます。一覧に出るのも使えるのも、機密の会話・タスクの中だけです。',
-    'Confidential conversations and tasks': '機密の会話とタスク',
-    'When a conversation starts, the wizard asks whether personal or confidential information is involved. If so, only local LLM models can be chosen. A conversation can become confidential midway, but never go back. Tasks set it in their definition.':
-      '会話を始めるとき、ウィザードが個人情報や機密情報を扱うかを確かめます。扱うなら、選べるのはローカルLLMのモデルだけ。会話は途中から機密にできますが、戻すことはできません。タスクは定義で決めます。',
-    'Confidential Skills': '機密のSkill',
-    'A Skill that declares a confidential connector, or whose files hold sensitive data, is confidential too. Editing it from chat and evaluating drafts also run on local models. Setting the flag takes edit rights; clearing it takes publish rights.':
-      '機密のConnectorを宣言したSkillと、資料そのものに機密の情報を含むSkillも機密です。会話からの編集もDraftの評価も、ローカルLLMで動かします。フラグを付けるのは編集の権限、外せるのは公開の権限だけです。',
-    'Confidential destinations': '機密の通知先',
-    'Results of confidential runs are delivered only to destinations explicitly allowed to receive them. A confidential result never lands on a public webhook by accident.':
-      '機密のRunの結果は、機密の結果を送ってよいとした通知先にだけ届きます。機密の結果が誤って公開のWebhookへ出ることはありません。',
-    'Ordinary business documents such as invoices and contracts can go to a cloud provider under enterprise terms. Data that is mostly personal information stays on models you host. The flag draws that line once, and every run checks it.':
-      '請求書や契約書のような通常の業務文書は、法人向けの条件のもとでクラウドのプロバイダーへ渡せます。個人情報を主な内容とするデータは、自社でホストするモデルの中にとどめます。この線をフラグで一度引けば、あとはすべてのRunがそれを確かめます。',
+    // For IT
+    'Your servers. Your identity provider. Your choice of LLM.': '自社のサーバーで。自社の認証基盤で。LLMは選べる。',
+    'Yoriki runs on a host you control, as a handful of containers. Nothing is sent to a vendor you did not configure yourself.':
+      'Yorikiは、自社が管理するホストの上で、いくつかのコンテナとして動きます。自分で設定していない外部のサービスへは、何も送られません。',
+    Deployment: '配備',
+    'Docker Compose on a single host to start; add app servers and workers later. Publish via your load balancer or Cloudflare Tunnel.':
+      'まずは1台のホストにDocker Composeで。あとからアプリサーバーやWorkerを足せます。公開は自社のロードバランサーかCloudflare Tunnelで。',
+    'Sign-in': 'ログイン',
+    'Microsoft 365 or Google Workspace (OIDC). Invited accounts with passwords where there is no SSO.':
+      'Microsoft 365・Google Workspace（OIDC）。SSOのない環境では、招待制のパスワードのアカウント。',
+    'OpenAI, Anthropic, Gemini, or a local server such as vLLM or Ollama. Keys are encrypted at rest and never reach the agent, the sandbox or the logs.':
+      'OpenAI・Anthropic・Gemini、またはvLLMやOllamaなどの社内サーバー。API keyは暗号化して保存し、エージェント、サンドボックス、ログには出しません。',
+    'Containers on gVisor with no network. Images published on Docker Hub.':
+      'gVisor上の、ネットワークのないコンテナ。イメージはDocker Hubで公開。',
+    Files: 'ファイル',
+    'Attachments and results on local disk or S3-compatible storage.':
+      '添付と結果はローカルディスクか、S3互換のストレージへ。',
+    Control: '管理',
+    'Users, departments and permissions; usage per user; history of every run. One admin UI.':
+      'ユーザー・部門・権限、ユーザーごとの利用量、すべての実行の履歴。ひとつの管理画面で。',
+
+    // Final / footer
+    'Open source, built in the open.': 'オープンソースで、公開しながら作っています。',
+    'Yoriki is pre-alpha and MIT-licensed. The design, the conventions and the current status are all in the repository. Read it, run it, and tell us what is missing.':
+      'Yorikiはpre-alphaで、MITライセンスです。設計、規約、いまの状況はすべてリポジトリにあります。読んで、動かして、足りないものを教えてください。',
+    'Star on GitHub': 'GitHubでStar',
+    'Current status': 'いまの状況',
+    "Named after the yoriki (与力), the officers of Edo-period Japan who carried out a magistrate's work within the authority they were given.":
+      '名前は与力から。江戸時代に奉行の下で、与えられた権限の範囲で実務を担った役人です。',
+    Documentation: 'ドキュメント',
+    Design: '設計',
+    Authorization: '権限',
+    Project: 'プロジェクト',
+    Status: '状況',
+    'MIT License': 'MITライセンス',
+    'Released under the MIT License.': 'MITライセンスで公開しています。',
   }
 
   const dictionaries = { en: null, ja }
   const STORAGE_KEY = 'yoriki-lp-lang'
   const meta = {
     en: {
-      title: 'Yoriki — AI agents for everyone at work, governed by your servers',
+      title: 'Yoriki — AI agents your whole company can use with confidence',
       description:
-        "Yoriki is an open-source, self-hosted platform that lets employees delegate real work to AI agents through chat. Skills, connectors and sandboxes stay under your administrators' control.",
+        'Yoriki is an open-source, self-hosted platform for using AI agents at work. The company decides what data an agent may touch, where its commands run and where results go, and Yoriki enforces it in software.',
     },
     ja: {
-      title: 'Yoriki — 社内の誰もが使える、業務用AIエージェント',
+      title: 'Yoriki — AIエージェントを、全社で安心して使うための基盤',
       description:
-        'Yorikiは、社員がチャットでAIエージェントに業務を任せられる、オープンソースのセルフホスト基盤。Skill・Connector・Sandboxを管理者が一元管理し、権限はサーバーと実行環境で強制します。',
+        'Yorikiは、業務でAIエージェントを使うための、オープンソースのセルフホスト基盤。エージェントが触れるデータ、コマンドが動く場所、結果の届け先を会社が決め、ソフトウェアがそのとおりに守ります。',
     },
   }
 

@@ -1,8 +1,8 @@
 # ランディングページ（site/）をGitHub Pagesへ配備する
 # - リポジトリの Settings → Pages → Source を「GitHub Actions」にしておく。
-# - main への push では、リポジトリの変数 SITE_DEPLOY が true のときだけ配備する（それ以外は skipped になる）。
-#   手動実行（workflow_dispatch）は変数に関係なく配備する。site/ だけの変更に [skip ci] は要らない
-#   （他の workflow は paths で動かない）。
+# - main への site/ の push で配備する。手動実行（workflow_dispatch）もできる。
+# - 自動の配備を止めたいときは、Actions の画面でこの workflow を Disable にする（[skip ci] は使わない。
+#   site/ だけの変更では他の workflow は paths で動かない）。
 # TODO: 他のworkflowと同じく、actionsをcommit SHAで固定する。
 name: site
 
@@ -23,7 +23,6 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.event_name == 'workflow_dispatch' || vars.SITE_DEPLOY == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:

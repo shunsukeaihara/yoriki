@@ -96,6 +96,7 @@ def test_creating_a_destination_needs_the_permission_and_shows_the_secret_once(a
         (DestinationKind.WEBHOOK, "https://user:pass@hooks.example.com/a", "パスワード"),
         (DestinationKind.ZAPIER, "https://hooks.example.com/hooks/catch/1/", "Catch Hook"),
         (DestinationKind.ZAPIER, "https://hooks.zapier.com/other/", "Catch Hook"),
+        (DestinationKind.WEBHOOK, "https://[::1/hook", "形"),
     ],
 )
 def test_the_url_must_fit_the_kind(api_client, integrator, kind, url, message):

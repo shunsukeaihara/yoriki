@@ -53,7 +53,7 @@ def _claim(delivery_id: int) -> tuple[Delivery, DeliveryAttempt, str, str] | Non
     """送る番の配信を「配信中」にする。送らないなら None（送る前に出口が使えなくなっていたら取消にする）"""
     delivery = (
         Delivery.objects.select_for_update(skip_locked=True, of=("self",))
-        .select_related("destination_revision__destination", "run__task__department")
+        .select_related("destination_revision__destination", "run__task__department", "run__task__owner")
         .filter(pk=delivery_id, status__in=SENDABLE_STATUSES)
         .first()
     )
@@ -70,7 +70,8 @@ def _claim(delivery_id: int) -> tuple[Delivery, DeliveryAttempt, str, str] | Non
     problem = destination.problem_for(run.task, sensitive=sensitive)
     if not problem and sensitive and not delivery.destination_revision.allows_sensitive_results:
         problem = _("出口が機密の結果を送ってよい先ではありません")
-    if not problem and run.task is not None and run.task.deleted:
+    if not problem:
+        # タスクの停止・削除・部門の無効化・持ち主の無効化も、配信の直前に確かめる（authorization.md §6）
         problem = task_problem(run.task)
     if problem:
         delivery.status = DeliveryStatus.CANCELLED
@@ -97,8 +98,21 @@ def _record(delivery_id: int, attempt_id: int, outcome: Outcome) -> None:
     attempt.error = outcome.error[:500]
     attempt.finished = now
     attempt.save(update_fields=["outcome", "http_status", "error", "finished"])
-    if delivery.status != DeliveryStatus.SENDING or delivery.attempt_count != attempt.number:
-        return  # 持ち時間が切れて確認待ちにされた後に戻った（記録だけ残す）
+    if delivery.attempt_count != attempt.number:
+        return  # 後の試行がもう始まっている（記録だけ残す）
+    if delivery.status != DeliveryStatus.SENDING:
+        # 持ち時間が切れて確認待ちにされた（その後に人が送り直しを依頼し、まだ送っていないものを含む）後に戻った。
+        # 受付が確かめられたなら受付確認済みにし、重ねて送らない。それ以外は記録だけ残す
+        if outcome.outcome == AttemptOutcome.ACCEPTED and delivery.status in (
+            DeliveryStatus.UNKNOWN,
+            DeliveryStatus.PENDING,
+        ):
+            delivery.status = DeliveryStatus.DELIVERED
+            delivery.delivered = now
+            delivery.last_error = ""
+            delivery.next_attempt = None
+            delivery.save(update_fields=["status", "delivered", "last_error", "next_attempt", "updated"])
+        return
     delivery.lease_expires = None
     delivery.last_error = outcome.error[:500]
     delivery.next_attempt = None

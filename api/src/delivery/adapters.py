@@ -22,7 +22,7 @@ from django.utils.translation import gettext as _
 from utils.http import PinnedTransport
 
 from .models import SIGNING_SECRET_PREFIX, AttemptOutcome, DestinationKind
-from .network import BlockedAddress, check_url, resolve
+from .network import BlockedAddress, ResolutionFailed, check_url, resolve
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,25 @@ def _retry_after(response: httpx.Response) -> int | None:
         return None
 
 
+def classify(response: httpx.Response) -> Outcome:
+    """送り先の応答を、受付確認・一時的な失敗（送り直す）・失敗に分ける"""
+    status = response.status_code
+    if 200 <= status < 300:
+        return Outcome(AttemptOutcome.ACCEPTED, http_status=status)
+    if status in RETRYABLE_STATUSES:
+        return Outcome(
+            AttemptOutcome.RETRYABLE,
+            http_status=status,
+            error=_("送り先が一時的に受け付けません（HTTP %(status)s）") % {"status": status},
+            retry_after=_retry_after(response),
+        )
+    if 300 <= status < 400:
+        error = _("送り先がリダイレクトを返しました（HTTP %(status)s）。リダイレクトは辿りません") % {"status": status}
+    else:
+        error = _("送り先が受け付けませんでした（HTTP %(status)s）") % {"status": status}
+    return Outcome(AttemptOutcome.FAILED, http_status=status, error=error)
+
+
 class WebhookAdapter:
     """設定したendpointへ、共通のイベントをJSONでPOSTする"""
 
@@ -78,6 +97,8 @@ class WebhookAdapter:
         try:
             parts = self.validate_url(url)
             address = resolve(parts)
+        except ResolutionFailed as exc:
+            return Outcome(AttemptOutcome.RETRYABLE, error=str(exc))  # 送る前なので、送り直してよい
         except BlockedAddress as exc:
             return Outcome(AttemptOutcome.FAILED, error=str(exc))
         body = self.prepare(payload)
@@ -108,23 +129,7 @@ class WebhookAdapter:
                 AttemptOutcome.UNKNOWN,
                 error=_("送り先の応答を受け取れません（%(type)s）") % {"type": type(exc).__name__},
             )
-        status = response.status_code
-        if 200 <= status < 300:
-            return Outcome(AttemptOutcome.ACCEPTED, http_status=status)
-        if status in RETRYABLE_STATUSES:
-            return Outcome(
-                AttemptOutcome.RETRYABLE,
-                http_status=status,
-                error=_("送り先が一時的に受け付けません（HTTP %(status)s）") % {"status": status},
-                retry_after=_retry_after(response),
-            )
-        if 300 <= status < 400:
-            error = _("送り先がリダイレクトを返しました（HTTP %(status)s）。リダイレクトは辿りません") % {
-                "status": status
-            }
-        else:
-            error = _("送り先が受け付けませんでした（HTTP %(status)s）") % {"status": status}
-        return Outcome(AttemptOutcome.FAILED, http_status=status, error=error)
+        return classify(response)
 
 
 ZAPIER_HOST = "hooks.zapier.com"

@@ -22,7 +22,7 @@ from llm.models import ProviderKind
 from run.models import RunEndReason, RunLaunch, RunStatus
 from task.dispatch import start_task_run
 from task.factories import TaskDefinitionFactory
-from task.models import TaskScope
+from task.models import TaskDefinition, TaskScope
 from user.factories import UserFactory, grant
 from utils.permissions import AppPermission
 
@@ -233,6 +233,17 @@ def test_a_suspended_or_deleted_destination_is_not_sent(manager, receiver):
     assert receiver.requests == []
 
 
+def test_a_suspended_or_deleted_task_is_not_sent(manager, receiver):
+    for change in ({"suspended": True}, {"deleted": True}):
+        delivery = _finish(_run(manager))
+        TaskDefinition.objects.filter(pk=delivery.run.task_id).update(**change)
+        send_delivery(delivery.pk)
+        delivery.refresh_from_db()
+        assert delivery.status == DeliveryStatus.CANCELLED
+        assert "タスク" in delivery.last_error
+    assert receiver.requests == []
+
+
 def test_a_sensitive_result_is_not_sent_after_the_flag_is_removed(manager, receiver):
     local = ModelProfileFactory.create(
         version__connection=LLMConnectionFactory.create(kind=ProviderKind.LOCAL), version__supports_tools=True
@@ -292,5 +303,28 @@ def test_a_late_result_after_the_lease_expired_is_only_recorded(manager, receive
     with mock.patch.object(WebhookAdapter, "transport", httpx.MockTransport(expire_while_sending)):
         send_delivery(delivery.pk)
     delivery.refresh_from_db()
-    assert delivery.status == DeliveryStatus.UNKNOWN
+    # 遅れて届いた受付確認は、配信にも反映する（確認待ちのまま人が送り直して重ねないように）
+    assert delivery.status == DeliveryStatus.DELIVERED
     assert delivery.attempts.get().outcome == AttemptOutcome.ACCEPTED
+
+
+def test_a_late_failure_after_the_lease_expired_keeps_the_unknown_state(manager):
+    delivery = _finish(_run(manager))
+
+    def expire_while_sending(request):
+        Delivery.objects.filter(pk=delivery.pk).update(status=DeliveryStatus.UNKNOWN, lease_expires=None)
+        return httpx.Response(500)
+
+    with mock.patch.object(WebhookAdapter, "transport", httpx.MockTransport(expire_while_sending)):
+        send_delivery(delivery.pk)
+    delivery.refresh_from_db()
+    assert delivery.status == DeliveryStatus.UNKNOWN
+
+
+def test_a_dns_failure_while_sending_is_retried(manager, receiver, fixture_public_dns):
+    delivery = _finish(_run(manager))
+    fixture_public_dns.side_effect = socket.gaierror(socket.EAI_AGAIN, "temporary failure")
+    send_delivery(delivery.pk)
+    delivery.refresh_from_db()
+    assert delivery.status == DeliveryStatus.RETRY_WAIT
+    assert receiver.requests == []

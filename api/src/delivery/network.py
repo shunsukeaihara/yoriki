@@ -20,13 +20,20 @@ class BlockedAddress(Exception):
     """送ってはいけない宛先（理由は利用者に見せてよい文）"""
 
 
+class ResolutionFailed(BlockedAddress):
+    """名前を引けなかった。登録では誤りにし、送るときは一時的な障害として送り直す（DNSの一時的な障害がある）"""
+
+
 def allowed_networks() -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
     return [ipaddress.ip_network(n, strict=False) for n in settings.YORIKI_DELIVERY_ALLOWED_NETWORKS]
 
 
 def check_url(url: str) -> SplitResult:
     """URLの形を確かめる（名前は引かない）"""
-    parts = urlsplit(url)
+    try:
+        parts = urlsplit(url)
+    except ValueError as exc:
+        raise BlockedAddress(_("送り先のURLの形が正しくありません")) from exc
     schemes = ("https", "http") if settings.DEBUG else ("https",)
     if parts.scheme not in schemes:
         raise BlockedAddress(_("送り先のURLは https:// で始めてください"))
@@ -54,11 +61,13 @@ def resolve(parts: SplitResult) -> IPAddress:
     port = parts.port or (443 if parts.scheme == "https" else 80)
     try:
         infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-    except (socket.gaierror, UnicodeError) as exc:
+    except socket.gaierror as exc:
+        raise ResolutionFailed(_("送り先のホスト名を解決できません")) from exc
+    except UnicodeError as exc:
         raise BlockedAddress(_("送り先のホスト名を解決できません")) from exc
     addresses = [ipaddress.ip_address(str(info[4][0]).split("%", 1)[0]) for info in infos]
     if not addresses:
-        raise BlockedAddress(_("送り先のホスト名を解決できません"))
+        raise ResolutionFailed(_("送り先のホスト名を解決できません"))
     networks = allowed_networks()
     for address in addresses:
         if not is_public(address) and not any(address in network for network in networks):

@@ -1012,10 +1012,12 @@ html[lang='ja'] .fear__q {
     gap: 24px;
   }
 }
-.use__grid > div,
-.it__grid > div {
-  position: sticky;
-  top: 96px;
+@media (min-width: 901px) {
+  .use__grid > div,
+  .it__grid > div {
+    position: sticky;
+    top: 96px;
+  }
 }
 .use__grid .lead,
 .it__grid .lead {
@@ -1138,26 +1140,7 @@ html[lang='ja'] .fear__q {
   font-size: 0.93rem;
 }
 
-/* Security */
-.security__grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
-  gap: 48px;
-  align-items: start;
-}
-@media (max-width: 900px) {
-  .security__grid {
-    grid-template-columns: 1fr;
-  }
-}
-.security__intro {
-  position: sticky;
-  top: 96px;
-}
-.security__intro .lead {
-  margin-top: 16px;
-  font-size: 1.05rem;
-}
+/* Check list (For employees) */
 .checks {
   display: grid;
   grid-template-columns: 1fr 1fr;

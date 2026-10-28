@@ -379,4 +379,7 @@ LOGGING = {
     "disable_existing_loggers": False,
     "handlers": {"console": {"class": "logging.StreamHandler"}},
     "root": {"handlers": ["console"], "level": os.getenv("YORIKI_LOG_LEVEL", "INFO")},
+    # httpxは要求のURLを丸ごとINFOで出す。出口の送り先のURL（ZapierのCatch Hook等）はそれだけで送れる資格情報なので、
+    # YORIKI_LOG_LEVEL によらずWARNINGより下を出さない（design.md §4.4）
+    "loggers": {"httpx": {"level": "WARNING"}, "httpcore": {"level": "WARNING"}},
 }

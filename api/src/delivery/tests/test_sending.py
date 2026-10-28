@@ -5,12 +5,16 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
+import logging.config
 import socket
 from datetime import timedelta
+from typing import Any
 from unittest import mock
 
 import httpx
 import pytest
+from django.conf import settings
 from django.utils import timezone
 
 from delivery.adapters import WebhookAdapter
@@ -160,6 +164,20 @@ def test_sending_signs_the_body_and_connects_to_the_checked_address(manager, rec
     # 送り終えたものは送らない
     send_delivery(delivery.pk)
     assert len(receiver.requests) == 1
+
+
+def test_the_url_is_not_logged(manager, receiver, caplog):
+    """送り先のURLはそれだけで送れる資格情報なので、既定のログ（INFO）に出さない"""
+    # アプリのログの設定を当て直し（ルートの水準はINFO）、外れたcaplogのハンドラーを付け直す。httpxのロガーの水準は
+    # 起動時の設定で決まっているので、いったん戻してから当て直す
+    logging.getLogger("httpx").setLevel(logging.NOTSET)
+    config: dict[str, Any] = settings.LOGGING
+    logging.config.dictConfig({**config, "root": {**config["root"], "level": "INFO"}})
+    logging.getLogger().addHandler(caplog.handler)
+    delivery = _finish(_run(manager))
+    send_delivery(delivery.pk)
+    assert receiver.requests
+    assert "hooks.example.com/yoriki" not in caplog.text
 
 
 def test_temporary_failures_are_retried_with_backoff_then_give_up(manager, receiver):

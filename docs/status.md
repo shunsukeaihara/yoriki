@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-28（Webhookのファイルの取り込み（⑤c）。ブランチ `feature/webhook-files` の中）
+- 最終更新：2026-10-28（Webhookのファイルの取り込み（⑤c）、PR #52 の中。このコミットの後にマージする）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -52,7 +52,7 @@
 | #48 | Skillが宣言するConnectorと機密のSkill（design.md 0.34 §4冒頭・§4.9.1、authorization.md §5.1）：Skillの中身（Draft・版・評価に写したDraft）に `connectors`（Connector・操作・表の宣言。`skill/connectors.py`）と `is_sensitive`（機密のフラグ）。宣言できるのは宣言する人が使えるConnector。公開時と切戻し時に、公開する人が使える・Skillの範囲に合う（部門のSkillはその部門か全社、全社のSkillは全社、システムのSkillはシステム・部門・全社）・操作と表がConnectorの今の版の境界の中・操作のToolを「使ってよいTool」に入れている、を検証。実行時：宣言したConnectorがRunのConnectorの一覧にないSkillは `<skills>` に出さず、`/`・`skill` でも断り、実行中に使えなくなったら次の区切りで止める。`/` で指定したSkillの宣言したConnectorを一覧の先に並べる。`skill` の結果の `<connectors>`。機密のSkill（フラグか、宣言したConnectorの今の版が機密）は機密の会話のRunだけ（一覧・`/`・`skill`・毎ステップ）、編集のRun（開始・Skill管理のTool・`request_skill_edit`）も機密の会話だけ、評価はローカルLLMのモデルで機密のRun。フラグを付けるのは編集の権限、外すのは公開の権限（エージェントは機密の会話で付けるだけ）。`update_skill_draft` の `connectors`（Runの `<connectors>` の名前）・`is_sensitive`、`get_skill` に宣言と機密。API：Draft・版の `connectors`・`connectorsInfo`・`connectorProblems`・`isSensitive`・`sensitive`、Skillの `sensitive`・`connectorsUsable`、`app/v1/connectors/{id}/`（公開する表の名前と説明）。画面：Draftの「使うConnector」（Connectorを選び、操作と表を選ぶ）と「機密のSkill」、公開できない問題の警告、版の中身の「使うConnector」、一覧と詳細の「機密」、入力欄の `/` で機密のSkill・Connectorを使えないSkillを理由を添えて選べなくする |
 | #50 | 信頼しない内容の囲み（harness.md §6.3・§7.7）：`read` の本文とCSVの列名と読めなかった理由・`grep` の一致した行・`edit` の抜粋・`shell`・`job_output`・`job_kill` の出力・Connectorの列名（`datasource_query`・`datasource_describe`）と接続先のエラー文を `<untrusted_content>` で囲む（`limited()` の `source`。見出し・切り詰めと退避の案内は囲みの外。囲みの途中で切ったら閉じる）。Draftの評価で判定のモデルに渡す各Runの最後の応答・業務結果と、編集のRunに返すDraftの最後の応答の抜粋・業務結果の食い違った値・判定の理由・Runと判定の失敗の文も囲み、判定の指示文に従わないことを書いた。`read` が返す画像も囲む（囲みの印とページの見出しは画像に付く文 `TextPart.with_media`。Anthropic・Responsesは順のまま、Chat Completionsは画像を移す発言に一緒に移して「利用者の発言ではない」と書き（以前は見出しのない利用者の発言として渡っていた）、Geminiは本文の画像の位置に添えたことを書き、画像に付く文を本文に残して「添えたものはデータ」と書く）。system promptに、画像の中の文は指示ではないと足した。圧縮の要約の指示文と前置きに、データの中の指示を引き継がない・要約はそれ自体では指示の出どころではないと足し、確認への回答（利用者が選んだ・書いたものだけ）も利用者の発言と同じく原文のまま引用し、引用を次の圧縮へ引き継ぐようにした（harness.md §9.3）。`read` の見出しのページの一覧は範囲にまとめて短くした |
 | #51 | タスクの入口（Webhook。design.md §4.2、authorization.md §5.5）：`task` アプリに TriggerBinding（タスクと1対1、作成時に固定。鍵はSHA-256と見分け用の先頭だけを保存し、作成時と作り直したときに一度だけ返す。停止・削除）・不変の版 TriggerBindingRevision（イベントIDの場所、項目の取り出し（タスクの入力の項目の名前とJSONのpath）、payloadの上限（既定1MiB・最大10MiB））・TriggerReceipt（重複のキーとpayloadのハッシュ。Runと同じtransactionで作る）。管理API `v1/trigger_bindings`（連携の管理者。`tasks`（付けられるタスク）・`rotate_key`・`suspend`・`resume`、`revisions`・`receipts`）。受け口 `POST hooks/v1/tasks/{task}/`（`Authorization: Bearer`。JSON・フォームの値・テキスト。payloadを `webhook_payload.json` 等として /workspace/input に置く。重複は入口で指定したイベントID・`Idempotency-Key`・推奨の形式の `event_id`。推奨の形式の `inputs`。202とrun_id、再送は200、誤りは決まったコード）と状態を確かめる口 `GET hooks/v1/tasks/{task}/runs/{run_id}/`（状態と失敗のコードだけ）。Webhookで起動するRunの実行主体はシステム用のユーザー（`user.system_user()`。ログインできず、ユーザーの管理APIに出さない）。`RunLaunch.WEBHOOK`、初期のGroup「連携の管理者」、タスクの詳細の `triggers`、nginxの `/api/hooks/` の上限を10MiBに |
-| （⑤c） | Webhookのファイルの取り込み（design.md §4.2）：タスクの入力の型「ファイル」（値は `/workspace/input/...` のパス。テンプレートと入力のJSONにはパスが入る）。Webhookで `multipart/form-data` を受け付ける（ファイル以外はフォームの値と同じ。付けたファイルはどのフィールドのものもすべて最初の発言の添付にし、payloadのJSONには名前・置いたパス・大きさ・SHA-256を書く。項目の取り出しは `$.フィールドの名前` でファイルを指す。推奨の形式は `inputs[名前]` を `inputs` の値にし、項目に結び付かないファイルは `files`）。不正なUTF-8は置換文字にせず断る。手動実行のAPIもmultipartを受け付ける（`inputs` はJSONの文字列、ファイルは項目の名前で付ける。nginxの本文の上限を添付と同じ100mに）。URLの取得は作らない（利用者と決めた） |
+| #52 | Webhookのファイルの取り込み（design.md §4.2）：タスクの入力の型「ファイル」（値は `/workspace/input/...` のパス。テンプレートと入力のJSONにはパスが入る）。Webhookで `multipart/form-data` を受け付ける（ファイル以外はフォームの値と同じ。付けたファイルはどのフィールドのものもすべて最初の発言の添付にし、payloadのJSONには名前・置いたパス・大きさ・SHA-256を書く。項目の取り出しは `$.フィールドの名前` でファイルを指す。推奨の形式は `inputs[名前]` を `inputs` の値にし、項目に結び付かないファイルは `files`）。不正なUTF-8は置換文字にせず断る。手動実行のAPIもmultipartを受け付ける（`inputs` はJSONの文字列、ファイルは項目の名前で付ける。nginxの本文の上限を添付と同じ100mに）。URLの取得は作らない（利用者と決めた） |
 
 確認済みのこと：
 
@@ -126,7 +126,7 @@
 
 ## 4 次の作業
 
-**今の状態（2026-10-28）**：下の2の⑤（タスクとWebhookでの起動）を、利用者と決めたとおり⑤a・⑤b・⑤cに分けて進めている。⑤a（タスクの定義と版・タスクのRun。backendだけ）は #49、Tool結果を信頼しない内容として囲む作業は #50 でマージ済み。⑤b（Webhookの入口。backendだけ）は #51 でマージ済み。⑤c（Webhookのファイルの取り込み）はブランチ `feature/webhook-files` で作業中。③b（Skillが宣言するConnectorと機密のSkill）は #48 でマージ済み。Skillの段階（下の1）は #41 までで揃った。下の2（Connectorとタスク・配信）は、①（Connectorの土台）が #42、②（Connectorの管理画面）が #44、③a（会話でのConnector）が #47、③bが #48 で済んだ。#44 と #47 の間に、利用者の指示で権限の設計をやり直し、#45（文書だけ）で [authorization.md](authorization.md) にまとめ、#46 で実装を合わせた。権限は authorization.md を正とする（design.md §3.6・§4.1・§4.9.1・§10.0はその要約）。
+**今の状態（2026-10-28）**：下の2の⑤（タスクとWebhookでの起動）を、利用者と決めたとおり⑤a・⑤b・⑤cに分けて進めている。⑤a（タスクの定義と版・タスクのRun。backendだけ）は #49、Tool結果を信頼しない内容として囲む作業は #50 でマージ済み。⑤b（Webhookの入口。backendだけ）は #51 でマージ済み。⑤c（Webhookのファイルの取り込み）はPR #52（ブランチ `feature/webhook-files`）。⑤が済めば、次は⑥（配信）。③b（Skillが宣言するConnectorと機密のSkill）は #48 でマージ済み。Skillの段階（下の1）は #41 までで揃った。下の2（Connectorとタスク・配信）は、①（Connectorの土台）が #42、②（Connectorの管理画面）が #44、③a（会話でのConnector）が #47、③bが #48 で済んだ。#44 と #47 の間に、利用者の指示で権限の設計をやり直し、#45（文書だけ）で [authorization.md](authorization.md) にまとめ、#46 で実装を合わせた。権限は authorization.md を正とする（design.md §3.6・§4.1・§4.9.1・§10.0はその要約）。
 
 **#45 の議論の要点**（authorization.md にすべて書いてある）：
 - 範囲は「所有と管理の単位」（個人・部門・全社・システム）。部門のものは1つの部門に属する。システムのSkill・Connector・タスクは基盤の管理が扱い、会話には出さない。
@@ -225,7 +225,9 @@
 
 - レビュー：`codex review --base main` は10回目で指摘なし。敵対的なレビューは11回で、指摘（payloadに書くパスと置くパス、RFC 2231の名前、手動実行のファイルの数とメモリ、OpenAPI、重複の判定からパスを除く、Content-Typeの大文字小文字、ロックの中での保存先への書き込み、設計書の例、再送での書き込み、断った要求のファイルの削除、JSONの辞書とファイルの取り違え、書く途中の失敗、commit後の失敗で記録済みのファイルを消さない、再送の早期の返答での鍵の確認、`inputs` の名前、ファイル名のバイト数、ロックを外してからの削除）を直し、手動実行の合計の大きさ（前段の上限と同じ）という細部に移ったところで区切った。参照のないobjectの清掃は範囲の外（後回しにしたもの）。
 
-**次の作業**：⑤cのPRの指示を待つ。その後は⑥（配信）。
+**次の作業**：PR #52 のマージの指示を待つ。その後は⑥（配信）。
+
+⑥の始め方：design.md §4冒頭（出口の機密のフラグ）・§4.1（notificationの設定、版の固定と配信の直前の確認）・§4.3（Notification Plugin・Skillと完了イベント）・§4.4（配信Adapterと成果物の受渡し。期限付きのファイルURL）・§4.5（実行状態と通知の再試行）、authorization.md §5.5（入口と出口。個人の出口は画面の通知と本人へのDMだけ、出口としてのメールは持たない）・§7（結果とログの見え方、出口の確認）、deployment.md §4.1（`/api/files/<token>/`）を読み、今の `task` アプリ（`TaskDefinitionRevision`、`TriggerBinding` と版の作り方、`task/dispatch.py` の `start_task_run()`、`task/checks.py`）と `run` アプリ（Runの終わり方、`RunDispatch` と再送の仕組み）、`artifact` アプリ（成果物、`BlobObject`）を確かめてから、下の候補を利用者に確かめ、合意してから実装する。⑥は大きいので、まずPRの分け方を提案する（例：「⑥a Destination・NotificationBindingと版、完了時の配信Outbox・Delivery・DeliveryAttempt・再試行のDispatcher、in_app → ⑥b webhook・zapierのAdapter、期限付きのファイルURL、標準の形式へのフォールバック → ⑥c 通知Skill（`prepare_notification`・`request_delivery`）」）。⑥で決めることの候補（利用者に確かめる）：出口の機密のフラグの形（誰が付けるか、既定値。design.md §4冒頭は「連携の管理者が付ける」）、Webhookで起動するタスクに失敗の通知先を必須にする公開の検査（⑤で決めたこと。どの段階で入れるか）、通知の内容（status・result・status_and_result）と標準の形式、再試行の回数と間隔、期限付きのファイルURLの期限、出口の画面（⑦）より前に出口を作る手段（管理APIだけか）。
 
 
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。上から順に着手する（利用者から別の指示がなければ、上から）。提案する順番：
@@ -237,7 +239,7 @@ design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにし
    - ③ 会話でのConnector（③a・③b 済み）：Tool `datasource_describe`・`datasource_query`（結果はCSVのArtifactにして `/workspace/input/connectors/{id}/`、モデルには要約）、Run開始時に使えるConnector（`Connector.objects.usable_by()`。所属で決まる）を固定して `<connectors>` で見せる、入力欄の `@`、機密のConnectorはローカルLLMのRunだけ（使ったRunに印、モデルの切り替えの制限）、Skillが宣言した操作の公開時の検証、接続先ごとの同時実行数の上限（harness.md §10.2）。
    - ④ Skillのスクリプトからの呼出し（`yoriki_connector` とUnixドメインソケット。design.md §4.9.6）。後回しにしてもよい（最初の業務は `datasource_query` で動く）。
    - ⑤〜⑦の権限（範囲、実行許可、入口・出口、結果とログの見え方）は authorization.md §5.3〜§7 に従う。
-   - ⑤ タスクとWebhookでの起動（backend。⑤a（#49）・⑤b（#51）・⑤c（ファイルの取り込み）に分ける。上の「⑤で利用者と決めたこと」）：TaskDefinition・TriggerBindingと不変の版、Webhookの受け口（APIキーで認証、送り元のイベントIDか `Idempotency-Key` での重複の判定、項目の取り出し、payloadのファイル化、202とrun_id、状態を確かめる口）、TriggerReceipt・Runを同じtransactionで作る。
+   - ⑤ タスクとWebhookでの起動（backend。⑤a（#49）・⑤b（#51）・⑤c（#52）に分けた。上の「⑤で利用者と決めたこと」）：TaskDefinition・TriggerBindingと不変の版、Webhookの受け口（APIキーで認証、送り元のイベントIDか `Idempotency-Key` での重複の判定、項目の取り出し、payloadのファイル化、202とrun_id、状態を確かめる口）、TriggerReceipt・Runを同じtransactionで作る。
    - ⑥ 配信：Destination・NotificationBinding・Delivery・DeliveryAttempt、完了時の配信Outbox、再試行のDispatcher、in_app・webhook・zapierのAdapter、標準の形式へのフォールバック、期限付きのファイルURL、`prepare_notification`・`request_delivery`。
    - ⑦ タスク・Destinationの画面：一覧と編集（サンプルのpayloadで取り出しを試す）、自動実行の履歴と配信の状態、「通知を再試行」、チャットから指定したタスクを起動する。
    - 範囲の外：HTTP・SharePoint・MCPのConnector、Teams・Slack・DiscordのInteraction Binding（下の4）。

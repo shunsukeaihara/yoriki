@@ -540,6 +540,10 @@ def test_multipart_limits_and_encoding(api_client, integrator, settings):
     body = files_part + b'--B\r\nContent-Disposition: form-data; name="memo"\r\n\r\n' + b"x" * 200 + b"\r\n--B--\r\n"
     res = _send(api_client, task, key, body, content_type="multipart/form-data; boundary=B")
     assert (res.status_code, res.json()["code"]) == (413, "payload_too_large")
+    # 同じ名前のフィールドに文字とファイル（送った順がわからない）
+    data = {"inputs[vendor]": "ACME", "files": ["x", SimpleUploadedFile("a.pdf", b"1")]}
+    res = _send_multipart(api_client, task, key, data)
+    assert (res.status_code, res.json()["code"]) == (400, "invalid_form")
     # RFC 2231の形の名前の不正なUTF-8も断る（Djangoは置換文字にするため）
     for disposition in (
         b"name=\"inputs[invoice]\"; filename*=utf-8''%FF.pdf",

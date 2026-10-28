@@ -333,28 +333,31 @@ def receive_webhook(
         with transaction.atomic():
             _lock_task(binding)
             current, revision, key = _current_binding(binding, body, payload, idempotency_key)
-            if (existing := _received_run(current, key, payload, idempotency_key)) is not None:
-                discard_files(stored)
-                return existing, False
-            run = start_task_run(
-                current.task,
-                inputs=lambda task_revision: input_values(payload, revision.inputs, task_revision.inputs),
-                actor=system_user(),
-                launch=RunLaunch.WEBHOOK,
-                files=[payload_file, *payload.files],
-            )
-            TriggerReceipt.objects.create(
-                binding=current,
-                binding_revision=revision,
-                dedup_key=key or "",
-                payload_sha256=payload.sha256,
-                payload_size=len(body),
-                content_type=payload.content_type,
-                run=run,
-            )
+            existing = _received_run(current, key, payload, idempotency_key)
+            if existing is None:
+                run = start_task_run(
+                    current.task,
+                    inputs=lambda task_revision: input_values(payload, revision.inputs, task_revision.inputs),
+                    actor=system_user(),
+                    launch=RunLaunch.WEBHOOK,
+                    files=[payload_file, *payload.files],
+                )
+                TriggerReceipt.objects.create(
+                    binding=current,
+                    binding_revision=revision,
+                    dedup_key=key or "",
+                    payload_sha256=payload.sha256,
+                    payload_size=len(body),
+                    content_type=payload.content_type,
+                    run=run,
+                )
     except BaseException:
         discard_files(stored)
         raise
+    if existing is not None:
+        # 同時に届いた再送。保存先から消すのは、ロックを外した後にする（保存先が遅くても入口・タスクを待たせない）
+        discard_files(stored)
+        return existing, False
     return run, True
 
 

@@ -293,6 +293,10 @@ def _parse_multipart(body: bytes, content_type: str) -> tuple[dict[str, Any], st
     except (MultiPartParserError, SuspiciousOperation, UnicodeDecodeError, ValueError):
         raise PayloadError("invalid_form", _("本文をmultipart/form-dataとして読めません")) from None
     pairs: list[tuple[str, Any]] = [(key, value) for key, items in values.lists() for value in items]
+    # Djangoのparserは文字とファイルを分けて返し、同じ名前の文字とファイルの送られた順がわからないので断る
+    if mixed := set(values) & set(uploaded):
+        detail = _("同じ名前のフィールドに、文字とファイルを一緒に送れません：%(names)s")
+        raise PayloadError("invalid_form", detail % {"names": ", ".join(sorted(mixed))})
     files: list[InputFile] = []
     for key, items in uploaded.lists():
         for item in items:

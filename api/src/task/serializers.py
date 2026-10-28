@@ -75,13 +75,10 @@ class TaskInputSerializer(serializers.Serializer):
         min_value=1, max_value=10_000, required=False, allow_null=True, default=None, help_text=_("文字の長さの上限")
     )
 
-    def validate_name(self, value: str) -> str:
-        # 手動実行のmultipartでは、ファイル以外の値を `inputs` のフィールドで送るので、項目の名前に使わせない
-        if value == "inputs":
-            raise serializers.ValidationError(_("inputs は項目の名前に使えません"))
-        return value
-
     def validate(self, attrs):
+        # 手動実行のmultipartでは、ファイル以外の値を `inputs` のフィールドで送るので、ファイルの項目の名前に使わせない
+        if attrs["type"] == TaskInputType.FILE and attrs["name"] == "inputs":
+            raise serializers.ValidationError({"name": _("inputs は型がファイルの項目の名前に使えません")})
         if attrs["type"] == TaskInputType.CHOICE:
             if not attrs["choices"]:
                 raise serializers.ValidationError({"choices": _("選択肢を入力してください")})

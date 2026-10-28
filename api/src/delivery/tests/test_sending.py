@@ -190,6 +190,22 @@ def test_temporary_failures_are_retried_with_backoff_then_give_up(manager, recei
     assert "HTTP 500" in delivery.last_error
 
 
+class EndlessBody(httpx.SyncByteStream):
+    """読み終わらない応答の本文（読んだら失敗にする）"""
+
+    def __iter__(self):
+        raise AssertionError("応答の本文を読んだ")
+        yield b""  # pragma: no cover
+
+
+def test_the_response_body_is_not_read(manager, receiver):
+    delivery = _finish(_run(manager))
+    receiver.responses = [httpx.Response(200, stream=EndlessBody())]
+    send_delivery(delivery.pk)
+    delivery.refresh_from_db()
+    assert delivery.status == DeliveryStatus.DELIVERED
+
+
 @pytest.mark.parametrize(
     ("response", "status"),
     [
@@ -319,6 +335,34 @@ def test_a_late_failure_after_the_lease_expired_keeps_the_unknown_state(manager)
         send_delivery(delivery.pk)
     delivery.refresh_from_db()
     assert delivery.status == DeliveryStatus.UNKNOWN
+
+
+def test_the_checked_addresses_are_tried_in_order(manager, receiver, fixture_public_dns):
+    delivery = _finish(_run(manager))
+    fixture_public_dns.return_value = [
+        (socket.AF_INET6, socket.SOCK_STREAM, 6, "", ("2606:2800:220:1::1", 443, 0, 0)),
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", (PUBLIC_ADDRESS, 443)),
+    ]
+    receiver.responses = [httpx.ConnectError("unreachable"), httpx.Response(200)]
+    send_delivery(delivery.pk)
+    delivery.refresh_from_db()
+    assert delivery.status == DeliveryStatus.DELIVERED
+    # 名前を引き直さず、確かめた2つ目のアドレスへつなぐ
+    assert [r.url.host for r in receiver.requests] == ["2606:2800:220:1::1", PUBLIC_ADDRESS]
+    assert fixture_public_dns.call_count == 1
+
+
+def test_an_unknown_outcome_does_not_try_the_next_address(manager, receiver, fixture_public_dns):
+    delivery = _finish(_run(manager))
+    fixture_public_dns.return_value = [
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.35", 443)),
+        (socket.AF_INET, socket.SOCK_STREAM, 6, "", (PUBLIC_ADDRESS, 443)),
+    ]
+    receiver.responses = [httpx.ReadTimeout("timed out")]
+    send_delivery(delivery.pk)
+    delivery.refresh_from_db()
+    assert delivery.status == DeliveryStatus.UNKNOWN
+    assert len(receiver.requests) == 1
 
 
 def test_a_dns_failure_while_sending_is_retried(manager, receiver, fixture_public_dns):

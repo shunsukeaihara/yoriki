@@ -54,8 +54,8 @@ def is_public(address: IPAddress) -> bool:
     return address.is_global and not address.is_multicast
 
 
-def resolve(parts: SplitResult) -> IPAddress:
-    """名前を引き、送ってよいアドレスを1つ返す。引いた先に1つでも送れないアドレスがあれば断る
+def resolve(parts: SplitResult) -> list[IPAddress]:
+    """名前を引き、送ってよいアドレスを返す（重ねず、引いた順）。引いた先に1つでも送れないアドレスがあれば断る
     （名前を引くたびに違うアドレスを返す送り先で、確かめた後に別の先へ向けられないように）"""
     host = parts.hostname or ""
     port = parts.port or (443 if parts.scheme == "https" else 80)
@@ -72,11 +72,4 @@ def resolve(parts: SplitResult) -> IPAddress:
     for address in addresses:
         if not is_public(address) and not any(address in network for network in networks):
             raise BlockedAddress(_("送り先が社内のアドレスです。基盤管理者が許したネットワークだけに送れます"))
-    return addresses[0]
-
-
-def check_destination(url: str) -> SplitResult:
-    """登録するときの確認（形と、名前を引いた先）"""
-    parts = check_url(url)
-    resolve(parts)
-    return parts
+    return list(dict.fromkeys(addresses))

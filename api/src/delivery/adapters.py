@@ -22,7 +22,7 @@ from django.utils.translation import gettext as _
 from utils.http import PinnedTransport
 
 from .models import SIGNING_SECRET_PREFIX, AttemptOutcome, DestinationKind
-from .network import BlockedAddress, ResolutionFailed, check_url, resolve
+from .network import BlockedAddress, IPAddress, ResolutionFailed, check_url, resolve
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,8 @@ class Outcome:
     error: str = ""
     # 送り先が指定した次に送ってよいまでの秒数（Retry-After）
     retry_after: int | None = None
+    # 接続できず、何も送っていない（ほかのアドレスを試してよい）
+    not_sent: bool = False
 
 
 def sign(secret: str, message_id: str, timestamp: int, body: bytes) -> str:
@@ -96,7 +98,7 @@ class WebhookAdapter:
     def deliver(self, *, url: str, secret: str, payload: dict[str, Any], attempt: int) -> Outcome:
         try:
             parts = self.validate_url(url)
-            address = resolve(parts)
+            addresses = resolve(parts)
         except ResolutionFailed as exc:
             return Outcome(AttemptOutcome.RETRYABLE, error=str(exc))  # 送る前なので、送り直してよい
         except BlockedAddress as exc:
@@ -113,15 +115,30 @@ class WebhookAdapter:
             "Yoriki-Event-Type": payload["event_type"],
             "Yoriki-Delivery-Attempt": str(attempt),
         }
+        # 確かめたアドレスを順に試す。つながらなかった（まだ何も送っていない）ときだけ次のアドレスへ進む
+        outcome = Outcome(AttemptOutcome.RETRYABLE)
+        for address in addresses:
+            outcome = self._post(url, address, body, headers)
+            if not outcome.not_sent:
+                break
+        return outcome
+
+    def _post(self, url: str, address: IPAddress, body: bytes, headers: dict[str, str]) -> Outcome:
         # 確かめたアドレスへ接続を固定する（HostとTLSの名前は元のホスト名）。環境変数のproxyは使わない
         transport = PinnedTransport(self.transport or httpx.HTTPTransport(), lambda _request: str(address))
         try:
-            with httpx.Client(timeout=TIMEOUT, follow_redirects=False, trust_env=False, transport=transport) as client:
-                response = client.post(url, content=body, headers=headers)
+            # 応答の本文は読まない（状態コードとヘッダーだけで決め、大きい・終わらない本文でWorkerを占有させない）
+            with (
+                httpx.Client(timeout=TIMEOUT, follow_redirects=False, trust_env=False, transport=transport) as client,
+                client.stream("POST", url, content=body, headers=headers) as response,
+            ):
+                return classify(response)
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout) as exc:
             # 送る前に失敗した（届いていない）ので、送り直してよい
             return Outcome(
-                AttemptOutcome.RETRYABLE, error=_("送り先につながりません（%(type)s）") % {"type": type(exc).__name__}
+                AttemptOutcome.RETRYABLE,
+                error=_("送り先につながりません（%(type)s）") % {"type": type(exc).__name__},
+                not_sent=True,
             )
         except httpx.HTTPError as exc:
             # 送った後に応答が失われた等。届いたか分からないので、自動では送り直さない（design.md §4.5）
@@ -129,7 +146,6 @@ class WebhookAdapter:
                 AttemptOutcome.UNKNOWN,
                 error=_("送り先の応答を受け取れません（%(type)s）") % {"type": type(exc).__name__},
             )
-        return classify(response)
 
 
 ZAPIER_HOST = "hooks.zapier.com"

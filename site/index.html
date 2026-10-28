@@ -204,60 +204,65 @@
           </p>
           <div class="fear-grid">
             <article class="fear">
-              <p class="fear__q" data-i18n>"Will the agent leak our data?"</p>
-              <h3 data-i18n>It only sees what administrators let it see.</h3>
+              <p class="fear__q" data-i18n>"Will company data leak?"</p>
+              <h3 data-i18n>The agent receives only the data administrators chose to hand it.</h3>
               <p data-i18n>
-                Which data the agent can read is decided by administrators, table by table and column by column. Work
-                that involves personal or confidential information is marked as such and runs only on LLMs you host.
-                Nothing typed into a prompt can widen that.
+                What the agent can read is set per data source by administrators, down to tables, columns and folders.
+                Work that involves personal or confidential information is flagged, kept off external LLMs and run only
+                on models you host. API keys and connection credentials are stored encrypted and never reach the agent
+                or the sandbox.
               </p>
               <ul>
-                <li data-i18n>Access scopes set in software, not in instructions</li>
-                <li data-i18n>Confidential work stays on local models</li>
+                <li data-i18n>The readable scope is configuration; a prompt cannot widen it</li>
+                <li data-i18n>Confidential work runs only on local LLMs</li>
                 <li data-i18n>API keys and credentials never reach the agent</li>
               </ul>
             </article>
             <article class="fear">
-              <p class="fear__q" data-i18n>"Will people reach things that aren't theirs?"</p>
-              <h3 data-i18n>Department and permissions decide what each person, and their agent, can see and do.</h3>
+              <p class="fear__q" data-i18n>"Could someone do more than they are allowed to?"</p>
+              <h3 data-i18n>Department and permissions draw the same line for the person and for their agent.</h3>
               <p data-i18n>
-                Skills, data sources and tasks have an owner and a scope: a person, a department or the whole company.
-                What a user may see and do is checked on the server from their department and permissions, and the agent
-                working for them gets exactly those rights, never more.
+                Skills, data sources and tasks have an owner and a scope: personal, departmental or company-wide. What a
+                user can see and do is decided on the server from their department and permissions. The agent only acts
+                on that user's behalf. What the person cannot do, the agent cannot do either, and what they cannot use
+                does not even appear among its options.
               </p>
               <ul>
-                <li data-i18n>Scope by person, department or company</li>
-                <li data-i18n>Checked on the server, not in a prompt</li>
-                <li data-i18n>The agent inherits the user's rights, never more</li>
+                <li data-i18n>Scopes are personal, departmental or company-wide, set by the owner</li>
+                <li data-i18n>Decided on the server, on every call</li>
+                <li data-i18n>What the person cannot do, the agent cannot do</li>
               </ul>
             </article>
             <article class="fear">
-              <p class="fear__q" data-i18n>"Will it break a system, or attack someone outside?"</p>
-              <h3 data-i18n>Commands run in a sandbox with nothing to break and no network.</h3>
+              <p class="fear__q" data-i18n>"Could it damage a system, or attack someone outside?"</p>
+              <h3 data-i18n>Commands run in a sandbox with nothing to break and no way out.</h3>
               <p data-i18n>
-                Administrators restrict what the agent may do to databases and cloud storage at the software level.
-                Commands run in a disposable sandbox that holds only that job's files, with no Internet, no office LAN
-                and no DNS. The host, your systems and the outside world are out of reach. The only outbound traffic is
-                what Yoriki itself makes through managed paths.
+                Every run gets a fresh, disposable sandbox holding only that job's attachments and Skill files. The host
+                and your internal systems are out of reach. The sandbox has no network: no Internet, no office LAN. What
+                the agent may do to databases and storage is limited by administrators at the software level, by scope
+                and by operation.
               </p>
               <ul>
-                <li data-i18n>Access to DBs and storage limited by configuration</li>
-                <li data-i18n>A fresh, isolated sandbox for every run, on gVisor, with only this job's files</li>
-                <li data-i18n>No network from the sandbox; results go only to registered destinations</li>
+                <li data-i18n>A disposable sandbox on gVisor, with only this job's files inside</li>
+                <li data-i18n>No network; the only outbound traffic is Yoriki's own managed paths</li>
+                <li data-i18n>Database and storage operations limited to the configured scope</li>
               </ul>
             </article>
             <article class="fear">
-              <p class="fear__q" data-i18n>"What if it runs wild?"</p>
-              <h3 data-i18n>People set the goal. The agent cannot grow its own powers.</h3>
+              <p class="fear__q" data-i18n>"Will it keep going on its own, beyond our control?"</p>
+              <h3 data-i18n>
+                People set the goal and people stop it. The agent acts only within the rights it was given.
+              </h3>
               <p data-i18n>
                 People decide the purpose and the business calls; the agent chooses the method within its limits. Any
-                run can be stopped at once. Every tool call is checked on the server, the agent cannot grant itself
-                permissions, and every step is recorded and cannot be rewritten.
+                run can be stopped at any time, and when a decision is needed the agent stops and asks. Every tool call
+                is checked by the server, the agent cannot grant itself permissions, and the record of what it did
+                cannot be deleted or rewritten.
               </p>
               <ul>
-                <li data-i18n>Stop any run, any time</li>
-                <li data-i18n>Permissions checked on every call, server-side</li>
-                <li data-i18n>Immutable history of what was done</li>
+                <li data-i18n>Stop at any time; the agent itself stops when a decision is needed</li>
+                <li data-i18n>It cannot grow its own permissions; every call is checked on the server</li>
+                <li data-i18n>The record of what was done cannot be rewritten</li>
               </ul>
             </article>
           </div>

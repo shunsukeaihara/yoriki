@@ -51,40 +51,44 @@
     'Four boundaries, enforced in software.': 'ソフトウェアが守る4つの境界で答える。',
     "These are the questions that stop a rollout. Each one is answered by a boundary that Yoriki's server and execution environment enforce, not by a rule in a prompt that the model may or may not follow.":
       '導入を止めるのは、この4つの問いです。それぞれに、Yorikiのサーバーと実行環境が強制する境界で答えます。モデルが守るかどうか分からない、プロンプトの中の決まりではありません。',
-    '"Will the agent leak our data?"': '「エージェントが情報を漏らさないか」',
-    'It only sees what administrators let it see.': '管理者が見せると決めたものしか見えません。',
-    'Which data the agent can read is decided by administrators, table by table and column by column. Work that involves personal or confidential information is marked as such and runs only on LLMs you host. Nothing typed into a prompt can widen that.':
-      'エージェントが読めるデータは、管理者が表と列の単位で決めます。個人情報や機密情報を扱う業務にはその印を付け、自社でホストするLLMでだけ動かします。プロンプトに何を書いても、この範囲は広がりません。',
-    'Access scopes set in software, not in instructions': 'アクセスの範囲は指示文ではなく設定で決める',
-    'Confidential work stays on local models': '機密の業務は社内のモデルにとどまる',
-    'API keys and credentials never reach the agent': 'API keyや資格情報はエージェントに渡らない',
-    '"Will people reach things that aren\'t theirs?"': '「本人の権限を超えて、情報や機能に触れないか」',
-    'Department and permissions decide what each person, and their agent, can see and do.':
-      '所属と権限が、本人とそのエージェントに見えるもの・できることを決めます。',
-    'Skills, data sources and tasks have an owner and a scope: a person, a department or the whole company. What a user may see and do is checked on the server from their department and permissions, and the agent working for them gets exactly those rights, never more.':
-      'Skill、データソース、タスクには持ち主と範囲があります。個人、部門、全社。誰に何が見え、何ができるかは、その人の所属と権限からサーバーが判定し、その人のために働くエージェントには、まったく同じ権限だけが与えられます。それ以上はありません。',
-    'Scope by person, department or company': '範囲は個人・部門・全社',
-    'Checked on the server, not in a prompt': '判定するのはプロンプトではなくサーバー',
-    "The agent inherits the user's rights, never more": 'エージェントの権限は本人と同じで、それ以上にはならない',
-    '"Will it break a system, or attack someone outside?"':
-      '「システムを壊したり、社外を攻撃する踏み台になったりしないか」',
-    'Commands run in a sandbox with nothing to break and no network.':
-      '壊せるものがなく、ネットワークもないサンドボックスで、コマンドが動きます。',
-    "Administrators restrict what the agent may do to databases and cloud storage at the software level. Commands run in a disposable sandbox that holds only that job's files, with no Internet, no office LAN and no DNS. The host, your systems and the outside world are out of reach. The only outbound traffic is what Yoriki itself makes through managed paths.":
-      'DBやクラウドストレージに対してエージェントができることは、管理者がソフトウェアのレベルで制限します。コマンドは使い捨てのサンドボックスで動き、中にあるのはその仕事のファイルだけ。インターネットも、社内LANも、DNSもありません。ホスト、社内のシステム、社外には届かず、外へ出る通信はYoriki自身が管理された経路で行うものだけです。',
-    'Access to DBs and storage limited by configuration': 'DBやストレージへのアクセスは設定で制限',
-    "A fresh, isolated sandbox for every run, on gVisor, with only this job's files":
-      '実行のたびに新しい、gVisor上の隔離されたサンドボックス。中はその仕事のファイルだけ',
-    'No network from the sandbox; results go only to registered destinations':
-      'サンドボックスからネットワークに出られず、結果が届くのは登録した通知先だけ',
-    '"What if it runs wild?"': '「暴走しないか」',
-    'People set the goal. The agent cannot grow its own powers.':
-      '目的は人が決め、エージェントは自分の権限を増やせません。',
-    'People decide the purpose and the business calls; the agent chooses the method within its limits. Any run can be stopped at once. Every tool call is checked on the server, the agent cannot grant itself permissions, and every step is recorded and cannot be rewritten.':
-      '目的と業務上の判断は人が決め、エージェントは許された範囲で方法を選びます。実行はいつでもすぐ止められます。Toolの呼出しはすべてサーバーで確かめられ、エージェントは自分に権限を与えられず、すべての手順が記録され、書き換えられません。',
-    'Stop any run, any time': 'どの実行も、いつでも止められる',
-    'Permissions checked on every call, server-side': '権限は呼出しのたびにサーバー側で確認',
-    'Immutable history of what was done': '何をしたかの履歴は書き換えられない',
+    '"Will company data leak?"': '「社内の情報が、外に漏れないか」',
+    'The agent receives only the data administrators chose to hand it.':
+      'エージェントに渡るのは、管理者が渡すと決めたデータだけです。',
+    'What the agent can read is set per data source by administrators, down to tables, columns and folders. Work that involves personal or confidential information is flagged, kept off external LLMs and run only on models you host. API keys and connection credentials are stored encrypted and never reach the agent or the sandbox.':
+      'エージェントが読める範囲は、管理者がデータソースごとに、表・列・フォルダの単位で決めます。個人情報や機密情報を扱う業務には機密の印を付け、社外のLLMには送らず、自社でホストしたモデルでだけ動かします。APIキーや接続の資格情報は暗号化して保存され、エージェントにもサンドボックスにも渡りません。',
+    'The readable scope is configuration; a prompt cannot widen it':
+      '読める範囲は設定で決まり、プロンプトでは広がらない',
+    'Confidential work runs only on local LLMs': '機密の業務は社内のLLMでだけ動く',
+    'API keys and credentials never reach the agent': 'APIキーや資格情報はエージェントに渡らない',
+    '"Could someone do more than they are allowed to?"': '「誰かが、自分の権限を超えたことをできてしまわないか」',
+    'Department and permissions draw the same line for the person and for their agent.':
+      '所属と権限が、本人にもエージェントにも同じ線を引きます。',
+    "Skills, data sources and tasks have an owner and a scope: personal, departmental or company-wide. What a user can see and do is decided on the server from their department and permissions. The agent only acts on that user's behalf. What the person cannot do, the agent cannot do either, and what they cannot use does not even appear among its options.":
+      'Skill、データソース、タスクには持ち主と範囲があります。個人のもの、部門のもの、全社のもの。誰に何が見え、何ができるかは、その人の所属と権限からサーバーが判定します。エージェントはその人の代わりに働くだけで、本人にできないことはエージェントにもできません。権限のないものは、エージェントの選択肢にも現れません。',
+    'Scopes are personal, departmental or company-wide, set by the owner': '範囲は個人・部門・全社で、持ち主が決める',
+    'Decided on the server, on every call': '判定はサーバーで、呼出しのたびに',
+    'What the person cannot do, the agent cannot do': '本人にできないことは、エージェントにもできない',
+    '"Could it damage a system, or attack someone outside?"': '「システムを壊したり、社外を攻撃したりしないか」',
+    'Commands run in a sandbox with nothing to break and no way out.':
+      'コマンドは、壊せるものも、外へ出る道もないサンドボックスで動きます。',
+    "Every run gets a fresh, disposable sandbox holding only that job's attachments and Skill files. The host and your internal systems are out of reach. The sandbox has no network: no Internet, no office LAN. What the agent may do to databases and storage is limited by administrators at the software level, by scope and by operation.":
+      'コマンドは、実行のたびに作る使い捨てのサンドボックスで動き、中にあるのはその仕事の添付とSkillの資料だけです。ホストや社内のシステムには届きません。サンドボックスにはネットワークがなく、インターネットにも社内LANにも出られません。DBやストレージへの操作は、管理者がソフトウェアのレベルで、範囲と操作の種類を制限します。',
+    "A disposable sandbox on gVisor, with only this job's files inside":
+      'gVisor上の使い捨てのサンドボックス。中はその仕事のファイルだけ',
+    "No network; the only outbound traffic is Yoriki's own managed paths":
+      'ネットワークなし。外へ出る通信はYorikiが管理する経路だけ',
+    'Database and storage operations limited to the configured scope':
+      'DB・ストレージへの操作は、設定した範囲と種類だけ',
+    '"Will it keep going on its own, beyond our control?"': '「勝手に動き続けて、手に負えなくならないか」',
+    'People set the goal and people stop it. The agent acts only within the rights it was given.':
+      '目的を決めるのも、止めるのも人。エージェントは与えられた権限の中でしか動けません。',
+    'People decide the purpose and the business calls; the agent chooses the method within its limits. Any run can be stopped at any time, and when a decision is needed the agent stops and asks. Every tool call is checked by the server, the agent cannot grant itself permissions, and the record of what it did cannot be deleted or rewritten.':
+      '目的と業務上の判断は人が決め、エージェントは許された範囲で方法を選びます。実行はいつでも止められ、判断が必要になれば、エージェントのほうが止まって人に聞きます。Toolの呼出しはすべてサーバーが確かめ、エージェントが自分の権限を増やすことはできません。何をしたかの記録は、消すことも書き換えることもできません。',
+    'Stop at any time; the agent itself stops when a decision is needed':
+      'いつでも止められ、判断が要るときはエージェントが止まる',
+    'It cannot grow its own permissions; every call is checked on the server':
+      '自分の権限を増やせず、呼出しのたびにサーバーが確かめる',
+    'The record of what was done cannot be rewritten': '何をしたかの記録は書き換えられない',
     'What people type in remains their judgement. Yoriki supports it: a confidential flag that keeps sensitive work on local models, a check when a conversation starts, and data sources that are limited before anyone asks a question.':
       '何を入力するかは、人の判断のままです。Yorikiはそれを支えます。機密の業務を社内のモデルにとどめる印、会話を始めるときの確認、そして質問される前から制限されたデータソースです。',
 

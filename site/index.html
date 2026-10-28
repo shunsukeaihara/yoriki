@@ -218,31 +218,32 @@
               </ul>
             </article>
             <article class="fear">
-              <p class="fear__q" data-i18n>"Will it break a system or wipe data?"</p>
-              <h3 data-i18n>Commands run in a sandbox with nothing to break.</h3>
+              <p class="fear__q" data-i18n>"Will people reach things that aren't theirs?"</p>
+              <h3 data-i18n>Department and permissions decide what each person, and their agent, can see and do.</h3>
               <p data-i18n>
-                Administrators restrict what the agent may do to databases and cloud storage at the software level.
-                Commands run in a disposable sandbox that holds only that job's files. The host, other jobs and your
-                systems are out of reach.
+                Skills, data sources and tasks have an owner and a scope: a person, a department or the whole company.
+                What a user may see and do is checked on the server from their department and permissions, and the agent
+                working for them gets exactly those rights, never more.
               </p>
               <ul>
-                <li data-i18n>Access to DBs and storage limited by configuration</li>
-                <li data-i18n>A fresh, isolated sandbox for every run, on gVisor</li>
-                <li data-i18n>Only this job's attachments and Skill files inside</li>
+                <li data-i18n>Scope by person, department or company</li>
+                <li data-i18n>Checked on the server, not in a prompt</li>
+                <li data-i18n>The agent inherits the user's rights, never more</li>
               </ul>
             </article>
             <article class="fear">
-              <p class="fear__q" data-i18n>"Could it attack someone outside?"</p>
-              <h3 data-i18n>The sandbox has no network at all.</h3>
+              <p class="fear__q" data-i18n>"Will it break a system, or attack someone outside?"</p>
+              <h3 data-i18n>Commands run in a sandbox with nothing to break and no network.</h3>
               <p data-i18n>
-                No Internet, no office LAN, no DNS. An agent cannot scan, call or send anything from where its commands
-                run. The only outbound traffic is what Yoriki itself makes through managed paths: the LLM you chose and
-                the data sources you approved.
+                Administrators restrict what the agent may do to databases and cloud storage at the software level.
+                Commands run in a disposable sandbox that holds only that job's files, with no Internet, no office LAN
+                and no DNS. The host, your systems and the outside world are out of reach. The only outbound traffic is
+                what Yoriki itself makes through managed paths.
               </p>
               <ul>
-                <li data-i18n>No free outbound access from the agent</li>
-                <li data-i18n>Results go only to destinations you registered</li>
-                <li data-i18n>Nothing reaches outside without a managed path</li>
+                <li data-i18n>Access to DBs and storage limited by configuration</li>
+                <li data-i18n>A fresh, isolated sandbox for every run, on gVisor, with only this job's files</li>
+                <li data-i18n>No network from the sandbox; results go only to registered destinations</li>
               </ul>
             </article>
             <article class="fear">

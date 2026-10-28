@@ -58,20 +58,25 @@
     'Access scopes set in software, not in instructions': 'アクセスの範囲は指示文ではなく設定で決める',
     'Confidential work stays on local models': '機密の業務は社内のモデルにとどまる',
     'API keys and credentials never reach the agent': 'API keyや資格情報はエージェントに渡らない',
-    '"Will it break a system or wipe data?"': '「システムを壊したり、データを消したりしないか」',
-    'Commands run in a sandbox with nothing to break.': '壊せるものがないサンドボックスで、コマンドが動きます。',
-    "Administrators restrict what the agent may do to databases and cloud storage at the software level. Commands run in a disposable sandbox that holds only that job's files. The host, other jobs and your systems are out of reach.":
-      'DBやクラウドストレージに対してエージェントができることは、管理者がソフトウェアのレベルで制限します。コマンドは使い捨てのサンドボックスで動き、中にあるのはその仕事のファイルだけ。ホスト、他の仕事、社内のシステムには届きません。',
+    '"Will people reach things that aren\'t theirs?"': '「本人の権限を超えて、情報や機能に触れないか」',
+    'Department and permissions decide what each person, and their agent, can see and do.':
+      '所属と権限が、本人とそのエージェントに見えるもの・できることを決めます。',
+    'Skills, data sources and tasks have an owner and a scope: a person, a department or the whole company. What a user may see and do is checked on the server from their department and permissions, and the agent working for them gets exactly those rights, never more.':
+      'Skill、データソース、タスクには持ち主と範囲があります。個人、部門、全社。誰に何が見え、何ができるかは、その人の所属と権限からサーバーが判定し、その人のために働くエージェントには、まったく同じ権限だけが与えられます。それ以上はありません。',
+    'Scope by person, department or company': '範囲は個人・部門・全社',
+    'Checked on the server, not in a prompt': '判定するのはプロンプトではなくサーバー',
+    "The agent inherits the user's rights, never more": 'エージェントの権限は本人と同じで、それ以上にはならない',
+    '"Will it break a system, or attack someone outside?"':
+      '「システムを壊したり、社外を攻撃する踏み台になったりしないか」',
+    'Commands run in a sandbox with nothing to break and no network.':
+      '壊せるものがなく、ネットワークもないサンドボックスで、コマンドが動きます。',
+    "Administrators restrict what the agent may do to databases and cloud storage at the software level. Commands run in a disposable sandbox that holds only that job's files, with no Internet, no office LAN and no DNS. The host, your systems and the outside world are out of reach. The only outbound traffic is what Yoriki itself makes through managed paths.":
+      'DBやクラウドストレージに対してエージェントができることは、管理者がソフトウェアのレベルで制限します。コマンドは使い捨てのサンドボックスで動き、中にあるのはその仕事のファイルだけ。インターネットも、社内LANも、DNSもありません。ホスト、社内のシステム、社外には届かず、外へ出る通信はYoriki自身が管理された経路で行うものだけです。',
     'Access to DBs and storage limited by configuration': 'DBやストレージへのアクセスは設定で制限',
-    'A fresh, isolated sandbox for every run, on gVisor': '実行のたびに新しい、gVisor上の隔離されたサンドボックス',
-    "Only this job's attachments and Skill files inside": '中にあるのは、その仕事の添付とSkillの資料だけ',
-    '"Could it attack someone outside?"': '「社外を攻撃する踏み台にならないか」',
-    'The sandbox has no network at all.': 'サンドボックスにネットワークはありません。',
-    'No Internet, no office LAN, no DNS. An agent cannot scan, call or send anything from where its commands run. The only outbound traffic is what Yoriki itself makes through managed paths: the LLM you chose and the data sources you approved.':
-      'インターネットも、社内LANも、DNSもありません。コマンドが動く場所から、何かを探したり、呼んだり、送ったりはできません。外へ出る通信は、Yoriki自身が管理された経路で行うものだけ。選んだLLMと、許可したデータソースです。',
-    'No free outbound access from the agent': 'エージェントからの自由な外部アクセスはない',
-    'Results go only to destinations you registered': '結果が届くのは登録した通知先だけ',
-    'Nothing reaches outside without a managed path': '管理された経路の外には何も出ない',
+    "A fresh, isolated sandbox for every run, on gVisor, with only this job's files":
+      '実行のたびに新しい、gVisor上の隔離されたサンドボックス。中はその仕事のファイルだけ',
+    'No network from the sandbox; results go only to registered destinations':
+      'サンドボックスからネットワークに出られず、結果が届くのは登録した通知先だけ',
     '"What if it runs wild?"': '「暴走しないか」',
     'People set the goal. The agent cannot grow its own powers.':
       '目的は人が決め、エージェントは自分の権限を増やせません。',

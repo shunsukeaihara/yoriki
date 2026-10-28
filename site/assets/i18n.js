@@ -16,7 +16,6 @@
     'Toggle theme': 'テーマを切り替える',
 
     // Hero
-    'Open source · self-hosted · MIT': 'オープンソース · セルフホスト · MIT',
     'AI agents your whole company': 'AIエージェントを、',
     'can use with confidence.': '全社で安心して使うための基盤。',
     'Using AI agents at work is no longer optional. But leaks, damaged systems, attacks on outsiders and runaway agents are real fears. Yoriki lets the company decide what data an agent may touch, where its commands run and where results go, and enforces that in software. Human judgement still matters. The agent cannot step over the line on its own.':
@@ -116,38 +115,19 @@
     'Every published Skill is an immutable version. Running work keeps the version it started with. Roll back in one step, or stop a Skill everywhere with one switch.':
       '公開したSkillは不変の版になります。実行中の仕事は始めたときの版を使い続けます。ひとつ前に戻すのも、すべての場所で止めるのも、ひとつの操作です。',
 
-    // Data
-    'Data sources': 'データソース',
-    'Internal data, within limits the administrator sets.': '社内のデータは、管理者が決めた範囲で。',
-    'Connect internal data sources and give the agent exactly the slice it needs. Employees point at a source with @ in the chat; the agent cannot see anything outside the slice, no matter how it is asked.':
-      '社内のデータソースをつなぎ、エージェントには必要な範囲だけを渡します。社員はチャットで @ を付けてデータソースを指定します。どう頼まれても、エージェントは範囲の外を見ることができません。',
-    'Database products, cloud storage such as SharePoint and Google Drive, and MCP servers connect through connector plugins':
-      'DB製品、SharePointやGoogle Driveなどのクラウドストレージ、MCPサーバーを、Connectorのプラグインとしてつなぐ',
-    'Expose only the tables, columns, folders and operations you choose, with caps on rows and runtime':
-      '公開するのは選んだ表・列・フォルダ・操作だけ。件数と実行時間に上限',
-    'Several views on the same connection: one for accounting, another for sales':
-      '同じ接続の上に、経理向け・営業向けなど複数の範囲を作れる',
-    'Which departments may use each source is part of its configuration':
-      'どの部門が使えるかは、データソースの設定の一部',
-    'Sources holding personal data carry a confidential flag and are used only with local LLMs':
-      '個人情報を持つデータソースには機密の印を付け、社内のLLMとだけ使う',
-    'Every operation is checked and recorded on the server before it runs': '操作は実行前にサーバーで検査し、記録する',
-    'Plugins are installed by the platform administrator; nothing loads code from a prompt or the network':
-      'プラグインを入れるのは基盤管理者。プロンプトやネットワークからコードを読み込むことはない',
-
     // Automation
     'Routine work, started anywhere,': '定型業務を、どこからでも起動し、',
     'delivered anywhere.': 'どこへでも届ける。',
-    'Put a routine job into a task: the instructions, the Skill version to use, and the inputs it takes. Then start it from a webhook or by hand, without opening a conversation, and have the result show up where the team already looks.':
-      '定型業務はタスクにまとめます。指示、使うSkillの版、受け取る入力。あとはWebhookや手動で、会話を開かずに起動し、結果はチームがいつも見ている場所へ届けます。',
-    Triggers: '起動',
-    'from your existing tools; duplicates dropped by event ID': 'いつものツールから。重複はイベントIDで除く',
+    'Put a routine job into a task: the instructions, the Skill version to use, and the inputs it takes. Then start it from a trigger instead of a conversation, and have the result show up where the team already looks.':
+      '定型業務はタスクにまとめます。指示、使うSkillの版、受け取る入力。あとは会話の代わりにトリガーから起動し、結果はチームがいつも見ている場所へ届けます。',
+    Triggers: 'トリガー',
+    'from the systems you already run': 'いつも使っているシステムから',
+    Chat: 'チャット',
+    'an employee starts the task from a conversation': '社員が会話からタスクを起動する',
+    Schedule: 'スケジュール',
+    'on a timer': '決まった時刻に',
     'Manual run': '手動実行',
     'from the task list or the API': 'タスクの一覧かAPIから',
-    Chat: 'チャット',
-    'start a task from a conversation': '会話からタスクを起動する',
-    Schedule: 'スケジュール',
-    'run on a timer': '決まった時刻に動かす',
     'The task runs': 'タスクが動く',
     'Same safe sandbox as a conversation': '会話と同じ安全なサンドボックスで',
     'Fixed Skill version, so results stay consistent': 'Skillの版を固定し、結果がぶれない',
@@ -161,13 +141,45 @@
     'When an automated run needs a human decision, it asks in the channel you chose. Anyone in that thread can answer, and the same run continues. Results go only to destinations an administrator registered, and confidential results only to destinations allowed to receive them.':
       '自動実行の途中で人の判断が必要になると、指定したチャネルで質問します。スレッドの誰でも答えられ、同じ実行が続きます。結果が届くのは管理者が登録した通知先だけで、機密の結果は、受け取ってよいとした通知先にだけ届きます。',
 
+    // Plugins
+    Plugins: 'プラグイン',
+    'Data sources, triggers and destinations': 'データソース、トリガー、通知先は、',
+    'are plugins.': 'すべてプラグイン。',
+    'Everything that connects Yoriki to the outside is a plugin with the same contract: installed by the platform administrator as a reviewed package, configured with explicit limits, and checked on every call. Nothing loads code from a prompt or the network.':
+      'Yorikiと外をつなぐものは、すべて同じ契約のプラグインです。基盤管理者がレビュー済みのパッケージとして入れ、明示的な制限を設定し、呼出しのたびにサーバーが確かめます。プロンプトやネットワークからコードを読み込むことはありません。',
+    Connectors: 'Connector',
+    'Database products, cloud storage such as SharePoint and Google Drive, and MCP servers.':
+      'DB製品、SharePointやGoogle Driveなどのクラウドストレージ、MCPサーバー。',
+    'Expose only the tables, columns, folders and operations you choose, with caps on rows and runtime':
+      '公開するのは選んだ表・列・フォルダ・操作だけ。件数と実行時間に上限',
+    'Several views on the same connection: one for accounting, another for sales':
+      '同じ接続の上に、経理向け・営業向けなど複数の範囲を作れる',
+    'Which departments may use each source is part of its configuration':
+      'どの部門が使えるかは、データソースの設定の一部',
+    'Sources holding personal data carry a confidential flag and are used only with local LLMs':
+      '個人情報を持つデータソースには機密の印を付け、社内のLLMとだけ使う',
+    'Employees point at a source with @ in the chat; the agent cannot see outside the slice':
+      '社員はチャットで @ を付けて指定する。エージェントは範囲の外を見られない',
+    'Webhook, chat, schedule, manual run.': 'Webhook、チャット、スケジュール、手動実行。',
+    'Each trigger has its own credential and can be suspended on its own': 'トリガーごとに鍵があり、単独で止められる',
+    'Incoming payloads are handed to the agent as files, never as instructions':
+      '届いたpayloadは指示ではなくファイルとしてエージェントに渡す',
+    'Duplicate events are dropped by their event ID': '重複したイベントはイベントIDで除く',
+    "A trigger starts only the task it is attached to, with that task's permissions":
+      'トリガーが起動できるのは結び付けたタスクだけで、そのタスクの権限で動く',
+    'In-app, webhook and Zapier, Teams, Slack and Discord.': '画面内、WebhookとZapier、Teams・Slack・Discord。',
+    'Results go only to destinations an administrator registered': '結果が届くのは管理者が登録した通知先だけ',
+    'Confidential results go only to destinations allowed to receive them':
+      '機密の結果は、受け取ってよいとした通知先にだけ届く',
+    'Delivery is retried and recorded separately from the run itself': '配信は実行とは別に再試行し、記録する',
+    'Channel destinations carry questions, answers and the report in one thread':
+      'チャネルの通知先では、質問・回答・報告が1つのスレッドにまとまる',
+
     // For IT
-    'Your servers. Your identity provider. Your choice of LLM.': '自社のサーバーで。自社の認証基盤で。LLMは選べる。',
-    'Yoriki runs on a host you control, as a handful of containers. Nothing is sent to a vendor you did not configure yourself.':
-      'Yorikiは、自社が管理するホストの上で、いくつかのコンテナとして動きます。自分で設定していない外部のサービスへは、何も送られません。',
-    Deployment: '配備',
-    'Docker Compose on a single host to start; add app servers and workers later. Publish via your load balancer or Cloudflare Tunnel.':
-      'まずは1台のホストにDocker Composeで。あとからアプリサーバーやWorkerを足せます。公開は自社のロードバランサーかCloudflare Tunnelで。',
+    'Your identity provider. Your choice of LLM. One place to manage it.':
+      '自社の認証基盤で。LLMは選べる。管理はひとつの画面で。',
+    'Yoriki runs in an environment you control. Nothing is sent to a vendor you did not configure yourself, and everything an agent did is there to review.':
+      'Yorikiは、自社が管理する環境で動きます。自分で設定していない外部のサービスへは何も送られず、エージェントがしたことはすべて後から確かめられます。',
     'Sign-in': 'ログイン',
     'Microsoft 365 or Google Workspace (OIDC). Invited accounts with passwords where there is no SSO.':
       'Microsoft 365・Google Workspace（OIDC）。SSOのない環境では、招待制のパスワードのアカウント。',
@@ -183,18 +195,19 @@
       'ユーザー・部門・権限、ユーザーごとの利用量、すべての実行の履歴。ひとつの管理画面で。',
 
     // Final / footer
-    'Open source, built in the open.': 'オープンソースで、公開しながら作っています。',
-    'Yoriki is pre-alpha and MIT-licensed. The design, the conventions and the current status are all in the repository. Read it, run it, and tell us what is missing.':
-      'Yorikiはpre-alphaで、MITライセンスです。設計、規約、いまの状況はすべてリポジトリにあります。読んで、動かして、足りないものを教えてください。',
-    'Star on GitHub': 'GitHubでStar',
-    'Current status': 'いまの状況',
+    'Give everyone an agent.': '全員にエージェントを。',
+    'Keep the boundaries yours.': '境界は会社の手に。',
+    'Yoriki is open source under the MIT license. Run it on your own infrastructure, connect your identity provider and your data, and let your company start delegating work.':
+      'YorikiはMITライセンスのオープンソースです。自社の環境で動かし、認証基盤とデータをつなぎ、会社として仕事を任せ始めてください。',
+    'Get Yoriki on GitHub': 'GitHubでYorikiを入手',
+    'Read the docs': 'ドキュメントを読む',
     "Named after the yoriki (与力), the officers of Edo-period Japan who carried out a magistrate's work within the authority they were given.":
       '名前は与力から。江戸時代に奉行の下で、与えられた権限の範囲で実務を担った役人です。',
     Documentation: 'ドキュメント',
     Design: '設計',
+    Deployment: '配備',
     Authorization: '権限',
     Project: 'プロジェクト',
-    Status: '状況',
     'MIT License': 'MITライセンス',
     'Released under the MIT License.': 'MITライセンスで公開しています。',
   }

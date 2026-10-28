@@ -38,8 +38,8 @@
           <a href="#fears" data-i18n>Why Yoriki</a>
           <a href="#use" data-i18n>For employees</a>
           <a href="#skills" data-i18n>Skills</a>
-          <a href="#data" data-i18n>Data</a>
           <a href="#automation" data-i18n>Automation</a>
+          <a href="#plugins" data-i18n>Plugins</a>
           <a href="#it" data-i18n>For IT</a>
         </nav>
         <div class="nav__actions">
@@ -84,10 +84,6 @@
       <section class="hero">
         <div class="container hero__grid">
           <div class="hero__copy">
-            <p class="eyebrow">
-              <span class="dot dot--live" aria-hidden="true"></span>
-              <span data-i18n>Open source · self-hosted · MIT</span>
-            </p>
             <h1 class="display">
               <span data-i18n>AI agents your whole company</span>
               <em data-i18n>can use with confidence.</em>
@@ -372,36 +368,6 @@
         </div>
       </section>
 
-      <!-- Data -->
-      <section class="data" id="data">
-        <div class="container data__grid">
-          <div>
-            <p class="kicker" data-i18n>Data sources</p>
-            <h2 class="display display--md" data-i18n>Internal data, within limits the administrator sets.</h2>
-            <p class="lead" data-i18n>
-              Connect internal data sources and give the agent exactly the slice it needs. Employees point at a source
-              with @ in the chat; the agent cannot see anything outside the slice, no matter how it is asked.
-            </p>
-          </div>
-          <ul class="bullets bullets--light">
-            <li data-i18n>
-              Database products, cloud storage such as SharePoint and Google Drive, and MCP servers connect through
-              connector plugins
-            </li>
-            <li data-i18n>
-              Expose only the tables, columns, folders and operations you choose, with caps on rows and runtime
-            </li>
-            <li data-i18n>Several views on the same connection: one for accounting, another for sales</li>
-            <li data-i18n>Which departments may use each source is part of its configuration</li>
-            <li data-i18n>Sources holding personal data carry a confidential flag and are used only with local LLMs</li>
-            <li data-i18n>Every operation is checked and recorded on the server before it runs</li>
-            <li data-i18n>
-              Plugins are installed by the platform administrator; nothing loads code from a prompt or the network
-            </li>
-          </ul>
-        </div>
-      </section>
-
       <!-- Automation -->
       <section class="automation" id="automation">
         <div class="container">
@@ -411,29 +377,18 @@
           </h2>
           <p class="lead" data-i18n>
             Put a routine job into a task: the instructions, the Skill version to use, and the inputs it takes. Then
-            start it from a webhook or by hand, without opening a conversation, and have the result show up where the
-            team already looks.
+            start it from a trigger instead of a conversation, and have the result show up where the team already looks.
           </p>
           <div class="flow">
             <div class="flow__col">
               <h3 data-i18n>Triggers</h3>
               <ul>
+                <li><span>Webhook</span><small data-i18n>from the systems you already run</small></li>
                 <li>
-                  <span>Webhook</span>
-                  <small data-i18n>from your existing tools; duplicates dropped by event ID</small>
+                  <span data-i18n>Chat</span><small data-i18n>an employee starts the task from a conversation</small>
                 </li>
-                <li>
-                  <span data-i18n>Manual run</span>
-                  <small data-i18n>from the task list or the API</small>
-                </li>
-                <li>
-                  <span data-i18n>Chat</span>
-                  <small data-i18n>start a task from a conversation</small>
-                </li>
-                <li>
-                  <span data-i18n>Schedule</span>
-                  <small data-i18n>run on a timer</small>
-                </li>
+                <li><span data-i18n>Schedule</span><small data-i18n>on a timer</small></li>
+                <li><span data-i18n>Manual run</span><small data-i18n>from the task list or the API</small></li>
               </ul>
             </div>
             <div class="flow__arrow" aria-hidden="true">
@@ -454,17 +409,11 @@
             <div class="flow__col">
               <h3 data-i18n>Destinations</h3>
               <ul>
+                <li><span data-i18n>In-app</span><small data-i18n>result and files in Yoriki</small></li>
+                <li><span>Webhook · Zapier</span><small data-i18n>hand the result to any other system</small></li>
                 <li>
-                  <span data-i18n>In-app</span>
-                  <small data-i18n>result and files in Yoriki</small>
-                </li>
-                <li>
-                  <span>Webhook · Zapier</span>
-                  <small data-i18n>hand the result to any other system</small>
-                </li>
-                <li>
-                  <span>Teams · Slack · Discord</span>
-                  <small data-i18n>questions, answers and the report in one thread</small>
+                  <span>Teams · Slack · Discord</span
+                  ><small data-i18n>questions, answers and the report in one thread</small>
                 </li>
               </ul>
             </div>
@@ -477,25 +426,74 @@
         </div>
       </section>
 
+      <!-- Plugins -->
+      <section class="plugins" id="plugins">
+        <div class="container">
+          <p class="kicker" data-i18n>Plugins</p>
+          <h2 class="display display--md">
+            <span data-i18n>Data sources, triggers and destinations</span> <em data-i18n>are plugins.</em>
+          </h2>
+          <p class="lead" data-i18n>
+            Everything that connects Yoriki to the outside is a plugin with the same contract: installed by the platform
+            administrator as a reviewed package, configured with explicit limits, and checked on every call. Nothing
+            loads code from a prompt or the network.
+          </p>
+          <div class="plugin-grid">
+            <article>
+              <h3 data-i18n>Connectors</h3>
+              <p data-i18n>Database products, cloud storage such as SharePoint and Google Drive, and MCP servers.</p>
+              <ul>
+                <li data-i18n>
+                  Expose only the tables, columns, folders and operations you choose, with caps on rows and runtime
+                </li>
+                <li data-i18n>Several views on the same connection: one for accounting, another for sales</li>
+                <li data-i18n>Which departments may use each source is part of its configuration</li>
+                <li data-i18n>
+                  Sources holding personal data carry a confidential flag and are used only with local LLMs
+                </li>
+                <li data-i18n>
+                  Employees point at a source with @ in the chat; the agent cannot see outside the slice
+                </li>
+              </ul>
+            </article>
+            <article>
+              <h3 data-i18n>Triggers</h3>
+              <p data-i18n>Webhook, chat, schedule, manual run.</p>
+              <ul>
+                <li data-i18n>Each trigger has its own credential and can be suspended on its own</li>
+                <li data-i18n>Incoming payloads are handed to the agent as files, never as instructions</li>
+                <li data-i18n>Duplicate events are dropped by their event ID</li>
+                <li data-i18n>A trigger starts only the task it is attached to, with that task's permissions</li>
+              </ul>
+            </article>
+            <article>
+              <h3 data-i18n>Destinations</h3>
+              <p data-i18n>In-app, webhook and Zapier, Teams, Slack and Discord.</p>
+              <ul>
+                <li data-i18n>Results go only to destinations an administrator registered</li>
+                <li data-i18n>Confidential results go only to destinations allowed to receive them</li>
+                <li data-i18n>Delivery is retried and recorded separately from the run itself</li>
+                <li data-i18n>Channel destinations carry questions, answers and the report in one thread</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
       <!-- For IT -->
       <section class="it" id="it">
         <div class="container it__grid">
           <div>
             <p class="kicker" data-i18n>For IT</p>
-            <h2 class="display display--md" data-i18n>Your servers. Your identity provider. Your choice of LLM.</h2>
+            <h2 class="display display--md" data-i18n>
+              Your identity provider. Your choice of LLM. One place to manage it.
+            </h2>
             <p class="lead" data-i18n>
-              Yoriki runs on a host you control, as a handful of containers. Nothing is sent to a vendor you did not
-              configure yourself.
+              Yoriki runs in an environment you control. Nothing is sent to a vendor you did not configure yourself, and
+              everything an agent did is there to review.
             </p>
           </div>
           <dl class="facts">
-            <div>
-              <dt data-i18n>Deployment</dt>
-              <dd data-i18n>
-                Docker Compose on a single host to start; add app servers and workers later. Publish via your load
-                balancer or Cloudflare Tunnel.
-              </dd>
-            </div>
             <div>
               <dt data-i18n>Sign-in</dt>
               <dd data-i18n>
@@ -525,19 +523,23 @@
         </div>
       </section>
 
-      <!-- Open source -->
+      <!-- Closing -->
       <section class="final">
         <div class="container final__inner">
           <span class="seal seal--lg" aria-hidden="true">与力</span>
-          <h2 class="display display--md" data-i18n>Open source, built in the open.</h2>
+          <h2 class="display display--md">
+            <span data-i18n>Give everyone an agent.</span> <em data-i18n>Keep the boundaries yours.</em>
+          </h2>
           <p class="lead" data-i18n>
-            Yoriki is pre-alpha and MIT-licensed. The design, the conventions and the current status are all in the
-            repository. Read it, run it, and tell us what is missing.
+            Yoriki is open source under the MIT license. Run it on your own infrastructure, connect your identity
+            provider and your data, and let your company start delegating work.
           </p>
           <div class="cta cta--center">
-            <a class="btn btn--primary" href="https://github.com/shunsukeaihara/yoriki" data-i18n>Star on GitHub</a>
-            <a class="btn btn--ghost" href="https://github.com/shunsukeaihara/yoriki/blob/main/docs/status.md" data-i18n
-              >Current status</a
+            <a class="btn btn--primary" href="https://github.com/shunsukeaihara/yoriki" data-i18n
+              >Get Yoriki on GitHub</a
+            >
+            <a class="btn btn--ghost" href="https://github.com/shunsukeaihara/yoriki/tree/main/docs" data-i18n
+              >Read the docs</a
             >
           </div>
         </div>
@@ -570,7 +572,6 @@
             <h4 data-i18n>Project</h4>
             <a href="https://github.com/shunsukeaihara/yoriki">GitHub</a>
             <a href="https://github.com/shunsukeaihara/yoriki/issues">Issues</a>
-            <a href="https://github.com/shunsukeaihara/yoriki/blob/main/docs/status.md" data-i18n>Status</a>
             <a href="https://github.com/shunsukeaihara/yoriki/blob/main/LICENSE" data-i18n>MIT License</a>
           </div>
         </div>

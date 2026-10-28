@@ -999,7 +999,6 @@ html[lang='ja'] .fear__q {
 
 /* For employees / Data / IT (two-column intro + list) */
 .use__grid,
-.data__grid,
 .it__grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
@@ -1008,68 +1007,92 @@ html[lang='ja'] .fear__q {
 }
 @media (max-width: 900px) {
   .use__grid,
-  .data__grid,
   .it__grid {
     grid-template-columns: 1fr;
     gap: 24px;
   }
 }
 .use__grid > div,
-.data__grid > div,
 .it__grid > div {
   position: sticky;
   top: 96px;
 }
 .use__grid .lead,
-.data__grid .lead,
 .it__grid .lead {
   margin-top: 16px;
   font-size: 1.05rem;
 }
-.data {
+/* Plugins */
+.plugins {
   background: var(--ink);
   color: #f1ede4;
 }
-:root[data-theme='dark'] .data {
+:root[data-theme='dark'] .plugins {
   background: #0c0b0a;
 }
 @media (prefers-color-scheme: dark) {
-  :root[data-theme='auto'] .data {
+  :root[data-theme='auto'] .plugins {
     background: #0c0b0a;
   }
 }
-.data .kicker {
+.plugins .kicker {
   color: var(--accent);
 }
-.data .lead {
+.plugins .lead {
+  margin-top: 12px;
   color: rgba(241, 237, 228, 0.72);
 }
-.bullets {
+.plugin-grid {
   display: grid;
-  gap: 12px;
-  font-size: 0.98rem;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-top: 40px;
 }
-.bullets li {
-  padding-left: 22px;
+@media (max-width: 900px) {
+  .plugin-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.plugin-grid article {
+  border: 1px solid rgba(241, 237, 228, 0.14);
+  border-radius: var(--radius);
+  padding: 24px 22px;
+  background: rgba(241, 237, 228, 0.04);
+}
+.plugin-grid h3 {
+  font-size: 0.78rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.plugin-grid > article > p {
+  font-size: 1.05rem;
+  font-weight: 500;
+  margin-bottom: 14px;
+  text-wrap: pretty;
+}
+.plugin-grid ul {
+  display: grid;
+  gap: 8px;
+  font-size: 0.88rem;
+  color: rgba(241, 237, 228, 0.78);
+}
+.plugin-grid li {
+  padding-left: 18px;
   position: relative;
 }
-.bullets li::before {
+.plugin-grid li::before {
   content: '';
   position: absolute;
   left: 0;
-  top: 11px;
-  width: 10px;
+  top: 10px;
+  width: 8px;
   height: 2px;
   background: var(--accent);
 }
-.bullets--light {
-  color: rgba(241, 237, 228, 0.85);
-  padding-top: 8px;
-}
-.bullets--light li + li {
-  border-top: 1px solid rgba(241, 237, 228, 0.12);
-  padding-top: 12px;
-}
+
 .skills {
   border-bottom: 1px solid var(--line);
 }
@@ -1193,6 +1216,10 @@ html[lang='ja'] .fear__q {
 }
 .final__inner {
   max-width: 720px;
+}
+.final .display span,
+.final .display em {
+  display: block;
 }
 .final .lead {
   margin: 16px auto 0;

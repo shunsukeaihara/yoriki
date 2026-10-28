@@ -7,4 +7,5 @@ Yorikiを紹介する静的なランディングページ。英語を基本と�
 - 配色のトークンは `style.css` の `:root` にあり、ダークモードは `prefers-color-scheme` とヘッダーのボタン（`data-theme`）の両方に対応する。
 - 手元で見るには、`site/` で `python3 -m http.server 8765` を動かして http://localhost:8765/ を開く。
 - 整形は `pnpm exec prettier --print-width 120 --no-semi --single-quote --write "site/**/*.{html,css,js}"`（`frontend/` のPrettierを使う）。
-- `main` に push すると `.github/workflows/site.yml` がGitHub Pagesへ配備する（リポジトリの設定でPagesのSourceを「GitHub Actions」にしておく）。この `README.md` は配備に含めない（workflowで除いている）。
+- 配備は `.github/workflows/site.yml`。`main` への push では、リポジトリの変数 `SITE_DEPLOY`（Settings → Secrets and variables → Actions → Variables）が `true` のときだけGitHub Pagesへ配備し、それ以外はskipになる。手動実行は変数に関係なく配備する。Pagesの Source は「GitHub Actions」にしておく。この `README.md` は配備に含めない。
+- `site/` だけの変更のコミットに `[skip ci]` は付けない。他のworkflowは `paths` で動かず、付けると `site` も動かなくなる。

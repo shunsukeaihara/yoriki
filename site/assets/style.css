@@ -899,21 +899,6 @@ section {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-.tag {
-  display: inline-block;
-  margin-left: 8px;
-  padding: 1px 7px;
-  border-radius: 999px;
-  font-size: 0.68rem;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ink-3);
-  border: 1px solid var(--line-strong);
-  vertical-align: middle;
-}
-html[lang='ja'] .tag {
-  letter-spacing: 0.1em;
-}
 .automation__notes {
   display: grid;
   grid-template-columns: 1fr 1fr;

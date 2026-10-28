@@ -119,20 +119,21 @@
     // Data
     'Data sources': 'データソース',
     'Internal data, within limits the administrator sets.': '社内のデータは、管理者が決めた範囲で。',
-    'Connect internal databases and give the agent exactly the slice it needs. Employees point at a source with @ in the chat; the agent cannot see anything outside the slice, no matter how it is asked.':
-      '社内のデータベースをつなぎ、エージェントには必要な範囲だけを渡します。社員はチャットで @ を付けてデータソースを指定します。どう頼まれても、エージェントは範囲の外を見ることができません。',
-    'PostgreSQL, MySQL and SQL Server today; storage and SaaS sources on the roadmap':
-      '今はPostgreSQL・MySQL・SQL Server。ストレージやSaaSの接続先はロードマップに',
-    'Expose only the tables and columns you choose, with caps on rows and runtime':
-      '公開するのは選んだ表と列だけ。件数と実行時間に上限',
+    'Connect internal data sources and give the agent exactly the slice it needs. Employees point at a source with @ in the chat; the agent cannot see anything outside the slice, no matter how it is asked.':
+      '社内のデータソースをつなぎ、エージェントには必要な範囲だけを渡します。社員はチャットで @ を付けてデータソースを指定します。どう頼まれても、エージェントは範囲の外を見ることができません。',
+    'Database products, cloud storage such as SharePoint and Google Drive, and MCP servers connect through connector plugins':
+      'DB製品、SharePointやGoogle Driveなどのクラウドストレージ、MCPサーバーを、Connectorのプラグインとしてつなぐ',
+    'Expose only the tables, columns, folders and operations you choose, with caps on rows and runtime':
+      '公開するのは選んだ表・列・フォルダ・操作だけ。件数と実行時間に上限',
     'Several views on the same connection: one for accounting, another for sales':
       '同じ接続の上に、経理向け・営業向けなど複数の範囲を作れる',
     'Which departments may use each source is part of its configuration':
       'どの部門が使えるかは、データソースの設定の一部',
     'Sources holding personal data carry a confidential flag and are used only with local LLMs':
       '個人情報を持つデータソースには機密の印を付け、社内のLLMとだけ使う',
-    'Every query is checked and recorded on the server before it runs':
-      '問い合わせは実行前にサーバーで検査し、記録する',
+    'Every operation is checked and recorded on the server before it runs': '操作は実行前にサーバーで検査し、記録する',
+    'Plugins are installed by the platform administrator; nothing loads code from a prompt or the network':
+      'プラグインを入れるのは基盤管理者。プロンプトやネットワークからコードを読み込むことはない',
 
     // Automation
     'Routine work, started anywhere,': '定型業務を、どこからでも起動し、',
@@ -144,11 +145,9 @@
     'Manual run': '手動実行',
     'from the task list or the API': 'タスクの一覧かAPIから',
     Chat: 'チャット',
-    soon: '近日',
     'start a task from a conversation': '会話からタスクを起動する',
     Schedule: 'スケジュール',
-    planned: '予定',
-    'same mechanism, added later': '同じ仕組みで後から追加',
+    'run on a timer': '決まった時刻に動かす',
     'The task runs': 'タスクが動く',
     'Same safe sandbox as a conversation': '会話と同じ安全なサンドボックスで',
     'Fixed Skill version, so results stay consistent': 'Skillの版を固定し、結果がぶれない',

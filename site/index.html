@@ -379,17 +379,25 @@
             <p class="kicker" data-i18n>Data sources</p>
             <h2 class="display display--md" data-i18n>Internal data, within limits the administrator sets.</h2>
             <p class="lead" data-i18n>
-              Connect internal databases and give the agent exactly the slice it needs. Employees point at a source with
-              @ in the chat; the agent cannot see anything outside the slice, no matter how it is asked.
+              Connect internal data sources and give the agent exactly the slice it needs. Employees point at a source
+              with @ in the chat; the agent cannot see anything outside the slice, no matter how it is asked.
             </p>
           </div>
           <ul class="bullets bullets--light">
-            <li data-i18n>PostgreSQL, MySQL and SQL Server today; storage and SaaS sources on the roadmap</li>
-            <li data-i18n>Expose only the tables and columns you choose, with caps on rows and runtime</li>
+            <li data-i18n>
+              Database products, cloud storage such as SharePoint and Google Drive, and MCP servers connect through
+              connector plugins
+            </li>
+            <li data-i18n>
+              Expose only the tables, columns, folders and operations you choose, with caps on rows and runtime
+            </li>
             <li data-i18n>Several views on the same connection: one for accounting, another for sales</li>
             <li data-i18n>Which departments may use each source is part of its configuration</li>
             <li data-i18n>Sources holding personal data carry a confidential flag and are used only with local LLMs</li>
-            <li data-i18n>Every query is checked and recorded on the server before it runs</li>
+            <li data-i18n>Every operation is checked and recorded on the server before it runs</li>
+            <li data-i18n>
+              Plugins are installed by the platform administrator; nothing loads code from a prompt or the network
+            </li>
           </ul>
         </div>
       </section>
@@ -419,12 +427,12 @@
                   <small data-i18n>from the task list or the API</small>
                 </li>
                 <li>
-                  <span data-i18n>Chat</span><span class="tag" data-i18n>soon</span>
+                  <span data-i18n>Chat</span>
                   <small data-i18n>start a task from a conversation</small>
                 </li>
                 <li>
-                  <span data-i18n>Schedule</span><span class="tag" data-i18n>planned</span>
-                  <small data-i18n>same mechanism, added later</small>
+                  <span data-i18n>Schedule</span>
+                  <small data-i18n>run on a timer</small>
                 </li>
               </ul>
             </div>
@@ -447,15 +455,15 @@
               <h3 data-i18n>Destinations</h3>
               <ul>
                 <li>
-                  <span data-i18n>In-app</span><span class="tag" data-i18n>soon</span>
+                  <span data-i18n>In-app</span>
                   <small data-i18n>result and files in Yoriki</small>
                 </li>
                 <li>
-                  <span>Webhook · Zapier</span><span class="tag" data-i18n>soon</span>
+                  <span>Webhook · Zapier</span>
                   <small data-i18n>hand the result to any other system</small>
                 </li>
                 <li>
-                  <span>Teams · Slack · Discord</span><span class="tag" data-i18n>planned</span>
+                  <span>Teams · Slack · Discord</span>
                   <small data-i18n>questions, answers and the report in one thread</small>
                 </li>
               </ul>

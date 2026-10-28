@@ -285,6 +285,7 @@ docker compose -f deploy/compose.yaml exec api python manage.py resume_workers
 - **バックアップ**：`pg_dump` と、Local保存のobjectsのディレクトリを同じ時点で取得する（design.md §10）。復元手順を定期的に試す。
 - **掃除**：使わなくなったSandboxイメージは、RunやCheckpointが参照していないことを確認してから削除する（design.md §10.1）。`docker image prune` を無条件に実行しない。
 - **Sandboxのコンテナ**：LauncherはAttemptを終えるときにSandboxを `docker rm -f` で消す。Workerが落ちて残ったものは、次にSandboxを起動するときに、終わったAttemptのもの（ラベル `org.yoriki.attempt`）を探して消す。
+- **結果の配信**：出口（Webhook・Zapier）への送信はqclusterから行う。qclusterのコンテナ（Workerサーバーを含む）から送り先（`hooks.zapier.com` 等）へのHTTPSの外向きの通信が要る。環境変数のproxy（`HTTPS_PROXY`）は使わず、名前を引いて確かめたアドレスへ直接つなぐ（design.md §4.4）。社内のアドレスへ送るときだけ、`YORIKI_DELIVERY_ALLOWED_NETWORKS` に許すネットワーク（CIDR）を指定する。
 - **ファイルの保存先**：添付・成果物・Workspaceのsnapshot（tar）は、`YORIKI_STORAGE_BACKEND` で選んだ保存先（Localなら `/var/lib/yoriki/objects`、S3ならbucket）に置く（§7.2）。保持期限での削除はまだない（docs/status.md §3）。
 
 ### 7.1 Sandboxを動かすホスト

@@ -215,6 +215,23 @@ export interface paths {
         patch: operations["app_v1_conversations_partial_update"];
         trace?: never;
     };
+    "/api/app/v1/destinations/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description タスクの編集画面で選ぶ出口の候補（停止中でなく、タスクを管理できる範囲のもの。authorization.md §7.2） */
+        get: operations["app_v1_destinations_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/app/v1/model_profiles/": {
         parameters: {
             query?: never;
@@ -828,6 +845,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/app/v1/tasks/{task}/deliveries/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description タスクのRunの配信の履歴と送り直し（タスクを管理できる人。authorization.md §7.1） */
+        get: operations["app_v1_tasks_deliveries_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/tasks/{task}/deliveries/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description タスクのRunの配信の履歴と送り直し（タスクを管理できる人。authorization.md §7.1） */
+        get: operations["app_v1_tasks_deliveries_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/tasks/{task}/deliveries/{uid}/retry/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 失敗・確認待ち・取消の配信を送り直す（保存した内容を送る。エージェントは動かし直さない）。送る直前に、出口が今も使えるかを確かめ直す */
+        post: operations["app_v1_tasks_deliveries_retry_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/app/v1/tasks/{task}/revisions/": {
         parameters: {
             query?: never;
@@ -1319,6 +1387,129 @@ export interface paths {
         head?: never;
         /** @description 部門の管理API */
         patch: operations["v1_departments_partial_update"];
+        trace?: never;
+    };
+    "/api/v1/destinations/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 出口（Webhook・Zapier）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md §5.5） */
+        get: operations["v1_destinations_list"];
+        put?: never;
+        /** @description 出口（Webhook・Zapier）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md §5.5） */
+        post: operations["v1_destinations_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/destinations/{destination}/revisions/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 出口の版の履歴 */
+        get: operations["v1_destinations_revisions_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/destinations/{destination}/revisions/{number}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 出口の版の履歴 */
+        get: operations["v1_destinations_revisions_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/destinations/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 出口（Webhook・Zapier）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md §5.5） */
+        get: operations["v1_destinations_retrieve"];
+        /** @description 出口（Webhook・Zapier）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md §5.5） */
+        put: operations["v1_destinations_update"];
+        post?: never;
+        /** @description 出口を消す。まだ送っていない配信も送らない */
+        delete: operations["v1_destinations_destroy"];
+        options?: never;
+        head?: never;
+        /** @description 出口（Webhook・Zapier）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md §5.5） */
+        patch: operations["v1_destinations_partial_update"];
+        trace?: never;
+    };
+    "/api/v1/destinations/{uid}/resume/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 停止を解く */
+        post: operations["v1_destinations_resume_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/destinations/{uid}/rotate_secret/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 署名の鍵を作り直す。次の送信から新しい鍵で署名する。新しい鍵は応答で一度だけ返す */
+        post: operations["v1_destinations_rotate_secret_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/destinations/{uid}/suspend/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 停止する。新しく受け付けるRunに使わず、まだ送っていない配信も送らない */
+        post: operations["v1_destinations_suspend_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/groups/": {
@@ -2082,6 +2273,14 @@ export interface components {
             };
             diff?: components["schemas"]["AssetDiff"] | null;
         };
+        /**
+         * @description * `1` - 受付確認
+         *     * `2` - 一時的な失敗
+         *     * `3` - 失敗
+         *     * `4` - 届いたか分からない
+         * @enum {integer}
+         */
+        AttemptOutcomeEnum: 1 | 2 | 3 | 4;
         /** @description ログイン画面に出すログインの方法 */
         AuthMethods: {
             readonly providers: components["schemas"]["AuthProvider"][];
@@ -2628,6 +2827,69 @@ export interface components {
             operations: string[];
             tables: string[];
         };
+        /** @description タスクのRunの配信の履歴（タスクを管理できる人。authorization.md §7.1）。送った内容と試行の記録を返す */
+        Delivery: {
+            readonly id: string;
+            readonly run: string;
+            readonly event_type: components["schemas"]["NotifyEventEnum"];
+            readonly status: components["schemas"]["DeliveryStatusEnum"];
+            readonly status_display: string;
+            readonly destination: components["schemas"]["DestinationChoice"];
+            readonly destination_version: number;
+            /** 送る内容 */
+            readonly payload: unknown;
+            /** 送った回数 */
+            readonly attempt_count: number;
+            /**
+             * 次に送る日時
+             * Format: date-time
+             */
+            readonly next_attempt: string | null;
+            /** 最後の誤り */
+            readonly last_error: string;
+            readonly attempts: components["schemas"]["DeliveryAttempt"][];
+            /** Format: date-time */
+            readonly created: string;
+            /** Format: date-time */
+            readonly updated: string;
+            /**
+             * 受付確認の日時
+             * Format: date-time
+             */
+            readonly delivered: string | null;
+        };
+        /** @description 表示専用のModelSerializer。すべての項目を読み取り専用にする */
+        DeliveryAttempt: {
+            /** 回 */
+            readonly number: number;
+            /** 結果 */
+            readonly outcome: (components["schemas"]["AttemptOutcomeEnum"] | components["schemas"]["NullEnum"]) | null;
+            /** HTTPの状態コード */
+            readonly http_status: number | null;
+            /** 誤り */
+            readonly error: string;
+            /**
+             * 開始日時
+             * Format: date-time
+             */
+            readonly started: string;
+            /**
+             * 終了日時
+             * Format: date-time
+             */
+            readonly finished: string | null;
+        };
+        /**
+         * @description * `1` - 配信待ち
+         *     * `2` - 配信中
+         *     * `3` - 再試行待ち
+         *     * `10` - 受付確認済み
+         *     * `20` - 失敗
+         *     * `21` - 確認待ち
+         *     * `30` - 取消
+         * @enum {integer}
+         */
+        DeliveryStatusEnum: 1 | 2 | 3 | 10 | 20 | 21 | 30;
         Department: {
             readonly id: string;
             /** 名前 */
@@ -2656,6 +2918,184 @@ export interface components {
         DepartmentRequest: {
             /** 名前 */
             name: string;
+        };
+        /**
+         * @description 出口の作成と表示（連携の管理者。authorization.md §5.5）。中身は今の版の値を平らに出す。
+         *
+         *     種類・範囲・部門は作成時に決めて変えない。送り先のURLは書くだけで、表示ではホストと末尾の4文字だけを返す。
+         *     署名の鍵は作成時と作り直したときに一度だけ返す。更新では、編集を始めた時点の `version` を送り、その間に他の人が
+         *     版を作っていたら409になる
+         */
+        Destination: {
+            readonly id: string;
+            /**
+             * @description 種類。作成した後は変えられない
+             *
+             *     * `1` - Webhook
+             *     * `2` - Zapier
+             */
+            kind: components["schemas"]["DestinationKindEnum"];
+            readonly kind_display: string;
+            /**
+             * @description 使ってよい範囲。部門の出口はその部門のタスクだけが使う。作成した後は変えられない
+             *
+             *     * `2` - 部門
+             *     * `3` - 全社
+             *     * `4` - システム
+             */
+            scope: components["schemas"]["ConnectorScopeEnum"];
+            readonly scope_display: string;
+            /** @description 部門の範囲では必須。作成した後は変えられない */
+            department?: string | null;
+            readonly department_info: components["schemas"]["MinimumDepartment"] | null;
+            name: string;
+            /** 停止中 */
+            readonly suspended: boolean;
+            /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
+            version?: number;
+            /** @description 送り先のホストと末尾の4文字 */
+            readonly url_display: string;
+            /**
+             * @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい
+             * @default false
+             */
+            allows_sensitive_results: boolean;
+            /**
+             * 署名の鍵を作った日時
+             * Format: date-time
+             */
+            readonly secret_rotated: string | null;
+            readonly created_by: components["schemas"]["MinimumUser"];
+            /** Format: date-time */
+            readonly created: string;
+            /** Format: date-time */
+            readonly updated: string;
+        };
+        /** @description タスクの編集画面で選ぶ出口の候補（ID・名前・種類・範囲だけ。送り先・鍵は返さない。authorization.md §7.2） */
+        DestinationChoice: {
+            readonly id: string;
+            /** 名前 */
+            readonly name: string;
+            readonly kind: components["schemas"]["DestinationKindEnum"];
+            readonly scope: components["schemas"]["ConnectorScopeEnum"];
+            readonly department: components["schemas"]["MinimumDepartment"] | null;
+            readonly allows_sensitive_results: boolean;
+        };
+        /**
+         * @description * `1` - Webhook
+         *     * `2` - Zapier
+         * @enum {integer}
+         */
+        DestinationKindEnum: 1 | 2;
+        /**
+         * @description 出口の作成と表示（連携の管理者。authorization.md §5.5）。中身は今の版の値を平らに出す。
+         *
+         *     種類・範囲・部門は作成時に決めて変えない。送り先のURLは書くだけで、表示ではホストと末尾の4文字だけを返す。
+         *     署名の鍵は作成時と作り直したときに一度だけ返す。更新では、編集を始めた時点の `version` を送り、その間に他の人が
+         *     版を作っていたら409になる
+         */
+        DestinationRequest: {
+            /**
+             * @description 種類。作成した後は変えられない
+             *
+             *     * `1` - Webhook
+             *     * `2` - Zapier
+             */
+            kind: components["schemas"]["DestinationKindEnum"];
+            /**
+             * @description 使ってよい範囲。部門の出口はその部門のタスクだけが使う。作成した後は変えられない
+             *
+             *     * `2` - 部門
+             *     * `3` - 全社
+             *     * `4` - システム
+             */
+            scope: components["schemas"]["ConnectorScopeEnum"];
+            /** @description 部門の範囲では必須。作成した後は変えられない */
+            department?: string | null;
+            name: string;
+            /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
+            version?: number;
+            /** @description 送り先のURL（https）。表示では返さない */
+            url: string;
+            /**
+             * @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい
+             * @default false
+             */
+            allows_sensitive_results: boolean;
+            change_reason?: string;
+        };
+        /** @description 表示専用のModelSerializer。すべての項目を読み取り専用にする */
+        DestinationRevision: {
+            readonly id: string;
+            /** 版 */
+            readonly number: number;
+            readonly url_display: string;
+            /** 機密の結果を送ってよい */
+            readonly allows_sensitive_results: boolean;
+            /** 変更理由 */
+            readonly change_reason: string;
+            readonly created_by: components["schemas"]["MinimumUser"];
+            /** Format: date-time */
+            readonly created: string;
+        };
+        /** @description 作成・署名の鍵の作り直しの応答。鍵はこのときだけ返す（再表示はできない） */
+        DestinationSecret: {
+            readonly id: string;
+            /**
+             * @description 種類。作成した後は変えられない
+             *
+             *     * `1` - Webhook
+             *     * `2` - Zapier
+             */
+            kind: components["schemas"]["DestinationKindEnum"];
+            readonly kind_display: string;
+            /**
+             * @description 使ってよい範囲。部門の出口はその部門のタスクだけが使う。作成した後は変えられない
+             *
+             *     * `2` - 部門
+             *     * `3` - 全社
+             *     * `4` - システム
+             */
+            scope: components["schemas"]["ConnectorScopeEnum"];
+            readonly scope_display: string;
+            /** @description 部門の範囲では必須。作成した後は変えられない */
+            department?: string | null;
+            readonly department_info: components["schemas"]["MinimumDepartment"] | null;
+            name: string;
+            /** 停止中 */
+            readonly suspended: boolean;
+            /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
+            version?: number;
+            /** @description 送り先のホストと末尾の4文字 */
+            readonly url_display: string;
+            /**
+             * @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい
+             * @default false
+             */
+            allows_sensitive_results: boolean;
+            /**
+             * 署名の鍵を作った日時
+             * Format: date-time
+             */
+            readonly secret_rotated: string | null;
+            readonly created_by: components["schemas"]["MinimumUser"];
+            /** Format: date-time */
+            readonly created: string;
+            /** Format: date-time */
+            readonly updated: string;
+            /** @description 署名の鍵（Standard Webhooksの webhook-signature を確かめる鍵）。いま一度だけ表示する */
+            readonly signing_secret: string;
+        };
+        /** @description 出口の更新。種類・範囲・部門は変えられない */
+        DestinationUpdateRequest: {
+            name?: string;
+            /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
+            version?: number;
+            /** @description 送り先のURL（https）。表示では返さない */
+            url?: string;
+            /** @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい */
+            allows_sensitive_results?: boolean;
+            change_reason?: string;
         };
         ElementDiff: {
             kind: string;
@@ -3322,6 +3762,20 @@ export interface components {
             /** @description 管理できる部門（部門のSkill・タスクを作るときの選択肢） */
             readonly manageable_departments: components["schemas"]["MyDepartment"][];
         };
+        /**
+         * @description * `status` - 状態だけ
+         *     * `result` - 業務結果
+         *     * `status_and_result` - 状態と業務結果
+         * @enum {string}
+         */
+        NotifyContentEnum: "status" | "result" | "status_and_result";
+        /**
+         * @description * `run.completed` - 完了
+         *     * `run.failed` - 失敗
+         *     * `run.cancelled` - 停止
+         * @enum {string}
+         */
+        NotifyEventEnum: "run.completed" | "run.failed" | "run.cancelled";
         /** @enum {unknown} */
         NullEnum: null;
         /**
@@ -3421,6 +3875,19 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["DatabaseConnection"][];
         };
+        PaginatedDeliveryList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["Delivery"][];
+        };
         PaginatedDepartmentList: {
             /**
              * Format: uri
@@ -3446,6 +3913,45 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["DepartmentMembership"][];
+        };
+        PaginatedDestinationChoiceList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["DestinationChoice"][];
+        };
+        PaginatedDestinationList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["Destination"][];
+        };
+        PaginatedDestinationRevisionList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["DestinationRevision"][];
         };
         PaginatedLLMConnectionList: {
             /**
@@ -3799,6 +4305,17 @@ export interface components {
             /** 名前 */
             name?: string;
         };
+        /** @description 出口の更新。種類・範囲・部門は変えられない */
+        PatchedDestinationUpdateRequest: {
+            name?: string;
+            /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
+            version?: number;
+            /** @description 送り先のURL（https）。表示では返さない */
+            url?: string;
+            /** @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい */
+            allows_sensitive_results?: boolean;
+            change_reason?: string;
+        };
         /** @description プロバイダ接続の更新。種別とbase URL（接続先）は変えられないので、読み取り専用にする */
         PatchedLLMConnectionUpdateRequest: {
             /** 名前 */
@@ -3995,6 +4512,18 @@ export interface components {
             inputs?: components["schemas"]["TaskInputRequest"][];
             /** @description 業務結果のSchema。なければSkillのもの */
             output_schema?: unknown;
+            /** @description 結果の通知先（出口）。タスクの範囲で使ってよい出口だけ（候補は app/v1/destinations/） */
+            destination?: string | null;
+            /** @description 通知するイベント。Webhookの入口があるタスクでは run.failed が必須 */
+            notify_events?: components["schemas"]["NotifyEventEnum"][];
+            /**
+             * @description 通知の内容（状態だけ・業務結果・両方）
+             *
+             *     * `status` - 状態だけ
+             *     * `result` - 業務結果
+             *     * `status_and_result` - 状態と業務結果
+             */
+            notify_content?: components["schemas"]["NotifyContentEnum"];
             change_reason?: string;
         };
         /** @description 入口の更新。タスクは変えられない */
@@ -4840,7 +5369,21 @@ export interface components {
             inputs?: components["schemas"]["TaskInput"][];
             /** @description 業務結果のSchema。なければSkillのもの */
             output_schema?: unknown;
+            /** @description 結果の通知先（出口）。タスクの範囲で使ってよい出口だけ（候補は app/v1/destinations/） */
+            destination?: string | null;
+            /** @description 通知するイベント。Webhookの入口があるタスクでは run.failed が必須 */
+            notify_events?: components["schemas"]["NotifyEventEnum"][];
+            /**
+             * @description 通知の内容（状態だけ・業務結果・両方）
+             *
+             *     * `status` - 状態だけ
+             *     * `result` - 業務結果
+             *     * `status_and_result` - 状態と業務結果
+             * @default status_and_result
+             */
+            notify_content: components["schemas"]["NotifyContentEnum"];
             readonly model_profile_info: components["schemas"]["AppModelProfile"];
+            readonly destination_info: components["schemas"]["DestinationChoice"] | null;
             /** @description 今、手動で実行できるか（停止中でなく、版がある） */
             readonly can_run: boolean;
             /** @description このタスクの入口（作る・変えるのは連携の管理者） */
@@ -4895,6 +5438,19 @@ export interface components {
             inputs?: components["schemas"]["TaskInputRequest"][];
             /** @description 業務結果のSchema。なければSkillのもの */
             output_schema?: unknown;
+            /** @description 結果の通知先（出口）。タスクの範囲で使ってよい出口だけ（候補は app/v1/destinations/） */
+            destination?: string | null;
+            /** @description 通知するイベント。Webhookの入口があるタスクでは run.failed が必須 */
+            notify_events?: components["schemas"]["NotifyEventEnum"][];
+            /**
+             * @description 通知の内容（状態だけ・業務結果・両方）
+             *
+             *     * `status` - 状態だけ
+             *     * `result` - 業務結果
+             *     * `status_and_result` - 状態と業務結果
+             * @default status_and_result
+             */
+            notify_content: components["schemas"]["NotifyContentEnum"];
             change_reason?: string;
         };
         /** @description 版の表示（履歴） */
@@ -4918,6 +5474,11 @@ export interface components {
             readonly inputs: components["schemas"]["TaskInput"][];
             /** 業務結果のSchema */
             readonly output_schema: unknown;
+            readonly destination: string | null;
+            /** 通知するイベント */
+            readonly notify_events: string[];
+            /** 通知の内容 */
+            readonly notify_content: string;
             /** 変更理由 */
             readonly change_reason: string;
             readonly created_by: components["schemas"]["MinimumUser"];
@@ -4944,6 +5505,18 @@ export interface components {
             inputs?: components["schemas"]["TaskInputRequest"][];
             /** @description 業務結果のSchema。なければSkillのもの */
             output_schema?: unknown;
+            /** @description 結果の通知先（出口）。タスクの範囲で使ってよい出口だけ（候補は app/v1/destinations/） */
+            destination?: string | null;
+            /** @description 通知するイベント。Webhookの入口があるタスクでは run.failed が必須 */
+            notify_events?: components["schemas"]["NotifyEventEnum"][];
+            /**
+             * @description 通知の内容（状態だけ・業務結果・両方）
+             *
+             *     * `status` - 状態だけ
+             *     * `result` - 業務結果
+             *     * `status_and_result` - 状態と業務結果
+             */
+            notify_content?: components["schemas"]["NotifyContentEnum"];
             change_reason?: string;
         };
         TaskInput: {
@@ -5744,6 +6317,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Conversation"];
+                };
+            };
+        };
+    };
+    app_v1_destinations_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description 部門のID（部門の範囲のとき） */
+                department?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description タスクの範囲（2：部門、3：全社、4：システム） */
+                scope?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedDestinationChoiceList"];
                 };
             };
         };
@@ -7243,6 +7848,104 @@ export interface operations {
             };
         };
     };
+    app_v1_tasks_deliveries_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /**
+                 * @description * `run.completed` - 完了
+                 *     * `run.failed` - 失敗
+                 *     * `run.cancelled` - 停止
+                 */
+                event_type?: "run.cancelled" | "run.completed" | "run.failed";
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description RunのID */
+                run?: string;
+                /** @description A search term. */
+                search?: string;
+                /**
+                 * @description * `1` - 配信待ち
+                 *     * `2` - 配信中
+                 *     * `3` - 再試行待ち
+                 *     * `10` - 受付確認済み
+                 *     * `20` - 失敗
+                 *     * `21` - 確認待ち
+                 *     * `30` - 取消
+                 */
+                status?: 1 | 10 | 2 | 20 | 21 | 3 | 30;
+            };
+            header?: never;
+            path: {
+                task: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedDeliveryList"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_deliveries_retrieve: {
+        parameters: {
+            query?: {
+                /** @description RunのID */
+                run?: string;
+            };
+            header?: never;
+            path: {
+                task: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Delivery"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_deliveries_retry_create: {
+        parameters: {
+            query?: {
+                /** @description RunのID */
+                run?: string;
+            };
+            header?: never;
+            path: {
+                task: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Delivery"];
+                };
+            };
+        };
+    };
     app_v1_tasks_revisions_list: {
         parameters: {
             query?: {
@@ -8495,6 +9198,295 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Department"];
+                };
+            };
+        };
+    };
+    v1_destinations_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /**
+                 * @description * `1` - Webhook
+                 *     * `2` - Zapier
+                 */
+                kind?: 1 | 2;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /**
+                 * @description * `2` - 部門
+                 *     * `3` - 全社
+                 *     * `4` - システム
+                 */
+                scope?: 2 | 3 | 4;
+                /** @description A search term. */
+                search?: string;
+                suspended?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedDestinationList"];
+                };
+            };
+        };
+    };
+    v1_destinations_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DestinationRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["DestinationRequest"];
+                "multipart/form-data": components["schemas"]["DestinationRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DestinationSecret"];
+                };
+            };
+        };
+    };
+    v1_destinations_revisions_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                destination: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedDestinationRevisionList"];
+                };
+            };
+        };
+    };
+    v1_destinations_revisions_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                destination: string;
+                number: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DestinationRevision"];
+                };
+            };
+        };
+    };
+    v1_destinations_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Destination"];
+                };
+            };
+        };
+    };
+    v1_destinations_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["DestinationUpdateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["DestinationUpdateRequest"];
+                "multipart/form-data": components["schemas"]["DestinationUpdateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Destination"];
+                };
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、他の人が版を作った） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_destinations_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_destinations_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedDestinationUpdateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedDestinationUpdateRequest"];
+                "multipart/form-data": components["schemas"]["PatchedDestinationUpdateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Destination"];
+                };
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、他の人が版を作った） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_destinations_resume_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Destination"];
+                };
+            };
+        };
+    };
+    v1_destinations_rotate_secret_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DestinationSecret"];
+                };
+            };
+        };
+    };
+    v1_destinations_suspend_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Destination"];
                 };
             };
         };

@@ -363,7 +363,7 @@ Runの中身が外へ出る経路をすべて列挙し、どれにも「結果�
 | 全件管理者 | `user.can_manage_all_departments`と、部門・全社のSkill・タスクのpermission |
 | Connector管理者 | `connector.*_connector`、`connector.*_<接続のModel>` |
 | システム管理者 | `skill.can_edit_system_skills`、`skill.can_publish_system_skills`、`task.can_manage_system_tasks`、`connector.view_connector`（システムタスクに登録するConnectorの定義を見るため） |
-| 連携の管理者 | 入口のModelのpermission（`task.*_triggerbinding`）。出口のModelのpermissionは配信の段階で足す |
+| 連携の管理者 | 入口と出口のModelのpermission（`task.*_triggerbinding`、`delivery.*_destination`。出口のpermissionは配信の段階のマイグレーションで足した） |
 | ユーザー管理者 | `user.*_user`、`user.*_department` |
 
 ## 12 0.33で変えたこと（以前の設計・実装から）

@@ -12,6 +12,8 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.fields import empty
 from rest_framework.utils import html
 
+from delivery.models import Destination, NotifyContent, NotifyEvent
+from delivery.serializers import DestinationChoiceSerializer
 from harness.tools import SKILL_TOOLS
 from harness.tools.base import schema_problem
 from llm.models import ModelProfile
@@ -180,6 +182,33 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
         default=None,
         help_text=_("業務結果のSchema。なければSkillのもの"),
     )
+    destination: "serializers.SlugRelatedField[Destination]" = serializers.SlugRelatedField(
+        source="current_revision.destination",
+        slug_field="uid",
+        queryset=Destination.objects.alive().select_related("current_revision", "department"),
+        required=False,
+        allow_null=True,
+        default=None,
+        help_text=_("結果の通知先（出口）。タスクの範囲で使ってよい出口だけ（候補は app/v1/destinations/）"),
+    )
+    destination_info = DestinationChoiceSerializer(
+        source="current_revision.destination", read_only=True, allow_null=True
+    )
+    notify_events = serializers.ListField(
+        source="current_revision.notify_events",
+        child=serializers.ChoiceField(choices=NotifyEvent.choices),
+        required=False,
+        default=list,
+        max_length=len(NotifyEvent),
+        help_text=_("通知するイベント。Webhookの入口があるタスクでは run.failed が必須"),
+    )
+    notify_content = serializers.ChoiceField(
+        source="current_revision.notify_content",
+        choices=NotifyContent.choices,
+        required=False,
+        default=NotifyContent.STATUS_AND_RESULT,
+        help_text=_("通知の内容（状態だけ・業務結果・両方）"),
+    )
     change_reason = serializers.CharField(max_length=500, required=False, allow_blank=True, write_only=True)
     can_run = serializers.SerializerMethodField(help_text=_("今、手動で実行できるか（停止中でなく、版がある）"))
     triggers = serializers.SerializerMethodField(help_text=_("このタスクの入口（作る・変えるのは連携の管理者）"))
@@ -199,6 +228,7 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
             "version",
             *REVISION_FIELDS,
             "model_profile_info",
+            "destination_info",
             "change_reason",
             "can_run",
             "triggers",
@@ -233,6 +263,9 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
         return value
 
     def validate_tools(self, value: list[str]) -> list[str]:
+        return list(dict.fromkeys(value))
+
+    def validate_notify_events(self, value: list[str]) -> list[str]:
         return list(dict.fromkeys(value))
 
     def validate_inputs(self, value: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -327,6 +360,15 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
             )
         except VersionConflict as exc:
             raise Conflict() from exc
+        # Webhookの入口があるタスクは、失敗を知らせる先を外せない（design.md §4.2）。入口の作成もタスクの行を
+        # ロックしてから確かめるので、行をロックした後（revise() の後）に確かめる
+        if (
+            not checks.notifies_failure(validated_data["content"])
+            and TriggerBinding.objects.alive().filter(task=instance, kind=TriggerKind.WEBHOOK).exists()
+        ):
+            raise serializers.ValidationError(
+                {"notify_events": _("Webhookの入口があるタスクでは、失敗（run.failed）を知らせる通知先が必要です")}
+            )
         fields = ["current_revision", "updated"]
         if "name" in validated_data:
             instance.name = validated_data["name"]
@@ -373,6 +415,9 @@ class TaskDefinitionRevisionSerializer(ReadOnlyModelSerializer):
     inputs = TaskInputSerializer(many=True, read_only=True)
     model_profile: "serializers.SlugRelatedField[ModelProfile]" = serializers.SlugRelatedField(
         slug_field="uid", read_only=True
+    )
+    destination: "serializers.SlugRelatedField[Destination]" = serializers.SlugRelatedField(
+        slug_field="uid", read_only=True, allow_null=True
     )
     created_by = MinimumUserSerializer(read_only=True)
 
@@ -597,9 +642,14 @@ class TriggerBindingSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def create(self, validated_data) -> TriggerBinding:
         # 同じタスクへの同時の作成を、タスクの行のロックで直列にしてから確かめ直す（1対1）
-        task = TaskDefinition.objects.select_for_update(of=("self",)).get(pk=validated_data["task"].pk)
+        task = (
+            TaskDefinition.objects.select_for_update(of=("self",))
+            .select_related("current_revision")
+            .get(pk=validated_data["task"].pk)
+        )
         if task.deleted or TriggerBinding.objects.alive().filter(task=task, kind=TriggerKind.WEBHOOK).exists():
             raise serializers.ValidationError({"task": _("このタスクには、もうWebhookの入口があります")})
+        _check_failure_notice(task)
         binding, key = TriggerBinding.create_with_revision(
             task=validated_data["task"],
             name=validated_data["name"],
@@ -612,6 +662,12 @@ class TriggerBindingSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def update(self, instance: TriggerBinding, validated_data) -> TriggerBinding:
+        task = (
+            TaskDefinition.objects.select_for_update(of=("self",))
+            .select_related("current_revision")
+            .get(pk=instance.task_id)
+        )
+        _check_failure_notice(task)
         try:
             instance.revise(
                 actor=validated_data["actor"],
@@ -627,6 +683,19 @@ class TriggerBindingSerializer(serializers.ModelSerializer):
             fields.append("name")
         instance.save(update_fields=fields)
         return instance
+
+
+def _check_failure_notice(task: TaskDefinition) -> None:
+    """Webhookで起動するタスクは、失敗を知らせる先が必須（design.md §4.2）。タスクの行をロックしてから呼ぶ"""
+    if task.current_revision is None or not checks.notifies_failure(task.current_revision):
+        raise serializers.ValidationError(
+            {
+                "task": _(
+                    "Webhookで起動するタスクには、失敗（run.failed）を知らせる通知先が必要です。"
+                    "タスクの結果の通知を設定してください"
+                )
+            }
+        )
 
 
 class TriggerBindingUpdateSerializer(TriggerBindingSerializer):

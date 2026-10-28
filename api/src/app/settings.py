@@ -4,6 +4,7 @@
 ローカル開発ではリポジトリルートの `.envrc`（direnv）、本番では実行環境から渡す（backend-conventions.md §6.1）。
 """
 
+import ipaddress
 import json
 import os
 import sys
@@ -67,6 +68,7 @@ INSTALLED_APPS = [
     "skill",
     "connector",
     "task",
+    "delivery",
 ]
 
 MIDDLEWARE = [
@@ -247,6 +249,11 @@ SPECTACULAR_SETTINGS = {
         "CsvColumnTypeEnum": "resources.formats.COLUMN_TYPES",
         "ConnectorKindEnum": "connector.models.ConnectorKind",
         "TriggerKindEnum": "task.models.TriggerKind",
+        "DestinationKindEnum": "delivery.models.DestinationKind",
+        "NotifyEventEnum": "delivery.models.NotifyEvent",
+        "NotifyContentEnum": "delivery.models.NotifyContent",
+        "DeliveryStatusEnum": "delivery.models.DeliveryStatus",
+        "AttemptOutcomeEnum": "delivery.models.AttemptOutcome",
     },
 }
 
@@ -354,6 +361,16 @@ YORIKI_UPLOAD_MAX_MB = int(os.getenv("YORIKI_UPLOAD_MAX_MB", "50"))
 YORIKI_ATTACHMENTS_PER_MESSAGE = int(os.getenv("YORIKI_ATTACHMENTS_PER_MESSAGE", "20"))
 # 添付と成果物の保持期間（日。design.md §8の初期案）
 YORIKI_ARTIFACT_RETENTION_DAYS = int(os.getenv("YORIKI_ARTIFACT_RETENTION_DAYS", "90"))
+
+# --- 結果の配信（design.md §4.4） ---
+# 出口（Webhook・Zapier）の送り先に許す社内のネットワーク（CIDR。カンマ区切り）。既定では、名前を引いた先が
+# プライベート・ループバック・リンクローカル等のアドレスなら送らない（SSRF対策）。社内のシステムへ送る導入先だけが
+# 指定する
+YORIKI_DELIVERY_ALLOWED_NETWORKS = _env_list("YORIKI_DELIVERY_ALLOWED_NETWORKS")
+try:
+    _delivery_networks = [ipaddress.ip_network(n, strict=False) for n in YORIKI_DELIVERY_ALLOWED_NETWORKS]
+except ValueError as _exc:
+    raise ImproperlyConfigured(f"YORIKI_DELIVERY_ALLOWED_NETWORKS: {_exc}") from _exc
 
 LOGGING = {
     "version": 1,

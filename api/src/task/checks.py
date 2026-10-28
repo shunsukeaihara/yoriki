@@ -13,6 +13,7 @@ from typing import Any, Protocol
 from django.utils.translation import gettext as _
 
 from connector.models import Connector, ConnectorAction, ConnectorScope, Operation
+from delivery.models import Destination, NotifyEvent
 from skill import connectors as skill_connectors
 from skill.models import Skill, SkillAction, SkillScope, SkillVersion
 
@@ -121,6 +122,7 @@ def content_errors(task: TaskLike, content: dict[str, Any]) -> dict[str, list[st
     skills = load_skills(content["skills"])
     _check_skills(task, content, skills, errors)
     _check_model(content, skills, errors)
+    _check_notification(task, content, errors)
     names = {i["name"] for i in content["inputs"]}
     if unknown := [name for name in placeholders(content["prompt_template"]) if name not in names]:
         errors.add(
@@ -208,6 +210,29 @@ def _check_declarations(skill: Skill, version: SkillVersion, content: dict[str, 
                 _("Skill「%(skill)s」が使う操作（%(operations)s）を、使ってよいToolに加えてください")
                 % {"skill": skill.name, "operations": "、".join(missing)},
             )
+
+
+def _check_notification(task: TaskLike, content: dict[str, Any], errors: Errors) -> None:
+    """結果の通知の出口が、タスクの範囲で使えて、機密の区分に合うか（authorization.md §5.4・§7）"""
+    destination: Destination | None = content["destination"]
+    if destination is None:
+        if content["notify_events"]:
+            errors.add("destination", _("通知するイベントを選んだときは、通知先を選んでください"))
+        return
+    if not content["notify_events"]:
+        errors.add("notify_events", _("通知するイベントを選んでください"))
+    if problem := destination.problem_for(task, sensitive=content["handles_sensitive_data"]):
+        errors.add(
+            "destination",
+            _("通知先「%(name)s」は使えません（%(reason)s）") % {"name": destination.name, "reason": problem},
+        )
+
+
+def notifies_failure(revision: Any) -> bool:
+    """失敗を知らせる先がある（Webhookで起動するタスクに必須。design.md §4.2）。`revision` は版か版の中身の辞書"""
+    if isinstance(revision, dict):
+        return revision["destination"] is not None and NotifyEvent.FAILED in revision["notify_events"]
+    return revision.destination_id is not None and NotifyEvent.FAILED in revision.notify_events
 
 
 def _check_model(content: dict[str, Any], skills: dict[str, tuple[Skill, SkillVersion | None]], errors: Errors) -> None:

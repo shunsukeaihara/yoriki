@@ -34,4 +34,7 @@ class TaskDefinitionFactory(DjangoModelFactory[TaskDefinition]):
         kwargs.setdefault("handles_sensitive_data", False)
         kwargs.setdefault("inputs", [])
         kwargs.setdefault("output_schema", None)
+        kwargs.setdefault("destination", None)
+        kwargs.setdefault("notify_events", [])
+        kwargs.setdefault("notify_content", "status_and_result")
         obj.revise(actor=obj.created_by, expected_version=0, **kwargs)

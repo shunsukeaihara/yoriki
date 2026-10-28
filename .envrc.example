@@ -68,3 +68,7 @@ export YORIKI_STORAGE_LOCAL_ROOT="$PWD/.objects"
 # --- フロントエンド（Nuxt） ---
 # 開発サーバーが /api を転送する先（既定は http://localhost:8000）
 # export YORIKI_DEV_API_ORIGIN=http://localhost:8000
+
+# --- 結果の配信（design.md §4.4） ---
+# 手元に立てた偽の受け手（http://127.0.0.1:8766 等）へ送って試すときだけ、ループバックを許す。開発時（DEBUG）は http も使える
+# export YORIKI_DELIVERY_ALLOWED_NETWORKS=127.0.0.0/8,::1/128

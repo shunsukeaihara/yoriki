@@ -1,18 +1,23 @@
 """タスクの入口（Webhook。design.md §4.2、authorization.md §5.5）。入口の管理、鍵、受付、重複の判定、項目の取り出し、
 payloadのファイル化、状態を確かめる口"""
 
+import hashlib
+import io
 import json
+from unittest import mock
 from urllib.parse import urlencode
 
 import pytest
+from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.exceptions import ValidationError
 
 from artifact.models import ArtifactKind, BlobObject
 from artifact.tests.test_api import body_of
 from conversation.models import ConversationPurpose
 from run.models import Run, RunEndReason, RunEvent, RunEventKind, RunLaunch, RunStatus, RunTrigger
-from task.dispatch import WEBHOOK_NOTE, receive_webhook
+from task.dispatch import WEBHOOK_NOTE, discard_files, receive_webhook, store_files
 from task.factories import TaskDefinitionFactory
+from task.inputs import InputFile
 from task.models import (
     REVISION_FIELDS,
     TaskDefinition,
@@ -22,7 +27,7 @@ from task.models import (
     TriggerReceipt,
 )
 from task.serializers import TriggerBindingSerializer
-from task.webhook import PayloadError, extract, parse_path
+from task.webhook import PayloadError, extract, parse_path, parse_payload
 from user.factories import UserFactory, grant
 from user.models import SYSTEM_USERNAME, User, system_user
 
@@ -317,6 +322,239 @@ def test_form_values_and_text(api_client, integrator, task):
     assert (res.status_code, res.json()["code"]) == (400, "invalid_json")
 
 
+FILE_INPUTS = [*INPUTS, {"name": "invoice", "label": "請求書", "type": "file", "required": True}]
+
+
+def _send_multipart(api_client, task, key, data, **headers):
+    return api_client.post(_hook(task), data, format="multipart", HTTP_AUTHORIZATION=f"Bearer {key}", **headers)
+
+
+def _file_task(api_client, integrator, **binding):
+    task = TaskDefinitionFactory.create(
+        scope=TaskScope.COMPANY,
+        revision__prompt_template="{{ inputs.invoice }} を確認してください。",
+        revision__inputs=FILE_INPUTS,
+    )
+    res = _create_binding(api_client, integrator, task, **binding)
+    api_client.logout()
+    return task, res.json()["key"]
+
+
+def _extra_files():
+    return [SimpleUploadedFile("memo.txt", "前回と同じ".encode()), SimpleUploadedFile("webhook_payload.json", b"{}")]
+
+
+def test_multipart_files_are_placed_and_file_inputs_point_to_them(api_client, integrator):
+    mapping = [{"name": "vendor", "path": "$.vendor"}, {"name": "invoice", "path": "$.document"}]
+    task, key = _file_task(api_client, integrator, inputs=mapping, event_id_path="$.id")
+    data = {
+        "id": "evt-1",
+        "vendor": "ACME",
+        "document": SimpleUploadedFile("invoice.pdf", b"%PDF-1.7"),
+        "files": _extra_files(),
+    }
+    res = _send_multipart(api_client, task, key, data)
+    assert res.status_code == 202, res.json()
+    run = Run.objects.get(uid=res.json()["run_id"])
+    assert run.manifest["fixed"]["task"]["inputs"] == {"vendor": "ACME", "invoice": "/workspace/input/invoice.pdf"}
+
+    # ファイルはすべて置く。payloadのファイルが先で、同じ名前のファイルは「(2)」にする
+    attachments = run.conversation.messages.get().attachments.order_by("pk")
+    assert [a.path for a in attachments] == [
+        "webhook_payload.json",
+        "invoice.pdf",
+        "memo.txt",
+        "webhook_payload (2).json",
+    ]
+    assert all(a.run == run for a in attachments)
+    with attachments[0].blob.open() as f:
+        payload = json.loads(f.read())
+    assert payload["vendor"] == "ACME"
+    assert payload["document"] == {
+        "file": "invoice.pdf",
+        "path": "/workspace/input/invoice.pdf",
+        "size": 8,
+        "sha256": hashlib.sha256(b"%PDF-1.7").hexdigest(),
+    }
+    # payloadのファイルには、送られた名前と実際に置いたパスを書く
+    assert [(f["file"], f["path"]) for f in payload["files"]] == [
+        ("memo.txt", "/workspace/input/memo.txt"),
+        ("webhook_payload.json", "/workspace/input/webhook_payload (2).json"),
+    ]
+    text = RunEvent.objects.get(run=run, kind=RunEventKind.USER_MESSAGE).data["text"]
+    assert '<untrusted_content source="input:invoice">/workspace/input/invoice.pdf</untrusted_content>' in text
+
+    # 同じイベントの再送は、ファイルも同じなら前のRun、違えば409
+    data["document"] = SimpleUploadedFile("invoice.pdf", b"%PDF-1.7")
+    data["files"] = _extra_files()
+    again = _send_multipart(api_client, task, key, data)
+    assert (again.status_code, again.json()["run_id"]) == (200, run.uid)
+    data["document"] = SimpleUploadedFile("invoice.pdf", b"%PDF-2.0")
+    data["files"] = []
+    changed = _send_multipart(api_client, task, key, data)
+    assert (changed.status_code, changed.json()["code"]) == (409, "event_id_reused")
+
+
+def test_resending_multipart_in_another_part_order_returns_the_same_run(api_client, integrator):
+    mapping = [{"name": "vendor", "path": "$.vendor"}, {"name": "invoice", "path": "$.a"}]
+    task, key = _file_task(api_client, integrator, inputs=mapping, event_id_path="$.id")
+
+    def body(*parts: str) -> bytes:
+        files = {"a": b"%PDF-a", "b": b"%PDF-b"}
+        chunks = [b'--B\r\nContent-Disposition: form-data; name="id"\r\n\r\nevt-1\r\n']
+        chunks.append(b'--B\r\nContent-Disposition: form-data; name="vendor"\r\n\r\nACME\r\n')
+        for name in parts:
+            disposition = f'form-data; name="{name}"; filename="same.pdf"'.encode()
+            chunks.append(b"--B\r\nContent-Disposition: " + disposition + b"\r\n\r\n" + files[name] + b"\r\n")
+        return b"".join(chunks) + b"--B--\r\n"
+
+    # 同じ名前のファイルは、パートの順番で「(2)」の付く先が変わるが、同じ入力として扱う
+    first = _send(api_client, task, key, body("a", "b"), content_type="multipart/form-data; boundary=B")
+    again = _send(api_client, task, key, body("b", "a"), content_type="multipart/form-data; boundary=B")
+    assert first.status_code == 202, first.json()
+    assert (again.status_code, again.json()["run_id"]) == (200, first.json()["run_id"])
+
+
+def test_resends_write_nothing_and_refused_requests_delete_what_was_written(api_client, integrator):
+    task, key = _file_task(api_client, integrator, event_id_path="$.event_id")
+    data = {"event_id": "e-1", "inputs[vendor]": "ACME", "inputs[invoice]": SimpleUploadedFile("a.pdf", b"1")}
+    with (
+        mock.patch.object(BlobObject, "write", wraps=BlobObject.write) as write,
+        mock.patch("artifact.storage.LocalStorage.delete", autospec=True) as delete,
+    ):
+        assert _send_multipart(api_client, task, key, data).status_code == 202
+        assert (write.call_count, delete.call_count) == (2, 0)  # payloadとファイル
+
+        # 再送は保存先に書く前に前のRunを返す
+        data["inputs[invoice]"] = SimpleUploadedFile("a.pdf", b"1")
+        assert _send_multipart(api_client, task, key, data).status_code == 200
+        assert write.call_count == 2
+
+        # 項目の誤りで断った要求は、書いたものを消す
+        data = {"event_id": "e-2", "inputs[invoice]": SimpleUploadedFile("a.pdf", b"1")}
+        res = _send_multipart(api_client, task, key, data)
+        assert (res.status_code, res.json()["code"]) == (400, "invalid_inputs")
+        assert (write.call_count, delete.call_count) == (4, 2)
+    assert Run.objects.count() == 1
+
+
+def test_a_failed_write_deletes_the_files_written_before_it(api_client, integrator):
+    task, key = _file_task(api_client, integrator)
+    data = {"inputs[vendor]": "ACME", "inputs[invoice]": SimpleUploadedFile("a.pdf", b"1")}
+    write = BlobObject.write
+    with (
+        mock.patch.object(BlobObject, "write", side_effect=[write(io.BytesIO(b"payload")), OSError("disk full")]),
+        mock.patch("artifact.storage.LocalStorage.delete", autospec=True) as delete,
+        pytest.raises(OSError),
+    ):
+        _send_multipart(api_client, task, key, data)
+    assert delete.call_count == 1  # payloadの分
+    assert not Run.objects.exists()
+
+
+def test_files_recorded_by_a_run_are_not_discarded():
+    """commitした後のQ2への送信の失敗等で discard_files() が呼ばれても、記録したRunの添付は消さない"""
+    recorded, unrecorded = InputFile("a.pdf", b"1"), InputFile("b.pdf", b"2")
+    store_files([recorded, unrecorded])
+    assert recorded.stored is not None and unrecorded.stored is not None
+    BlobObject.register(*recorded.stored)
+    unrecorded_key = unrecorded.stored[0].key
+    with mock.patch("artifact.storage.LocalStorage.delete", autospec=True) as delete:
+        discard_files([recorded, unrecorded])
+    assert [c.args[1] for c in delete.call_args_list] == [unrecorded_key]
+
+
+def test_a_json_value_shaped_like_a_file_is_not_the_same_input(api_client, integrator):
+    mapping = [{"name": "vendor", "path": "$.vendor"}, {"name": "invoice", "path": "$.doc"}]
+    task, key = _file_task(api_client, integrator, inputs=mapping, event_id_path="$.id")
+    content = b"%PDF-1.7"
+    described = {"file": "a.pdf", "size": len(content), "sha256": hashlib.sha256(content).hexdigest()}
+    files = {"id": "x", "vendor": "A", "doc": SimpleUploadedFile("a.pdf", content)}
+    assert _send_multipart(api_client, task, key, files).status_code == 202
+    receipt = TriggerReceipt.objects.get()
+    # ファイルの記述と同じ形の辞書をJSONで送っても、ファイルを付けた要求と同じ入力にならない（再送とみなさない）
+    body = json.dumps({"id": "x", "vendor": "A", "doc": described}).encode()
+    json_payload = parse_payload(body, "application/json")
+    assert json_payload.sha256 != receipt.payload_sha256
+
+
+def test_recommended_format_in_multipart(api_client, integrator):
+    task, key = _file_task(api_client, integrator)
+    data = {
+        "event_id": "z-1",
+        "inputs[vendor]": "ACME",
+        "inputs[amount]": "300",
+        "inputs[invoice]": SimpleUploadedFile("a.pdf", b"1"),
+    }
+    res = _send_multipart(api_client, task, key, data)
+    assert res.status_code == 202, res.json()
+    run = Run.objects.get(uid=res.json()["run_id"])
+    assert run.manifest["fixed"]["task"]["inputs"] == {
+        "vendor": "ACME",
+        "amount": 300,
+        "invoice": "/workspace/input/a.pdf",
+    }
+    assert TriggerReceipt.objects.get(run=run).dedup_key == "event:z-1"
+
+    # フォームの値でも `inputs[名前]` は推奨の形式の inputs になる
+    form = urlencode({"inputs[vendor]": "ACME"})
+    res = _send(api_client, task, key, form, content_type="application/x-www-form-urlencoded")
+    assert (res.status_code, set(res.json()["inputs"])) == (400, {"invoice"})
+
+
+def test_file_inputs_need_files(api_client, integrator):
+    task, key = _file_task(api_client, integrator)
+    # JSONでは、ファイルの項目にURLや文字を送っても取り込まない
+    res = _send(api_client, task, key, {"inputs": {"vendor": "ACME", "invoice": "https://example.com/a.pdf"}})
+    assert (res.status_code, res.json()["code"], set(res.json()["inputs"])) == (400, "invalid_inputs", {"invoice"})
+    # 文字の項目にファイル
+    res = _send_multipart(
+        api_client,
+        task,
+        key,
+        {"inputs[vendor]": SimpleUploadedFile("v.txt", b"x"), "inputs[invoice]": SimpleUploadedFile("a.pdf", b"1")},
+    )
+    assert (res.status_code, set(res.json()["inputs"])) == (400, {"vendor"})
+    assert not Run.objects.exists()
+
+
+def test_multipart_limits_and_encoding(api_client, integrator, settings):
+    task, key = _file_task(api_client, integrator)
+    settings.YORIKI_ATTACHMENTS_PER_MESSAGE = 3
+    files = [SimpleUploadedFile(f"{i}.txt", b"x") for i in range(3)]
+    res = _send_multipart(api_client, task, key, {"inputs[vendor]": "ACME", "files": files})
+    assert (res.status_code, res.json()["code"]) == (400, "too_many_files")
+
+    # 不正なUTF-8の値は置換文字にせず断る（違う値が同じ値にならないように）
+    body = b'--B\r\nContent-Disposition: form-data; name="inputs[vendor]"\r\n\r\nAC\xffME\r\n--B--\r\n'
+    res = _send(api_client, task, key, body, content_type="multipart/form-data; boundary=B")
+    assert (res.status_code, res.json()["code"]) == (400, "invalid_form")
+    res = _send(api_client, task, key, b"x", content_type="multipart/form-data")
+    assert (res.status_code, res.json()["code"]) == (400, "invalid_form")
+    # 形式の大文字小文字は問わない。ファイル以外の値の合計は、Djangoのフォームと同じ上限まで
+    settings.DATA_UPLOAD_MAX_MEMORY_SIZE = 100
+    files_part = b'--B\r\nContent-Disposition: form-data; name="inputs[invoice]"; filename="a.pdf"\r\n\r\n1\r\n'
+    body = files_part + b'--B\r\nContent-Disposition: form-data; name="inputs[vendor]"\r\n\r\nACME\r\n--B--\r\n'
+    res = _send(api_client, task, key, body, content_type="Multipart/Form-Data; boundary=B")
+    assert res.status_code == 202, res.json()
+    body = files_part + b'--B\r\nContent-Disposition: form-data; name="memo"\r\n\r\n' + b"x" * 200 + b"\r\n--B--\r\n"
+    res = _send(api_client, task, key, body, content_type="multipart/form-data; boundary=B")
+    assert (res.status_code, res.json()["code"]) == (413, "payload_too_large")
+    # 同じ名前のフィールドに文字とファイル（送った順がわからない）
+    data = {"inputs[vendor]": "ACME", "files": ["x", SimpleUploadedFile("a.pdf", b"1")]}
+    res = _send_multipart(api_client, task, key, data)
+    assert (res.status_code, res.json()["code"]) == (400, "invalid_form")
+    # RFC 2231の形の名前の不正なUTF-8も断る（Djangoは置換文字にするため）
+    for disposition in (
+        b"name=\"inputs[invoice]\"; filename*=utf-8''%FF.pdf",
+        b"name*=utf-8''inputs%5B%FF%5D; filename=\"a.pdf\"",
+    ):
+        body = b"--B\r\nContent-Disposition: form-data; " + disposition + b"\r\n\r\n1\r\n--B--\r\n"
+        res = _send(api_client, task, key, body, content_type="multipart/form-data; boundary=B")
+        assert (res.status_code, res.json()["code"]) == (400, "invalid_form")
+    assert Run.objects.count() == 1
+
+
 def test_text_payload_is_kept_as_a_text_file(api_client, integrator):
     task = TaskDefinitionFactory.create(scope=TaskScope.COMPANY, revision__inputs=[])
     key = _create_binding(api_client, integrator, task).json()["key"]
@@ -424,6 +662,18 @@ def test_a_key_rotated_or_suspended_after_authentication_cannot_start_a_run(task
         )
     assert exc.value.status == 403
     assert not Run.objects.exists()
+
+
+def test_a_resend_with_a_key_rotated_after_authentication_is_refused(task, webhook):
+    binding, _key = webhook
+    body = json.dumps(_payload()).encode()
+    receive_webhook(binding, body=body, content_type="application/json", idempotency_key=None)
+    authenticated = TriggerBinding.objects.get(pk=binding.pk)
+    binding.rotate_key()
+    # 再送でも、作り直した後の古い鍵では前のRunを返さない
+    with pytest.raises(PayloadError) as exc:
+        receive_webhook(authenticated, body=body, content_type="application/json", idempotency_key=None)
+    assert exc.value.status == 401
 
 
 def test_resending_after_changing_the_event_id_path_returns_the_same_run(api_client, integrator, task, webhook):

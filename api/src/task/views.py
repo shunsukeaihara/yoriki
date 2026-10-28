@@ -69,6 +69,23 @@ class TaskFilter(filters.FilterSet):
         fields = ["name", "scope", "department", "suspended"]
 
 
+# 手動実行のmultipart/form-data。ファイルのフィールドの名前は項目の名前なので、名前を決めずに書く
+TASK_RUN_MULTIPART = {
+    "type": "object",
+    "properties": {
+        "inputs": {
+            "type": "string",
+            "description": "ファイル以外の入力の項目の名前と値（JSONのオブジェクトの文字列）",
+        },
+    },
+    "additionalProperties": {
+        "type": "string",
+        "format": "binary",
+        "description": "型がファイルの項目。フィールドの名前は項目の名前",
+    },
+}
+
+
 @extend_schema(description="タスクの一覧・作成・変更・停止・手動実行", tags=["app/task"])
 @extend_schema_view(
     create=extend_schema(responses={201: TaskDefinitionSerializer}),
@@ -136,8 +153,9 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
 
     @extend_schema(
         description="タスクの今の版で、手動で実行する（タスクを管理できる人。authorization.md §6）。"
-        "入力はタスクの定義で決めた項目だけを受け付け、自由な依頼文は受けない",
-        request=TaskRunCreateSerializer,
+        "入力はタスクの定義で決めた項目だけを受け付け、自由な依頼文は受けない。型がファイルの項目があれば "
+        "multipart/form-dataで送る（ファイルは項目の名前で付ける）",
+        request={"application/json": TaskRunCreateSerializer, "multipart/form-data": TASK_RUN_MULTIPART},
         responses={201: RunSerializer},
     )
     @action(detail=True, methods=["post"], serializer_class=TaskRunCreateSerializer)
@@ -349,11 +367,12 @@ HOOK_ERRORS = {
 @extend_schema(
     description="Webhookでタスクを起動する（design.md §4.2）。受け付けたら202とrun_idを返し、作業の完了を待たない。"
     "同じイベントID（入口で指定した場所・Idempotency-Key ヘッダー・推奨の形式の event_id）の再送には、前のRunを"
-    "200で返す",
+    "200で返す。ファイルは multipart/form-data で付ける（URLの取得はしない）",
     tags=["hooks/task"],
     request={
         "application/json": OpenApiTypes.OBJECT,
         "application/x-www-form-urlencoded": OpenApiTypes.OBJECT,
+        "multipart/form-data": OpenApiTypes.OBJECT,
         "text/plain": OpenApiTypes.STR,
     },
     parameters=[OpenApiParameter("Idempotency-Key", str, OpenApiParameter.HEADER, required=False)],

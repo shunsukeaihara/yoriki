@@ -25,6 +25,8 @@ from .storage import StoredObject, get_storage
 # ファイル名に使わない文字（パスの区切り、制御文字、Windowsで使えない文字）
 UNSAFE_NAME_CHARS = re.compile(r'[\x00-\x1f\x7f/\\:*?"<>|]')
 MAX_NAME_LENGTH = 200
+# 多くのファイルシステムの名前の上限（255バイト）から、同じ名前のときに付ける「 (2)」等の分を残したUTF-8のバイト数
+MAX_NAME_BYTES = 230
 # Connectorの結果を置く /workspace/input の中のディレクトリ（harness.md §10.2）
 CONNECTOR_RESULTS_DIR = "connectors"
 
@@ -36,7 +38,36 @@ def clean_filename(name: str) -> str:
     if len(name) > MAX_NAME_LENGTH:
         stem, ext = posixpath.splitext(name)
         name = stem[: MAX_NAME_LENGTH - len(ext)] + ext if len(ext) <= 20 else name[:MAX_NAME_LENGTH]
-    return name or "file"
+    if len(name.encode()) > MAX_NAME_BYTES:
+        # 日本語の名前は1文字が3バイトなので、文字数の上限の中でもSandboxに置けないことがある
+        stem, ext = posixpath.splitext(name)
+        ext_bytes = len(ext.encode())
+        if ext_bytes <= 20:
+            name = _cut_bytes(stem, MAX_NAME_BYTES - ext_bytes) + ext
+        else:
+            name = _cut_bytes(name, MAX_NAME_BYTES)
+    return name.strip() or "file"
+
+
+def _cut_bytes(text: str, limit: int) -> str:
+    """UTF-8で `limit` バイト以内になるよう、文字の途中で切らずに切る"""
+    return text.encode()[:limit].decode("utf-8", "ignore")
+
+
+def input_paths(names: list[str], used: set[str]) -> list[str]:
+    """添付を置く /workspace/input の中の名前。`used` は会話で既に使った名前。同じ名前があれば「名前 (2).拡張子」の
+    ようにする（前の添付を置き換えない）。Connectorの結果を置くディレクトリと同じ名前にしない"""
+    used = {*used, CONNECTOR_RESULTS_DIR}
+    paths = []
+    for name in names:
+        stem, ext = posixpath.splitext(name)
+        path, number = name, 1
+        while path in used:
+            number += 1
+            path = f"{stem} ({number}){ext}"
+        used.add(path)
+        paths.append(path)
+    return paths
 
 
 def guess_content_type(name: str) -> str:
@@ -74,11 +105,16 @@ class BlobObject(models.Model):
         return blob
 
     @classmethod
+    def write(cls, src: IO[bytes]) -> tuple[StoredObject, str]:
+        """既定の保存先に書くだけで、記録しない。（書いたもの、保存先）。後で register() で記録する（DBの行ロックを
+        持つ前に書いておくため。記録しなかったものは、参照のないobjectとして清掃で消す）"""
+        storage = get_storage()
+        return storage.put_immutable(cls.new_key(), src), storage.backend_id
+
+    @classmethod
     def put(cls, src: IO[bytes]) -> "BlobObject":
         """既定の保存先に書いてから記録する"""
-        storage = get_storage()
-        stored = storage.put_immutable(cls.new_key(), src)
-        return cls.register(stored, storage.backend_id)
+        return cls.register(*cls.write(src))
 
     def location(self) -> "BlobLocation":
         return self.locations.order_by("-pk")[0]
@@ -206,22 +242,13 @@ class Artifact(models.Model):
 
     @classmethod
     def attach(cls, conversation, artifacts: list["Artifact"]) -> None:
-        """メッセージで送る添付に、/workspace/input の中の名前を決める。会話の行ロックの中で呼ぶ。
-        同じ名前の添付が既にあれば「名前 (2).拡張子」のようにする（前の添付を置き換えない）"""
+        """メッセージで送る添付に、/workspace/input の中の名前を決める（input_paths()）。会話の行ロックの中で呼ぶ"""
         used = set(
             cls.objects.filter(conversation=conversation, kind=ArtifactKind.ATTACHMENT)
             .exclude(path="")
             .values_list("path", flat=True)
         )
-        # Connectorの結果を置くディレクトリと同じ名前にしない
-        used.add(CONNECTOR_RESULTS_DIR)
-        for artifact in artifacts:
-            stem, ext = posixpath.splitext(artifact.name)
-            path, number = artifact.name, 1
-            while path in used:
-                number += 1
-                path = f"{stem} ({number}){ext}"
-            used.add(path)
+        for artifact, path in zip(artifacts, input_paths([a.name for a in artifacts], used), strict=True):
             artifact.path = path
             artifact.save(update_fields=["path"])
 

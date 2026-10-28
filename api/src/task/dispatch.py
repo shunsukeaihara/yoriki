@@ -5,8 +5,8 @@
 ではなくタスクに固定したものの範囲で動く（使えるかの判定は task/checks.py）。
 """
 
-import io
 import json
+import logging
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -14,7 +14,8 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from artifact.models import Artifact, ArtifactKind, BlobObject, guess_content_type
+from artifact.models import Artifact, ArtifactKind, BlobLocation, BlobObject, clean_filename, guess_content_type
+from artifact.storage import get_storage
 from conversation.dispatch import user_message_data
 from conversation.models import Conversation, ConversationMessage, ConversationPurpose, MessageRole
 from harness.connectors import fixed_catalog, is_allowed_for
@@ -27,9 +28,19 @@ from user.models import system_user
 
 from . import checks
 from .errors import CannotRun
-from .inputs import clean_inputs, render
-from .models import TaskAction, TaskDefinition, TaskDefinitionRevision, TaskScope, TriggerBinding, TriggerReceipt
+from .inputs import InputFile, clean_inputs, render
+from .models import (
+    TaskAction,
+    TaskDefinition,
+    TaskDefinitionRevision,
+    TaskScope,
+    TriggerBinding,
+    TriggerBindingRevision,
+    TriggerReceipt,
+)
 from .webhook import Payload, PayloadError, dedup_key, input_values, parse_payload
+
+logger = logging.getLogger(__name__)
 
 # タスクのRunの最初の発言に添える。答える人がいないので、確認の代わりに前提を置いて進めさせる（harness.md §10.3）
 NO_RESPONDER_NOTE = (
@@ -57,34 +68,41 @@ def start_task_run(
     inputs: dict[str, Any] | Callable[[TaskDefinitionRevision], dict[str, Any]],
     actor,
     launch: RunLaunch,
-    files: Sequence[tuple[str, bytes]] = (),
+    files: Sequence[InputFile] = (),
 ) -> Run:
     """タスクの今の版でRunを始める。始められなければ CannotRun（入力の誤りは InvalidInputs）。
 
-    `inputs` は値か、ロックした後の今の版から値を作る関数（Webhookでは、項目の型を今の版で決めるため）。
-    `files` は /workspace/input に置くファイル（名前とbytes）。呼び出し元のtransactionの中で呼べば、Runの受付と同時に
-    確定させたいもの（TriggerReceipt）を同じtransactionで作れる"""
-    with transaction.atomic():
-        # 停止・版の更新と同時に受け付けないよう、タスクの行をロックする
-        task = (
-            TaskDefinition.objects.select_for_update(of=("self",))
-            .select_related("owner", "department", "current_revision__model_profile__current_version")
-            .get(pk=task.pk)
-        )
-        if launch == RunLaunch.MANUAL and not task.can(actor, TaskAction.RUN):
-            raise CannotRun(_("このタスクを実行する権限がないか、タスクが停止中です"))
-        # 入口からの起動は、タスクに固定したものの範囲で動く（authorization.md §6。個人のタスクはスケジュールだけ）
-        if launch == RunLaunch.WEBHOOK and (not task.in_service() or task.scope == TaskScope.PERSONAL):
-            raise CannotRun(_("タスクが停止中か、削除されています"))
-        if reason := checks.task_problem(task):
-            raise CannotRun(reason)
-        revision = task.current_revision
-        assert revision is not None  # can()・in_service() が確かめた
-        values = inputs(revision) if callable(inputs) else inputs
-        cleaned, errors = clean_inputs(revision.inputs, values)
-        if errors:
-            raise InvalidInputs(errors)
-        return _start(task, revision, cleaned, actor=actor, launch=launch, files=files)
+    `inputs` は値か、ロックした後の今の版から値を作る関数（Webhookでは、項目の型を今の版で決めるため）。型がファイルの
+    項目の値は InputFile。`files` は項目の値のほかに /workspace/input に置くファイル（Webhookのpayload等）。呼び出し元の
+    transactionの中で呼べば、Runの受付と同時に確定させたいもの（TriggerReceipt）を同じtransactionで作れる"""
+    # 保存先への書き込みは、タスクの行をロックする前に行う（保存先が遅くても、同じタスクの受付や更新を待たせない）
+    sent = inputs.values() if isinstance(inputs, dict) else ()
+    written = store_files([*files, *(v for v in sent if isinstance(v, InputFile))])
+    try:
+        with transaction.atomic():
+            # 停止・版の更新と同時に受け付けないよう、タスクの行をロックする
+            task = (
+                TaskDefinition.objects.select_for_update(of=("self",))
+                .select_related("owner", "department", "current_revision__model_profile__current_version")
+                .get(pk=task.pk)
+            )
+            if launch == RunLaunch.MANUAL and not task.can(actor, TaskAction.RUN):
+                raise CannotRun(_("このタスクを実行する権限がないか、タスクが停止中です"))
+            # 入口からの起動は、タスクに固定したものの範囲で動く（authorization.md §6。個人のタスクはスケジュールだけ）
+            if launch == RunLaunch.WEBHOOK and (not task.in_service() or task.scope == TaskScope.PERSONAL):
+                raise CannotRun(_("タスクが停止中か、削除されています"))
+            if reason := checks.task_problem(task):
+                raise CannotRun(reason)
+            revision = task.current_revision
+            assert revision is not None  # can()・in_service() が確かめた
+            values = inputs(revision) if callable(inputs) else inputs
+            cleaned, errors = clean_inputs(revision.inputs, values)
+            if errors:
+                raise InvalidInputs(errors)
+            return _start(task, revision, cleaned, actor=actor, launch=launch, files=files)
+    except BaseException:
+        discard_files(written)
+        raise
 
 
 def _start(
@@ -94,7 +112,7 @@ def _start(
     *,
     actor,
     launch,
-    files: Sequence[tuple[str, bytes]],
+    files: Sequence[InputFile],
 ) -> Run:
     profile = revision.model_profile
     version = profile.current_version
@@ -152,6 +170,7 @@ def _start(
         title=task.name[:200],
         last_posted=timezone.now(),
     )
+    attachments, inputs = _place_files(conversation, files, inputs, actor=actor)
     text = render(revision.prompt_template, inputs)
     message = ConversationMessage.objects.create(
         conversation=conversation, sender=actor, role=MessageRole.USER, body=text
@@ -195,8 +214,10 @@ def _start(
     )
     message.run = run
     message.save(update_fields=["run"])
-    if files:
-        _attach_files(message, run, files, actor=actor)
+    if attachments:
+        # Runの結果とログを見られる人（タスクを管理できる人）が、Runのファイルのapiで取得できるようにする
+        Artifact.objects.filter(pk__in=[a.pk for a in attachments]).update(run=run)
+        message.attachments.set(attachments)
     RunEvent.record(run, RunEventKind.STATUS, {"status": RunStatus.QUEUED}, actor=actor)
     RunEvent.record(
         run,
@@ -222,27 +243,64 @@ def _first_message(text: str, inputs: dict[str, Any], launch: RunLaunch) -> str:
     return "\n\n".join(parts)
 
 
-def _attach_files(message: ConversationMessage, run: Run, files: Sequence[tuple[str, bytes]], *, actor) -> None:
-    """ファイルを最初の発言の添付にする（/workspace/input に読取り専用で置く）。Runにも紐付け、Runの結果とログを
-    見られる人（タスクを管理できる人）がRunのファイルのAPIで取得できるようにする。入力とタスクを確かめた後に、Runと同じ
-    transactionで記録する（受け付けなかった要求の中身をDBに残さない。transactionが戻ったときの保存先のbytesは、
-    参照のないobjectとして清掃で消す）"""
-    conversation = message.conversation
+def store_files(files: Sequence[InputFile]) -> list[InputFile]:
+    """まだ書いていないファイルを保存先に書く（記録は _place_files() でRunと同じtransactionで行う）。書いたものを返す"""
+    written: list[InputFile] = []
+    try:
+        for file in files:
+            if file.stored is None:
+                file.stored = BlobObject.write(file.open())
+                written.append(file)
+    except BaseException:
+        discard_files(written)  # 途中で失敗したら、それまでに書いたものを消す
+        raise
+    return written
+
+
+def discard_files(files: Sequence[InputFile]) -> None:
+    """store_files() で書いたが記録しなかったものを、保存先から消す（消せなければ、参照のないobjectとして清掃で消す）。
+
+    DBに記録されているもの（commitした後のQ2への送信の失敗等で呼ばれたとき）は、Runの添付なので消さない"""
+    for file in files:
+        if file.stored is None:
+            continue
+        stored, backend = file.stored
+        if BlobLocation.objects.filter(backend=backend, key=stored.key).exists():
+            continue
+        file.stored = None
+        try:
+            get_storage(backend).delete(stored.key)
+        except Exception:
+            logger.warning("cannot delete unrecorded object %s", stored.key, exc_info=True)
+
+
+def _place_files(
+    conversation: Conversation, files: Sequence[InputFile], inputs: dict[str, Any], *, actor
+) -> tuple[list[Artifact], dict[str, Any]]:
+    """`files` と、型がファイルの項目の値を、最初の発言の添付（/workspace/input に読取り専用で置く）として保存し、
+    項目の値をそのパスにする。（添付、パスにした入力の値）。同じファイルを指す項目が複数あっても1つだけ置く。
+
+    入力とタスクを確かめた後に、Runと同じtransactionで記録する（受け付けなかった要求の中身をDBに残さない。
+    transactionが戻ったときの保存先のbytesは、参照のないobjectとして清掃で消す）"""
+    placed = list(dict.fromkeys([*files, *(v for v in inputs.values() if isinstance(v, InputFile))]))
+    if not placed:
+        return [], inputs
     artifacts = [
         Artifact.objects.create(
             owner=actor,
             conversation=conversation,
-            run=run,
-            blob=BlobObject.put(io.BytesIO(content)),
+            blob=BlobObject.register(*file.stored) if file.stored else BlobObject.put(file.open()),
             kind=ArtifactKind.ATTACHMENT,
-            name=name,
-            content_type=guess_content_type(name),
+            name=clean_filename(file.name),
+            content_type=guess_content_type(clean_filename(file.name)),
             expires=Artifact.default_expires(),
         )
-        for name, content in files
+        for file in placed
     ]
     Artifact.attach(conversation, artifacts)
-    message.attachments.set(artifacts)
+    paths = {id(file): artifact.describe()["path"] for file, artifact in zip(placed, artifacts, strict=True)}
+    values = {name: paths[id(v)] if isinstance(v, InputFile) else v for name, v in inputs.items()}
+    return artifacts, values
 
 
 def receive_webhook(
@@ -260,47 +318,78 @@ def receive_webhook(
     受け付けられない要求は PayloadError（形の誤り・鍵・停止）、InvalidInputs（項目の誤り）、CannotRun（タスクを
     始められない）"""
     payload = parse_payload(body, content_type)
+    # 再送は、保存先に書く前に見つけて返す。鍵の作り直し・停止と同時でも古い鍵で返さないよう、行をロックして確かめる
+    # （ロックはDBの確認の間だけで、保存先には書かない）
     with transaction.atomic():
-        # タスク → 入口の順にロックする（タスクの削除と同じ順）
-        TaskDefinition.objects.select_for_update(of=("self",)).filter(pk=binding.task_id).first()
-        current = (
-            TriggerBinding.objects.select_for_update(of=("self",))
-            .select_related("task", "current_revision")
-            .filter(pk=binding.pk)
-            .first()
-        )
-        if current is None or current.deleted or current.key_hash != binding.key_hash:
-            raise PayloadError("invalid_key", _("鍵が正しくありません"), status=401)
-        revision = current.current_revision
-        if current.suspended or revision is None:
-            raise PayloadError("trigger_suspended", _("この入口は停止中です"), status=403)
-        # 本文を読んだ後に上限を下げられていても、今の版の上限で断る
-        if len(body) > revision.max_payload_bytes:
-            raise PayloadError(
-                "payload_too_large",
-                _("payloadが大きすぎます（上限 %(limit)s バイト）") % {"limit": revision.max_payload_bytes},
-                status=413,
-            )
-        key = dedup_key(payload, revision.event_id_path, idempotency_key)
+        _lock_task(binding)
+        current, revision, key = _current_binding(binding, body, payload, idempotency_key)
         if (existing := _received_run(current, key, payload, idempotency_key)) is not None:
             return existing, False
-        run = start_task_run(
-            current.task,
-            inputs=lambda task_revision: input_values(payload, revision.inputs, task_revision.inputs),
-            actor=system_user(),
-            launch=RunLaunch.WEBHOOK,
-            files=[(payload.file_name, payload.file_bytes)],
-        )
-        TriggerReceipt.objects.create(
-            binding=current,
-            binding_revision=revision,
-            dedup_key=key or "",
-            payload_sha256=payload.sha256,
-            payload_size=len(body),
-            content_type=payload.content_type,
-            run=run,
-        )
+    payload_file = InputFile(payload.file_name, payload.file_bytes)
+    # 保存先への書き込みは、入口とタスクの行をロックする前に行う（保存先が遅くても、同じ入口・タスクを待たせない）。
+    # 受け付けなかったら、書いたものを消す
+    stored = store_files([payload_file, *payload.files])
+    try:
+        with transaction.atomic():
+            _lock_task(binding)
+            current, revision, key = _current_binding(binding, body, payload, idempotency_key)
+            existing = _received_run(current, key, payload, idempotency_key)
+            if existing is None:
+                run = start_task_run(
+                    current.task,
+                    inputs=lambda task_revision: input_values(payload, revision.inputs, task_revision.inputs),
+                    actor=system_user(),
+                    launch=RunLaunch.WEBHOOK,
+                    files=[payload_file, *payload.files],
+                )
+                TriggerReceipt.objects.create(
+                    binding=current,
+                    binding_revision=revision,
+                    dedup_key=key or "",
+                    payload_sha256=payload.sha256,
+                    payload_size=len(body),
+                    content_type=payload.content_type,
+                    run=run,
+                )
+    except BaseException:
+        discard_files(stored)
+        raise
+    if existing is not None:
+        # 同時に届いた再送。保存先から消すのは、ロックを外した後にする（保存先が遅くても入口・タスクを待たせない）
+        discard_files(stored)
+        return existing, False
     return run, True
+
+
+def _lock_task(binding: TriggerBinding) -> None:
+    # タスク → 入口の順にロックする（タスクの削除と同じ順）
+    TaskDefinition.objects.select_for_update(of=("self",)).filter(pk=binding.task_id).first()
+
+
+def _current_binding(
+    binding: TriggerBinding, body: bytes, payload: Payload, idempotency_key: str | None
+) -> tuple[TriggerBinding, TriggerBindingRevision, str | None]:
+    """入口の行をロックして読み直し、鍵（作り直されていないか）・停止・今の版の上限を確かめる。
+    （入口、今の版、重複のキー）"""
+    current = (
+        TriggerBinding.objects.select_for_update(of=("self",))
+        .select_related("task", "current_revision")
+        .filter(pk=binding.pk)
+        .first()
+    )
+    if current is None or current.deleted or current.key_hash != binding.key_hash:
+        raise PayloadError("invalid_key", _("鍵が正しくありません"), status=401)
+    revision = current.current_revision
+    if current.suspended or revision is None:
+        raise PayloadError("trigger_suspended", _("この入口は停止中です"), status=403)
+    # 本文を読んだ後に上限を下げられていても、今の版の上限で断る
+    if len(body) > revision.max_payload_bytes:
+        raise PayloadError(
+            "payload_too_large",
+            _("payloadが大きすぎます（上限 %(limit)s バイト）") % {"limit": revision.max_payload_bytes},
+            status=413,
+        )
+    return current, revision, dedup_key(payload, revision.event_id_path, idempotency_key)
 
 
 def _received_run(

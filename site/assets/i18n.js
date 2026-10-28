@@ -203,10 +203,6 @@
     'Read the docs': 'ドキュメントを読む',
     "Named after the yoriki (与力), the officers of Edo-period Japan who carried out a magistrate's work within the authority they were given.":
       '名前は与力から。江戸時代に奉行の下で、与えられた権限の範囲で実務を担った役人です。',
-    Documentation: 'ドキュメント',
-    Design: '設計',
-    Deployment: '配備',
-    Authorization: '権限',
     Project: 'プロジェクト',
     'MIT License': 'MITライセンス',
     'Released under the MIT License.': 'MITライセンスで公開しています。',

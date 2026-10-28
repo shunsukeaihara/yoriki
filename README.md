@@ -49,7 +49,8 @@
 | `frontend/` | Nuxt 4 / Nuxt UI 4（社員向けの画面と、`/manage` の管理画面） |
 | `sandbox/` | エージェントがコマンドを動かすSandboxのイメージ、補助コマンド `yoriki-sandbox`、契約テスト |
 | `deploy/` | Docker Compose、nginxの設定、本番の環境変数のexample |
-| `.github/workflows/` | CI（backend、frontend、api-types、app-images、sandbox） |
+| `site/` | ランディングページ（静的HTML。英語・日本語。[site/README.md](site/README.md)） |
+| `.github/workflows/` | CI（backend、frontend、api-types、app-images、sandbox）とランディングページの配備（site） |
 | `.vscode/`、`ruff.toml`、`.editorconfig` | エディタと整形・lintの共通設定 |
 | `docs/` | 設計と規約 |
 

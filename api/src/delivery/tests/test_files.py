@@ -227,9 +227,12 @@ def test_a_storage_failure_is_not_counted_as_served(manager, sent):
     token = _token(_sent_files(sent)[0]["url"])
     with mock.patch.object(LocalStorage, "signed_url", side_effect=StorageError("down")):
         assert APIClient().get(f"/api/files/{token}/").status_code == 503
-    fetch = FileFetch.objects.get()
-    assert not fetch.served
-    assert fetch.refusal
+    # 保存先にない（署名付きURL・X-Accel-Redirect では応答の後に読むので、応答の前に確かめる）
+    with mock.patch.object(LocalStorage, "stat", return_value=None):
+        assert APIClient().get(f"/api/files/{token}/").status_code == 503
+    assert FileFetch.objects.count() == 2
+    assert not FileFetch.objects.filter(served=True).exists()
+    assert all(f.refusal for f in FileFetch.objects.all())
     # 回数に数えない（後で取り直せる）
     assert FileLink.objects.get(token_hash=FileLink.hash_token(token)).fetch_count == 0
     assert APIClient().get(f"/api/files/{token}/").status_code == 200

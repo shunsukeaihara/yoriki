@@ -66,7 +66,11 @@ def fetch_file(token: str, request) -> HttpResponse | StreamingHttpResponse:
 
 def _response(artifact) -> HttpResponse | StreamingHttpResponse:
     location = artifact.blob.location()
-    url = get_storage(location.backend).signed_url(location.key, name=artifact.name, content_type=artifact.content_type)
+    storage = get_storage(location.backend)
+    # 署名付きURL・X-Accel-Redirect では、実際に読むのは応答の後なので、ここで保存先にあるかを確かめておく
+    if storage.stat(location.key) is None:
+        raise StorageError(f"{location.key} is not in the storage")
+    url = storage.signed_url(location.key, name=artifact.name, content_type=artifact.content_type)
     if url is None:
         return file_response(artifact)
     response = HttpResponseRedirect(url)

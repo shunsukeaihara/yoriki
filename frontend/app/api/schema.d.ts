@@ -5957,15 +5957,28 @@ export interface components {
             readonly suspended: boolean;
             readonly inputs: components["schemas"]["TaskInput"][];
         };
-        /** @description ログインユーザー宛ての通知：自分のRunの状態の変更 */
-        UserStreamEvent: {
-            /** @enum {string} */
+        /** @description 自分のRunの状態の変更 */
+        UserRunStatusEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
             type: "run.status";
             run: string;
             conversation: string;
             status: components["schemas"]["RunStatusEnum"];
             sequence: number;
         };
+        /** @description 画面の通知が届いた（中身は app/v1/notifications/ で読む） */
+        UserNotificationEvent: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "notification";
+        };
+        /** @description ログインユーザー宛ての通知 */
+        UserStreamEvent: components["schemas"]["UserRunStatusEvent"] | components["schemas"]["UserNotificationEvent"];
     };
     responses: never;
     parameters: never;

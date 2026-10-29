@@ -1,0 +1,42 @@
+// 画面の通知（通知欄）。未読の数はタブに1つだけ持ち、通知が届いたらログインユーザー宛てのストリームで知って読み直す
+
+// 通知欄に出す件数（古いものは出さない。一覧の画面はタスクの Run の画面とあわせて作る）
+export const NOTIFICATION_PAGE_SIZE = 20
+
+export const useNotificationStore = defineStore('notification', () => {
+  const unread = ref(0)
+  const items = ref<AppNotification[]>([])
+  const loading = ref(false)
+
+  const refreshCount = async () => {
+    unread.value = (await useAPI().notifications.unreadCount()).unread
+  }
+
+  const reload = async () => {
+    loading.value = true
+    try {
+      const [page, count] = await Promise.all([
+        useAPI().notifications.list({ pageSize: NOTIFICATION_PAGE_SIZE }),
+        useAPI().notifications.unreadCount(),
+      ])
+      items.value = page.results
+      unread.value = count.unread
+    } finally {
+      loading.value = false
+    }
+  }
+
+  const markRead = async (notification: AppNotification) => {
+    if (notification.read) return
+    const updated = await useAPI().notifications.read(notification.id)
+    items.value = items.value.map((n) => (n.id === updated.id ? updated : n))
+    unread.value = Math.max(0, unread.value - 1)
+  }
+
+  const markAllRead = async () => {
+    unread.value = (await useAPI().notifications.readAll()).unread
+    await reload()
+  }
+
+  return { unread, items, loading, refreshCount, reload, markRead, markAllRead }
+})

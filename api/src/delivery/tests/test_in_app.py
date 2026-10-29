@@ -1,6 +1,8 @@
 """画面の通知（in_app。design.md §4.3・§4.4、authorization.md §5.5・§7.1）。受け手は送るときに決め、今もタスクを
 管理できる人に限る。個人のタスクには全員で共通の出口（受け手は持ち主）を使い、機密のタスクにも使える"""
 
+from unittest import mock
+
 import pytest
 from rest_framework.test import APIClient
 
@@ -77,8 +79,11 @@ def test_a_personal_task_notifies_its_owner_even_when_sensitive():
 def test_a_manual_run_notifies_the_person_who_ran_it():
     runner = grant(UserFactory.create(), AppPermission.MANAGE_COMPANY_TASKS)
     other = grant(UserFactory.create(), AppPermission.MANAGE_COMPANY_TASKS)
-    delivery = _finish(_task(), runner)
+    with mock.patch("delivery.in_app.notify_notification") as notify:
+        delivery = _finish(_task(), runner)
     assert _recipients(delivery) == {runner.pk}
+    # 受け手の画面へ、通知が届いたことを知らせる
+    notify.assert_called_once_with(runner.uid)
     assert other.pk not in _recipients(delivery)
 
 

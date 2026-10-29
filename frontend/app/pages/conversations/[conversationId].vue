@@ -98,7 +98,7 @@ const live = useRunLive(activeRunId, { onEvent: () => sync(), onReconnect: () =>
 // 別のタブや外部のスレッドから、この会話で新しい Run が始まった場合
 useUserEvents(
   (event) => {
-    if (event.conversation === conversationId && event.run !== activeRunId.value) sync()
+    if (event.type === 'run.status' && event.conversation === conversationId && event.run !== activeRunId.value) sync()
   },
   { onReconnect: () => sync() },
 )

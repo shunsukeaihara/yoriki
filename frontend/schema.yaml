@@ -14541,9 +14541,9 @@ components:
       - scope
       - scope_display
       - suspended
-    UserStreamEvent:
+    UserRunStatusEvent:
       type: object
-      description: ログインユーザー宛ての通知：自分のRunの状態の変更
+      description: 自分のRunの状態の変更
       properties:
         type:
           type: string
@@ -14563,6 +14563,26 @@ components:
       - conversation
       - status
       - sequence
+    UserNotificationEvent:
+      type: object
+      description: 画面の通知が届いた（中身は app/v1/notifications/ で読む）
+      properties:
+        type:
+          type: string
+          enum:
+          - notification
+      required:
+      - type
+    UserStreamEvent:
+      description: ログインユーザー宛ての通知
+      oneOf:
+      - $ref: '#/components/schemas/UserRunStatusEvent'
+      - $ref: '#/components/schemas/UserNotificationEvent'
+      discriminator:
+        propertyName: type
+        mapping:
+          run.status: '#/components/schemas/UserRunStatusEvent'
+          notification: '#/components/schemas/UserNotificationEvent'
   securitySchemes:
     cookieAuth:
       type: apiKey

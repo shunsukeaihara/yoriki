@@ -66,6 +66,14 @@ const createAPI = () => {
         http.get<Paginated<AppConnector>, Paginated<AppConnector>>('app/v1/connectors/', { params }),
       get: (id: string) => http.get<AppConnectorDetail, AppConnectorDetail>(`app/v1/connectors/${id}/`),
     },
+    // 本人の画面の通知（通知欄）。中身はタスクの名前と Run の状態だけ
+    notifications: {
+      list: (params?: NotificationListParams) =>
+        http.get<Paginated<AppNotification>, Paginated<AppNotification>>('app/v1/notifications/', { params }),
+      unreadCount: () => http.get<NotificationCount, NotificationCount>('app/v1/notifications/unread_count/'),
+      read: (id: string) => http.post<AppNotification, AppNotification>(`app/v1/notifications/${id}/read/`),
+      readAll: () => http.post<NotificationCount, NotificationCount>('app/v1/notifications/read_all/'),
+    },
     // Skill（design.md §3）。中身の編集は Draft で行い、公開すると版になる
     skills: (id?: string) => ({
       ...readOnlyResource<Skill, SkillListParams>(http, 'app/v1/skills', id),

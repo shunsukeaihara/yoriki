@@ -14,6 +14,7 @@ from django.contrib.auth import get_user_model
 from django.utils.translation import gettext as _
 
 from run.models import RunLaunch
+from stream.notifier import notify_notification
 from task.models import SCOPE_PERMISSIONS, TaskScope, can_manage
 
 from .adapters import Outcome
@@ -64,4 +65,7 @@ def notify(delivery: Delivery) -> Outcome:
         ],
         ignore_conflicts=True,
     )
+    # 通知欄の未読の数をすぐ更新できるように、受け手の画面へ知らせる（保存はしないので、届かなくても次に読めば分かる）
+    for user in users:
+        notify_notification(user.uid)
     return Outcome(AttemptOutcome.ACCEPTED)

@@ -172,6 +172,13 @@ export type RunStreamEvent = Api<'RunStreamEvent'>
 export type RunMessageEvent = Api<'RunMessageEvent'>
 export type UserStreamEvent = Api<'UserStreamEvent'>
 
+// 画面の通知（通知欄）
+// ブラウザの Notification と名前が重なるので App を付ける
+export type AppNotification = Api<'Notification'>
+export type NotificationCount = Api<'NotificationCount'>
+export type NotifyEventEnum = Schemas['NotifyEventEnum']
+export type NotificationListParams = ListParams & { unread?: boolean }
+
 export type ConversationListParams = ListParams
 export type ArtifactListParams = ListParams & { kind?: ArtifactKindEnum }
 export type RunListParams = ListParams & { status?: RunStatusEnum; conversation?: string }

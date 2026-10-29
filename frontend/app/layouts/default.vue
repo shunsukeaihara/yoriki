@@ -30,6 +30,7 @@ const { links: manageLinks } = useManageMenu()
           block
           :class="collapsed ? undefined : 'justify-start'"
         />
+        <NotificationBell :collapsed="collapsed" />
         <ConversationList :collapsed="collapsed" />
       </template>
 

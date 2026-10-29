@@ -1,5 +1,6 @@
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from user.models import Department
@@ -11,6 +12,7 @@ from .adapters import adapter_for
 from .errors import VersionConflict
 from .models import (
     DESTINATION_REVISION_FIELDS,
+    URL_KINDS,
     Delivery,
     DeliveryAttempt,
     DeliveryStatus,
@@ -18,6 +20,8 @@ from .models import (
     DestinationKind,
     DestinationRevision,
     DestinationScope,
+    FileFetch,
+    Notification,
     NotifyEvent,
 )
 from .network import BlockedAddress, resolve
@@ -37,7 +41,8 @@ class DestinationSerializer(serializers.ModelSerializer):
     kind = serializers.ChoiceField(choices=DestinationKind.choices, help_text=_("種類。作成した後は変えられない"))
     kind_display = serializers.CharField(source="get_kind_display", read_only=True)
     scope = serializers.ChoiceField(
-        choices=DestinationScope.choices,
+        # 個人の出口（画面の通知）はYorikiが作る
+        choices=[c for c in DestinationScope.choices if c[0] != DestinationScope.PERSONAL],
         help_text=_("使ってよい範囲。部門の出口はその部門のタスクだけが使う。作成した後は変えられない"),
     )
     scope_display = serializers.CharField(source="get_scope_display", read_only=True)
@@ -59,8 +64,10 @@ class DestinationSerializer(serializers.ModelSerializer):
     url = serializers.CharField(
         source="current_revision.url",
         max_length=MAX_URL_LENGTH,
+        required=False,
+        allow_blank=True,
         write_only=True,
-        help_text=_("送り先のURL（https）。表示では返さない"),
+        help_text=_("送り先のURL（https）。Webhook・Zapierでは必須、画面の通知では送らない。表示では返さない"),
     )
     url_display = serializers.CharField(
         source="current_revision.url_display", read_only=True, help_text=_("送り先のホストと末尾の4文字")
@@ -69,7 +76,10 @@ class DestinationSerializer(serializers.ModelSerializer):
         source="current_revision.allows_sensitive_results",
         required=False,
         default=False,
-        help_text=_("機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい"),
+        help_text=_(
+            "機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面への参照だけなので、"
+            "この指定によらず機密のタスクにも使える"
+        ),
     )
     change_reason = serializers.CharField(max_length=500, required=False, allow_blank=True, write_only=True)
     created_by = MinimumUserSerializer(read_only=True)
@@ -122,6 +132,20 @@ class DestinationSerializer(serializers.ModelSerializer):
                 content[name] = current.url.reveal() if current else ""
             else:
                 content[name] = getattr(current, name)
+        self._check_url(kind, sent, content)
+        attrs["content"] = content
+        return attrs
+
+    @staticmethod
+    def _check_url(kind: int, sent: dict, content: dict) -> None:
+        if kind not in URL_KINDS:
+            # 画面の通知は送り先を持たない
+            if str(sent.get("url") or "").strip():
+                raise serializers.ValidationError({"url": _("画面の通知には送り先のURLを指定しません")})
+            content["url"] = ""
+            return
+        if not str(content["url"]).strip():
+            raise serializers.ValidationError({"url": _("送り先のURLを入力してください")})
         if "url" in sent:
             # 登録するときも、送り先の形と、名前を引いた先が送ってよいアドレスかを確かめる（design.md §4.4）
             content["url"] = content["url"].strip()
@@ -129,8 +153,6 @@ class DestinationSerializer(serializers.ModelSerializer):
                 resolve(adapter_for(kind).validate_url(content["url"]))
             except BlockedAddress as exc:
                 raise serializers.ValidationError({"url": str(exc)}) from exc
-        attrs["content"] = content
-        return attrs
 
     @transaction.atomic
     def create(self, validated_data) -> Destination:
@@ -241,10 +263,27 @@ class DestinationChoiceSerializer(ReadOnlyModelSerializer):
         fields = ["id", "name", "kind", "scope", "department", "allows_sensitive_results"]
 
 
+class FileFetchSerializer(ReadOnlyModelSerializer):
+    """出口へ渡したファイルの取得の記録（身に覚えのない取得に気づけるように）"""
+
+    file = serializers.CharField(source="link.artifact.name", read_only=True)
+
+    class Meta:
+        model = FileFetch
+        fields = ["file", "served", "refusal", "ip_address", "user_agent", "created"]
+
+
 class DeliveryAttemptSerializer(ReadOnlyModelSerializer):
+    file_fetches = serializers.SerializerMethodField(help_text=_("この送信で渡したファイルの取得の記録"))
+
     class Meta:
         model = DeliveryAttempt
-        fields = ["number", "outcome", "http_status", "error", "started", "finished"]
+        fields = ["number", "outcome", "http_status", "error", "started", "finished", "file_fetches"]
+
+    @extend_schema_field(FileFetchSerializer(many=True))
+    def get_file_fetches(self, attempt: DeliveryAttempt) -> list[dict]:
+        fetches = [fetch for link in attempt.file_links.all() for fetch in link.fetches.all()]
+        return list(FileFetchSerializer(sorted(fetches, key=lambda f: (f.created, f.pk)), many=True).data)
 
 
 class DeliverySerializer(ReadOnlyModelSerializer):
@@ -278,3 +317,21 @@ class DeliverySerializer(ReadOnlyModelSerializer):
             "updated",
             "delivered",
         ]
+
+
+class NotificationSerializer(ReadOnlyModelSerializer):
+    """画面の通知（本人の通知欄）。タスクの名前とRunの状態だけを返す"""
+
+    id = serializers.CharField(source="uid", read_only=True)
+    event_type = serializers.ChoiceField(choices=NotifyEvent.choices, read_only=True)
+    event_display = serializers.CharField(source="get_event_type_display", read_only=True)
+    task = serializers.CharField(source="task.uid", read_only=True)
+    run = serializers.CharField(source="run.uid", read_only=True)
+
+    class Meta:
+        model = Notification
+        fields = ["id", "event_type", "event_display", "task", "task_name", "run", "read", "created"]
+
+
+class NotificationCountSerializer(serializers.Serializer):
+    unread = serializers.IntegerField(read_only=True)

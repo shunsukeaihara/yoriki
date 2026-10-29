@@ -5,7 +5,7 @@ from django.utils.translation import gettext as _
 
 from task.checks import task_problem
 
-from .models import Delivery, Destination
+from .models import URL_KINDS, Delivery, Destination
 
 
 def send_problem(delivery: Delivery) -> str:
@@ -17,6 +17,11 @@ def send_problem(delivery: Delivery) -> str:
     )
     sensitive = run.handles_sensitive_data
     problem = destination.problem_for(run.task, sensitive=sensitive)
-    if not problem and sensitive and not delivery.destination_revision.allows_sensitive_results:
+    if (
+        not problem
+        and sensitive
+        and destination.kind in URL_KINDS
+        and not delivery.destination_revision.allows_sensitive_results
+    ):
         problem = _("出口が機密の結果を送ってよい先ではありません")
     return problem or task_problem(run.task)

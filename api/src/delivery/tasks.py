@@ -13,9 +13,10 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
+from . import in_app
 from .adapters import Outcome, adapter_for
 from .checks import send_problem
-from .models import SENDABLE_STATUSES, AttemptOutcome, Delivery, DeliveryAttempt, DeliveryStatus
+from .models import SENDABLE_STATUSES, AttemptOutcome, Delivery, DeliveryAttempt, DeliveryStatus, DestinationKind
 from .outbox import send_later
 from .payload import FileLinksUnavailable, with_file_links
 
@@ -39,11 +40,15 @@ def send_delivery(delivery_id: int) -> None:
     delivery, attempt, url, secret = claimed
     revision = delivery.destination_revision
     try:
-        # ファイルのURLは送るたびに発行する（期限が短いので、送り直しでも新しくする。design.md §4.5）
-        payload = with_file_links(delivery.payload, attempt)
-        outcome = adapter_for(revision.destination.kind).deliver(
-            url=url, secret=secret, payload=payload, attempt=attempt.number
-        )
+        if revision.destination.kind == DestinationKind.IN_APP:
+            # 画面の通知は外へ送らず、通知欄に載せる（ファイルのURLは発行しない）
+            outcome = in_app.notify(delivery)
+        else:
+            # ファイルのURLは送るたびに発行する（期限が短いので、送り直しでも新しくする。design.md §4.5）
+            payload = with_file_links(delivery.payload, attempt)
+            outcome = adapter_for(revision.destination.kind).deliver(
+                url=url, secret=secret, payload=payload, attempt=attempt.number
+            )
     except FileLinksUnavailable as exc:
         outcome = Outcome(AttemptOutcome.FAILED, error=str(exc))
     except Exception:

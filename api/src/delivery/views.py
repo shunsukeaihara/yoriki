@@ -1,5 +1,6 @@
 from django.db import transaction
 from django.db.models import Q
+from django.utils import timezone
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema, extend_schema_view
 from rest_framework import mixins, status
@@ -20,7 +21,7 @@ from utils.permissions import AppUser, ModelPermissions
 from utils.views import SoftDeleteMixin
 
 from .files import FileRefused, fetch_file
-from .models import Delivery, Destination, DestinationRevision, DestinationScope
+from .models import Delivery, Destination, DestinationRevision, DestinationScope, Notification
 from .outbox import enqueue_delivery
 from .serializers import (
     DeliverySerializer,
@@ -30,13 +31,15 @@ from .serializers import (
     DestinationSerializer,
     DestinationStateSerializer,
     DestinationUpdateSerializer,
+    NotificationCountSerializer,
+    NotificationSerializer,
 )
 
 CONFLICT = OpenApiResponse(description="他の変更と競合した（編集を始めた後に、他の人が版を作った）")
 
 
 @extend_schema(
-    description="出口（Webhook・Zapier）の一覧・作成・変更・停止・署名の鍵の作り直し"
+    description="出口（Webhook・Zapier・画面の通知）の一覧・作成・変更・停止・署名の鍵の作り直し"
     "（連携の管理者。authorization.md §5.5）",
     tags=["manage/destination"],
 )
@@ -52,7 +55,12 @@ class DestinationViewSet(SoftDeleteMixin, ModelViewSet):
     permission_classes = [ModelPermissions]
     action_permissions = {"suspend": "change", "resume": "change", "rotate_secret": "change"}
     lookup_field = "uid"
-    queryset = Destination.objects.alive().select_related("department", "current_revision", "created_by")
+    # 個人の出口（画面の通知）はYorikiが作り、管理では扱わない
+    queryset = (
+        Destination.objects.alive()
+        .exclude(scope=DestinationScope.PERSONAL)
+        .select_related("department", "current_revision", "created_by")
+    )
     serializer_class = DestinationSerializer
     filterset_fields = ["kind", "scope", "suspended"]
     search_fields = ("name",)
@@ -114,13 +122,16 @@ class DestinationRevisionViewSet(ReadOnlyModelViewSet):
     ordering = ("-number",)
 
     def get_queryset(self):
-        destination = get_object_or_404(Destination.objects.alive(), uid=self.kwargs["destination"])
+        destination = get_object_or_404(
+            Destination.objects.alive().exclude(scope=DestinationScope.PERSONAL), uid=self.kwargs["destination"]
+        )
         return super().get_queryset().filter(destination=destination)
 
 
 def choosable_condition(user) -> Q:
-    """タスクの編集画面で選べる出口：利用者がタスクを管理できる範囲の出口（部門は管理できる部門のもの）"""
-    condition = Q(pk__in=[])
+    """タスクの編集画面で選べる出口：利用者がタスクを管理できる範囲の出口（部門は管理できる部門のもの）。個人の
+    タスクの画面の通知は、だれでも選べる（受け手は持ち主）"""
+    condition = Q(scope=DestinationScope.PERSONAL)
     for scope, perm in SCOPE_PERMISSIONS.items():
         if user.has_perm(perm.perm):
             part = Q(scope=scope)
@@ -134,7 +145,7 @@ def choosable_condition(user) -> Q:
     description="タスクの編集画面で選ぶ出口の候補（停止中でなく、タスクを管理できる範囲のもの。authorization.md §7.2）",
     tags=["app/destination"],
     parameters=[
-        OpenApiParameter("scope", int, description="タスクの範囲（2：部門、3：全社、4：システム）"),
+        OpenApiParameter("scope", int, description="タスクの範囲（1：個人、2：部門、3：全社、4：システム）"),
         OpenApiParameter("department", str, description="部門のID（部門の範囲のとき）"),
     ],
 )
@@ -146,6 +157,7 @@ class AppDestinationViewSet(mixins.ListModelMixin, GenericViewSet):
     ordering = ("name", "pk")
 
     def get_queryset(self):
+        Destination.personal_in_app()  # 個人のタスクの画面の通知は、最初に選ぶときに作る
         qs = (
             super()
             .get_queryset()
@@ -169,7 +181,7 @@ class AppTaskDeliveryViewSet(TaskMixin, ReadOnlyModelViewSet):
     lookup_field = "uid"
     queryset = Delivery.objects.select_related(
         "run", "destination_revision__destination__department", "destination_revision__destination__current_revision"
-    ).prefetch_related("attempts")
+    ).prefetch_related("attempts__file_links__artifact", "attempts__file_links__fetches")
     serializer_class = DeliverySerializer
     filterset_fields = ["status", "event_type"]
     ordering = ("-created", "-pk")
@@ -225,3 +237,42 @@ class FileAPIView(APIView):
                 # 認証の仕組み（authentication_classes）を使わないので、DRFの AuthenticationFailed では403になる
                 return Response(status=status.HTTP_401_UNAUTHORIZED, headers={"WWW-Authenticate": "Bearer"})
             raise NotFound from None
+
+
+@extend_schema(description="本人の画面の通知（通知欄）の一覧と既読", tags=["app/notification"])
+class AppNotificationViewSet(mixins.ListModelMixin, GenericViewSet):
+    permission_classes = [AppUser]
+    lookup_field = "uid"
+    queryset = Notification.objects.select_related("task", "run")
+    serializer_class = NotificationSerializer
+    ordering = ("-created", "-pk")
+
+    def get_queryset(self):
+        qs = super().get_queryset().filter(user=self.request.user)
+        if self.request.query_params.get("unread") in ("1", "true"):
+            qs = qs.filter(read__isnull=True)
+        return qs
+
+    @extend_schema(
+        description="未読の数",
+        parameters=[OpenApiParameter("unread", bool, description="未読だけ")],
+        responses=NotificationCountSerializer,
+    )
+    @action(detail=False, methods=["get"], url_path="unread_count", serializer_class=NotificationCountSerializer)
+    def unread_count(self, request, *args, **kwargs):
+        return Response({"unread": Notification.objects.filter(user=request.user).unread().count()})
+
+    @extend_schema(description="既読にする", request=None, responses=NotificationSerializer)
+    @action(detail=True, methods=["post"])
+    def read(self, request, *args, **kwargs):
+        notification = self.get_object()
+        if notification.read is None:
+            Notification.objects.filter(pk=notification.pk, read__isnull=True).update(read=timezone.now())
+            notification.refresh_from_db(fields=["read"])
+        return Response(self.get_serializer(notification).data)
+
+    @extend_schema(description="すべて既読にする", request=None, responses=NotificationCountSerializer)
+    @action(detail=False, methods=["post"], url_path="read_all", serializer_class=NotificationCountSerializer)
+    def read_all(self, request, *args, **kwargs):
+        Notification.objects.filter(user=request.user).unread().update(read=timezone.now())
+        return Response({"unread": 0})

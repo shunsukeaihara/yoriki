@@ -283,6 +283,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/app/v1/notifications/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 本人の画面の通知（通知欄）の一覧と既読 */
+        get: operations["app_v1_notifications_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/notifications/{uid}/read/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 既読にする */
+        post: operations["app_v1_notifications_read_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/notifications/read_all/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description すべて既読にする */
+        post: operations["app_v1_notifications_read_all_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/notifications/unread_count/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 未読の数 */
+        get: operations["app_v1_notifications_unread_count_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/app/v1/runs/": {
         parameters: {
             query?: never;
@@ -1025,7 +1093,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description 期限付きのtokenで成果物を取得する（ログインなし。Zapier等の外部へ渡すURL） */
+        /** @description 出口（Zapier・Webhook）へ渡した成果物を、期限付きのtokenで取得する（ログインなし。design.md §4.4）。汎用のWebhookの出口では、出口の署名の鍵を `Authorization: Bearer` で付ける。S3に保存したものは、ごく短い期限の署名付きURLへリダイレクトする */
         get: operations["files_retrieve"];
         put?: never;
         post?: never;
@@ -1396,10 +1464,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description 出口（Webhook・Zapier）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md §5.5） */
+        /** @description 出口（Webhook・Zapier・画面の通知）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md §5.5） */
         get: operations["v1_destinations_list"];
         put?: never;
-        /** @description 出口（Webhook・Zapier）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md §5.5） */
+        /** @description 出口（Webhook・Zapier・画面の通知）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md §5.5） */
         post: operations["v1_destinations_create"];
         delete?: never;
         options?: never;
@@ -1448,16 +1516,16 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description 出口（Webhook・Zapier）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md §5.5） */
+        /** @description 出口（Webhook・Zapier・画面の通知）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md §5.5） */
         get: operations["v1_destinations_retrieve"];
-        /** @description 出口（Webhook・Zapier）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md §5.5） */
+        /** @description 出口（Webhook・Zapier・画面の通知）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md §5.5） */
         put: operations["v1_destinations_update"];
         post?: never;
         /** @description 出口を消す。まだ送っていない配信も送らない */
         delete: operations["v1_destinations_destroy"];
         options?: never;
         head?: never;
-        /** @description 出口（Webhook・Zapier）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md §5.5） */
+        /** @description 出口（Webhook・Zapier・画面の通知）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md §5.5） */
         patch: operations["v1_destinations_partial_update"];
         trace?: never;
     };
@@ -2878,6 +2946,8 @@ export interface components {
              * Format: date-time
              */
             readonly finished: string | null;
+            /** @description この送信で渡したファイルの取得の記録 */
+            readonly file_fetches: components["schemas"]["FileFetch"][];
         };
         /**
          * @description * `1` - 配信待ち
@@ -2933,6 +3003,7 @@ export interface components {
              *
              *     * `1` - Webhook
              *     * `2` - Zapier
+             *     * `3` - 画面の通知
              */
             kind: components["schemas"]["DestinationKindEnum"];
             readonly kind_display: string;
@@ -2956,7 +3027,7 @@ export interface components {
             /** @description 送り先のホストと末尾の4文字 */
             readonly url_display: string;
             /**
-             * @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい
+             * @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面への参照だけなので、この指定によらず機密のタスクにも使える
              * @default false
              */
             allows_sensitive_results: boolean;
@@ -2977,16 +3048,17 @@ export interface components {
             /** 名前 */
             readonly name: string;
             readonly kind: components["schemas"]["DestinationKindEnum"];
-            readonly scope: components["schemas"]["ConnectorScopeEnum"];
+            readonly scope: components["schemas"]["SkillScopeEnum"];
             readonly department: components["schemas"]["MinimumDepartment"] | null;
             readonly allows_sensitive_results: boolean;
         };
         /**
          * @description * `1` - Webhook
          *     * `2` - Zapier
+         *     * `3` - 画面の通知
          * @enum {integer}
          */
-        DestinationKindEnum: 1 | 2;
+        DestinationKindEnum: 1 | 2 | 3;
         /**
          * @description 出口の作成と表示（連携の管理者。authorization.md §5.5）。中身は今の版の値を平らに出す。
          *
@@ -3000,6 +3072,7 @@ export interface components {
              *
              *     * `1` - Webhook
              *     * `2` - Zapier
+             *     * `3` - 画面の通知
              */
             kind: components["schemas"]["DestinationKindEnum"];
             /**
@@ -3015,10 +3088,10 @@ export interface components {
             name: string;
             /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
             version?: number;
-            /** @description 送り先のURL（https）。表示では返さない */
-            url: string;
+            /** @description 送り先のURL（https）。Webhook・Zapierでは必須、画面の通知では送らない。表示では返さない */
+            url?: string;
             /**
-             * @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい
+             * @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面への参照だけなので、この指定によらず機密のタスクにも使える
              * @default false
              */
             allows_sensitive_results: boolean;
@@ -3046,6 +3119,7 @@ export interface components {
              *
              *     * `1` - Webhook
              *     * `2` - Zapier
+             *     * `3` - 画面の通知
              */
             kind: components["schemas"]["DestinationKindEnum"];
             readonly kind_display: string;
@@ -3069,7 +3143,7 @@ export interface components {
             /** @description 送り先のホストと末尾の4文字 */
             readonly url_display: string;
             /**
-             * @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい
+             * @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面への参照だけなので、この指定によらず機密のタスクにも使える
              * @default false
              */
             allows_sensitive_results: boolean;
@@ -3091,9 +3165,9 @@ export interface components {
             name?: string;
             /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
             version?: number;
-            /** @description 送り先のURL（https）。表示では返さない */
+            /** @description 送り先のURL（https）。Webhook・Zapierでは必須、画面の通知では送らない。表示では返さない */
             url?: string;
-            /** @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい */
+            /** @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面への参照だけなので、この指定によらず機密のタスクにも使える */
             allows_sensitive_results?: boolean;
             change_reason?: string;
         };
@@ -3148,6 +3222,19 @@ export interface components {
          * @enum {integer}
          */
         EvaluationVerdictEnum: 1 | 2 | 3;
+        /** @description 出口へ渡したファイルの取得の記録（身に覚えのない取得に気づけるように） */
+        FileFetch: {
+            readonly file: string;
+            /** 返した */
+            readonly served: boolean;
+            /** 返さなかった理由 */
+            readonly refusal: string;
+            /** IPアドレス */
+            readonly ip_address: string | null;
+            readonly user_agent: string;
+            /** Format: date-time */
+            readonly created: string;
+        };
         /** @description Group（permissionの集まり）。ユーザーへの割り当てでは名前で指定する */
         Group: {
             /** 名前 */
@@ -3762,6 +3849,26 @@ export interface components {
             /** @description 管理できる部門（部門のSkill・タスクを作るときの選択肢） */
             readonly manageable_departments: components["schemas"]["MyDepartment"][];
         };
+        /** @description 画面の通知（本人の通知欄）。タスクの名前とRunの状態だけを返す */
+        Notification: {
+            readonly id: string;
+            readonly event_type: components["schemas"]["NotifyEventEnum"];
+            readonly event_display: string;
+            readonly task: string;
+            /** タスクの名前 */
+            readonly task_name: string;
+            readonly run: string;
+            /**
+             * 既読にした日時
+             * Format: date-time
+             */
+            readonly read: string | null;
+            /** Format: date-time */
+            readonly created: string;
+        };
+        NotificationCount: {
+            readonly unread: number;
+        };
         /**
          * @description * `status` - 状態だけ
          *     * `result` - 業務結果
@@ -4070,6 +4177,19 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["ModelProfileVersion"][];
         };
+        PaginatedNotificationList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["Notification"][];
+        };
         PaginatedRunList: {
             /**
              * Format: uri
@@ -4310,9 +4430,9 @@ export interface components {
             name?: string;
             /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
             version?: number;
-            /** @description 送り先のURL（https）。表示では返さない */
+            /** @description 送り先のURL（https）。Webhook・Zapierでは必須、画面の通知では送らない。表示では返さない */
             url?: string;
-            /** @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい */
+            /** @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面への参照だけなので、この指定によらず機密のタスクにも使える */
             allows_sensitive_results?: boolean;
             change_reason?: string;
         };
@@ -6332,7 +6452,7 @@ export interface operations {
                 ordering?: string;
                 /** @description Number of results to return per page. */
                 page_size?: number;
-                /** @description タスクの範囲（2：部門、3：全社、4：システム） */
+                /** @description タスクの範囲（1：個人、2：部門、3：全社、4：システム） */
                 scope?: number;
                 /** @description A search term. */
                 search?: string;
@@ -6413,6 +6533,96 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MyUser"];
+                };
+            };
+        };
+    };
+    app_v1_notifications_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedNotificationList"];
+                };
+            };
+        };
+    };
+    app_v1_notifications_read_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Notification"];
+                };
+            };
+        };
+    };
+    app_v1_notifications_read_all_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationCount"];
+                };
+            };
+        };
+    };
+    app_v1_notifications_unread_count_retrieve: {
+        parameters: {
+            query?: {
+                /** @description 未読だけ */
+                unread?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationCount"];
                 };
             };
         };
@@ -8241,6 +8451,20 @@ export interface operations {
                     "application/octet-stream": string;
                 };
             };
+            /** @description 保存先の署名付きURLへのリダイレクト */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No response body */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description No response body */
             404: {
                 headers: {
@@ -9210,18 +9434,20 @@ export interface operations {
                 /**
                  * @description * `1` - Webhook
                  *     * `2` - Zapier
+                 *     * `3` - 画面の通知
                  */
-                kind?: 1 | 2;
+                kind?: 1 | 2 | 3;
                 /** @description Which field to use when ordering the results. */
                 ordering?: string;
                 /** @description Number of results to return per page. */
                 page_size?: number;
                 /**
-                 * @description * `2` - 部門
+                 * @description * `1` - 個人
+                 *     * `2` - 部門
                  *     * `3` - 全社
                  *     * `4` - システム
                  */
-                scope?: 2 | 3 | 4;
+                scope?: 1 | 2 | 3 | 4;
                 /** @description A search term. */
                 search?: string;
                 suspended?: boolean;

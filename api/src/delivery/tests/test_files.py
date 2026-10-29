@@ -160,6 +160,12 @@ def test_a_zapier_link_gives_the_file_without_login(manager, sent):
     assert res["Content-Disposition"].startswith("attachment")
     fetch = FileFetch.objects.get()
     assert (fetch.served, fetch.ip_address, fetch.user_agent) == (True, "203.0.113.5", "Zapier")
+    # 取得の記録は、配信の履歴でタスクの管理者が見られる
+    client = APIClient()
+    client.force_login(manager)
+    history = client.get(f"/api/app/v1/tasks/{delivery.run.task.uid}/deliveries/").json()["results"]
+    fetches = history[0]["attempts"][0]["file_fetches"]
+    assert [(f["file"], f["served"], f["ip_address"]) for f in fetches] == [("report.xlsx", True, "203.0.113.5")]
 
 
 def test_a_webhook_link_needs_the_destination_key(manager, sent):

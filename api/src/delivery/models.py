@@ -19,7 +19,7 @@ from urllib.parse import urlsplit
 
 from auditlog.registry import auditlog
 from django.conf import settings
-from django.db import models, transaction
+from django.db import IntegrityError, models, transaction
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext
@@ -32,15 +32,24 @@ from .errors import VersionConflict
 
 
 class DestinationKind(models.IntegerChoices):
-    """出口の種類。画面の通知（in_app）とTeams・Slack等は後で足す"""
+    """出口の種類。Teams・Slack等は後で足す"""
 
     WEBHOOK = 1, _("Webhook")
     ZAPIER = 2, _("Zapier")
+    # 画面の通知。送り先のURLはなく、Yorikiの利用者の通知欄に載せる（認証の要る画面への参照だけなので、機密の
+    # タスクにも使える）
+    IN_APP = 3, _("画面の通知")
+
+
+# 送り先のURLを持つ（外へ送る）種類
+URL_KINDS = (DestinationKind.WEBHOOK, DestinationKind.ZAPIER)
 
 
 class DestinationScope(models.IntegerChoices):
-    """使ってよい範囲。値はタスクの範囲と同じにする。個人の出口（画面の通知・本人へのDM）は後で足す"""
+    """使ってよい範囲。値はタスクの範囲と同じにする。個人の出口は画面の通知（本人へ）だけで、全員で共通の1つを
+    Yorikiが作る（`Destination.personal_in_app()`。本人へのDMはSlack・Teamsの段階で足す。authorization.md §5.5）"""
 
+    PERSONAL = 1, _("個人")
     DEPARTMENT = 2, _("部門")
     COMPANY = 3, _("全社")
     SYSTEM = 4, _("システム")
@@ -95,8 +104,14 @@ class Destination(models.Model):
     # 送る要求の署名（Standard Webhooksの webhook-signature）に使う鍵。作成時と作り直したときに一度だけ返す
     signing_secret = EncryptedSecretField(_("署名の鍵"))
     secret_rotated = models.DateTimeField(_("署名の鍵を作った日時"), null=True, blank=True)
+    # 個人の画面の通知（Yorikiが作る）では空
     created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+", verbose_name=_("作成者")
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("作成者"),
     )
 
     created = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -112,9 +127,22 @@ class Destination(models.Model):
             models.CheckConstraint(
                 condition=(
                     Q(scope=DestinationScope.DEPARTMENT, department__isnull=False)
-                    | Q(scope__in=[DestinationScope.COMPANY, DestinationScope.SYSTEM], department__isnull=True)
+                    | Q(
+                        scope__in=[DestinationScope.PERSONAL, DestinationScope.COMPANY, DestinationScope.SYSTEM],
+                        department__isnull=True,
+                    )
                 ),
                 name="destination_scope_department",
+            ),
+            # 個人の出口は、全員で共通の画面の通知の1つだけ
+            models.CheckConstraint(
+                condition=~Q(scope=DestinationScope.PERSONAL) | Q(kind=DestinationKind.IN_APP),
+                name="destination_personal_in_app",
+            ),
+            models.UniqueConstraint(
+                fields=["scope"],
+                condition=Q(scope=DestinationScope.PERSONAL, deleted=False),
+                name="uniq_destination_personal",
             ),
         ]
 
@@ -145,9 +173,30 @@ class Destination(models.Model):
             return gettext("出口が停止中です")
         if task is None or not self.allowed_for(task):
             return gettext("出口がタスクの範囲で使えなくなりました")
-        if sensitive and not self.current_revision.allows_sensitive_results:
+        # 画面の通知は認証の要る画面への参照だけなので、機密のタスクにも使える
+        if sensitive and self.kind in URL_KINDS and not self.current_revision.allows_sensitive_results:
             return gettext("出口が機密の結果を送ってよい先ではありません")
         return ""
+
+    @classmethod
+    def personal_in_app(cls) -> "Destination":
+        """個人のタスクの画面の通知（全員で共通。受け手はタスクの持ち主）。なければ作る"""
+        existing = cls.objects.alive().filter(scope=DestinationScope.PERSONAL).first()
+        if existing is not None:
+            return existing
+        try:
+            with transaction.atomic():
+                destination, _secret = cls.create_with_revision(
+                    kind=DestinationKind.IN_APP,
+                    scope=DestinationScope.PERSONAL,
+                    department=None,
+                    name=gettext("画面の通知（本人）"),
+                    actor=None,
+                    content={"url": "", "allows_sensitive_results": False},
+                )
+            return destination
+        except IntegrityError:
+            return cls.objects.alive().get(scope=DestinationScope.PERSONAL)
 
     @staticmethod
     def new_secret() -> str:
@@ -233,8 +282,14 @@ class DestinationRevision(models.Model):
     url = EncryptedSecretField(_("送り先のURL"))
     allows_sensitive_results = models.BooleanField(_("機密の結果を送ってよい"), default=False)
     change_reason = models.CharField(_("変更理由"), max_length=500, blank=True)
+    # 個人の画面の通知（Yorikiが作る）では空
     created_by = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+", verbose_name=_("保存した人")
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("保存した人"),
     )
 
     created = models.DateTimeField(auto_now_add=True)
@@ -435,6 +490,45 @@ class FileFetch(models.Model):
 
     def __str__(self):
         return f"{self.link_id} {self.created}"
+
+
+class NotificationQuerySet(models.QuerySet):
+    def unread(self) -> Self:
+        return self.filter(read__isnull=True)
+
+
+class Notification(models.Model):
+    """画面の通知（in_app。design.md §4.3・§4.4）。配信ごと・受け手ごとに1つ。
+
+    受け手は送るときに決める（`delivery/in_app.py`）。中身はタスクの名前とRunの状態だけで、業務結果・成果物は
+    載せない（結果を確かめる画面へのリンクは、タスクのRunの画面ができてから足す）"""
+
+    uid = NanoidField(unique=True)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="notifications", verbose_name=_("受け手")
+    )
+    delivery = models.ForeignKey(Delivery, on_delete=models.CASCADE, related_name="notifications")
+    run = models.ForeignKey("run.Run", on_delete=models.CASCADE, related_name="+", verbose_name=_("実行"))
+    task = models.ForeignKey(
+        "task.TaskDefinition", on_delete=models.CASCADE, related_name="+", verbose_name=_("タスク")
+    )
+    event_type = models.CharField(_("イベント"), max_length=30, choices=NotifyEvent.choices)
+    # 送ったときのタスクの名前（後で名前を変えても、通知は送ったときのまま）
+    task_name = models.CharField(_("タスクの名前"), max_length=200)
+    read = models.DateTimeField(_("既読にした日時"), null=True, blank=True)
+
+    created = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    objects = NotificationQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = _("画面の通知")
+        verbose_name_plural = verbose_name
+        constraints = [models.UniqueConstraint(fields=["delivery", "user"], name="uniq_notification_recipient")]
+        indexes = [models.Index(fields=["user", "-created"])]
+
+    def __str__(self):
+        return f"{self.user_id} {self.task_name} {self.event_type}"
 
 
 auditlog.register(Destination, exclude_fields=["signing_secret", "updated"])

@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from .views import (
     AppDestinationViewSet,
+    AppNotificationViewSet,
     AppTaskDeliveryViewSet,
     DestinationRevisionViewSet,
     DestinationViewSet,
@@ -12,6 +13,7 @@ from .views import (
 router = DefaultRouter()
 
 router.register("app/v1/destinations", AppDestinationViewSet, basename="app_destination_viewset")
+router.register("app/v1/notifications", AppNotificationViewSet, basename="app_notification_viewset")
 router.register("app/v1/tasks/(?P<task>[^/]+)/deliveries", AppTaskDeliveryViewSet, basename="app_task_delivery_viewset")
 router.register("v1/destinations", DestinationViewSet, basename="destination_viewset")
 router.register(

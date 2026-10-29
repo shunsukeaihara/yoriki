@@ -28,7 +28,7 @@ class MaskFileTokens(logging.Filter):
 
 def install() -> None:
     """uvicornのアクセスログに付ける。uvicornはDjangoより先に自分のログを設定するので、Djangoの LOGGING ではなく
-    アプリを読み込むときに付ける"""
+    アプリを読み込むときに付ける（Djangoのログは LOGGING の console に付けている）"""
     logger = logging.getLogger("uvicorn.access")
     if not any(isinstance(f, MaskFileTokens) for f in logger.filters):
         logger.addFilter(MaskFileTokens())

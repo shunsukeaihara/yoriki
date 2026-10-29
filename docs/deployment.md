@@ -193,7 +193,7 @@ cd frontend && pnpm dev
 | `/api/hooks/` | api:8000 | Webhook・Channelの受信。rate limitを強くする。bodyの上限（multipartのファイルを含む）は入口ごとの設定の最大（10MiB）にし、入口ごとの上限（既定1MiB）はapiで確かめる |
 | `/api/admin/`、`/api/schema/` | api:8000 | ログインとpermissionで守る（Django管理画面は基盤管理者、スキーマとSwagger UIはどの環境でもログインした利用者）。IPの制限は導入先が任意で追加する |
 | `/api/accounts/` | api:8000 | SSOのログイン開始と認証基盤からのコールバック |
-| `/api/files/<token>/` | api:8000 | 出口（Zapier等）へ渡した成果物の期限付き取得。セッションを使わずtokenを確認する（汎用のWebhookの出口では、出口の署名の鍵も `Authorization: Bearer` で求める）。rate limitを付ける。URLの元は `YORIKI_PUBLIC_URL`。tokenだけで期限の間取得できるので、アクセスログにはパスを残さない（nginxは `/api/files/` だけtokenを伏せたログの形式 `yoriki_files`。エッジのnginxも同じ。uvicornのアクセスログは `utils/logs.py` のフィルターで伏せる）。社員向けのダウンロードには使わない（セッションで認証し、取得のたびに閲覧の判定をし直す。authorization.md §7.1） |
+| `/api/files/<token>/` | api:8000 | 出口（Zapier等）へ渡した成果物の期限付き取得。セッションを使わずtokenを確認する（汎用のWebhookの出口では、出口の署名の鍵も `Authorization: Bearer` で求める）。rate limitを付ける。URLの元は `YORIKI_PUBLIC_URL`。tokenだけで期限の間取得できるので、アクセスログにはパスを残さない（nginxは `/api/files/` だけtokenを伏せたログの形式 `yoriki_files`。エッジのnginxも同じ。uvicornのアクセスログとDjangoの `django.request`（404等のたびにパスを出す）は `utils/logs.py` のフィルターで伏せる）。社員向けのダウンロードには使わない（セッションで認証し、取得のたびに閲覧の判定をし直す。authorization.md §7.1） |
 | `/_protected/` | （nginxの内部location） | `internal;` を付け、apiの `X-Accel-Redirect` からだけ使う。外から直接は取得できない |
 | `/api/ping/` | api:8000 | ヘルスチェック（認証なし） |
 | `/api/static/` | （nginxが直接返す） | Djangoの静的ファイル（§2）。長くキャッシュさせる |

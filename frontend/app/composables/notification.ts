@@ -8,36 +8,39 @@ export const useNotificationStore = defineStore('notification', () => {
   const items = ref<AppNotification[]>([])
   const loading = ref(false)
 
+  // 応答は、最後に始めた要求のものだけを反映する（要求が重なったとき、遅れて届いた古い一覧・数で巻き戻さない）。
+  // 利用者が変わったときも世代を進め、前の人への応答を捨てる
+  let listGeneration = 0
+  let countGeneration = 0
+
   // ログアウト・別の人のログインでは、前の人の通知を残さない（Run を見られる人は利用者ごと。authorization.md §7.1）
   watch(
     () => useAccountStore().user?.id,
     () => {
+      listGeneration++
+      countGeneration++
       items.value = []
       unread.value = 0
     },
   )
 
-  // 要求の間にログインユーザーが変わったら、前の人への応答は反映しない
-  const currentUser = () => useAccountStore().user?.id
-  const stillSame = (user: string | undefined) => user === currentUser()
-
   const refreshCount = async () => {
-    const user = currentUser()
+    const generation = ++countGeneration
     const count = await useAPI().notifications.unreadCount()
-    if (stillSame(user)) unread.value = count.unread
+    if (generation === countGeneration) unread.value = count.unread
   }
 
   const reload = async () => {
-    const user = currentUser()
+    const list = ++listGeneration
+    const counted = ++countGeneration
     loading.value = true
     try {
       const [page, count] = await Promise.all([
         useAPI().notifications.list({ pageSize: NOTIFICATION_PAGE_SIZE }),
         useAPI().notifications.unreadCount(),
       ])
-      if (!stillSame(user)) return
-      items.value = page.results
-      unread.value = count.unread
+      if (list === listGeneration) items.value = page.results
+      if (counted === countGeneration) unread.value = count.unread
     } finally {
       loading.value = false
     }
@@ -45,19 +48,20 @@ export const useNotificationStore = defineStore('notification', () => {
 
   const markRead = async (notification: AppNotification) => {
     if (notification.read) return
-    const user = currentUser()
+    const list = listGeneration
     const updated = await useAPI().notifications.read(notification.id)
-    if (!stillSame(user)) return
+    if (list !== listGeneration) return
+    // 先に始めた取得が遅れて届いても、既読にした通知を未読に戻さない
+    listGeneration++
     items.value = items.value.map((n) => (n.id === updated.id ? updated : n))
     // 続けて押すと応答の前に同じ通知をもう一度送ることがあるので、数は減らさずにサーバーから読み直す
     await refreshCount()
   }
 
   const markAllRead = async () => {
-    const user = currentUser()
-    const count = await useAPI().notifications.readAll()
-    if (!stillSame(user)) return
-    unread.value = count.unread
+    const list = listGeneration
+    await useAPI().notifications.readAll()
+    if (list !== listGeneration) return
     await reload()
   }
 

@@ -185,6 +185,8 @@ def test_a_link_has_a_limited_number_of_fetches(manager, sent):
     delivery = _delivery(manager, kind=DestinationKind.ZAPIER)
     send_delivery(delivery.pk)
     token = _token(_sent_files(sent)[0]["url"])
+    # HEADは受け付けず、回数に数えない
+    assert APIClient().head(f"/api/files/{token}/").status_code == 405
     for _ in range(FILE_LINK_MAX_FETCHES):
         assert APIClient().get(f"/api/files/{token}/").status_code == 200
     assert APIClient().get(f"/api/files/{token}/").status_code == 404

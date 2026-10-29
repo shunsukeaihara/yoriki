@@ -92,4 +92,18 @@ describe('NotificationBell', () => {
     await pending
     expect(store.items).toEqual([])
   })
+
+  it('遅れて届いた古い応答で、既読を未読に戻さない', async () => {
+    const store = useNotificationStore()
+    await store.reload()
+    let resolve: (value: unknown) => void = () => {}
+    list.mockReturnValueOnce(new Promise((r) => (resolve = r)))
+    const stale = store.reload()
+    await store.markRead(store.items[0]!)
+    expect(store.items[0]!.read).not.toBeNull()
+    // 既読にする前に始めた取得の応答（まだ未読の一覧）が後から届く
+    resolve({ results: [notification('n1'), notification('n2')], next: null, previous: null })
+    await stale
+    expect(store.items[0]!.read).not.toBeNull()
+  })
 })

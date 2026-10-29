@@ -228,6 +228,8 @@ class AppTaskDeliveryViewSet(TaskMixin, ReadOnlyModelViewSet):
 class FileAPIView(APIView):
     authentication_classes = []
     permission_classes = [AllowAny]
+    # HEADはDjangoがGETとして扱い、取得の回数を使ってしまうので受け付けない（405）
+    http_method_names = ["get"]
 
     def get(self, request: Request, token: str):
         try:

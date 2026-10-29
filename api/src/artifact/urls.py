@@ -1,7 +1,6 @@
-from django.urls import path
 from rest_framework.routers import DefaultRouter
 
-from .views import AppConversationArtifactViewSet, AppRunArtifactViewSet, FileAPIView
+from .views import AppConversationArtifactViewSet, AppRunArtifactViewSet
 
 router = DefaultRouter()
 
@@ -12,7 +11,4 @@ router.register(
 )
 router.register("app/v1/runs/(?P<run>[^/]+)/artifacts", AppRunArtifactViewSet, basename="app_run_artifact_viewset")
 
-urlpatterns = [
-    path("files/<str:token>/", FileAPIView.as_view()),
-    *router.urls,
-]
+urlpatterns = router.urls

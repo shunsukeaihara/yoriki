@@ -13,11 +13,11 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from task.checks import task_problem
-
 from .adapters import Outcome, adapter_for
-from .models import SENDABLE_STATUSES, AttemptOutcome, Delivery, DeliveryAttempt, DeliveryStatus, Destination
+from .checks import send_problem
+from .models import SENDABLE_STATUSES, AttemptOutcome, Delivery, DeliveryAttempt, DeliveryStatus
 from .outbox import send_later
+from .payload import FileLinksUnavailable, with_file_links
 
 logger = logging.getLogger(__name__)
 
@@ -39,9 +39,13 @@ def send_delivery(delivery_id: int) -> None:
     delivery, attempt, url, secret = claimed
     revision = delivery.destination_revision
     try:
+        # ファイルのURLは送るたびに発行する（期限が短いので、送り直しでも新しくする。design.md §4.5）
+        payload = with_file_links(delivery.payload, attempt)
         outcome = adapter_for(revision.destination.kind).deliver(
-            url=url, secret=secret, payload=delivery.payload, attempt=attempt.number
+            url=url, secret=secret, payload=payload, attempt=attempt.number
         )
+    except FileLinksUnavailable as exc:
+        outcome = Outcome(AttemptOutcome.FAILED, error=str(exc))
     except Exception:
         logger.exception("delivery %s: unexpected error", delivery.uid)
         outcome = Outcome(AttemptOutcome.UNKNOWN, error=_("送信の途中で内部のエラーが起きました"))
@@ -60,19 +64,8 @@ def _claim(delivery_id: int) -> tuple[Delivery, DeliveryAttempt, str, str] | Non
     now = timezone.now()
     if delivery is None or (delivery.next_attempt is not None and delivery.next_attempt > now):
         return None
-    run = delivery.run
-    # 送る直前に、出口が今も使えるかを確かめ直す（固定した版のURLへ送るが、停止・削除・範囲・機密は今の状態で見る。
-    # authorization.md §7.2）
-    destination = Destination.objects.select_related("current_revision", "department").get(
-        pk=delivery.destination_revision.destination_id
-    )
-    sensitive = run.handles_sensitive_data
-    problem = destination.problem_for(run.task, sensitive=sensitive)
-    if not problem and sensitive and not delivery.destination_revision.allows_sensitive_results:
-        problem = _("出口が機密の結果を送ってよい先ではありません")
-    if not problem:
-        # タスクの停止・削除・部門の無効化・持ち主の無効化も、配信の直前に確かめる（authorization.md §6）
-        problem = task_problem(run.task)
+    # 送る直前に、出口とタスクが今も使えるかを確かめ直す（authorization.md §6・§7.2）
+    problem = send_problem(delivery)
     if problem:
         delivery.status = DeliveryStatus.CANCELLED
         delivery.last_error = problem[:500]
@@ -85,7 +78,8 @@ def _claim(delivery_id: int) -> tuple[Delivery, DeliveryAttempt, str, str] | Non
     delivery.lease_expires = now + LEASE
     delivery.save(update_fields=["status", "attempt_count", "lease_expires", "updated"])
     attempt = DeliveryAttempt.objects.create(delivery=delivery, number=delivery.attempt_count)
-    return delivery, attempt, delivery.destination_revision.url.reveal(), destination.signing_secret.reveal()
+    revision = delivery.destination_revision
+    return delivery, attempt, revision.url.reveal(), revision.destination.signing_secret.reveal()
 
 
 @transaction.atomic

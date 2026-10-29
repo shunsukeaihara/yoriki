@@ -11,6 +11,7 @@
 """
 
 import base64
+import hashlib
 import secrets
 from datetime import timedelta
 from typing import Any, Self
@@ -367,6 +368,73 @@ class DeliveryAttempt(models.Model):
 
     def __str__(self):
         return f"{self.delivery_id}#{self.number}"
+
+
+# 出口へ渡すファイルのURLの期限と、1つのURLで取得できる回数（authorization.md §7.1。Zapierは使うステップごとに
+# 取りに来ることがあるので、1回限りにはしない）
+FILE_LINK_TTL = timedelta(hours=1)
+FILE_LINK_MAX_FETCHES = 3
+
+
+class FileLink(models.Model):
+    """出口へ渡した成果物の取得用のtoken（`/api/files/<token>/`。design.md §4.4、authorization.md §7.1）。
+
+    送るたびに（DeliveryAttemptごとに）ファイルごとに作る。tokenはハッシュ（SHA-256）だけを保存する。取得のたびに、
+    期限・回数と、配信の出口とタスクが今も使えるかを確かめ直すので、出口・タスクを止めたら未使用のtokenも使えない
+    """
+
+    attempt = models.ForeignKey(DeliveryAttempt, on_delete=models.CASCADE, related_name="file_links")
+    artifact = models.ForeignKey(
+        "artifact.Artifact", on_delete=models.CASCADE, related_name="+", verbose_name=_("成果物")
+    )
+    token_hash = models.CharField(_("tokenのハッシュ"), max_length=64, unique=True)
+    expires = models.DateTimeField(_("期限"))
+    fetch_count = models.PositiveIntegerField(_("取得した回数"), default=0)
+
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("ファイルの取得用のURL")
+        verbose_name_plural = verbose_name
+
+    def __str__(self):
+        return f"{self.attempt_id} {self.artifact_id}"
+
+    @staticmethod
+    def hash_token(token: str) -> str:
+        return hashlib.sha256(token.encode()).hexdigest()
+
+    @classmethod
+    def issue(cls, attempt: DeliveryAttempt, artifact) -> tuple["FileLink", str]:
+        """（記録、token）。tokenはここでだけ返す"""
+        token = secrets.token_urlsafe(32)
+        link = cls.objects.create(
+            attempt=attempt,
+            artifact=artifact,
+            token_hash=cls.hash_token(token),
+            expires=timezone.now() + FILE_LINK_TTL,
+        )
+        return link, token
+
+
+class FileFetch(models.Model):
+    """ファイルの取得の記録。身に覚えのない取得に、タスクの管理者が気づけるようにする"""
+
+    link = models.ForeignKey(FileLink, on_delete=models.CASCADE, related_name="fetches")
+    served = models.BooleanField(_("返した"))
+    # 返さなかった理由（期限切れ・回数・出口が使えない等）
+    refusal = models.CharField(_("返さなかった理由"), max_length=200, blank=True)
+    ip_address = models.GenericIPAddressField(_("IPアドレス"), null=True, blank=True)
+    user_agent = models.CharField(_("User-Agent"), max_length=300, blank=True)
+
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("ファイルの取得")
+        verbose_name_plural = verbose_name
+
+    def __str__(self):
+        return f"{self.link_id} {self.created}"
 
 
 auditlog.register(Destination, exclude_fields=["signing_secret", "updated"])

@@ -2,19 +2,15 @@ from django.db.models import Q
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound
 from rest_framework.mixins import CreateModelMixin, ListModelMixin, RetrieveModelMixin
 from rest_framework.parsers import MultiPartParser
-from rest_framework.permissions import AllowAny
-from rest_framework.request import Request
-from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet
 
 from conversation.views import MyConversationMixin
 from run.views import MyRunMixin
 from utils.permissions import AppUser
 
-from .download import file_response, resolve_file_token
+from .download import file_response
 from .models import Artifact, ArtifactKind
 from .serializers import ArtifactSerializer
 
@@ -67,19 +63,3 @@ class AppRunArtifactViewSet(MyRunMixin, ListModelMixin, RetrieveModelMixin, Gene
     @action(detail=True, methods=["get"], serializer_class=None)
     def download(self, request, *args, **kwargs):
         return file_response(self.get_object())
-
-
-@extend_schema(
-    description="期限付きのtokenで成果物を取得する（ログインなし。Zapier等の外部へ渡すURL）",
-    tags=["files"],
-    responses={**FILE_RESPONSE, 404: None},
-)
-class FileAPIView(APIView):
-    authentication_classes = []
-    permission_classes = [AllowAny]
-
-    def get(self, request: Request, token: str):
-        artifact = resolve_file_token(token)
-        if artifact is None:
-            raise NotFound
-        return file_response(artifact)

@@ -1,11 +1,15 @@
 from django.db import transaction
 from django.db.models import Q
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema, extend_schema_view
 from rest_framework import mixins, status
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.generics import get_object_or_404
+from rest_framework.permissions import AllowAny
+from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet, ModelViewSet, ReadOnlyModelViewSet
 
 from run.models import Run
@@ -15,6 +19,7 @@ from user.models import Department
 from utils.permissions import AppUser, ModelPermissions
 from utils.views import SoftDeleteMixin
 
+from .files import FileRefused, fetch_file
 from .models import Delivery, Destination, DestinationRevision, DestinationScope
 from .outbox import enqueue_delivery
 from .serializers import (
@@ -193,3 +198,30 @@ class AppTaskDeliveryViewSet(TaskMixin, ReadOnlyModelViewSet):
                 raise ValidationError({"non_field_errors": [problem]})
             enqueue_delivery(delivery)
         return Response(self.get_serializer(self.get_object()).data)
+
+
+@extend_schema(
+    description="出口（Zapier・Webhook）へ渡した成果物を、期限付きのtokenで取得する（ログインなし。design.md §4.4）。"
+    "汎用のWebhookの出口では、出口の署名の鍵を `Authorization: Bearer` で付ける。S3に保存したものは、"
+    "ごく短い期限の署名付きURLへリダイレクトする",
+    tags=["files"],
+    responses={
+        (200, "application/octet-stream"): OpenApiResponse(OpenApiTypes.BINARY, description="ファイル"),
+        302: OpenApiResponse(description="保存先の署名付きURLへのリダイレクト"),
+        401: None,
+        404: None,
+    },
+)
+class FileAPIView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def get(self, request: Request, token: str):
+        try:
+            return fetch_file(token, request)
+        except FileRefused as exc:
+            # 理由は取得した側に見せない（記録に残す）。鍵がないだけなら、受け手が直せるように401にする
+            if exc.unauthorized:
+                # 認証の仕組み（authentication_classes）を使わないので、DRFの AuthenticationFailed では403になる
+                return Response(status=status.HTTP_401_UNAUTHORIZED, headers={"WWW-Authenticate": "Bearer"})
+            raise NotFound from None

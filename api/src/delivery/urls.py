@@ -1,6 +1,13 @@
+from django.urls import path
 from rest_framework.routers import DefaultRouter
 
-from .views import AppDestinationViewSet, AppTaskDeliveryViewSet, DestinationRevisionViewSet, DestinationViewSet
+from .views import (
+    AppDestinationViewSet,
+    AppTaskDeliveryViewSet,
+    DestinationRevisionViewSet,
+    DestinationViewSet,
+    FileAPIView,
+)
 
 router = DefaultRouter()
 
@@ -13,4 +20,7 @@ router.register(
     basename="destination_revision_viewset",
 )
 
-urlpatterns = router.urls
+urlpatterns = [
+    path("files/<str:token>/", FileAPIView.as_view()),
+    *router.urls,
+]

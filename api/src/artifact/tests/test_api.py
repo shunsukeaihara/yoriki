@@ -1,6 +1,5 @@
 import asyncio
 import io
-from datetime import timedelta
 
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -11,7 +10,6 @@ from conversation.models import ConversationMessage, InstructionKind, Instructio
 from run.factories import RunFactory
 from run.models import ClarificationKind, ClarificationRequest, RunEvent, RunEventKind, RunStatus
 
-from ..download import issue_file_token
 from ..factories import ArtifactFactory
 from ..models import Artifact, ArtifactKind, BlobObject, clean_filename
 
@@ -231,24 +229,6 @@ class TestDownload:
             (output.uid, "結果.xlsx", "集計/結果.xlsx", run.uid)
         ]
         assert output.content_type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-
-
-class TestFileToken:
-    def test_token_gives_the_file_without_login(self, conversation):
-        artifact = ArtifactFactory.create(conversation=conversation, content=b"result")
-        token = issue_file_token(artifact, timedelta(hours=1))
-        res = APIClient().get(f"/api/files/{token}/")
-        assert res.status_code == 200
-        assert body_of(res) == b"result"
-
-    def test_expired_tampered_or_deleted(self, conversation):
-        artifact = ArtifactFactory.create(conversation=conversation)
-        expired = issue_file_token(artifact, timedelta(seconds=-1))
-        assert APIClient().get(f"/api/files/{expired}/").status_code == 404
-        token = issue_file_token(artifact, timedelta(hours=1))
-        assert APIClient().get(f"/api/files/{token[:-2]}xx/").status_code == 404
-        Artifact.objects.filter(pk=artifact.pk).update(deleted=True)
-        assert APIClient().get(f"/api/files/{token}/").status_code == 404
 
 
 @pytest.mark.parametrize(

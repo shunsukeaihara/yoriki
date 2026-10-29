@@ -81,9 +81,11 @@ const colors: Record<NotifyEventEnum, string> = {
             <UIcon :name="icons[item.eventType]" :class="['mt-0.5 size-4 shrink-0', colors[item.eventType]]" />
             <span class="flex min-w-0 flex-1 flex-col">
               <span :class="['truncate text-sm', item.read ? 'text-muted' : 'font-medium text-highlighted']">
-                {{ $t('タスク「{name}」：{event}', { name: item.taskName, event: item.eventDisplay }) }}
+                {{ item.taskName }}
               </span>
-              <span class="text-xs text-muted">{{ formatDatetime(item.created) }}</span>
+              <span class="text-xs text-muted">
+                {{ $t('{event}・{time}', { event: item.eventDisplay, time: formatDatetime(item.created) }) }}
+              </span>
             </span>
             <span v-if="!item.read" class="mt-1.5 size-2 shrink-0 rounded-full bg-primary" :aria-label="$t('未読')" />
           </button>

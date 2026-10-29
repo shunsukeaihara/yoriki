@@ -65,6 +65,10 @@ class StorageBackend(ABC):
     def delete(self, key: str) -> None:
         pass
 
+    def exists(self, key: str) -> bool:
+        """あるか（中身は読まない）。既定は stat() で確かめる"""
+        return self.stat(key) is not None
+
     def accel_redirect(self, key: str) -> str | None:
         """nginxの内部locationから返せるなら、そのパス（`X-Accel-Redirect`。deployment.md §4.1）"""
         return None
@@ -151,6 +155,10 @@ class LocalStorage(StorageBackend):
             return path.open("rb")
         except FileNotFoundError as exc:
             raise StorageError(f"not found: {key}") from exc
+
+    def exists(self, key: str) -> bool:
+        path = self._path(key)
+        return path.is_file() and not path.is_symlink()
 
     def stat(self, key: str) -> StoredObject | None:
         path = self._path(key)

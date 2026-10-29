@@ -81,5 +81,15 @@ describe('NotificationBell', () => {
     await nextTick()
     expect(store.items).toEqual([])
     expect(store.unread).toBe(0)
+    // 読んでいる途中に利用者が変わったら、前の人への応答は反映しない
+    account.user = { id: 'u1' } as MyUser
+    let resolve: (value: unknown) => void = () => {}
+    list.mockReturnValueOnce(new Promise((r) => (resolve = r)))
+    const pending = store.reload()
+    account.user = { id: 'u2' } as MyUser
+    await nextTick()
+    resolve({ results: [notification('n1')], next: null, previous: null })
+    await pending
+    expect(store.items).toEqual([])
   })
 })

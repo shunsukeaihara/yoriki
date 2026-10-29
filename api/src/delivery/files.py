@@ -68,7 +68,7 @@ def _response(artifact) -> HttpResponse | StreamingHttpResponse:
     location = artifact.blob.location()
     storage = get_storage(location.backend)
     # 署名付きURL・X-Accel-Redirect では、実際に読むのは応答の後なので、ここで保存先にあるかを確かめておく
-    if storage.stat(location.key) is None:
+    if not storage.exists(location.key):
         raise StorageError(f"{location.key} is not in the storage")
     url = storage.signed_url(location.key, name=artifact.name, content_type=artifact.content_type)
     if url is None:

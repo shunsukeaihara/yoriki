@@ -39,6 +39,12 @@ def make_submit_result_tool(schema: dict[str, Any]) -> Tool:
     )
 
 
+def original_schema(tool: Tool) -> dict[str, Any] | None:
+    """`make_submit_result_tool()` に渡した業務結果のSchema（モデルへ渡すものでなく、ファイルの項目の印があるもの）"""
+    execute_fn = tool.execute
+    return execute_fn.keywords.get("schema") if isinstance(execute_fn, partial) else None
+
+
 def execute(arguments: dict[str, Any], context: ToolContext, *, schema: dict[str, Any] | None = None) -> ToolResult:
     # 引数はRunnerが実行の前にSchemaで検証している
     if problem := _file_problem(schema, arguments, context):

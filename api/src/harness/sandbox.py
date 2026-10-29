@@ -128,6 +128,9 @@ class Suspended:
     # 保存の前に止めたジョブ（[{"job_id", "command"}]）
     stopped: list[dict[str, str]]
     outputs: list[CollectedOutput]
+    # 保存したときに /workspace/output にあった（回収の対象の）ファイルの、パスごとの中身（SHA-256）。回収し直さなかった
+    # 変わっていないファイルを含む。業務結果が指すファイルが完了時にあるかを確かめるのに使う
+    present: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -558,6 +561,7 @@ class SandboxSession:
         key = f"snapshots/runs/{self.run.uid}/{self.attempt.number}-{generate(JOB_ID_ALPHABET, 8)}.tar"
         sandbox = self.sandbox
         known = self._known_outputs()
+        present: dict[str, str] = {}
 
         def save() -> tuple[StoredObject, list[CollectedOutput]]:
             with tempfile.TemporaryFile(dir=self.dir) as archive:
@@ -566,12 +570,12 @@ class SandboxSession:
                 try:
                     snapshot = storage.put_immutable(key, archive)
                     archive.seek(0)
-                    return snapshot, collect_outputs(archive, storage, known)
+                    return snapshot, collect_outputs(archive, storage, known, present)
                 except (OSError, StorageError, tarfile.TarError) as exc:
                     raise SandboxUnavailable(f"cannot save the workspace: {exc}") from exc
 
         snapshot, outputs = self._keep_lease(save)
-        return Suspended(snapshot, storage.backend_id, stopped, outputs)
+        return Suspended(snapshot, storage.backend_id, stopped, outputs, present)
 
     def _known_outputs(self) -> dict[str, str]:
         """会話の成果物の、パスごとの最新の中身（SHA-256）。変わっていないファイルは回収し直さない"""
@@ -612,9 +616,12 @@ class SandboxSession:
         shutil.rmtree(self.dir, ignore_errors=True)
 
 
-def collect_outputs(archive: IO[bytes], storage: StorageBackend, known: dict[str, str]) -> list[CollectedOutput]:
+def collect_outputs(
+    archive: IO[bytes], storage: StorageBackend, known: dict[str, str], present: dict[str, str] | None = None
+) -> list[CollectedOutput]:
     """Workspaceのtarから /workspace/output の通常のファイルを取り出して保存する（design.md §7.4）。
-    symlink・特殊なファイル・隠しファイル・変わっていないファイルは回収しない。数が多すぎれば、先頭から上限まで"""
+    symlink・特殊なファイル・隠しファイル・変わっていないファイルは回収しない。数が多すぎれば、先頭から上限まで。
+    `present` には、回収の対象のファイル（変わっていないものを含み、上限を超えた分は含まない）の中身のSHA-256を入れる"""
     collected: list[CollectedOutput] = []
     with tarfile.open(fileobj=archive, mode="r:") as tar:
         for member in tar:
@@ -632,6 +639,8 @@ def collect_outputs(archive: IO[bytes], storage: StorageBackend, known: dict[str
             digest = hashlib.sha256()
             while chunk := src.read(1024 * 1024):
                 digest.update(chunk)
+            if present is not None:
+                present[path] = digest.hexdigest()
             if known.get(path) == digest.hexdigest():
                 continue
             src.seek(0)

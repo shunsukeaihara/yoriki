@@ -5,7 +5,14 @@ from typing import Any, cast
 
 import pytest
 
-from harness.result_files import file_fields, file_format_problem, model_schema, output_path, result_files
+from harness.result_files import (
+    file_fields,
+    file_format_problem,
+    missing_files,
+    model_schema,
+    output_path,
+    result_files,
+)
 from harness.tools.base import ToolContext
 from harness.tools.submit_result import _file_problem, make_submit_result_tool
 from llm.providers.base import TextPart
@@ -113,3 +120,15 @@ def test_submit_result_checks_the_files_exist():
     assert "symlinks" in _error(SCHEMA, {"ok": True, "attachments": ["l.csv"]}, _context(linked))
     # ファイルの項目がなければSandboxを使わない
     assert _file_problem({"type": "object", "properties": {}}, {}, _context({})) is None
+
+
+def test_missing_files_compares_the_workspace_at_completion():
+    result = {"ok": True, "report": "report.xlsx", "attachments": ["a.csv"]}
+    present = {"report.xlsx": "r1", "a.csv": "a1"}
+    collected = {"report.xlsx": "r1", "a.csv": "a1"}
+    assert missing_files(SCHEMA, result, present, collected.get) == []
+    # submit_result の後に消した（同じ会話の前のRunの成果物は渡さない）
+    assert missing_files(SCHEMA, result, {"a.csv": "a1"}, collected.get) == ["/workspace/output/report.xlsx"]
+    # 回収できなかった（上限を超えた等）、または回収した中身が今の中身と違う
+    assert missing_files(SCHEMA, result, present, {"report.xlsx": "r1"}.get) == ["/workspace/output/a.csv"]
+    assert missing_files(SCHEMA, result, present, {**collected, "a.csv": "old"}.get) == ["/workspace/output/a.csv"]

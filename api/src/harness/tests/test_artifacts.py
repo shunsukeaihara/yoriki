@@ -53,12 +53,18 @@ def test_collects_only_regular_visible_files_in_output(tmp_path):
 def test_unchanged_files_are_not_collected_again():
     tar = archive([("output/a.txt", b"same", "file"), ("output/b.txt", b"new", "file")])
     known = {"a.txt": hashlib.sha256(b"same").hexdigest(), "b.txt": hashlib.sha256(b"old").hexdigest()}
-    assert [c.path for c in collect_outputs(tar, get_storage(), known)] == ["b.txt"]
+    present: dict[str, str] = {}
+    assert [c.path for c in collect_outputs(tar, get_storage(), known, present)] == ["b.txt"]
+    # 回収し直さなかったファイルも、今あるファイルとして中身を記録する（業務結果のファイルの確認に使う）
+    assert present == {"a.txt": known["a.txt"], "b.txt": hashlib.sha256(b"new").hexdigest()}
 
 
 def test_number_of_files_is_limited():
     tar = archive([(f"output/{i}.txt", b"x", "file") for i in range(MAX_OUTPUT_FILES + 5)])
-    assert len(collect_outputs(tar, get_storage(), {})) == MAX_OUTPUT_FILES
+    present: dict[str, str] = {}
+    assert len(collect_outputs(tar, get_storage(), {}, present)) == MAX_OUTPUT_FILES
+    # 上限を超えた分は、今あるファイルにも入れない（業務結果が指していれば、完了の前の確認で欠けているとわかる）
+    assert len(present) == MAX_OUTPUT_FILES
 
 
 @pytest.mark.django_db

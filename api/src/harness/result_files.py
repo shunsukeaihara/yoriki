@@ -10,6 +10,7 @@
 """
 
 import posixpath
+from collections.abc import Callable
 from typing import Any
 
 FILE_FORMAT = "file"
@@ -108,3 +109,17 @@ def result_files(schema: dict[str, Any] | None, result: Any) -> list[tuple[str, 
             if (path := output_path(value)) is not None:
                 files.append((name, path))
     return files
+
+
+def missing_files(
+    schema: dict[str, Any] | None, result: Any, present: dict[str, str], collected: Callable[[str], str | None]
+) -> list[str]:
+    """業務結果が指すのに、完了時の /workspace/output にない（`present`：パスごとの中身のSHA-256）か、今の中身と同じ
+    成果物を回収していない（`collected`：そのパスの最新の成果物の中身のSHA-256）ファイルのパス。同じ会話の前のRunが
+    回収した同じパスの古いファイルを渡さないよう、中身で照らす（配信は同じパスの最新の成果物を渡す）"""
+    missing = []
+    for _name, path in result_files(schema, result):
+        sha256 = present.get(path)
+        if sha256 is None or collected(path) != sha256:
+            missing.append(f"{OUTPUT_DIR}/{path}")
+    return missing

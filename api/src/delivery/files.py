@@ -15,7 +15,7 @@ from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from artifact.download import file_response
-from artifact.storage import get_storage
+from artifact.storage import StorageError, get_storage
 from utils.backends import client_ip
 
 from .checks import send_problem
@@ -25,9 +25,11 @@ logger = logging.getLogger(__name__)
 
 
 class FileRefused(Exception):
-    def __init__(self, reason: str, *, unauthorized: bool = False):
+    def __init__(self, reason: str, *, unauthorized: bool = False, unavailable: bool = False):
         super().__init__(reason)
         self.unauthorized = unauthorized
+        # 渡してよいが、保存先から読めなかった（受け手は後で取り直せる）
+        self.unavailable = unavailable
 
 
 def fetch_file(token: str, request) -> HttpResponse | StreamingHttpResponse:
@@ -50,8 +52,19 @@ def fetch_file(token: str, request) -> HttpResponse | StreamingHttpResponse:
     except FileRefused as exc:
         _record(link, request, refusal=str(exc))
         raise
+    try:
+        response = _response(link.artifact)
+    except (StorageError, OSError, IndexError) as exc:
+        # 返せなかった取得は回数に数えず、返せなかったとして記録する
+        logger.warning("file link %s: cannot read the file: %s", link.pk, exc)
+        FileLink.objects.filter(pk=link.pk).update(fetch_count=F("fetch_count") - 1)
+        _record(link, request, refusal=_("保存先からファイルを読めませんでした"))
+        raise FileRefused("storage", unavailable=True) from exc
     _record(link, request)
-    artifact = link.artifact
+    return response
+
+
+def _response(artifact) -> HttpResponse | StreamingHttpResponse:
     location = artifact.blob.location()
     url = get_storage(location.backend).signed_url(location.key, name=artifact.name, content_type=artifact.content_type)
     if url is None:
@@ -75,7 +88,7 @@ def _check(link: FileLink, request) -> None:
         raise FileRefused(_("成果物が削除されています"))
     if problem := send_problem(delivery):
         raise FileRefused(problem)
-    # 回数は最後に数える（ほかの理由で断ったものは数えない）
+    # 回数は最後に数える（ほかの理由で断ったものは数えない）。同時の取得で上限を超えないよう、返す前に数えておく
     if not FileLink.objects.filter(pk=link.pk, fetch_count__lt=FILE_LINK_MAX_FETCHES).update(
         fetch_count=F("fetch_count") + 1
     ):

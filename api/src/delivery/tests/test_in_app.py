@@ -175,6 +175,23 @@ def test_the_list_shows_only_my_notifications_and_marks_them_read():
     assert Notification.objects.get(pk=theirs.pk).read is None
 
 
+def test_notifications_are_hidden_after_losing_the_permission():
+    """送った後に権限を失ったら、そのRunの通知は見せない（Runの結果を見られる人と同じ。authorization.md §7.1）"""
+    manager = grant(UserFactory.create(), AppPermission.MANAGE_COMPANY_TASKS)
+    _finish(_task(), manager)
+    client = APIClient()
+    client.force_login(manager)
+    assert client.get(f"{NOTIFICATIONS}unread_count/").json() == {"unread": 1}
+    manager.user_permissions.clear()
+    client.force_login(manager)
+    assert client.get(NOTIFICATIONS).json()["results"] == []
+    assert client.get(f"{NOTIFICATIONS}unread_count/").json() == {"unread": 0}
+    notification = Notification.objects.get(user=manager)
+    assert client.post(f"{NOTIFICATIONS}{notification.uid}/read/").status_code == 404
+    client.post(f"{NOTIFICATIONS}read_all/")
+    assert Notification.objects.get(pk=notification.pk).read is None
+
+
 # --- 出口の管理 ---
 
 

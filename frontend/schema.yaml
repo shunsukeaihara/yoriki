@@ -3083,6 +3083,8 @@ paths:
           description: No response body
         '404':
           description: No response body
+        '503':
+          description: 保存先から読めなかった（後で取り直せる）
   /api/hooks/v1/tasks/{task}/:
     post:
       operationId: hooks_v1_tasks_create

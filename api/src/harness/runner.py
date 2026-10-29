@@ -85,6 +85,7 @@ from .context import (
 from .context import runtime_context as build_runtime_context
 from .prompts import system_prompt
 from .recovery import request_model_switch
+from .result_files import missing_files
 from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, SandboxSession
 from .skill_edit import revoked_edit
 from .skills import explicit_versions, revoked_skill
@@ -95,7 +96,7 @@ from .tools.request_skill_edit import REQUEST_SKILL_EDIT
 from .tools.skill_admin import CREATE_SKILL, SKILL_ADMIN_TOOLS
 from .tools.skill_tool import make_skill_tool
 from .tools.submit_result import NAME as SUBMIT_RESULT
-from .tools.submit_result import make_submit_result_tool
+from .tools.submit_result import make_submit_result_tool, original_schema
 from .tools.test_skill_draft import TEST_SKILL_DRAFT
 
 logger = logging.getLogger(__name__)
@@ -185,6 +186,8 @@ class Runner:
         # Skillで決まるTool（Run開始時に固定したManifestから作る。Runの中では変わらない）
         self.skill_tools: tuple[Tool, ...] | None = None
         self.nudges = 0
+        # 最後に保存したときの /workspace/output のファイルと中身（SHA-256）。_checkpoint() が更新する
+        self.workspace_outputs: dict[str, str] = {}
         self.compacted_for_overflow = False
         self.repeats: dict[str, int] = {}
         self.last_call_key = ""
@@ -722,10 +725,31 @@ class Runner:
             ).exists()
             if status == RunStatus.COMPLETED and pending:
                 return True
+            if status == RunStatus.COMPLETED and (missing := self._missing_result_files(run)):
+                # 業務結果が指すファイルを成果物として回収できなかった（回収の上限を超えた等）。出口へ渡す成果物が
+                # 黙って欠けないよう、完了にしない（harness.md §10.5）
+                logger.warning("run %s: result files were not collected: %s", run.uid, missing)
+                status, end_reason = RunStatus.FAILED, RunEndReason.NO_RESULT
+                error = _("業務結果が指すファイルを、成果物として回収できませんでした：%(paths)s") % {
+                    "paths": "、".join(missing[:5])
+                }
             if status != RunStatus.COMPLETED:
                 error = error or str(end_reason.label)
             run.set_status(status, end_reason=end_reason, error=error)
         return False
+
+    def _missing_result_files(self, run: Run) -> list[str]:
+        """業務結果のファイルの項目が指すのに、完了時に成果物として渡せないファイル。完了の前の回収（_checkpoint()）
+        の後に呼ぶ"""
+        tool = next((t for t in self.tools if t.name == SUBMIT_RESULT), None)
+        if tool is None or run.result is None:
+            return []
+
+        def collected(path: str) -> str | None:
+            artifact = Artifact.objects.latest_output(run.conversation_id, path)
+            return artifact.sha256 if artifact else None
+
+        return missing_files(original_schema(tool), run.result, self.workspace_outputs, collected)
 
     def _finish_cancelled(self) -> None:
         # 停止を優先する。Workspaceを保存できなくても止める（design.md §7.9）
@@ -760,7 +784,9 @@ class Runner:
             logger.warning("run %s: cannot save the workspace", self.run_obj.uid, exc_info=True)
             return
         if saved is None:
+            self.workspace_outputs = {}
             return
+        self.workspace_outputs = saved.present
         with self.run_obj.fenced(self.attempt) as run:
             sequence = RunEvent.objects.filter(run=run).aggregate(last=Max("sequence"))["last"] or 0
             Checkpoint.objects.create(

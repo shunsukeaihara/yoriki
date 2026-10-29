@@ -8485,6 +8485,13 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description 保存先から読めなかった（後で取り直せる） */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
     hooks_v1_tasks_create: {

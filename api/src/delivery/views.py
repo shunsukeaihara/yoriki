@@ -222,6 +222,7 @@ class AppTaskDeliveryViewSet(TaskMixin, ReadOnlyModelViewSet):
         302: OpenApiResponse(description="保存先の署名付きURLへのリダイレクト"),
         401: None,
         404: None,
+        503: OpenApiResponse(description="保存先から読めなかった（後で取り直せる）"),
     },
 )
 class FileAPIView(APIView):
@@ -236,7 +237,15 @@ class FileAPIView(APIView):
             if exc.unauthorized:
                 # 認証の仕組み（authentication_classes）を使わないので、DRFの AuthenticationFailed では403になる
                 return Response(status=status.HTTP_401_UNAUTHORIZED, headers={"WWW-Authenticate": "Bearer"})
+            if exc.unavailable:
+                return Response(status=status.HTTP_503_SERVICE_UNAVAILABLE)
             raise NotFound from None
+
+
+def visible_notifications(user):
+    """本人の通知のうち、今もそのRunの結果を見られるもの（Runを実行したときのタスクの範囲と部門で判定する。
+    authorization.md §7.1）。送った後に権限を失ったら見せない"""
+    return Notification.objects.filter(user=user, run__in=Run.objects.visible_to(user).values("pk"))
 
 
 @extend_schema(description="本人の画面の通知（通知欄）の一覧と既読", tags=["app/notification"])
@@ -248,7 +257,7 @@ class AppNotificationViewSet(mixins.ListModelMixin, GenericViewSet):
     ordering = ("-created", "-pk")
 
     def get_queryset(self):
-        qs = super().get_queryset().filter(user=self.request.user)
+        qs = visible_notifications(self.request.user).select_related("task", "run")
         if self.request.query_params.get("unread") in ("1", "true"):
             qs = qs.filter(read__isnull=True)
         return qs
@@ -260,7 +269,7 @@ class AppNotificationViewSet(mixins.ListModelMixin, GenericViewSet):
     )
     @action(detail=False, methods=["get"], url_path="unread_count", serializer_class=NotificationCountSerializer)
     def unread_count(self, request, *args, **kwargs):
-        return Response({"unread": Notification.objects.filter(user=request.user).unread().count()})
+        return Response({"unread": visible_notifications(request.user).filter(read__isnull=True).count()})
 
     @extend_schema(description="既読にする", request=None, responses=NotificationSerializer)
     @action(detail=True, methods=["post"])
@@ -274,5 +283,7 @@ class AppNotificationViewSet(mixins.ListModelMixin, GenericViewSet):
     @extend_schema(description="すべて既読にする", request=None, responses=NotificationCountSerializer)
     @action(detail=False, methods=["post"], url_path="read_all", serializer_class=NotificationCountSerializer)
     def read_all(self, request, *args, **kwargs):
-        Notification.objects.filter(user=request.user).unread().update(read=timezone.now())
+        Notification.objects.filter(
+            pk__in=visible_notifications(request.user).filter(read__isnull=True).values("pk")
+        ).update(read=timezone.now())
         return Response({"unread": 0})

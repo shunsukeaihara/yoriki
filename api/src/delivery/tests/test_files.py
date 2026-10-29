@@ -13,7 +13,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from artifact.models import Artifact, BlobObject
-from artifact.storage import LocalStorage
+from artifact.storage import LocalStorage, StorageError
 from artifact.tests.test_api import body_of
 from delivery.adapters import WebhookAdapter
 from delivery.factories import DestinationFactory
@@ -219,6 +219,20 @@ def test_stopping_the_destination_or_the_task_revokes_unused_links(manager, sent
     else:
         type(delivery.run).objects.filter(pk=delivery.run_id).update(handles_sensitive_data=True)
     assert APIClient().get(f"/api/files/{token}/").status_code == 404
+
+
+def test_a_storage_failure_is_not_counted_as_served(manager, sent):
+    delivery = _delivery(manager, kind=DestinationKind.ZAPIER)
+    send_delivery(delivery.pk)
+    token = _token(_sent_files(sent)[0]["url"])
+    with mock.patch.object(LocalStorage, "signed_url", side_effect=StorageError("down")):
+        assert APIClient().get(f"/api/files/{token}/").status_code == 503
+    fetch = FileFetch.objects.get()
+    assert not fetch.served
+    assert fetch.refusal
+    # 回数に数えない（後で取り直せる）
+    assert FileLink.objects.get(token_hash=FileLink.hash_token(token)).fetch_count == 0
+    assert APIClient().get(f"/api/files/{token}/").status_code == 200
 
 
 def test_s3_redirects_to_a_short_signed_url(manager, sent):

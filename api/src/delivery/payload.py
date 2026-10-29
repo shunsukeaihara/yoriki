@@ -15,7 +15,7 @@ from typing import Any
 from django.conf import settings
 from django.utils.translation import gettext as _
 
-from artifact.models import Artifact, ArtifactKind
+from artifact.models import Artifact
 from harness.result_files import result_files
 from harness.tasks import output_schema
 from run.models import Run, RunEndReason, RunEvent, RunStatus
@@ -75,13 +75,8 @@ def result_artifacts(run: Run) -> list[dict[str, Any]]:
     同じパスの最新のものを選ぶ（変わっていないファイルは回収し直さないので、同じ会話の前のRunのものもある）"""
     files = []
     for field, path in result_files(output_schema(run), run.result):
-        artifact = (
-            Artifact.objects.select_related("blob")
-            .filter(conversation_id=run.conversation_id, kind=ArtifactKind.OUTPUT, path=path, deleted=False)
-            .order_by("-created", "-pk")
-            .first()
-        )
-        if artifact is None:
+        artifact = Artifact.objects.latest_output(run.conversation_id, path)
+        if artifact is None:  # 完了の前に確かめている（harness/runner.py）ので、保持期限で消えたもの等
             logger.warning("run %s: the result file %s (%s) was not collected", run.uid, path, field)
             continue
         files.append(

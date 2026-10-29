@@ -3,14 +3,17 @@
 import hashlib
 import io
 import tarfile
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
+from artifact.models import Artifact, BlobObject
 from artifact.storage import get_storage
 from harness.context import build_messages
-from harness.sandbox import MAX_OUTPUT_FILES, collect_outputs
+from harness.sandbox import MAX_OUTPUT_FILES, SandboxSession, collect_outputs
 from run.factories import RunFactory
-from run.models import RunEvent, RunEventKind
+from run.models import ExecutionAttempt, RunEvent, RunEventKind
 
 
 def archive(entries: list[tuple[str, bytes | None, str]]) -> io.BytesIO:
@@ -89,3 +92,14 @@ def test_model_sees_the_attachment_list():
     second = build_messages(run, RunEvent.objects.filter(run=run))[1]
     assert second.text.startswith('集計も\n\n<attachments scope="earlier">\nFiles attached earlier')
     assert "- /workspace/input/請求書.pdf" in second.text
+
+
+@pytest.mark.django_db
+def test_deleted_outputs_are_not_known():
+    """削除した成果物は既知にしない（同じ中身のファイルを回収し直し、業務結果のファイルの確認で見つかるように）"""
+    run = RunFactory.create()
+    kept = Artifact.create_output(run, "a.txt", BlobObject.put(io.BytesIO(b"a")))
+    removed = Artifact.create_output(run, "b.txt", BlobObject.put(io.BytesIO(b"b")))
+    Artifact.objects.filter(pk=removed.pk).update(deleted=True)
+    session = SandboxSession(run, cast(ExecutionAttempt, SimpleNamespace(number=1)))
+    assert session._known_outputs() == {"a.txt": kept.sha256}

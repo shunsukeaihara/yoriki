@@ -57,6 +57,12 @@ def test_file_fields_and_the_schema_for_the_model():
             },
         },
         {"type": "object", "additionalProperties": {"type": "string", "format": "file"}},
+        {"type": "object", "patternProperties": {"^f": {"type": "string", "format": "file"}}},
+        {"type": "object", "$defs": {"f": {"type": "string", "format": "file"}}},
+        {
+            "type": "object",
+            "properties": {"a": {"type": "array", "prefixItems": [{"type": "string", "format": "file"}]}},
+        },
     ],
 )
 def test_file_format_only_on_top_level_strings(schema):

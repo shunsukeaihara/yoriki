@@ -581,7 +581,8 @@ class SandboxSession:
         """会話の成果物の、パスごとの最新の中身（SHA-256）。変わっていないファイルは回収し直さない"""
         known = {}
         rows = (
-            Artifact.objects.filter(conversation_id=self.run.conversation_id, kind=ArtifactKind.OUTPUT)
+            # 削除した成果物は既知にしない（同じ中身のファイルを回収し直す。業務結果のファイルの確認で見つかるように）
+            Artifact.objects.filter(conversation_id=self.run.conversation_id, kind=ArtifactKind.OUTPUT, deleted=False)
             .order_by("created", "pk")
             .values_list("path", "blob__sha256")
         )

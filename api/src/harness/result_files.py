@@ -34,24 +34,27 @@ def file_fields(schema: dict[str, Any] | None) -> dict[str, bool]:
 
 
 def file_format_problem(schema: dict[str, Any]) -> str:
-    """`format: file` を置ける場所はルートの項目（文字列か、文字列の並び）だけ。誤りなら理由、正しければ空文字"""
+    """`format: file` を置ける場所はルートの項目（文字列か、文字列の並びの要素）だけ。Schemaのどこに書いても
+    （`patternProperties`・`$defs` 等を含む）、それ以外の場所なら誤り。誤りなら理由、正しければ空文字"""
+    allowed: set[tuple[str, ...]] = set()
+    for name, child in (schema.get("properties") or {}).items():
+        if _is_file(child) and child.get("type") == "string":
+            allowed.add(("properties", name))
+        elif isinstance(child, dict) and child.get("type") == "array":
+            items = child.get("items")
+            if _is_file(items) and isinstance(items, dict) and items.get("type") == "string":
+                allowed.add(("properties", name, "items"))
 
-    def visit(node: Any, *, allowed: bool, top: bool = False) -> str:
-        """`allowed`：ファイルにしてよい場所（ルートの項目か、ルートの項目の並びの要素）。`top`：ルートの項目"""
+    def visit(node: Any, path: tuple[str, ...]) -> str:
+        if isinstance(node, list):
+            return next((p for i, child in enumerate(node) if (p := visit(child, (*path, str(i))))), "")
         if not isinstance(node, dict):
             return ""
-        if _is_file(node) and not (allowed and node.get("type") == "string"):
+        if _is_file(node) and path not in allowed:
             return 'format "file" can be used only on a top-level string property (or the items of a top-level array)'
-        children = [(c, False) for c in (node.get("properties") or {}).values()]
-        if isinstance(node.get("additionalProperties"), dict):
-            children.append((node["additionalProperties"], False))
-        if isinstance(node.get("items"), dict):
-            children.append((node["items"], top and node.get("type") == "array"))
-        return next((p for child, ok in children if (p := visit(child, allowed=ok))), "")
+        return next((p for key, child in node.items() if (p := visit(child, (*path, key)))), "")
 
-    children = [(c, True, True) for c in (schema.get("properties") or {}).values()]
-    children += [(schema.get(key), False, False) for key in ("additionalProperties", "items")]
-    return next((p for child, ok, top in children if (p := visit(child, allowed=ok, top=top))), "")
+    return visit(schema, ())
 
 
 def model_schema(schema: dict[str, Any]) -> dict[str, Any]:

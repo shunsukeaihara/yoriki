@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-29（配信の土台とWebhook・ZapierのAdapter（⑥a）、ブランチ `feature/delivery`）
+- 最終更新：2026-10-29（配信の土台とWebhook・ZapierのAdapter（⑥a）、PR #55 の中。このコミットの後にマージする）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -128,7 +128,7 @@
 
 ## 4 次の作業
 
-**今の状態（2026-10-29）**：下の2の⑥（配信）を、利用者と決めたとおり⑥a・⑥b・⑥cに分けて進めている。⑥a（出口・配信の土台とWebhook・ZapierのAdapter。backendだけ）はブランチ `feature/delivery` のPR（AIのレビューは済み。人間のレビュー待ち）。⑤（タスクとWebhookでの起動）は⑤a #49・⑤b #51・⑤c #52 でマージ済み（Tool結果を信頼しない内容として囲む作業は #50）。③b（Skillが宣言するConnectorと機密のSkill）は #48 でマージ済み。Skillの段階（下の1）は #41 までで揃った。下の2（Connectorとタスク・配信）は、①（Connectorの土台）が #42、②（Connectorの管理画面）が #44、③a（会話でのConnector）が #47、③bが #48 で済んだ。#44 と #47 の間に、利用者の指示で権限の設計をやり直し、#45（文書だけ）で [authorization.md](authorization.md) にまとめ、#46 で実装を合わせた。権限は authorization.md を正とする（design.md §3.6・§4.1・§4.9.1・§10.0はその要約）。
+**今の状態（2026-10-29）**：下の2の⑥（配信）を、利用者と決めたとおり⑥a・⑥b・⑥cに分けて進めている。⑥a（出口・配信の土台とWebhook・ZapierのAdapter。backendだけ）は #55 でマージ済み。次は⑥b（期限付きのファイルURLと画面の通知）。⑤（タスクとWebhookでの起動）は⑤a #49・⑤b #51・⑤c #52 でマージ済み（Tool結果を信頼しない内容として囲む作業は #50）。③b（Skillが宣言するConnectorと機密のSkill）は #48 でマージ済み。Skillの段階（下の1）は #41 までで揃った。下の2（Connectorとタスク・配信）は、①（Connectorの土台）が #42、②（Connectorの管理画面）が #44、③a（会話でのConnector）が #47、③bが #48 で済んだ。#44 と #47 の間に、利用者の指示で権限の設計をやり直し、#45（文書だけ）で [authorization.md](authorization.md) にまとめ、#46 で実装を合わせた。権限は authorization.md を正とする（design.md §3.6・§4.1・§4.9.1・§10.0はその要約）。
 
 **#45 の議論の要点**（authorization.md にすべて書いてある）：
 - 範囲は「所有と管理の単位」（個人・部門・全社・システム）。部門のものは1つの部門に属する。システムのSkill・Connector・タスクは基盤の管理が扱い、会話には出さない。
@@ -246,7 +246,7 @@
 
 - レビュー：PRの前に回した（利用者の指示：AIのレビューが固まってからPRで人間がレビューする）。`codex review --base main` は6回目・7回目で指摘なし、敵対的なレビューは7回目でapprove。指摘（配信の直前のタスクの停止の確認、不正なIPv6のURL、送るときの名前解決の失敗の再試行、持ち時間の切れの後に遅れて届いた受付確認、複数のアドレスを順に試す、応答の本文を読まない、前の送信が終わるまで送り直さない、持ち時間が切れた試行を終わったことにしない、httpxのログに送り先のURLが出る、authorization.md の実装状況、配信キーの記述）を直した。直さなかったもの（手動実行した人の権限、部門の付け替えの後の配信の履歴）は、上の判断に理由を書いた。
 
-**次の作業**：⑥aのPRを人間がレビューし、マージの指示を待つ。その後は⑥b（期限付きのファイルURLと画面の通知）。
+**次の作業**：⑥b（期限付きのファイルURLと画面の通知）。下の「⑥bの始め方」から始める。
 
 ⑥bの始め方：design.md §4.4（成果物の受渡し。期限付きのファイルURL）・§4.3（in_appの完了通知）、authorization.md §5.5（個人の出口は画面の通知と本人へのDMだけ）・§7.1（期限付きURLは出口へ渡すものだけ、取得のたびにtokenと出口を確かめ、出口を止めたら未使用のtokenも失効）、deployment.md §4.1（`/api/files/<token>/`）を読み、⑥aの `delivery` アプリ（`payload.build_payload()`、`tasks.send_delivery()`、`Destination.problem_for()`）と `artifact` アプリ（`download.py`、S3の署名付きURL）を確かめてから、次を利用者に確かめる：ファイルURLの期限（例：24時間）と、どの成果物を渡すか（業務結果のSchemaで指定したもの・Runの成果物すべて等）、画面の通知の受け手（部門・全社のタスクは管理できる人全員か、起動した人か）、通知欄の画面の形（ヘッダーの通知・既読）、個人のタスクの出口（画面の通知だけを⑥bで作るか）。
 

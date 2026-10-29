@@ -193,7 +193,7 @@ cd frontend && pnpm dev
 | `/api/hooks/` | api:8000 | Webhook・Channelの受信。rate limitを強くする。bodyの上限（multipartのファイルを含む）は入口ごとの設定の最大（10MiB）にし、入口ごとの上限（既定1MiB）はapiで確かめる |
 | `/api/admin/`、`/api/schema/` | api:8000 | ログインとpermissionで守る（Django管理画面は基盤管理者、スキーマとSwagger UIはどの環境でもログインした利用者）。IPの制限は導入先が任意で追加する |
 | `/api/accounts/` | api:8000 | SSOのログイン開始と認証基盤からのコールバック |
-| `/api/files/<token>/` | api:8000 | 出口（Zapier等）へ渡した成果物の期限付き取得。セッションを使わずtokenを確認する。rate limitを付ける。社員向けのダウンロードには使わない（セッションで認証し、取得のたびに閲覧の判定をし直す。authorization.md §7.1） |
+| `/api/files/<token>/` | api:8000 | 出口（Zapier等）へ渡した成果物の期限付き取得。セッションを使わずtokenを確認する（汎用のWebhookの出口では、出口の署名の鍵も `Authorization: Bearer` で求める）。rate limitを付ける。URLの元は `YORIKI_PUBLIC_URL`。社員向けのダウンロードには使わない（セッションで認証し、取得のたびに閲覧の判定をし直す。authorization.md §7.1） |
 | `/_protected/` | （nginxの内部location） | `internal;` を付け、apiの `X-Accel-Redirect` からだけ使う。外から直接は取得できない |
 | `/api/ping/` | api:8000 | ヘルスチェック（認証なし） |
 | `/api/static/` | （nginxが直接返す） | Djangoの静的ファイル（§2）。長くキャッシュさせる |
@@ -285,7 +285,7 @@ docker compose -f deploy/compose.yaml exec api python manage.py resume_workers
 - **バックアップ**：`pg_dump` と、Local保存のobjectsのディレクトリを同じ時点で取得する（design.md §10）。復元手順を定期的に試す。
 - **掃除**：使わなくなったSandboxイメージは、RunやCheckpointが参照していないことを確認してから削除する（design.md §10.1）。`docker image prune` を無条件に実行しない。
 - **Sandboxのコンテナ**：LauncherはAttemptを終えるときにSandboxを `docker rm -f` で消す。Workerが落ちて残ったものは、次にSandboxを起動するときに、終わったAttemptのもの（ラベル `org.yoriki.attempt`）を探して消す。
-- **結果の配信**：出口（Webhook・Zapier）への送信はqclusterから行う。qclusterのコンテナ（Workerサーバーを含む）から送り先（`hooks.zapier.com` 等）へのHTTPSの外向きの通信が要る。環境変数のproxy（`HTTPS_PROXY`）は使わず、名前を引いて確かめたアドレスへ直接つなぐ（design.md §4.4）。社内のアドレスへ送るときだけ、`YORIKI_DELIVERY_ALLOWED_NETWORKS` に許すネットワーク（CIDR）を指定する。
+- **結果の配信**：出口（Webhook・Zapier）への送信はqclusterから行う。qclusterのコンテナ（Workerサーバーを含む）から送り先（`hooks.zapier.com` 等）へのHTTPSの外向きの通信が要る。環境変数のproxy（`HTTPS_PROXY`）は使わず、名前を引いて確かめたアドレスへ直接つなぐ（design.md §4.4）。社内のアドレスへ送るときだけ、`YORIKI_DELIVERY_ALLOWED_NETWORKS` に許すネットワーク（CIDR）を指定する。出口へ成果物を渡すときは、外（Zapier等）から見たYorikiのURLを `YORIKI_PUBLIC_URL` に指定する（取得用のURLの元。未設定なら、ファイルを渡す配信は失敗にする）。認証プロキシの裏に置く場合も、`/api/files/` はプロキシを通さない（§8.6）。
 - **ファイルの保存先**：添付・成果物・Workspaceのsnapshot（tar）は、`YORIKI_STORAGE_BACKEND` で選んだ保存先（Localなら `/var/lib/yoriki/objects`、S3ならbucket）に置く（§7.2）。保持期限での削除はまだない（docs/status.md §3）。
 
 ### 7.1 Sandboxを動かすホスト

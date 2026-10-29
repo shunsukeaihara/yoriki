@@ -46,7 +46,7 @@ Yorikiの画面で双方向に必要なのは「利用者の送信」と「サ�
 | `run.message` | エージェントの確定したメッセージ、Tool実行 |
 | `run.delta` | LLM出力の差分（token単位の断片）。`id:` を付けない一時イベント |
 | `clarification.requested` | エージェントからの質問（回答待ち） |
-| `notification` | ログインユーザー宛ての通知 |
+| `notification` | 画面の通知が届いた（中身は送らず、画面が `app/v1/notifications/` で読む。design.md §4.4） |
 
 ### イベントの形式
 

@@ -72,3 +72,5 @@ export YORIKI_STORAGE_LOCAL_ROOT="$PWD/.objects"
 # --- 結果の配信（design.md §4.4） ---
 # 手元に立てた偽の受け手（http://127.0.0.1:8766 等）へ送って試すときだけ、ループバックを許す。開発時（DEBUG）は http も使える
 # export YORIKI_DELIVERY_ALLOWED_NETWORKS=127.0.0.0/8,::1/128
+# 出口へ渡す成果物の取得用のURLの元（外から見たYorikiのURL）。開発時（DEBUG）は http も使える
+# export YORIKI_PUBLIC_URL=http://localhost:8000

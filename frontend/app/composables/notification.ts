@@ -12,11 +12,14 @@ export const useNotificationStore = defineStore('notification', () => {
   // 利用者が変わったときも世代を進め、前の人への応答を捨てる
   let listGeneration = 0
   let countGeneration = 0
+  // 利用者が変わった回数。既読の操作は互いに打ち消さず、利用者が変わったときだけ応答を捨てる
+  let userGeneration = 0
 
   // ログアウト・別の人のログインでは、前の人の通知を残さない（Run を見られる人は利用者ごと。authorization.md §7.1）
   watch(
     () => useAccountStore().user?.id,
     () => {
+      userGeneration++
       listGeneration++
       countGeneration++
       items.value = []
@@ -48,9 +51,9 @@ export const useNotificationStore = defineStore('notification', () => {
 
   const markRead = async (notification: AppNotification) => {
     if (notification.read) return
-    const list = listGeneration
+    const user = userGeneration
     const updated = await useAPI().notifications.read(notification.id)
-    if (list !== listGeneration) return
+    if (user !== userGeneration) return
     // 先に始めた取得が遅れて届いても、既読にした通知を未読に戻さない
     listGeneration++
     items.value = items.value.map((n) => (n.id === updated.id ? updated : n))
@@ -59,9 +62,9 @@ export const useNotificationStore = defineStore('notification', () => {
   }
 
   const markAllRead = async () => {
-    const list = listGeneration
+    const user = userGeneration
     await useAPI().notifications.readAll()
-    if (list !== listGeneration) return
+    if (user !== userGeneration) return
     await reload()
   }
 

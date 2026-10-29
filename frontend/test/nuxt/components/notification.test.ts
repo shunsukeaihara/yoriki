@@ -106,4 +106,16 @@ describe('NotificationBell', () => {
     await stale
     expect(store.items[0]!.read).not.toBeNull()
   })
+
+  it('続けて既読にした通知は、どちらも既読で表示する', async () => {
+    const store = useNotificationStore()
+    await store.reload()
+    let resolveFirst: (value: AppNotification) => void = () => {}
+    read.mockImplementationOnce(() => new Promise((r) => (resolveFirst = r)))
+    const first = store.markRead(store.items[0]!)
+    await store.markRead(store.items[1]!)
+    resolveFirst(notification('n1', '2026-10-29T10:00:00+09:00'))
+    await first
+    expect(store.items.map((n) => n.read !== null)).toEqual([true, true])
+  })
 })

@@ -30,7 +30,8 @@ export const useNotificationStore = defineStore('notification', () => {
     if (notification.read) return
     const updated = await useAPI().notifications.read(notification.id)
     items.value = items.value.map((n) => (n.id === updated.id ? updated : n))
-    unread.value = Math.max(0, unread.value - 1)
+    // 続けて押すと応答の前に同じ通知をもう一度送ることがあるので、数は減らさずにサーバーから読み直す
+    await refreshCount()
   }
 
   const markAllRead = async () => {

@@ -57,6 +57,7 @@ describe('NotificationBell', () => {
     await mountSuspended(NotificationBell)
     const store = useNotificationStore()
     await store.reload()
+    unreadCount.mockResolvedValue({ unread: 1 })
     await store.markRead(store.items[0]!)
     expect(read).toHaveBeenCalledWith('n1')
     expect(store.unread).toBe(1)

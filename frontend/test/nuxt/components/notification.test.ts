@@ -70,4 +70,16 @@ describe('NotificationBell', () => {
     expect(readAll).toHaveBeenCalled()
     expect(store.unread).toBe(0)
   })
+
+  it('ログインユーザーが変わったら、前の人の通知を消す', async () => {
+    const account = useAccountStore()
+    account.user = { id: 'u1' } as MyUser
+    const store = useNotificationStore()
+    await store.reload()
+    expect(store.items).toHaveLength(2)
+    account.user = null
+    await nextTick()
+    expect(store.items).toEqual([])
+    expect(store.unread).toBe(0)
+  })
 })

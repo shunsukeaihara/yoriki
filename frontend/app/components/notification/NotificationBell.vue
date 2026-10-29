@@ -11,13 +11,14 @@ const notify = (err: unknown) =>
   toast.add({ title: t('通知を読めませんでした'), description: makeErrorMsg(err), color: 'error' })
 
 onMounted(() => store.refreshCount().catch(() => {}))
+// 通知欄を開いていれば一覧も、閉じていれば未読の数だけを読み直す
+const refresh = () => (open.value ? store.reload() : store.refreshCount()).catch(() => {})
 useUserEvents(
   (event) => {
-    if (event.type !== 'notification') return
-    ;(open.value ? store.reload() : store.refreshCount()).catch(() => {})
+    if (event.type === 'notification') refresh()
   },
-  // 通知は保存しないので、切れていた間に届いた分は数え直す
-  { onReconnect: () => store.refreshCount().catch(() => {}) },
+  // 通知は保存しないので、切れていた間に届いた分は読み直す
+  { onReconnect: refresh },
 )
 
 watch(open, (value) => {

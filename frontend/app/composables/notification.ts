@@ -8,6 +8,15 @@ export const useNotificationStore = defineStore('notification', () => {
   const items = ref<AppNotification[]>([])
   const loading = ref(false)
 
+  // ログアウト・別の人のログインでは、前の人の通知を残さない（Run を見られる人は利用者ごと。authorization.md §7.1）
+  watch(
+    () => useAccountStore().user?.id,
+    () => {
+      items.value = []
+      unread.value = 0
+    },
+  )
+
   const refreshCount = async () => {
     unread.value = (await useAPI().notifications.unreadCount()).unread
   }

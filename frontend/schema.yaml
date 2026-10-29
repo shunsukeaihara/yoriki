@@ -544,6 +544,56 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/app/v1/destinations/:
+    get:
+      operationId: app_v1_destinations_list
+      description: タスクの編集画面で選ぶ出口の候補（停止中でなく、タスクを管理できる範囲のもの。authorization.md §7.2）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - in: query
+        name: department
+        schema:
+          type: string
+        description: 部門のID（部門の範囲のとき）
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: scope
+        schema:
+          type: integer
+        description: タスクの範囲（2：部門、3：全社、4：システム）
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - app/destination
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDestinationChoiceList'
+          description: ''
   /api/app/v1/model_profiles/:
     get:
       operationId: app_v1_model_profiles_list
@@ -2430,6 +2480,155 @@ paths:
               schema:
                 $ref: '#/components/schemas/TaskDefinition'
           description: ''
+  /api/app/v1/tasks/{task}/deliveries/:
+    get:
+      operationId: app_v1_tasks_deliveries_list
+      description: タスクのRunの配信の履歴と送り直し（タスクを管理できる人。authorization.md §7.1）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - in: query
+        name: event_type
+        schema:
+          type: string
+          title: イベント
+          enum:
+          - run.cancelled
+          - run.completed
+          - run.failed
+        description: |-
+          * `run.completed` - 完了
+          * `run.failed` - 失敗
+          * `run.cancelled` - 停止
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: run
+        schema:
+          type: string
+        description: RunのID
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: status
+        schema:
+          type: integer
+          title: 状態
+          enum:
+          - 1
+          - 10
+          - 2
+          - 20
+          - 21
+          - 3
+          - 30
+        description: |-
+          * `1` - 配信待ち
+          * `2` - 配信中
+          * `3` - 再試行待ち
+          * `10` - 受付確認済み
+          * `20` - 失敗
+          * `21` - 確認待ち
+          * `30` - 取消
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/task/delivery
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDeliveryList'
+          description: ''
+  /api/app/v1/tasks/{task}/deliveries/{uid}/:
+    get:
+      operationId: app_v1_tasks_deliveries_retrieve
+      description: タスクのRunの配信の履歴と送り直し（タスクを管理できる人。authorization.md §7.1）
+      parameters:
+      - in: query
+        name: run
+        schema:
+          type: string
+        description: RunのID
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/task/delivery
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Delivery'
+          description: ''
+  /api/app/v1/tasks/{task}/deliveries/{uid}/retry/:
+    post:
+      operationId: app_v1_tasks_deliveries_retry_create
+      description: 失敗・確認待ち・取消の配信を送り直す（保存した内容を送る。エージェントは動かし直さない）。送る直前に、出口が今も使えるかを確かめ直す
+      parameters:
+      - in: query
+        name: run
+        schema:
+          type: string
+        description: RunのID
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/task/delivery
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Delivery'
+          description: ''
   /api/app/v1/tasks/{task}/revisions/:
     get:
       operationId: app_v1_tasks_revisions_list
@@ -3890,6 +4089,347 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/destinations/:
+    get:
+      operationId: v1_destinations_list
+      description: 出口（Webhook・Zapier）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md
+        §5.5）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - in: query
+        name: kind
+        schema:
+          type: integer
+          title: 種類
+          enum:
+          - 1
+          - 2
+        description: |-
+          * `1` - Webhook
+          * `2` - Zapier
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: scope
+        schema:
+          type: integer
+          title: 使ってよい範囲
+          enum:
+          - 2
+          - 3
+          - 4
+        description: |-
+          * `2` - 部門
+          * `3` - 全社
+          * `4` - システム
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: suspended
+        schema:
+          type: boolean
+      tags:
+      - manage/destination
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDestinationList'
+          description: ''
+    post:
+      operationId: v1_destinations_create
+      description: 出口（Webhook・Zapier）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md
+        §5.5）
+      tags:
+      - manage/destination
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DestinationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DestinationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DestinationRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DestinationSecret'
+          description: ''
+  /api/v1/destinations/{destination}/revisions/:
+    get:
+      operationId: v1_destinations_revisions_list
+      description: 出口の版の履歴
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - in: path
+        name: destination
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - manage/destination/revision
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDestinationRevisionList'
+          description: ''
+  /api/v1/destinations/{destination}/revisions/{number}/:
+    get:
+      operationId: v1_destinations_revisions_retrieve
+      description: 出口の版の履歴
+      parameters:
+      - in: path
+        name: destination
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: number
+        schema:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          title: 版
+        required: true
+      tags:
+      - manage/destination/revision
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DestinationRevision'
+          description: ''
+  /api/v1/destinations/{uid}/:
+    get:
+      operationId: v1_destinations_retrieve
+      description: 出口（Webhook・Zapier）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md
+        §5.5）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/destination
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Destination'
+          description: ''
+    put:
+      operationId: v1_destinations_update
+      description: 出口（Webhook・Zapier）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md
+        §5.5）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/destination
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DestinationUpdateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DestinationUpdateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DestinationUpdateRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Destination'
+          description: ''
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、他の人が版を作った）
+    patch:
+      operationId: v1_destinations_partial_update
+      description: 出口（Webhook・Zapier）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md
+        §5.5）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/destination
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedDestinationUpdateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedDestinationUpdateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedDestinationUpdateRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Destination'
+          description: ''
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、他の人が版を作った）
+    delete:
+      operationId: v1_destinations_destroy
+      description: 出口を消す。まだ送っていない配信も送らない
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/destination
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/destinations/{uid}/resume/:
+    post:
+      operationId: v1_destinations_resume_create
+      description: 停止を解く
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/destination
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Destination'
+          description: ''
+  /api/v1/destinations/{uid}/rotate_secret/:
+    post:
+      operationId: v1_destinations_rotate_secret_create
+      description: 署名の鍵を作り直す。次の送信から新しい鍵で署名する。新しい鍵は応答で一度だけ返す
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/destination
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DestinationSecret'
+          description: ''
+  /api/v1/destinations/{uid}/suspend/:
+    post:
+      operationId: v1_destinations_suspend_create
+      description: 停止する。新しく受け付けるRunに使わず、まだ送っていない配信も送らない
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/destination
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Destination'
+          description: ''
   /api/v1/groups/:
     get:
       operationId: v1_groups_list
@@ -5927,6 +6467,18 @@ components:
           allOf:
           - $ref: '#/components/schemas/AssetDiff'
           nullable: true
+    AttemptOutcomeEnum:
+      enum:
+      - 1
+      - 2
+      - 3
+      - 4
+      type: integer
+      description: |-
+        * `1` - 受付確認
+        * `2` - 一時的な失敗
+        * `3` - 失敗
+        * `4` - 届いたか分からない
     AuthMethods:
       type: object
       description: ログイン画面に出すログインの方法
@@ -7167,6 +7719,156 @@ components:
       - name
       - operations
       - tables
+    Delivery:
+      type: object
+      description: タスクのRunの配信の履歴（タスクを管理できる人。authorization.md §7.1）。送った内容と試行の記録を返す
+      properties:
+        id:
+          type: string
+          readOnly: true
+        run:
+          type: string
+          readOnly: true
+        event_type:
+          allOf:
+          - $ref: '#/components/schemas/NotifyEventEnum'
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/DeliveryStatusEnum'
+          readOnly: true
+        status_display:
+          type: string
+          readOnly: true
+        destination:
+          allOf:
+          - $ref: '#/components/schemas/DestinationChoice'
+          readOnly: true
+        destination_version:
+          type: integer
+          readOnly: true
+        payload:
+          readOnly: true
+          title: 送る内容
+        attempt_count:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          readOnly: true
+          title: 送った回数
+        next_attempt:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 次に送る日時
+        last_error:
+          type: string
+          readOnly: true
+          title: 最後の誤り
+          maxLength: 500
+        attempts:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeliveryAttempt'
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+        delivered:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 受付確認の日時
+      required:
+      - attempt_count
+      - attempts
+      - created
+      - delivered
+      - destination
+      - destination_version
+      - event_type
+      - id
+      - last_error
+      - next_attempt
+      - payload
+      - run
+      - status
+      - status_display
+      - updated
+    DeliveryAttempt:
+      type: object
+      description: 表示専用のModelSerializer。すべての項目を読み取り専用にする
+      properties:
+        number:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          readOnly: true
+          title: 回
+        outcome:
+          readOnly: true
+          nullable: true
+          title: 結果
+          minimum: 0
+          maximum: 32767
+          oneOf:
+          - $ref: '#/components/schemas/AttemptOutcomeEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        http_status:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          readOnly: true
+          nullable: true
+          title: HTTPの状態コード
+        error:
+          type: string
+          readOnly: true
+          title: 誤り
+          maxLength: 500
+        started:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 開始日時
+        finished:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 終了日時
+      required:
+      - error
+      - finished
+      - http_status
+      - number
+      - outcome
+      - started
+    DeliveryStatusEnum:
+      enum:
+      - 1
+      - 2
+      - 3
+      - 10
+      - 20
+      - 21
+      - 30
+      type: integer
+      description: |-
+        * `1` - 配信待ち
+        * `2` - 配信中
+        * `3` - 再試行待ち
+        * `10` - 受付確認済み
+        * `20` - 失敗
+        * `21` - 確認待ち
+        * `30` - 取消
     Department:
       type: object
       properties:
@@ -7241,6 +7943,363 @@ components:
           maxLength: 100
       required:
       - name
+    Destination:
+      type: object
+      description: |-
+        出口の作成と表示（連携の管理者。authorization.md §5.5）。中身は今の版の値を平らに出す。
+
+        種類・範囲・部門は作成時に決めて変えない。送り先のURLは書くだけで、表示ではホストと末尾の4文字だけを返す。
+        署名の鍵は作成時と作り直したときに一度だけ返す。更新では、編集を始めた時点の `version` を送り、その間に他の人が
+        版を作っていたら409になる
+      properties:
+        id:
+          type: string
+          readOnly: true
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/DestinationKindEnum'
+          description: |-
+            種類。作成した後は変えられない
+
+            * `1` - Webhook
+            * `2` - Zapier
+        kind_display:
+          type: string
+          readOnly: true
+        scope:
+          allOf:
+          - $ref: '#/components/schemas/ConnectorScopeEnum'
+          description: |-
+            使ってよい範囲。部門の出口はその部門のタスクだけが使う。作成した後は変えられない
+
+            * `2` - 部門
+            * `3` - 全社
+            * `4` - システム
+        scope_display:
+          type: string
+          readOnly: true
+        department:
+          type: string
+          nullable: true
+          description: 部門の範囲では必須。作成した後は変えられない
+        department_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumDepartment'
+          readOnly: true
+          nullable: true
+        name:
+          type: string
+          maxLength: 100
+        suspended:
+          type: boolean
+          readOnly: true
+          title: 停止中
+        version:
+          type: integer
+          minimum: 0
+          description: 今の版。更新では、編集を始めた時点の値を送る（作成では送らない）
+        url_display:
+          type: string
+          readOnly: true
+          description: 送り先のホストと末尾の4文字
+        allows_sensitive_results:
+          type: boolean
+          default: false
+          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい
+        secret_rotated:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 署名の鍵を作った日時
+        created_by:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created
+      - created_by
+      - department_info
+      - id
+      - kind
+      - kind_display
+      - name
+      - scope
+      - scope_display
+      - secret_rotated
+      - suspended
+      - updated
+      - url_display
+    DestinationChoice:
+      type: object
+      description: タスクの編集画面で選ぶ出口の候補（ID・名前・種類・範囲だけ。送り先・鍵は返さない。authorization.md §7.2）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+          title: 名前
+          maxLength: 100
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/DestinationKindEnum'
+          readOnly: true
+        scope:
+          allOf:
+          - $ref: '#/components/schemas/ConnectorScopeEnum'
+          readOnly: true
+        department:
+          allOf:
+          - $ref: '#/components/schemas/MinimumDepartment'
+          readOnly: true
+          nullable: true
+        allows_sensitive_results:
+          type: boolean
+          readOnly: true
+      required:
+      - allows_sensitive_results
+      - department
+      - id
+      - kind
+      - name
+      - scope
+    DestinationKindEnum:
+      enum:
+      - 1
+      - 2
+      type: integer
+      description: |-
+        * `1` - Webhook
+        * `2` - Zapier
+    DestinationRequest:
+      type: object
+      description: |-
+        出口の作成と表示（連携の管理者。authorization.md §5.5）。中身は今の版の値を平らに出す。
+
+        種類・範囲・部門は作成時に決めて変えない。送り先のURLは書くだけで、表示ではホストと末尾の4文字だけを返す。
+        署名の鍵は作成時と作り直したときに一度だけ返す。更新では、編集を始めた時点の `version` を送り、その間に他の人が
+        版を作っていたら409になる
+      properties:
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/DestinationKindEnum'
+          description: |-
+            種類。作成した後は変えられない
+
+            * `1` - Webhook
+            * `2` - Zapier
+        scope:
+          allOf:
+          - $ref: '#/components/schemas/ConnectorScopeEnum'
+          description: |-
+            使ってよい範囲。部門の出口はその部門のタスクだけが使う。作成した後は変えられない
+
+            * `2` - 部門
+            * `3` - 全社
+            * `4` - システム
+        department:
+          type: string
+          minLength: 1
+          nullable: true
+          description: 部門の範囲では必須。作成した後は変えられない
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        version:
+          type: integer
+          minimum: 0
+          description: 今の版。更新では、編集を始めた時点の値を送る（作成では送らない）
+        url:
+          type: string
+          writeOnly: true
+          minLength: 1
+          description: 送り先のURL（https）。表示では返さない
+          maxLength: 2000
+        allows_sensitive_results:
+          type: boolean
+          default: false
+          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい
+        change_reason:
+          type: string
+          writeOnly: true
+          maxLength: 500
+      required:
+      - kind
+      - name
+      - scope
+      - url
+    DestinationRevision:
+      type: object
+      description: 表示専用のModelSerializer。すべての項目を読み取り専用にする
+      properties:
+        id:
+          type: string
+          readOnly: true
+        number:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          readOnly: true
+          title: 版
+        url_display:
+          type: string
+          readOnly: true
+        allows_sensitive_results:
+          type: boolean
+          readOnly: true
+          title: 機密の結果を送ってよい
+        change_reason:
+          type: string
+          readOnly: true
+          title: 変更理由
+          maxLength: 500
+        created_by:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - allows_sensitive_results
+      - change_reason
+      - created
+      - created_by
+      - id
+      - number
+      - url_display
+    DestinationSecret:
+      type: object
+      description: 作成・署名の鍵の作り直しの応答。鍵はこのときだけ返す（再表示はできない）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/DestinationKindEnum'
+          description: |-
+            種類。作成した後は変えられない
+
+            * `1` - Webhook
+            * `2` - Zapier
+        kind_display:
+          type: string
+          readOnly: true
+        scope:
+          allOf:
+          - $ref: '#/components/schemas/ConnectorScopeEnum'
+          description: |-
+            使ってよい範囲。部門の出口はその部門のタスクだけが使う。作成した後は変えられない
+
+            * `2` - 部門
+            * `3` - 全社
+            * `4` - システム
+        scope_display:
+          type: string
+          readOnly: true
+        department:
+          type: string
+          nullable: true
+          description: 部門の範囲では必須。作成した後は変えられない
+        department_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumDepartment'
+          readOnly: true
+          nullable: true
+        name:
+          type: string
+          maxLength: 100
+        suspended:
+          type: boolean
+          readOnly: true
+          title: 停止中
+        version:
+          type: integer
+          minimum: 0
+          description: 今の版。更新では、編集を始めた時点の値を送る（作成では送らない）
+        url_display:
+          type: string
+          readOnly: true
+          description: 送り先のホストと末尾の4文字
+        allows_sensitive_results:
+          type: boolean
+          default: false
+          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい
+        secret_rotated:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 署名の鍵を作った日時
+        created_by:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+        signing_secret:
+          type: string
+          readOnly: true
+          description: 署名の鍵（Standard Webhooksの webhook-signature を確かめる鍵）。いま一度だけ表示する
+      required:
+      - created
+      - created_by
+      - department_info
+      - id
+      - kind
+      - kind_display
+      - name
+      - scope
+      - scope_display
+      - secret_rotated
+      - signing_secret
+      - suspended
+      - updated
+      - url_display
+    DestinationUpdateRequest:
+      type: object
+      description: 出口の更新。種類・範囲・部門は変えられない
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        version:
+          type: integer
+          minimum: 0
+          description: 今の版。更新では、編集を始めた時点の値を送る（作成では送らない）
+        url:
+          type: string
+          writeOnly: true
+          minLength: 1
+          description: 送り先のURL（https）。表示では返さない
+          maxLength: 2000
+        allows_sensitive_results:
+          type: boolean
+          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい
+        change_reason:
+          type: string
+          writeOnly: true
+          maxLength: 500
     ElementDiff:
       type: object
       properties:
@@ -8769,6 +9828,26 @@ components:
       - manageable_departments
       - usable_departments
       - username
+    NotifyContentEnum:
+      enum:
+      - status
+      - result
+      - status_and_result
+      type: string
+      description: |-
+        * `status` - 状態だけ
+        * `result` - 業務結果
+        * `status_and_result` - 状態と業務結果
+    NotifyEventEnum:
+      enum:
+      - run.completed
+      - run.failed
+      - run.cancelled
+      type: string
+      description: |-
+        * `run.completed` - 完了
+        * `run.failed` - 失敗
+        * `run.cancelled` - 停止
     NullEnum:
       enum:
       - null
@@ -8913,6 +9992,25 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DatabaseConnection'
+    PaginatedDeliveryList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Delivery'
     PaginatedDepartmentList:
       type: object
       required:
@@ -8951,6 +10049,63 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/DepartmentMembership'
+    PaginatedDestinationChoiceList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/DestinationChoice'
+    PaginatedDestinationList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Destination'
+    PaginatedDestinationRevisionList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/DestinationRevision'
     PaginatedLLMConnectionList:
       type: object
       required:
@@ -9500,6 +10655,31 @@ components:
           minLength: 1
           title: 名前
           maxLength: 100
+    PatchedDestinationUpdateRequest:
+      type: object
+      description: 出口の更新。種類・範囲・部門は変えられない
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        version:
+          type: integer
+          minimum: 0
+          description: 今の版。更新では、編集を始めた時点の値を送る（作成では送らない）
+        url:
+          type: string
+          writeOnly: true
+          minLength: 1
+          description: 送り先のURL（https）。表示では返さない
+          maxLength: 2000
+        allows_sensitive_results:
+          type: boolean
+          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい
+        change_reason:
+          type: string
+          writeOnly: true
+          maxLength: 500
     PatchedLLMConnectionUpdateRequest:
       type: object
       description: プロバイダ接続の更新。種別とbase URL（接続先）は変えられないので、読み取り専用にする
@@ -9901,6 +11081,26 @@ components:
         output_schema:
           nullable: true
           description: 業務結果のSchema。なければSkillのもの
+        destination:
+          type: string
+          minLength: 1
+          nullable: true
+          description: 結果の通知先（出口）。タスクの範囲で使ってよい出口だけ（候補は app/v1/destinations/）
+        notify_events:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotifyEventEnum'
+          description: 通知するイベント。Webhookの入口があるタスクでは run.failed が必須
+          maxItems: 3
+        notify_content:
+          allOf:
+          - $ref: '#/components/schemas/NotifyContentEnum'
+          description: |-
+            通知の内容（状態だけ・業務結果・両方）
+
+            * `status` - 状態だけ
+            * `result` - 業務結果
+            * `status_and_result` - 状態と業務結果
         change_reason:
           type: string
           writeOnly: true
@@ -12040,10 +13240,35 @@ components:
         output_schema:
           nullable: true
           description: 業務結果のSchema。なければSkillのもの
+        destination:
+          type: string
+          nullable: true
+          description: 結果の通知先（出口）。タスクの範囲で使ってよい出口だけ（候補は app/v1/destinations/）
+        notify_events:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotifyEventEnum'
+          description: 通知するイベント。Webhookの入口があるタスクでは run.failed が必須
+          maxItems: 3
+        notify_content:
+          allOf:
+          - $ref: '#/components/schemas/NotifyContentEnum'
+          default: status_and_result
+          description: |-
+            通知の内容（状態だけ・業務結果・両方）
+
+            * `status` - 状態だけ
+            * `result` - 業務結果
+            * `status_and_result` - 状態と業務結果
         model_profile_info:
           allOf:
           - $ref: '#/components/schemas/AppModelProfile'
           readOnly: true
+        destination_info:
+          allOf:
+          - $ref: '#/components/schemas/DestinationChoice'
+          readOnly: true
+          nullable: true
         can_run:
           type: boolean
           readOnly: true
@@ -12071,6 +13296,7 @@ components:
       - created
       - created_by
       - department_info
+      - destination_info
       - id
       - model_profile
       - model_profile_info
@@ -12159,6 +13385,27 @@ components:
         output_schema:
           nullable: true
           description: 業務結果のSchema。なければSkillのもの
+        destination:
+          type: string
+          minLength: 1
+          nullable: true
+          description: 結果の通知先（出口）。タスクの範囲で使ってよい出口だけ（候補は app/v1/destinations/）
+        notify_events:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotifyEventEnum'
+          description: 通知するイベント。Webhookの入口があるタスクでは run.failed が必須
+          maxItems: 3
+        notify_content:
+          allOf:
+          - $ref: '#/components/schemas/NotifyContentEnum'
+          default: status_and_result
+          description: |-
+            通知の内容（状態だけ・業務結果・両方）
+
+            * `status` - 状態だけ
+            * `result` - 業務結果
+            * `status_and_result` - 状態と業務結果
         change_reason:
           type: string
           writeOnly: true
@@ -12228,6 +13475,22 @@ components:
           readOnly: true
           nullable: true
           title: 業務結果のSchema
+        destination:
+          type: string
+          readOnly: true
+          nullable: true
+        notify_events:
+          type: array
+          items:
+            type: string
+            maxLength: 30
+          readOnly: true
+          title: 通知するイベント
+        notify_content:
+          type: string
+          readOnly: true
+          title: 通知の内容
+          maxLength: 30
         change_reason:
           type: string
           readOnly: true
@@ -12247,11 +13510,14 @@ components:
       - created
       - created_by
       - description
+      - destination
       - effort
       - handles_sensitive_data
       - id
       - inputs
       - model_profile
+      - notify_content
+      - notify_events
       - number
       - output_schema
       - prompt_template
@@ -12311,6 +13577,26 @@ components:
         output_schema:
           nullable: true
           description: 業務結果のSchema。なければSkillのもの
+        destination:
+          type: string
+          minLength: 1
+          nullable: true
+          description: 結果の通知先（出口）。タスクの範囲で使ってよい出口だけ（候補は app/v1/destinations/）
+        notify_events:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotifyEventEnum'
+          description: 通知するイベント。Webhookの入口があるタスクでは run.failed が必須
+          maxItems: 3
+        notify_content:
+          allOf:
+          - $ref: '#/components/schemas/NotifyContentEnum'
+          description: |-
+            通知の内容（状態だけ・業務結果・両方）
+
+            * `status` - 状態だけ
+            * `result` - 業務結果
+            * `status_and_result` - 状態と業務結果
         change_reason:
           type: string
           writeOnly: true

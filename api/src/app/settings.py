@@ -4,6 +4,7 @@
 ローカル開発ではリポジトリルートの `.envrc`（direnv）、本番では実行環境から渡す（backend-conventions.md §6.1）。
 """
 
+import ipaddress
 import json
 import os
 import sys
@@ -67,6 +68,7 @@ INSTALLED_APPS = [
     "skill",
     "connector",
     "task",
+    "delivery",
 ]
 
 MIDDLEWARE = [
@@ -247,6 +249,11 @@ SPECTACULAR_SETTINGS = {
         "CsvColumnTypeEnum": "resources.formats.COLUMN_TYPES",
         "ConnectorKindEnum": "connector.models.ConnectorKind",
         "TriggerKindEnum": "task.models.TriggerKind",
+        "DestinationKindEnum": "delivery.models.DestinationKind",
+        "NotifyEventEnum": "delivery.models.NotifyEvent",
+        "NotifyContentEnum": "delivery.models.NotifyContent",
+        "DeliveryStatusEnum": "delivery.models.DeliveryStatus",
+        "AttemptOutcomeEnum": "delivery.models.AttemptOutcome",
     },
 }
 
@@ -254,11 +261,13 @@ SPECTACULAR_SETTINGS = {
 # クラスタは1つで、エージェントの実行（Run）も配信・Outbox・清掃も受け持つ。増やすときはqclusterの数で調整する
 # （backend-conventions.md §8.4、deployment.md §3.2）。Runは確認待ちまで長く動くので、timeoutは長くする
 Q_CLUSTER_WORKERS = int(os.getenv("YORIKI_Q_WORKERS", "4"))
+# taskの実行の上限（秒）。超えたらQ2がWorkerを止める（配信の送り直しも、この時間を過ぎた送信は止まったものとみなす）
+Q_CLUSTER_TIMEOUT = 3600
 Q_CLUSTER = {
     "name": "default",
     "orm": "default",
     "workers": Q_CLUSTER_WORKERS,
-    "timeout": 3600,
+    "timeout": Q_CLUSTER_TIMEOUT,
     "retry": 3660,
     "max_attempts": 1,
 }
@@ -355,9 +364,22 @@ YORIKI_ATTACHMENTS_PER_MESSAGE = int(os.getenv("YORIKI_ATTACHMENTS_PER_MESSAGE",
 # 添付と成果物の保持期間（日。design.md §8の初期案）
 YORIKI_ARTIFACT_RETENTION_DAYS = int(os.getenv("YORIKI_ARTIFACT_RETENTION_DAYS", "90"))
 
+# --- 結果の配信（design.md §4.4） ---
+# 出口（Webhook・Zapier）の送り先に許す社内のネットワーク（CIDR。カンマ区切り）。既定では、名前を引いた先が
+# プライベート・ループバック・リンクローカル等のアドレスなら送らない（SSRF対策）。社内のシステムへ送る導入先だけが
+# 指定する
+YORIKI_DELIVERY_ALLOWED_NETWORKS = _env_list("YORIKI_DELIVERY_ALLOWED_NETWORKS")
+try:
+    _delivery_networks = [ipaddress.ip_network(n, strict=False) for n in YORIKI_DELIVERY_ALLOWED_NETWORKS]
+except ValueError as _exc:
+    raise ImproperlyConfigured(f"YORIKI_DELIVERY_ALLOWED_NETWORKS: {_exc}") from _exc
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "handlers": {"console": {"class": "logging.StreamHandler"}},
     "root": {"handlers": ["console"], "level": os.getenv("YORIKI_LOG_LEVEL", "INFO")},
+    # httpxは要求のURLを丸ごとINFOで出す。出口の送り先のURL（ZapierのCatch Hook等）はそれだけで送れる資格情報なので、
+    # YORIKI_LOG_LEVEL によらずWARNINGより下を出さない（design.md §4.4）
+    "loggers": {"httpx": {"level": "WARNING"}, "httpcore": {"level": "WARNING"}},
 }

@@ -491,6 +491,8 @@ notification:
 
 同じスレッドへ結果も載せる場合はinteraction側の完了イベントに含める。notificationで同じ対話スレッドを指定する場合も同じ配信へ統合し、完了報告と結果の重複投稿を避ける。結果通知のためだけに別スレッドを作らない。
 
+初期の実装では、結果の通知の設定（出口・対象イベント・通知内容）をTask Definitionの版の項目として持ち、Notification Bindingを別のModelにしない（1つのタスクに1つの結果通知で、通知Skillもまだないため。通知Skillを入れるときに見直す）。部門のタスクはその部門の出口、全社のタスクは全社の出口、システムのタスクはシステムの出口だけを選べ、機密のタスクは機密の結果を送ってよい出口だけを選べる。Runは受付時に出口の版を固定し、出口を今は使えなければ（停止・削除・範囲の外・機密の結果を送れない）受け付けない。
+
 公開済みTask Definition RevisionにBinding Revisionを関連付け、RunにはSkill・資料・モデル設定・受け取ったpayloadとファイル・生成した依頼文とともに固定する。通知Skill、通知Adapter、Interaction BindingとChannel Plugin、Destinationの版も対象に含める。設定変更は次のRunから反映し、再試行中のRunやDeliveryを新しい通知先へ暗黙に向けない。ただし、固定した出口が停止・削除・タスクの範囲の外になったら、配信の直前に確かめて送らない（authorization.md §7.2）。Secretは値を保存せず参照を持ち、資格情報の更新・失効は別に反映する。
 
 通常チャットにはTask Definitionを必須にしない。既定のchat Triggerと画面内の結果表示を使い、必要に応じてタスクを指定して実行する。PipelineRunやTaskRunは追加せず、共通Runへ起動元とBindingを関連付ける。タスクの起動Pluginを増やしても、RunnerにPlugin別の業務分岐を増やさない。
@@ -520,7 +522,7 @@ Webhook AdapterはAPIキー・署名等で認証し、URLを知っているだ�
 - **項目の取り出し（任意）**：Bindingに、取り出す項目を表で書く（タスクの入力の項目の名前と、payloadの中の場所（JSONのpath。`$.data.items[0]["vendor name"]` の形））。必須か、型（文字・数値・整数・真偽・日付・選択肢・ファイル）と取りうる値は、タスクの版の入力の項目で決め、手動実行と同じ規則で確かめる（フォームの値のように数値・真偽が文字で届いたときは読み替える）。取り出した値はプロンプトのテンプレートに `{{ inputs.名前 }}` で埋め込める。値は文字として埋め込むだけで、式やコードとして評価しない。値は利用者の指示ではないデータなので、信頼しない内容として囲んで埋め込む（harness.md §6.3）。必須の項目がない要求と型の合わない要求は、受付時に400で断り、Runを作らない。型がファイルの項目は、multipartで付けたファイル（項目の場所は `$.フィールドの名前`）を指し、値は作業場所に置いたファイルのパス（`/workspace/input/...`）になる（手動実行でもファイルを付ける）。JSONの値（URL等）はファイルの項目の値にしない。設定画面では、サンプルのpayloadを貼ると、取り出した値と埋め込んだ後のプロンプトを表示して確かめられる。
 - **Bindingに置くもの**：Runを作る前にサーバーが決めることだけを置く。受け口と認証、重複の判定に使う送り元のイベントIDの場所（任意）、項目の取り出し（任意）、payloadの大きさの上限（multipartのファイルを含む。既定1MiB・最大10MiB。multipartのファイル以外の値の合計は、Djangoのフォームと同じ上限（`DATA_UPLOAD_MAX_MEMORY_SIZE`。既定2.5MiB）まで）。ファイルの数は、最初の発言に付けられる添付の数（`YORIKI_ATTACHMENTS_PER_MESSAGE`）からpayloadのファイルの分を引いた数まで。
 - **重複の判定**：重複のキーは、Bindingで指定した送り元のイベントID、要求の `Idempotency-Key` ヘッダー、推奨の形式の `event_id`（Bindingでイベントの場所を指定していないときだけ）の順に使う。イベントIDと `Idempotency-Key` は出所を付けて分ける（同じ値でも別のキー）。本文の内容（hash）だけではキーにしない（同じ内容の別の出来事を、再送と区別できないため）。multipartのファイルは名前・大きさ・中身のSHA-256で比べる（置いたパスは比べない）。同じキーと同じ内容なら前のRunを返し、同じキーで違う内容は409で断る。Bindingの版でイベントIDの場所を変えた後も、前の版の場所で取り出したキーで同じ内容の受付があれば前のRunを返す（違う内容で断る判定には今の版のキーだけを使う）。どれもない場合は重複の判定をせず、届くたびに新しいRunを作る。この場合は、送り元が再送すると二重に実行されることを設定画面に表示する。
-- **失敗を必ず知らせる**：Webhookで起動するタスクは、失敗を知らせる先を必須とする（`run.failed` を含む結果通知か、対話のチャネル）。ないTask Definitionは公開できない。受付時の202にはrun_idを含め、送り元は同じ認証で状態を確かめる口（`GET /api/hooks/v1/tasks/{task}/runs/{run_id}/`。状態と、失敗なら決まった失敗のコードだけを返す。エラーの本文やログ由来の情報は、鍵の持ち主に返さない。authorization.md §7.1）でも結果を確かめられる。画面は、これらを入れるふつうのフォームと項目の表にする（項目の場所はJSONのpathを文字で入れる）。
+- **失敗を必ず知らせる**：Webhookで起動するタスクは、失敗を知らせる先を必須とする（`run.failed` を含む結果通知か、対話のチャネル）。ないTask Definitionは公開できない（初期の実装：Webhookの入口の作成・変更と、入口のあるタスクの保存で、`run.failed` を含む結果通知がなければ断る。この確認を入れる前に作った入口の受付は止めない）。受付時の202にはrun_idを含め、送り元は同じ認証で状態を確かめる口（`GET /api/hooks/v1/tasks/{task}/runs/{run_id}/`。状態と、失敗なら決まった失敗のコードだけを返す。エラーの本文やログ由来の情報は、鍵の持ち主に返さない。authorization.md §7.1）でも結果を確かめられる。画面は、これらを入れるふつうのフォームと項目の表にする（項目の場所はJSONのpathを文字で入れる）。
 - **推奨の形式**：送る形を決められる送り元（Zapier等）向けに、Yorikiの推奨の形式（`event_id`、`message`、`inputs`、`files`）を示す。この形式で送れば、重複のキー（`event_id`。Bindingでイベントの場所を指定していないとき）と項目の取り出し（`inputs` の値をそのまま入力の値にする。Bindingで取り出しを指定していないとき）とファイルの取り込みはBindingの設定なしで行う。フォームの値・multipartでは、`inputs[名前]` のフィールドを `inputs` の値として読み（型がファイルの項目には `inputs[名前]` でファイルを付ける）、項目に結び付かないファイルは `files` のフィールドで付ける（付けたファイルは、どのフィールドのものもすべて作業場所に置く）。`message` は他の値と同じくpayloadのファイルに残るデータで、依頼文としては扱わない（入口は自由な依頼文を受けない。authorization.md §6）。推奨であり、必須にはしない。
 - **受け付ける形式と実行主体**：本文はJSON、フォームの値（JSONにしてファイルに置く）、multipart/form-data（ファイル以外はフォームの値と同じ。ファイルは作業場所に置く）、テキスト（`webhook_payload.txt`。項目は取り出せない）を受け付ける。認証は `Authorization: Bearer <鍵>`（鍵は作成時と作り直したときに一度だけ表示し、DBにはSHA-256と見分け用の先頭だけを保存する）。Runの実行主体（`Run.owner`・会話の持ち主）は、ログインできないシステム用のユーザーにする（利用量の記録と実行時の文脈の名前に使い、権限の判定には使わない）。受付の応答は、受け付けたら202、同じイベントの再送には前のRunを200、形と項目の誤りは400（項目ごとの誤り）、停止中の入口は403、同じイベントIDで違う内容とタスクを今は実行できないときは409（理由はタスクの中身を含むので送り元には返さない）、上限を超えた本文は413、受け付けない形式は415。
 
@@ -577,15 +579,17 @@ ResultEnvelopeはresult_id、run_id、タスク版、結果Schema版、確定デ
 
 Zapierでファイルとして使うURLは、追加ログイン不要で直接取得できる必要がある。対象ファイルに限定した期限付きURLを発行し、社内SSOの画面URLを渡さない。どの保存先でも、出口へ渡すのはAPIのtoken付き取得経路だけにする。APIは取得のたびにtokenと出口が有効かを確かめ、S3保存時は確かめた後にごく短い期限（例：1分）の署名付きURLへリダイレクトしてよい（出口を止めたらすぐ取得できなくするため。authorization.md §7.1）。保存Backendを切り替えても通知SkillはArtifact IDを扱い続ける。取得経路の到達性と期限は配信設定時に検証する。
 
+**webhook・zapierのAdapter（初期の実装）**：共通の形（`version`、`event_id`、`event_type`、`occurred_at`、`run`（id・状態・失敗のコード・日時）、`task`（id・名前・版）、通知内容が業務結果を含むときは `result`）をJSONでPOSTする。失敗の理由の本文は含めない（決まった失敗のコードだけ。authorization.md §7.1）。要求には [Standard Webhooks](https://www.standardwebhooks.com/) の形の署名（`webhook-id`・`webhook-timestamp`・`webhook-signature`。鍵は出口ごとに作り、作成時と作り直したときに一度だけ表示する）を付け、受け手が送り主とイベントを確かめられるようにする。送り先はhttpsだけで、名前を引いた先がプライベート・ループバック・リンクローカル等のアドレスなら、登録時にも送信時にも断る（SSRF対策。社内のシステムへ送る導入先は、基盤管理者が `YORIKI_DELIVERY_ALLOWED_NETWORKS` で許すネットワークを指定する）。送るときは確かめたアドレスに接続を固定し（TLSの証明書は元のホスト名で確かめる。複数のアドレスは、つながらないときだけ名前を引き直さずに順に試す）、応答の本文は読まず、リダイレクトは辿らない（3xxは失敗）。Zapierの出口は、送り先をCatch HookのURL（`https://hooks.zapier.com/hooks/catch/…`）に限る。期限付きのファイルURLと結果を確かめる画面へのリンクは、後の段階で足す。
+
 Destinationは接続情報、Secret参照、許可scope、対応内容、timeout、再試行方針を版付きで管理する。送信前にも有効性を再確認し、失効した宛先には再送しない。URL型Adapterは登録時・接続時に許可範囲とredirect先を検証する。ZapierのHook URL等をLLMや通常ログへ露出しない。通知Pluginの追加によってSandboxの通信制限を緩めない。
 
 ### 4.5 実行状態と通知の再試行
 
 RunのCOMPLETEDは業務結果と成果物の確定を表す。Deliveryは配信待ち、配信中、受付確認済み、再試行待ち、失敗、取消を別に保持し、「処理完了・通知失敗」を表現する。保存済み結果を使って配信だけ再試行し、エージェントの実行や通知SkillのLLM処理をやり直さない。通信ごとの送信内容・URL有効期限はDeliveryAttemptへ記録し、再送でURLを更新してもevent_idと業務結果は維持する。
 
-配信キーはrun_event_id、Notification Binding Revision、Destination Revisionから作る。同じ完了イベントの自動通知とTool候補を統合でき、確認待ちが複数回発生しても別のRunEventとして通知できる。対話用の送信もInteraction Bindingから解決した送信Bindingとthread参照を使い、同じDelivery／Outboxで管理する。質問ごとにClarificationRequestのID・世代を持つ別イベントとする。同じイベントを同じ対話スレッドへ送る設定が重複した場合は一つの配信へ正規化する。手動送信は別のoperation keyを持つ。外部送信で、受付後に応答が失われる等、送ったかどうか分からない障害では、自動で送り直さず確認待ちにする（authorization.md §6）。受信側のevent_idによる重複処理は補助として使い、exactly-onceとは表現しない。
+配信キーはrun_event_id、Notification Binding Revision、Destination Revisionから作る（初期の実装は、通知の設定をTask Definitionの版の項目にし、Runがその版を固定するので、配信キーはrun_event_idとDestination Revisionの2つ（`uniq_delivery_key`）。Notification Bindingを別のModelにするとき（通知Skillの段階）に、その版をキーに加える）。同じ完了イベントの自動通知とTool候補を統合でき、確認待ちが複数回発生しても別のRunEventとして通知できる。対話用の送信もInteraction Bindingから解決した送信Bindingとthread参照を使い、同じDelivery／Outboxで管理する。質問ごとにClarificationRequestのID・世代を持つ別イベントとする。同じイベントを同じ対話スレッドへ送る設定が重複した場合は一つの配信へ正規化する。手動送信は別のoperation keyを持つ。外部送信で、受付後に応答が失われる等、送ったかどうか分からない障害では、自動で送り直さず確認待ちにする（authorization.md §6）。受信側のevent_idによる重複処理は補助として使い、exactly-onceとは表現しない。
 
-Adapterが分類した一時的な障害、timeout、429、再試行可能な5xx等は上限付きbackoffで扱う。権限・設定・形式エラー等は原因を表示する。通知Pluginの停止や未対応版の検出時は対象Deliveryを保持し、別方式へ勝手に送らない。通知設定を変更して過去結果を送り直す場合は、管理権限を検証した新しい配信操作として元の履歴と関連付ける。
+Adapterが分類した一時的な障害、timeout、429、再試行可能な5xx等は上限付きbackoffで扱う（初期の実装：名前を引けない・つながらない・接続の時間切れ・408・425・429・500・502・503・504を、1分・5分・15分・1時間・3時間の間隔で、合わせて6回まで送る。送り先の `Retry-After` が長ければ3時間までそれに従う。それ以外の4xx・3xxは失敗。送った後の応答の時間切れ・接続の切断と、配信中にWorkerが止まって持ち時間（2分）が切れたものは「確認待ち」にし、自動では送り直さない（切れた後に受付確認が遅れて届けば、受付確認済みにする）。失敗・確認待ち・取消の配信は、タスクを管理できる人が送り直せる（保存した内容を送る。HTTPには送信全体の期限がないので、前の送信が終わるか、Q2がWorkerを止める時間を過ぎるまでは送り直さない））。権限・設定・形式エラー等は原因を表示する。通知Pluginの停止や未対応版の検出時は対象Deliveryを保持し、別方式へ勝手に送らない。通知設定を変更して過去結果を送り直す場合は、管理権限を検証した新しい配信操作として元の履歴と関連付ける。
 
 Webhookの2xxは送信先の受付確認であり、後続Zap等の業務完了ではない。in_appは通知欄への保存、将来のAdapterはそのサービスの受付を、それぞれ明示する。外部の処理完了まで追う場合は別の認証済み結果返却経路を設計する。
 
@@ -849,17 +853,17 @@ Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプ�
 | SkillEvaluationCase / SkillEvaluation | 評価ケース（依頼の文、添付、確認する観点、期待する業務結果、公開の前に必須か）。評価は、写したDraftの中身とrevision、比べた公開中の版、モデル、依頼者・編集Run、ケースごとの評価Run・機械的な検証・LLMの判定（§3.7.1） |
 | RuntimeProfile / RuntimeProfileVersion | 名前・説明、有効か、既定か（1つだけ）。版はimage（repositoryとindex＝manifest listのdigest。Workerは自分のplatformのmanifestを解決し、そのdigestをAttemptに記録する）、契約番号、対応platform、Python版、資源上限（メモリ、CPU、pids、tmpfsの大きさ、コマンド・ジョブの時間）。中身を変えると新しい版を作る（§7.3） |
 | EnvironmentRevision / PackageBundle | 完全な依存lock、wheelのhash、対応ABIとplatform、保管参照、元revision |
-| TaskDefinition / TaskDefinitionRevision | 範囲（個人・部門・全社・システム）と持ち主・部門、停止、今の版。版は説明、プロンプトのテンプレート、使うSkillと固定の版、Connector、使ってよいTool、モデル設定とeffort（空なら既定）、機密、入力の項目（名前・型・必須・選択肢）、業務結果Schema（なければSkillのもの）、保存した人。フローの起動・対話・結果通知Bindingは各段階で足す |
+| TaskDefinition / TaskDefinitionRevision | 範囲（個人・部門・全社・システム）と持ち主・部門、停止、今の版。版は説明、プロンプトのテンプレート、使うSkillと固定の版、Connector、使ってよいTool、モデル設定とeffort（空なら既定）、機密、入力の項目（名前・型・必須・選択肢）、業務結果Schema（なければSkillのもの）、結果の通知（出口・対象イベント・通知内容。初期は1つ）、保存した人。フローの起動・対話Bindingは各段階で足す |
 | PluginExtension | 拡張種別、Adapter実装版、契約版、設定Schema、対応能力、有効状態 |
 | TriggerBinding / TriggerBindingRevision | 安定ID、起動Plugin版、認証参照、範囲と使ってよい範囲、タスク（Webhookは1対1）、設定版 |
 | TriggerReceipt | 起動Binding、外部イベントID、入力hash、対応Run・会話操作、受付時刻 |
-| NotificationBinding / NotificationBindingRevision | Plugin・Skill版、対象イベント、通知内容、Destination版、許可項目 |
+| NotificationBinding / NotificationBindingRevision | Plugin・Skill版、対象イベント、通知内容、Destination版、許可項目。初期（1つのタスクに1つの結果通知・通知Skillなし）は別のModelにせず、TaskDefinitionRevisionの項目（出口・対象イベント・通知内容）にする。Runは受付時にDestinationの版を固定する（§4.1） |
 | InteractionBinding / InteractionBindingRevision | Channel Plugin版、接続・Destination版、スレッド方針、返信モード、通知イベント |
 | ExternalThreadBinding | Run・Conversation、対話Binding版、provider・接続・チャネル・thread参照、親message、作成操作key、状態 |
 | ChannelMessageReceipt | provider・接続・event／message ID、投稿者ID・表示名、thread、質問世代、本文hash、受付・適用結果 |
-| Destination / DestinationRevision | 種別、宛先、Secret参照、許可scope、出力・再送設定、状態 |
-| Delivery | Run、event_id、配信キー、送信Binding版、外部thread参照、確定内容・質問・結果・成果物参照、配信状態 |
-| DeliveryAttempt | 試行番号、送信payload、URL期限、受付結果・外部ID、エラー、次回試行時刻 |
+| Destination / DestinationRevision | 種別（webhook・zapier。in_app等は後で足す）、使ってよい範囲（部門・全社・システム）と部門、署名の鍵（暗号化して保存。版に入れない）、停止。版は宛先のURL（資格情報を含みうるので暗号化して保存し、画面にはホストと末尾だけを出す）、機密の結果を送ってよいか（§4.4） |
+| Delivery | Run、RunEvent（event_idはRunのIDとイベントの順序）、Destinationの版（配信キーはこの2つ）、確定内容（送る内容をRunの終わりに組み立てて保存する）、配信状態、送った回数、次回試行時刻、配信中の期限（§4.5）。外部thread参照は対話の段階で足す |
+| DeliveryAttempt | 試行番号、受付結果（受付確認・一時的な失敗・失敗・届いたか分からない）、HTTPの状態コード、エラー（応答の本文は保存しない）。URL期限は期限付きのファイルURLの段階で足す |
 | LLMConnection | プロバイダ種別、API key（暗号化して保存）、base URL、timeout、同時実行数・rate limit（§4.8） |
 | ModelProfile / ModelProfileVersion | 接続、モデル名、token上限、単価、対応能力、受け付けるeffortの値と既定、使わせる範囲を版付きで保持（§4.8） |
 | 接続（DatabaseConnection等。種類ごと） | 種別、接続先、認証方式、資格情報（暗号化して保存）、接続のタイムアウト、同時実行数の上限（§4.9.1） |

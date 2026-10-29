@@ -3,7 +3,7 @@
 Yorikiの権限（誰が何を見て、使い、変えられるか）と、Runが誰の権限で何を読みどこへ出せるかを定める。対象はSkill・Connector・タスク・入口（Trigger）・出口（配信先）と、管理画面の操作。製品の要件は [design.md](design.md) を正とし、権限については本書を正とする（design.md §3.6・§4.1・§4.9.1・§10.0は本書の要約）。Djangoでの書き方は [backend-conventions.md](backend-conventions.md) §6.3、画面の出し分けは [frontend-conventions.md](frontend-conventions.md) §6 に従う。
 
 - 版：0.1 設計案（2026年10月27日。design.md 0.33）
-- タスク・入口・出口はまだ実装していない。その部分は方針で、細部はタスク・配信の段階で実物に即して詰める。
+- タスク（定義と版、手動実行）・Webhookの入口・出口（Webhook・Zapier）と配信は実装した。スケジュールの入口、チャットからのタスクの起動、画面の通知・本人へのDM・Slack・Teamsの出口、タスク・出口の画面はまだ実装していない。その部分は方針で、細部は各段階で実物に即して詰める。
 
 ---
 
@@ -15,7 +15,7 @@ Yorikiは社内向けのAIエージェント基盤。社員は会話でエージ
 |---|---|
 | Skill | 業務の手順・判断基準・資料（CSV・PPTX等）・業務結果の形。Draft（編集中）と不変の版を持ち、「公開」で版を作る。エージェントが会話からSkillを直すこともできる（依頼した人の権限の範囲で） |
 | Connector | 外部のデータ（社内DB、SharePoint、Google Drive等）を、エージェントに見せる範囲（表・列、サイト・フォルダ）を決めて公開するもの。接続先と資格情報（接続）とは分けて持ち、1つの接続の上に範囲の違うConnectorを複数作れる |
-| タスク | 決まった入口（スケジュール・Webhook・チャット等）で起動し、決まったSkill・Connector・Tool・モデル・プロンプトを使い、決まった出口（配信先）へ結果を届ける定型の業務。まだ実装していない |
+| タスク | 決まった入口（スケジュール・Webhook・チャット等）で起動し、決まったSkill・Connector・Tool・モデル・プロンプトを使い、決まった出口（配信先）へ結果を届ける定型の業務（スケジュールとチャットからの起動はまだない） |
 | 入口（Trigger） | タスクを起動するもの。スケジュール、社内・社外のサービスからのWebhook等 |
 | 出口（配信先） | タスクの結果を届ける先。画面の通知、Slack・Teams等のチャット（本人へのDMを含む）、Zapier、Webhook等。出口としてのメールの送信は持たない（必要ならZapierを通す。招待のリンク等、システムから本人へのメールは出口ではない） |
 | 会話 | 社員がエージェントに頼む場。`/`でSkill、`@`でConnectorを指定できる。指定がなければ、エージェントが利用者の使えるものから探して使う |
@@ -363,7 +363,7 @@ Runの中身が外へ出る経路をすべて列挙し、どれにも「結果�
 | 全件管理者 | `user.can_manage_all_departments`と、部門・全社のSkill・タスクのpermission |
 | Connector管理者 | `connector.*_connector`、`connector.*_<接続のModel>` |
 | システム管理者 | `skill.can_edit_system_skills`、`skill.can_publish_system_skills`、`task.can_manage_system_tasks`、`connector.view_connector`（システムタスクに登録するConnectorの定義を見るため） |
-| 連携の管理者 | 入口のModelのpermission（`task.*_triggerbinding`）。出口のModelのpermissionは配信の段階で足す |
+| 連携の管理者 | 入口と出口のModelのpermission（`task.*_triggerbinding`、`delivery.*_destination`。出口のpermissionは配信の段階のマイグレーションで足した） |
 | ユーザー管理者 | `user.*_user`、`user.*_department` |
 
 ## 12 0.33で変えたこと（以前の設計・実装から）

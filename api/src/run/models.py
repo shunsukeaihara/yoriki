@@ -179,6 +179,15 @@ class Run(models.Model):
         related_name="+",
         verbose_name=_("実行したときのタスクの部門"),
     )
+    # 受付時に固定した結果の通知先の版（タスクの版で通知を設定したとき。authorization.md §7.2）
+    destination_revision = models.ForeignKey(
+        "delivery.DestinationRevision",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("結果の通知先の版"),
+    )
 
     created = models.DateTimeField(auto_now_add=True, db_index=True)
     updated = models.DateTimeField(auto_now=True)
@@ -259,6 +268,11 @@ class Run(models.Model):
                 run=self, kind=InstructionKind.CURRENT, state=InstructionState.RECEIVED
             ).update(kind=InstructionKind.NEXT, run=None, updated=timezone.now())
             start_next_request(self.conversation)
+            if self.destination_revision_id is not None:
+                # 結果の通知の配信を、終わりの状態と同じtransactionで作る（design.md §4.3）
+                from delivery.outbox import queue_deliveries  # noqa: PLC0415  deliveryがrunのModelを参照するため
+
+                queue_deliveries(self, event)
             if self.kind in (RunKind.EVALUATION, RunKind.SKILL_EDIT):
                 # 評価のRunが終わったら評価を進め、編集のRunが終わったら待っている評価を止める（design.md §3.7.1）
                 from conversation.evaluation import on_run_finished  # noqa: PLC0415

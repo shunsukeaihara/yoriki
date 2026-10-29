@@ -14,6 +14,7 @@ from rest_framework.exceptions import ValidationError
 from artifact.models import ArtifactKind, BlobObject
 from artifact.tests.test_api import body_of
 from conversation.models import ConversationPurpose
+from delivery.factories import DestinationFactory
 from run.models import Run, RunEndReason, RunEvent, RunEventKind, RunLaunch, RunStatus, RunTrigger
 from task.dispatch import WEBHOOK_NOTE, discard_files, receive_webhook, store_files
 from task.factories import TaskDefinitionFactory
@@ -47,9 +48,18 @@ def fixture_integrator(db) -> User:
     return grant(UserFactory.create(), *BINDING_PERMS)
 
 
+def notified(scope: TaskScope = TaskScope.COMPANY, **kwargs) -> dict:
+    """失敗を知らせる通知先（Webhookで起動するタスクに必須。design.md §4.2）の版の項目"""
+    return {
+        "revision__destination": DestinationFactory.create(scope=scope, **kwargs),
+        "revision__notify_events": ["run.failed"],
+    }
+
+
 @pytest.fixture(name="task")
 def fixture_task(db) -> TaskDefinition:
     return TaskDefinitionFactory.create(
+        **notified(),
         scope=TaskScope.COMPANY,
         name="請求書チェック",
         revision__prompt_template="{{ inputs.vendor }} の請求書を確認してください。",
@@ -331,6 +341,7 @@ def _send_multipart(api_client, task, key, data, **headers):
 
 def _file_task(api_client, integrator, **binding):
     task = TaskDefinitionFactory.create(
+        **notified(),
         scope=TaskScope.COMPANY,
         revision__prompt_template="{{ inputs.invoice }} を確認してください。",
         revision__inputs=FILE_INPUTS,
@@ -556,7 +567,7 @@ def test_multipart_limits_and_encoding(api_client, integrator, settings):
 
 
 def test_text_payload_is_kept_as_a_text_file(api_client, integrator):
-    task = TaskDefinitionFactory.create(scope=TaskScope.COMPANY, revision__inputs=[])
+    task = TaskDefinitionFactory.create(**notified(), scope=TaskScope.COMPANY, revision__inputs=[])
     key = _create_binding(api_client, integrator, task).json()["key"]
     api_client.logout()
     res = _send(api_client, task, key, "請求書が届きました", content_type="text/plain; charset=utf-8")
@@ -579,7 +590,7 @@ def test_authentication(api_client, task, webhook):
     assert api_client.post(_hook(task), {}, format="json").status_code == 401
     assert _send(api_client, task, "yrk_wh_wrong", _payload()).status_code == 401
     # 別のタスクのURLには使えない（あるかどうかも見せない）
-    other = TaskDefinitionFactory.create(scope=TaskScope.COMPANY)
+    other = TaskDefinitionFactory.create(**notified(), scope=TaskScope.COMPANY)
     assert _send(api_client, other, key, _payload()).status_code == 404
     # セッションでは使えない
     api_client.force_login(UserFactory.create())
@@ -612,7 +623,7 @@ def test_the_sender_sees_only_the_state_of_its_runs(api_client, integrator, task
     assert res.json() == {"run_id": run_id, "status": "failed", "failure_code": "step_limit"}
 
     # 他の入口のRunは見えない
-    other_task = TaskDefinitionFactory.create(scope=TaskScope.COMPANY, revision__inputs=[])
+    other_task = TaskDefinitionFactory.create(**notified(), scope=TaskScope.COMPANY, revision__inputs=[])
     other_key = _create_binding(api_client, integrator, other_task).json()["key"]
     api_client.logout()
     other_run = _send(api_client, other_task, other_key, {}).json()["run_id"]
@@ -728,7 +739,7 @@ def _content(binding):
 
 def test_form_with_too_many_fields_is_refused(api_client, integrator, settings):
     settings.DATA_UPLOAD_MAX_NUMBER_FIELDS = 3
-    task = TaskDefinitionFactory.create(scope=TaskScope.COMPANY, revision__inputs=[])
+    task = TaskDefinitionFactory.create(**notified(), scope=TaskScope.COMPANY, revision__inputs=[])
     key = _create_binding(api_client, integrator, task).json()["key"]
     api_client.logout()
     body = urlencode({f"f{n}": "x" for n in range(4)})
@@ -796,7 +807,7 @@ def test_system_user_does_not_reuse_an_employee_account():
 
 
 def test_form_with_invalid_utf8_is_refused(api_client, integrator):
-    task = TaskDefinitionFactory.create(scope=TaskScope.COMPANY, revision__inputs=[])
+    task = TaskDefinitionFactory.create(**notified(), scope=TaskScope.COMPANY, revision__inputs=[])
     key = _create_binding(api_client, integrator, task, event_id_path="$.event_id").json()["key"]
     api_client.logout()
     res = _send(api_client, task, key, "event_id=%FF", content_type="application/x-www-form-urlencoded")

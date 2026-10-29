@@ -18,6 +18,7 @@ from artifact.models import Artifact, ArtifactKind, BlobLocation, BlobObject, cl
 from artifact.storage import get_storage
 from conversation.dispatch import user_message_data
 from conversation.models import Conversation, ConversationMessage, ConversationPurpose, MessageRole
+from delivery.models import Destination, DestinationRevision
 from harness.connectors import fixed_catalog, is_allowed_for
 from harness.skills import manifest_entry
 from harness.untrusted import untrusted
@@ -161,6 +162,7 @@ def _start(
     if output_schema and not version.supports_tools:
         # 業務結果は submit_result で確定するので、モデル設定の今の版がToolを使えなければ受け付けない
         raise CannotRun(_("このタスクのモデル設定はToolを使えないので、業務結果を確定できません。"))
+    destination_revision = _destination_revision(task, revision)
     conversation = Conversation.objects.create(
         owner=actor,
         model_profile=profile,
@@ -211,6 +213,7 @@ def _start(
         launch=launch,
         task_scope=task.scope,
         task_department=task.department,
+        destination_revision=destination_revision,
     )
     message.run = run
     message.save(update_fields=["run"])
@@ -229,6 +232,24 @@ def _start(
     )
     enqueue_run(run)
     return run
+
+
+def _destination_revision(task: TaskDefinition, revision: TaskDefinitionRevision) -> DestinationRevision | None:
+    """結果の通知先の今の版（Runに固定する）。通知先を今は使えなければ CannotRun（受け付けた後に送れないRunを
+    作らない）"""
+    if revision.destination_id is None:
+        return None
+    # 停止・版の更新と同時に受け付けないよう、出口の行をロックする（タスクの行の後に取る）
+    destination = (
+        Destination.objects.select_for_update(of=("self",))
+        .select_related("current_revision", "department")
+        .get(pk=revision.destination_id)
+    )
+    if problem := destination.problem_for(task, sensitive=revision.handles_sensitive_data):
+        raise CannotRun(
+            _("結果の通知先「%(name)s」を使えません（%(reason)s）。") % {"name": destination.name, "reason": problem}
+        )
+    return destination.current_revision
 
 
 def _first_message(text: str, inputs: dict[str, Any], launch: RunLaunch) -> str:

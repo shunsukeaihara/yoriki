@@ -288,6 +288,9 @@ REVISION_FIELDS = (
     "handles_sensitive_data",
     "inputs",
     "output_schema",
+    "destination",
+    "notify_events",
+    "notify_content",
 )
 
 
@@ -301,6 +304,8 @@ class TaskDefinitionRevision(models.Model):
     - `inputs`：入力の項目。`[{"name": "vendor", "label": "取引先", "type": "string", "required": true,
       "choices": [], "max_length": 200}]`。プロンプトのテンプレートに `{{ inputs.vendor }}` で埋め込む
     - `output_schema`：業務結果のSchema。なければSkillのもの
+    - `destination`・`notify_events`・`notify_content`：結果の通知（出口、通知するイベント、通知の内容）。初期は
+      1つのタスクに1つ（design.md §4.1）。Runは受付時に出口の版を固定する
     """
 
     uid = NanoidField(unique=True)
@@ -322,6 +327,16 @@ class TaskDefinitionRevision(models.Model):
     handles_sensitive_data = models.BooleanField(_("個人情報・機密情報を扱う"), default=False)
     inputs = models.JSONField(_("入力の項目"), default=list)
     output_schema = models.JSONField(_("業務結果のSchema"), null=True, blank=True)
+    destination = models.ForeignKey(
+        "delivery.Destination",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("結果の通知先"),
+    )
+    notify_events = ArrayField(models.CharField(max_length=30), verbose_name=_("通知するイベント"), default=list)
+    notify_content = models.CharField(_("通知の内容"), max_length=30, default="status_and_result")
     change_reason = models.CharField(_("変更理由"), max_length=500, blank=True)
     # 最後にタスクを保存した人（authorization.md §6。Runに記録する）
     created_by = models.ForeignKey(

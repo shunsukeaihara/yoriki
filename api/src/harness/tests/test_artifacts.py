@@ -83,13 +83,13 @@ def test_model_sees_the_attachment_list():
         }
     ]
     RunEvent.record(run, RunEventKind.USER_MESSAGE, {"text": "取り込んで", "attachments": attachments})
-    [message] = build_messages(run, RunEvent.objects.filter(run=run))
+    [message] = build_messages(run, RunEvent.objects.filter(run=run).order_by("sequence"))
     assert message.text == (
         "取り込んで\n\n<attachments>\nThe user attached these files (read-only):\n"
         "- /workspace/input/請求書.pdf (application/pdf, 2.0 KB)\n</attachments>"
     )
     RunEvent.record(run, RunEventKind.USER_MESSAGE, {"text": "集計も", "earlier_attachments": attachments})
-    second = build_messages(run, RunEvent.objects.filter(run=run))[1]
+    second = build_messages(run, RunEvent.objects.filter(run=run).order_by("sequence"))[1]
     assert second.text.startswith('集計も\n\n<attachments scope="earlier">\nFiles attached earlier')
     assert "- /workspace/input/請求書.pdf" in second.text
 

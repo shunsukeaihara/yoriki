@@ -65,4 +65,49 @@ describe('TaskRunDeliveries', () => {
     expect(list).toHaveBeenCalledTimes(2)
     expect(wrapper.emitted('retried')).toHaveLength(1)
   })
+
+  it('送り直しが受け付けられたら、読み直しに失敗しても受け付けた状態を出す', async () => {
+    list.mockResolvedValueOnce({ results: [delivery('a', DeliveryStatus.FAILED, '失敗')], next: null, previous: null })
+    const wrapper = await mountSuspended(TaskRunDeliveries, { props: { taskId: 't1', runId: 'r1' } })
+    await flushPromises()
+    retry.mockResolvedValue(delivery('a', DeliveryStatus.PENDING, '配信待ち'))
+    list.mockRejectedValue(new Error('network'))
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('通知を再試行'))!
+      .trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('配信待ち')
+    expect(wrapper.text()).not.toContain('通知を再試行')
+    expect(wrapper.emitted('retried')).toHaveLength(1)
+  })
+
+  it('配信待ち・配信中の間は、間をおいて読み直す', async () => {
+    vi.useFakeTimers()
+    try {
+      list
+        .mockResolvedValueOnce({
+          results: [delivery('a', DeliveryStatus.SENDING, '配信中')],
+          next: null,
+          previous: null,
+        })
+        .mockResolvedValue({
+          results: [delivery('a', DeliveryStatus.DELIVERED, '受付確認済み')],
+          next: null,
+          previous: null,
+        })
+      const wrapper = await mountSuspended(TaskRunDeliveries, { props: { taskId: 't1', runId: 'r1' } })
+      await flushPromises()
+      expect(list).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(5000)
+      await flushPromises()
+      expect(list).toHaveBeenCalledTimes(2)
+      expect(wrapper.text()).toContain('受付確認済み')
+      // 確定したら読み直さない
+      await vi.advanceTimersByTimeAsync(20000)
+      expect(list).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

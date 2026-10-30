@@ -2,7 +2,8 @@
 /**
  * タスクの Run の配信（design.md §4.5・§11.9）。出口ごとの配信の状態、送った内容、送信の記録を出し、失敗・確認待ち・
  * 取消の配信は「通知を再試行」で送り直す（保存した内容を送る。エージェントは動かし直さない）。
- * 受付確認は送り先が受け取ったことだけを表し、Zapier 等での後の処理が終わったことは表さない
+ * 受付確認は送り先が受け取ったことだけを表し、Zapier 等での後の処理が終わったことは表さない。
+ * 配信は Run の後に Worker が送るので、配信待ち・配信中の間は間をおいて読み直す（配信の変化は画面へ知らせないため）
  */
 const props = defineProps<{ taskId: string; runId: string }>()
 const emit = defineEmits<{ retried: [value: Delivery] }>()
@@ -14,12 +15,27 @@ const { t } = useI18n()
 const { items, loading, fetchAll } = useFetchAll(() =>
   api.tasks(props.taskId).deliveries().list({ run: props.runId, pageSize: 50 }),
 )
+const notifyLoadError = (err: unknown) =>
+  toast.add({ title: t('配信を読めませんでした'), description: makeErrorMsg(err), color: 'error' })
 defineExpose({ reload: fetchAll })
-onMounted(() =>
-  fetchAll().catch((err) =>
-    toast.add({ title: t('配信を読めませんでした'), description: makeErrorMsg(err), color: 'error' }),
-  ),
+onMounted(() => fetchAll().catch(notifyLoadError))
+
+// 配信待ち・配信中のものがあれば読み直す（再試行待ちは次に送る日時を出すので、読み直さない）
+const POLL_INTERVAL = 5000
+const sending = computed(() =>
+  items.value.some((d) => d.status === DeliveryStatus.PENDING || d.status === DeliveryStatus.SENDING),
 )
+let pollTimer: ReturnType<typeof setTimeout> | undefined
+const schedulePoll = () => {
+  clearTimeout(pollTimer)
+  if (!sending.value) return
+  pollTimer = setTimeout(() => {
+    // 読めなくても、次の読み直しか「読み直す」で戻る
+    fetchAll().catch(() => {})
+  }, POLL_INTERVAL)
+}
+watch(items, schedulePoll)
+onBeforeUnmount(() => clearTimeout(pollTimer))
 
 const eventLabels = computed(() => new Map(notifyEventItems(t).map((item) => [item.value, item.title])))
 const kindIcon = (kind: DestinationKindEnum) => (kind === DestinationKind.IN_APP ? 'i-lucide-bell' : 'i-lucide-send')
@@ -36,17 +52,21 @@ const retry = async (delivery: Delivery) => {
   })
   if (!ok) return
   retrying.value = delivery.id
+  let value: Delivery
   try {
-    const value = await api.tasks(props.taskId).deliveries(delivery.id).retry()
-    toast.add({ title: t('送り直しを受け付けました'), color: 'success' })
-    emit('retried', value)
-    await fetchAll()
+    value = await api.tasks(props.taskId).deliveries(delivery.id).retry()
   } catch (err) {
     toast.add({ title: t('再試行できませんでした'), description: makeErrorMsg(err), color: 'error' })
     await fetchAll().catch(() => {})
+    return
   } finally {
     retrying.value = null
   }
+  // 受け付けたことは、読み直しに失敗しても応答で示す（もう一度送らせない）
+  items.value = items.value.map((d) => (d.id === value.id ? value : d))
+  toast.add({ title: t('送り直しを受け付けました'), color: 'success' })
+  emit('retried', value)
+  await fetchAll().catch(notifyLoadError)
 }
 </script>
 

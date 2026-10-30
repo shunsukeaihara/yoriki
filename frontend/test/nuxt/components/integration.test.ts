@@ -219,11 +219,36 @@ describe('TriggerBindingPreview', () => {
     expect(text).toContain('evt-1')
     expect(text).toContain('ACME')
     expect(text).toContain('invoice')
-    expect(text).toContain('タスクの依頼文は表示しません')
+    // 断られる要求では、欠けた値で埋めたプロンプトを見せない
+    expect(text).toContain('受付で断るので、プロンプトは作りません')
 
     // 試した後に受け取り方を変えたら、結果が古いことを示す
     await wrapper.setProps({ settings: { ...settings, eventIdPath: '$.event.id' } })
     expect(wrapper.text()).toContain('もう一度試してください')
+  })
+
+  it('受け付けられる要求では、プロンプトを返されたときだけ出し、返されなければ権限がないことを示す', async () => {
+    const ok = {
+      formatError: '',
+      eventId: null,
+      eventIdError: '',
+      values: [{ name: 'vendor', value: 'ACME' }],
+      inputErrors: [],
+      fileInputs: [],
+    }
+    preview.mockResolvedValueOnce({ ...ok, canViewPrompt: false, prompt: null })
+    preview.mockResolvedValueOnce({ ...ok, canViewPrompt: true, prompt: 'ACME の請求書を確認してください。' })
+    const wrapper = await mountSuspended(TriggerBindingPreview, { props: { bindingId: 'b1', settings } })
+    const vm = wrapper.vm as unknown as { onSubmit: () => Promise<void> }
+    await wrapper.find('textarea').setValue('{"vendor": "ACME"}')
+    await vm.onSubmit()
+    await nextTick()
+    expect(wrapper.text()).toContain('この要求は受け付けられます')
+    expect(wrapper.text()).toContain('タスクの依頼文は表示しません')
+    expect(wrapper.text()).toContain('重複を判定せず')
+    await vm.onSubmit()
+    await nextTick()
+    expect(wrapper.text()).toContain('ACME の請求書を確認してください。')
   })
 
   it('読めないpayloadは、その理由だけを出す', async () => {

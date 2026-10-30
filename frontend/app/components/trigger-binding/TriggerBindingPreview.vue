@@ -126,8 +126,12 @@ defineExpose({ onSubmit })
 
         <div class="grid gap-1">
           <span class="font-medium">{{ $t('埋め込んだ後のプロンプト') }}</span>
+          <!-- 断られる要求では、Runを作らないのでプロンプトもない（欠けた値で埋めたものを見せない） -->
+          <p v-if="result.inputErrors.length" class="text-muted">
+            {{ $t('受付で断るので、プロンプトは作りません') }}
+          </p>
           <pre
-            v-if="result.prompt !== null"
+            v-else-if="result.prompt !== null"
             class="max-h-80 overflow-auto rounded-md bg-elevated p-3 text-xs whitespace-pre-wrap"
             >{{ result.prompt }}</pre>
           <p v-else class="text-muted">

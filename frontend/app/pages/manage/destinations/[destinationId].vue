@@ -162,7 +162,7 @@ const tabs = computed(() => [
           :description="$t('受け手の設定を、この鍵に変えてください。鍵はこの画面を閉じると表示できません')"
         />
         <div v-if="destination?.secretRotated" class="text-xs text-muted">
-          {{ $t('署名の鍵を作り直した日時：{date}', { date: formatDatetime(destination.secretRotated) }) }}
+          {{ $t('署名の鍵を作った日時：{date}', { date: formatDatetime(destination.secretRotated) }) }}
         </div>
         <UTabs v-model="tab" :items="tabs" variant="link" :unmount-on-hide="false">
           <template #settings>

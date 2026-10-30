@@ -190,7 +190,7 @@ const tabs = computed(() => [
           <dd>
             <code class="text-xs">Authorization: Bearer {{ binding.keyPrefix }}…</code>
             <span v-if="binding.keyRotated" class="ml-2 text-xs text-muted">
-              {{ $t('作り直した日時：{date}', { date: formatDatetime(binding.keyRotated) }) }}
+              {{ $t('鍵を作った日時：{date}', { date: formatDatetime(binding.keyRotated) }) }}
             </span>
           </dd>
         </dl>
@@ -207,7 +207,7 @@ const tabs = computed(() => [
           </template>
           <template #receipts>
             <div class="pt-4">
-              <TriggerReceiptList v-model:reload-key="receiptsReloadKey" :binding-id="bindingId" />
+              <TriggerBindingReceiptList v-model:reload-key="receiptsReloadKey" :binding-id="bindingId" />
             </div>
           </template>
           <template #revisions>

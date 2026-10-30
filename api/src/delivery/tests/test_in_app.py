@@ -160,7 +160,17 @@ def test_the_list_shows_only_my_notifications_and_marks_them_read():
     assert len(items) == 2
     assert items[0]["task_name"] == task.name
     assert items[0]["event_display"] == "完了"
-    assert set(items[0]) == {"id", "event_type", "event_display", "task", "task_name", "run", "read", "created"}
+    assert set(items[0]) == {
+        "id",
+        "event_type",
+        "event_display",
+        "task",
+        "task_name",
+        "message",
+        "run",
+        "read",
+        "created",
+    }
     assert client.get(f"{NOTIFICATIONS}unread_count/").json() == {"unread": 2}
 
     read = client.post(f"{NOTIFICATIONS}{items[0]['id']}/read/")

@@ -15,12 +15,13 @@ const { unreadCount, list, read, readAll, handlers } = vi.hoisted(() => ({
 mockNuxtImport('useAPI', () => () => ({ notifications: { unreadCount, list, read, readAll } }))
 mockNuxtImport('useUserEvents', () => (handler: (event: UserStreamEvent) => void) => handlers.push(handler))
 
-const notification = (id: string, readAt: string | null = null): AppNotification => ({
+const notification = (id: string, readAt: string | null = null, message = ''): AppNotification => ({
   id,
   eventType: 'run.completed',
   eventDisplay: '完了',
   task: 't1',
   taskName: '請求書チェック',
+  message,
   run: 'r1',
   read: readAt,
   created: '2026-10-29T09:00:00+09:00',
@@ -51,6 +52,21 @@ describe('NotificationBell', () => {
     await flushPromises()
     expect(unreadCount).toHaveBeenCalledTimes(2)
     expect(wrapper.text()).toContain('3')
+  })
+
+  it('開くと一覧を読み、通知Skillが決めた文章を文字として出す', async () => {
+    list.mockResolvedValue({
+      results: [notification('n1', null, '3件の請求書を確認しました。\n<b>差異</b>は1件です')],
+      next: null,
+      previous: null,
+    })
+    const wrapper = await mountSuspended(NotificationBell, { attachTo: document.body })
+    await wrapper.find('button').trigger('click')
+    await flushPromises()
+    expect(list).toHaveBeenCalled()
+    expect(document.body.textContent).toContain('3件の請求書を確認しました。')
+    expect(document.body.textContent).toContain('<b>差異</b>は1件です')
+    wrapper.unmount()
   })
 
   it('開いた通知を既読にし、未読の数を減らす', async () => {

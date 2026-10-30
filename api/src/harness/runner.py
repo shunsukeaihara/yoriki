@@ -92,6 +92,7 @@ from .skills import explicit_versions, revoked_skill
 from .tools import ALL_TOOLS, SANDBOX_TOOLS, WORKSPACE_WRITING_TOOLS
 from .tools.base import Effect, Tool, ToolContext, ToolResult
 from .tools.datasource import make_datasource_tools
+from .tools.prepare_notification import PREPARE_NOTIFICATION
 from .tools.request_skill_edit import REQUEST_SKILL_EDIT
 from .tools.skill_admin import CREATE_SKILL, SKILL_ADMIN_TOOLS
 from .tools.skill_tool import make_skill_tool
@@ -489,9 +490,11 @@ class Runner:
                 instruction.save(update_fields=["state", "applied", "updated"])
                 applied = True
             if applied and run.result is not None:
-                # 確定した業務結果は、取り込んだ指示を反映していない。確定し直させる（harness.md §10.4・§10.5）
-                Run.objects.filter(pk=run.pk).update(result=None, updated=timezone.now())
+                # 確定した業務結果は、取り込んだ指示を反映していない。確定し直させる（harness.md §10.4・§10.5）。
+                # 通知の候補も前の業務結果から作ったものなので消す
+                Run.objects.filter(pk=run.pk).update(result=None, notification=None, updated=timezone.now())
                 self.run_obj.result = None
+                self.run_obj.notification = None
                 RunEvent.record(run, RunEventKind.CONTEXT, {"text": RESULT_RESET_NOTICE, "result_reset": True})
         if applied and self.session.started:
             # 追加指示に付いた添付を、動いているSandboxの /workspace/input にも置く
@@ -533,6 +536,9 @@ class Runner:
             tools = tuple(t for t in (*ALL_TOOLS, *datasource) if t.name in allowed)
             if schema := tasks.output_schema(self.run_obj):
                 tools += (make_submit_result_tool(schema),)
+            if tasks.task_entry(self.run_obj).get("notification_skill"):
+                # 通知Skillが通知の文章と渡すファイルを決める（design.md §4.3）
+                tools += (PREPARE_NOTIFICATION,)
         elif explicit:
             allowed = {name for version in explicit for name in version.tools}
             tools = tuple(t for t in (*ALL_TOOLS, *datasource) if t.name in allowed)

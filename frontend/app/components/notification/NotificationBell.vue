@@ -84,6 +84,10 @@ const colors: Record<NotifyEventEnum, string> = {
               <span :class="['truncate text-sm', item.read ? 'text-muted' : 'font-medium text-highlighted']">
                 {{ item.taskName }}
               </span>
+              <!-- 通知Skillが決めた通知の文章（エージェントが書いたもの。文字として表示する） -->
+              <span v-if="item.message" class="line-clamp-3 text-xs whitespace-pre-line text-default">
+                {{ item.message }}
+              </span>
               <span class="text-xs text-muted">
                 {{ $t('{event}・{time}', { event: item.eventDisplay, time: formatDatetime(item.created) }) }}
               </span>

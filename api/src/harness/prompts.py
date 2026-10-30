@@ -36,6 +36,10 @@ TOOL_GUIDANCE = {
         "- This work has a result schema. When the work is done and checked, call `submit_result` alone with the "
         "result, then write your final reply."
     ),
+    "prepare_notification": (
+        "- This task has a notification skill. After the work (and `submit_result`), follow the skill and call "
+        "`prepare_notification` with the text of the notification. Where it is sent is fixed by the task."
+    ),
     "ask_user": "- Use `ask_user` for business decisions only. Call it alone; the answers arrive as its result.",
     "request_skill_edit": (
         "- When the user gives a rule only for this time, apply it to this work only. When the user asks to keep it "

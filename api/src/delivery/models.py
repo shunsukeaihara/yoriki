@@ -500,8 +500,9 @@ class NotificationQuerySet(models.QuerySet):
 class Notification(models.Model):
     """画面の通知（in_app。design.md §4.3・§4.4）。配信ごと・受け手ごとに1つ。
 
-    受け手は送るときに決める（`delivery/in_app.py`）。中身はタスクの名前とRunの状態だけで、業務結果・成果物は
-    載せない（結果を確かめる画面へのリンクは、タスクのRunの画面ができてから足す）"""
+    受け手は送るときに決める（`delivery/in_app.py`）。中身はタスクの名前とRunの状態と、通知Skillが決めた通知の文章
+    （送る内容にあるときだけ）で、業務結果・成果物は載せない（結果を確かめる画面へのリンクは、タスクのRunの画面が
+    できてから足す）"""
 
     uid = NanoidField(unique=True)
     user = models.ForeignKey(
@@ -515,6 +516,8 @@ class Notification(models.Model):
     event_type = models.CharField(_("イベント"), max_length=30, choices=NotifyEvent.choices)
     # 送ったときのタスクの名前（後で名前を変えても、通知は送ったときのまま）
     task_name = models.CharField(_("タスクの名前"), max_length=200)
+    # 通知Skillが決めた通知の文章（design.md §4.3）
+    message = models.TextField(_("通知の文章"), blank=True)
     read = models.DateTimeField(_("既読にした日時"), null=True, blank=True)
 
     created = models.DateTimeField(auto_now_add=True, db_index=True)

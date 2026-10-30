@@ -479,6 +479,8 @@ def test_a_run_stays_readable_after_its_task_is_moved_or_deleted(api_client, app
     assert api_client.get(deliveries, {"run": run_id}).status_code == 200
     assert api_client.get(_url(task, "runs/")).status_code == 404
     assert api_client.get(deliveries).status_code == 404
+    # 名前は受付時のもの
+    TaskDefinition.objects.filter(uid=task["id"]).update(name="名前を変えたタスク")
     data = api_client.get(urls[0]).json()
     assert (data["task"], data["task_name"]) == (task["id"], "請求書チェック")
     assert data["inputs"] == [{"name": "vendor", "label": "取引先", "value": "A商事"}]

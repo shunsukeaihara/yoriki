@@ -3,8 +3,11 @@
  * タスクの Run の配信（design.md §4.5・§11.9）。出口ごとの配信の状態、送った内容、送信の記録を出し、失敗・確認待ち・
  * 取消の配信は「通知を再試行」で送り直す（保存した内容を送る。エージェントは動かし直さない）。
  * 受付確認は送り先が受け取ったことだけを表し、Zapier 等での後の処理が終わったことは表さない。
- * 配信は Run の後に Worker が送るので、配信待ち・配信中の間は間をおいて読み直す（配信の変化は画面へ知らせないため）
+ * 配信は Run の後に Worker が送るので、配信待ち・配信中・再試行待ちの間は間をおいて読み直す（配信の変化は画面へ
+ * 知らせないため）
  */
+import { AxiosError } from 'axios'
+
 const props = defineProps<{ taskId: string; runId: string }>()
 const emit = defineEmits<{ retried: [value: Delivery] }>()
 const api = useAPI()
@@ -32,19 +35,26 @@ const notifyLoadError = (err: unknown) =>
 defineExpose({ reload: fetchAll })
 onMounted(() => fetchAll().catch(notifyLoadError))
 
-// 配信待ち・配信中のものがあれば読み直す（再試行待ちは次に送る日時を出すので、読み直さない）
+// 配信待ち・配信中のものがあれば5秒ごとに、再試行待ちのものは次に送る日時を過ぎたら読み直す
 const POLL_INTERVAL = 5000
-const sending = computed(() =>
-  items.value.some((d) => d.status === DeliveryStatus.PENDING || d.status === DeliveryStatus.SENDING),
-)
+const nextPollDelay = (): number | null => {
+  const delays = items.value.flatMap((d) => {
+    if (d.status === DeliveryStatus.PENDING || d.status === DeliveryStatus.SENDING) return [POLL_INTERVAL]
+    if (d.status === DeliveryStatus.RETRY_WAIT && d.nextAttempt)
+      return [Math.max(POLL_INTERVAL, new Date(d.nextAttempt).getTime() - Date.now() + POLL_INTERVAL)]
+    return []
+  })
+  return delays.length ? Math.min(...delays) : null
+}
 let pollTimer: ReturnType<typeof setTimeout> | undefined
 const schedulePoll = () => {
   clearTimeout(pollTimer)
-  if (!sending.value) return
+  const delay = nextPollDelay()
+  if (delay === null) return
   pollTimer = setTimeout(() => {
     // 読めなかったときは一覧が変わらないので、ここで次を予約する（読めたときは一覧の変化で予約し直す）
     fetchAll().catch(schedulePoll)
-  }, POLL_INTERVAL)
+  }, delay)
 }
 watch(items, schedulePoll)
 onBeforeUnmount(() => clearTimeout(pollTimer))
@@ -68,8 +78,17 @@ const retry = async (delivery: Delivery) => {
   try {
     value = await api.tasks(props.taskId).deliveries(delivery.id).retry()
   } catch (err) {
-    toast.add({ title: t('再試行できませんでした'), description: makeErrorMsg(err), color: 'error' })
-    await fetchAll().catch(() => {})
+    if (err instanceof AxiosError && !err.response) {
+      // 送った後に応答だけが失われたときは、受け付けているかもしれない。読み直した状態で確かめてもらう
+      toast.add({
+        title: t('受け付けたかを確かめられませんでした'),
+        description: t('配信の状態を読み直しました。配信待ち・配信中なら受け付けています'),
+        color: 'warning',
+      })
+    } else {
+      toast.add({ title: t('再試行できませんでした'), description: makeErrorMsg(err), color: 'error' })
+    }
+    await fetchAll().catch(notifyLoadError)
     return
   } finally {
     retrying.value = null

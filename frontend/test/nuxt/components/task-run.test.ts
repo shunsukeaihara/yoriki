@@ -1,5 +1,6 @@
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
+import { AxiosError } from 'axios'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TaskRunDeliveries } from '#components'
 
@@ -135,6 +136,44 @@ describe('TaskRunDeliveries', () => {
       // 確定したら読み直さない
       await vi.advanceTimersByTimeAsync(20000)
       expect(list).toHaveBeenCalledTimes(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('送り直しの応答が返らなかったら、失敗と断定せずに状態を読み直す', async () => {
+    list.mockResolvedValueOnce({ results: [delivery('a', DeliveryStatus.FAILED, '失敗')], next: null, previous: null })
+    const wrapper = await mountSuspended(TaskRunDeliveries, { props: { taskId: 't1', runId: 'r1' } })
+    await flushPromises()
+    retry.mockRejectedValue(new AxiosError('Network Error'))
+    list.mockResolvedValue({ results: [delivery('a', DeliveryStatus.PENDING, '配信待ち')], next: null, previous: null })
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('通知を再試行'))!
+      .trigger('click')
+    await flushPromises()
+    expect(list).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('配信待ち')
+    expect(wrapper.emitted('retried')).toBeUndefined()
+  })
+
+  it('再試行待ちの配信は、次に送る日時を過ぎたら読み直す', async () => {
+    vi.useFakeTimers()
+    try {
+      const next = new Date(Date.now() + 60_000).toISOString()
+      list
+        .mockResolvedValueOnce({
+          results: [delivery('a', DeliveryStatus.RETRY_WAIT, '再試行待ち', { nextAttempt: next })],
+          next: null,
+          previous: null,
+        })
+        .mockResolvedValue({ results: [delivery('a', DeliveryStatus.FAILED, '失敗')], next: null, previous: null })
+      await mountSuspended(TaskRunDeliveries, { props: { taskId: 't1', runId: 'r1' } })
+      await flushPromises()
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(list).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(40_000)
+      expect(list).toHaveBeenCalledTimes(2)
     } finally {
       vi.useRealTimers()
     }

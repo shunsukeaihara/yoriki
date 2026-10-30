@@ -5947,6 +5947,7 @@ export interface components {
              */
             readonly finished: string | null;
             readonly task: string;
+            /** @description 受付時のタスクの名前 */
             readonly task_name: string;
             readonly task_version: number;
             readonly launch: components["schemas"]["RunLaunchEnum"];
@@ -5988,6 +5989,7 @@ export interface components {
         TaskRunReceipt: {
             readonly id: string;
             readonly binding: string;
+            /** @description 入口の今の名前（名前は版の外で、受付時の名前は残さない） */
             readonly binding_name: string;
             readonly binding_version: number;
             /** 重複のキー */

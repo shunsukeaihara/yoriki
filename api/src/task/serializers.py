@@ -1113,7 +1113,9 @@ class TaskRunReceiptSerializer(ReadOnlyModelSerializer):
 
     id = serializers.CharField(source="uid", read_only=True)
     binding = serializers.CharField(source="binding.uid", read_only=True)
-    binding_name = serializers.CharField(source="binding.name", read_only=True)
+    binding_name = serializers.CharField(
+        source="binding.name", read_only=True, help_text=_("入口の今の名前（名前は版の外で、受付時の名前は残さない）")
+    )
     binding_version = serializers.IntegerField(source="binding_revision.number", read_only=True)
 
     class Meta:
@@ -1149,7 +1151,7 @@ class TaskRunSerializer(RunSerializer):
     配信の状態を足す"""
 
     task = serializers.CharField(source="task.uid", read_only=True)
-    task_name = serializers.CharField(source="task.name", read_only=True)
+    task_name = serializers.SerializerMethodField(help_text=_("受付時のタスクの名前"))
     task_version = serializers.IntegerField(source="task_revision.number", read_only=True)
     launch = serializers.ChoiceField(choices=RunLaunch.choices, read_only=True)
     launch_display = serializers.CharField(source="get_launch_display", read_only=True)
@@ -1177,6 +1179,11 @@ class TaskRunSerializer(RunSerializer):
             "deliveries_info",
         ]
         read_only_fields = fields
+
+    def get_task_name(self, obj: Run) -> str:
+        # 名前は版の外なので、受付時にManifestへ固定した名前を使う（後で名前を変えても、過去のRunは変えない）
+        fixed = ((obj.manifest or {}).get("fixed") or {}).get("task") or {}
+        return fixed.get("name") or (obj.task.name if obj.task else "")
 
     @extend_schema_field(MinimumUserSerializer(allow_null=True))
     def get_started_by(self, obj: Run) -> dict[str, Any] | None:

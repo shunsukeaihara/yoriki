@@ -14541,6 +14541,7 @@ components:
         task_name:
           type: string
           readOnly: true
+          description: 受付時のタスクの名前
         task_version:
           type: integer
           readOnly: true
@@ -14674,6 +14675,7 @@ components:
         binding_name:
           type: string
           readOnly: true
+          description: 入口の今の名前（名前は版の外で、受付時の名前は残さない）
         binding_version:
           type: integer
           readOnly: true

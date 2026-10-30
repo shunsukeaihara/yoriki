@@ -46,3 +46,20 @@ describe('useManageMenu', () => {
     expect(useManageMenu().links.value.map((link) => link.to)).toEqual(['/manage/system_skills'])
   })
 })
+
+describe('useManageMenu（連携）', () => {
+  it('入口と出口は「連携」の見出しの下に、それぞれのpermissionで出す', () => {
+    login([PermissionCode.VIEW_TRIGGER_BINDING])
+    const { items, links } = useManageMenu()
+    expect(items.value.map((item) => item.label)).toEqual(['連携'])
+    expect(links.value.map((link) => link.to)).toEqual(['/manage/trigger_bindings'])
+    login([PermissionCode.CHANGE_DESTINATION, PermissionCode.CHANGE_TRIGGER_BINDING])
+    expect(useManageMenu().links.value.map((link) => link.to)).toEqual([
+      '/manage/trigger_bindings',
+      '/manage/destinations',
+    ])
+    // 作るだけのpermissionでは入れない
+    login([PermissionCode.ADD_DESTINATION])
+    expect(useManageMenu().links.value).toEqual([])
+  })
+})

@@ -12,6 +12,7 @@ const api = useAPI()
 const toast = useToast()
 const confirm = useConfirmDialog()
 const { t } = useI18n()
+const { hasAny } = usePermission()
 const taskId = route.params.taskId as string
 
 const { data: task, error } = await useAsyncData(`task-${taskId}`, () => api.tasks(taskId).get())
@@ -195,7 +196,15 @@ const onDelete = async () => {
           <p class="font-medium">{{ $t('入口') }}</p>
           <div v-for="trigger in task.triggers" :key="trigger.id" class="flex flex-wrap items-center gap-2">
             <UIcon name="i-lucide-webhook" />
-            <span>{{ trigger.name }}</span>
+            <!-- 連携の管理者には、入口の管理画面へのリンクにする -->
+            <NuxtLink
+              v-if="hasAny(ManagePagePermissions.TRIGGER_BINDING)"
+              :to="`/manage/trigger_bindings/${trigger.id}`"
+              class="text-primary"
+            >
+              {{ trigger.name }}
+            </NuxtLink>
+            <span v-else>{{ trigger.name }}</span>
             <code class="text-xs text-muted">{{ trigger.keyPrefix }}…</code>
             <UBadge v-if="trigger.suspended" color="error" variant="subtle" size="sm">{{ $t('停止中') }}</UBadge>
           </div>

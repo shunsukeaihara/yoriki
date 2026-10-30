@@ -124,7 +124,7 @@ const onDelete = async () => {
         </template>
         <template #right>
           <template v-if="task">
-            <TaskRunDialog :task="task" @started="onStarted">
+            <TaskRunDialog :task="task" @started="onStarted" @conflicted="reloadAll" @unknown="onStarted">
               <template #trigger="{ on }">
                 <DBtn
                   icon="i-lucide-play"

@@ -30,7 +30,7 @@ from skill.models import Skill
 from user.models import system_user
 
 from . import checks
-from .errors import CannotRun
+from .errors import CannotRun, VersionConflict
 from .inputs import InputFile, clean_inputs, render
 from .models import (
     TaskAction,
@@ -78,8 +78,10 @@ def start_task_run(
     actor,
     launch: RunLaunch,
     files: Sequence[InputFile] = (),
+    expected_version: int | None = None,
 ) -> Run:
     """タスクの今の版でRunを始める。始められなければ CannotRun（入力の誤りは InvalidInputs）。
+    `expected_version` を渡すと、今の版がそれと違えば VersionConflict（画面で確かめた版と違う定義で動かさない）。
 
     `inputs` は値か、ロックした後の今の版から値を作る関数（Webhookでは、項目の型を今の版で決めるため）。型がファイルの
     項目の値は InputFile。`files` は項目の値のほかに /workspace/input に置くファイル（Webhookのpayload等）。呼び出し元の
@@ -104,6 +106,8 @@ def start_task_run(
                 raise CannotRun(reason)
             revision = task.current_revision
             assert revision is not None  # can()・in_service() が確かめた
+            if expected_version is not None and revision.number != expected_version:
+                raise VersionConflict()
             values = inputs(revision) if callable(inputs) else inputs
             cleaned, errors = clean_inputs(revision.inputs, values)
             if errors:

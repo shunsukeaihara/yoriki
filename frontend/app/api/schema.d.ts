@@ -5834,6 +5834,8 @@ export interface components {
             inputs?: {
                 [key: string]: unknown;
             };
+            /** @description 画面で確かめた版（任意）。今の版と違えば409にし、確かめていない定義では実行しない */
+            version?: number | null;
         };
         TaskSkill: {
             /** @description SkillのID */
@@ -8567,6 +8569,8 @@ export interface operations {
                 "multipart/form-data": {
                     /** @description ファイル以外の入力の項目の名前と値（JSONのオブジェクトの文字列） */
                     inputs?: string;
+                    /** @description 画面で確かめた版（任意）。今の版と違えば409 */
+                    version?: number;
                 } & {
                     [key: string]: string;
                 };
@@ -8580,6 +8584,13 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Run"];
                 };
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、他の人が版を作った） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

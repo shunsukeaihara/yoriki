@@ -52,10 +52,11 @@ const adding = ref<string | null>(null)
 watch(adding, (id) => {
   if (!id) return
   const choice = choiceOf(id)
-  if (choice) modelValue.value.push({ skill: id, version: choice.version })
+  // 並びは入れ替えて渡す（親が computed の setter で受け取ることがあるため、その場で書き換えない）
+  if (choice) modelValue.value = [...modelValue.value, { skill: id, version: choice.version }]
   nextTick(() => (adding.value = null))
 })
-const remove = (index: number) => modelValue.value.splice(index, 1)
+const remove = (index: number) => (modelValue.value = modelValue.value.filter((_, i) => i !== index))
 </script>
 
 <template>

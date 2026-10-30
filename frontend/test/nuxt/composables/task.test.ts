@@ -31,10 +31,12 @@ describe('入力の項目の行', () => {
     expect(fromInputRows(rows)[0]).toMatchObject({ choices: [], maxLength: 10 })
   })
 
-  it('行ごとの誤り（many=True の辞書）から項目の誤りを引く', () => {
-    const errors = { '1': { name: ['同じ名前の項目があります'] } }
-    expect(rowErrorsOf(errors, 1, 'name')).toEqual(['同じ名前の項目があります'])
-    expect(rowErrorsOf(errors, 0, 'name')).toBeUndefined()
+  it('行ごとの誤り（many=True の並びと辞書）から項目の誤りを引く', () => {
+    for (const errors of [[{}, { name: ['名前を入力してください'] }], { '1': { name: ['名前を入力してください'] } }]) {
+      expect(rowErrorsOf(errors, 1, 'name')).toEqual(['名前を入力してください'])
+      expect(rowErrorsOf(errors, 0, 'name')).toBeUndefined()
+    }
+    // 項目全体の誤り（文の並び）は行の誤りではない
     expect(rowErrorsOf(['入力の項目は30個までです'], 0, 'name')).toBeUndefined()
   })
 })

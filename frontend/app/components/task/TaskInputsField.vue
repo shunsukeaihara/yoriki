@@ -18,7 +18,9 @@ const move = (index: number, offset: number) => {
   rows.splice(index + offset, 0, row!)
 }
 // 項目全体の誤り（同じ名前がある、数の上限等）
-const fieldErrors = computed(() => (Array.isArray(props.errors) ? props.errors.map(String) : []))
+const fieldErrors = computed(() =>
+  Array.isArray(props.errors) ? props.errors.filter((e): e is string => typeof e === 'string') : [],
+)
 const placeholderExample = (name: string) => `{{ inputs.${name || t('名前')} }}`
 </script>
 

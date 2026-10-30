@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { AxiosError } from 'axios'
+
 /**
  * タスクの手動実行（authorization.md §6）。タスクの今の版で、決めた入力の項目の値だけを渡す（自由な依頼文は受けない）。
  * 部門・全社・システムのタスクは、起動した人ではなくタスクの範囲で動く。型と必須はサーバーが確かめ、項目ごとに返す
@@ -7,7 +9,14 @@ const props = defineProps<{ task: TaskDetail }>()
 const api = useAPI()
 const toast = useToast()
 const { t } = useI18n()
-const emit = defineEmits<{ started: [value: Run]; failed: [error: unknown] }>()
+const emit = defineEmits<{
+  started: [value: Run]
+  failed: [error: unknown]
+  /** 画面を開いた後に版が変わった（409）。最新の状態を読み込み直す */
+  conflicted: []
+  /** 応答を受け取れなかった（受け付けたかが分からない）。実行の履歴で確かめる */
+  unknown: []
+}>()
 
 // 入力の項目はタスクの版で決まる。版が変わったら、親がこのフォームを作り直す（key）
 const inputs = props.task.inputs ?? []
@@ -33,14 +42,28 @@ const fields = inputs.map((input) => ({
 
 const { onSubmit, loading, errors } = createSubmit({
   form,
-  fn: (data) => api.tasks(props.task.id).run(data),
+  // 画面で確かめた版を送る。別の版ができていれば409になり、確かめていない定義では実行しない
+  fn: (data) => api.tasks(props.task.id).run(props.task.version ?? 0, data),
   onSuccess: (run) => {
     emit('started', run)
     toast.add({ title: t('実行を始めました'), color: 'success' })
   },
   onError: (err) => {
     emit('failed', err)
-    toast.add({ title: t('エラー'), description: makeErrorMsg(err), color: 'error' })
+    if (err instanceof AxiosError && err.response?.status === 409) {
+      emit('conflicted')
+      toast.add({ title: t('エラー'), description: makeErrorMsg(err), color: 'error' })
+    } else if (err instanceof AxiosError && !err.response) {
+      // 送った後に応答だけが失われたときは、受け付けている。再送で二重に実行しないよう、先に履歴を見せる
+      emit('unknown')
+      toast.add({
+        title: t('受け付けたかを確かめられませんでした'),
+        description: t('実行の履歴に出ていれば受け付けています。出ていなければ、もう一度実行してください'),
+        color: 'warning',
+      })
+    } else {
+      toast.add({ title: t('エラー'), description: makeErrorMsg(err), color: 'error' })
+    }
   },
 })
 // 入力の項目の誤り（{ inputs: { 項目の名前: [...] } }）と、入力全体の誤り（文の並び）

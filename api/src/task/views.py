@@ -19,13 +19,14 @@ from run.models import Run, RunLaunch
 from run.serializers import RunSerializer
 from skill.models import SkillVersion
 from user.models import Department
+from utils.exceptions import Conflict
 from utils.permissions import AppUser, ModelPermissions
 from utils.views import SoftDeleteMixin
 
 from . import checks
 from .authentication import WebhookKeyAuthentication, WebhookTaskPermission
 from .dispatch import InvalidInputs, receive_webhook, start_task_run
-from .errors import CannotRun
+from .errors import CannotRun, VersionConflict
 from .models import (
     BUSINESS_SCOPES,
     WEBHOOK_TASK_SCOPES,
@@ -91,6 +92,7 @@ TASK_RUN_MULTIPART = {
             "type": "string",
             "description": "ファイル以外の入力の項目の名前と値（JSONのオブジェクトの文字列）",
         },
+        "version": {"type": "integer", "description": "画面で確かめた版（任意）。今の版と違えば409"},
     },
     "additionalProperties": {
         "type": "string",
@@ -172,7 +174,7 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
         "入力はタスクの定義で決めた項目だけを受け付け、自由な依頼文は受けない。型がファイルの項目があれば "
         "multipart/form-dataで送る（ファイルは項目の名前で付ける）",
         request={"application/json": TaskRunCreateSerializer, "multipart/form-data": TASK_RUN_MULTIPART},
-        responses={201: RunSerializer},
+        responses={201: RunSerializer, 409: CONFLICT},
     )
     @action(detail=True, methods=["post"], serializer_class=TaskRunCreateSerializer)
     def run(self, request, *args, **kwargs):
@@ -181,8 +183,15 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
         serializer.is_valid(raise_exception=True)
         try:
             run = start_task_run(
-                task, inputs=serializer.validated_data["inputs"], actor=request.user, launch=RunLaunch.MANUAL
+                task,
+                inputs=serializer.validated_data["inputs"],
+                actor=request.user,
+                launch=RunLaunch.MANUAL,
+                expected_version=serializer.validated_data["version"],
             )
+        except VersionConflict as exc:
+            message = _("画面を開いた後に、タスクの版が変わりました。最新の状態を読み込んでから実行してください")
+            raise Conflict(message) from exc
         except InvalidInputs as exc:
             raise ValidationError({"inputs": exc.errors}) from exc
         except CannotRun as exc:

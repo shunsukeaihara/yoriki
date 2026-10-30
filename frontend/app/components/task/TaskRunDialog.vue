@@ -3,7 +3,7 @@ import TaskRunForm from './TaskRunForm.vue'
 import DDialog from '../common/DDialog.vue'
 
 const props = defineProps<{ task: TaskDetail }>()
-const emit = defineEmits<{ started: [value: Run] }>()
+const emit = defineEmits<{ started: [value: Run]; conflicted: []; unknown: [] }>()
 
 const dialog = ref<InstanceType<typeof DDialog> | null>(null)
 const formRef = ref<InstanceType<typeof TaskRunForm> | null>(null)
@@ -15,6 +15,15 @@ const onOpen = (open: boolean) => {
 
 const started = (value: Run) => {
   emit('started', value)
+  dialog.value?.closeDialog()
+}
+// 版が変わった・受け付けたかが分からないときは、閉じて親に読み直させる
+const conflicted = () => {
+  emit('conflicted')
+  dialog.value?.closeDialog()
+}
+const unknown = () => {
+  emit('unknown')
   dialog.value?.closeDialog()
 }
 </script>
@@ -35,7 +44,14 @@ const started = (value: Run) => {
               })
         }}
       </p>
-      <TaskRunForm :key="formKey" ref="formRef" :task="props.task" @started="started" />
+      <TaskRunForm
+        :key="formKey"
+        ref="formRef"
+        :task="props.task"
+        @started="started"
+        @conflicted="conflicted"
+        @unknown="unknown"
+      />
     </template>
     <template #footer="{ closeDialog }">
       <DBtn color="neutral" variant="ghost" @click="closeDialog()">{{ $t('キャンセル') }}</DBtn>

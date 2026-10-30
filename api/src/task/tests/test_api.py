@@ -284,6 +284,21 @@ def test_manual_run_fixes_the_revision_and_renders_the_inputs(api_client, app_us
     assert "1. 請求書を読む" in first["skills_text"]
 
 
+def test_manual_run_refuses_a_revision_other_than_the_one_on_the_screen(api_client, app_user, model):
+    """画面で確かめた版（version）を送ると、別の版ができていれば409にし、確かめていない定義では実行しない"""
+    task = _create(api_client, app_user, model).json()
+    res = api_client.patch(_url(task), {"version": 1, "prompt_template": "{{ inputs.vendor }} を調べて"}, format="json")
+    assert res.json()["version"] == 2
+    res = api_client.post(_url(task, "run/"), {"inputs": {"vendor": "A商事"}, "version": 1}, format="json")
+    assert res.status_code == 409
+    assert not Run.objects.exists()
+    # multipart でも送れる
+    body = {"inputs": json.dumps({"vendor": "A商事"}), "version": "2"}
+    res = api_client.post(_url(task, "run/"), body)
+    assert res.status_code == 201, res.json()
+    assert Run.objects.get().task_revision == TaskDefinitionRevision.objects.get(task__uid=task["id"], number=2)
+
+
 def test_manual_run_accepts_only_the_defined_inputs(api_client, app_user, model):
     task = _create(api_client, app_user, model).json()
     res = api_client.post(_url(task, "run/"), {"inputs": {"memo": "これも見て"}}, format="json")
@@ -339,6 +354,8 @@ def test_manual_run_refuses_mismatched_files(api_client, app_user, model, settin
     assert (res.status_code, set(res.json()["inputs"])) == (400, {"invoice"})
     res = _create(api_client, app_user, model, name="別", inputs=[{"name": "inputs", "label": "x", "type": "file"}])
     assert "inputs は型がファイルの項目の名前に使えません" in str(res.json()["inputs"])
+    res = _create(api_client, app_user, model, name="別3", inputs=[{"name": "version", "label": "x", "type": "file"}])
+    assert "version は型がファイルの項目の名前に使えません" in str(res.json()["inputs"])
     inputs = [{"name": "inputs", "label": "x", "type": "string"}]
     res = _create(api_client, app_user, model, name="別2", inputs=inputs, prompt_template="{{ inputs.inputs }}")
     assert res.status_code == 201, res.json()

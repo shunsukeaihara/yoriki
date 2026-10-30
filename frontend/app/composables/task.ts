@@ -153,10 +153,13 @@ export const emptyInputRow = (): TaskInputRow => ({
   choicesText: '',
 })
 
-/** many=True の入力の項目の誤り（{ "0": { name: [...] } }）から、行と項目の誤りを引く */
+/**
+ * many=True の入力の項目の誤りから、行と項目の誤りを引く。DRF は行ごとの並び（[{}, { name: [...] }]）で返し、
+ * 辞書（{ "1": { name: [...] } }）の形もある。項目全体の誤り（文の並び）は行の誤りではない
+ */
 export const rowErrorsOf = (errors: unknown, index: number, field: string): string[] | undefined => {
-  if (!errors || typeof errors !== 'object' || Array.isArray(errors)) return undefined
-  const row = (errors as Record<string, unknown>)[String(index)]
+  if (!errors || typeof errors !== 'object') return undefined
+  const row = Array.isArray(errors) ? errors[index] : (errors as Record<string, unknown>)[String(index)]
   const value = row && typeof row === 'object' ? (row as Record<string, unknown>)[field] : undefined
   return Array.isArray(value) ? value.map(String) : undefined
 }

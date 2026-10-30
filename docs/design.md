@@ -545,15 +545,14 @@ chat Adapterでは、新規依頼、既存Runへの追加指示（人が起動�
 Notification Pluginは、Adapterと既定の通知Skillを同梱できる（§3.11）。利用者は「Zapierへ業務結果を渡す」「画面内に完了を通知する」等の候補から選ぶ。通知Skillだけを差し替えて要約方法を変えることも、通知Pluginを差し替えて経路を変えることもできる。Pluginの設定Schemaと対応イベント・成果物方式に適合する組合せだけを公開する。
 
 ```python
-# エージェントが呼ぶ管理Toolの概念例。送信内容の候補を登録する。
+# エージェントが呼ぶ管理Tool。送信内容の候補を登録する（宛先・イベントは指定できない）
 prepare_notification(
-    notification_binding_id="invoice-result",
-    content={"summary": "請求書チェック完了", "needs_review": False},
-    artifact_ids=["artifact_123"],
+    message="請求書3件を確認しました。差異は1件で、確認が要ります。",
+    files=["/workspace/output/report.xlsx"],  # 業務結果のファイルの項目が指すものから絞るだけ。省けばすべて
 )
 ```
 
-通知Skillは通常の業務Run内で要約等を作り、この管理Toolへ候補を渡せる。ToolはRunに固定したBinding、項目・成果物の送信権限を検証する。任意のURL、別のDestination、未許可のマスターを追加させない。完了前の候補は送信せず、Runの業務結果と成果物が確定した後だけ配信対象にする。Skillの編集・公開は既存の権限内でエージェントに委任できるが、送信権限とAdapterコードは変更できない。
+通知Skillは通常の業務Run内で要約等を作り、この管理Toolへ候補を渡せる。ToolはRunに固定した通知の設定と、業務結果のファイルの項目で指した成果物の中からの選択だけを受け付ける（項目のSchemaは置かない。下の「通知Skill（初期の実装）」）。任意のURL、別のDestination、未許可のマスターを追加させない。完了前の候補は送信せず、Runの業務結果と成果物が確定した後だけ配信対象にする。Skillの編集・公開は既存の権限内でエージェントに委任できるが、送信権限とAdapterコードは変更できない。
 
 業務結果Schemaと成果物保存の検証後、Runの完了状態・共通イベント・通知Bindingに対応する配信Outboxを同じDB transactionで確定する。エージェントが通知Toolを呼ばなくても、設定済みの完了通知を登録する。Tool候補と自動通知は同じ配信キーにまとめる。
 

@@ -28,8 +28,8 @@ from utils.fields import NormalizedTextField
 from utils.serializers import ReadOnlyModelSerializer
 
 from . import checks
-from .dispatch import received_run
-from .errors import VersionConflict
+from .dispatch import plan_run, received_run
+from .errors import CannotRun, VersionConflict
 from .inputs import InputFile, clean_inputs, render
 from .models import (
     DEFAULT_MAX_PAYLOAD_BYTES,
@@ -916,6 +916,8 @@ class TriggerPreviewSerializer(serializers.Serializer):
         return value
 
     def preview(self, binding: TriggerBinding, user) -> dict[str, Any]:
+        """受付（task.dispatch.receive_webhook()）と同じ順で確かめる：入口の停止 → payload → 前の受付との重複（同じ
+        要求なら、ここで前のRunを返して終わる） → タスクの状態とRunを始められるか → 項目"""
         data = self.validated_data
         task = binding.task
         revision = task.current_revision
@@ -923,7 +925,9 @@ class TriggerPreviewSerializer(serializers.Serializer):
         definitions = revision.inputs if revision else []
         files = [d for d in definitions if d["type"] == TaskInputType.FILE]
         can_view_prompt = TaskDefinition.objects.manageable_by(user).filter(pk=task.pk).exists()
-        refusals, doubts = _state_problems(binding, can_view_prompt)
+        refusals: list[str] = []
+        if binding.suspended or current is None:
+            refusals.append(str(_("この入口は停止中です")))
         result: dict[str, Any] = {
             "outcome": TriggerPreviewOutcome.REFUSED,
             "format_error": "",
@@ -933,7 +937,7 @@ class TriggerPreviewSerializer(serializers.Serializer):
             "input_errors": [],
             "file_inputs": [d["name"] for d in files],
             "required_file_inputs": [d["name"] for d in files if d.get("required")],
-            "run_problems": [*refusals, *doubts],
+            "run_problems": refusals,
             "duplicate": False,
             "can_view_prompt": can_view_prompt,
             "prompt": None,
@@ -952,14 +956,21 @@ class TriggerPreviewSerializer(serializers.Serializer):
         try:
             key = dedup_key(payload, data.get("event_id_path", current.event_id_path if current else ""), None)
             result["event_id"] = key.split(":", 1)[1] if key else None
-            # 前の受付との重複（受付と同じ判定。読むだけ）。同じ要求なら前のRunを返し、違う内容なら409で断る
-            result["duplicate"] = received_run(binding, key, payload, None) is not None
+            # 前の受付との重複（受付と同じ判定。読むだけ）。同じ要求なら、タスクの状態や項目によらず前のRunを返す
+            if not refusals and received_run(binding, key, payload, None) is not None:
+                result["duplicate"] = True
+                result["outcome"] = TriggerPreviewOutcome.ACCEPTED
+                return result
         except PayloadError as exc:
-            if exc.code == "event_id_reused":
+            if exc.code == "event_id_reused":  # 同じイベントIDで違う内容は409で断る
                 refusals.append(exc.detail)
-                result["run_problems"].append(exc.detail)
             else:
                 result["event_id_error"] = exc.detail
+        doubts: list[str] = []
+        if not refusals:
+            task_refusals, doubts = _task_problems(task, detailed=can_view_prompt)
+            refusals += task_refusals
+            result["run_problems"] = [*refusals, *doubts]
         mappings = data.get("inputs", current.inputs if current else [])
         cleaned, errors, absent_files = _preview_inputs(payload, mappings, definitions)
         order = [d["name"] for d in definitions]
@@ -976,21 +987,23 @@ class TriggerPreviewSerializer(serializers.Serializer):
         return result
 
 
-def _state_problems(binding: TriggerBinding, detailed: bool) -> tuple[list[str], list[str]]:
-    """入口・タスクの今の状態で、受付が断る理由と、断りうる理由。
+def _task_problems(task: TaskDefinition, *, detailed: bool) -> tuple[list[str], list[str]]:
+    """タスクの今の状態で、受付が断る理由と、断りうる理由。
 
-    断るのは入口・タスクの停止等（task.dispatch の _current_binding()・start_task_run() と同じ条件）。断りうるのは、
-    タスクの定義が保存のときの検査に通らないもの（Skillの停止・Connectorの削除等）。多くは受付も断るが、断らないもの
-    （受付時に既定に戻すeffort等）もある。定義の中身は `detailed`（タスクを管理できる人）のときだけ詳しく返す"""
-    task = binding.task
-    refusals: list[str] = []
-    if binding.suspended or binding.current_revision is None:
-        refusals.append(str(_("この入口は停止中です")))
-    if problem := checks.task_problem(task) or ("" if task.in_service() else _("タスクの今の版がありません")):
-        refusals.append(str(problem))
+    断るのは、タスクの停止等と、Runを始められないもの（モデル設定・実行環境・Skill・Connector・通知先。受付と同じ
+    task.dispatch.plan_run()）。断りうるのは、定義が保存のときの検査に通らないもの（受付は断らないものもある。受付時に
+    既定に戻すeffort等）。理由はタスクの定義の中身に触れるので、`detailed`（タスクを管理できる人）のときだけ詳しく返す"""
     revision = task.current_revision
-    if refusals or revision is None:
-        return refusals, []
+    if problem := checks.task_problem(task) or ("" if task.in_service() else _("タスクの今の版がありません")):
+        return [str(problem)], []
+    assert revision is not None  # in_service() が確かめた
+    try:
+        # 通知先の行をロックするので、transactionの中で確かめる（何も作らない）
+        with transaction.atomic():
+            plan_run(task, revision)
+    except CannotRun as exc:
+        generic = _("タスクを今は実行できません（タスクの管理者に確かめてください）")
+        return [str(exc) if detailed else str(generic)], []
     content = {name: getattr(revision, name) for name in REVISION_FIELDS}
     problems = [str(m) for messages in checks.content_errors(task, content).values() for m in messages]
     if problems and not detailed:

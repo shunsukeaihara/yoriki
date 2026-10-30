@@ -8,6 +8,7 @@
 import json
 import logging
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from django.db import transaction
@@ -25,7 +26,7 @@ from harness.untrusted import untrusted
 from llm.models import ModelProfileVersion
 from run.dispatch import enqueue_run
 from run.models import Run, RunEvent, RunEventKind, RunKind, RunLaunch, RunStatus, RunTrigger
-from runtime.models import RuntimeProfile
+from runtime.models import RuntimeProfile, RuntimeProfileVersion
 from user.models import system_user
 
 from . import checks
@@ -119,15 +120,25 @@ def start_task_run(
         raise
 
 
-def _start(
-    task: TaskDefinition,
-    revision: TaskDefinitionRevision,
-    inputs: dict[str, Any],
-    *,
-    actor,
-    launch,
-    files: Sequence[InputFile],
-) -> Run:
+@dataclass
+class RunPlan:
+    """タスクの版から決めた、Runに固定するもの（plan_run()）"""
+
+    version: ModelProfileVersion
+    effort: str
+    runtime_version: RuntimeProfileVersion
+    entries: list[dict[str, Any]]
+    output_schema: dict[str, Any] | None
+    notification: str
+    connector_catalog: dict[str, Any] | None
+    destination_revision: DestinationRevision | None
+
+
+def plan_run(task: TaskDefinition, revision: TaskDefinitionRevision) -> RunPlan:
+    """タスクの今の版でRunを始められるかを確かめ、Runに固定するものを決める。始められなければ CannotRun。
+
+    何も作らない（通知先の行をロックするので、transactionの中で呼ぶ）。受付（_start()）と、入口の画面でサンプルを
+    試すとき（受付と同じ判定を見せる）に使う"""
     profile = revision.model_profile
     version = profile.current_version
     if version is None or not profile.is_active or profile.deleted:
@@ -163,10 +174,32 @@ def _start(
     if output_schema and not version.supports_tools:
         # 業務結果は submit_result で確定するので、モデル設定の今の版がToolを使えなければ受け付けない
         raise CannotRun(_("このタスクのモデル設定はToolを使えないので、業務結果を確定できません。"))
-    destination_revision = _destination_revision(task, revision)
+    return RunPlan(
+        version=version,
+        effort=effort,
+        runtime_version=runtime_version,
+        entries=entries,
+        output_schema=output_schema,
+        notification=notification,
+        connector_catalog=connector_catalog,
+        destination_revision=_destination_revision(task, revision),
+    )
+
+
+def _start(
+    task: TaskDefinition,
+    revision: TaskDefinitionRevision,
+    inputs: dict[str, Any],
+    *,
+    actor,
+    launch,
+    files: Sequence[InputFile],
+) -> Run:
+    plan = plan_run(task, revision)
+    sensitive = revision.handles_sensitive_data
     conversation = Conversation.objects.create(
         owner=actor,
-        model_profile=profile,
+        model_profile=revision.model_profile,
         effort=revision.effort,
         purpose=ConversationPurpose.TASK,
         handles_sensitive_data=sensitive,
@@ -179,14 +212,14 @@ def _start(
         conversation=conversation, sender=actor, role=MessageRole.USER, body=text
     )
     fixed: dict[str, Any] = {
-        "model_version": version.pk,
-        "effort": effort,
-        "runtime_version": runtime_version.pk,
+        "model_version": plan.version.pk,
+        "effort": plan.effort,
+        "runtime_version": plan.runtime_version.pk,
         "handles_sensitive_data": sensitive,
-        "skills": entries,
+        "skills": plan.entries,
         "skill_catalog": None,
         "connectors": [],
-        "connector_catalog": connector_catalog,
+        "connector_catalog": plan.connector_catalog,
         "task": {
             "task": task.uid,
             "name": task.name,
@@ -194,9 +227,9 @@ def _start(
             "number": revision.number,
             "launch": launch,
             "connectors": revision.connectors,
-            "output_schema": output_schema,
+            "output_schema": plan.output_schema,
             "inputs": inputs,
-            "notification_instructions": notification,
+            "notification_instructions": plan.notification,
         },
     }
     run = Run.objects.create(
@@ -204,9 +237,9 @@ def _start(
         owner=actor,
         trigger=RunTrigger.TASK,
         kind=RunKind.WORK,
-        model_version=version,
-        effort=effort,
-        runtime_version=runtime_version,
+        model_version=plan.version,
+        effort=plan.effort,
+        runtime_version=plan.runtime_version,
         handles_sensitive_data=sensitive,
         manifest={"fixed": fixed, "appended": []},
         task=task,
@@ -214,7 +247,7 @@ def _start(
         launch=launch,
         task_scope=task.scope,
         task_department=task.department,
-        destination_revision=destination_revision,
+        destination_revision=plan.destination_revision,
     )
     message.run = run
     message.save(update_fields=["run"])
@@ -228,9 +261,9 @@ def _start(
         RunEventKind.USER_MESSAGE,
         user_message_data(
             message,
-            _first_message(text, inputs, launch, notification=notification),
-            skills=entries,
-            connector_catalog=connector_catalog,
+            _first_message(text, inputs, launch, notification=plan.notification),
+            skills=plan.entries,
+            connector_catalog=plan.connector_catalog,
         ),
         actor=actor,
     )

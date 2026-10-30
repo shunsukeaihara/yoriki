@@ -15,8 +15,8 @@ from artifact.models import ArtifactKind, BlobObject
 from artifact.tests.test_api import body_of
 from conversation.models import ConversationPurpose
 from delivery.factories import DestinationFactory
-from delivery.models import Destination
 from run.models import Run, RunEndReason, RunEvent, RunEventKind, RunLaunch, RunStatus, RunTrigger
+from runtime.models import RuntimeProfile
 from task.dispatch import WEBHOOK_NOTE, discard_files, receive_webhook, store_files
 from task.factories import TaskDefinitionFactory
 from task.inputs import InputFile
@@ -285,17 +285,20 @@ def test_preview_reflects_the_state_of_the_webhook_and_the_task(api_client, inte
     TaskDefinition.objects.filter(pk=task.pk).update(suspended=False)
     assert _preview(api_client, binding, sample).json()["outcome"] == "accepted"
 
-    # 定義が保存のときの検査に通らない（通知先の停止）なら、確かめられない。中身はタスクを管理できる人にだけ見せる
-    Destination.objects.filter(pk=task.current_revision.destination_id).update(suspended=True)
+    # Runを始められない（既定の実行環境がない・通知先の停止）なら、受付と同じく断る。理由はタスクを管理できる人にだけ
+    # 詳しく見せる
+    RuntimeProfile.objects.update(is_default=False)
     body = _preview(api_client, binding, sample).json()
-    assert body["outcome"] == "unconfirmed"
-    assert body["run_problems"] == [
-        "タスクの定義に、実行を断られうる設定があります（タスクの管理者に確かめてください）"
-    ]
+    assert (body["outcome"], body["run_problems"]) == (
+        "refused",
+        ["タスクを今は実行できません（タスクの管理者に確かめてください）"],
+    )
     api_client.force_login(grant(integrator, AppPermission.MANAGE_COMPANY_TASKS))
     body = _preview(api_client, binding, sample).json()
-    assert body["outcome"] == "unconfirmed"
-    assert body["run_problems"] and "タスクの管理者" not in body["run_problems"][0]
+    assert body["outcome"] == "refused"
+    assert "Runtime Profile" in body["run_problems"][0]
+    api_client.logout()
+    assert _send(api_client, task, _key, sample).status_code == 409
 
 
 def test_preview_uses_the_edited_limit_and_the_receipts(api_client, integrator, task, webhook):
@@ -319,6 +322,14 @@ def test_preview_uses_the_edited_limit_and_the_receipts(api_client, integrator, 
     assert body["run_problems"] == ["同じイベントIDで、前と違う内容を受け取りました"]
     api_client.logout()
     assert _send(api_client, task, key, _payload(event_id="evt-7", vendor="Other")).status_code == 409
+
+    # 受付と同じく、重複はタスクの状態や項目より先に判定する（停止した後の再送も前のRunを返す）
+    TaskDefinition.objects.filter(pk=task.pk).update(suspended=True)
+    api_client.force_login(integrator)
+    body = _preview(api_client, binding, json.dumps(sample)).json()
+    assert (body["outcome"], body["duplicate"], body["run_problems"]) == ("accepted", True, [])
+    api_client.logout()
+    assert _send(api_client, task, key, sample).status_code == 200
 
 
 def test_preview_refuses_json_values_for_file_inputs(api_client, integrator):

@@ -311,6 +311,8 @@ def test_manual_run_refuses_a_revision_other_than_the_one_on_the_screen(api_clie
     assert res.status_code == 409
     api_client.post(_url(task, "resume/"))
     assert api_client.post(_url(task, "run/?version=x"), {}, format="json").status_code == 400
+    # 入力の誤り（multipartの不正なJSON）より先にも照合する
+    assert api_client.post(_url(task, "run/?version=1"), {"inputs": "{"}).status_code == 409
     assert not Run.objects.exists()
     # 入力の項目の名前と重ならないよう、版はクエリで送る（version という名前のファイルの項目も使える）
     inputs = [

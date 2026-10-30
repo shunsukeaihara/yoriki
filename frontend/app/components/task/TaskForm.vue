@@ -44,6 +44,7 @@ const reset = (task: TaskDetail = props.task) => {
   version.value = task.version ?? 0
   savedName.value = task.name
   errors.value = {}
+  loadChoices()
 }
 const dirty = computed(() => JSON.stringify(form.value) !== saved.value)
 
@@ -57,7 +58,8 @@ const { items: destinationChoices, fetchAll: fetchDestinations } = useFetchAll((
   api.destinations.list(choiceParams),
 )
 const models = ref<AppModelProfile[]>([])
-onMounted(async () => {
+// 候補は、開いたときと、タスクを読み直したとき（保存・最新の状態の読み込み）に読む（その間に公開された版等を出す）
+const loadChoices = async () => {
   try {
     await Promise.all([
       fetchSkills(),
@@ -68,7 +70,8 @@ onMounted(async () => {
   } catch (err) {
     toast.add({ title: t('エラー'), description: makeErrorMsg(err), color: 'error' })
   }
-})
+}
+onMounted(loadChoices)
 
 const connectorItems = computed(() => {
   const items = connectorChoices.value.map((c) => ({

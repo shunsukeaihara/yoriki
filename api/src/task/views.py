@@ -71,6 +71,8 @@ CHOICE_PARAMETERS = [
     OpenApiParameter("search", str, description="名前の一部"),
 ]
 
+VERSION_CHANGED = _("画面を開いた後に、タスクの版が変わりました。最新の状態を読み込んでから実行してください")
+
 CONFLICT = OpenApiResponse(description="他の変更と競合した（編集を始めた後に、他の人が版を作った）")
 
 
@@ -189,6 +191,9 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
         version = request.query_params.get("version")
         if version is not None and not version.isdigit():
             raise ValidationError({"version": [_("版の番号を指定してください")]})
+        # 入力の検証より先にも照合する（古い画面に、今の版に対する入力の誤りを見せない）。受付ではロックして照合し直す
+        if version is not None and int(version) != task.version_number:
+            raise Conflict(VERSION_CHANGED)
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
@@ -200,8 +205,7 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
                 expected_version=int(version) if version is not None else None,
             )
         except VersionConflict as exc:
-            message = _("画面を開いた後に、タスクの版が変わりました。最新の状態を読み込んでから実行してください")
-            raise Conflict(message) from exc
+            raise Conflict(VERSION_CHANGED) from exc
         except InvalidInputs as exc:
             raise ValidationError({"inputs": exc.errors}) from exc
         except CannotRun as exc:

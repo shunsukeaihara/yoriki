@@ -3006,6 +3006,11 @@ paths:
         schema:
           type: string
         required: true
+      - in: query
+        name: version
+        schema:
+          type: integer
+        description: 画面で確かめた版（任意）。今の版と違えば409にし、確かめていない定義では実行しない。入力の項目の名前と重ならないよう、本文ではなくクエリで送る
       tags:
       - app/task
       requestBody:
@@ -3020,9 +3025,6 @@ paths:
                 inputs:
                   type: string
                   description: ファイル以外の入力の項目の名前と値（JSONのオブジェクトの文字列）
-                version:
-                  type: integer
-                  description: 画面で確かめた版（任意）。今の版と違えば409
               additionalProperties:
                 type: string
                 format: binary
@@ -14302,11 +14304,6 @@ components:
           additionalProperties:
             nullable: true
           description: 入力の項目の名前と値。タスクの定義で決めた項目だけを受け付ける。multipart/form-dataではJSONの文字列にし、型がファイルの項目は項目の名前でファイルを付ける
-        version:
-          type: integer
-          minimum: 1
-          nullable: true
-          description: 画面で確かめた版（任意）。今の版と違えば409にし、確かめていない定義では実行しない
     TaskSkill:
       type: object
       properties:

@@ -52,8 +52,6 @@ from .webhook import parse_path
 TOOL_CHOICES = [(t.name, t.name) for t in SKILL_TOOLS]
 MAX_PROMPT_TEMPLATE = 20_000
 MAX_CHOICES = 100
-# 手動実行のmultipartで、ファイル以外に使うフィールドの名前
-RESERVED_FIELDS = ("inputs", "version")
 
 
 class TaskSkillSerializer(serializers.Serializer):
@@ -83,12 +81,9 @@ class TaskInputSerializer(serializers.Serializer):
     )
 
     def validate(self, attrs):
-        # 手動実行のmultipartでは、ファイル以外の値を `inputs`、確かめた版を `version` のフィールドで送るので、
-        # ファイルの項目の名前に使わせない
-        if attrs["type"] == TaskInputType.FILE and attrs["name"] in RESERVED_FIELDS:
-            raise serializers.ValidationError(
-                {"name": _("%(name)s は型がファイルの項目の名前に使えません") % {"name": attrs["name"]}}
-            )
+        # 手動実行のmultipartでは、ファイル以外の値を `inputs` のフィールドで送るので、ファイルの項目の名前に使わせない
+        if attrs["type"] == TaskInputType.FILE and attrs["name"] == "inputs":
+            raise serializers.ValidationError({"name": _("inputs は型がファイルの項目の名前に使えません")})
         if attrs["type"] == TaskInputType.CHOICE:
             if not attrs["choices"]:
                 raise serializers.ValidationError({"choices": _("選択肢を入力してください")})
@@ -332,8 +327,7 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
             if "version_number" not in attrs:
                 raise serializers.ValidationError({"version": _("編集を始めた時点の版を送ってください")})
             task = self.instance
-            # 別の人が版を作った後の保存は、内容の検証より先に409にする（今の版に対する誤りを、古い画面に見せない）。
-            # 保存の直前にも、行をロックしてから revise() が照合し直す
+            # 内容の検証より先に409にする（数で届いた版は、項目ごとの検証の前に to_internal_value() で照合している）
             if attrs["version_number"] != task.version_number:
                 raise Conflict()
         if "name" in attrs:
@@ -480,6 +474,14 @@ class TaskDefinitionUpdateSerializer(TaskDefinitionDetailSerializer):
     class Meta(TaskDefinitionDetailSerializer.Meta):
         pass
 
+    def to_internal_value(self, data):
+        # 別の人が版を作った後の保存は、項目ごとの検証（通知先・モデル設定等の参照）より先に409にする。今の版に対する
+        # 誤りを古い画面に見せないため。保存の直前にも、行をロックしてから revise() が照合し直す
+        version = data.get("version") if hasattr(data, "get") else None
+        if self.instance is not None and isinstance(version, int) and version != self.instance.version_number:
+            raise Conflict()
+        return super().to_internal_value(data)
+
     def get_fields(self):
         # 部分更新でも、省いた項目に既定値を入れて今の版を上書きしないようにする
         fields = super().get_fields()
@@ -571,26 +573,18 @@ class TaskRunCreateSerializer(serializers.Serializer):
         ),
     )
 
-    version = serializers.IntegerField(
-        min_value=1,
-        required=False,
-        allow_null=True,
-        default=None,
-        help_text=_("画面で確かめた版（任意）。今の版と違えば409にし、確かめていない定義では実行しない"),
-    )
-
     def validate(self, attrs):
         files: dict[str, InputFile] = {}
         data = self.initial_data
         for name, items in data.lists() if hasattr(data, "lists") else ():
             uploaded = [i for i in items if isinstance(i, UploadedFile)]
             if not uploaded:
-                if name not in RESERVED_FIELDS:
+                if name != "inputs":
                     # 文字の値は inputs に入れる。ほかのフィールドを黙って捨てない
                     error = _("ファイルを送るか、値は inputs に入れて送ってください")
                     raise serializers.ValidationError({"inputs": {name: error}})
                 continue
-            if len(items) > 1 or name in RESERVED_FIELDS:
+            if len(items) > 1 or name == "inputs":
                 # 2つ目のファイルや、ファイルと一緒に送った文字を黙って捨てない
                 raise serializers.ValidationError({"inputs": {name: _("1つの項目にはファイルを1つだけ送ってください")}})
             limit = settings.YORIKI_UPLOAD_MAX_MB

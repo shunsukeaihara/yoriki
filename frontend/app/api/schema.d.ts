@@ -5834,8 +5834,6 @@ export interface components {
             inputs?: {
                 [key: string]: unknown;
             };
-            /** @description 画面で確かめた版（任意）。今の版と違えば409にし、確かめていない定義では実行しない */
-            version?: number | null;
         };
         TaskSkill: {
             /** @description SkillのID */
@@ -8556,7 +8554,10 @@ export interface operations {
     };
     app_v1_tasks_run_create: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 画面で確かめた版（任意）。今の版と違えば409にし、確かめていない定義では実行しない。入力の項目の名前と重ならないよう、本文ではなくクエリで送る */
+                version?: number;
+            };
             header?: never;
             path: {
                 uid: string;
@@ -8569,8 +8570,6 @@ export interface operations {
                 "multipart/form-data": {
                     /** @description ファイル以外の入力の項目の名前と値（JSONのオブジェクトの文字列） */
                     inputs?: string;
-                    /** @description 画面で確かめた版（任意）。今の版と違えば409 */
-                    version?: number;
                 } & {
                     [key: string]: string;
                 };

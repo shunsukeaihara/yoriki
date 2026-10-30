@@ -92,7 +92,6 @@ TASK_RUN_MULTIPART = {
             "type": "string",
             "description": "ファイル以外の入力の項目の名前と値（JSONのオブジェクトの文字列）",
         },
-        "version": {"type": "integer", "description": "画面で確かめた版（任意）。今の版と違えば409"},
     },
     "additionalProperties": {
         "type": "string",
@@ -174,11 +173,22 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
         "入力はタスクの定義で決めた項目だけを受け付け、自由な依頼文は受けない。型がファイルの項目があれば "
         "multipart/form-dataで送る（ファイルは項目の名前で付ける）",
         request={"application/json": TaskRunCreateSerializer, "multipart/form-data": TASK_RUN_MULTIPART},
+        parameters=[
+            OpenApiParameter(
+                "version",
+                int,
+                description="画面で確かめた版（任意）。今の版と違えば409にし、確かめていない定義では実行しない。"
+                "入力の項目の名前と重ならないよう、本文ではなくクエリで送る",
+            )
+        ],
         responses={201: RunSerializer, 409: CONFLICT},
     )
     @action(detail=True, methods=["post"], serializer_class=TaskRunCreateSerializer)
     def run(self, request, *args, **kwargs):
         task = self.get_object()
+        version = request.query_params.get("version")
+        if version is not None and not version.isdigit():
+            raise ValidationError({"version": [_("版の番号を指定してください")]})
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         try:
@@ -187,7 +197,7 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
                 inputs=serializer.validated_data["inputs"],
                 actor=request.user,
                 launch=RunLaunch.MANUAL,
-                expected_version=serializer.validated_data["version"],
+                expected_version=int(version) if version is not None else None,
             )
         except VersionConflict as exc:
             message = _("画面を開いた後に、タスクの版が変わりました。最新の状態を読み込んでから実行してください")

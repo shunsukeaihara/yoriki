@@ -97,6 +97,9 @@ def start_task_run(
                 .select_related("owner", "department", "current_revision__model_profile__current_version")
                 .get(pk=task.pk)
             )
+            # 画面で確かめた版と違えば、実行できるかより先に知らせる（画面に最新の状態を読み込ませる）
+            if expected_version is not None and task.version_number != expected_version:
+                raise VersionConflict()
             if launch == RunLaunch.MANUAL and not task.can(actor, TaskAction.RUN):
                 raise CannotRun(_("このタスクを実行する権限がないか、タスクが停止中です"))
             # 入口からの起動は、タスクに固定したものの範囲で動く（authorization.md §6。個人のタスクはスケジュールだけ）
@@ -106,8 +109,6 @@ def start_task_run(
                 raise CannotRun(reason)
             revision = task.current_revision
             assert revision is not None  # can()・in_service() が確かめた
-            if expected_version is not None and revision.number != expected_version:
-                raise VersionConflict()
             values = inputs(revision) if callable(inputs) else inputs
             cleaned, errors = clean_inputs(revision.inputs, values)
             if errors:

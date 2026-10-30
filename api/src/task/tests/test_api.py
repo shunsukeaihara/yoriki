@@ -291,6 +291,9 @@ def test_saving_an_old_revision_is_a_conflict_even_if_the_content_is_invalid(api
     # 版1のまま、入力の項目にない名前をテンプレートで使う（今の版に対しても誤り）
     res = api_client.patch(_url(task), {"version": 1, "prompt_template": "{{ inputs.memo }}"}, format="json")
     assert res.status_code == 409, res.json()
+    # 項目ごとの検証（消えた参照先）より先にも照合する
+    res = api_client.patch(_url(task), {"version": 1, "model_profile": "gone", "destination": "gone"}, format="json")
+    assert res.status_code == 409, res.json()
     res = api_client.patch(_url(task), {"version": 2, "prompt_template": "{{ inputs.memo }}"}, format="json")
     assert res.status_code == 400
 
@@ -300,14 +303,26 @@ def test_manual_run_refuses_a_revision_other_than_the_one_on_the_screen(api_clie
     task = _create(api_client, app_user, model).json()
     res = api_client.patch(_url(task), {"version": 1, "prompt_template": "{{ inputs.vendor }} を調べて"}, format="json")
     assert res.json()["version"] == 2
-    res = api_client.post(_url(task, "run/"), {"inputs": {"vendor": "A商事"}, "version": 1}, format="json")
+    res = api_client.post(_url(task, "run/?version=1"), {"inputs": {"vendor": "A商事"}}, format="json")
     assert res.status_code == 409
+    # 新しい版で実行できなくなっていても、先に版の違いを知らせる
+    api_client.post(_url(task, "suspend/"))
+    res = api_client.post(_url(task, "run/?version=1"), {"inputs": {"vendor": "A商事"}}, format="json")
+    assert res.status_code == 409
+    api_client.post(_url(task, "resume/"))
+    assert api_client.post(_url(task, "run/?version=x"), {}, format="json").status_code == 400
     assert not Run.objects.exists()
-    # multipart でも送れる
-    body = {"inputs": json.dumps({"vendor": "A商事"}), "version": "2"}
-    res = api_client.post(_url(task, "run/"), body)
+    # 入力の項目の名前と重ならないよう、版はクエリで送る（version という名前のファイルの項目も使える）
+    inputs = [
+        {"name": "vendor", "label": "取引先", "type": "string", "required": True},
+        {"name": "version", "label": "版のファイル", "type": "file"},
+    ]
+    task = api_client.patch(_url(task), {"version": 2, "inputs": inputs}, format="json").json()
+    assert task["version"] == 3
+    body = {"inputs": json.dumps({"vendor": "A商事"}), "version": SimpleUploadedFile("v.txt", b"1")}
+    res = api_client.post(_url(task, "run/?version=3"), body)
     assert res.status_code == 201, res.json()
-    assert Run.objects.get().task_revision == TaskDefinitionRevision.objects.get(task__uid=task["id"], number=2)
+    assert Run.objects.get().task_revision == TaskDefinitionRevision.objects.get(task__uid=task["id"], number=3)
 
 
 def test_manual_run_accepts_only_the_defined_inputs(api_client, app_user, model):
@@ -365,8 +380,6 @@ def test_manual_run_refuses_mismatched_files(api_client, app_user, model, settin
     assert (res.status_code, set(res.json()["inputs"])) == (400, {"invoice"})
     res = _create(api_client, app_user, model, name="別", inputs=[{"name": "inputs", "label": "x", "type": "file"}])
     assert "inputs は型がファイルの項目の名前に使えません" in str(res.json()["inputs"])
-    res = _create(api_client, app_user, model, name="別3", inputs=[{"name": "version", "label": "x", "type": "file"}])
-    assert "version は型がファイルの項目の名前に使えません" in str(res.json()["inputs"])
     inputs = [{"name": "inputs", "label": "x", "type": "string"}]
     res = _create(api_client, app_user, model, name="別2", inputs=inputs, prompt_template="{{ inputs.inputs }}")
     assert res.status_code == 201, res.json()

@@ -176,7 +176,8 @@ const createAPI = () => {
       suspend: () => http.post<TaskDetail, TaskDetail>(`app/v1/tasks/${id}/suspend/`),
       resume: () => http.post<TaskDetail, TaskDetail>(`app/v1/tasks/${id}/resume/`),
       // 手動実行。いつも multipart で送り、inputs はJSONの文字列にする（項目の名前のキーを変換しないため）。
-      // 型がファイルの項目は、項目の名前のフィールドでファイルを付ける。version は画面で確かめた版（違えば409）
+      // 型がファイルの項目は、項目の名前のフィールドでファイルを付ける。version は画面で確かめた版（違えば409）で、
+      // 入力の項目の名前と重ならないようクエリで送る
       run: (version: number, inputs: TaskRunInputs) => {
         const form = new FormData()
         const values: Record<string, unknown> = {}
@@ -185,8 +186,7 @@ const createAPI = () => {
           else if (value !== null && value !== '') values[name] = value
         }
         form.append('inputs', JSON.stringify(values))
-        form.append('version', String(version))
-        return http.post<Run, Run>(`app/v1/tasks/${id}/run/`, form, { timeout: UPLOAD_TIMEOUT })
+        return http.post<Run, Run>(`app/v1/tasks/${id}/run/`, form, { timeout: UPLOAD_TIMEOUT, params: { version } })
       },
       // 版は版番号で識別する
       revisions: () => ({

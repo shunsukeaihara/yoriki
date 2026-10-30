@@ -5,6 +5,7 @@ import pytest
 
 from connector.factories import ConnectorFactory
 from connector.models import ConnectorScope
+from harness import tasks
 from harness.runner import Runner
 from harness.tests.test_connectors import TABLES, execute, fixture_fake_datasource, results, text_of
 from llm.factories import ModelProfileFactory
@@ -55,7 +56,6 @@ def test_task_run_uses_only_the_fixed_skill_tools_and_connectors(admin):
         created_by=admin,
         revision__skills=[{"skill": skill.uid, "version": 1}],
         revision__connectors=[connector.uid],
-        revision__tools=["read", "datasource_query", "todo_write"],
         revision__model_profile=ModelProfileFactory.create(version__supports_tools=True),
     )
     run = _start(task, admin)
@@ -71,8 +71,8 @@ def test_task_run_uses_only_the_fixed_skill_tools_and_connectors(admin):
     assert run.status == RunStatus.COMPLETED, run.error
     assert run.result == {"ok": True}
     first = adapter.requests[0]
-    # Skillとタスクの両方に入っているToolだけ。skill・ask_user・request_skill_edit は出さない
-    assert sorted(t.name for t in first.tools) == ["datasource_query", "read", "submit_result"]
+    # 固定したSkillの「使ってよいTool」だけ。skill・ask_user・request_skill_edit は出さない
+    assert sorted(t.name for t in first.tools) == ["datasource_query", "read", "shell", "submit_result"]
     query_tool = next(t for t in first.tools if t.name == "datasource_query")
     assert query_tool.parameters["properties"]["connector"]["enum"] == ["経理DB"]
     context = next(m.text for m in first.messages if m.role == "user" and "<runtime_context>" in m.text)
@@ -90,7 +90,6 @@ def test_connector_disabled_during_the_task_run_is_refused(admin):
         created_by=admin,
         revision__skills=[{"skill": skill.uid, "version": 1}],
         revision__connectors=[connector.uid],
-        revision__tools=["datasource_query"],
     )
     run = _start(task, admin)
     connector.is_active = False
@@ -143,7 +142,6 @@ def test_remaining_calls_are_not_run_after_the_skill_is_suspended(admin, fake_da
         created_by=admin,
         revision__skills=[{"skill": skill.uid, "version": 1}],
         revision__connectors=[connector.uid],
-        revision__tools=["datasource_query"],
     )
     run = _start(task, admin)
     original = Runner._run_tool
@@ -211,7 +209,6 @@ def test_suspended_task_does_not_replay_a_pending_tool_call(admin, fake_datasour
         created_by=admin,
         revision__skills=[{"skill": skill.uid, "version": 1}],
         revision__connectors=[connector.uid],
-        revision__tools=["datasource_query"],
     )
     run = _start(task, admin)
     call = {"id": "c1", "name": "datasource_query", "arguments": {"connector": "経理DB", "sql": "SELECT 1"}}
@@ -248,7 +245,6 @@ def test_system_task_cannot_use_a_connector_of_a_disabled_department(admin):
         created_by=admin,
         revision__skills=[{"skill": skill.uid, "version": 1}],
         revision__connectors=[connector.uid],
-        revision__tools=["datasource_query"],
     )
     run = _start(task, admin)
     department.deleted = True
@@ -259,3 +255,11 @@ def test_system_task_cannot_use_a_connector_of_a_disabled_department(admin):
     )
     [queried] = results(run, "datasource_query")
     assert queried["is_error"]
+
+
+def test_runs_accepted_with_a_task_tool_list_keep_it():
+    """タスクの版がToolの一覧を持っていた頃に受け付けたRunは、その一覧との両方に入っているものに限る"""
+    old = Run(manifest={"fixed": {"task": {"tools": ["read"]}}})
+    assert tasks.allowed_tools(old, {"read", "shell"}) == {"read"}
+    new = Run(manifest={"fixed": {"task": {}}})
+    assert tasks.allowed_tools(new, {"read", "shell"}) == {"read", "shell"}

@@ -61,8 +61,11 @@ def connector_permitted(run: Run, connector) -> bool:
 
 
 def allowed_tools(run: Run, skill_tools: set[str]) -> set[str]:
-    """Skillの「使ってよいTool」（固定したSkillのものを合わせたもの）とタスクのToolの一覧の両方に入っているもの"""
-    return skill_tools & set(task_entry(run).get("tools", []))
+    """タスクのRunが使うTool：固定したSkillの「使ってよいTool」を合わせたもの（authorization.md §5.4）。
+
+    タスクの版がToolの一覧を持っていた頃に受け付けたRunは、固定したその一覧との両方に入っているものに限る"""
+    fixed = task_entry(run).get("tools")
+    return skill_tools if fixed is None else skill_tools & set(fixed)
 
 
 def output_schema(run: Run) -> dict[str, Any] | None:

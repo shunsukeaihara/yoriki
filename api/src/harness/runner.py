@@ -552,7 +552,7 @@ class Runner:
             if not ((self.run_obj.manifest or {}).get("fixed") or {}).get("skill_edit", {}).get("skill"):
                 tools += (CREATE_SKILL,)
         elif tasks.is_task_run(self.run_obj):
-            # タスクのRun：固定したSkillの「使ってよいTool」とタスクのToolの一覧の両方に入っているものだけ。
+            # タスクのRun：固定したSkillの「使ってよいTool」を合わせたものだけ。
             # 業務結果のSchemaはタスクのもの（なければSkillのもの）。`skill` は出さない（authorization.md §5.4）
             allowed = tasks.allowed_tools(self.run_obj, {name for version in explicit for name in version.tools})
             tools = tuple(t for t in (*ALL_TOOLS, *datasource) if t.name in allowed)

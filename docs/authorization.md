@@ -170,7 +170,7 @@ Connector管理者・連携の管理者・システム管理者・ユーザー�
 - 部門・全社・システムのタスクには、個人のSkill・Connector・入口・出口を登録できない。
 - **タスクのRunでは、Connectorを指示で選ばせない**。エージェントが使えるConnectorはタスクに固定したものだけで、会話のように利用者の使えるものから探して使うことはしない。プロンプト・Skill・入力に何が書かれていても増えない。
 - 入力の制限：入力の項目ごとに、型と取りうる値（選べる対象）を決められる。Connectorの操作には取得件数の上限があり、タスクごとにさらに絞れる。Toolの引数も、タスクごとに絞れる。
-- Tool：Skillの「使ってよいTool」とタスクのToolの一覧の、両方に入っているものだけを使う。どちらにも書いていなければ、業務のToolなし（文章の応答だけ）。汎用のコード実行・ファイルの書出しも、この一覧で絞る。外のデータを読み書きしない進行の制御のTool（業務結果を確定する `submit_result`、利用者に尋ねる `ask_user`、Skillの編集を提案する `request_skill_edit`、通知Skillの指示で完了の通知の文章と渡すファイルを決める `prepare_notification`）は、業務のTool一覧とは別に、harness.md §7.5の条件（業務結果のSchemaがある、答える人がいる、タスクに通知Skillがある）で加える。`prepare_notification` は出口・イベントを変えられず、渡すファイルも業務結果のファイルの項目の中から絞るだけ（design.md §4.3）。コードを実行する環境（Sandbox）は、Connectorの資格情報と外のネットワークに直接届かない。
+- Tool：固定したSkill（通知Skillを含む）の「使ってよいTool」を合わせたものを使う。タスクの側ではToolを選ばない（Skillの「使ってよいTool」は公開の権限でしか変えられず、Sandboxは外のネットワークとConnectorの資格情報に届かず、Connectorはタスクに固定したものだけなので、同じ一覧をタスクでもう一度絞っても守れるものが少ないため。design.md 0.35）。どのSkillにも書いていなければ、業務のToolなし（文章の応答だけ）。Connectorを登録したタスクには、Connectorの操作を許すSkillが要る。外のデータを読み書きしない進行の制御のTool（業務結果を確定する `submit_result`、利用者に尋ねる `ask_user`、Skillの編集を提案する `request_skill_edit`、通知Skillの指示で完了の通知の文章と渡すファイルを決める `prepare_notification`）は、業務のTool一覧とは別に、harness.md §7.5の条件（業務結果のSchemaがある、答える人がいる、タスクに通知Skillがある）で加える。`prepare_notification` は出口・イベントを変えられず、渡すファイルも業務結果のファイルの項目の中から絞るだけ（design.md §4.3）。コードを実行する環境（Sandbox）は、Connectorの資格情報と外のネットワークに直接届かない。
 
 ### 5.5 入口と出口
 

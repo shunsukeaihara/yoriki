@@ -146,7 +146,6 @@ def test_detail_shows_names_and_problems(api_client, app_user):
             "model_profile": model.uid,
             "skills": [{"skill": skill.uid, "version": 1}],
             "connectors": [connector.uid],
-            "tools": ["read", "datasource_query"],
         },
         format="json",
     )

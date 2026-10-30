@@ -329,5 +329,5 @@ def test_a_notification_skill_is_checked_like_the_other_skills(api_client, manag
     # 通知Skillの「使ってよいTool」も、タスクのToolの一覧に使える
     reader = _notifier("報告書の要約")
     SkillVersionFactory.create(skill=reader, tools=["read"])
-    res = _create(api_client, manager, notification_skill={"skill": reader.uid, "version": 2}, tools=["read"], **common)
+    res = _create(api_client, manager, notification_skill={"skill": reader.uid, "version": 2}, **common)
     assert res.status_code == 201, res.json()

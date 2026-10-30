@@ -282,7 +282,6 @@ REVISION_FIELDS = (
     "prompt_template",
     "skills",
     "connectors",
-    "tools",
     "model_profile",
     "effort",
     "handles_sensitive_data",
@@ -301,7 +300,6 @@ class TaskDefinitionRevision(models.Model):
     - `skills`：使うSkillと固定の版。`[{"skill": "<SkillのID>", "version": <版の番号>}]`。Skillが新しい版を公開しても
       切り替わらない（authorization.md §5.4）
     - `connectors`：使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う
-    - `tools`：使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う
     - `inputs`：入力の項目。`[{"name": "vendor", "label": "取引先", "type": "string", "required": true,
       "choices": [], "max_length": 200}]`。プロンプトのテンプレートに `{{ inputs.vendor }}` で埋め込む
     - `output_schema`：業務結果のSchema。なければSkillのもの
@@ -320,7 +318,6 @@ class TaskDefinitionRevision(models.Model):
     prompt_template = models.TextField(_("プロンプトのテンプレート"))
     skills = models.JSONField(_("使うSkillと版"), default=list)
     connectors = ArrayField(models.CharField(max_length=30), verbose_name=_("使うConnector"), default=list)
-    tools = ArrayField(models.CharField(max_length=50), verbose_name=_("使ってよいTool"), default=list)
     model_profile = models.ForeignKey(
         "llm.ModelProfile", on_delete=models.PROTECT, related_name="+", verbose_name=_("モデル設定")
     )

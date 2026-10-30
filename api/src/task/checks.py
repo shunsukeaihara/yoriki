@@ -185,11 +185,11 @@ def _check_connectors(task: TaskLike, content: dict[str, Any], errors: Errors) -
                 _("Connector「%(name)s」は機密なので、個人情報・機密情報を扱うタスクにしてください")
                 % {"name": connector.name},
             )
-    tools = set(content["tools"])
-    if content["connectors"] and not tools & DATASOURCE_TOOLS:
-        errors.add("tools", _("Connectorを使うには、使ってよいToolにConnectorの操作を加えてください"))
-    if tools & DATASOURCE_TOOLS and not content["connectors"]:
-        errors.add("connectors", _("Connectorの操作を使うには、使うConnectorを選んでください"))
+
+
+def skill_tools(skills: dict[str, tuple[Skill, SkillVersion | None]]) -> set[str]:
+    """固定したSkill（業務のSkillと通知Skill）の「使ってよいTool」を合わせたもの。タスクのRunはこれだけを使う"""
+    return {t for _s, v in skills.values() if v is not None for t in v.tools}
 
 
 def _check_skills(
@@ -213,12 +213,15 @@ def _check_skills(
         else:
             schemas += 1 if version.output_schema else 0
             _check_declarations(skill, version, content, errors, field)
-    # Toolは、固定したSkillの「使ってよいTool」との積だけを実行時に出すので、どのSkillも使わないToolは保存させない
-    skill_tools = {t for _s, v in skills.values() if v is not None for t in v.tools}
-    if unused := [t for t in content["tools"] if t not in skill_tools]:
+    # タスクのRunのToolは、固定したSkillの「使ってよいTool」を合わせたもの。Connectorの操作を許すSkillがなければ、
+    # 登録したConnectorを使えない
+    if content["connectors"] and not skill_tools(skills) & DATASOURCE_TOOLS:
         errors.add(
-            "tools",
-            _("登録したSkillのどれも使わないToolがあります：%(tools)s") % {"tools": "、".join(unused)},
+            "connectors",
+            _(
+                "登録したConnectorを使えるSkillがありません。Connectorの操作（datasource_describe・datasource_query）を"
+                "使ってよいToolに持つSkillを登録してください"
+            ),
         )
     if schemas > 1 and not content["output_schema"]:
         errors.add(
@@ -247,12 +250,6 @@ def _check_declarations(
         elif connector is not None and skill_connectors.out_of_bounds(declaration, connector):
             errors.add(
                 field, _("Skill「%(skill)s」が使う表・操作を、Connector「%(name)s」が今は公開していません") % names
-            )
-        if missing := [o for o in declaration["operations"] if o not in content["tools"]]:
-            errors.add(
-                "tools",
-                _("Skill「%(skill)s」が使う操作（%(operations)s）を、使ってよいToolに加えてください")
-                % {"skill": skill.name, "operations": "、".join(missing)},
             )
 
 
@@ -305,7 +302,7 @@ def _check_model(content: dict[str, Any], skills: dict[str, tuple[Skill, SkillVe
         errors.add("model_profile", _("業務結果のSchemaがあるタスクには、Toolを使えるモデルを選んでください"))
     elif content["notification_skill"] and not version.supports_tools:
         errors.add("model_profile", _("通知Skillを使うタスクには、Toolを使えるモデルを選んでください"))
-    elif content["tools"] and not version.supports_tools:
+    elif skill_tools(skills) and not version.supports_tools:
         errors.add("model_profile", _("このモデルはToolを使えません。Toolを使わないか、別のモデルを選んでください"))
     for _skill, skill_version in skills.values():
         if skill_version is not None and (reason := skill_version.unsupported_by(version)):

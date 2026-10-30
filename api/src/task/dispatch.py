@@ -190,7 +190,6 @@ def _start(
             "revision": revision.pk,
             "number": revision.number,
             "launch": launch,
-            "tools": revision.tools,
             "connectors": revision.connectors,
             "output_schema": output_schema,
             "inputs": inputs,

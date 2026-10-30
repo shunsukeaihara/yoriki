@@ -19,7 +19,6 @@ const toForm = (task: TaskDetail) => ({
   inputs: toInputRows(task.inputs),
   skills: (task.skills ?? []).map((s) => ({ ...s })),
   connectors: [...(task.connectors ?? [])],
-  tools: [...(task.tools ?? [])] as string[],
   modelProfile: task.modelProfile,
   effort: task.effort,
   handlesSensitiveData: task.handlesSensitiveData,
@@ -156,7 +155,6 @@ const { onSubmit, loading, errors } = createSubmit({
       inputs: fromInputRows(data.inputs),
       skills: data.skills,
       connectors: data.connectors,
-      tools: data.tools as ToolName[],
       modelProfile: data.modelProfile,
       effort: data.effort,
       handlesSensitiveData: data.handlesSensitiveData,
@@ -227,7 +225,11 @@ defineExpose({ onSubmit, loading, canPost, dirty, reset })
 
     <DFormSection
       :title="$t('使うもの')"
-      :description="$t('エージェントは、ここで選んだSkill・Connector・Toolだけを使い、ほかのものを探して使いません')"
+      :description="
+        $t(
+          'エージェントは、ここで選んだSkillとConnectorだけを使い、ほかのものを探して使いません。Toolは、登録したSkillの「使ってよいTool」を使います',
+        )
+      "
     >
       <TaskSkillsField
         v-model="form.skills"
@@ -241,20 +243,12 @@ defineExpose({ onSubmit, loading, canPost, dirty, reset })
       <DSelect
         v-model="form.connectors"
         :label="$t('Connector')"
-        :hint="$t('Skillが使うConnectorは、ここにも選びます')"
+        :hint="$t('Skillが使うConnectorは、ここにも選びます。Connectorの操作を使ってよいToolに持つSkillが要ります')"
         :items="connectorItems"
         multiple
         clearable
         searchable
         :error-messages="errors.connectors"
-      />
-      <DCheckboxGroup
-        v-model="form.tools"
-        :label="$t('使ってよいTool')"
-        :hint="$t('登録したSkillの「使ってよいTool」にもあるものだけを使います')"
-        :items="skillToolItems(t)"
-        orientation="horizontal"
-        :error-messages="errors.tools"
       />
     </DFormSection>
 

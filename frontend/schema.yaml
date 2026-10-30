@@ -11431,12 +11431,6 @@ components:
             maxLength: 30
           description: 使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う
           maxItems: 10
-        tools:
-          type: array
-          items:
-            $ref: '#/components/schemas/ToolsEnum'
-          description: 使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う
-          maxItems: 50
         model_profile:
           type: string
           minLength: 1
@@ -13594,12 +13588,6 @@ components:
             maxLength: 30
           description: 使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う
           maxItems: 10
-        tools:
-          type: array
-          items:
-            $ref: '#/components/schemas/ToolsEnum'
-          description: 使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う
-          maxItems: 50
         model_profile:
           type: string
         effort:
@@ -13757,12 +13745,6 @@ components:
             maxLength: 30
           description: 使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う
           maxItems: 10
-        tools:
-          type: array
-          items:
-            $ref: '#/components/schemas/ToolsEnum'
-          description: 使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う
-          maxItems: 50
         model_profile:
           type: string
         effort:
@@ -13927,12 +13909,6 @@ components:
             maxLength: 30
           description: 使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う
           maxItems: 10
-        tools:
-          type: array
-          items:
-            $ref: '#/components/schemas/ToolsEnum'
-          description: 使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う
-          maxItems: 50
         model_profile:
           type: string
           minLength: 1
@@ -14020,13 +13996,6 @@ components:
             maxLength: 30
           readOnly: true
           title: 使うConnector
-        tools:
-          type: array
-          items:
-            type: string
-            maxLength: 50
-          readOnly: true
-          title: 使ってよいTool
         model_profile:
           type: string
           readOnly: true
@@ -14100,7 +14069,6 @@ components:
       - output_schema
       - prompt_template
       - skills
-      - tools
     TaskDefinitionUpdateRequest:
       type: object
       description: タスクの更新。範囲と部門は変えられないので、読み取り専用にする
@@ -14132,12 +14100,6 @@ components:
             maxLength: 30
           description: 使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う
           maxItems: 10
-        tools:
-          type: array
-          items:
-            $ref: '#/components/schemas/ToolsEnum'
-          description: 使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う
-          maxItems: 50
         model_profile:
           type: string
           minLength: 1

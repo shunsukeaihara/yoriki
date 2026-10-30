@@ -4671,8 +4671,6 @@ export interface components {
             skills?: components["schemas"]["TaskSkillRequest"][];
             /** @description 使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う */
             connectors?: string[];
-            /** @description 使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う */
-            tools?: components["schemas"]["ToolsEnum"][];
             model_profile?: string;
             /** @description 空ならモデルの既定 */
             effort?: string;
@@ -5524,8 +5522,6 @@ export interface components {
             skills?: components["schemas"]["TaskSkill"][];
             /** @description 使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う */
             connectors?: string[];
-            /** @description 使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う */
-            tools?: components["schemas"]["ToolsEnum"][];
             model_profile: string;
             /**
              * @description 空ならモデルの既定
@@ -5599,8 +5595,6 @@ export interface components {
             skills?: components["schemas"]["TaskSkill"][];
             /** @description 使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う */
             connectors?: string[];
-            /** @description 使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う */
-            tools?: components["schemas"]["ToolsEnum"][];
             model_profile: string;
             /**
              * @description 空ならモデルの既定
@@ -5676,8 +5670,6 @@ export interface components {
             skills?: components["schemas"]["TaskSkillRequest"][];
             /** @description 使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う */
             connectors?: string[];
-            /** @description 使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う */
-            tools?: components["schemas"]["ToolsEnum"][];
             model_profile: string;
             /**
              * @description 空ならモデルの既定
@@ -5721,8 +5713,6 @@ export interface components {
             readonly skills: components["schemas"]["TaskSkill"][];
             /** 使うConnector */
             readonly connectors: string[];
-            /** 使ってよいTool */
-            readonly tools: string[];
             readonly model_profile: string;
             readonly effort: string;
             /** 個人情報・機密情報を扱う */
@@ -5752,8 +5742,6 @@ export interface components {
             skills?: components["schemas"]["TaskSkillRequest"][];
             /** @description 使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う */
             connectors?: string[];
-            /** @description 使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う */
-            tools?: components["schemas"]["ToolsEnum"][];
             model_profile?: string;
             /** @description 空ならモデルの既定 */
             effort?: string;

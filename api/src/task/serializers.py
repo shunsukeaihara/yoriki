@@ -16,7 +16,6 @@ from connector.models import Connector
 from delivery.models import Destination, NotifyContent, NotifyEvent
 from delivery.serializers import DestinationChoiceSerializer
 from harness.result_files import file_format_problem
-from harness.tools import SKILL_TOOLS
 from harness.tools.base import schema_problem
 from llm.models import ModelProfile
 from llm.serializers import AppModelProfileSerializer
@@ -49,7 +48,6 @@ from .models import (
 )
 from .webhook import parse_path
 
-TOOL_CHOICES = [(t.name, t.name) for t in SKILL_TOOLS]
 MAX_PROMPT_TEMPLATE = 20_000
 MAX_CHOICES = 100
 
@@ -148,14 +146,6 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
         default=list,
         max_length=checks.MAX_TASK_CONNECTORS,
         help_text=_("使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う"),
-    )
-    tools = serializers.ListField(
-        source="current_revision.tools",
-        child=serializers.ChoiceField(choices=TOOL_CHOICES),
-        required=False,
-        default=list,
-        max_length=50,
-        help_text=_("使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う"),
     )
     model_profile: "serializers.SlugRelatedField[ModelProfile]" = serializers.SlugRelatedField(
         source="current_revision.model_profile",
@@ -277,9 +267,6 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
         if len(set(value)) != len(value):
             raise serializers.ValidationError(_("同じConnectorを2回登録しています"))
         return value
-
-    def validate_tools(self, value: list[str]) -> list[str]:
-        return list(dict.fromkeys(value))
 
     def validate_notify_events(self, value: list[str]) -> list[str]:
         return list(dict.fromkeys(value))

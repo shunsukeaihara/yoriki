@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-30（タスクの画面（⑦a）、PR #58 の中）
+- 最終更新：2026-10-31（タスクの画面（⑦a）、#58。次の作業の書き方を直した）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -132,7 +132,7 @@
 
 ## 4 次の作業
 
-**今の状態（2026-10-30）**：⑥（配信）は #57 で終わった。⑦（タスク・出口の画面）は、PRの分け方を利用者と決める前に、どの分け方の案でも最初になる「タスクの一覧・編集・手動実行」（⑦a）を `feature/task-pages` のブランチで進めた（利用者が作業を任せて離れていたため）。分け方の案は下の「⑦の始め方」のとおりで、⑦aのPRを作る前に利用者に確かめる。
+**今の状態（2026-10-31）**：⑥（配信）は #57 で終わった。⑦（タスク・出口の画面）は、PRの分け方を利用者と決める前に、どの分け方の案でも最初になる「タスクの一覧・編集・手動実行」（⑦a）を #58 で作った（利用者が作業を任せて離れていたため）。分け方の案は下の「⑦の始め方」のとおりで、⑦bを始めるときに利用者に確かめる。
 
 **⑦aで利用者と決めたこと**：タスクの作成・編集でToolを選ばない。タスクのRunは、固定したSkillの「使ってよいTool」を合わせたものを使う（design.md 0.35、authorization.md §5.4）。Connectorを登録したタスクには、Connectorの操作を許すSkillが要る（保存のときに確かめる）。Toolの一覧を持っていた頃に受け付けたRunは、固定したその一覧との両方に入っているものに限る（`harness/tasks.py` の `allowed_tools()`）。
 
@@ -300,9 +300,9 @@
 - レビュー：PRの前に回した。`codex review --base main` は5回目から指摘なし、敵対的なレビューは8回目でapprove。直した指摘：Toolを使えないモデルで通知SkillがToolを要すると受付ごと断る → 通知Skillを読み込まずに標準の形へ。`submit_result` の説明・結果・system promptが「ほかのToolを呼ばない」で `prepare_notification` と矛盾 → 通知Skillのあるタスクでは順番を揃える。authorization.md の進行の制御のTool・backend-conventions.md の NotificationBinding の記述・design.md の概念例が古い → 直した。業務結果を確定し直しても古い通知の文章が残る → 候補を消す。`prepare_notification` の誤りの繰り返しでRun全体が失敗する・呼び続けてステップの上限で失敗する・同じ応答の残りが実行される → そのRunでは出さない。通知Skillの業務結果のSchemaが最初の発言に載る → 業務結果のSchemaを持つSkillは通知Skillにできない。画面の通知の機密の根拠（authorization.md・status.md）が「状態だけ」のまま → 受け手をRunの結果を見られる人に限る、に書き直した。直さなかった指摘：権限を失った人の開いたままの通知欄に取得済みの文章が残る（アプリ全体で同じ。§3に記録）。
 - テスト：`delivery/tests/test_notification_skill.py`（Runnerから `prepare_notification` → 完了の配信と画面の通知の文章、候補がないときの標準の形、失敗に載せない、ファイルの絞り込みと断るパス、Toolを使えないモデル、保存時の検査）と、フロントエンドの通知欄の文章の表示。
 
-**次の作業**：#58 を人間のレビューとCIを経てマージする。⑦のPRの分け方（⑦a〜⑦d）を利用者に確かめ、その後は⑦b以降。
+**次の作業**：#58 がマージされたことを確かめてから、⑦b（出口・入口の管理画面）。始める前に、⑦のPRの分け方（⑦b〜⑦d）を利用者に確かめる。
 
-⑦の始め方：⑦は画面（frontend）が中心で大きいので、PRの分け方を利用者と決める（案：⑦a タスクの一覧・編集・手動実行（ブランチで進めた）→ ⑦b 出口・入口の管理画面（サンプルのpayloadで取り出しを試す）→ ⑦c Runの履歴と配信の状態・「通知を再試行」→ ⑦d チャットからタスクを起動する）。APIは `task`・`delivery` にある（タスク、版の履歴、手動実行、入口、出口、配信の履歴と送り直し、画面の通知）。authorization.md §7.2（タスクの編集画面で選ぶ候補のAPI）と、§3の「タスクで後回しにしたもの」「Webhookの入口で後回しにしたもの」「配信で後回しにしたもの」を読む。
+⑦の始め方：⑦は画面（frontend）が中心で大きいので、PRの分け方を利用者と決める（案：⑦a タスクの一覧・編集・手動実行（#58）→ ⑦b 出口・入口の管理画面（サンプルのpayloadで取り出しを試す）→ ⑦c Runの履歴と配信の状態・「通知を再試行」→ ⑦d チャットからタスクを起動する）。APIは `task`・`delivery` にある（タスク、版の履歴、手動実行、入口、出口、配信の履歴と送り直し、画面の通知）。authorization.md §7.2（タスクの編集画面で選ぶ候補のAPI）と、§3の「タスクで後回しにしたもの」「Webhookの入口で後回しにしたもの」「配信で後回しにしたもの」を読む。
 
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。上から順に着手する（利用者から別の指示がなければ、上から）。提案する順番：
 
@@ -348,7 +348,8 @@ cd frontend && pnpm install
 - 画面をブラウザで確かめるときは、api（上記）と `cd frontend && pnpm dev` を起動し、Playwright（Python）で操作する。手元のブラウザのキャッシュ（chromium-1208）に合う版は `uv run --no-project --with playwright==1.58.0 python <script>`。基盤管理者は `/login?method=password` でログインし、`storage_state` を保存して使い回す。SSOの社員はパスワードでログインできないので、`manage.py shell` でその社員のセッションを作り（`BACKEND_SESSION_KEY` は `utils.backends.PasswordBackend`）、Cookie `sessionid` に入れる。開発用のDBには、#35 で使った基盤管理者 `skill-admin@example.co.jp`（パスワード `check-pass-123`）、社員 `skill-member@example.co.jp`（部門「経理部」の所属とGroup「部門のSkill編集者」。以前の「編集」の役割の代わり）、委任したユーザー管理者 `user-admin@example.co.jp`（Group「ユーザー管理者」。パスワードはないので、セッションを作って使う）、システムのSkill「部門横断の照合（確認用）」（未公開）、部門のSkill「請求書の照合」（版3まで）が残っている。
 - 手元のmacOS（Node.js 26.12.1）では、フロントエンドの単体テストのうちコンポーネントをマウントしないファイル（`test/nuxt/composables/`、`api/client.test.ts` 等）が、Nuxtの環境の準備で止まって「Hook timed out」になる（`main` でも同じ。CIでは通る。原因は未調査）。コンポーネントのテストのファイルと一緒に `pnpm vitest run <ファイル>` で動かすと、同じ実行の中では通ることがある。
 - 変更前に、AGENTS.md と、触る範囲の規約を読む。作業の進め方（ブランチ、コミット、Pull Request、CI、マージ）は development.md に従う。
-- 作業の区切りでは、本書の §1・§3・§4 を更新する。Pull Requestで進めた作業は、マージの前にそのPull Requestの中で更新する（マージの後に `main` へ別にコミットしない）。
+- 作業の区切りでは、本書の §1・§3・§4 を更新する。Pull Requestで進めた作業は、マージの前にそのPull Requestの中で更新する（マージの後に `main` へ別にコミットしない）。マージは人間が指示して行うので、「次の作業」には「マージする」とは書かず、マージされる前提で、マージの後に始める作業を書く。
+- セッションを始めるときは、「次の作業」の前提のPRが実際にマージされたことを確かめてから進める（`gh pr view <番号>` か git の履歴）。マージされていなければ、進めずに利用者に伝える。
 - Codexのレビュー：手元で `codex review --base main -c 'developer_instructions="<指示>"'` を実行し（数分かかる。出力の `[P1]`・`[P2]` の行と末尾を読む）、指摘をコードで確かめて直し（テストも足す）、コミットして、指摘がなくなるまで繰り返す。PRの前に回してよい。`--base` と引数の指示文は一緒に使えないので、見る対象は `developer_instructions` で指定する。変更の種類で見る対象を変える：
   - 文書だけの変更（`docs/` 等）：文書を対象にする。指示は「レビューの指摘とまとめは、すべて日本語で書いてください。この変更は文書だけです。変えた文書と、関係する docs/ の文書（design.md・authorization.md・harness.md・各規約・status.md）の間の食い違い、古くなった記述、今の実装（api/・frontend/）と合わない記述を見てください。」
   - コードの変更：コードと文書を対象にする。指示は「レビューの指摘とまとめは、すべて日本語で書いてください。コードの不具合に加えて、変更が docs/ の設計書・規約（design.md・authorization.md・harness.md・各規約）と食い違っていないか、文書の直し漏れがないか（status.md を含む）も見てください。」

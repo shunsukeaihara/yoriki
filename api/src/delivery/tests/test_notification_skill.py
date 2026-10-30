@@ -137,6 +137,23 @@ def test_resubmitting_the_result_clears_the_candidate(manager):
     )
 
 
+def test_repeated_errors_of_the_notification_tool_do_not_fail_the_work(manager):
+    run = start_task_run(_task(), inputs={}, actor=manager, launch=RunLaunch.MANUAL)
+    wrong = {"message": "送ります", "files": ["report.xlsx"]}
+    adapter = FakeAdapter(
+        [
+            calls(("c0", "submit_result", {"ok": True})),
+            *[calls((f"c{i}", "prepare_notification", wrong)) for i in range(1, 6)],
+            reply("確認しました"),
+        ]
+    )
+    run = execute(run, adapter)
+    assert run.status == RunStatus.COMPLETED, run.error
+    *_errors, last = results(run, "prepare_notification")
+    assert "Do not call it again" in text_of(last)
+    assert Delivery.objects.get(run=run).payload["notification"] is None
+
+
 def test_without_a_candidate_the_standard_form_is_sent(manager):
     """通知Skillが候補を作らなかった・失敗した場合も、業務は完了にし、標準の形で送る"""
     run = start_task_run(_task(), inputs={}, actor=manager, launch=RunLaunch.MANUAL)
@@ -273,6 +290,11 @@ def test_a_notification_skill_is_checked_like_the_other_skills(api_client, manag
     entry = {"skill": notifier.uid, "version": 1}
     res = _create(api_client, manager, skills=[entry], notification_skill=entry, **common)
     assert "通知Skill" in str(res.json()["notification_skill"])
+
+    # 業務結果のSchemaを持つSkillは通知Skillにできない（最初の発言に業務結果の形が2つ載らないように）
+    shaped = _notifier("結果の形あり", output_schema=SCHEMA)
+    res = _create(api_client, manager, notification_skill={"skill": shaped.uid, "version": 1}, **common)
+    assert "業務結果のSchema" in str(res.json()["notification_skill"])
 
     # 通知Skillの「使ってよいTool」も、タスクのToolの一覧に使える
     reader = _notifier("報告書の要約")

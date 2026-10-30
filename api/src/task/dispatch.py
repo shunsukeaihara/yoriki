@@ -256,7 +256,7 @@ def _fixed_skills(
         entries.append(manifest_entry(skill, skill_version))
         if field == "notification_skill":
             notification_skill = skill
-    # 通知Skillの業務結果のSchemaは使わない
+    # 通知Skillは業務結果のSchemaを持たない（保存時に確かめている）
     output_schema = revision.output_schema or next(
         (v.output_schema for e in revision.skills if (v := skills[e["skill"]][1]) is not None and v.output_schema),
         None,

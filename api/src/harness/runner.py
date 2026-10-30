@@ -111,6 +111,10 @@ DELTA_INTERVAL = 0.15
 HEARTBEAT_INTERVAL = 20
 # 同じ呼出し・同じエラーを繰り返したときに、注意を添える回数と、止める回数（harness.md §11.3）
 REPEAT_WARN, REPEAT_STOP = 3, 5
+NOTIFICATION_GIVE_UP = (
+    "prepare_notification failed repeatedly. Do not call it again: the notification is sent with the last prepared "
+    "one, or in the standard form. Write your final reply."
+)
 # 応答の異常（空、出力の上限で切れた）を許す回数
 MAX_NUDGES = 3
 # 並べて実行するToolの数の上限（harness.md §7.6）
@@ -1030,6 +1034,9 @@ class Runner:
         self.error_repeats = self.error_repeats + 1 if error_key and error_key == self.last_error_key else 1
         self.last_error_key = error_key
         if self.repeats[key] >= REPEAT_STOP or (error_key and self.error_repeats >= REPEAT_STOP):
+            if call.name == PREPARE_NOTIFICATION.name:
+                # 通知の文章を作れないだけで業務を失敗にしない。前に決めた候補か標準の形で送る（design.md §4.3）
+                return ToolResult.text(NOTIFICATION_GIVE_UP)
             raise RepeatedErrors()
         notice = ""
         if self.repeats[key] >= REPEAT_WARN:

@@ -181,9 +181,11 @@ def _check_skills(
             )
         elif not skill_allowed(task, skill):
             errors.add(field, _("Skill「%(name)s」は、このタスクでは使えません") % {"name": skill.name})
+        elif field == "notification_skill" and version.output_schema:
+            # 業務結果は業務のSkillかタスクのもの。通知Skillの本文に別の形が載ると、モデルが確定する形を誤る
+            errors.add(field, _("業務結果のSchemaを持つSkillは、通知Skillにできません"))
         else:
-            # 通知Skillの業務結果のSchemaは使わない（業務結果は業務のSkillかタスクのもの）
-            schemas += 1 if field == "skills" and version.output_schema else 0
+            schemas += 1 if version.output_schema else 0
             _check_declarations(skill, version, content, errors, field)
     # Toolは、固定したSkillの「使ってよいTool」との積だけを実行時に出すので、どのSkillも使わないToolは保存させない
     skill_tools = {t for _s, v in skills.values() if v is not None for t in v.tools}

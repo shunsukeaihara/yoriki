@@ -68,6 +68,12 @@ const reloadLatest = async () => {
   await reloadAll()
 }
 
+// 手動実行が版の違いで断られた。読み直せるまで実行を止め、最新の状態を読み込む操作を出す
+const onRunConflicted = async () => {
+  conflicted.value = true
+  await reloadAll()
+}
+
 const onStarted = () => {
   tab.value = 'runs'
   runsReloadKey.value = Date.now()
@@ -126,11 +132,11 @@ const onDelete = async () => {
         </template>
         <template #right>
           <template v-if="task">
-            <TaskRunDialog :task="task" @started="onStarted" @conflicted="reloadAll" @unknown="onStarted">
+            <TaskRunDialog :task="task" @started="onStarted" @conflicted="onRunConflicted" @unknown="onStarted">
               <template #trigger="{ on }">
                 <DBtn
                   icon="i-lucide-play"
-                  :disabled="!task.canRun || formRef?.dirty"
+                  :disabled="!task.canRun || formRef?.dirty || conflicted"
                   :aria-label="$t('実行')"
                   v-on="on"
                 >
@@ -196,6 +202,16 @@ const onDelete = async () => {
           <p class="text-xs text-muted">{{ $t('入口は連携の管理者が管理画面で作り、鍵を管理します') }}</p>
         </div>
 
+        <UAlert
+          v-if="conflicted"
+          color="warning"
+          variant="subtle"
+          icon="i-lucide-refresh-cw"
+          :title="$t('編集の間に、他の人がタスクを保存しました')"
+          :actions="[
+            { label: $t('最新の状態を読み込む'), color: 'warning', variant: 'outline', onClick: reloadLatest },
+          ]"
+        />
         <UTabs
           v-model="tab"
           :items="tabs"
@@ -206,16 +222,6 @@ const onDelete = async () => {
           <template #settings>
             <div class="grid gap-4 pt-4">
               <TaskForm ref="formRef" :task="task" @updated="onUpdated" @failed="onFailed" />
-              <UAlert
-                v-if="conflicted"
-                color="warning"
-                variant="subtle"
-                icon="i-lucide-refresh-cw"
-                :title="$t('編集の間に、他の人がタスクを保存しました')"
-                :actions="[
-                  { label: $t('最新の状態を読み込む'), color: 'warning', variant: 'outline', onClick: reloadLatest },
-                ]"
-              />
               <div class="flex flex-wrap items-center justify-end gap-2 border-t border-default pt-4">
                 <span v-if="formRef?.dirty" class="text-xs text-warning">{{ $t('保存していない変更があります') }}</span>
                 <DBtn :disabled="!formRef?.canPost" :loading="formRef?.loading" @click="formRef?.onSubmit()">

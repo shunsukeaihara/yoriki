@@ -10,6 +10,15 @@ const reloadKey = defineModel<number>('reloadKey', { default: 0 })
 const api = useAPI()
 const { t } = useI18n()
 const params = ref<TaskRunListParams>({})
+const reload = () => (reloadKey.value = Date.now())
+// 自分が手動実行したRunの状態の変化はログインユーザー宛ての通知で届くので、読み直す（ほかの人・入口からのRunは
+// 届かないので、読み直すボタンでも読む）
+useUserEvents(
+  (event) => {
+    if (event.type === 'run.status') reload()
+  },
+  { onReconnect: reload },
+)
 
 const columns: TableColumn<Run>[] = [
   { accessorKey: 'created', header: t('受付') },
@@ -20,6 +29,9 @@ const columns: TableColumn<Run>[] = [
 </script>
 
 <template>
+  <div class="mb-2 flex justify-end">
+    <DBtn color="neutral" variant="ghost" icon="i-lucide-refresh-cw" @click="reload">{{ $t('読み直す') }}</DBtn>
+  </div>
   <DDataTable
     v-model:reload-key="reloadKey"
     :columns="columns"

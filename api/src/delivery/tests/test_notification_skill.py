@@ -56,9 +56,9 @@ def fixture_manager(db):
     return grant(UserFactory.create(), AppPermission.MANAGE_COMPANY_TASKS)
 
 
-def _notifier(name="結果の連絡", **version):
+def _notifier(name="結果の連絡", tools=(), **version):
     skill = SkillFactory.create(scope=SkillScope.COMPANY, name=name, owner=None)
-    SkillVersionFactory.create(skill=skill, instructions="1. 確認した件数を1文で書く", tools=[], **version)
+    SkillVersionFactory.create(skill=skill, instructions="1. 確認した件数を1文で書く", tools=list(tools), **version)
     return skill
 
 
@@ -90,6 +90,12 @@ def test_the_notification_skill_prepares_the_message_sent_on_completion(manager)
     assert run.status == RunStatus.COMPLETED, run.error
     first = adapter.requests[0]
     assert sorted(t.name for t in first.tools) == ["prepare_notification", "submit_result"]
+    # submit_result の説明と結果も、確定した後に prepare_notification を呼ぶよう伝える（ほかのToolを禁じる文と矛盾
+    # させない）
+    submit = next(t for t in first.tools if t.name == "submit_result")
+    assert "call prepare_notification" in submit.description
+    [submitted] = results(run, "submit_result")
+    assert "call prepare_notification" in text_of(submitted)
     # 通知Skillの本文と、どれが通知Skillかを最初の発言で伝える
     text = "\n".join(m.text for m in first.messages if m.role == "user")
     assert "確認した件数を1文で書く" in text
@@ -186,12 +192,14 @@ def test_a_task_run_without_tools_falls_back_to_the_standard_form(manager):
         revision__model_profile=profile,
         revision__destination=DestinationFactory.create(kind=DestinationKind.IN_APP, revision__url=""),
         revision__notify_events=["run.completed"],
-        revision__notification_skill={"skill": _notifier().uid, "version": 1},
+        revision__notification_skill={"skill": _notifier(tools=["read"]).uid, "version": 1},
     )
     # 保存した後に、モデル設定の今の版がToolを使えなくなった
     ModelProfileVersion.objects.filter(profile=profile).update(supports_tools=False)
+    # 通知SkillがToolを要しても、受付を断らずに、通知Skillを読み込まずに標準の形で送る
     run = start_task_run(task, inputs={}, actor=manager, launch=RunLaunch.MANUAL)
     assert run.manifest["fixed"]["task"]["notification_skill"] == ""
+    assert run.manifest["fixed"]["skills"] == []
 
 
 # --- タスクの保存 ---

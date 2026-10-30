@@ -20,18 +20,25 @@ NAME = "submit_result"
 DESCRIPTION = """Submit the business result of this work, in the form the skill defines.
 
 Call it once when the work is done and you have checked the result, before your final reply. Call it alone. If \
-you call it again, the new result replaces the previous one. After it succeeds, write a short final reply to the \
-user and do not call other tools."""
+you call it again, the new result replaces the previous one. After it succeeds, {after}"""
 
-RECORDED = "The result was recorded. Now write a short final reply to the user, and do not call other tools."
+AFTER = "write a short final reply to the user and do not call other tools."
+# 通知Skillのあるタスクでは、確定した後に prepare_notification を呼ばせる（design.md §4.3）
+AFTER_WITH_NOTIFICATION = (
+    "call prepare_notification as the notification skill instructs, then write a short final reply to the user. Do "
+    "not call other tools."
+)
+
+RECORDED = "The result was recorded. Now {after}"
 
 
-def make_submit_result_tool(schema: dict[str, Any]) -> Tool:
+def make_submit_result_tool(schema: dict[str, Any], *, notification: bool = False) -> Tool:
+    after = AFTER_WITH_NOTIFICATION if notification else AFTER
     return Tool(
         NAME,
-        DESCRIPTION,
+        DESCRIPTION.format(after=after),
         model_schema(schema),
-        partial(execute, schema=schema),
+        partial(execute, schema=schema, recorded=RECORDED.format(after=after)),
         Effect.READ,
         alone=True,
         replay_safe=True,
@@ -45,14 +52,20 @@ def original_schema(tool: Tool) -> dict[str, Any] | None:
     return execute_fn.keywords.get("schema") if isinstance(execute_fn, partial) else None
 
 
-def execute(arguments: dict[str, Any], context: ToolContext, *, schema: dict[str, Any] | None = None) -> ToolResult:
+def execute(
+    arguments: dict[str, Any],
+    context: ToolContext,
+    *,
+    schema: dict[str, Any] | None = None,
+    recorded: str = RECORDED.format(after=AFTER),
+) -> ToolResult:
     # 引数はRunnerが実行の前にSchemaで検証している
     if problem := _file_problem(schema, arguments, context):
         return problem
     with context.run.fenced(context.attempt) as run:
         Run.objects.filter(pk=run.pk).update(result=arguments, updated=timezone.now())
     context.run.result = arguments
-    return ToolResult.text(RECORDED, value={"result": arguments})
+    return ToolResult.text(recorded, value={"result": arguments})
 
 
 def _file_problem(schema: dict[str, Any] | None, arguments: dict[str, Any], context: ToolContext) -> ToolResult | None:

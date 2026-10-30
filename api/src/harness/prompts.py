@@ -37,8 +37,9 @@ TOOL_GUIDANCE = {
         "result, then write your final reply."
     ),
     "prepare_notification": (
-        "- This task has a notification skill. After the work (and `submit_result`), follow the skill and call "
-        "`prepare_notification` with the text of the notification. Where it is sent is fixed by the task."
+        "- This task has a notification skill. When the work is done (right after `submit_result` if the work has a "
+        "result schema), follow the skill and call `prepare_notification` with the text of the notification, then "
+        "write your final reply. Where it is sent is fixed by the task."
     ),
     "ask_user": "- Use `ask_user` for business decisions only. Call it alone; the answers arrive as its result.",
     "request_skill_edit": (

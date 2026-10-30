@@ -132,6 +132,8 @@ export const toolLabel = (
       return t('Connectorで読み取る：{connector}', { connector: arg('connector') })
     case 'submit_result':
       return t('業務結果を確定')
+    case 'prepare_notification':
+      return t('通知を準備')
     case 'request_skill_edit':
       return t('Skillの編集を提案')
     case 'get_skill':

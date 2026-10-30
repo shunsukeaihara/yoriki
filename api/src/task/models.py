@@ -291,6 +291,7 @@ REVISION_FIELDS = (
     "destination",
     "notify_events",
     "notify_content",
+    "notification_skill",
 )
 
 
@@ -306,6 +307,8 @@ class TaskDefinitionRevision(models.Model):
     - `output_schema`：業務結果のSchema。なければSkillのもの
     - `destination`・`notify_events`・`notify_content`：結果の通知（出口、通知するイベント、通知の内容）。初期は
       1つのタスクに1つ（design.md §4.1）。Runは受付時に出口の版を固定する
+    - `notification_skill`：通知Skillと固定の版（`{"skill": "<SkillのID>", "version": <版の番号>}`。任意）。業務のRunの
+      中で読み込み、`prepare_notification` で通知の文章と渡すファイルを決めさせる（design.md §4.3）
     """
 
     uid = NanoidField(unique=True)
@@ -337,6 +340,7 @@ class TaskDefinitionRevision(models.Model):
     )
     notify_events = ArrayField(models.CharField(max_length=30), verbose_name=_("通知するイベント"), default=list)
     notify_content = models.CharField(_("通知の内容"), max_length=30, default="status_and_result")
+    notification_skill = models.JSONField(_("通知Skillと版"), null=True, blank=True)
     change_reason = models.CharField(_("変更理由"), max_length=500, blank=True)
     # 最後にタスクを保存した人（authorization.md §6。Runに記録する）
     created_by = models.ForeignKey(

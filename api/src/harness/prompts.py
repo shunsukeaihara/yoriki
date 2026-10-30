@@ -36,6 +36,11 @@ TOOL_GUIDANCE = {
         "- This work has a result schema. When the work is done and checked, call `submit_result` alone with the "
         "result, then write your final reply."
     ),
+    "prepare_notification": (
+        "- This task has a notification skill. When the work is done (right after `submit_result` if the work has a "
+        "result schema), follow the skill and call `prepare_notification` with the text of the notification, then "
+        "write your final reply. Where it is sent is fixed by the task."
+    ),
     "ask_user": "- Use `ask_user` for business decisions only. Call it alone; the answers arrive as its result.",
     "request_skill_edit": (
         "- When the user gives a rule only for this time, apply it to this work only. When the user asks to keep it "
@@ -69,8 +74,18 @@ TOOL_GUIDANCE = {
 }
 
 
+# 通知Skillのあるタスクの submit_result の節。確定した後に prepare_notification を呼ぶ順番に揃える
+SUBMIT_RESULT_WITH_NOTIFICATION = (
+    "- This work has a result schema. When the work is done and checked, call `submit_result` alone with the "
+    "result, then `prepare_notification`, then write your final reply."
+)
+
+
 def system_prompt(tools: tuple[Tool, ...]) -> str:
-    lines = [TOOL_GUIDANCE[t.name] for t in tools if t.name in TOOL_GUIDANCE]
+    sections = dict(TOOL_GUIDANCE)
+    if any(t.name == "prepare_notification" for t in tools):
+        sections["submit_result"] = SUBMIT_RESULT_WITH_NOTIFICATION
+    lines = [sections[t.name] for t in tools if t.name in sections]
     guidance = ("# Tools\n- Call independent tools together in one response.\n" + "\n".join(lines)) if lines else ""
     template = (PROMPT_DIR / "system.md").read_text()
     return template.replace("{tool_guidance}", guidance).strip()

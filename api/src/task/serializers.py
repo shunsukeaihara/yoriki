@@ -210,6 +210,16 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
         default=NotifyContent.STATUS_AND_RESULT,
         help_text=_("通知の内容（状態だけ・業務結果・両方）"),
     )
+    notification_skill = TaskSkillSerializer(
+        source="current_revision.notification_skill",
+        required=False,
+        allow_null=True,
+        default=None,
+        help_text=_(
+            "通知Skillと固定の版（任意）。業務のRunの中で読み込み、通知の文章と渡すファイルを決めさせる。通知先と"
+            "完了（run.completed）の通知が要る"
+        ),
+    )
     change_reason = serializers.CharField(max_length=500, required=False, allow_blank=True, write_only=True)
     can_run = serializers.SerializerMethodField(help_text=_("今、手動で実行できるか（停止中でなく、版がある）"))
     triggers = serializers.SerializerMethodField(help_text=_("このタスクの入口（作る・変えるのは連携の管理者）"))
@@ -257,6 +267,9 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
         if len({e["skill"] for e in value}) != len(value):
             raise serializers.ValidationError(_("同じSkillを2回登録しています"))
         return [{"skill": e["skill"], "version": e["version"]} for e in value]
+
+    def validate_notification_skill(self, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        return None if value is None else {"skill": value["skill"], "version": value["version"]}
 
     def validate_connectors(self, value: list[str]) -> list[str]:
         if len(set(value)) != len(value):
@@ -316,6 +329,12 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
             attrs["name"] = attrs["name"].strip()
             self._check_unique_name(task, attrs["name"])
         content = self._content(attrs, task.current_revision if self.instance else None)
+        if content["notification_skill"] and content["notification_skill"]["skill"] in {
+            e["skill"] for e in content["skills"]
+        }:
+            raise serializers.ValidationError(
+                {"notification_skill": _("業務のSkillに登録したSkillを、通知Skillにはできません")}
+            )
         if errors := checks.content_errors(task, content):
             raise serializers.ValidationError(errors)
         attrs["content"] = content
@@ -413,6 +432,7 @@ class TaskDefinitionRevisionSerializer(ReadOnlyModelSerializer):
 
     id = serializers.CharField(source="uid", read_only=True)
     skills = TaskSkillSerializer(many=True, read_only=True)
+    notification_skill = TaskSkillSerializer(read_only=True, allow_null=True)
     inputs = TaskInputSerializer(many=True, read_only=True)
     model_profile: "serializers.SlugRelatedField[ModelProfile]" = serializers.SlugRelatedField(
         slug_field="uid", read_only=True

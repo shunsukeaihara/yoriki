@@ -3849,7 +3849,7 @@ export interface components {
             /** @description 管理できる部門（部門のSkill・タスクを作るときの選択肢） */
             readonly manageable_departments: components["schemas"]["MyDepartment"][];
         };
-        /** @description 画面の通知（本人の通知欄）。タスクの名前とRunの状態だけを返す */
+        /** @description 画面の通知（本人の通知欄）。タスクの名前とRunの状態と、通知Skillが決めた通知の文章（なければ空文字）を返す */
         Notification: {
             readonly id: string;
             readonly event_type: components["schemas"]["NotifyEventEnum"];
@@ -3857,6 +3857,8 @@ export interface components {
             readonly task: string;
             /** タスクの名前 */
             readonly task_name: string;
+            /** 通知の文章 */
+            readonly message: string;
             readonly run: string;
             /**
              * 既読にした日時
@@ -4644,6 +4646,8 @@ export interface components {
              *     * `status_and_result` - 状態と業務結果
              */
             notify_content?: components["schemas"]["NotifyContentEnum"];
+            /** @description 通知Skillと固定の版（任意）。業務のRunの中で読み込み、通知の文章と渡すファイルを決めさせる。通知先と完了（run.completed）の通知が要る */
+            notification_skill?: components["schemas"]["TaskSkillRequest"] | null;
             change_reason?: string;
         };
         /** @description 入口の更新。タスクは変えられない */
@@ -5502,6 +5506,8 @@ export interface components {
              * @default status_and_result
              */
             notify_content: components["schemas"]["NotifyContentEnum"];
+            /** @description 通知Skillと固定の版（任意）。業務のRunの中で読み込み、通知の文章と渡すファイルを決めさせる。通知先と完了（run.completed）の通知が要る */
+            notification_skill?: components["schemas"]["TaskSkill"] | null;
             readonly model_profile_info: components["schemas"]["AppModelProfile"];
             readonly destination_info: components["schemas"]["DestinationChoice"] | null;
             /** @description 今、手動で実行できるか（停止中でなく、版がある） */
@@ -5571,6 +5577,8 @@ export interface components {
              * @default status_and_result
              */
             notify_content: components["schemas"]["NotifyContentEnum"];
+            /** @description 通知Skillと固定の版（任意）。業務のRunの中で読み込み、通知の文章と渡すファイルを決めさせる。通知先と完了（run.completed）の通知が要る */
+            notification_skill?: components["schemas"]["TaskSkillRequest"] | null;
             change_reason?: string;
         };
         /** @description 版の表示（履歴） */
@@ -5599,6 +5607,7 @@ export interface components {
             readonly notify_events: string[];
             /** 通知の内容 */
             readonly notify_content: string;
+            readonly notification_skill: components["schemas"]["TaskSkill"] | null;
             /** 変更理由 */
             readonly change_reason: string;
             readonly created_by: components["schemas"]["MinimumUser"];
@@ -5637,6 +5646,8 @@ export interface components {
              *     * `status_and_result` - 状態と業務結果
              */
             notify_content?: components["schemas"]["NotifyContentEnum"];
+            /** @description 通知Skillと固定の版（任意）。業務のRunの中で読み込み、通知の文章と渡すファイルを決めさせる。通知先と完了（run.completed）の通知が要る */
+            notification_skill?: components["schemas"]["TaskSkillRequest"] | null;
             change_reason?: string;
         };
         TaskInput: {

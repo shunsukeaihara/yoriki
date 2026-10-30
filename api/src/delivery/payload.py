@@ -7,6 +7,10 @@ Skillの原本は含めない（Webhookの送り元が状態を確かめる口�
 成果物は、業務結果のSchemaのファイルの項目（harness/result_files.py）で指したものだけを `files` に入れる。保存する
 内容にはファイルの情報（ID・名前・形式・大きさ・SHA-256）だけを入れ、取得用の期限付きURLは送るたびに発行して足す
 （`with_file_links()`）。結果を確かめる画面へのリンクは、後の段階で足す。
+
+通知Skillが `prepare_notification` で決めた通知の候補があれば、業務結果と一緒に `notification`（文章）として載せ、
+`files` をその中で選んだものに絞る（design.md §4.3。候補と自動の通知を1つの配信にまとめる）。候補がない・形が
+正しくないときは、標準の形（`notification` はnull）で送る（通知の整形の失敗で業務を失敗に戻さない）。
 """
 
 import logging
@@ -65,16 +69,37 @@ def build_payload(run: Run, event: RunEvent, event_type: str, content: str) -> d
     }
     if content in (NotifyContent.RESULT, NotifyContent.STATUS_AND_RESULT):
         completed = run.status == RunStatus.COMPLETED
+        candidate = notification_candidate(run) if completed else None
         payload["result"] = run.result if completed else None
-        payload["files"] = result_artifacts(run) if completed else []
+        payload["files"] = (
+            result_artifacts(run, only=candidate.get("files") if candidate else None) if completed else []
+        )
+        payload["notification"] = {"message": candidate["message"]} if candidate else None
     return payload
 
 
-def result_artifacts(run: Run) -> list[dict[str, Any]]:
+def notification_candidate(run: Run) -> dict[str, Any] | None:
+    """通知の候補（`{"message": "...", "files": [...]}`。`files` は任意）。なければ・形が正しくなければNone"""
+    candidate = run.notification
+    if not isinstance(candidate, dict) or not isinstance(message := candidate.get("message"), str) or not message:
+        return None
+    files = candidate.get("files")
+    if files is None:
+        return {"message": message}
+    if not isinstance(files, list) or not all(isinstance(f, str) for f in files):
+        logger.warning("run %s: the notification candidate has invalid files", run.uid)
+        return None
+    return {"message": message, "files": files}
+
+
+def result_artifacts(run: Run, *, only: list[str] | None = None) -> list[dict[str, Any]]:
     """業務結果のファイルの項目が指す成果物。Runの完了の前に回収したもの（harness/runner.py の _checkpoint()）から、
-    同じパスの最新のものを選ぶ（変わっていないファイルは回収し直さないので、同じ会話の前のRunのものもある）"""
+    同じパスの最新のものを選ぶ（変わっていないファイルは回収し直さないので、同じ会話の前のRunのものもある）。
+    `only`（`/workspace/output` からの相対パス）があれば、その中のものだけ"""
     files = []
     for field, path in result_files(output_schema(run), run.result):
+        if only is not None and path not in only:
+            continue
         artifact = Artifact.objects.latest_output(run.conversation_id, path)
         if artifact is None:  # 完了の前に確かめている（harness/runner.py）ので、保持期限で消えたもの等
             logger.warning("run %s: the result file %s (%s) was not collected", run.uid, path, field)

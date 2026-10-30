@@ -148,6 +148,9 @@ class Run(models.Model):
     manifest = models.JSONField(_("Manifest"), default=dict)
     # 業務結果。SkillかTask Definitionが業務結果のSchemaを持つRunで、submit_result が確定する（harness.md §10.5）
     result = models.JSONField(_("業務結果"), null=True, blank=True)
+    # 通知の候補。通知SkillのあるタスクのRunで、prepare_notification が決める（`{"message": "...", "files": [...]}`。
+    # `files` は任意）。完了時の配信の内容に載せる（design.md §4.3）
+    notification = models.JSONField(_("通知の候補"), null=True, blank=True)
     end_reason = models.PositiveSmallIntegerField(_("終わり方"), choices=RunEndReason.choices, null=True, blank=True)
     error = models.TextField(_("失敗の理由"), blank=True)
     step_count = models.PositiveIntegerField(_("ステップ数"), default=0)

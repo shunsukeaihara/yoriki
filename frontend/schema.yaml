@@ -9983,7 +9983,7 @@ components:
       - username
     Notification:
       type: object
-      description: 画面の通知（本人の通知欄）。タスクの名前とRunの状態だけを返す
+      description: 画面の通知（本人の通知欄）。タスクの名前とRunの状態と、通知Skillが決めた通知の文章（なければ空文字）を返す
       properties:
         id:
           type: string
@@ -10003,6 +10003,10 @@ components:
           readOnly: true
           title: タスクの名前
           maxLength: 200
+        message:
+          type: string
+          readOnly: true
+          title: 通知の文章
         run:
           type: string
           readOnly: true
@@ -10021,6 +10025,7 @@ components:
       - event_display
       - event_type
       - id
+      - message
       - read
       - run
       - task
@@ -11324,6 +11329,11 @@ components:
             * `status` - 状態だけ
             * `result` - 業務結果
             * `status_and_result` - 状態と業務結果
+        notification_skill:
+          allOf:
+          - $ref: '#/components/schemas/TaskSkillRequest'
+          nullable: true
+          description: 通知Skillと固定の版（任意）。業務のRunの中で読み込み、通知の文章と渡すファイルを決めさせる。通知先と完了（run.completed）の通知が要る
         change_reason:
           type: string
           writeOnly: true
@@ -13483,6 +13493,11 @@ components:
             * `status` - 状態だけ
             * `result` - 業務結果
             * `status_and_result` - 状態と業務結果
+        notification_skill:
+          allOf:
+          - $ref: '#/components/schemas/TaskSkill'
+          nullable: true
+          description: 通知Skillと固定の版（任意）。業務のRunの中で読み込み、通知の文章と渡すファイルを決めさせる。通知先と完了（run.completed）の通知が要る
         model_profile_info:
           allOf:
           - $ref: '#/components/schemas/AppModelProfile'
@@ -13629,6 +13644,11 @@ components:
             * `status` - 状態だけ
             * `result` - 業務結果
             * `status_and_result` - 状態と業務結果
+        notification_skill:
+          allOf:
+          - $ref: '#/components/schemas/TaskSkillRequest'
+          nullable: true
+          description: 通知Skillと固定の版（任意）。業務のRunの中で読み込み、通知の文章と渡すファイルを決めさせる。通知先と完了（run.completed）の通知が要る
         change_reason:
           type: string
           writeOnly: true
@@ -13714,6 +13734,11 @@ components:
           readOnly: true
           title: 通知の内容
           maxLength: 30
+        notification_skill:
+          allOf:
+          - $ref: '#/components/schemas/TaskSkill'
+          readOnly: true
+          nullable: true
         change_reason:
           type: string
           readOnly: true
@@ -13739,6 +13764,7 @@ components:
       - id
       - inputs
       - model_profile
+      - notification_skill
       - notify_content
       - notify_events
       - number
@@ -13820,6 +13846,11 @@ components:
             * `status` - 状態だけ
             * `result` - 業務結果
             * `status_and_result` - 状態と業務結果
+        notification_skill:
+          allOf:
+          - $ref: '#/components/schemas/TaskSkillRequest'
+          nullable: true
+          description: 通知Skillと固定の版（任意）。業務のRunの中で読み込み、通知の文章と渡すファイルを決めさせる。通知先と完了（run.completed）の通知が要る
         change_reason:
           type: string
           writeOnly: true

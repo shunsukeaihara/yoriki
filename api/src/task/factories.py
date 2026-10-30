@@ -37,4 +37,5 @@ class TaskDefinitionFactory(DjangoModelFactory[TaskDefinition]):
         kwargs.setdefault("destination", None)
         kwargs.setdefault("notify_events", [])
         kwargs.setdefault("notify_content", "status_and_result")
+        kwargs.setdefault("notification_skill", None)
         obj.revise(actor=obj.created_by, expected_version=0, **kwargs)

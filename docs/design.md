@@ -491,7 +491,7 @@ notification:
 
 同じスレッドへ結果も載せる場合はinteraction側の完了イベントに含める。notificationで同じ対話スレッドを指定する場合も同じ配信へ統合し、完了報告と結果の重複投稿を避ける。結果通知のためだけに別スレッドを作らない。
 
-初期の実装では、結果の通知の設定（出口・対象イベント・通知内容）をTask Definitionの版の項目として持ち、Notification Bindingを別のModelにしない（1つのタスクに1つの結果通知で、通知Skillもまだないため。通知Skillを入れるときに見直す）。部門のタスクはその部門の出口、全社のタスクは全社の出口、システムのタスクはシステムの出口だけを選べ、機密のタスクは機密の結果を送ってよい出口だけを選べる。Runは受付時に出口の版を固定し、出口を今は使えなければ（停止・削除・範囲の外・機密の結果を送れない）受け付けない。
+初期の実装では、結果の通知の設定（出口・対象イベント・通知内容・通知Skill）をTask Definitionの版の項目として持ち、Notification Bindingを別のModelにしない（1つのタスクに1つの結果通知のため。1つのタスクに複数の通知を持たせるときに見直す。通知Skillは§4.3）。部門のタスクはその部門の出口、全社のタスクは全社の出口、システムのタスクはシステムの出口だけを選べ、機密のタスクは機密の結果を送ってよい出口だけを選べる。Runは受付時に出口の版を固定し、出口を今は使えなければ（停止・削除・範囲の外・機密の結果を送れない）受け付けない。
 
 公開済みTask Definition RevisionにBinding Revisionを関連付け、RunにはSkill・資料・モデル設定・受け取ったpayloadとファイル・生成した依頼文とともに固定する。通知Skill、通知Adapter、Interaction BindingとChannel Plugin、Destinationの版も対象に含める。設定変更は次のRunから反映し、再試行中のRunやDeliveryを新しい通知先へ暗黙に向けない。ただし、固定した出口が停止・削除・タスクの範囲の外になったら、配信の直前に確かめて送らない（authorization.md §7.2）。Secretは値を保存せず参照を持ち、資格情報の更新・失効は別に反映する。
 
@@ -545,21 +545,22 @@ chat Adapterでは、新規依頼、既存Runへの追加指示（人が起動�
 Notification Pluginは、Adapterと既定の通知Skillを同梱できる（§3.11）。利用者は「Zapierへ業務結果を渡す」「画面内に完了を通知する」等の候補から選ぶ。通知Skillだけを差し替えて要約方法を変えることも、通知Pluginを差し替えて経路を変えることもできる。Pluginの設定Schemaと対応イベント・成果物方式に適合する組合せだけを公開する。
 
 ```python
-# エージェントが呼ぶ管理Toolの概念例。送信内容の候補を登録する。
+# エージェントが呼ぶ管理Tool。送信内容の候補を登録する（宛先・イベントは指定できない）
 prepare_notification(
-    notification_binding_id="invoice-result",
-    content={"summary": "請求書チェック完了", "needs_review": False},
-    artifact_ids=["artifact_123"],
+    message="請求書3件を確認しました。差異は1件で、確認が要ります。",
+    files=["/workspace/output/report.xlsx"],  # 業務結果のファイルの項目が指すものから絞るだけ。省けばすべて
 )
 ```
 
-通知Skillは通常の業務Run内で要約等を作り、この管理Toolへ候補を渡せる。ToolはRunに固定したBinding、項目・成果物の送信権限を検証する。任意のURL、別のDestination、未許可のマスターを追加させない。完了前の候補は送信せず、Runの業務結果と成果物が確定した後だけ配信対象にする。Skillの編集・公開は既存の権限内でエージェントに委任できるが、送信権限とAdapterコードは変更できない。
+通知Skillは通常の業務Run内で要約等を作り、この管理Toolへ候補を渡せる。ToolはRunに固定した通知の設定と、業務結果のファイルの項目で指した成果物の中からの選択だけを受け付ける（項目のSchemaは置かない。下の「通知Skill（初期の実装）」）。任意のURL、別のDestination、未許可のマスターを追加させない。完了前の候補は送信せず、Runの業務結果と成果物が確定した後だけ配信対象にする。Skillの編集・公開は既存の権限内でエージェントに委任できるが、送信権限とAdapterコードは変更できない。
 
 業務結果Schemaと成果物保存の検証後、Runの完了状態・共通イベント・通知Bindingに対応する配信Outboxを同じDB transactionで確定する。エージェントが通知Toolを呼ばなくても、設定済みの完了通知を登録する。Tool候補と自動通知は同じ配信キーにまとめる。
 
 業務結果の検証と通知文面の整形は別に扱う。業務結果が未完成ならRunを完了させない。一方、通知Skillの整形失敗だけで完了済みの業務を失敗に戻さない。通知候補がない・不正な場合は、状態、run_id、許可済み結果・成果物参照を含む標準形式へフォールバックする。Adapterがその標準形式を受け付けられない場合は配信失敗として保持し、最低限の完了状態は画面で確認できる。失敗・取消の通知にもLLMを必須にしない。
 
 content_modeがstatusなら完了状態と許可された結果確認先、resultなら業務結果・成果物、status_and_resultなら両方を配信する。外部からイベントを識別できる最小の状態・event_idはどの形式にも含める。失敗時は利用可能な情報だけを載せる。画面内の履歴・成果物表示は通知Pluginから独立して維持する。
+
+**通知Skill（初期の実装）**：Notification Bindingを別のModelにせず、タスクの版に通知Skillと固定の版（`notification_skill`。任意）を置く（1つのタスクに1つの結果通知のまま）。通知Skillも業務のSkillと同じ規則で確かめ（タスクの範囲、宣言したConnector、機密、モデル。authorization.md §5.4）、業務のSkillと同じSkillは登録できない。通知Skillの「使ってよいTool」も、タスクのTool一覧との両方に入っているものを使える。業務結果のSchemaを持つSkillは通知Skillにできない（最初の発言に別の業務結果の形が載らないように）。通知Skillを置けるのは、出口があり、完了（run.completed）を通知し、通知内容に業務結果を含むタスクだけ。タスクのRunは、受付時に通知Skillの版を業務のSkillと一緒に固定して最初の発言に入れ、どれが通知Skillかを添え、`prepare_notification` を出す（`submit_result` の説明と結果の文も「確定した後に `prepare_notification` を呼ぶ」にする）。受付時にモデル設定の今の版がToolを使えなければ、通知Skillは読み込まず、`prepare_notification` も出さずに標準の形で送る（通知のために業務を止めない）。`prepare_notification` が受けるのは、通知の文章（`message`。2000文字まで）と、渡すファイルの絞り込み（`files`。業務結果のファイルの項目で指したものの中からだけ選べ、省けばすべて、空ならなし）だけで、宛先・イベント・送り方は変えられず、渡すファイルも増やせない。業務結果のSchemaがあるRunでは `submit_result` の後にだけ受け付け、もう一度呼べば置き換える（候補は `Run.notification`。`submit_result` で業務結果を確定し直したときと、追加の指示で業務結果を取り消すときは、前の結果から作った候補なので消す。作り直さなければ標準の形で送る）。`prepare_notification` を同じ誤り・同じ引数で繰り返しても、ほかのToolのようにRunを失敗にはせず、そのRunではもう出さずに（記録に印を残し、別のAttemptでも出さない）、前に決めた候補か標準の形で送る。完了の配信を作るとき（Outbox）に、候補があれば送る内容に `notification`（`{"message": ...}`）を載せて `files` を絞り、なければ（呼ばなかった・形が正しくない）`notification` をnullにした標準の形で送る。候補は完了のイベントにだけ使い、失敗・取消の通知には載せない。会話からの `request_delivery` は作らない（下の段落）。
 
 会話のRunの出口は依頼した人への応答だけで、当面は会話から配信しない（authorization.md §7）。将来、会話で「この結果を送って」と明示して配信できるようにするときは、利用者本人の送信の権限で宛先を判定し、確定済みResultEnvelopeに対して共通のrequest_delivery Toolを使う別操作とする。操作に指定された許可済みBindingだけを使い、operation keyで再送を重複登録しない。受付時にはdelivery_idと待機状態を返し、実際の配信前に送信済みと表示しない。
 
@@ -583,7 +584,7 @@ Zapierでファイルとして使うURLは、追加ログイン不要で直接�
 
 **成果物の受渡し（初期の実装）**：出口へ渡すのは、業務結果のSchemaのファイルの項目（ルートの項目に `"format": "file"`。値は `/workspace/output` の中のパス。harness.md §10.5）で指した成果物だけにする（Runの成果物すべては渡さない）。送る内容の `files` に項目名・ID・ファイル名・MIME・サイズ・SHA-256を入れ、取得用のURL（`/api/files/<token>/`）と期限（`url`・`expires_at`）は送るたびに発行して足す（送り直しでも新しいURLにし、`event_id` と業務結果は変えない）。URLは1時間・3回まで使え（GETだけ。HEADでは回数を使わせない）、tokenはハッシュだけを保存し、nginx・uvicornのアクセスログにも残さない。取得のたびに、期限・回数と、配信の出口とタスクが今も使えるか（停止・削除・範囲・機密）を確かめ直す。汎用のWebhookの出口では、出口の署名の鍵を `Authorization: Bearer` で求める（URLだけが受け手のログ等から漏れても取得させない。Zapierはファイルの項目のURLを自分で取りに来るのでヘッダーを付けられず、URLだけで取得する）。取得は日時・IPアドレス・User-Agentを記録し、配信の履歴でタスクの管理者が見られる（返す前に保存先にあるかを確かめ、ない・読めなかった取得は、返さなかったとして記録し、回数に数えず503を返す。「返した」は確かめたうえで返し始めたことで、nginx・S3から送る途中の失敗はapiからは分からないので記録しない。受け手は回数の範囲で取り直せる）。URLの元は `YORIKI_PUBLIC_URL`（未設定なら、ファイルを渡す配信は失敗にする）。S3に保存したものは、確かめた後に60秒の署名付きURLへリダイレクトする。
 
-**in_appのAdapter（初期の実装）**：送り先のURLを持たず、受け手の通知欄に通知（タスクの名前とRunの状態だけ。業務結果・成果物は載せない）を載せ、受け手の画面へログインユーザー宛ての通知（`notification`。realtime.md §3）で知らせる。受け手は送るときに決める：個人のタスクは持ち主、部門・全社・システムのタスクの手動実行は実行した人、入口から動いたRunはタスクを管理できる人全員。どれも、Runを実行したときのタスクの範囲と部門で今も管理できる人に限り（Runの結果を見られる人と同じ。authorization.md §7.1）、いなければ配信の失敗にする。通知欄は、送った後に権限を失った人には見せない（Runの結果を見られる人で絞る）。認証の要る画面の中だけで見せるので、出口の機密のフラグがなくても機密のタスクに使える。個人のタスクの出口は、全員で共通の画面の通知を1つだけYorikiが作る（最初に選ぶときに作る。管理の画面では扱わない）。
+**in_appのAdapter（初期の実装）**：送り先のURLを持たず、受け手の通知欄に通知（タスクの名前とRunの状態と、送る内容にあれば通知Skillが決めた通知の文章。業務結果・成果物は載せない）を載せ、受け手の画面へログインユーザー宛ての通知（`notification`。realtime.md §3）で知らせる。受け手は送るときに決める：個人のタスクは持ち主、部門・全社・システムのタスクの手動実行は実行した人、入口から動いたRunはタスクを管理できる人全員。どれも、Runを実行したときのタスクの範囲と部門で今も管理できる人に限り（Runの結果を見られる人と同じ。authorization.md §7.1）、いなければ配信の失敗にする。通知欄は、送った後に権限を失った人には見せない（Runの結果を見られる人で絞る）。認証の要る画面の中だけで、Runの結果を見られる人にだけ見せるので、出口の機密のフラグがなくても機密のタスクに使える（通知Skillの文章が機密の情報を含んでも、受け手はもともとそのRunの結果を見られる人だけ）。個人のタスクの出口は、全員で共通の画面の通知を1つだけYorikiが作る（最初に選ぶときに作る。管理の画面では扱わない）。
 
 Destinationは接続情報、Secret参照、許可scope、対応内容、timeout、再試行方針を版付きで管理する。送信前にも有効性を再確認し、失効した宛先には再送しない。URL型Adapterは登録時・接続時に許可範囲とredirect先を検証する。ZapierのHook URL等をLLMや通常ログへ露出しない。通知Pluginの追加によってSandboxの通信制限を緩めない。
 
@@ -591,7 +592,7 @@ Destinationは接続情報、Secret参照、許可scope、対応内容、timeout
 
 RunのCOMPLETEDは業務結果と成果物の確定を表す。Deliveryは配信待ち、配信中、受付確認済み、再試行待ち、失敗、取消を別に保持し、「処理完了・通知失敗」を表現する。保存済み結果を使って配信だけ再試行し、エージェントの実行や通知SkillのLLM処理をやり直さない。通信ごとの送信内容・URL有効期限はDeliveryAttemptへ記録し、再送でURLを更新してもevent_idと業務結果は維持する。
 
-配信キーはrun_event_id、Notification Binding Revision、Destination Revisionから作る（初期の実装は、通知の設定をTask Definitionの版の項目にし、Runがその版を固定するので、配信キーはrun_event_idとDestination Revisionの2つ（`uniq_delivery_key`）。Notification Bindingを別のModelにするとき（通知Skillの段階）に、その版をキーに加える）。同じ完了イベントの自動通知とTool候補を統合でき、確認待ちが複数回発生しても別のRunEventとして通知できる。対話用の送信もInteraction Bindingから解決した送信Bindingとthread参照を使い、同じDelivery／Outboxで管理する。質問ごとにClarificationRequestのID・世代を持つ別イベントとする。同じイベントを同じ対話スレッドへ送る設定が重複した場合は一つの配信へ正規化する。手動送信は別のoperation keyを持つ。外部送信で、受付後に応答が失われる等、送ったかどうか分からない障害では、自動で送り直さず確認待ちにする（authorization.md §6）。受信側のevent_idによる重複処理は補助として使い、exactly-onceとは表現しない。
+配信キーはrun_event_id、Notification Binding Revision、Destination Revisionから作る（初期の実装は、通知の設定をTask Definitionの版の項目にし、Runがその版を固定するので、配信キーはrun_event_idとDestination Revisionの2つ（`uniq_delivery_key`）。通知Skillの候補も同じ配信に載せる（§4.3）。Notification Bindingを別のModelにするとき（1つのタスクに複数の通知を持たせるとき）に、その版をキーに加える）。同じ完了イベントの自動通知とTool候補を統合でき、確認待ちが複数回発生しても別のRunEventとして通知できる。対話用の送信もInteraction Bindingから解決した送信Bindingとthread参照を使い、同じDelivery／Outboxで管理する。質問ごとにClarificationRequestのID・世代を持つ別イベントとする。同じイベントを同じ対話スレッドへ送る設定が重複した場合は一つの配信へ正規化する。手動送信は別のoperation keyを持つ。外部送信で、受付後に応答が失われる等、送ったかどうか分からない障害では、自動で送り直さず確認待ちにする（authorization.md §6）。受信側のevent_idによる重複処理は補助として使い、exactly-onceとは表現しない。
 
 Adapterが分類した一時的な障害、timeout、429、再試行可能な5xx等は上限付きbackoffで扱う（初期の実装：名前を引けない・つながらない・接続の時間切れ・408・425・429・500・502・503・504を、1分・5分・15分・1時間・3時間の間隔で、合わせて6回まで送る。送り先の `Retry-After` が長ければ3時間までそれに従う。それ以外の4xx・3xxは失敗。送った後の応答の時間切れ・接続の切断と、配信中にWorkerが止まって持ち時間（2分）が切れたものは「確認待ち」にし、自動では送り直さない（切れた後に受付確認が遅れて届けば、受付確認済みにする）。失敗・確認待ち・取消の配信は、タスクを管理できる人が送り直せる（保存した内容を送る。HTTPには送信全体の期限がないので、前の送信が終わるか、Q2がWorkerを止める時間を過ぎるまでは送り直さない））。権限・設定・形式エラー等は原因を表示する。通知Pluginの停止や未対応版の検出時は対象Deliveryを保持し、別方式へ勝手に送らない。通知設定を変更して過去結果を送り直す場合は、管理権限を検証した新しい配信操作として元の履歴と関連付ける。
 
@@ -861,7 +862,7 @@ Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプ�
 | PluginExtension | 拡張種別、Adapter実装版、契約版、設定Schema、対応能力、有効状態 |
 | TriggerBinding / TriggerBindingRevision | 安定ID、起動Plugin版、認証参照、範囲と使ってよい範囲、タスク（Webhookは1対1）、設定版 |
 | TriggerReceipt | 起動Binding、外部イベントID、入力hash、対応Run・会話操作、受付時刻 |
-| NotificationBinding / NotificationBindingRevision | Plugin・Skill版、対象イベント、通知内容、Destination版、許可項目。初期（1つのタスクに1つの結果通知・通知Skillなし）は別のModelにせず、TaskDefinitionRevisionの項目（出口・対象イベント・通知内容）にする。Runは受付時にDestinationの版を固定する（§4.1） |
+| NotificationBinding / NotificationBindingRevision | Plugin・Skill版、対象イベント、通知内容、Destination版、許可項目。初期（1つのタスクに1つの結果通知）は別のModelにせず、TaskDefinitionRevisionの項目（出口・対象イベント・通知内容・通知Skillの版）にする（§4.3）。Runは受付時にDestinationの版を固定する（§4.1） |
 | InteractionBinding / InteractionBindingRevision | Channel Plugin版、接続・Destination版、スレッド方針、返信モード、通知イベント |
 | ExternalThreadBinding | Run・Conversation、対話Binding版、provider・接続・チャネル・thread参照、親message、作成操作key、状態 |
 | ChannelMessageReceipt | provider・接続・event／message ID、投稿者ID・表示名、thread、質問世代、本文hash、受付・適用結果 |

@@ -50,6 +50,7 @@ const { onSubmit, loading, errors } = createSubmit({
   },
   onError: (err) => {
     emit('failed', err)
+    rawInputErrors.value = err instanceof AxiosError ? taskInputErrors(err) : undefined
     if (err instanceof AxiosError && err.response?.status === 409) {
       emit('conflicted')
       toast.add({ title: t('エラー'), description: makeErrorMsg(err), color: 'error' })
@@ -66,14 +67,15 @@ const { onSubmit, loading, errors } = createSubmit({
     }
   },
 })
-// 入力の項目の誤り（{ inputs: { 項目の名前: [...] } }）と、入力全体の誤り（文の並び）
-const inputErrors = computed(() => errors.value.inputs as unknown as Record<string, unknown> | string[] | undefined)
+// 入力の項目の誤り（{ inputs: { 項目の名前: [...] } }）と、入力全体の誤り（文の並び）。キーは項目の名前なので、
+// camelCase に変換する前の応答から引く（foo_bar と foo__bar のように、変換すると同じになる名前があるため）
+const rawInputErrors = ref<Record<string, unknown> | string[] | undefined>()
 const errorsOf = (name: string) =>
-  inputErrors.value && !Array.isArray(inputErrors.value) ? inputErrorsOf(inputErrors.value, name) : undefined
+  rawInputErrors.value && !Array.isArray(rawInputErrors.value) ? inputErrorsOf(rawInputErrors.value, name) : undefined
 const generalErrors = computed(() => ({
   nonFieldErrors: [
     ...(errors.value.nonFieldErrors ?? []),
-    ...(Array.isArray(inputErrors.value) ? inputErrors.value.map(String) : []),
+    ...(Array.isArray(rawInputErrors.value) ? rawInputErrors.value.map(String) : []),
   ],
 }))
 

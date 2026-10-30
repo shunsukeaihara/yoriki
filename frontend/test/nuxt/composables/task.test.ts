@@ -1,3 +1,4 @@
+import { AxiosError, AxiosHeaders } from 'axios'
 import { describe, expect, it } from 'vitest'
 
 describe('入力の項目の行', () => {
@@ -41,12 +42,34 @@ describe('入力の項目の行', () => {
   })
 })
 
-describe('inputErrorsOf', () => {
-  it('手動実行の誤りは、キーが camelCase に変換されているので、項目の名前も変換して引く', () => {
-    const errors = { invoiceFile: ['この項目は必須です'], amount: '整数を入力してください' }
-    expect(inputErrorsOf(errors, 'invoice_file')).toEqual(['この項目は必須です'])
-    expect(inputErrorsOf(errors, 'amount')).toEqual(['整数を入力してください'])
+describe('taskInputErrors・inputErrorsOf', () => {
+  it('手動実行の誤りは、camelCase に変換する前の応答から項目の名前のまま引く', () => {
+    const error = new AxiosError('bad', '400', undefined, undefined, {
+      status: 400,
+      statusText: 'Bad Request',
+      headers: { 'content-type': 'application/json' },
+      config: { headers: new AxiosHeaders() },
+      data: { inputs: { foo_bar: ['この項目は必須です'], foo__bar: '整数を入力してください' } },
+    })
+    const errors = taskInputErrors(error) as Record<string, unknown>
+    expect(inputErrorsOf(errors, 'foo_bar')).toEqual(['この項目は必須です'])
+    expect(inputErrorsOf(errors, 'foo__bar')).toEqual(['整数を入力してください'])
     expect(inputErrorsOf(errors, 'vendor')).toBeUndefined()
+  })
+
+  it('入力全体の誤りは文の並び、400以外は誤りなし', () => {
+    const error = (status: number, data: unknown) =>
+      new AxiosError('bad', String(status), undefined, undefined, {
+        status,
+        statusText: '',
+        headers: { 'content-type': 'application/json' },
+        config: { headers: new AxiosHeaders() },
+        data,
+      })
+    expect(taskInputErrors(error(400, { inputs: ['JSONのオブジェクトで入力してください'] }))).toEqual([
+      'JSONのオブジェクトで入力してください',
+    ])
+    expect(taskInputErrors(error(409, { detail: '競合' }))).toBeUndefined()
   })
 })
 

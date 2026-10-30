@@ -148,7 +148,7 @@ export default defineNuxtConfig({
 `api/client.ts` の `createHttp()` は、axiosのインスタンスを作り、認証にセッションCookieとCSRFを使う。
 
 - リクエストのbodyは `snakeProps()`、クエリは `qs.stringify(snakeProps(params), { indices: false })` で変換する。
-- 利用者・エージェント・DBがキーを決めるJSON（SkillのJSON Schema、期待する業務結果・業務結果、Toolの引数、Connectorの列名 → 説明、platform → digest）は、項目の名前だけを変換し、値の中のキーは変換しない（`client.ts` の `RAW_VALUE_KEYS`）。変換すると `invoice_no` が `invoiceNo` に、`VendorCode` が `vendor_code` に変わるため。このような項目をAPIに足したら、名前を `RAW_VALUE_KEYS` に加える。同じ名前の項目が別のAPIで変換の要る形を持つとき（タスクの `inputs` は、定義では項目の定義の並び、手動実行では項目の名前 → 値）は、`RAW_VALUE_KEYS` に入れず、値の側をmultipartのJSONの文字列で送る（`api.tasks(id).run()`）。応答のエラーのキーは変換されるので、画面では項目の名前も同じく変換して引く（`inputErrorsOf()`）。
+- 利用者・エージェント・DBがキーを決めるJSON（SkillのJSON Schema、期待する業務結果・業務結果、Toolの引数、Connectorの列名 → 説明、platform → digest）は、項目の名前だけを変換し、値の中のキーは変換しない（`client.ts` の `RAW_VALUE_KEYS`）。変換すると `invoice_no` が `invoiceNo` に、`VendorCode` が `vendor_code` に変わるため。このような項目をAPIに足したら、名前を `RAW_VALUE_KEYS` に加える。同じ名前の項目が別のAPIで変換の要る形を持つとき（タスクの `inputs` は、定義では項目の定義の並び、手動実行では項目の名前 → 値）は、`RAW_VALUE_KEYS` に入れず、値の側をmultipartのJSONの文字列で送る（`api.tasks(id).run()`）。応答のエラーのキーも変換されて、`foo_bar` と `foo__bar` のような名前が同じキーになるので、画面では変換する前の応答の本文から項目の名前のまま引く（`taskInputErrors()`・`inputErrorsOf()`）。
 - レスポンスがJSONなら `camelProps()` で変換し、`data` だけを返す（`AxiosResponse` は返さない）。
 - 認証はDjangoのセッションCookieで行う（`withCredentials: true`）。トークンを画面側で持たず、`Authorization` ヘッダーも付けない。
 - 書き込みの要求には、Cookieの `csrftoken` を `X-CSRFToken` ヘッダーに付ける（axiosの `xsrfCookieName` / `xsrfHeaderName`）。

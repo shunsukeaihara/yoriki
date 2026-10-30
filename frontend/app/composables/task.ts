@@ -1,4 +1,4 @@
-import { camelCase } from 'change-case'
+import type { AxiosError } from 'axios'
 
 // バックエンドの task.models.TaskScope と同じ値（Skill・Connectorの範囲と同じ）
 export const TaskScope = {
@@ -115,11 +115,20 @@ export const taskChoiceParams = (task: Pick<Task, 'scope' | 'departmentInfo'>): 
 })
 
 /**
- * 手動実行の入力の誤り（400の inputs）を項目ごとに引く。応答のキーは camelCase に変換されているので、項目の名前も
- * 同じく変換して引く
+ * 手動実行の400の応答の inputs（項目の名前 → 誤り、か入力全体の誤りの文の並び）。キーは項目の名前なので、APIクライアント
+ * が camelCase に変換する前の応答の本文から取り出す（foo_bar と foo__bar のように、変換すると同じになる名前があるため）
  */
+export const taskInputErrors = (error: AxiosError): Record<string, unknown> | string[] | undefined => {
+  if (error.response?.status !== 400) return undefined
+  const data = error.response.data
+  const inputs = data && typeof data === 'object' ? (data as Record<string, unknown>).inputs : undefined
+  if (Array.isArray(inputs)) return inputs.map(String)
+  return inputs && typeof inputs === 'object' ? (inputs as Record<string, unknown>) : undefined
+}
+
+/** 手動実行の入力の誤り（taskInputErrors() の辞書）から、項目の名前のまま誤りを引く */
 export const inputErrorsOf = (errors: Record<string, unknown> | undefined, name: string): string[] | undefined => {
-  const value = errors?.[camelCase(name)]
+  const value = errors?.[name]
   if (Array.isArray(value)) return value.map(String)
   return typeof value === 'string' ? [value] : undefined
 }

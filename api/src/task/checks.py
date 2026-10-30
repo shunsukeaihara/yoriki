@@ -1,6 +1,6 @@
 """タスクに登録できるもの（authorization.md §5.4）と、タスクのRunの実行許可（authorization.md §6）。
 
-- 保存するとき（`content_errors()`）：Skill（通知Skillを含む）・Connectorがタスクの範囲で登録できるか、Skillが
+- 保存するとき（`content_errors()`）：Skill・Connectorがタスクの範囲で登録できるか、Skillが
   宣言したConnectorと操作がタスクに入っているか、機密の区分とモデル設定が合うか、プロンプトのテンプレートが入力の項目だけを使うか。
 - 実行するとき（`skill_problem()`・`connector_permitted()`・`task_problem()`）：受付時、実行の区切りごと、Connectorの
   操作のたびに、固定したものが今も有効でタスクの範囲の中にあるかを確かめ直す。部門・全社・システムのタスクは、
@@ -10,6 +10,7 @@
 import re
 from typing import Any, Protocol
 
+from django.db.models import Q, QuerySet
 from django.utils.translation import gettext as _
 
 from connector.models import Connector, ConnectorAction, ConnectorScope, Operation
@@ -78,17 +79,35 @@ def connector_allowed(task: TaskLike, connector: Connector) -> bool:
     return True
 
 
+def allowed_skills(task: TaskLike) -> QuerySet[Skill]:
+    """このタスクの範囲に登録できるSkill（`skill_allowed()` と同じ規則のSQL）。編集画面の候補に使う"""
+    if task.scope == TaskScope.PERSONAL:
+        return Skill.objects.usable_by(task.owner) if task.owner is not None else Skill.objects.none()
+    scopes = SCOPE_SKILLS.get(task.scope, ())
+    condition = Q(scope__in=[s for s in scopes if s != SkillScope.DEPARTMENT])
+    if SkillScope.DEPARTMENT in scopes:
+        condition |= Q(scope=SkillScope.DEPARTMENT, department_id=task.department_id, department__deleted=False)
+    return Skill.objects.filter(condition, deleted=False, suspended=False, current_version__isnull=False)
+
+
+def allowed_connectors(task: TaskLike) -> QuerySet[Connector]:
+    """このタスクの範囲に登録できるConnector（`connector_allowed()` と同じ規則のSQL）。編集画面の候補に使う"""
+    if task.scope == TaskScope.PERSONAL:
+        return Connector.objects.usable_by(task.owner) if task.owner is not None else Connector.objects.none()
+    scopes = SCOPE_CONNECTORS.get(task.scope, ())
+    condition = Q(scope__in=[s for s in scopes if s != ConnectorScope.DEPARTMENT])
+    if ConnectorScope.DEPARTMENT in scopes:
+        department = Q(scope=ConnectorScope.DEPARTMENT, department__deleted=False)
+        if task.scope == TaskScope.DEPARTMENT:
+            department &= Q(department_id=task.department_id)
+        condition |= department
+    return Connector.objects.in_service().filter(condition)
+
+
 def skill_entries(revision: Any) -> list[tuple[str, dict[str, Any]]]:
-    """版に登録したSkill（業務のSkillと通知Skill）の（項目の名前、`{"skill", "version"}`）。`revision` は版か版の中身の
-    辞書。通知Skillも業務のSkillと同じく、タスクの範囲・Connectorの宣言・モデルで確かめ、Runで読み込む"""
-    if isinstance(revision, dict):
-        skills, notification_skill = revision["skills"], revision["notification_skill"]
-    else:
-        skills, notification_skill = revision.skills, revision.notification_skill
-    entries = [("skills", entry) for entry in skills]
-    if notification_skill:
-        entries.append(("notification_skill", notification_skill))
-    return entries
+    """版に登録したSkillの（項目の名前、`{"skill", "version"}`）。`revision` は版か版の中身の辞書"""
+    skills = revision["skills"] if isinstance(revision, dict) else revision.skills
+    return [("skills", entry) for entry in skills]
 
 
 def placeholders(template: str) -> list[str]:
@@ -159,11 +178,11 @@ def _check_connectors(task: TaskLike, content: dict[str, Any], errors: Errors) -
                 _("Connector「%(name)s」は機密なので、個人情報・機密情報を扱うタスクにしてください")
                 % {"name": connector.name},
             )
-    tools = set(content["tools"])
-    if content["connectors"] and not tools & DATASOURCE_TOOLS:
-        errors.add("tools", _("Connectorを使うには、使ってよいToolにConnectorの操作を加えてください"))
-    if tools & DATASOURCE_TOOLS and not content["connectors"]:
-        errors.add("connectors", _("Connectorの操作を使うには、使うConnectorを選んでください"))
+
+
+def skill_tools(skills: dict[str, tuple[Skill, SkillVersion | None]]) -> set[str]:
+    """固定したSkillの「使ってよいTool」を合わせたもの。タスクのRunはこれだけを使う"""
+    return {t for _s, v in skills.values() if v is not None for t in v.tools}
 
 
 def _check_skills(
@@ -181,18 +200,18 @@ def _check_skills(
             )
         elif not skill_allowed(task, skill):
             errors.add(field, _("Skill「%(name)s」は、このタスクでは使えません") % {"name": skill.name})
-        elif field == "notification_skill" and version.output_schema:
-            # 業務結果は業務のSkillかタスクのもの。通知Skillの本文に別の形が載ると、モデルが確定する形を誤る
-            errors.add(field, _("業務結果のSchemaを持つSkillは、通知Skillにできません"))
         else:
             schemas += 1 if version.output_schema else 0
             _check_declarations(skill, version, content, errors, field)
-    # Toolは、固定したSkillの「使ってよいTool」との積だけを実行時に出すので、どのSkillも使わないToolは保存させない
-    skill_tools = {t for _s, v in skills.values() if v is not None for t in v.tools}
-    if unused := [t for t in content["tools"] if t not in skill_tools]:
+    # タスクのRunのToolは、固定したSkillの「使ってよいTool」を合わせたもの。Connectorの操作を許すSkillがなければ、
+    # 登録したConnectorを使えない
+    if content["connectors"] and not skill_tools(skills) & DATASOURCE_TOOLS:
         errors.add(
-            "tools",
-            _("登録したSkillのどれも使わないToolがあります：%(tools)s") % {"tools": "、".join(unused)},
+            "connectors",
+            _(
+                "登録したConnectorを使えるSkillがありません。Connectorの操作（datasource_describe・datasource_query）を"
+                "使ってよいToolに持つSkillを登録してください"
+            ),
         )
     if schemas > 1 and not content["output_schema"]:
         errors.add(
@@ -222,26 +241,23 @@ def _check_declarations(
             errors.add(
                 field, _("Skill「%(skill)s」が使う表・操作を、Connector「%(name)s」が今は公開していません") % names
             )
-        if missing := [o for o in declaration["operations"] if o not in content["tools"]]:
-            errors.add(
-                "tools",
-                _("Skill「%(skill)s」が使う操作（%(operations)s）を、使ってよいToolに加えてください")
-                % {"skill": skill.name, "operations": "、".join(missing)},
-            )
 
 
 def _check_notification(task: TaskLike, content: dict[str, Any], errors: Errors) -> None:
     """結果の通知の出口が、タスクの範囲で使えて、機密の区分に合うか（authorization.md §5.4・§7）"""
     destination: Destination | None = content["destination"]
-    if content["notification_skill"] and (
+    if content["notification_instructions"] and (
         destination is None
         or NotifyEvent.COMPLETED not in content["notify_events"]
         or content["notify_content"] == NotifyContent.STATUS
     ):
-        # 通知Skillが決めた文章とファイルは、完了の通知の業務結果と一緒に送る（design.md §4.3）
+        # 通知の書き方で決めた文章とファイルは、完了の通知の業務結果と一緒に送る（design.md §4.3）
         errors.add(
-            "notification_skill",
-            _("通知Skillを使うには、通知先と完了（run.completed）の通知を選び、通知の内容に業務結果を含めてください"),
+            "notification_instructions",
+            _(
+                "通知の書き方を使うには、通知先と完了（run.completed）の通知を選び、通知の内容に業務結果を"
+                "含めてください"
+            ),
         )
     if destination is None:
         if content["notify_events"]:
@@ -277,9 +293,9 @@ def _check_model(content: dict[str, Any], skills: dict[str, tuple[Skill, SkillVe
     if schema and not version.supports_tools:
         # 業務結果は submit_result で確定するので、Toolを使えないモデルでは確定できない（harness.md §10.5）
         errors.add("model_profile", _("業務結果のSchemaがあるタスクには、Toolを使えるモデルを選んでください"))
-    elif content["notification_skill"] and not version.supports_tools:
-        errors.add("model_profile", _("通知Skillを使うタスクには、Toolを使えるモデルを選んでください"))
-    elif content["tools"] and not version.supports_tools:
+    elif content["notification_instructions"] and not version.supports_tools:
+        errors.add("model_profile", _("通知の書き方を決めたタスクには、Toolを使えるモデルを選んでください"))
+    elif skill_tools(skills) and not version.supports_tools:
         errors.add("model_profile", _("このモデルはToolを使えません。Toolを使わないか、別のモデルを選んでください"))
     for _skill, skill_version in skills.values():
         if skill_version is not None and (reason := skill_version.unsupported_by(version)):

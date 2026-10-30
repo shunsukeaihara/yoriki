@@ -320,7 +320,7 @@ class DeliverySerializer(ReadOnlyModelSerializer):
 
 
 class NotificationSerializer(ReadOnlyModelSerializer):
-    """画面の通知（本人の通知欄）。タスクの名前とRunの状態と、通知Skillが決めた通知の文章（なければ空文字）を返す"""
+    """画面の通知（本人の通知欄）。タスクの名前とRunの状態と、通知の書き方に従って決めた通知の文章（なければ空文字）を返す"""
 
     id = serializers.CharField(source="uid", read_only=True)
     event_type = serializers.ChoiceField(choices=NotifyEvent.choices, read_only=True)

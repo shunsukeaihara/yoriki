@@ -26,11 +26,10 @@ from llm.models import ModelProfileVersion
 from run.dispatch import enqueue_run
 from run.models import Run, RunEvent, RunEventKind, RunKind, RunLaunch, RunStatus, RunTrigger
 from runtime.models import RuntimeProfile
-from skill.models import Skill
 from user.models import system_user
 
 from . import checks
-from .errors import CannotRun
+from .errors import CannotRun, VersionConflict
 from .inputs import InputFile, clean_inputs, render
 from .models import (
     TaskAction,
@@ -52,10 +51,11 @@ NO_RESPONDER_NOTE = (
 )
 
 
-# 通知Skill（design.md §4.3）。どのSkillが通知Skillかを伝える
+# 通知の書き方（design.md §4.3）。タスクを管理する人が書いた定義なので、依頼文と同じく囲まない
 NOTIFICATION_NOTE = (
-    '[The skill "{name}" is the notification skill of this task. When the work is done, follow it and call '
-    "prepare_notification. The notification is sent when the work completes.]"
+    "[When the work is done, write the completion notification of this task by following the instructions below, "
+    "and call prepare_notification. The notification is sent when the work completes.]\n"
+    "<notification_instructions>\n{instructions}\n</notification_instructions>"
 )
 
 # Webhookで起動したRunの最初の発言に添える。payloadの全体はファイルとして置き、データとして読ませる（harness.md §6.3）
@@ -78,8 +78,10 @@ def start_task_run(
     actor,
     launch: RunLaunch,
     files: Sequence[InputFile] = (),
+    expected_version: int | None = None,
 ) -> Run:
     """タスクの今の版でRunを始める。始められなければ CannotRun（入力の誤りは InvalidInputs）。
+    `expected_version` を渡すと、今の版がそれと違えば VersionConflict（画面で確かめた版と違う定義で動かさない）。
 
     `inputs` は値か、ロックした後の今の版から値を作る関数（Webhookでは、項目の型を今の版で決めるため）。型がファイルの
     項目の値は InputFile。`files` は項目の値のほかに /workspace/input に置くファイル（Webhookのpayload等）。呼び出し元の
@@ -95,6 +97,9 @@ def start_task_run(
                 .select_related("owner", "department", "current_revision__model_profile__current_version")
                 .get(pk=task.pk)
             )
+            # 画面で確かめた版と違えば、実行できるかより先に知らせる（画面に最新の状態を読み込ませる）
+            if expected_version is not None and task.version_number != expected_version:
+                raise VersionConflict()
             if launch == RunLaunch.MANUAL and not task.can(actor, TaskAction.RUN):
                 raise CannotRun(_("このタスクを実行する権限がないか、タスクが停止中です"))
             # 入口からの起動は、タスクに固定したものの範囲で動く（authorization.md §6。個人のタスクはスケジュールだけ）
@@ -137,7 +142,10 @@ def _start(
             _("コマンドを動かす環境（Runtime Profile）が登録されていません。基盤管理者に問い合わせてください。")
         )
     # 固定したSkillの版と、Connectorを、受付時にも確かめ直す（authorization.md §6）
-    entries, output_schema, notification_skill = _fixed_skills(task, revision, version, sensitive=sensitive)
+    entries, output_schema = _fixed_skills(task, revision, version, sensitive=sensitive)
+    # 通知の書き方。Toolを使えないモデルでは prepare_notification を出せないので、決まった形で通知する（通知のために
+    # 業務を止めない。design.md §4.3）
+    notification = revision.notification_instructions.strip() if version.supports_tools else ""
     connectors = checks.load_connectors(revision.connectors)
     fixed_connectors = []
     for uid in revision.connectors:
@@ -185,12 +193,10 @@ def _start(
             "revision": revision.pk,
             "number": revision.number,
             "launch": launch,
-            "tools": revision.tools,
             "connectors": revision.connectors,
             "output_schema": output_schema,
             "inputs": inputs,
-            # 通知Skill。Toolを使えないモデルでは prepare_notification を出せないので、標準の形で通知する
-            "notification_skill": notification_skill.uid if notification_skill else "",
+            "notification_instructions": notification,
         },
     }
     run = Run.objects.create(
@@ -222,7 +228,7 @@ def _start(
         RunEventKind.USER_MESSAGE,
         user_message_data(
             message,
-            _first_message(text, inputs, launch, notification_skill=notification_skill),
+            _first_message(text, inputs, launch, notification=notification),
             skills=entries,
             connector_catalog=connector_catalog,
         ),
@@ -234,17 +240,12 @@ def _start(
 
 def _fixed_skills(
     task: TaskDefinition, revision: TaskDefinitionRevision, version: ModelProfileVersion, *, sensitive: bool
-) -> tuple[list[dict[str, Any]], dict[str, Any] | None, Skill | None]:
-    """固定したSkillの版（通知Skillを含む）を受付時に確かめ直す（authorization.md §6）。（Manifestに固定する内容、
-    業務結果のSchema、通知Skill（Toolを使えないモデルではNone））。使えなければ CannotRun"""
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """固定したSkillの版を受付時に確かめ直す（authorization.md §6）。（Manifestに固定する内容、業務結果のSchema）。
+    使えなければ CannotRun"""
     skills = checks.load_skills([entry for _field, entry in checks.skill_entries(revision)])
     entries = []
-    notification_skill = None
-    for field, entry in checks.skill_entries(revision):
-        if field == "notification_skill" and not version.supports_tools:
-            # prepare_notification を出せないので、通知Skillは読み込まずに標準の形で通知する（通知のために業務を
-            # 止めない。design.md §4.3）
-            continue
+    for _field, entry in checks.skill_entries(revision):
         skill, skill_version = skills.get(entry["skill"], (None, None))
         if skill is None or skill_version is None:
             raise CannotRun(_("固定したSkillの版がありません。タスクの定義を確かめてください。"))
@@ -254,14 +255,11 @@ def _fixed_skills(
         if reason:
             raise CannotRun(_("Skill「%(name)s」を使えません（%(reason)s）。") % {"name": skill.name, "reason": reason})
         entries.append(manifest_entry(skill, skill_version))
-        if field == "notification_skill":
-            notification_skill = skill
-    # 通知Skillは業務結果のSchemaを持たない（保存時に確かめている）
     output_schema = revision.output_schema or next(
         (v.output_schema for e in revision.skills if (v := skills[e["skill"]][1]) is not None and v.output_schema),
         None,
     )
-    return entries, output_schema, notification_skill
+    return entries, output_schema
 
 
 def _destination_revision(task: TaskDefinition, revision: TaskDefinitionRevision) -> DestinationRevision | None:
@@ -282,16 +280,14 @@ def _destination_revision(task: TaskDefinition, revision: TaskDefinitionRevision
     return destination.current_revision
 
 
-def _first_message(
-    text: str, inputs: dict[str, Any], launch: RunLaunch, *, notification_skill: Skill | None = None
-) -> str:
-    """モデルに渡す最初の発言。テンプレートを埋めた依頼文に、入力の値と、通知Skillと、答える人がいないことを添える"""
+def _first_message(text: str, inputs: dict[str, Any], launch: RunLaunch, *, notification: str = "") -> str:
+    """モデルに渡す最初の発言。テンプレートを埋めた依頼文に、入力の値と、通知の書き方と、答える人がいないことを添える"""
     parts = [text.strip()]
     if inputs:
         # 入力の値は利用者の指示ではないデータとして囲む（harness.md §6.3）
         parts.append("The inputs of this run:\n" + untrusted(json.dumps(inputs, ensure_ascii=False), "task_inputs"))
-    if notification_skill:
-        parts.append(NOTIFICATION_NOTE.format(name=notification_skill.name))
+    if notification:
+        parts.append(NOTIFICATION_NOTE.format(instructions=notification))
     if launch == RunLaunch.WEBHOOK:
         parts.append(WEBHOOK_NOTE)
     parts.append(NO_RESPONDER_NOTE)

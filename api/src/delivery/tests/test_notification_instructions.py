@@ -1,5 +1,5 @@
-"""通知Skill（design.md §4.3）。タスクの版で通知Skillの版を固定し、業務のRunの中で prepare_notification が通知の
-文章と渡すファイルを決める。候補は完了の通知の内容に載せ、なければ標準の形で送る"""
+"""通知の書き方（design.md §4.3）。タスクの版に書いた通知の書き方に従って、業務のRunの中で prepare_notification が
+通知の文章と渡すファイルを決める。候補は完了の通知の内容に載せ、なければ標準の形で送る"""
 
 import io
 import socket
@@ -20,12 +20,10 @@ from llm.models import ModelProfileVersion
 from llm.providers.base import ToolCall
 from run.models import RunLaunch, RunStatus
 from run.tasks import claim_run
-from skill.factories import SkillFactory, SkillVersionFactory
-from skill.models import SkillScope
 from task.dispatch import start_task_run
 from task.factories import TaskDefinitionFactory
 from task.models import TaskScope
-from user.factories import DepartmentFactory, UserFactory, grant
+from user.factories import UserFactory, grant
 from utils.permissions import AppPermission
 
 pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("default_runtime")]
@@ -56,25 +54,21 @@ def fixture_manager(db):
     return grant(UserFactory.create(), AppPermission.MANAGE_COMPANY_TASKS)
 
 
-def _notifier(name="結果の連絡", tools=(), **version):
-    skill = SkillFactory.create(scope=SkillScope.COMPANY, name=name, owner=None)
-    SkillVersionFactory.create(skill=skill, instructions="1. 確認した件数を1文で書く", tools=list(tools), **version)
-    return skill
+INSTRUCTIONS = "確認した件数を1文で書く"
 
 
-def _task(*, kind=DestinationKind.IN_APP, schema=SCHEMA, notifier=None):
+def _task(*, kind=DestinationKind.IN_APP, schema=SCHEMA):
     url = "" if kind == DestinationKind.IN_APP else "https://hooks.example.com/yoriki"
-    notifier = notifier or _notifier()
     return TaskDefinitionFactory.create(
         scope=TaskScope.COMPANY,
         revision__output_schema=schema,
         revision__destination=DestinationFactory.create(kind=kind, revision__url=url),
         revision__notify_events=["run.completed", "run.failed"],
-        revision__notification_skill={"skill": notifier.uid, "version": 1},
+        revision__notification_instructions=INSTRUCTIONS,
     )
 
 
-def test_the_notification_skill_prepares_the_message_sent_on_completion(manager):
+def test_the_instructions_prepare_the_message_sent_on_completion(manager):
     task = _task()
     run = start_task_run(task, inputs={}, actor=manager, launch=RunLaunch.MANUAL)
     adapter = FakeAdapter(
@@ -96,10 +90,9 @@ def test_the_notification_skill_prepares_the_message_sent_on_completion(manager)
     assert "call prepare_notification" in submit.description
     [submitted] = results(run, "submit_result")
     assert "call prepare_notification" in text_of(submitted)
-    # 通知Skillの本文と、どれが通知Skillかを最初の発言で伝える
+    # 通知の書き方を最初の発言で伝える
     text = "\n".join(m.text for m in first.messages if m.role == "user")
-    assert "確認した件数を1文で書く" in text
-    assert 'The skill "結果の連絡" is the notification skill' in text
+    assert f"<notification_instructions>\n{INSTRUCTIONS}\n</notification_instructions>" in text
     # 業務結果のあるRunでは、確定する前の候補は受け付けない
     before, after = results(run, "prepare_notification")
     assert before["is_error"]
@@ -185,7 +178,7 @@ def test_calls_after_closing_in_the_same_response_are_not_run(manager):
 
 
 def test_without_a_candidate_the_standard_form_is_sent(manager):
-    """通知Skillが候補を作らなかった・失敗した場合も、業務は完了にし、標準の形で送る"""
+    """通知の候補を作らなかった・失敗した場合も、業務は完了にし、標準の形で送る"""
     run = start_task_run(_task(), inputs={}, actor=manager, launch=RunLaunch.MANUAL)
     run = execute(run, FakeAdapter([calls(("c1", "submit_result", {"ok": True})), reply("確認しました")]))
     assert run.status == RunStatus.COMPLETED, run.error
@@ -254,21 +247,31 @@ def test_an_empty_list_sends_no_files(manager):
 
 
 def test_a_task_run_without_tools_falls_back_to_the_standard_form(manager):
-    """Toolを使えないモデルでは prepare_notification を出さず、通知Skillを伝えない"""
+    """Toolを使えないモデルでは prepare_notification を出さず、通知の書き方を伝えない"""
     profile = ModelProfileFactory.create(version__supports_tools=True)
     task = TaskDefinitionFactory.create(
         scope=TaskScope.COMPANY,
         revision__model_profile=profile,
         revision__destination=DestinationFactory.create(kind=DestinationKind.IN_APP, revision__url=""),
         revision__notify_events=["run.completed"],
-        revision__notification_skill={"skill": _notifier(tools=["read"]).uid, "version": 1},
+        revision__notification_instructions=INSTRUCTIONS,
     )
-    # 保存した後に、モデル設定の今の版がToolを使えなくなった
+    # 保存した後に、モデル設定の今の版がToolを使えなくなった。受付を断らずに、標準の形で送る
     ModelProfileVersion.objects.filter(profile=profile).update(supports_tools=False)
-    # 通知SkillがToolを要しても、受付を断らずに、通知Skillを読み込まずに標準の形で送る
     run = start_task_run(task, inputs={}, actor=manager, launch=RunLaunch.MANUAL)
-    assert run.manifest["fixed"]["task"]["notification_skill"] == ""
-    assert run.manifest["fixed"]["skills"] == []
+    assert run.manifest["fixed"]["task"]["notification_instructions"] == ""
+
+
+def test_runs_accepted_with_a_notification_skill_keep_the_notification_tool(manager):
+    """通知Skillを固定していた頃に受け付けたRunも、prepare_notification を出す"""
+    run = start_task_run(_task(), inputs={}, actor=manager, launch=RunLaunch.MANUAL)
+    task_entry = run.manifest["fixed"]["task"]
+    task_entry.pop("notification_instructions")
+    task_entry["notification_skill"] = "skill1"
+    run.save(update_fields=["manifest"])
+    adapter = FakeAdapter([calls(("c1", "submit_result", {"ok": True})), reply("確認しました")])
+    run = execute(run, adapter)
+    assert "prepare_notification" in [t.name for t in adapter.requests[0].tools]
 
 
 # --- タスクの保存 ---
@@ -286,48 +289,31 @@ def _create(api_client, user, **data):
     return api_client.post(TASKS, body, format="json")
 
 
-def test_a_notification_skill_needs_the_completed_notification_with_the_result(api_client, manager):
-    notifier = _notifier()
-    entry = {"skill": notifier.uid, "version": 1}
+def test_instructions_need_the_completed_notification_with_the_result(api_client, manager):
     destination = DestinationFactory.create().uid
     for data in (
         {},
         {"destination": destination, "notify_events": ["run.failed"]},
         {"destination": destination, "notify_events": ["run.completed"], "notify_content": "status"},
     ):
-        res = _create(api_client, manager, notification_skill=entry, **data)
+        res = _create(api_client, manager, notification_instructions=INSTRUCTIONS, **data)
         assert res.status_code == 400, data
-        assert "notification_skill" in res.json(), data
+        assert "notification_instructions" in res.json(), data
 
     res = _create(
-        api_client, manager, notification_skill=entry, destination=destination, notify_events=["run.completed"]
+        api_client,
+        manager,
+        notification_instructions=f"  {INSTRUCTIONS}\r\n",
+        destination=destination,
+        notify_events=["run.completed"],
     )
     assert res.status_code == 201, res.json()
-    assert res.json()["notification_skill"] == entry
+    assert res.json()["notification_instructions"].strip() == INSTRUCTIONS
 
 
-def test_a_notification_skill_is_checked_like_the_other_skills(api_client, manager):
+def test_instructions_need_a_model_that_uses_tools(api_client, manager):
     common = {"destination": DestinationFactory.create().uid, "notify_events": ["run.completed"]}
-    other = SkillFactory.create(scope=SkillScope.DEPARTMENT, department=DepartmentFactory.create(), owner=None)
-    SkillVersionFactory.create(skill=other, tools=[])
-    res = _create(api_client, manager, notification_skill={"skill": other.uid, "version": 1}, **common)
-    assert "このタスクでは使えません" in str(res.json()["notification_skill"])
-
-    notifier = _notifier()
-    res = _create(api_client, manager, notification_skill={"skill": notifier.uid, "version": 2}, **common)
-    assert "版2" in str(res.json()["notification_skill"])
-
-    entry = {"skill": notifier.uid, "version": 1}
-    res = _create(api_client, manager, skills=[entry], notification_skill=entry, **common)
-    assert "通知Skill" in str(res.json()["notification_skill"])
-
-    # 業務結果のSchemaを持つSkillは通知Skillにできない（最初の発言に業務結果の形が2つ載らないように）
-    shaped = _notifier("結果の形あり", output_schema=SCHEMA)
-    res = _create(api_client, manager, notification_skill={"skill": shaped.uid, "version": 1}, **common)
-    assert "業務結果のSchema" in str(res.json()["notification_skill"])
-
-    # 通知Skillの「使ってよいTool」も、タスクのToolの一覧に使える
-    reader = _notifier("報告書の要約")
-    SkillVersionFactory.create(skill=reader, tools=["read"])
-    res = _create(api_client, manager, notification_skill={"skill": reader.uid, "version": 2}, tools=["read"], **common)
-    assert res.status_code == 201, res.json()
+    model = ModelProfileFactory.create(version__supports_tools=False).uid
+    res = _create(api_client, manager, notification_instructions=INSTRUCTIONS, model_profile=model, **common)
+    assert res.status_code == 400
+    assert "Toolを使えるモデル" in str(res.json()["model_profile"])

@@ -179,6 +179,32 @@ export type NotificationCount = Api<'NotificationCount'>
 export type NotifyEventEnum = Schemas['NotifyEventEnum']
 export type NotificationListParams = ListParams & { unread?: boolean }
 
+// タスク（design.md §4.1、authorization.md §5.3）。中身は今の版の値を平らに持ち、保存のたびに版が増える
+export type TaskInputTypeEnum = Schemas['TaskInputTypeEnum']
+export type NotifyContentEnum = Schemas['NotifyContentEnum']
+export type Task = Api<'TaskDefinition'>
+export type TaskDetail = Api<'TaskDefinitionDetail'>
+export type TaskCreate = Api<'TaskDefinitionRequest'>
+export type TaskUpdate = Api<'TaskDefinitionUpdateRequest'>
+export type TaskRevision = Api<'TaskDefinitionRevision'>
+export type TaskInput = Api<'TaskInput'>
+export type TaskSkill = Api<'TaskSkill'>
+export type TaskReference = Api<'TaskReference'>
+export type TaskSkillChoice = Api<'TaskSkillChoice'>
+export type DestinationChoice = Api<'DestinationChoice'>
+export type DestinationKindEnum = Schemas['DestinationKindEnum']
+// 手動実行の入力の値。キーは項目の名前（変換しない）。型がファイルの項目は File
+export type TaskRunInputs = Record<string, string | number | boolean | File | null>
+export type TaskListParams = ListParams & {
+  name?: string
+  scope?: SkillScopeEnum
+  department?: string
+  suspended?: boolean
+}
+// 編集画面の候補（Skill・Connector・出口）を求める範囲
+export type TaskChoiceParams = ListParams & { scope: SkillScopeEnum; department?: string | null }
+export type TaskRunListParams = ListParams & { status?: RunStatusEnum }
+
 export type ConversationListParams = ListParams
 export type ArtifactListParams = ListParams & { kind?: ArtifactKindEnum }
 export type RunListParams = ListParams & { status?: RunStatusEnum; conversation?: string }

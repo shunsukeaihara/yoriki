@@ -282,7 +282,6 @@ REVISION_FIELDS = (
     "prompt_template",
     "skills",
     "connectors",
-    "tools",
     "model_profile",
     "effort",
     "handles_sensitive_data",
@@ -291,7 +290,7 @@ REVISION_FIELDS = (
     "destination",
     "notify_events",
     "notify_content",
-    "notification_skill",
+    "notification_instructions",
 )
 
 
@@ -301,14 +300,13 @@ class TaskDefinitionRevision(models.Model):
     - `skills`：使うSkillと固定の版。`[{"skill": "<SkillのID>", "version": <版の番号>}]`。Skillが新しい版を公開しても
       切り替わらない（authorization.md §5.4）
     - `connectors`：使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う
-    - `tools`：使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う
     - `inputs`：入力の項目。`[{"name": "vendor", "label": "取引先", "type": "string", "required": true,
       "choices": [], "max_length": 200}]`。プロンプトのテンプレートに `{{ inputs.vendor }}` で埋め込む
     - `output_schema`：業務結果のSchema。なければSkillのもの
     - `destination`・`notify_events`・`notify_content`：結果の通知（出口、通知するイベント、通知の内容）。初期は
       1つのタスクに1つ（design.md §4.1）。Runは受付時に出口の版を固定する
-    - `notification_skill`：通知Skillと固定の版（`{"skill": "<SkillのID>", "version": <版の番号>}`。任意）。業務のRunの
-      中で読み込み、`prepare_notification` で通知の文章と渡すファイルを決めさせる（design.md §4.3）
+    - `notification_instructions`：通知の書き方（任意）。完了の通知に載せる文章と渡すファイルを、業務のRunの最後に
+      `prepare_notification` で決めさせる手順（design.md §4.3）。空なら決まった形で送る
     """
 
     uid = NanoidField(unique=True)
@@ -320,7 +318,6 @@ class TaskDefinitionRevision(models.Model):
     prompt_template = models.TextField(_("プロンプトのテンプレート"))
     skills = models.JSONField(_("使うSkillと版"), default=list)
     connectors = ArrayField(models.CharField(max_length=30), verbose_name=_("使うConnector"), default=list)
-    tools = ArrayField(models.CharField(max_length=50), verbose_name=_("使ってよいTool"), default=list)
     model_profile = models.ForeignKey(
         "llm.ModelProfile", on_delete=models.PROTECT, related_name="+", verbose_name=_("モデル設定")
     )
@@ -340,7 +337,7 @@ class TaskDefinitionRevision(models.Model):
     )
     notify_events = ArrayField(models.CharField(max_length=30), verbose_name=_("通知するイベント"), default=list)
     notify_content = models.CharField(_("通知の内容"), max_length=30, default="status_and_result")
-    notification_skill = models.JSONField(_("通知Skillと版"), null=True, blank=True)
+    notification_instructions = models.TextField(_("通知の書き方"), blank=True, default="")
     change_reason = models.CharField(_("変更理由"), max_length=500, blank=True)
     # 最後にタスクを保存した人（authorization.md §6。Runに記録する）
     created_by = models.ForeignKey(

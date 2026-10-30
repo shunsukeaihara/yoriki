@@ -37,8 +37,8 @@ TOOL_GUIDANCE = {
         "result, then write your final reply."
     ),
     "prepare_notification": (
-        "- This task has a notification skill. When the work is done (right after `submit_result` if the work has a "
-        "result schema), follow the skill and call `prepare_notification` with the text of the notification, then "
+        "- This task has notification instructions. When the work is done (right after `submit_result` if the work "
+        "has a result schema), follow them and call `prepare_notification` with the text of the notification, then "
         "write your final reply. Where it is sent is fixed by the task."
     ),
     "ask_user": "- Use `ask_user` for business decisions only. Call it alone; the answers arrive as its result.",
@@ -74,7 +74,7 @@ TOOL_GUIDANCE = {
 }
 
 
-# 通知Skillのあるタスクの submit_result の節。確定した後に prepare_notification を呼ぶ順番に揃える
+# 通知の書き方のあるタスクの submit_result の節。確定した後に prepare_notification を呼ぶ順番に揃える
 SUBMIT_RESULT_WITH_NOTIFICATION = (
     "- This work has a result schema. When the work is done and checked, call `submit_result` alone with the "
     "result, then `prepare_notification`, then write your final reply."

@@ -96,7 +96,7 @@ frontend/
     ├── components/
     │   ├── common/             # D*ラッパー（prefixなしで自動import）
     │   └── <domain>/           # 業務コンポーネント（例：run/RunCancelDialog.vue）
-    ├── composables/            # field, date, form, list, confirm, account, permission, manage, locale, markdown, stream, llm, sso, user, conversation, run, artifact, skill, connector
+    ├── composables/            # field, date, form, list, confirm, account, permission, manage, locale, markdown, stream, llm, sso, user, conversation, run, artifact, skill, connector, notification, task
     ├── layouts/                # default（社員。サイドバーに会話の一覧）、anonymous（ログイン・開発用）、manage（管理）
     ├── middleware/             # auth.global.ts、permission.global.ts、manage.ts（/manage の入口）
     ├── pages/                  # 社員向けはルート直下、管理向けは manage/ 以下、dev/ は開発用
@@ -148,7 +148,7 @@ export default defineNuxtConfig({
 `api/client.ts` の `createHttp()` は、axiosのインスタンスを作り、認証にセッションCookieとCSRFを使う。
 
 - リクエストのbodyは `snakeProps()`、クエリは `qs.stringify(snakeProps(params), { indices: false })` で変換する。
-- 利用者・エージェント・DBがキーを決めるJSON（SkillのJSON Schema、期待する業務結果・業務結果、Toolの引数、Connectorの列名 → 説明、platform → digest）は、項目の名前だけを変換し、値の中のキーは変換しない（`client.ts` の `RAW_VALUE_KEYS`）。変換すると `invoice_no` が `invoiceNo` に、`VendorCode` が `vendor_code` に変わるため。このような項目をAPIに足したら、名前を `RAW_VALUE_KEYS` に加える。
+- 利用者・エージェント・DBがキーを決めるJSON（SkillのJSON Schema、期待する業務結果・業務結果、Toolの引数、Connectorの列名 → 説明、platform → digest）は、項目の名前だけを変換し、値の中のキーは変換しない（`client.ts` の `RAW_VALUE_KEYS`）。変換すると `invoice_no` が `invoiceNo` に、`VendorCode` が `vendor_code` に変わるため。このような項目をAPIに足したら、名前を `RAW_VALUE_KEYS` に加える。同じ名前の項目が別のAPIで変換の要る形を持つとき（タスクの `inputs` は、定義では項目の定義の並び、手動実行では項目の名前 → 値）は、`RAW_VALUE_KEYS` に入れず、値の側をmultipartのJSONの文字列で送る（`api.tasks(id).run()`）。応答のエラーのキーも変換されて、`foo_bar` と `foo__bar` のような名前が同じキーになるので、画面では変換する前の応答の本文から項目の名前のまま引く（`taskInputErrors()`・`inputErrorsOf()`）。
 - レスポンスがJSONなら `camelProps()` で変換し、`data` だけを返す（`AxiosResponse` は返さない）。
 - 認証はDjangoのセッションCookieで行う（`withCredentials: true`）。トークンを画面側で持たず、`Authorization` ヘッダーも付けない。
 - 書き込みの要求には、Cookieの `csrftoken` を `X-CSRFToken` ヘッダーに付ける（axiosの `xsrfCookieName` / `xsrfHeaderName`）。
@@ -471,8 +471,11 @@ pages/
 ├── runs/[runId].vue              # 詳細ドロワー
 ├── skills/index.vue              # Skillの一覧と作成
 ├── skills/[skillId].vue          # 公開中の版・Draftの編集と公開・版の履歴・変更の記録（ページ全体）
+├── tasks/index.vue               # 管理できるタスクの一覧と作成
+├── tasks/[taskId]/index.vue      # 設定の編集（保存のたびに版）・手動実行・実行の履歴・版の履歴（ページ全体）
 ├── manage.vue                    # definePageMeta({ layout: 'manage', middleware: 'manage' })＋<NuxtPage />
 └── manage/
+    ├── system_tasks.vue          # システムのタスクの一覧（詳細は tasks/[taskId] を使い回す）
     ├── destinations.vue
     ├── destinations/[destinationId].vue
     ├── departments.vue
@@ -481,6 +484,7 @@ pages/
 
 - Skillの画面は、管理画面（`/manage`）ではなく社員向けのルート直下に置く。個人のSkillは全社員が作り、何ができるかはSkillごとの `access`（範囲・所属・permission。authorization.md §5.1）で決まるため、`/manage` に入る権限とは関係がない。APIも社員向けの `app/v1/skills` にある。
 - Skillの詳細は、編集する項目が多いので、一覧の子ルートのドロワー（§8.2）ではなくページ全体にする。
+- タスクの画面も、Skillと同じ理由で社員向けのルート直下（`/tasks`）に置き、詳細はページ全体にする。一覧は管理できるタスクだけ（authorization.md §7.3.1）。システムのタスクは `/manage/system_tasks` の一覧から、同じ詳細のページを開く。編集画面で選ぶSkill・Connector・出口は、タスクの範囲を渡す候補のAPI（authorization.md §7.2）から読む。
 
 - URLのパス、ディレクトリ名、パラメータ名は、APIのリソース名に合わせる（`/runs/[runId]` ↔ `app/v1/runs/{uid}`）。パラメータの値はAPIの `id`（uid）をそのまま使う。
 

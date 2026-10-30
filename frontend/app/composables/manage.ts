@@ -19,6 +19,7 @@ export const ManagePagePermissions = {
   DATABASE_CONNECTION: [PermissionCode.VIEW_DATABASE_CONNECTION, PermissionCode.CHANGE_DATABASE_CONNECTION],
   CONNECTOR: [PermissionCode.VIEW_CONNECTOR, PermissionCode.CHANGE_CONNECTOR],
   SYSTEM_SKILL: [PermissionCode.EDIT_SYSTEM_SKILLS, PermissionCode.PUBLISH_SYSTEM_SKILLS],
+  SYSTEM_TASK: [PermissionCode.MANAGE_SYSTEM_TASKS],
   USER: [PermissionCode.VIEW_USER, PermissionCode.CHANGE_USER],
   DEPARTMENT: [PermissionCode.VIEW_DEPARTMENT, PermissionCode.CHANGE_DEPARTMENT],
   SSO_PROVIDER: [PermissionCode.VIEW_SSO_PROVIDER, PermissionCode.CHANGE_SSO_PROVIDER],
@@ -86,6 +87,12 @@ export const useManageMenu = () => {
       icon: 'i-lucide-book-lock',
       to: '/manage/system_skills',
       permission: ManagePagePermissions.SYSTEM_SKILL,
+    },
+    {
+      label: $i18n.t('システムのタスク'),
+      icon: 'i-lucide-workflow',
+      to: '/manage/system_tasks',
+      permission: ManagePagePermissions.SYSTEM_TASK,
     },
     {
       label: $i18n.t('ユーザー'),

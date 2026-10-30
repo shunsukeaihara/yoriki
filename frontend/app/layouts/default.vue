@@ -30,6 +30,15 @@ const { links: manageLinks } = useManageMenu()
           block
           :class="collapsed ? undefined : 'justify-start'"
         />
+        <DBtn
+          to="/tasks"
+          icon="i-lucide-workflow"
+          :label="collapsed ? undefined : $t('タスク')"
+          variant="ghost"
+          color="neutral"
+          block
+          :class="collapsed ? undefined : 'justify-start'"
+        />
         <NotificationBell :collapsed="collapsed" />
         <ConversationList :collapsed="collapsed" />
       </template>

@@ -42,6 +42,10 @@ export const PermissionCode = {
   PUBLISH_COMPANY_SKILLS: 'skill.can_publish_company_skills',
   EDIT_SYSTEM_SKILLS: 'skill.can_edit_system_skills',
   PUBLISH_SYSTEM_SKILLS: 'skill.can_publish_system_skills',
+  // 範囲ごとのタスクの管理（authorization.md §5.3）。部門は管理できる部門（manageableDepartments）にだけ効く
+  MANAGE_DEPARTMENT_TASKS: 'task.can_manage_department_tasks',
+  MANAGE_COMPANY_TASKS: 'task.can_manage_company_tasks',
+  MANAGE_SYSTEM_TASKS: 'task.can_manage_system_tasks',
 } as const
 export type PermissionCode = (typeof PermissionCode)[keyof typeof PermissionCode]
 

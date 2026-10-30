@@ -27,7 +27,6 @@ class TaskDefinitionFactory(DjangoModelFactory[TaskDefinition]):
         kwargs.setdefault("prompt_template", "請求書を確認してください。")
         kwargs.setdefault("skills", [])
         kwargs.setdefault("connectors", [])
-        kwargs.setdefault("tools", [])
         if "model_profile" not in kwargs:
             kwargs["model_profile"] = ModelProfileFactory.create(version__supports_tools=True)
         kwargs.setdefault("effort", "")
@@ -37,5 +36,5 @@ class TaskDefinitionFactory(DjangoModelFactory[TaskDefinition]):
         kwargs.setdefault("destination", None)
         kwargs.setdefault("notify_events", [])
         kwargs.setdefault("notify_content", "status_and_result")
-        kwargs.setdefault("notification_skill", None)
+        kwargs.setdefault("notification_instructions", "")
         obj.revise(actor=obj.created_by, expected_version=0, **kwargs)

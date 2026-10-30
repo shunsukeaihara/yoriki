@@ -173,7 +173,6 @@ def test_system_task_uses_department_connectors_of_any_department(api_client, mo
         scope=TaskScope.SYSTEM,
         skills=[{"skill": skill.uid, "version": 1}],
         connectors=[connector.uid],
-        tools=["datasource_query"],
     )
     assert res.status_code == 201, res.json()
 
@@ -186,7 +185,6 @@ def test_system_task_uses_department_connectors_of_any_department(api_client, mo
         scope=TaskScope.COMPANY,
         skills=[{"skill": _company_skill().uid, "version": 1}],
         connectors=[connector.uid],
-        tools=["datasource_query"],
     )
     assert res.status_code == 400
     assert "このタスクでは使えません" in res.json()["connectors"][0]
@@ -202,8 +200,7 @@ def test_skill_declared_connector_must_be_in_the_task(api_client, model):
     res = _create(api_client, admin, model, **body)
     assert res.status_code == 400
     assert "販売管理" in res.json()["connectors"][0]
-    assert "datasource_query" in res.json()["tools"][0]
-    res = _create(api_client, admin, model, connectors=[connector.uid], tools=["read", "datasource_query"], **body)
+    res = _create(api_client, admin, model, connectors=[connector.uid], **body)
     assert res.status_code == 201, res.json()
 
 
@@ -214,7 +211,6 @@ def test_sensitive_connector_needs_a_sensitive_task_with_a_local_model(api_clien
         "scope": TaskScope.COMPANY,
         "skills": [{"skill": _company_skill().uid, "version": 1}],
         "connectors": [connector.uid],
-        "tools": ["datasource_query"],
     }
     res = _create(api_client, admin, model, **body)
     assert res.status_code == 400
@@ -259,7 +255,7 @@ def test_saving_makes_a_new_revision_and_conflicts_are_detected(api_client, app_
 
 def test_manual_run_fixes_the_revision_and_renders_the_inputs(api_client, app_user, model):
     skill = _company_skill(output_schema={"type": "object", "properties": {"ok": {"type": "boolean"}}})
-    task = _create(api_client, app_user, model, skills=[{"skill": skill.uid, "version": 1}], tools=["read"]).json()
+    task = _create(api_client, app_user, model, skills=[{"skill": skill.uid, "version": 1}]).json()
     SkillVersionFactory.create(skill=skill, instructions="新しい手順")  # 公開しても、タスクは版1のまま
 
     res = api_client.post(_url(task, "run/"), {"inputs": {"vendor": "A商事"}}, format="json")
@@ -271,7 +267,7 @@ def test_manual_run_fixes_the_revision_and_renders_the_inputs(api_client, app_us
     assert run.parent is None
     fixed = run.manifest["fixed"]
     assert [(s["skill"], s["number"]) for s in fixed["skills"]] == [(skill.uid, 1)]
-    assert fixed["task"]["tools"] == ["read"]
+    assert "tools" not in fixed["task"]  # Toolは固定したSkillの「使ってよいTool」で決まる
     assert fixed["task"]["output_schema"]["properties"] == {"ok": {"type": "boolean"}}
     assert run.conversation.purpose == ConversationPurpose.TASK
     assert not Conversation.objects.owned_by(app_user).exists()  # 会話の一覧には出さない
@@ -282,6 +278,49 @@ def test_manual_run_fixes_the_revision_and_renders_the_inputs(api_client, app_us
     )
     assert '<untrusted_content source="task_inputs">{"vendor": "A商事"}</untrusted_content>' in first["text"]
     assert "1. 請求書を読む" in first["skills_text"]
+
+
+def test_saving_an_old_revision_is_a_conflict_even_if_the_content_is_invalid(api_client, app_user, model):
+    """別の人が版を作った後の保存は、内容の誤りより先に409にする（古い画面に最新の状態を読み込ませる）"""
+    task = _create(api_client, app_user, model).json()
+    api_client.patch(_url(task), {"version": 1, "description": "直した"}, format="json")
+    # 版1のまま、入力の項目にない名前をテンプレートで使う（今の版に対しても誤り）
+    res = api_client.patch(_url(task), {"version": 1, "prompt_template": "{{ inputs.memo }}"}, format="json")
+    assert res.status_code == 409, res.json()
+    # 項目ごとの検証（消えた参照先）より先にも照合する
+    res = api_client.patch(_url(task), {"version": 1, "model_profile": "gone", "destination": "gone"}, format="json")
+    assert res.status_code == 409, res.json()
+    res = api_client.patch(_url(task), {"version": 2, "prompt_template": "{{ inputs.memo }}"}, format="json")
+    assert res.status_code == 400
+
+
+def test_manual_run_refuses_a_revision_other_than_the_one_on_the_screen(api_client, app_user, model):
+    """画面で確かめた版（version）を送ると、別の版ができていれば409にし、確かめていない定義では実行しない"""
+    task = _create(api_client, app_user, model).json()
+    res = api_client.patch(_url(task), {"version": 1, "prompt_template": "{{ inputs.vendor }} を調べて"}, format="json")
+    assert res.json()["version"] == 2
+    res = api_client.post(_url(task, "run/?version=1"), {"inputs": {"vendor": "A商事"}}, format="json")
+    assert res.status_code == 409
+    # 新しい版で実行できなくなっていても、先に版の違いを知らせる
+    api_client.post(_url(task, "suspend/"))
+    res = api_client.post(_url(task, "run/?version=1"), {"inputs": {"vendor": "A商事"}}, format="json")
+    assert res.status_code == 409
+    api_client.post(_url(task, "resume/"))
+    assert api_client.post(_url(task, "run/?version=x"), {}, format="json").status_code == 400
+    # 入力の誤り（multipartの不正なJSON）より先にも照合する
+    assert api_client.post(_url(task, "run/?version=1"), {"inputs": "{"}).status_code == 409
+    assert not Run.objects.exists()
+    # 入力の項目の名前と重ならないよう、版はクエリで送る（version という名前のファイルの項目も使える）
+    inputs = [
+        {"name": "vendor", "label": "取引先", "type": "string", "required": True},
+        {"name": "version", "label": "版のファイル", "type": "file"},
+    ]
+    task = api_client.patch(_url(task), {"version": 2, "inputs": inputs}, format="json").json()
+    assert task["version"] == 3
+    body = {"inputs": json.dumps({"vendor": "A商事"}), "version": SimpleUploadedFile("v.txt", b"1")}
+    res = api_client.post(_url(task, "run/?version=3"), body)
+    assert res.status_code == 201, res.json()
+    assert Run.objects.get().task_revision == TaskDefinitionRevision.objects.get(task__uid=task["id"], number=3)
 
 
 def test_manual_run_accepts_only_the_defined_inputs(api_client, app_user, model):
@@ -444,12 +483,18 @@ def test_result_files_are_only_top_level_properties(api_client, app_user, model)
     assert _create(api_client, app_user, model, output_schema=flat).status_code == 201
 
 
-def test_tools_that_no_skill_allows_are_refused(api_client, app_user, model):
-    """実行時はSkillとタスクの両方にあるToolだけを出すので、どのSkillも使わないToolは保存させない"""
-    skill = _company_skill(tools=["read"])
-    res = _create(api_client, app_user, model, skills=[{"skill": skill.uid, "version": 1}], tools=["read", "shell"])
+def test_connectors_need_a_skill_that_may_use_them(api_client, app_user, model):
+    """タスクのRunのToolは固定したSkillの「使ってよいTool」で決まるので、Connectorの操作を許すSkillがなければ、
+    登録したConnectorを使えない"""
+    connector = ConnectorFactory.create()
+    reader = _company_skill(tools=["read"])
+    skills = [{"skill": reader.uid, "version": 1}]
+    res = _create(api_client, app_user, model, skills=skills, connectors=[connector.uid])
     assert res.status_code == 400
-    assert "shell" in res.json()["tools"][0]
+    assert "Connectorを使えるSkillがありません" in res.json()["connectors"][0]
+    querier = _company_skill(name="照合", tools=["datasource_query"])
+    skills.append({"skill": querier.uid, "version": 1})
+    assert _create(api_client, app_user, model, skills=skills, connectors=[connector.uid]).status_code == 201
 
 
 def test_task_whose_model_lost_tools_is_not_started(api_client, app_user, model):

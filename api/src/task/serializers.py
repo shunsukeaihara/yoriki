@@ -12,14 +12,15 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.fields import empty
 from rest_framework.utils import html
 
+from connector.models import Connector
 from delivery.models import Destination, NotifyContent, NotifyEvent
 from delivery.serializers import DestinationChoiceSerializer
 from harness.result_files import file_format_problem
-from harness.tools import SKILL_TOOLS
 from harness.tools.base import schema_problem
 from llm.models import ModelProfile
 from llm.serializers import AppModelProfileSerializer
 from run.models import Run, RunEndReason, RunStatus
+from skill.models import Skill
 from user.models import Department
 from user.serializers import MinimumDepartmentSerializer, MinimumUserSerializer
 from utils.exceptions import Conflict
@@ -47,9 +48,9 @@ from .models import (
 )
 from .webhook import parse_path
 
-TOOL_CHOICES = [(t.name, t.name) for t in SKILL_TOOLS]
 MAX_PROMPT_TEMPLATE = 20_000
 MAX_CHOICES = 100
+MAX_NOTIFICATION_INSTRUCTIONS = 4000
 
 
 class TaskSkillSerializer(serializers.Serializer):
@@ -147,14 +148,6 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
         max_length=checks.MAX_TASK_CONNECTORS,
         help_text=_("使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う"),
     )
-    tools = serializers.ListField(
-        source="current_revision.tools",
-        child=serializers.ChoiceField(choices=TOOL_CHOICES),
-        required=False,
-        default=list,
-        max_length=50,
-        help_text=_("使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う"),
-    )
     model_profile: "serializers.SlugRelatedField[ModelProfile]" = serializers.SlugRelatedField(
         source="current_revision.model_profile",
         slug_field="uid",
@@ -210,14 +203,15 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
         default=NotifyContent.STATUS_AND_RESULT,
         help_text=_("通知の内容（状態だけ・業務結果・両方）"),
     )
-    notification_skill = TaskSkillSerializer(
-        source="current_revision.notification_skill",
+    notification_instructions = NormalizedTextField(
+        source="current_revision.notification_instructions",
+        max_length=MAX_NOTIFICATION_INSTRUCTIONS,
         required=False,
-        allow_null=True,
-        default=None,
+        allow_blank=True,
+        default="",
         help_text=_(
-            "通知Skillと固定の版（任意）。業務のRunの中で読み込み、通知の文章と渡すファイルを決めさせる。通知先と"
-            "完了（run.completed）の通知が要る"
+            "通知の書き方（任意）。業務のRunの最後に、これに従って完了の通知の文章と渡すファイルを決めさせる。"
+            "通知先と完了（run.completed）の通知が要り、通知の内容に業務結果を含める。空なら決まった形で送る"
         ),
     )
     change_reason = serializers.CharField(max_length=500, required=False, allow_blank=True, write_only=True)
@@ -268,16 +262,10 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(_("同じSkillを2回登録しています"))
         return [{"skill": e["skill"], "version": e["version"]} for e in value]
 
-    def validate_notification_skill(self, value: dict[str, Any] | None) -> dict[str, Any] | None:
-        return None if value is None else {"skill": value["skill"], "version": value["version"]}
-
     def validate_connectors(self, value: list[str]) -> list[str]:
         if len(set(value)) != len(value):
             raise serializers.ValidationError(_("同じConnectorを2回登録しています"))
         return value
-
-    def validate_tools(self, value: list[str]) -> list[str]:
-        return list(dict.fromkeys(value))
 
     def validate_notify_events(self, value: list[str]) -> list[str]:
         return list(dict.fromkeys(value))
@@ -325,16 +313,13 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
             if "version_number" not in attrs:
                 raise serializers.ValidationError({"version": _("編集を始めた時点の版を送ってください")})
             task = self.instance
+            # 内容の検証より先に409にする（数で届いた版は、項目ごとの検証の前に to_internal_value() で照合している）
+            if attrs["version_number"] != task.version_number:
+                raise Conflict()
         if "name" in attrs:
             attrs["name"] = attrs["name"].strip()
             self._check_unique_name(task, attrs["name"])
         content = self._content(attrs, task.current_revision if self.instance else None)
-        if content["notification_skill"] and content["notification_skill"]["skill"] in {
-            e["skill"] for e in content["skills"]
-        }:
-            raise serializers.ValidationError(
-                {"notification_skill": _("業務のSkillに登録したSkillを、通知Skillにはできません")}
-            )
         if errors := checks.content_errors(task, content):
             raise serializers.ValidationError(errors)
         attrs["content"] = content
@@ -398,7 +383,62 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
         return instance
 
 
-class TaskDefinitionUpdateSerializer(TaskDefinitionSerializer):
+class TaskReferenceSerializer(serializers.Serializer):
+    """版に登録したSkill・Connectorの名前（削除されたものも、登録した名前のまま出す）"""
+
+    id = serializers.CharField()
+    name = serializers.CharField()
+    deleted = serializers.BooleanField()
+
+
+class TaskDefinitionDetailSerializer(TaskDefinitionSerializer):
+    """タスクの詳細（編集画面）。一覧の項目に加えて、登録したSkill・Connectorの名前と、今の版が保存のときの検査に
+    通らない理由（Skillの停止・Connectorの削除・範囲の外等。多くは実行も断られる）を返す"""
+
+    skills_info = serializers.SerializerMethodField(help_text=_("登録したSkillの名前"))
+    connectors_info = serializers.SerializerMethodField(help_text=_("登録したConnectorの名前"))
+    problems = serializers.SerializerMethodField(
+        help_text=_(
+            "今の版が、保存のときの検査に通らない理由（なければ空）。版を作ったときより後の変更（Skillの停止・"
+            "Connectorの削除等）で生じたもので、多くは実行も断られる"
+        )
+    )
+
+    class Meta(TaskDefinitionSerializer.Meta):
+        fields = [*TaskDefinitionSerializer.Meta.fields, "skills_info", "connectors_info", "problems"]
+
+    @extend_schema_field(TaskReferenceSerializer(many=True))
+    def get_skills_info(self, obj: TaskDefinition) -> list[dict[str, Any]]:
+        revision = obj.current_revision
+        if revision is None:
+            return []
+        uids = [entry["skill"] for _field, entry in checks.skill_entries(revision)]
+        skills = {s.uid: s for s in Skill.objects.filter(uid__in=uids).only("uid", "name", "deleted")}
+        return [{"id": s.uid, "name": s.name, "deleted": s.deleted} for uid in uids if (s := skills.get(uid))]
+
+    @extend_schema_field(TaskReferenceSerializer(many=True))
+    def get_connectors_info(self, obj: TaskDefinition) -> list[dict[str, Any]]:
+        revision = obj.current_revision
+        if revision is None:
+            return []
+        connectors = {
+            c.uid: c for c in Connector.objects.filter(uid__in=revision.connectors).only("uid", "name", "deleted")
+        }
+        return [
+            {"id": c.uid, "name": c.name, "deleted": c.deleted}
+            for uid in revision.connectors
+            if (c := connectors.get(uid))
+        ]
+
+    def get_problems(self, obj: TaskDefinition) -> list[str]:
+        revision = obj.current_revision
+        if revision is None:
+            return []
+        content = {name: getattr(revision, name) for name in REVISION_FIELDS}
+        return [message for messages in checks.content_errors(obj, content).values() for message in messages]
+
+
+class TaskDefinitionUpdateSerializer(TaskDefinitionDetailSerializer):
     """タスクの更新。範囲と部門は変えられないので、読み取り専用にする"""
 
     scope = serializers.ChoiceField(choices=TaskScope.choices, read_only=True)
@@ -414,8 +454,16 @@ class TaskDefinitionUpdateSerializer(TaskDefinitionSerializer):
         required=False,
     )
 
-    class Meta(TaskDefinitionSerializer.Meta):
+    class Meta(TaskDefinitionDetailSerializer.Meta):
         pass
+
+    def to_internal_value(self, data):
+        # 別の人が版を作った後の保存は、項目ごとの検証（通知先・モデル設定等の参照）より先に409にする。今の版に対する
+        # 誤りを古い画面に見せないため。保存の直前にも、行をロックしてから revise() が照合し直す
+        version = data.get("version") if hasattr(data, "get") else None
+        if self.instance is not None and isinstance(version, int) and version != self.instance.version_number:
+            raise Conflict()
+        return super().to_internal_value(data)
 
     def get_fields(self):
         # 部分更新でも、省いた項目に既定値を入れて今の版を上書きしないようにする
@@ -432,7 +480,6 @@ class TaskDefinitionRevisionSerializer(ReadOnlyModelSerializer):
 
     id = serializers.CharField(source="uid", read_only=True)
     skills = TaskSkillSerializer(many=True, read_only=True)
-    notification_skill = TaskSkillSerializer(read_only=True, allow_null=True)
     inputs = TaskInputSerializer(many=True, read_only=True)
     model_profile: "serializers.SlugRelatedField[ModelProfile]" = serializers.SlugRelatedField(
         slug_field="uid", read_only=True
@@ -456,7 +503,25 @@ class TaskSuspendSerializer(serializers.Serializer):
         raise NotImplementedError
 
     def to_representation(self, instance):
-        return TaskDefinitionSerializer(instance, context=self.context).data
+        return TaskDefinitionDetailSerializer(instance, context=self.context).data
+
+
+class TaskSkillChoiceSerializer(ReadOnlyModelSerializer):
+    """タスクの編集画面で選ぶSkillの候補（ID・名前・説明・範囲・版だけ。authorization.md §7.2）"""
+
+    id = serializers.CharField(source="uid", read_only=True)
+    scope_display = serializers.CharField(source="get_scope_display", read_only=True)
+    department_info = MinimumDepartmentSerializer(source="department", read_only=True, allow_null=True)
+    description = serializers.CharField(source="current_version.description", read_only=True)
+    version = serializers.IntegerField(source="version_number", read_only=True, help_text=_("公開中の版"))
+    versions = serializers.SerializerMethodField(help_text=_("固定できる版の番号（新しい順）"))
+
+    class Meta:
+        model = Skill
+        fields = ["id", "name", "description", "scope", "scope_display", "department_info", "version", "versions"]
+
+    def get_versions(self, obj: Skill) -> list[int]:
+        return sorted((v.number for v in obj.versions.all()), reverse=True)
 
 
 class InputValuesField(serializers.DictField):

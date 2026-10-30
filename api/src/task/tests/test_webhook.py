@@ -117,6 +117,10 @@ def test_creating_a_webhook_needs_the_permission_and_shows_the_key_once(api_clie
     assert data["version"] == 1
     assert data["max_payload_bytes"] == 1024 * 1024
     assert data["task_info"]["inputs"][0]["name"] == "vendor"
+    # 取り出しの設定に要るものだけ（説明・選択肢等のタスクの定義の中身は返さない）
+    assert set(data["task_info"]["inputs"][0]) == {"name", "label", "type", "required"}
+    candidates = api_client.get(f"{BINDINGS}tasks/").json()["results"]
+    assert all(set(i) == {"name", "label", "type", "required"} for c in candidates for i in c["inputs"])
     # 鍵は保存せず、一覧・詳細にも出さない
     binding = TriggerBinding.objects.get(uid=data["id"])
     assert data["key"] not in (binding.key_hash, binding.key_prefix)

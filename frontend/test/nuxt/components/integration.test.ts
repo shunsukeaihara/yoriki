@@ -50,8 +50,8 @@ const binding: TriggerBinding = {
     department: null,
     suspended: false,
     inputs: [
-      { name: 'vendor', label: '取引先', description: '', type: TaskInputType.STRING, required: true },
-      { name: 'invoice', label: '請求書', description: '', type: TaskInputType.FILE, required: false },
+      { name: 'vendor', label: '取引先', type: TaskInputType.STRING, required: true },
+      { name: 'invoice', label: '請求書', type: TaskInputType.FILE, required: false },
     ],
   },
   name: '経費SaaS',

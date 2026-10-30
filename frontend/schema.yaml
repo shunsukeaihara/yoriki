@@ -15171,7 +15171,7 @@ components:
         inputs:
           type: array
           items:
-            $ref: '#/components/schemas/TaskInput'
+            $ref: '#/components/schemas/TriggerTaskInput'
           readOnly: true
       required:
       - department
@@ -15181,6 +15181,32 @@ components:
       - scope
       - scope_display
       - suspended
+    TriggerTaskInput:
+      type: object
+      description: |-
+        入口の画面に出すタスクの入力の項目。取り出しの設定に要るもの（名前・表示名・型・必須）だけを返し、説明・
+        選択肢・文字数の上限等のタスクの定義の中身は返さない（連携の管理者がタスクを管理できるとは限らない。
+        authorization.md §5.3）
+      properties:
+        name:
+          type: string
+          readOnly: true
+        label:
+          type: string
+          readOnly: true
+        type:
+          allOf:
+          - $ref: '#/components/schemas/TaskInputTypeEnum'
+          readOnly: true
+        required:
+          type: boolean
+          readOnly: true
+          default: false
+      required:
+      - label
+      - name
+      - required
+      - type
     UserRunStatusEvent:
       type: object
       description: 自分のRunの状態の変更

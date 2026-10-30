@@ -6232,7 +6232,19 @@ export interface components {
             readonly department: components["schemas"]["MinimumDepartment"] | null;
             /** 停止中 */
             readonly suspended: boolean;
-            readonly inputs: components["schemas"]["TaskInput"][];
+            readonly inputs: components["schemas"]["TriggerTaskInput"][];
+        };
+        /**
+         * @description 入口の画面に出すタスクの入力の項目。取り出しの設定に要るもの（名前・表示名・型・必須）だけを返し、説明・
+         *     選択肢・文字数の上限等のタスクの定義の中身は返さない（連携の管理者がタスクを管理できるとは限らない。
+         *     authorization.md §5.3）
+         */
+        TriggerTaskInput: {
+            readonly name: string;
+            readonly label: string;
+            readonly type: components["schemas"]["TaskInputTypeEnum"];
+            /** @default false */
+            readonly required: boolean;
         };
         /** @description 自分のRunの状態の変更 */
         UserRunStatusEvent: {

@@ -597,13 +597,24 @@ class TriggerInputSerializer(serializers.Serializer):
         return value
 
 
+class TriggerTaskInputSerializer(serializers.Serializer):
+    """入口の画面に出すタスクの入力の項目。取り出しの設定に要るもの（名前・表示名・型・必須）だけを返し、説明・
+    選択肢・文字数の上限等のタスクの定義の中身は返さない（連携の管理者がタスクを管理できるとは限らない。
+    authorization.md §5.3）"""
+
+    name = serializers.CharField(read_only=True)
+    label = serializers.CharField(read_only=True)  # type: ignore[assignment]
+    type = serializers.ChoiceField(choices=TaskInputType.choices, read_only=True)
+    required = serializers.BooleanField(read_only=True, default=False)  # type: ignore[assignment]
+
+
 class TriggerTaskSerializer(ReadOnlyModelSerializer):
     """入口の画面に出すタスク（名前と範囲と入力の項目。項目の取り出しの設定に使う）"""
 
     id = serializers.CharField(source="uid", read_only=True)
     scope_display = serializers.CharField(source="get_scope_display", read_only=True)
     department = MinimumDepartmentSerializer(read_only=True, allow_null=True)
-    inputs = TaskInputSerializer(source="current_revision.inputs", many=True, read_only=True)
+    inputs = TriggerTaskInputSerializer(source="current_revision.inputs", many=True, read_only=True)
 
     class Meta:
         model = TaskDefinition

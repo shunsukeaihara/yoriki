@@ -30,7 +30,8 @@ const busy = ref(false)
 
 // 編集・停止・鍵の作り直しはサーバー側でも権限を確認し、なければ403になる
 const canChange = computed(() => hasPermission(PermissionCode.CHANGE_DESTINATION))
-const isWebhook = computed(() => destination.value?.kind === DestinationKind.WEBHOOK)
+// 署名の鍵は、送り先のURLを持つ種類（Webhook・Zapier）だけが持つ
+const hasSecret = computed(() => isUrlDestinationKind(destination.value?.kind))
 
 const close = () => router.push('/manage/destinations')
 
@@ -161,7 +162,7 @@ const tabs = computed(() => [
           :value="issuedSecret"
           :description="$t('受け手の設定を、この鍵に変えてください。鍵はこの画面を閉じると表示できません')"
         />
-        <div v-if="destination?.secretRotated" class="text-xs text-muted">
+        <div v-if="hasSecret && destination?.secretRotated" class="text-xs text-muted">
           {{ $t('署名の鍵を作った日時：{date}', { date: formatDatetime(destination.secretRotated) }) }}
         </div>
         <UTabs v-model="tab" :items="tabs" variant="link" :unmount-on-hide="false">
@@ -188,7 +189,7 @@ const tabs = computed(() => [
           {{ $t('停止を解く') }}
         </DBtn>
         <DBtn v-else color="neutral" variant="outline" :loading="busy" @click="onSuspend">{{ $t('停止') }}</DBtn>
-        <DBtn v-if="isWebhook" color="neutral" variant="outline" :loading="busy" @click="onRotate">
+        <DBtn v-if="hasSecret" color="neutral" variant="outline" :loading="busy" @click="onRotate">
           {{ $t('署名の鍵を作り直す') }}
         </DBtn>
       </template>

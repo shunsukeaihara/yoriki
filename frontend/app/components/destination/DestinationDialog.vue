@@ -8,7 +8,7 @@ const { t } = useI18n()
 const dialog = ref<InstanceType<typeof DDialog> | null>(null)
 const formRef = ref<InstanceType<typeof DestinationForm> | null>(null)
 const editing = ref<Destination | null>(null)
-// 作成した後は、署名の鍵（Webhookだけ。受け手が署名を確かめる）を一度だけ表示してから閉じる
+// 作成した後は、署名の鍵（送り先のURLを持つWebhook・Zapier。送る要求に署名を付ける）を一度だけ表示してから閉じる
 const created = ref<DestinationSecret | null>(null)
 
 // 開くたびに空のフォームにし、前回の入力やエラーを残さない
@@ -21,7 +21,7 @@ const onOpen = (open: boolean) => {
 
 const onCreated = (value: DestinationSecret) => {
   emit('saved', value)
-  if (value.kind === DestinationKind.WEBHOOK) created.value = value
+  if (isUrlDestinationKind(value.kind)) created.value = value
   else dialog.value?.closeDialog()
 }
 </script>
@@ -45,9 +45,13 @@ const onCreated = (value: DestinationSecret) => {
         :label="$t('署名の鍵')"
         :value="created.signingSecret"
         :description="
-          t(
-            '受け手に設定し、届いた要求の署名（Standard Webhooks）を確かめてもらいます。成果物のファイルを取得するときも、この鍵を Authorization: Bearer で付けます。鍵はこの画面でしか表示できません',
-          )
+          created.kind === DestinationKind.WEBHOOK
+            ? t(
+                '受け手に設定し、届いた要求の署名（Standard Webhooks）を確かめてもらいます。成果物のファイルを取得するときも、この鍵を Authorization: Bearer で付けます。鍵はこの画面でしか表示できません',
+              )
+            : t(
+                '送る要求に、この鍵で署名（Standard Webhooks）を付けます。Zapの中で署名を確かめるときに使います。鍵はこの画面でしか表示できません',
+              )
         "
       />
       <DestinationForm v-else ref="formRef" v-model="editing" @created="onCreated" />

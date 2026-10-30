@@ -15,11 +15,12 @@ const { t } = useI18n()
 const taskId = route.params.taskId as string
 const runId = route.params.runId as string
 
-const [{ data: task, error: taskError }, { data: run, error: runError, refresh: refreshRun }] = await Promise.all([
-  useAsyncData(`task-${taskId}`, () => api.tasks(taskId).get()),
-  useAsyncData(`task-${taskId}-run-${runId}`, () => api.tasks(taskId).runs(runId).get()),
-])
-if (taskError.value) throw createError(taskError.value)
+// タスクの定義は読まない（タスクを移した・消した後も、Runの結果を見られる人は開ける。authorization.md §7.1）
+const {
+  data: run,
+  error: runError,
+  refresh: refreshRun,
+} = await useAsyncData(`task-${taskId}-run-${runId}`, () => api.tasks(taskId).runs(runId).get())
 if (runError.value) throw createError(runError.value)
 
 const messages = useMessages((params) => api.tasks(taskId).runs(runId).messages().list(params))
@@ -76,8 +77,6 @@ const chatMessages = computed(() =>
 const itemOf = (id: string) => timelineById.value.get(id)
 const chatStatus = computed(() => (activeRunId.value ? 'streaming' : 'ready'))
 
-// 入力の項目の表示名は、今のタスクの定義から引く（受付時の版から項目が変わっていれば、名前のまま出す）
-const inputLabels = computed(() => new Map((task.value?.inputs ?? []).map((i) => [i.name, i.label])))
 const formatValue = (value: unknown) =>
   value === null || value === undefined || value === ''
     ? '—'
@@ -123,7 +122,7 @@ const stop = async () => {
 <template>
   <UDashboardPanel :id="`task-run-${runId}`">
     <template #header>
-      <UDashboardNavbar :title="task?.name">
+      <UDashboardNavbar :title="run?.taskName">
         <template #leading>
           <DBtn
             :to="listPath"
@@ -231,7 +230,7 @@ const stop = async () => {
             <h3 class="text-xs font-semibold text-muted">{{ $t('入力') }}</h3>
             <dl class="grid gap-1.5 text-sm">
               <div v-for="input in run.inputs" :key="input.name">
-                <dt class="text-xs text-muted">{{ inputLabels.get(input.name) ?? input.name }}</dt>
+                <dt class="text-xs text-muted">{{ input.label }}</dt>
                 <dd class="break-words whitespace-pre-wrap">{{ formatValue(input.value) }}</dd>
               </div>
             </dl>

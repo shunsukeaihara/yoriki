@@ -862,7 +862,7 @@ def test_task_managers_see_the_receipt_and_delivery_of_a_webhook_run(api_client,
     api_client.force_login(grant(UserFactory.create(), AppPermission.MANAGE_COMPANY_TASKS))
     data = api_client.get(f"/api/app/v1/tasks/{task.uid}/runs/{run_id}/").json()
     assert (data["launch"], data["started_by"]) == (RunLaunch.WEBHOOK, None)
-    assert data["inputs"] == [{"name": "vendor", "value": "ACME"}, {"name": "amount", "value": 12000}]
+    assert [(i["name"], i["value"]) for i in data["inputs"]] == [("vendor", "ACME"), ("amount", 12000)]
     receipt = data["receipt"]
     assert (receipt["binding"], receipt["binding_name"], receipt["binding_version"]) == (binding.uid, "経費SaaS", 1)
     assert receipt["dedup_key"] == "event:evt-1"

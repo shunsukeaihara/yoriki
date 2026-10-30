@@ -12,9 +12,21 @@ const toast = useToast()
 const confirm = useConfirmDialog()
 const { t } = useI18n()
 
-const { items, loading, fetchAll } = useFetchAll(() =>
-  api.tasks(props.taskId).deliveries().list({ run: props.runId, pageSize: 50 }),
-)
+// 1つのRunの配信は、通知のイベントごとに出口1つなので数件（1ページで読む）。読込みに世代を付け、後から始めた読込みや
+// 送り直しの応答より前に始めた読込みの応答は使わない（送り直した配信を、古い一覧で失敗に戻さない）
+const items = ref<Delivery[]>([])
+const loading = ref(false)
+let generation = 0
+const fetchAll = async () => {
+  const current = ++generation
+  loading.value = true
+  try {
+    const page = await api.tasks(props.taskId).deliveries().list({ run: props.runId, pageSize: 100 })
+    if (current === generation) items.value = page.results
+  } finally {
+    if (current === generation) loading.value = false
+  }
+}
 const notifyLoadError = (err: unknown) =>
   toast.add({ title: t('配信を読めませんでした'), description: makeErrorMsg(err), color: 'error' })
 defineExpose({ reload: fetchAll })
@@ -62,7 +74,9 @@ const retry = async (delivery: Delivery) => {
   } finally {
     retrying.value = null
   }
-  // 受け付けたことは、読み直しに失敗しても応答で示す（もう一度送らせない）
+  // 受け付けたことは、読み直しに失敗しても応答で示す（もう一度送らせない）。読込みの途中なら、その応答は捨てる
+  generation++
+  loading.value = false
   items.value = items.value.map((d) => (d.id === value.id ? value : d))
   toast.add({ title: t('送り直しを受け付けました'), color: 'success' })
   emit('retried', value)

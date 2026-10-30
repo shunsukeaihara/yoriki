@@ -5946,6 +5946,8 @@ export interface components {
              * Format: date-time
              */
             readonly finished: string | null;
+            readonly task: string;
+            readonly task_name: string;
             readonly task_version: number;
             readonly launch: components["schemas"]["RunLaunchEnum"];
             readonly launch_display: string;
@@ -5978,6 +5980,8 @@ export interface components {
         };
         TaskRunInputValue: {
             readonly name: string;
+            /** @description 受付時のタスクの版の表示名（その版にない項目は名前） */
+            readonly label: string;
             readonly value: unknown;
         };
         /** @description 入口から起動したRunの受付（入口と受付日時。payloadは返さない） */

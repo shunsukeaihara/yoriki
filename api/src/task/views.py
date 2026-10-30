@@ -307,9 +307,13 @@ class AppTaskRevisionViewSet(TaskMixin, ReadOnlyModelViewSet):
     description="タスクのRunの履歴（結果とログを見られるもの。authorization.md §7.1）", tags=["app/task/run"]
 )
 class AppTaskRunViewSet(TaskMixin, ReadOnlyModelViewSet):
+    """一覧はタスクを今管理できる人（タスクの画面の実行の履歴）。1つのRunは、Runの結果とログを見られる人（実行した
+    ときの範囲と部門で判定する。authorization.md §7.1）なら、タスクを移した・消した後も読める"""
+
     permission_classes = [AppUser]
     lookup_field = "uid"
     queryset = Run.objects.select_related(
+        "task",
         "conversation",
         "model_version__profile",
         "task_revision",
@@ -328,19 +332,17 @@ class AppTaskRunViewSet(TaskMixin, ReadOnlyModelViewSet):
     ordering = ("-created", "-pk")
 
     def get_queryset(self):
-        return (
-            super()
-            .get_queryset()
-            .filter(task=self.task)
-            .filter(pk__in=Run.objects.visible_to(self.request.user).values("pk"))
-        )
+        qs = super().get_queryset().filter(pk__in=Run.objects.visible_to(self.request.user).values("pk"))
+        if self.action == "list":
+            return qs.filter(task=self.task)
+        return qs.filter(task__uid=self.kwargs["task"])
 
 
 @extend_schema(
     description="タスクのRunの会話のメッセージ（最初の依頼とエージェントの応答。タスクのRunの会話は会話のAPIに出さない）",
     tags=["app/task/run"],
 )
-class AppTaskRunMessageViewSet(TaskMixin, mixins.ListModelMixin, GenericViewSet):
+class AppTaskRunMessageViewSet(mixins.ListModelMixin, GenericViewSet):
     permission_classes = [AppUser]
     queryset = ConversationMessage.objects.select_related("run", "sender", "instruction").prefetch_related(
         Prefetch("attachments", queryset=Artifact.objects.select_related("blob", "run").order_by("pk")),
@@ -350,8 +352,13 @@ class AppTaskRunMessageViewSet(TaskMixin, mixins.ListModelMixin, GenericViewSet)
 
     @cached_property
     def conversation(self):
-        """URLのRunの会話（Runの結果とログを見られる人だけ。タスクのRunの会話は1つのRunだけを持つ）"""
-        runs = Run.objects.visible_to(self.request.user).filter(task=self.task).select_related("conversation")
+        """URLのRunの会話（Runの結果とログを見られる人だけ。タスクを移した・消した後も読める。タスクのRunの会話は
+        1つのRunだけを持つ）"""
+        runs = (
+            Run.objects.visible_to(self.request.user)
+            .filter(task__uid=self.kwargs["task"])
+            .select_related("conversation")
+        )
         return get_object_or_404(runs, uid=self.kwargs["run"]).conversation
 
     def get_queryset(self):

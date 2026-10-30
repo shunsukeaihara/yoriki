@@ -14535,6 +14535,12 @@ components:
           readOnly: true
           nullable: true
           title: 終了日時
+        task:
+          type: string
+          readOnly: true
+        task_name:
+          type: string
+          readOnly: true
         task_version:
           type: integer
           readOnly: true
@@ -14591,6 +14597,8 @@ components:
       - status
       - status_display
       - step_count
+      - task
+      - task_name
       - task_version
       - todos
       - updated
@@ -14643,9 +14651,14 @@ components:
         name:
           type: string
           readOnly: true
+        label:
+          type: string
+          readOnly: true
+          description: 受付時のタスクの版の表示名（その版にない項目は名前）
         value:
           readOnly: true
       required:
+      - label
       - name
       - value
     TaskRunReceipt:

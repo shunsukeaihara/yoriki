@@ -50,7 +50,7 @@ describe('TaskRunDeliveries', () => {
     })
     const wrapper = await mountSuspended(TaskRunDeliveries, { props: { taskId: 't1', runId: 'r1' } })
     await flushPromises()
-    expect(list).toHaveBeenCalledWith({ run: 'r1', pageSize: 50 })
+    expect(list).toHaveBeenCalledWith({ run: 'r1', pageSize: 100 })
     expect(wrapper.text()).toContain('HTTP 500')
     // 受付確認は、送り先での後の処理の完了を表さない
     expect(wrapper.text()).toContain('送り先での後の処理が終わったことは表しません')
@@ -80,6 +80,29 @@ describe('TaskRunDeliveries', () => {
     expect(wrapper.text()).toContain('配信待ち')
     expect(wrapper.text()).not.toContain('通知を再試行')
     expect(wrapper.emitted('retried')).toHaveLength(1)
+  })
+
+  it('送り直しを受け付けた後に届いた、前に始めた一覧の応答では表示を戻さない', async () => {
+    list.mockResolvedValueOnce({ results: [delivery('a', DeliveryStatus.FAILED, '失敗')], next: null, previous: null })
+    const wrapper = await mountSuspended(TaskRunDeliveries, {
+      props: { taskId: 't1', runId: 'r1' },
+    })
+    await flushPromises()
+    let resolveStale: (value: unknown) => void = () => {}
+    list.mockReturnValueOnce(new Promise((r) => (resolveStale = r)))
+    const stale = (wrapper.vm as unknown as { reload: () => Promise<void> }).reload()
+    retry.mockResolvedValue(delivery('a', DeliveryStatus.PENDING, '配信待ち'))
+    list.mockReturnValue(new Promise(() => {}))
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('通知を再試行'))!
+      .trigger('click')
+    await flushPromises()
+    resolveStale({ results: [delivery('a', DeliveryStatus.FAILED, '失敗')], next: null, previous: null })
+    await stale
+    await flushPromises()
+    expect(wrapper.text()).toContain('配信待ち')
+    expect(wrapper.text()).not.toContain('通知を再試行')
   })
 
   it('配信待ち・配信中の間は、間をおいて読み直す', async () => {

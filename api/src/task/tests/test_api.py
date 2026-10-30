@@ -442,7 +442,7 @@ def test_a_task_run_shows_how_it_started_and_its_messages(api_client, app_user, 
     assert (data["launch"], data["task_version"], data["inputs"]) == (
         RunLaunch.MANUAL,
         1,
-        [{"name": "vendor", "value": "A商事"}],
+        [{"name": "vendor", "label": "取引先", "value": "A商事"}],
     )
     assert data["started_by"]["id"] == manager.uid
     assert (data["receipt"], data["deliveries_info"]) == (None, [])
@@ -462,6 +462,38 @@ def test_a_task_run_shows_how_it_started_and_its_messages(api_client, app_user, 
     api_client.force_login(member)
     assert api_client.get(_url(task, f"runs/{run_id}/")).status_code == 404
     assert api_client.get(_url(task, f"runs/{run_id}/messages/")).status_code == 404
+
+
+def test_a_run_stays_readable_after_its_task_is_moved_or_deleted(api_client, app_user, model):
+    department = DepartmentFactory.create()
+    manager = _department_manager(app_user, department)
+    task = _create(api_client, manager, model, scope=TaskScope.DEPARTMENT, department=department.uid).json()
+    run_id = api_client.post(_url(task, "run/"), {"inputs": {"vendor": "A商事"}}, format="json").json()["id"]
+    urls = [_url(task, f"runs/{run_id}/"), _url(task, f"runs/{run_id}/messages/")]
+    deliveries = _url(task, "deliveries/")
+
+    # 別の部門へ移しても、実行したときの部門の管理者はRunを読める（一覧はタスクを今管理できる人だけ）
+    other = DepartmentFactory.create()
+    TaskDefinition.objects.filter(uid=task["id"]).update(department=other)
+    assert [api_client.get(url).status_code for url in urls] == [200, 200]
+    assert api_client.get(deliveries, {"run": run_id}).status_code == 200
+    assert api_client.get(_url(task, "runs/")).status_code == 404
+    assert api_client.get(deliveries).status_code == 404
+    data = api_client.get(urls[0]).json()
+    assert (data["task"], data["task_name"]) == (task["id"], "請求書チェック")
+    assert data["inputs"] == [{"name": "vendor", "label": "取引先", "value": "A商事"}]
+
+    # 消した後も読める
+    TaskDefinition.objects.filter(uid=task["id"]).update(department=department)
+    assert api_client.delete(_url(task)).status_code == 204
+    assert [api_client.get(url).status_code for url in urls] == [200, 200]
+
+    # 実行したときの部門を管理できない人は読めない
+    member = UserFactory.create()
+    DepartmentMembershipFactory.create(department=department, user=member)
+    api_client.force_login(member)
+    assert [api_client.get(url).status_code for url in urls] == [404, 404]
+    assert api_client.get(deliveries, {"run": run_id}).json()["results"] == []
 
 
 def test_task_runs_are_listed_without_a_query_per_run(api_client, app_user, model):

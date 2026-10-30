@@ -1140,6 +1140,7 @@ class TaskRunDeliveryStateSerializer(ReadOnlyModelSerializer):
 
 class TaskRunInputValueSerializer(serializers.Serializer):
     name = serializers.CharField(read_only=True)
+    label = serializers.CharField(read_only=True, help_text=_("受付時のタスクの版の表示名（その版にない項目は名前）"))
     value = serializers.JSONField(read_only=True)
 
 
@@ -1147,6 +1148,8 @@ class TaskRunSerializer(RunSerializer):
     """タスクのRun（結果とログを見られる人。authorization.md §7.1）。起動のしかた、受付時のタスクの版と入力、
     配信の状態を足す"""
 
+    task = serializers.CharField(source="task.uid", read_only=True)
+    task_name = serializers.CharField(source="task.name", read_only=True)
     task_version = serializers.IntegerField(source="task_revision.number", read_only=True)
     launch = serializers.ChoiceField(choices=RunLaunch.choices, read_only=True)
     launch_display = serializers.CharField(source="get_launch_display", read_only=True)
@@ -1163,6 +1166,8 @@ class TaskRunSerializer(RunSerializer):
     class Meta(RunSerializer.Meta):
         fields = [
             *RunSerializer.Meta.fields,
+            "task",
+            "task_name",
             "task_version",
             "launch",
             "launch_display",
@@ -1192,9 +1197,9 @@ class TaskRunSerializer(RunSerializer):
     def get_inputs(self, obj: Run) -> list[dict[str, Any]]:
         values = ((obj.manifest or {}).get("fixed") or {}).get("task", {}).get("inputs") or {}
         # Manifest（jsonb）はキーの順を保たないので、受付時のタスクの版の項目の順に並べる
-        order = [i["name"] for i in obj.task_revision.inputs] if obj.task_revision else []
-        names = [n for n in order if n in values] + sorted(n for n in values if n not in order)
-        return [{"name": name, "value": values[name]} for name in names]
+        labels = {i["name"]: i.get("label") or i["name"] for i in obj.task_revision.inputs} if obj.task_revision else {}
+        names = [n for n in labels if n in values] + sorted(n for n in values if n not in labels)
+        return [{"name": name, "label": labels.get(name, name), "value": values[name]} for name in names]
 
 
 class HookRunSerializer(serializers.Serializer):

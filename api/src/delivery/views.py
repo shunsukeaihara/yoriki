@@ -222,14 +222,14 @@ class AppTaskDeliveryViewSet(TaskMixin, ReadOnlyModelViewSet):
     ordering = ("-created", "-pk")
 
     def get_queryset(self):
-        qs = (
-            super()
-            .get_queryset()
-            .filter(run__task=self.task, run__in=Run.objects.visible_to(self.request.user).values("pk"))
-        )
+        qs = super().get_queryset().filter(run__in=Run.objects.visible_to(self.request.user).values("pk"))
+        # 1つのRunの配信と、配信1件（詳細・送り直し）は、Runの結果を見られる人（実行したときの範囲で判定する。
+        # タスクを移した・消した後も）。Runを指定しない一覧は、タスクを今管理できる人
         if run := self.request.query_params.get("run"):
-            qs = qs.filter(run__uid=run)
-        return qs
+            return qs.filter(run__uid=run, run__task__uid=self.kwargs["task"])
+        if self.action == "list":
+            return qs.filter(run__task=self.task)
+        return qs.filter(run__task__uid=self.kwargs["task"])
 
     @extend_schema(
         description="失敗・確認待ち・取消の配信を送り直す（保存した内容を送る。エージェントは動かし直さない）。"

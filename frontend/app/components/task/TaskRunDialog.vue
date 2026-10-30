@@ -29,7 +29,8 @@ const unknown = () => {
 </script>
 
 <template>
-  <DDialog ref="dialog" @update:open="onOpen">
+  <!-- 送信中は閉じさせない（閉じて開き直すと、フォームが作り直されて、同じ実行をもう一度送れてしまうため） -->
+  <DDialog ref="dialog" :dismissible="!formRef?.loading" :close="!formRef?.loading" @update:open="onOpen">
     <template #trigger="{ on }">
       <slot name="trigger" :on="on" />
     </template>
@@ -54,7 +55,9 @@ const unknown = () => {
       />
     </template>
     <template #footer="{ closeDialog }">
-      <DBtn color="neutral" variant="ghost" @click="closeDialog()">{{ $t('キャンセル') }}</DBtn>
+      <DBtn color="neutral" variant="ghost" :disabled="formRef?.loading" @click="closeDialog()">
+        {{ $t('キャンセル') }}
+      </DBtn>
       <DBtn icon="i-lucide-play" :disabled="!formRef?.canPost" :loading="formRef?.loading" @click="formRef?.onSubmit()">
         {{ $t('実行') }}
       </DBtn>

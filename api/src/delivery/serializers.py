@@ -274,11 +274,21 @@ class FileFetchSerializer(ReadOnlyModelSerializer):
 
 
 class DeliveryAttemptSerializer(ReadOnlyModelSerializer):
+    outcome_display = serializers.CharField(source="get_outcome_display", read_only=True, allow_null=True)
     file_fetches = serializers.SerializerMethodField(help_text=_("この送信で渡したファイルの取得の記録"))
 
     class Meta:
         model = DeliveryAttempt
-        fields = ["number", "outcome", "http_status", "error", "started", "finished", "file_fetches"]
+        fields = [
+            "number",
+            "outcome",
+            "outcome_display",
+            "http_status",
+            "error",
+            "started",
+            "finished",
+            "file_fetches",
+        ]
 
     @extend_schema_field(FileFetchSerializer(many=True))
     def get_file_fetches(self, attempt: DeliveryAttempt) -> list[dict]:

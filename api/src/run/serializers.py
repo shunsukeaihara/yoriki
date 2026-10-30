@@ -1,6 +1,7 @@
 from collections import defaultdict
 from typing import Any
 
+from django.db.models import Prefetch
 from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
@@ -20,6 +21,18 @@ from .models import (
     RunKind,
     RunStatus,
 )
+
+
+def todo_events():
+    """作業の計画（todo_write の成功した結果）。新しいものから"""
+    return RunEvent.objects.filter(
+        kind=RunEventKind.TOOL_RESULT, data__name="todo_write", data__is_error=False
+    ).order_by("-sequence")
+
+
+def prefetch_todos() -> Prefetch:
+    """RunSerializer の todos を一覧で先に読む"""
+    return Prefetch("events", queryset=todo_events(), to_attr="todo_events")
 
 
 class TodoSerializer(serializers.Serializer):
@@ -151,13 +164,12 @@ class RunSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(TodoSerializer(many=True))
     def get_todos(self, obj: Run) -> list[dict[str, str]]:
-        event = (
-            RunEvent.objects.filter(
-                run=obj, kind=RunEventKind.TOOL_RESULT, data__name="todo_write", data__is_error=False
-            )
-            .order_by("-sequence")
-            .first()
-        )
+        # 一覧では prefetch_todos() で先に読んだものを使う（件数でクエリを増やさない）
+        prefetched = getattr(obj, "todo_events", None)
+        if prefetched is not None:
+            event = prefetched[0] if prefetched else None
+        else:
+            event = todo_events().filter(run=obj).first()
         return (event.data.get("value") or {}).get("todos", []) if event else []
 
     @extend_schema_field(RunSkillSerializer(many=True))

@@ -2813,6 +2813,18 @@ paths:
         description: The pagination cursor value.
         schema:
           type: string
+      - in: query
+        name: launch
+        schema:
+          type: integer
+          nullable: true
+          title: 起動のしかた
+          enum:
+          - 1
+          - 2
+        description: |-
+          * `1` - タスクの画面からの手動実行
+          * `2` - Webhook
       - name: ordering
         required: false
         in: query
@@ -2869,7 +2881,86 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaginatedRunList'
+                $ref: '#/components/schemas/PaginatedTaskRunList'
+          description: ''
+  /api/app/v1/tasks/{task}/runs/{run}/messages/:
+    get:
+      operationId: app_v1_tasks_runs_messages_list
+      description: タスクのRunの会話のメッセージ（最初の依頼とエージェントの応答。タスクのRunの会話は会話のAPIに出さない）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: path
+        name: run
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/task/run
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedMessageList'
+          description: ''
+  /api/app/v1/tasks/{task}/runs/{uid}/:
+    get:
+      operationId: app_v1_tasks_runs_retrieve
+      description: タスクのRunの履歴（結果とログを見られるもの。authorization.md §7.1）
+      parameters:
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/task/run
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskRun'
           description: ''
   /api/app/v1/tasks/{uid}/:
     get:
@@ -8132,6 +8223,10 @@ components:
           oneOf:
           - $ref: '#/components/schemas/AttemptOutcomeEnum'
           - $ref: '#/components/schemas/NullEnum'
+        outcome_display:
+          type: string
+          readOnly: true
+          nullable: true
         http_status:
           type: integer
           maximum: 32767
@@ -8168,6 +8263,7 @@ components:
       - http_status
       - number
       - outcome
+      - outcome_display
       - started
     DeliveryStatusEnum:
       enum:
@@ -10880,6 +10976,25 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TaskDefinitionRevision'
+    PaginatedTaskRunList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskRun'
     PaginatedTaskSkillChoiceList:
       type: object
       required:
@@ -11871,6 +11986,14 @@ components:
         * `1` - 業務
         * `2` - Skillの編集
         * `3` - Draftの評価
+    RunLaunchEnum:
+      enum:
+      - 1
+      - 2
+      type: integer
+      description: |-
+        * `1` - タスクの画面からの手動実行
+        * `2` - Webhook
     RunMessageEvent:
       type: object
       description: 確定したメッセージとTool実行（利用者の発言、エージェントの応答、Toolの結果）
@@ -14329,6 +14452,148 @@ components:
       - deleted
       - id
       - name
+    TaskRun:
+      type: object
+      description: |-
+        タスクのRun（結果とログを見られる人。authorization.md §7.1）。起動のしかた、受付時のタスクの版と入力、
+        配信の状態を足す
+      properties:
+        id:
+          type: string
+          readOnly: true
+        conversation:
+          type: string
+          readOnly: true
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/RunKindEnum'
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/RunStatusEnum'
+          readOnly: true
+        status_display:
+          type: string
+          readOnly: true
+        end_reason:
+          readOnly: true
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/RunEndReasonEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        end_reason_display:
+          type: string
+          readOnly: true
+          nullable: true
+        error:
+          type: string
+          readOnly: true
+          title: 失敗の理由
+        model_profile_name:
+          type: string
+          readOnly: true
+        effort:
+          type: string
+          readOnly: true
+        step_count:
+          type: integer
+          readOnly: true
+          title: ステップ数
+        todos:
+          type: array
+          items:
+            $ref: '#/components/schemas/Todo'
+          readOnly: true
+          description: 作業の計画（todo_write の最新の内容）
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunSkill'
+          readOnly: true
+          description: 使っているSkillと版
+        result:
+          readOnly: true
+          nullable: true
+          description: 業務結果（submit_result の内容）
+        skill_changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunSkillChange'
+          readOnly: true
+          description: Skillの編集のRunで変えたSkill
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+        finished:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 終了日時
+        task_version:
+          type: integer
+          readOnly: true
+        launch:
+          allOf:
+          - $ref: '#/components/schemas/RunLaunchEnum'
+          readOnly: true
+        launch_display:
+          type: string
+          readOnly: true
+        started_by:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          nullable: true
+          readOnly: true
+          description: 手動実行した人（入口からのRunでは空）
+        receipt:
+          allOf:
+          - $ref: '#/components/schemas/TaskRunReceipt'
+          nullable: true
+          readOnly: true
+          description: 入口からのRunの受付（手動実行では空）
+        inputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskRunInputValue'
+          readOnly: true
+          description: 受け付けた入力の値（型がファイルの項目は /workspace/input の中のパス）。項目の名前のキーの辞書にすると、APIクライアントのcamelCaseの変換で名前が変わるので、並びにする
+        deliveries_info:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskRunDeliveryState'
+          readOnly: true
+      required:
+      - conversation
+      - created
+      - deliveries_info
+      - effort
+      - end_reason
+      - end_reason_display
+      - error
+      - finished
+      - id
+      - inputs
+      - kind
+      - launch
+      - launch_display
+      - model_profile_name
+      - receipt
+      - result
+      - skill_changes
+      - skills
+      - started_by
+      - status
+      - status_display
+      - step_count
+      - task_version
+      - todos
+      - updated
     TaskRunCreateRequest:
       type: object
       description: |-
@@ -14340,6 +14605,82 @@ components:
           additionalProperties:
             nullable: true
           description: 入力の項目の名前と値。タスクの定義で決めた項目だけを受け付ける。multipart/form-dataではJSONの文字列にし、型がファイルの項目は項目の名前でファイルを付ける
+    TaskRunDeliveryState:
+      type: object
+      description: タスクのRunの配信の状態（実行の履歴の一覧に出す。送った内容と試行の記録は配信の履歴のAPIで返す）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        event_type:
+          allOf:
+          - $ref: '#/components/schemas/NotifyEventEnum'
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/DeliveryStatusEnum'
+          readOnly: true
+        status_display:
+          type: string
+          readOnly: true
+        destination_name:
+          type: string
+          readOnly: true
+        destination_kind:
+          allOf:
+          - $ref: '#/components/schemas/DestinationKindEnum'
+          readOnly: true
+      required:
+      - destination_kind
+      - destination_name
+      - event_type
+      - id
+      - status
+      - status_display
+    TaskRunInputValue:
+      type: object
+      properties:
+        name:
+          type: string
+          readOnly: true
+        value:
+          readOnly: true
+      required:
+      - name
+      - value
+    TaskRunReceipt:
+      type: object
+      description: 入口から起動したRunの受付（入口と受付日時。payloadは返さない）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        binding:
+          type: string
+          readOnly: true
+        binding_name:
+          type: string
+          readOnly: true
+        binding_version:
+          type: integer
+          readOnly: true
+        dedup_key:
+          type: string
+          readOnly: true
+          title: 重複のキー
+          maxLength: 220
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+          title: 受付日時
+      required:
+      - binding
+      - binding_name
+      - binding_version
+      - created
+      - dedup_key
+      - id
     TaskSkill:
       type: object
       properties:

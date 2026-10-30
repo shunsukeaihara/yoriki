@@ -852,6 +852,29 @@ def test_the_admin_sees_receipts_without_results(api_client, integrator, task, w
     assert api_client.get(f"/api/app/v1/tasks/{task.uid}/runs/").status_code == 404
 
 
+def test_task_managers_see_the_receipt_and_delivery_of_a_webhook_run(api_client, task, webhook):
+    binding, key = webhook
+    run_id = _send(api_client, task, key, _payload()).json()["run_id"]
+    run = Run.objects.get(uid=run_id)
+    run.set_status(RunStatus.RUNNING)
+    run.set_status(RunStatus.FAILED, end_reason=RunEndReason.STEP_LIMIT)
+
+    api_client.force_login(grant(UserFactory.create(), AppPermission.MANAGE_COMPANY_TASKS))
+    data = api_client.get(f"/api/app/v1/tasks/{task.uid}/runs/{run_id}/").json()
+    assert (data["launch"], data["started_by"]) == (RunLaunch.WEBHOOK, None)
+    assert data["inputs"] == [{"name": "vendor", "value": "ACME"}, {"name": "amount", "value": 12000}]
+    receipt = data["receipt"]
+    assert (receipt["binding"], receipt["binding_name"], receipt["binding_version"]) == (binding.uid, "経費SaaS", 1)
+    assert receipt["dedup_key"] == "event:evt-1"
+    assert "payload" not in str(receipt)
+    assert [(d["event_type"], d["destination_name"]) for d in data["deliveries_info"]] == [
+        ("run.failed", task.current_revision.destination.name)
+    ]
+    # 一覧にも同じ形で出る
+    results = api_client.get(f"/api/app/v1/tasks/{task.uid}/runs/").json()["results"]
+    assert [(r["id"], r["receipt"]["binding_name"]) for r in results] == [(run_id, "経費SaaS")]
+
+
 # --- システム用のユーザー ---
 
 

@@ -1,10 +1,15 @@
 <script setup lang="ts">
 /**
- * 添付・成果物の1件。クリックするとダウンロードする（サーバーはいつも添付として返し、同じ origin で開かない）
+ * 添付・成果物の1件。クリックするとダウンロードする（サーバーはいつも添付として返し、同じ origin で開かない）。
+ * 会話のファイルは会話の API から、タスクの Run のファイルは Run の API から取得する（`runId` を渡す）
  */
-const props = defineProps<{ conversationId: string; artifact: Artifact; showPath?: boolean }>()
+const props = defineProps<{ conversationId?: string; runId?: string; artifact: Artifact; showPath?: boolean }>()
 const api = useAPI()
-const url = computed(() => api.conversations(props.conversationId).artifacts(props.artifact.id).downloadUrl())
+const url = computed(() =>
+  props.runId
+    ? api.runs(props.runId).artifacts(props.artifact.id).downloadUrl()
+    : api.conversations(props.conversationId).artifacts(props.artifact.id).downloadUrl(),
+)
 </script>
 
 <template>

@@ -13,13 +13,14 @@ from rest_framework.fields import empty
 from rest_framework.utils import html
 
 from connector.models import Connector
-from delivery.models import Destination, NotifyContent, NotifyEvent
+from delivery.models import Delivery, DeliveryStatus, Destination, DestinationKind, NotifyContent, NotifyEvent
 from delivery.serializers import DestinationChoiceSerializer
 from harness.result_files import file_format_problem
 from harness.tools.base import schema_problem
 from llm.models import ModelProfile
 from llm.serializers import AppModelProfileSerializer
-from run.models import Run, RunEndReason, RunStatus
+from run.models import Run, RunEndReason, RunLaunch, RunStatus
+from run.serializers import RunSerializer
 from skill.models import Skill
 from user.models import Department
 from user.serializers import MinimumDepartmentSerializer, MinimumUserSerializer
@@ -1105,6 +1106,95 @@ class TriggerReceiptSerializer(ReadOnlyModelSerializer):
             "run_status_display",
             "created",
         ]
+
+
+class TaskRunReceiptSerializer(ReadOnlyModelSerializer):
+    """入口から起動したRunの受付（入口と受付日時。payloadは返さない）"""
+
+    id = serializers.CharField(source="uid", read_only=True)
+    binding = serializers.CharField(source="binding.uid", read_only=True)
+    binding_name = serializers.CharField(source="binding.name", read_only=True)
+    binding_version = serializers.IntegerField(source="binding_revision.number", read_only=True)
+
+    class Meta:
+        model = TriggerReceipt
+        fields = ["id", "binding", "binding_name", "binding_version", "dedup_key", "created"]
+
+
+class TaskRunDeliveryStateSerializer(ReadOnlyModelSerializer):
+    """タスクのRunの配信の状態（実行の履歴の一覧に出す。送った内容と試行の記録は配信の履歴のAPIで返す）"""
+
+    id = serializers.CharField(source="uid", read_only=True)
+    event_type = serializers.ChoiceField(choices=NotifyEvent.choices, read_only=True)
+    status = serializers.ChoiceField(choices=DeliveryStatus.choices, read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    destination_name = serializers.CharField(source="destination_revision.destination.name", read_only=True)
+    destination_kind = serializers.ChoiceField(
+        source="destination_revision.destination.kind", choices=DestinationKind.choices, read_only=True
+    )
+
+    class Meta:
+        model = Delivery
+        fields = ["id", "event_type", "status", "status_display", "destination_name", "destination_kind"]
+
+
+class TaskRunInputValueSerializer(serializers.Serializer):
+    name = serializers.CharField(read_only=True)
+    value = serializers.JSONField(read_only=True)
+
+
+class TaskRunSerializer(RunSerializer):
+    """タスクのRun（結果とログを見られる人。authorization.md §7.1）。起動のしかた、受付時のタスクの版と入力、
+    配信の状態を足す"""
+
+    task_version = serializers.IntegerField(source="task_revision.number", read_only=True)
+    launch = serializers.ChoiceField(choices=RunLaunch.choices, read_only=True)
+    launch_display = serializers.CharField(source="get_launch_display", read_only=True)
+    started_by = serializers.SerializerMethodField(help_text=_("手動実行した人（入口からのRunでは空）"))
+    receipt = serializers.SerializerMethodField(help_text=_("入口からのRunの受付（手動実行では空）"))
+    inputs = serializers.SerializerMethodField(
+        help_text=_(
+            "受け付けた入力の値（型がファイルの項目は /workspace/input の中のパス）。項目の名前のキーの辞書にすると、"
+            "APIクライアントのcamelCaseの変換で名前が変わるので、並びにする"
+        )
+    )
+    deliveries_info = TaskRunDeliveryStateSerializer(source="deliveries", many=True, read_only=True)
+
+    class Meta(RunSerializer.Meta):
+        fields = [
+            *RunSerializer.Meta.fields,
+            "task_version",
+            "launch",
+            "launch_display",
+            "started_by",
+            "receipt",
+            "inputs",
+            "deliveries_info",
+        ]
+        read_only_fields = fields
+
+    @extend_schema_field(MinimumUserSerializer(allow_null=True))
+    def get_started_by(self, obj: Run) -> dict[str, Any] | None:
+        # 入口からのRunの実行主体はシステム用のユーザーなので、起動した人として出さない
+        if obj.launch != RunLaunch.MANUAL:
+            return None
+        return dict(MinimumUserSerializer(obj.owner).data)
+
+    @extend_schema_field(TaskRunReceiptSerializer(allow_null=True))
+    def get_receipt(self, obj: Run) -> dict[str, Any] | None:
+        try:
+            receipt = obj.trigger_receipt
+        except TriggerReceipt.DoesNotExist:
+            return None
+        return dict(TaskRunReceiptSerializer(receipt).data)
+
+    @extend_schema_field(TaskRunInputValueSerializer(many=True))
+    def get_inputs(self, obj: Run) -> list[dict[str, Any]]:
+        values = ((obj.manifest or {}).get("fixed") or {}).get("task", {}).get("inputs") or {}
+        # Manifest（jsonb）はキーの順を保たないので、受付時のタスクの版の項目の順に並べる
+        order = [i["name"] for i in obj.task_revision.inputs] if obj.task_revision else []
+        names = [n for n in order if n in values] + sorted(n for n in values if n not in order)
+        return [{"name": name, "value": values[name]} for name in names]
 
 
 class HookRunSerializer(serializers.Serializer):

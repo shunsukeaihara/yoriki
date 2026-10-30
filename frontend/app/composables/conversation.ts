@@ -70,6 +70,15 @@ const MESSAGE_PAGE_SIZE = 50
 /** 会話のメッセージを新しい順のページで読み、古い順に並べて持つ。古いページは loadOlder() で読む */
 export function useConversationMessages(conversationId: string) {
   const api = useAPI()
+  return useMessages((params) => api.conversations(conversationId).messages().list(params))
+}
+
+/**
+ * メッセージの一覧（新しい順のページを読み、古い順に並べる）。`fetchPage` は1ページ目を読む（会話のメッセージ、
+ * タスクのRunのメッセージ）
+ */
+export function useMessages(fetchPage: (params: ListParams) => Promise<Paginated<Message>>) {
+  const api = useAPI()
   const items = ref([]) as Ref<Message[]>
   const older = ref<string | null>(null)
   const loaded = ref(false)
@@ -87,7 +96,7 @@ export function useConversationMessages(conversationId: string) {
   /** 最新のページを読み直す（新しいメッセージと、追加指示の反映状態の変化を取り込む） */
   const refresh = async () => {
     const request = ++refreshing
-    const page = await api.conversations(conversationId).messages().list({ pageSize: MESSAGE_PAGE_SIZE })
+    const page = await fetchPage({ pageSize: MESSAGE_PAGE_SIZE })
     if (request !== refreshing) return
     merge(page.results)
     if (!loaded.value) older.value = page.next

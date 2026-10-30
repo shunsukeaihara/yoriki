@@ -4,13 +4,15 @@ import json
 
 import pytest
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 
 from artifact.factories import ArtifactFactory
 from artifact.models import ArtifactKind
 from artifact.tests.test_api import body_of
 from connector.factories import ConnectorFactory
 from connector.models import ConnectorScope
-from conversation.models import Conversation, ConversationPurpose
+from conversation.models import Conversation, ConversationPurpose, MessageRole
 from llm.factories import LLMConnectionFactory, ModelProfileFactory
 from llm.models import VERSION_FIELDS as MODEL_VERSION_FIELDS
 from llm.models import ProviderKind
@@ -426,6 +428,62 @@ def test_runs_are_seen_by_the_managers_of_the_recorded_scope(api_client, app_use
     api_client.force_login(member)
     assert api_client.get(f"/api/app/v1/runs/{run_id}/").status_code == 404
     assert api_client.get(f"/api/app/v1/runs/{run_id}/events/").status_code == 404
+
+
+def test_a_task_run_shows_how_it_started_and_its_messages(api_client, app_user, model):
+    department = DepartmentFactory.create()
+    manager = _department_manager(app_user, department)
+    task = _create(api_client, manager, model, scope=TaskScope.DEPARTMENT, department=department.uid).json()
+    run_id = api_client.post(_url(task, "run/"), {"inputs": {"vendor": "A商事"}}, format="json").json()["id"]
+
+    colleague = _department_manager(UserFactory.create(), department)
+    api_client.force_login(colleague)
+    data = api_client.get(_url(task, f"runs/{run_id}/")).json()
+    assert (data["launch"], data["task_version"], data["inputs"]) == (
+        RunLaunch.MANUAL,
+        1,
+        [{"name": "vendor", "value": "A商事"}],
+    )
+    assert data["started_by"]["id"] == manager.uid
+    assert (data["receipt"], data["deliveries_info"]) == (None, [])
+    # 最初の依頼は、値を埋め込んだ後の依頼文（値は信頼しない内容の囲みのまま。⑦bの試した結果と同じ）
+    messages = api_client.get(_url(task, f"runs/{run_id}/messages/")).json()["results"]
+    assert [(m["role"], m["run"]) for m in messages] == [(MessageRole.USER, run_id)]
+    assert messages[0]["body"].endswith(">A商事</untrusted_content> の請求書を確認してください。")
+
+    # 管理できない人と、別のタスクのURLからは見えない
+    other = _create(
+        api_client, colleague, model, name="別のタスク", scope=TaskScope.DEPARTMENT, department=department.uid
+    ).json()
+    assert api_client.get(_url(other, f"runs/{run_id}/")).status_code == 404
+    assert api_client.get(_url(other, f"runs/{run_id}/messages/")).status_code == 404
+    member = UserFactory.create()
+    DepartmentMembershipFactory.create(department=department, user=member)
+    api_client.force_login(member)
+    assert api_client.get(_url(task, f"runs/{run_id}/")).status_code == 404
+    assert api_client.get(_url(task, f"runs/{run_id}/messages/")).status_code == 404
+
+
+def test_task_runs_are_listed_without_a_query_per_run(api_client, app_user, model):
+    task = _create(api_client, app_user, model).json()
+    for vendor in ("A", "B"):
+        api_client.post(_url(task, "run/"), {"inputs": {"vendor": vendor}}, format="json")
+    run = Run.objects.filter(task__uid=task["id"]).earliest("pk")
+    todos = [{"content": "確認", "status": "in_progress"}]
+    RunEvent.record(run, RunEventKind.TOOL_RESULT, {"name": "todo_write", "is_error": False, "value": {"todos": todos}})
+
+    def count():
+        with CaptureQueriesContext(connection) as queries:
+            res = api_client.get(_url(task, "runs/"))
+        assert res.status_code == 200
+        return len(queries), res.json()["results"]
+
+    before, results = count()
+    assert [r["todos"] for r in results if r["id"] == run.uid] == [todos]
+    for vendor in ("C", "D", "E"):
+        api_client.post(_url(task, "run/"), {"inputs": {"vendor": vendor}}, format="json")
+    after, results = count()
+    assert (len(results), after) == (5, before)
 
 
 def test_outputs_of_a_task_run_are_downloaded_by_the_managers(api_client, app_user, model):

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
- * タスクのRunの履歴（結果を見られるもの。authorization.md §7.1）。状態と終わり方だけを出す。起動のしかた・配信の状態・
- * 通知の再試行・Runの中身は、タスクのRunの画面（まだない）で扱う
+ * タスクのRunの履歴（結果とログを見られるもの。authorization.md §7.1）。起動のしかた、処理の状態、通知の配信の状態を
+ * 並べ、受付の日時からRunの画面（中身・配信の詳細・通知の再試行）へ移る
  */
 import type { TableColumn } from '@nuxt/ui'
 
@@ -20,12 +20,17 @@ useUserEvents(
   { onReconnect: reload },
 )
 
-const columns: TableColumn<Run>[] = [
+const columns: TableColumn<TaskRun>[] = [
   { accessorKey: 'created', header: t('受付') },
+  { accessorKey: 'launch', header: t('起動') },
   { accessorKey: 'status', header: t('状態') },
+  { accessorKey: 'deliveriesInfo', header: t('通知') },
   { accessorKey: 'modelProfileName', header: t('モデル') },
   { accessorKey: 'finished', header: t('終了') },
 ]
+
+const launchedBy = (run: TaskRun) =>
+  run.startedBy ? run.startedBy.displayName || run.startedBy.email : (run.receipt?.bindingName ?? '')
 </script>
 
 <template>
@@ -38,16 +43,41 @@ const columns: TableColumn<Run>[] = [
     :fetch="api.tasks(props.taskId).runs().list"
     :params="params"
   >
-    <template #created-cell="{ row }">{{ formatDatetime(row.original.created) }}</template>
+    <template #created-cell="{ row }">
+      <NuxtLink :to="`/tasks/${props.taskId}/runs/${row.original.id}`" class="text-primary">
+        {{ formatDatetime(row.original.created) }}
+      </NuxtLink>
+    </template>
+    <template #launch-cell="{ row }">
+      <div class="flex flex-col">
+        <span class="text-sm">{{ row.original.launchDisplay }}</span>
+        <span v-if="launchedBy(row.original)" class="text-xs text-muted">{{ launchedBy(row.original) }}</span>
+      </div>
+    </template>
     <template #status-cell="{ row }">
       <div class="flex flex-wrap items-center gap-1.5">
         <UBadge :color="runStatusColor(row.original.status)" variant="subtle" size="sm">
           {{ row.original.statusDisplay }}
         </UBadge>
-        <span v-if="row.original.endReasonDisplay" class="text-xs text-muted">
+        <!-- 完了のときの終わり方（完了）は状態と同じなので出さない -->
+        <span
+          v-if="row.original.endReasonDisplay && row.original.endReasonDisplay !== row.original.statusDisplay"
+          class="text-xs text-muted"
+        >
           {{ row.original.endReasonDisplay }}
         </span>
       </div>
+    </template>
+    <template #deliveriesInfo-cell="{ row }">
+      <ul v-if="row.original.deliveriesInfo.length" class="grid gap-0.5">
+        <li v-for="delivery in row.original.deliveriesInfo" :key="delivery.id" class="flex items-center gap-1.5">
+          <UBadge :color="deliveryStatusColor(delivery.status)" variant="subtle" size="sm">
+            {{ delivery.statusDisplay }}
+          </UBadge>
+          <span class="truncate text-xs text-muted">{{ delivery.destinationName }}</span>
+        </li>
+      </ul>
+      <span v-else class="text-dimmed">—</span>
     </template>
     <template #finished-cell="{ row }">
       {{ row.original.finished ? formatDatetime(row.original.finished) : '—' }}

@@ -1015,6 +1015,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/app/v1/tasks/{task}/runs/{run}/messages/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description タスクのRunの会話のメッセージ（最初の依頼とエージェントの応答。タスクのRunの会話は会話のAPIに出さない） */
+        get: operations["app_v1_tasks_runs_messages_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/tasks/{task}/runs/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description タスクのRunの履歴（結果とログを見られるもの。authorization.md §7.1） */
+        get: operations["app_v1_tasks_runs_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/app/v1/tasks/{uid}/": {
         parameters: {
             query?: never;
@@ -3000,6 +3034,7 @@ export interface components {
             readonly number: number;
             /** 結果 */
             readonly outcome: (components["schemas"]["AttemptOutcomeEnum"] | components["schemas"]["NullEnum"]) | null;
+            readonly outcome_display: string | null;
             /** HTTPの状態コード */
             readonly http_status: number | null;
             /** 誤り */
@@ -4377,6 +4412,19 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["TaskDefinitionRevision"][];
         };
+        PaginatedTaskRunList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["TaskRun"][];
+        };
         PaginatedTaskSkillChoiceList: {
             /**
              * Format: uri
@@ -4866,6 +4914,12 @@ export interface components {
          * @enum {integer}
          */
         RunKindEnum: 1 | 2 | 3;
+        /**
+         * @description * `1` - タスクの画面からの手動実行
+         *     * `2` - Webhook
+         * @enum {integer}
+         */
+        RunLaunchEnum: 1 | 2;
         /** @description 確定したメッセージとTool実行（利用者の発言、エージェントの応答、Toolの結果） */
         RunMessageEvent: {
             /**
@@ -5858,6 +5912,52 @@ export interface components {
             deleted: boolean;
         };
         /**
+         * @description タスクのRun（結果とログを見られる人。authorization.md §7.1）。起動のしかた、受付時のタスクの版と入力、
+         *     配信の状態を足す
+         */
+        TaskRun: {
+            readonly id: string;
+            readonly conversation: string;
+            readonly kind: components["schemas"]["RunKindEnum"];
+            readonly status: components["schemas"]["RunStatusEnum"];
+            readonly status_display: string;
+            readonly end_reason: (components["schemas"]["RunEndReasonEnum"] | components["schemas"]["NullEnum"]) | null;
+            readonly end_reason_display: string | null;
+            /** 失敗の理由 */
+            readonly error: string;
+            readonly model_profile_name: string;
+            readonly effort: string;
+            /** ステップ数 */
+            readonly step_count: number;
+            /** @description 作業の計画（todo_write の最新の内容） */
+            readonly todos: components["schemas"]["Todo"][];
+            /** @description 使っているSkillと版 */
+            readonly skills: components["schemas"]["RunSkill"][];
+            /** @description 業務結果（submit_result の内容） */
+            readonly result: unknown;
+            /** @description Skillの編集のRunで変えたSkill */
+            readonly skill_changes: components["schemas"]["RunSkillChange"][];
+            /** Format: date-time */
+            readonly created: string;
+            /** Format: date-time */
+            readonly updated: string;
+            /**
+             * 終了日時
+             * Format: date-time
+             */
+            readonly finished: string | null;
+            readonly task_version: number;
+            readonly launch: components["schemas"]["RunLaunchEnum"];
+            readonly launch_display: string;
+            /** @description 手動実行した人（入口からのRunでは空） */
+            readonly started_by: components["schemas"]["MinimumUser"] | null;
+            /** @description 入口からのRunの受付（手動実行では空） */
+            readonly receipt: components["schemas"]["TaskRunReceipt"] | null;
+            /** @description 受け付けた入力の値（型がファイルの項目は /workspace/input の中のパス）。項目の名前のキーの辞書にすると、APIクライアントのcamelCaseの変換で名前が変わるので、並びにする */
+            readonly inputs: components["schemas"]["TaskRunInputValue"][];
+            readonly deliveries_info: components["schemas"]["TaskRunDeliveryState"][];
+        };
+        /**
          * @description 手動実行の入力。型がファイルの項目があれば multipart/form-data で送り、`inputs` はJSONの文字列にして、
          *     ファイルは項目の名前をフィールドの名前にして付ける
          */
@@ -5866,6 +5966,33 @@ export interface components {
             inputs?: {
                 [key: string]: unknown;
             };
+        };
+        /** @description タスクのRunの配信の状態（実行の履歴の一覧に出す。送った内容と試行の記録は配信の履歴のAPIで返す） */
+        TaskRunDeliveryState: {
+            readonly id: string;
+            readonly event_type: components["schemas"]["NotifyEventEnum"];
+            readonly status: components["schemas"]["DeliveryStatusEnum"];
+            readonly status_display: string;
+            readonly destination_name: string;
+            readonly destination_kind: components["schemas"]["DestinationKindEnum"];
+        };
+        TaskRunInputValue: {
+            readonly name: string;
+            readonly value: unknown;
+        };
+        /** @description 入口から起動したRunの受付（入口と受付日時。payloadは返さない） */
+        TaskRunReceipt: {
+            readonly id: string;
+            readonly binding: string;
+            readonly binding_name: string;
+            readonly binding_version: number;
+            /** 重複のキー */
+            readonly dedup_key: string;
+            /**
+             * 受付日時
+             * Format: date-time
+             */
+            readonly created: string;
         };
         TaskSkill: {
             /** @description SkillのID */
@@ -8515,6 +8642,11 @@ export interface operations {
             query?: {
                 /** @description The pagination cursor value. */
                 cursor?: string;
+                /**
+                 * @description * `1` - タスクの画面からの手動実行
+                 *     * `2` - Webhook
+                 */
+                launch?: 1 | 2 | null;
                 /** @description Which field to use when ordering the results. */
                 ordering?: string;
                 /** @description Number of results to return per page. */
@@ -8546,7 +8678,60 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PaginatedRunList"];
+                    "application/json": components["schemas"]["PaginatedTaskRunList"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_runs_messages_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                run: string;
+                task: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedMessageList"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_runs_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskRun"];
                 };
             };
         };

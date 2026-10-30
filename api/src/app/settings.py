@@ -229,6 +229,8 @@ SPECTACULAR_SETTINGS = {
         "RunStatusEnum": "run.models.RunStatus",
         "RunEndReasonEnum": "run.models.RunEndReason",
         "RunEventKindEnum": "run.models.RunEventKind",
+        "RunKindEnum": "run.models.RunKind",
+        "RunLaunchEnum": "run.models.RunLaunch",
         "ClarificationKindEnum": "run.models.ClarificationKind",
         "ClarificationStatusEnum": "run.models.ClarificationStatus",
         "InstructionKindEnum": "conversation.models.InstructionKind",

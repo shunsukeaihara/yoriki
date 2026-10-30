@@ -538,7 +538,7 @@ chat Adapterでは、新規依頼、既存Runへの追加指示（人が起動�
 |---|---|
 | RunOutcomeEvent / ResultEnvelope | 作業の確定状態、結果、成果物参照を保持する。既存RunEventを利用できる |
 | 通知の書き方 | 業務に合う要約・文面・項目整理・成果物選択の手順。タスクに書き、業務のRunの最後にエージェントが従う。必要なタスクだけ設定する |
-| Notification Binding | Plugin、Skill版、通知イベント、content_mode、Destination、許可項目を固定する |
+| Notification Binding | Plugin、通知の書き方、通知イベント、content_mode、Destination、許可項目を固定する |
 | Notification Adapter | 共通イベントと結果から送信用データを作り、指定経路で配信する |
 | Delivery Dispatcher | Outbox、配信試行、再試行、結果記録を共通管理する |
 
@@ -862,7 +862,7 @@ Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプ�
 | PluginExtension | 拡張種別、Adapter実装版、契約版、設定Schema、対応能力、有効状態 |
 | TriggerBinding / TriggerBindingRevision | 安定ID、起動Plugin版、認証参照、範囲と使ってよい範囲、タスク（Webhookは1対1）、設定版 |
 | TriggerReceipt | 起動Binding、外部イベントID、入力hash、対応Run・会話操作、受付時刻 |
-| NotificationBinding / NotificationBindingRevision | Plugin・Skill版、対象イベント、通知内容、Destination版、許可項目。初期（1つのタスクに1つの結果通知）は別のModelにせず、TaskDefinitionRevisionの項目（出口・対象イベント・通知内容・通知の書き方）にする（§4.3）。Runは受付時にDestinationの版を固定する（§4.1） |
+| NotificationBinding / NotificationBindingRevision | Plugin、通知の書き方、対象イベント、通知内容、Destination版、許可項目。初期（1つのタスクに1つの結果通知）は別のModelにせず、TaskDefinitionRevisionの項目（出口・対象イベント・通知内容・通知の書き方）にする（§4.3）。Runは受付時にDestinationの版を固定する（§4.1） |
 | InteractionBinding / InteractionBindingRevision | Channel Plugin版、接続・Destination版、スレッド方針、返信モード、通知イベント |
 | ExternalThreadBinding | Run・Conversation、対話Binding版、provider・接続・チャネル・thread参照、親message、作成操作key、状態 |
 | ChannelMessageReceipt | provider・接続・event／message ID、投稿者ID・表示名、thread、質問世代、本文hash、受付・適用結果 |

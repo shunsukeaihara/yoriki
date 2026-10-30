@@ -15,6 +15,7 @@ from artifact.models import ArtifactKind, BlobObject
 from artifact.tests.test_api import body_of
 from conversation.models import ConversationPurpose
 from delivery.factories import DestinationFactory
+from delivery.models import Destination
 from run.models import Run, RunEndReason, RunEvent, RunEventKind, RunLaunch, RunStatus, RunTrigger
 from task.dispatch import WEBHOOK_NOTE, discard_files, receive_webhook, store_files
 from task.factories import TaskDefinitionFactory
@@ -267,6 +268,46 @@ def test_preview_reports_what_the_hook_would_refuse(api_client, integrator, webh
     # 受け取り方の誤りは、保存と同じく400
     assert _preview(api_client, binding, "{}", event_id_path="$.event[").status_code == 400
     assert _preview(api_client, binding, "{}", inputs=[{"name": "vendor", "path": "vendor"}]).status_code == 400
+
+
+def test_preview_reflects_the_state_of_the_webhook_and_the_task(api_client, integrator, task, webhook):
+    binding, _key = webhook
+    api_client.force_login(integrator)
+    sample = _payload()
+    # 入口・タスクの停止は、受付と同じく断る
+    TriggerBinding.objects.filter(pk=binding.pk).update(suspended=True)
+    body = _preview(api_client, binding, sample).json()
+    assert (body["outcome"], body["run_problems"], body["prompt"]) == ("refused", ["この入口は停止中です"], None)
+    TriggerBinding.objects.filter(pk=binding.pk).update(suspended=False)
+    TaskDefinition.objects.filter(pk=task.pk).update(suspended=True)
+    body = _preview(api_client, binding, sample).json()
+    assert (body["outcome"], body["run_problems"]) == ("refused", ["タスクが停止されました"])
+    TaskDefinition.objects.filter(pk=task.pk).update(suspended=False)
+    assert _preview(api_client, binding, sample).json()["outcome"] == "accepted"
+
+    # 定義が保存のときの検査に通らない（通知先の停止）なら、確かめられない。中身はタスクを管理できる人にだけ見せる
+    Destination.objects.filter(pk=task.current_revision.destination_id).update(suspended=True)
+    body = _preview(api_client, binding, sample).json()
+    assert body["outcome"] == "unconfirmed"
+    assert body["run_problems"] == [
+        "タスクの定義に、実行を断られうる設定があります（タスクの管理者に確かめてください）"
+    ]
+    api_client.force_login(grant(integrator, AppPermission.MANAGE_COMPANY_TASKS))
+    body = _preview(api_client, binding, sample).json()
+    assert body["outcome"] == "unconfirmed"
+    assert body["run_problems"] and "タスクの管理者" not in body["run_problems"][0]
+
+
+def test_preview_refuses_json_values_for_file_inputs(api_client, integrator):
+    task, _key = _file_task(api_client, integrator)
+    binding = TriggerBinding.objects.get(task=task)
+    api_client.force_login(integrator)
+    # JSONの値（URL等）はファイルの項目の値にしない。受付と同じく断る
+    body = _preview(api_client, binding, {"inputs": {"vendor": "ACME", "invoice": "https://example.com/a.pdf"}}).json()
+    assert body["outcome"] == "refused"
+    assert [e["name"] for e in body["input_errors"]] == ["invoice"]
+    res = _send(api_client, task, _key, {"inputs": {"vendor": "ACME", "invoice": "https://example.com/a.pdf"}})
+    assert res.status_code == 400
 
 
 def test_preview_skips_file_inputs_and_keeps_the_payload_limit(api_client, integrator):

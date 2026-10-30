@@ -6129,7 +6129,7 @@ export interface components {
          */
         TriggerPreview: {
             /**
-             * @description 受付がこの要求をどうするか（payloadを読めない・イベントIDを使えない・項目の誤りがあれば断る。ほかに断る理由がなく、必須のファイルの項目があれば確かめられない）
+             * @description 受付がこの要求をどうするか（入口・タスクの停止、payloadを読めない・イベントIDを使えない・項目の誤りがあれば断る。ほかに断る理由がなく、必須のファイルの項目か、タスクの定義に断られうる設定があれば確かめられない）
              *
              *     * `accepted` - 受け付ける
              *     * `refused` - 断る
@@ -6149,6 +6149,8 @@ export interface components {
             readonly file_inputs: string[];
             /** @description 型がファイルの必須の項目 */
             readonly required_file_inputs: string[];
+            /** @description 入口・タスクの今の状態で、受付が断る・断りうる理由。入口・タスクの停止は断る。タスクの定義が保存のときの検査に通らない理由（Skillの停止等）は断りうる。定義の中身は、タスクを管理できる人にだけ詳しく返す */
+            readonly run_problems: string[];
             readonly can_view_prompt: boolean;
             /** @description 埋め込んだ後のプロンプト（タスクを管理できる人だけ。断る要求ではnull） */
             readonly prompt: string | null;

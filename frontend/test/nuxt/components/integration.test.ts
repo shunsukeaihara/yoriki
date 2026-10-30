@@ -223,6 +223,7 @@ describe('TriggerBindingPreview', () => {
       inputErrors: [{ name: 'amount', message: '整数を入力してください' }],
       fileInputs: ['invoice'],
       requiredFileInputs: [],
+      runProblems: [],
       canViewPrompt: false,
       prompt: null,
     })
@@ -233,7 +234,7 @@ describe('TriggerBindingPreview', () => {
     await nextTick()
     expect(preview).toHaveBeenCalledWith({ sample: '{"id": "evt-1", "vendor": "ACME"}', ...settings })
     const text = wrapper.find('[data-testid="trigger-preview-result"]').text()
-    expect(text).toContain('受付で400として断ります')
+    expect(text).toContain('受付で断ります')
     expect(text).toContain('整数を入力してください')
     expect(text).toContain('evt-1')
     expect(text).toContain('ACME')
@@ -250,6 +251,7 @@ describe('TriggerBindingPreview', () => {
     const ok = {
       outcome: TriggerPreviewOutcome.ACCEPTED,
       requiredFileInputs: [],
+      runProblems: [],
       formatError: '',
       eventId: null,
       eventIdError: '',
@@ -286,6 +288,7 @@ describe('TriggerBindingPreview', () => {
       outcome: TriggerPreviewOutcome.REFUSED,
       eventIdError: 'イベントIDは文字か整数で送ってください',
       requiredFileInputs: [],
+      runProblems: [],
       prompt: null,
     })
     preview.mockResolvedValueOnce({
@@ -293,6 +296,7 @@ describe('TriggerBindingPreview', () => {
       outcome: TriggerPreviewOutcome.UNCONFIRMED,
       eventIdError: '',
       requiredFileInputs: ['invoice'],
+      runProblems: [],
       prompt: 'ACME を確認してください。',
     })
     const wrapper = await mountSuspended(TriggerBindingPreview, { props: { bindingId: 'b1', settings } })
@@ -300,7 +304,7 @@ describe('TriggerBindingPreview', () => {
     await wrapper.find('textarea').setValue('{"vendor": "ACME"}')
     await vm.onSubmit()
     await nextTick()
-    expect(wrapper.text()).toContain('受付で400として断ります')
+    expect(wrapper.text()).toContain('受付で断ります')
     expect(wrapper.text()).toContain('イベントID：イベントIDは文字か整数で送ってください')
     expect(wrapper.text()).not.toContain('この要求は受け付けられます')
     await vm.onSubmit()
@@ -310,10 +314,47 @@ describe('TriggerBindingPreview', () => {
     expect(wrapper.text()).not.toContain('この要求は受け付けられます')
   })
 
+  it('入口・タスクの状態で断る・断りうる理由を出す', async () => {
+    const base = {
+      formatError: '',
+      eventId: null,
+      eventIdError: '',
+      values: [],
+      inputErrors: [],
+      fileInputs: [],
+      requiredFileInputs: [],
+      canViewPrompt: false,
+      prompt: null,
+    }
+    preview.mockResolvedValueOnce({
+      ...base,
+      outcome: TriggerPreviewOutcome.REFUSED,
+      runProblems: ['この入口は停止中です'],
+    })
+    preview.mockResolvedValueOnce({
+      ...base,
+      outcome: TriggerPreviewOutcome.UNCONFIRMED,
+      runProblems: ['タスクの定義に、実行を断られうる設定があります（タスクの管理者に確かめてください）'],
+    })
+    const wrapper = await mountSuspended(TriggerBindingPreview, { props: { bindingId: 'b1', settings } })
+    const vm = wrapper.vm as unknown as { onSubmit: () => Promise<void> }
+    await wrapper.find('textarea').setValue('{}')
+    await vm.onSubmit()
+    await nextTick()
+    expect(wrapper.text()).toContain('受付で断ります')
+    expect(wrapper.text()).toContain('この入口は停止中です')
+    await vm.onSubmit()
+    await nextTick()
+    expect(wrapper.text()).toContain('受け付けるかは確かめられません')
+    expect(wrapper.text()).toContain('実行を断られうる設定があります')
+    expect(wrapper.text()).not.toContain('必須のファイルの項目')
+  })
+
   it('読めないpayloadは、その理由だけを出す', async () => {
     preview.mockResolvedValue({
       outcome: TriggerPreviewOutcome.REFUSED,
       requiredFileInputs: [],
+      runProblems: [],
       formatError: 'JSONとして読めません',
       eventId: null,
       eventIdError: '',

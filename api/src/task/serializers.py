@@ -861,8 +861,8 @@ class TriggerPreviewSerializer(serializers.Serializer):
         choices=TriggerPreviewOutcome.choices,
         read_only=True,
         help_text=_(
-            "受付がこの要求をどうするか（payloadを読めない・イベントIDを使えない・項目の誤りがあれば断る。"
-            "ほかに断る理由がなく、必須のファイルの項目があれば確かめられない）"
+            "受付がこの要求をどうするか（入口・タスクの停止、payloadを読めない・イベントIDを使えない・項目の誤りが"
+            "あれば断る。ほかに断る理由がなく、必須のファイルの項目か、タスクの定義に断られうる設定があれば確かめられない）"
         ),
     )
     format_error = serializers.CharField(read_only=True, help_text=_("payloadを読めなかった理由（読めたら空）"))
@@ -879,6 +879,14 @@ class TriggerPreviewSerializer(serializers.Serializer):
     )
     required_file_inputs = serializers.ListField(
         child=serializers.CharField(), read_only=True, help_text=_("型がファイルの必須の項目")
+    )
+    run_problems = serializers.ListField(
+        child=serializers.CharField(),
+        read_only=True,
+        help_text=_(
+            "入口・タスクの今の状態で、受付が断る・断りうる理由。入口・タスクの停止は断る。タスクの定義が保存のときの"
+            "検査に通らない理由（Skillの停止等）は断りうる。定義の中身は、タスクを管理できる人にだけ詳しく返す"
+        ),
     )
     can_view_prompt = serializers.BooleanField(read_only=True)
     prompt = serializers.CharField(
@@ -912,10 +920,26 @@ class TriggerPreviewSerializer(serializers.Serializer):
             "input_errors": [],
             "file_inputs": file_inputs,
             "required_file_inputs": required_file_inputs,
+            "run_problems": [],
             "can_view_prompt": can_view_prompt,
             "prompt": None,
         }
         current = binding.current_revision
+        # 受付が入口・タスクの状態で断るもの（task.dispatch の _current_binding()・start_task_run() と同じ条件）
+        if binding.suspended or current is None:
+            result["run_problems"].append(_("この入口は停止中です"))
+        if problem := checks.task_problem(task) or ("" if task.in_service() else _("タスクの今の版がありません")):
+            result["run_problems"].append(problem)
+        refused_by_state = bool(result["run_problems"])
+        # 保存のときの検査に通らない定義（Skillの停止・Connectorの削除等）。多くは受付も断るが、断らないもの（受付時に
+        # 既定に戻すeffort等）もあるので、確かめられないとする
+        problems = []
+        if revision is not None and not refused_by_state:
+            content = {name: getattr(revision, name) for name in REVISION_FIELDS}
+            problems = [m for messages in checks.content_errors(task, content).values() for m in messages]
+        if problems:
+            generic = _("タスクの定義に、実行を断られうる設定があります（タスクの管理者に確かめてください）")
+            result["run_problems"] += problems if can_view_prompt else [generic]
         # 対にならないサロゲートは、サンプルの欄（CharField）が400で断るので、ここではUTF-8にできる
         body = data["sample"].encode()
         limit = current.max_payload_bytes if current else DEFAULT_MAX_PAYLOAD_BYTES
@@ -936,20 +960,21 @@ class TriggerPreviewSerializer(serializers.Serializer):
         else:
             result["event_id"] = key.split(":", 1)[1] if key else None
         values = input_values(payload, mappings, definitions)
+        # 型がファイルの項目は、JSONに値があれば受付と同じく断る（JSONの値はファイルの項目の値にしない）。値がなければ
+        # multipartで付けるファイルを指すので、ここでは確かめない
         cleaned, errors = clean_inputs(
-            [d for d in definitions if d["name"] not in file_inputs],
-            {name: value for name, value in values.items() if name not in file_inputs},
+            [d for d in definitions if d["name"] not in file_inputs or values.get(d["name"]) not in (None, "")],
+            values,
         )
         order = [d["name"] for d in definitions]
         result["values"] = [{"name": name, "value": cleaned[name]} for name in order if name in cleaned]
         # 誤りは項目の定義の順に並べ、定義にない項目（推奨の形式の inputs で送られたもの）は最後に置く
         ranked = sorted(errors.items(), key=lambda e: order.index(e[0]) if e[0] in order else len(order))
         result["input_errors"] = [{"name": name, "message": message} for name, message in ranked]
-        if result["event_id_error"] or errors:
+        if refused_by_state or result["event_id_error"] or errors:
             return result  # 断る要求ではRunを作らないので、プロンプトもない（欠けた値で埋めたものを見せない）
-        result["outcome"] = (
-            TriggerPreviewOutcome.UNCONFIRMED if required_file_inputs else TriggerPreviewOutcome.ACCEPTED
-        )
+        unconfirmed = bool(problems) or any(name not in values for name in required_file_inputs)
+        result["outcome"] = TriggerPreviewOutcome.UNCONFIRMED if unconfirmed else TriggerPreviewOutcome.ACCEPTED
         if can_view_prompt and revision is not None:
             result["prompt"] = render(revision.prompt_template, cleaned)
         return result

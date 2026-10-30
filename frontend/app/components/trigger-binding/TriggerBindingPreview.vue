@@ -29,6 +29,11 @@ const { onSubmit, loading, errors } = createSubmit({
   },
 })
 
+// 必須のファイルの項目のうち、JSONに値がないもの（multipartで付けるファイルを指すので、ここでは確かめられない）
+const missingFiles = computed(() =>
+  (result.value?.requiredFileInputs ?? []).filter((name) => !result.value?.values.some((v) => v.name === name)),
+)
+
 const valueText = (value: unknown) => (typeof value === 'string' ? value : JSON.stringify(value))
 
 defineExpose({ onSubmit })
@@ -75,9 +80,10 @@ defineExpose({ onSubmit })
           color="error"
           variant="subtle"
           icon="i-lucide-circle-x"
-          :title="$t('この要求は、受付で400として断ります')"
+          :title="$t('この要求は、受付で断ります')"
         >
-          <template v-if="result.inputErrors.length || result.eventIdError" #description>
+          <template v-if="result.runProblems.length || result.inputErrors.length || result.eventIdError" #description>
+            <p v-for="problem in result.runProblems" :key="problem">{{ problem }}</p>
             <p v-if="result.eventIdError">{{ $t('イベントID：{message}', { message: result.eventIdError }) }}</p>
             <ul class="list-disc pl-4">
               <li v-for="e in result.inputErrors" :key="e.name">
@@ -93,13 +99,19 @@ defineExpose({ onSubmit })
           variant="subtle"
           icon="i-lucide-circle-help"
           :title="$t('ほかに断る理由はありませんが、受け付けるかは確かめられません')"
-          :description="
-            $t(
-              '必須のファイルの項目（{names}）があります。ファイルはmultipartで付けて送るので、JSONのサンプルでは確かめられません',
-              { names: result.requiredFileInputs.join(', ') },
-            )
-          "
-        />
+        >
+          <template #description>
+            <p v-for="problem in result.runProblems" :key="problem">{{ problem }}</p>
+            <p v-if="missingFiles.length">
+              {{
+                $t(
+                  '必須のファイルの項目（{names}）があります。ファイルはmultipartで付けて送るので、JSONのサンプルでは確かめられません',
+                  { names: missingFiles.join(', ') },
+                )
+              }}
+            </p>
+          </template>
+        </UAlert>
         <UAlert
           v-else
           color="success"

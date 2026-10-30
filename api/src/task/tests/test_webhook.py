@@ -191,7 +191,12 @@ def test_preview_extracts_with_unsaved_settings_and_saves_nothing(api_client, ap
     )
     assert res.status_code == 200, res.json()
     body = res.json()
-    assert (body["format_error"], body["event_id"], body["event_id_error"]) == ("", "evt-9", "")
+    assert (body["outcome"], body["format_error"], body["event_id"], body["event_id_error"]) == (
+        "accepted",
+        "",
+        "evt-9",
+        "",
+    )
     # フォームの値のように文字で届いた整数は、受付と同じく読み替える
     assert body["values"] == [{"name": "vendor", "value": "ACME"}, {"name": "amount", "value": 12000}]
     assert body["input_errors"] == []
@@ -224,8 +229,21 @@ def test_preview_reports_what_the_hook_would_refuse(api_client, integrator, webh
     api_client.force_login(integrator)
     res = _preview(api_client, binding, "{not json")
     assert res.status_code == 200
+    assert (res.json()["outcome"], res.json()["values"]) == ("refused", [])
     assert res.json()["format_error"]
-    assert res.json()["values"] == []
+    # 要求の本文のJSONで \\ud800 とエスケープした、対にならないサロゲートは、サンプルの欄の誤り（400。500にしない）
+    res = api_client.post(
+        f"{BINDINGS}{binding.uid}/preview/",
+        json.dumps({"sample": '{"data": {"vendor_name": "\ud800"}}'}),
+        content_type="application/json",
+    )
+    assert (res.status_code, list(res.json())) == (400, ["sample"])
+
+    # イベントIDだけが使えなくても、受付は断る（プロンプトも作らない）
+    api_client.force_login(grant(integrator, AppPermission.MANAGE_COMPANY_TASKS))
+    res = _preview(api_client, binding, {"event": {"id": [1]}, "data": {"vendor_name": "ACME"}})
+    assert (res.json()["outcome"], res.json()["input_errors"], res.json()["prompt"]) == ("refused", [], None)
+    assert res.json()["event_id_error"]
 
     # 必須の項目がない・型が合わない・イベントIDが文字でも整数でもない
     res = _preview(api_client, binding, {"event": {"id": {"a": 1}}, "data": {"total": "abc"}})
@@ -256,8 +274,10 @@ def test_preview_skips_file_inputs_and_keeps_the_payload_limit(api_client, integ
     binding = TriggerBinding.objects.get(task=task)
     api_client.force_login(integrator)
     body = _preview(api_client, binding, {"inputs": {"vendor": "ACME"}}).json()
-    assert body["file_inputs"] == ["invoice"]
+    assert (body["file_inputs"], body["required_file_inputs"]) == (["invoice"], ["invoice"])
     assert body["input_errors"] == []
+    # 必須のファイルの項目は、JSONのサンプルでは確かめられない（受け付けるとは言わない）
+    assert body["outcome"] == "unconfirmed"
     body = _preview(api_client, binding, {"inputs": {"vendor": "x" * 2000}}).json()
     assert body["format_error"]
 

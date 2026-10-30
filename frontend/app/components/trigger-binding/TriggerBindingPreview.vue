@@ -69,14 +69,16 @@ defineExpose({ onSubmit })
         :description="result.formatError"
       />
       <template v-else>
+        <!-- 受付がどうするかはサーバーが決める（イベントIDの誤りも断る。必須のファイルの項目は確かめられない） -->
         <UAlert
-          v-if="result.inputErrors.length"
+          v-if="result.outcome === TriggerPreviewOutcome.REFUSED"
           color="error"
           variant="subtle"
           icon="i-lucide-circle-x"
           :title="$t('この要求は、受付で400として断ります')"
         >
-          <template #description>
+          <template v-if="result.inputErrors.length || result.eventIdError" #description>
+            <p v-if="result.eventIdError">{{ $t('イベントID：{message}', { message: result.eventIdError }) }}</p>
             <ul class="list-disc pl-4">
               <li v-for="e in result.inputErrors" :key="e.name">
                 <span class="font-mono">{{ e.name }}</span
@@ -85,6 +87,19 @@ defineExpose({ onSubmit })
             </ul>
           </template>
         </UAlert>
+        <UAlert
+          v-else-if="result.outcome === TriggerPreviewOutcome.UNCONFIRMED"
+          color="warning"
+          variant="subtle"
+          icon="i-lucide-circle-help"
+          :title="$t('ほかに断る理由はありませんが、受け付けるかは確かめられません')"
+          :description="
+            $t(
+              '必須のファイルの項目（{names}）があります。ファイルはmultipartで付けて送るので、JSONのサンプルでは確かめられません',
+              { names: result.requiredFileInputs.join(', ') },
+            )
+          "
+        />
         <UAlert
           v-else
           color="success"
@@ -127,7 +142,7 @@ defineExpose({ onSubmit })
         <div class="grid gap-1">
           <span class="font-medium">{{ $t('埋め込んだ後のプロンプト') }}</span>
           <!-- 断られる要求では、Runを作らないのでプロンプトもない（欠けた値で埋めたものを見せない） -->
-          <p v-if="result.inputErrors.length" class="text-muted">
+          <p v-if="result.outcome === TriggerPreviewOutcome.REFUSED" class="text-muted">
             {{ $t('受付で断るので、プロンプトは作りません') }}
           </p>
           <pre

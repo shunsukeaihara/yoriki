@@ -149,6 +149,23 @@ describe('DestinationForm', () => {
     vm.reset()
     expect(vm.form).toMatchObject({ url: '', version: 3 })
   })
+
+  it('競合の後の読み直しでは、入力し直せない送り先のURLだけを残す', async () => {
+    const wrapper = await mountSuspended(DestinationForm, { props: { modelValue: destination } })
+    const vm = wrapper.vm as unknown as Omit<Form, 'reset'> & {
+      form: { version: number }
+      reset: (options?: { keepUrl?: boolean }) => void
+    }
+    vm.form.name = '経理のZap（本番）'
+    vm.form.url = 'https://hooks.zapier.com/hooks/catch/1/new/'
+    await wrapper.setProps({ modelValue: { ...destination, version: 3, name: '別の人の名前' } })
+    vm.reset({ keepUrl: true })
+    expect(vm.form).toMatchObject({
+      name: '別の人の名前',
+      url: 'https://hooks.zapier.com/hooks/catch/1/new/',
+      version: 3,
+    })
+  })
 })
 
 describe('TriggerBindingForm', () => {
@@ -198,12 +215,14 @@ describe('TriggerBindingPreview', () => {
 
   it('編集中の受け取り方で試し、取り出した値・誤り・ファイルの項目を出す。プロンプトは返されたときだけ', async () => {
     preview.mockResolvedValue({
+      outcome: TriggerPreviewOutcome.REFUSED,
       formatError: '',
       eventId: 'evt-1',
       eventIdError: '',
       values: [{ name: 'vendor', value: 'ACME' }],
       inputErrors: [{ name: 'amount', message: '整数を入力してください' }],
       fileInputs: ['invoice'],
+      requiredFileInputs: [],
       canViewPrompt: false,
       prompt: null,
     })
@@ -229,6 +248,8 @@ describe('TriggerBindingPreview', () => {
 
   it('受け付けられる要求では、プロンプトを返されたときだけ出し、返されなければ権限がないことを示す', async () => {
     const ok = {
+      outcome: TriggerPreviewOutcome.ACCEPTED,
+      requiredFileInputs: [],
       formatError: '',
       eventId: null,
       eventIdError: '',
@@ -251,8 +272,48 @@ describe('TriggerBindingPreview', () => {
     expect(wrapper.text()).toContain('ACME の請求書を確認してください。')
   })
 
+  it('イベントIDだけの誤りでも断ると示し、必須のファイルの項目があれば確かめられないと示す', async () => {
+    const base = {
+      formatError: '',
+      eventId: null,
+      values: [{ name: 'vendor', value: 'ACME' }],
+      inputErrors: [],
+      fileInputs: ['invoice'],
+      canViewPrompt: true,
+    }
+    preview.mockResolvedValueOnce({
+      ...base,
+      outcome: TriggerPreviewOutcome.REFUSED,
+      eventIdError: 'イベントIDは文字か整数で送ってください',
+      requiredFileInputs: [],
+      prompt: null,
+    })
+    preview.mockResolvedValueOnce({
+      ...base,
+      outcome: TriggerPreviewOutcome.UNCONFIRMED,
+      eventIdError: '',
+      requiredFileInputs: ['invoice'],
+      prompt: 'ACME を確認してください。',
+    })
+    const wrapper = await mountSuspended(TriggerBindingPreview, { props: { bindingId: 'b1', settings } })
+    const vm = wrapper.vm as unknown as { onSubmit: () => Promise<void> }
+    await wrapper.find('textarea').setValue('{"vendor": "ACME"}')
+    await vm.onSubmit()
+    await nextTick()
+    expect(wrapper.text()).toContain('受付で400として断ります')
+    expect(wrapper.text()).toContain('イベントID：イベントIDは文字か整数で送ってください')
+    expect(wrapper.text()).not.toContain('この要求は受け付けられます')
+    await vm.onSubmit()
+    await nextTick()
+    expect(wrapper.text()).toContain('受け付けるかは確かめられません')
+    expect(wrapper.text()).toContain('必須のファイルの項目（invoice）')
+    expect(wrapper.text()).not.toContain('この要求は受け付けられます')
+  })
+
   it('読めないpayloadは、その理由だけを出す', async () => {
     preview.mockResolvedValue({
+      outcome: TriggerPreviewOutcome.REFUSED,
+      requiredFileInputs: [],
       formatError: 'JSONとして読めません',
       eventId: null,
       eventIdError: '',

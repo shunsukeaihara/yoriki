@@ -4,7 +4,7 @@ from typing import Any
 import jsonschema
 from django.conf import settings
 from django.core.files.uploadedfile import UploadedFile
-from django.db import transaction
+from django.db import models, transaction
 from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
@@ -821,6 +821,15 @@ class TriggerPreviewErrorSerializer(serializers.Serializer):
     message = serializers.CharField()
 
 
+class TriggerPreviewOutcome(models.TextChoices):
+    """サンプルの要求を受付がどうするか"""
+
+    ACCEPTED = "accepted", _("受け付ける")
+    REFUSED = "refused", _("断る")
+    # 必須のファイルの項目があり、JSONのサンプルでは確かめられない（ファイルはmultipartで付けるため）
+    UNCONFIRMED = "unconfirmed", _("確かめられない")
+
+
 class TriggerPreviewSerializer(serializers.Serializer):
     """サンプルのpayloadで取り出しを試す（design.md §4.2）。保存していない受け取り方（イベントIDの場所・項目の
     取り出し）で試せるように、それらも送れる（送らなければ今の版の値）。受付と同じ処理（payloadの読み取り、重複の
@@ -848,6 +857,14 @@ class TriggerPreviewSerializer(serializers.Serializer):
         many=True, required=False, write_only=True, help_text=_("項目の取り出し。送らなければ今の版の値")
     )
 
+    outcome = serializers.ChoiceField(
+        choices=TriggerPreviewOutcome.choices,
+        read_only=True,
+        help_text=_(
+            "受付がこの要求をどうするか（payloadを読めない・イベントIDを使えない・項目の誤りがあれば断る。"
+            "ほかに断る理由がなく、必須のファイルの項目があれば確かめられない）"
+        ),
+    )
     format_error = serializers.CharField(read_only=True, help_text=_("payloadを読めなかった理由（読めたら空）"))
     event_id = serializers.CharField(
         read_only=True, allow_null=True, help_text=_("重複の判定に使うイベントID（なければnull）")
@@ -860,9 +877,14 @@ class TriggerPreviewSerializer(serializers.Serializer):
     file_inputs = serializers.ListField(
         child=serializers.CharField(), read_only=True, help_text=_("型がファイルの項目（試せない）")
     )
+    required_file_inputs = serializers.ListField(
+        child=serializers.CharField(), read_only=True, help_text=_("型がファイルの必須の項目")
+    )
     can_view_prompt = serializers.BooleanField(read_only=True)
     prompt = serializers.CharField(
-        read_only=True, allow_null=True, help_text=_("埋め込んだ後のプロンプト（タスクを管理できる人だけ）")
+        read_only=True,
+        allow_null=True,
+        help_text=_("埋め込んだ後のプロンプト（タスクを管理できる人だけ。断る要求ではnull）"),
     )
 
     def validate_event_id_path(self, value: str) -> str:
@@ -879,18 +901,22 @@ class TriggerPreviewSerializer(serializers.Serializer):
         revision = task.current_revision
         definitions = revision.inputs if revision else []
         file_inputs = [d["name"] for d in definitions if d["type"] == TaskInputType.FILE]
+        required_file_inputs = [d["name"] for d in definitions if d["type"] == TaskInputType.FILE and d.get("required")]
         can_view_prompt = TaskDefinition.objects.manageable_by(user).filter(pk=task.pk).exists()
         result: dict[str, Any] = {
+            "outcome": TriggerPreviewOutcome.REFUSED,
             "format_error": "",
             "event_id": None,
             "event_id_error": "",
             "values": [],
             "input_errors": [],
             "file_inputs": file_inputs,
+            "required_file_inputs": required_file_inputs,
             "can_view_prompt": can_view_prompt,
             "prompt": None,
         }
         current = binding.current_revision
+        # 対にならないサロゲートは、サンプルの欄（CharField）が400で断るので、ここではUTF-8にできる
         body = data["sample"].encode()
         limit = current.max_payload_bytes if current else DEFAULT_MAX_PAYLOAD_BYTES
         if len(body) > limit:
@@ -919,6 +945,11 @@ class TriggerPreviewSerializer(serializers.Serializer):
         # 誤りは項目の定義の順に並べ、定義にない項目（推奨の形式の inputs で送られたもの）は最後に置く
         ranked = sorted(errors.items(), key=lambda e: order.index(e[0]) if e[0] in order else len(order))
         result["input_errors"] = [{"name": name, "message": message} for name, message in ranked]
+        if result["event_id_error"] or errors:
+            return result  # 断る要求ではRunを作らないので、プロンプトもない（欠けた値で埋めたものを見せない）
+        result["outcome"] = (
+            TriggerPreviewOutcome.UNCONFIRMED if required_file_inputs else TriggerPreviewOutcome.ACCEPTED
+        )
         if can_view_prompt and revision is not None:
             result["prompt"] = render(revision.prompt_template, cleaned)
         return result

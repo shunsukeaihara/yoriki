@@ -6128,6 +6128,14 @@ export interface components {
          *     見てよいとは限らない）
          */
         TriggerPreview: {
+            /**
+             * @description 受付がこの要求をどうするか（payloadを読めない・イベントIDを使えない・項目の誤りがあれば断る。ほかに断る理由がなく、必須のファイルの項目があれば確かめられない）
+             *
+             *     * `accepted` - 受け付ける
+             *     * `refused` - 断る
+             *     * `unconfirmed` - 確かめられない
+             */
+            readonly outcome: components["schemas"]["TriggerPreviewOutcomeEnum"];
             /** @description payloadを読めなかった理由（読めたら空） */
             readonly format_error: string;
             /** @description 重複の判定に使うイベントID（なければnull） */
@@ -6139,8 +6147,10 @@ export interface components {
             readonly input_errors: components["schemas"]["TriggerPreviewError"][];
             /** @description 型がファイルの項目（試せない） */
             readonly file_inputs: string[];
+            /** @description 型がファイルの必須の項目 */
+            readonly required_file_inputs: string[];
             readonly can_view_prompt: boolean;
-            /** @description 埋め込んだ後のプロンプト（タスクを管理できる人だけ） */
+            /** @description 埋め込んだ後のプロンプト（タスクを管理できる人だけ。断る要求ではnull） */
             readonly prompt: string | null;
         };
         TriggerPreviewError: {
@@ -6151,6 +6161,13 @@ export interface components {
             name: string;
             message: string;
         };
+        /**
+         * @description * `accepted` - 受け付ける
+         *     * `refused` - 断る
+         *     * `unconfirmed` - 確かめられない
+         * @enum {string}
+         */
+        TriggerPreviewOutcomeEnum: "accepted" | "refused" | "unconfirmed";
         /**
          * @description サンプルのpayloadで取り出しを試す（design.md §4.2）。保存していない受け取り方（イベントIDの場所・項目の
          *     取り出し）で試せるように、それらも送れる（送らなければ今の版の値）。受付と同じ処理（payloadの読み取り、重複の

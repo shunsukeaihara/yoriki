@@ -51,6 +51,14 @@ export const DEFAULT_MAX_PAYLOAD_KIB = 1024
 export const MAX_PAYLOAD_KIB = 10 * 1024
 export const MIN_PAYLOAD_KIB = 1
 
+// サンプルのpayloadを試したときの、受付がどうするか（task.serializers.TriggerPreviewOutcome）
+export const TriggerPreviewOutcome = {
+  ACCEPTED: 'accepted',
+  REFUSED: 'refused',
+  // 必須のファイルの項目があり、JSONのサンプルでは確かめられない
+  UNCONFIRMED: 'unconfirmed',
+} as const satisfies Record<string, TriggerPreviewOutcomeEnum>
+
 /** 項目の取り出しの1行。名前はタスクの入力の項目から選び、場所はJSONのpathで書く */
 export type TriggerInputRow = { name: string | null; path: string }
 

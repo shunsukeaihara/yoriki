@@ -42,14 +42,14 @@ const onUpdated = () => {
 const onFailed = (err: unknown) => {
   conflicted.value = err instanceof AxiosError && err.response?.status === 409
 }
-// 他の人の版を読み込み、未保存の入力を捨てて合わせ直す
+// 他の人の版を読み込み、未保存の入力を捨てて合わせ直す（入力し直せない送り先のURLだけは残す）
 const reloadLatest = async () => {
   await refresh()
   if (error.value) {
     toast.add({ title: t('エラー'), description: makeErrorMsg(error.value), color: 'error' })
     return
   }
-  formRef.value?.reset()
+  formRef.value?.reset({ keepUrl: true })
   conflicted.value = false
   revisionsReloadKey.value = Date.now()
 }

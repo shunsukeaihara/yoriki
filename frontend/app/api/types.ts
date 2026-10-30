@@ -229,6 +229,7 @@ export type TriggerInput = Api<'TriggerInput'>
 export type TriggerTask = Api<'TriggerTask'>
 export type TriggerReceipt = Api<'TriggerReceipt'>
 export type TriggerPreview = Api<'TriggerPreview'>
+export type TriggerPreviewOutcomeEnum = Schemas['TriggerPreviewOutcomeEnum']
 export type TriggerPreviewRequest = Api<'TriggerPreviewRequest'>
 export type TriggerBindingListParams = ListParams & { search?: string; suspended?: boolean }
 

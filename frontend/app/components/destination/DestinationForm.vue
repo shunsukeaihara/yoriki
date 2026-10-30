@@ -39,8 +39,14 @@ const toForm = (value: Destination | null | undefined) =>
       }
     : emptyForm()
 const form = ref(emptyForm())
-const reset = () => {
+/**
+ * 入力を捨てて、今の出口に合わせ直す。送り先のURLはサーバーが返さず入力し直せないので、競合の後の読み直しでは
+ * keepUrl で入力したURLを残す（他の人の版と比べる値がないので、送るかどうかは利用者が決める）
+ */
+const reset = ({ keepUrl = false }: { keepUrl?: boolean } = {}) => {
+  const url = form.value.url
   form.value = toForm(modelValue.value)
+  if (keepUrl) form.value.url = url
 }
 // 停止・再開・鍵の作り直しで出口が変わっても、未保存の入力は残す（版も編集を始めた時点のまま。その間に別の人が
 // 版を作っていれば、保存がサーバーの409で止まる）

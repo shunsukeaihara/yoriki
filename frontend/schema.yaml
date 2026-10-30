@@ -14919,6 +14919,16 @@ components:
         変換で名前を変えない）。埋め込んだ後のプロンプトは、タスクを管理できる人にだけ返す（連携の管理者がタスクの依頼文を
         見てよいとは限らない）
       properties:
+        outcome:
+          allOf:
+          - $ref: '#/components/schemas/TriggerPreviewOutcomeEnum'
+          readOnly: true
+          description: |-
+            受付がこの要求をどうするか（payloadを読めない・イベントIDを使えない・項目の誤りがあれば断る。ほかに断る理由がなく、必須のファイルの項目があれば確かめられない）
+
+            * `accepted` - 受け付ける
+            * `refused` - 断る
+            * `unconfirmed` - 確かめられない
         format_error:
           type: string
           readOnly: true
@@ -14949,6 +14959,12 @@ components:
             type: string
           readOnly: true
           description: 型がファイルの項目（試せない）
+        required_file_inputs:
+          type: array
+          items:
+            type: string
+          readOnly: true
+          description: 型がファイルの必須の項目
         can_view_prompt:
           type: boolean
           readOnly: true
@@ -14956,7 +14972,7 @@ components:
           type: string
           readOnly: true
           nullable: true
-          description: 埋め込んだ後のプロンプト（タスクを管理できる人だけ）
+          description: 埋め込んだ後のプロンプト（タスクを管理できる人だけ。断る要求ではnull）
       required:
       - can_view_prompt
       - event_id
@@ -14964,7 +14980,9 @@ components:
       - file_inputs
       - format_error
       - input_errors
+      - outcome
       - prompt
+      - required_file_inputs
       - values
     TriggerPreviewError:
       type: object
@@ -14988,6 +15006,16 @@ components:
       required:
       - message
       - name
+    TriggerPreviewOutcomeEnum:
+      enum:
+      - accepted
+      - refused
+      - unconfirmed
+      type: string
+      description: |-
+        * `accepted` - 受け付ける
+        * `refused` - 断る
+        * `unconfirmed` - 確かめられない
     TriggerPreviewRequest:
       type: object
       description: |-

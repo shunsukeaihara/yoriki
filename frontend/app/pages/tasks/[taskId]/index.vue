@@ -14,7 +14,7 @@ const confirm = useConfirmDialog()
 const { t } = useI18n()
 const taskId = route.params.taskId as string
 
-const { data: task, error, refresh } = await useAsyncData(`task-${taskId}`, () => api.tasks(taskId).get())
+const { data: task, error } = await useAsyncData(`task-${taskId}`, () => api.tasks(taskId).get())
 if (error.value) throw createError(error.value) // 404 / 403 はエラー画面にする
 
 // システムのタスクは管理画面の一覧から開く
@@ -42,11 +42,13 @@ const onUpdated = (value: TaskDetail) => {
   revisionsReloadKey.value = Date.now()
 }
 
+// 最新の状態を読み込む。読めなければ、入力中の内容と競合の表示を残す（古い定義を最新に見せない）
 const reloadAll = async () => {
   try {
-    await refresh()
+    task.value = await api.tasks(taskId).get()
   } catch (err) {
     toast.add({ title: t('エラー'), description: makeErrorMsg(err), color: 'error' })
+    return
   }
   await nextTick()
   if (task.value) formRef.value?.reset(task.value)

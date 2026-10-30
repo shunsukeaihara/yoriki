@@ -284,6 +284,17 @@ def test_manual_run_fixes_the_revision_and_renders_the_inputs(api_client, app_us
     assert "1. 請求書を読む" in first["skills_text"]
 
 
+def test_saving_an_old_revision_is_a_conflict_even_if_the_content_is_invalid(api_client, app_user, model):
+    """別の人が版を作った後の保存は、内容の誤りより先に409にする（古い画面に最新の状態を読み込ませる）"""
+    task = _create(api_client, app_user, model).json()
+    api_client.patch(_url(task), {"version": 1, "description": "直した"}, format="json")
+    # 版1のまま、入力の項目にない名前をテンプレートで使う（今の版に対しても誤り）
+    res = api_client.patch(_url(task), {"version": 1, "prompt_template": "{{ inputs.memo }}"}, format="json")
+    assert res.status_code == 409, res.json()
+    res = api_client.patch(_url(task), {"version": 2, "prompt_template": "{{ inputs.memo }}"}, format="json")
+    assert res.status_code == 400
+
+
 def test_manual_run_refuses_a_revision_other_than_the_one_on_the_screen(api_client, app_user, model):
     """画面で確かめた版（version）を送ると、別の版ができていれば409にし、確かめていない定義では実行しない"""
     task = _create(api_client, app_user, model).json()

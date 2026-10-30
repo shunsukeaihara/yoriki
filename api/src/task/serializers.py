@@ -332,6 +332,10 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
             if "version_number" not in attrs:
                 raise serializers.ValidationError({"version": _("編集を始めた時点の版を送ってください")})
             task = self.instance
+            # 別の人が版を作った後の保存は、内容の検証より先に409にする（今の版に対する誤りを、古い画面に見せない）。
+            # 保存の直前にも、行をロックしてから revise() が照合し直す
+            if attrs["version_number"] != task.version_number:
+                raise Conflict()
         if "name" in attrs:
             attrs["name"] = attrs["name"].strip()
             self._check_unique_name(task, attrs["name"])

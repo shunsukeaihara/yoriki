@@ -59,6 +59,11 @@ def notify_run_event(event: "RunEvent") -> None:
         )
 
 
+def notify_notification(user_uid: str) -> None:
+    """画面の通知が届いたことを本人に知らせる（中身は送らず、画面が通知のAPIで読む）"""
+    notify(user_channel(user_uid), {"type": "notification"})
+
+
 def notify_delta(run_uid: str, step: int, text: str) -> None:
     """LLM出力の差分。保存しない一時イベントなので、payloadで直接送る（大きければ分ける）"""
     chunk = ""

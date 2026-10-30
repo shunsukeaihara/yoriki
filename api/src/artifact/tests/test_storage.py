@@ -1,5 +1,6 @@
 import hashlib
 import io
+from unittest import mock
 
 import boto3
 import pytest
@@ -34,6 +35,13 @@ def test_put_and_read(storage):
     assert storage.stat("runs/r1/1.tar") == stored
     with storage.open_read("runs/r1/1.tar") as f:
         assert f.read() == b"data"
+
+
+def test_exists_without_reading(storage):
+    assert not storage.exists("a/missing")
+    storage.put_immutable("a/present", io.BytesIO(b"x"))
+    with mock.patch("artifact.storage.hash_stream", side_effect=AssertionError("read")):
+        assert storage.exists("a/present")
 
 
 def test_does_not_overwrite_another_object(storage):

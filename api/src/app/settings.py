@@ -374,12 +374,25 @@ try:
 except ValueError as _exc:
     raise ImproperlyConfigured(f"YORIKI_DELIVERY_ALLOWED_NETWORKS: {_exc}") from _exc
 
+# 外（Zapier等）から見たYorikiのURL（例：https://yoriki.example.co.jp）。出口へ渡すファイルの取得用のURL
+# （`/api/files/<token>/`）を作るのに使う。未設定なら、ファイルを渡す配信は失敗にする（design.md §4.4）
+YORIKI_PUBLIC_URL = os.getenv("YORIKI_PUBLIC_URL", "").strip().rstrip("/")
+if YORIKI_PUBLIC_URL and not YORIKI_PUBLIC_URL.startswith(("https://", "http://" if DEBUG else "https://")):
+    raise ImproperlyConfigured("YORIKI_PUBLIC_URL must start with https://")
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    # 出口へ渡すファイルのURLのtokenを伏せる（django.request は404等のたびにパスを出す。utils/logs.py）
+    "filters": {"mask_file_tokens": {"()": "utils.logs.MaskFileTokens"}},
+    "handlers": {"console": {"class": "logging.StreamHandler", "filters": ["mask_file_tokens"]}},
     "root": {"handlers": ["console"], "level": os.getenv("YORIKI_LOG_LEVEL", "INFO")},
     # httpxは要求のURLを丸ごとINFOで出す。出口の送り先のURL（ZapierのCatch Hook等）はそれだけで送れる資格情報なので、
     # YORIKI_LOG_LEVEL によらずWARNINGより下を出さない（design.md §4.4）
-    "loggers": {"httpx": {"level": "WARNING"}, "httpcore": {"level": "WARNING"}},
+    "loggers": {
+        "httpx": {"level": "WARNING"},
+        "httpcore": {"level": "WARNING"},
+        # Djangoが既定で付ける出力先（DEBUGのときのconsole等）を通っても伏せるよう、記録を作るloggerにも付ける
+        "django.request": {"filters": ["mask_file_tokens"]},
+    },
 }

@@ -20,11 +20,14 @@ from typing import IO, Any
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from django.conf import settings
+from django.utils.http import content_disposition_header
 from django.utils.module_loading import import_string
 
 CHUNK = 1024 * 1024
 # Storage Backendを入れる前のsnapshotの保存先のID（`local:<UUID>`）
 LEGACY_SNAPSHOT_PREFIX = "local:"
+# 署名付きURLの期限（秒）。出口を止めたらすぐ取得できなくするため、ごく短くする（authorization.md §7.1）
+SIGNED_URL_SECONDS = 60
 KEY_PATTERN = re.compile(r"^[A-Za-z0-9_-]+(/[A-Za-z0-9_.-]+)*$")
 
 
@@ -62,8 +65,17 @@ class StorageBackend(ABC):
     def delete(self, key: str) -> None:
         pass
 
+    def exists(self, key: str) -> bool:
+        """あるか（中身は読まない）。既定は stat() で確かめる"""
+        return self.stat(key) is not None
+
     def accel_redirect(self, key: str) -> str | None:
         """nginxの内部locationから返せるなら、そのパス（`X-Accel-Redirect`。deployment.md §4.1）"""
+        return None
+
+    def signed_url(self, key: str, *, name: str, content_type: str) -> str | None:
+        """保存先から直接取得できる、ごく短い期限のURL（S3の署名付きURL）。作れない保存先ではNone。
+        権限・tokenを確かめた後にだけ渡す（design.md §4.4）"""
         return None
 
 
@@ -143,6 +155,10 @@ class LocalStorage(StorageBackend):
             return path.open("rb")
         except FileNotFoundError as exc:
             raise StorageError(f"not found: {key}") from exc
+
+    def exists(self, key: str) -> bool:
+        path = self._path(key)
+        return path.is_file() and not path.is_symlink()
 
     def stat(self, key: str) -> StoredObject | None:
         path = self._path(key)
@@ -233,6 +249,22 @@ class S3Storage(StorageBackend):
         if not sha256:
             return None  # Yorikiが保存したものではない
         return StoredObject(key, head["ContentLength"], sha256)
+
+    def signed_url(self, key: str, *, name: str, content_type: str) -> str | None:
+        try:
+            return self.client.generate_presigned_url(
+                "get_object",
+                Params={
+                    "Bucket": self.bucket,
+                    "Key": self._key(key),
+                    # いつも添付として返す（artifact/download.py の file_response() と同じ）
+                    "ResponseContentDisposition": content_disposition_header(True, name),
+                    "ResponseContentType": content_type,
+                },
+                ExpiresIn=SIGNED_URL_SECONDS,
+            )
+        except (ClientError, BotoCoreError) as exc:
+            raise StorageError(f"cannot sign {key}: {exc}") from exc
 
     def delete(self, key: str) -> None:
         try:

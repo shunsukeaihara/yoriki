@@ -250,8 +250,10 @@ def test_a_department_task_uses_the_destination_of_its_department(api_client, ap
     assert _create_task(api_client, user, destination=theirs.uid, **common).status_code == 400
     assert _create_task(api_client, user, destination=ours.uid, **common).status_code == 201
 
-    # 候補は、タスクを管理できる範囲の出口だけ（部門は管理できる部門のもの）
-    assert [d["id"] for d in api_client.get(CHOICES).json()["results"]] == [ours.uid]
+    # 候補は、タスクを管理できる範囲の出口だけ（部門は管理できる部門のもの）と、個人のタスクの画面の通知
+    personal = Destination.personal_in_app()
+    assert [d["id"] for d in api_client.get(CHOICES).json()["results"]] == [ours.uid, personal.uid]
+    assert [d["id"] for d in api_client.get(CHOICES, {"scope": TaskScope.DEPARTMENT}).json()["results"]] == [ours.uid]
 
 
 def test_a_sensitive_task_needs_a_destination_that_allows_sensitive_results(api_client, company_manager):
@@ -271,10 +273,12 @@ def test_choices_show_only_what_task_managers_may_pick(api_client, app_user, com
     DestinationFactory.create(suspended=True)
     DestinationFactory.create(scope=DestinationScope.SYSTEM)
     api_client.force_login(app_user)
-    assert api_client.get(CHOICES).json()["results"] == []
+    # 個人のタスクの画面の通知は、だれでも選べる（最初に選ぶときに作る）
+    personal = Destination.personal_in_app()
+    assert [d["id"] for d in api_client.get(CHOICES).json()["results"]] == [personal.uid]
     api_client.force_login(company_manager)
     results = api_client.get(CHOICES).json()["results"]
-    assert [d["id"] for d in results] == [company.uid]
+    assert [d["id"] for d in results] == [company.uid, personal.uid]
     # 送り先・鍵は返さない
     assert set(results[0]) == {"id", "name", "kind", "scope", "department", "allows_sensitive_results"}
 

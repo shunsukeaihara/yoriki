@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 from django.apps import apps
 from django.contrib.auth.models import AnonymousUser, Group, Permission
@@ -14,6 +16,7 @@ from .backends import PasswordBackend
 from .crypto import encrypt_secret
 from .fields import ENCRYPTED_SECRET_FIELDS
 from .lock import lock
+from .logs import MaskFileTokens
 from .permissions import AppUser, DenyAll, require_permission
 
 
@@ -158,3 +161,17 @@ def test_encrypted_secret_fields_are_current_models():
     assert ENCRYPTED_SECRET_FIELDS
     for model, _name in ENCRYPTED_SECRET_FIELDS:
         assert apps.get_model(model._meta.label) is model
+
+
+def test_file_tokens_are_masked_in_access_logs():
+    record = logging.LogRecord(
+        "uvicorn.access",
+        logging.INFO,
+        "",
+        0,
+        '%s - "%s %s HTTP/%s" %d',
+        ("1.2.3.4", "GET", "/api/files/abcDEF_-1/?x=1", "1.1", 200),
+        None,
+    )
+    MaskFileTokens().filter(record)
+    assert record.getMessage() == '1.2.3.4 - "GET /api/files/***/?x=1 HTTP/1.1" 200'

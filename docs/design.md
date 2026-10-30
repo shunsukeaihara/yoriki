@@ -579,7 +579,11 @@ ResultEnvelopeはresult_id、run_id、タスク版、結果Schema版、確定デ
 
 Zapierでファイルとして使うURLは、追加ログイン不要で直接取得できる必要がある。対象ファイルに限定した期限付きURLを発行し、社内SSOの画面URLを渡さない。どの保存先でも、出口へ渡すのはAPIのtoken付き取得経路だけにする。APIは取得のたびにtokenと出口が有効かを確かめ、S3保存時は確かめた後にごく短い期限（例：1分）の署名付きURLへリダイレクトしてよい（出口を止めたらすぐ取得できなくするため。authorization.md §7.1）。保存Backendを切り替えても通知SkillはArtifact IDを扱い続ける。取得経路の到達性と期限は配信設定時に検証する。
 
-**webhook・zapierのAdapter（初期の実装）**：共通の形（`version`、`event_id`、`event_type`、`occurred_at`、`run`（id・状態・失敗のコード・日時）、`task`（id・名前・版）、通知内容が業務結果を含むときは `result`）をJSONでPOSTする。失敗の理由の本文は含めない（決まった失敗のコードだけ。authorization.md §7.1）。要求には [Standard Webhooks](https://www.standardwebhooks.com/) の形の署名（`webhook-id`・`webhook-timestamp`・`webhook-signature`。鍵は出口ごとに作り、作成時と作り直したときに一度だけ表示する）を付け、受け手が送り主とイベントを確かめられるようにする。送り先はhttpsだけで、名前を引いた先がプライベート・ループバック・リンクローカル等のアドレスなら、登録時にも送信時にも断る（SSRF対策。社内のシステムへ送る導入先は、基盤管理者が `YORIKI_DELIVERY_ALLOWED_NETWORKS` で許すネットワークを指定する）。送るときは確かめたアドレスに接続を固定し（TLSの証明書は元のホスト名で確かめる。複数のアドレスは、つながらないときだけ名前を引き直さずに順に試す）、応答の本文は読まず、リダイレクトは辿らない（3xxは失敗）。Zapierの出口は、送り先をCatch HookのURL（`https://hooks.zapier.com/hooks/catch/…`）に限る。期限付きのファイルURLと結果を確かめる画面へのリンクは、後の段階で足す。
+**webhook・zapierのAdapter（初期の実装）**：共通の形（`version`、`event_id`、`event_type`、`occurred_at`、`run`（id・状態・失敗のコード・日時）、`task`（id・名前・版）、通知内容が業務結果を含むときは `result`）をJSONでPOSTする。失敗の理由の本文は含めない（決まった失敗のコードだけ。authorization.md §7.1）。要求には [Standard Webhooks](https://www.standardwebhooks.com/) の形の署名（`webhook-id`・`webhook-timestamp`・`webhook-signature`。鍵は出口ごとに作り、作成時と作り直したときに一度だけ表示する）を付け、受け手が送り主とイベントを確かめられるようにする。送り先はhttpsだけで、名前を引いた先がプライベート・ループバック・リンクローカル等のアドレスなら、登録時にも送信時にも断る（SSRF対策。社内のシステムへ送る導入先は、基盤管理者が `YORIKI_DELIVERY_ALLOWED_NETWORKS` で許すネットワークを指定する）。送るときは確かめたアドレスに接続を固定し（TLSの証明書は元のホスト名で確かめる。複数のアドレスは、つながらないときだけ名前を引き直さずに順に試す）、応答の本文は読まず、リダイレクトは辿らない（3xxは失敗）。Zapierの出口は、送り先をCatch HookのURL（`https://hooks.zapier.com/hooks/catch/…`）に限る。結果を確かめる画面へのリンクは、タスクのRunの画面ができてから足す。
+
+**成果物の受渡し（初期の実装）**：出口へ渡すのは、業務結果のSchemaのファイルの項目（ルートの項目に `"format": "file"`。値は `/workspace/output` の中のパス。harness.md §10.5）で指した成果物だけにする（Runの成果物すべては渡さない）。送る内容の `files` に項目名・ID・ファイル名・MIME・サイズ・SHA-256を入れ、取得用のURL（`/api/files/<token>/`）と期限（`url`・`expires_at`）は送るたびに発行して足す（送り直しでも新しいURLにし、`event_id` と業務結果は変えない）。URLは1時間・3回まで使え（GETだけ。HEADでは回数を使わせない）、tokenはハッシュだけを保存し、nginx・uvicornのアクセスログにも残さない。取得のたびに、期限・回数と、配信の出口とタスクが今も使えるか（停止・削除・範囲・機密）を確かめ直す。汎用のWebhookの出口では、出口の署名の鍵を `Authorization: Bearer` で求める（URLだけが受け手のログ等から漏れても取得させない。Zapierはファイルの項目のURLを自分で取りに来るのでヘッダーを付けられず、URLだけで取得する）。取得は日時・IPアドレス・User-Agentを記録し、配信の履歴でタスクの管理者が見られる（返す前に保存先にあるかを確かめ、ない・読めなかった取得は、返さなかったとして記録し、回数に数えず503を返す。「返した」は確かめたうえで返し始めたことで、nginx・S3から送る途中の失敗はapiからは分からないので記録しない。受け手は回数の範囲で取り直せる）。URLの元は `YORIKI_PUBLIC_URL`（未設定なら、ファイルを渡す配信は失敗にする）。S3に保存したものは、確かめた後に60秒の署名付きURLへリダイレクトする。
+
+**in_appのAdapter（初期の実装）**：送り先のURLを持たず、受け手の通知欄に通知（タスクの名前とRunの状態だけ。業務結果・成果物は載せない）を載せ、受け手の画面へログインユーザー宛ての通知（`notification`。realtime.md §3）で知らせる。受け手は送るときに決める：個人のタスクは持ち主、部門・全社・システムのタスクの手動実行は実行した人、入口から動いたRunはタスクを管理できる人全員。どれも、Runを実行したときのタスクの範囲と部門で今も管理できる人に限り（Runの結果を見られる人と同じ。authorization.md §7.1）、いなければ配信の失敗にする。通知欄は、送った後に権限を失った人には見せない（Runの結果を見られる人で絞る）。認証の要る画面の中だけで見せるので、出口の機密のフラグがなくても機密のタスクに使える。個人のタスクの出口は、全員で共通の画面の通知を1つだけYorikiが作る（最初に選ぶときに作る。管理の画面では扱わない）。
 
 Destinationは接続情報、Secret参照、許可scope、対応内容、timeout、再試行方針を版付きで管理する。送信前にも有効性を再確認し、失効した宛先には再送しない。URL型Adapterは登録時・接続時に許可範囲とredirect先を検証する。ZapierのHook URL等をLLMや通常ログへ露出しない。通知Pluginの追加によってSandboxの通信制限を緩めない。
 
@@ -861,9 +865,11 @@ Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプ�
 | InteractionBinding / InteractionBindingRevision | Channel Plugin版、接続・Destination版、スレッド方針、返信モード、通知イベント |
 | ExternalThreadBinding | Run・Conversation、対話Binding版、provider・接続・チャネル・thread参照、親message、作成操作key、状態 |
 | ChannelMessageReceipt | provider・接続・event／message ID、投稿者ID・表示名、thread、質問世代、本文hash、受付・適用結果 |
-| Destination / DestinationRevision | 種別（webhook・zapier。in_app等は後で足す）、使ってよい範囲（部門・全社・システム）と部門、署名の鍵（暗号化して保存。版に入れない）、停止。版は宛先のURL（資格情報を含みうるので暗号化して保存し、画面にはホストと末尾だけを出す）、機密の結果を送ってよいか（§4.4） |
+| Destination / DestinationRevision | 種別（webhook・zapier・in_app。Teams・Slack等は後で足す）、使ってよい範囲（個人・部門・全社・システム。個人はYorikiが作る共通の画面の通知だけ）と部門、署名の鍵（暗号化して保存。版に入れない）、停止。版は宛先のURL（資格情報を含みうるので暗号化して保存し、画面にはホストと末尾だけを出す）、機密の結果を送ってよいか（§4.4） |
 | Delivery | Run、RunEvent（event_idはRunのIDとイベントの順序）、Destinationの版（配信キーはこの2つ）、確定内容（送る内容をRunの終わりに組み立てて保存する）、配信状態、送った回数、次回試行時刻、配信中の期限（§4.5）。外部thread参照は対話の段階で足す |
-| DeliveryAttempt | 試行番号、受付結果（受付確認・一時的な失敗・失敗・届いたか分からない）、HTTPの状態コード、エラー（応答の本文は保存しない）。URL期限は期限付きのファイルURLの段階で足す |
+| DeliveryAttempt | 試行番号、受付結果（受付確認・一時的な失敗・失敗・届いたか分からない）、HTTPの状態コード、エラー（応答の本文は保存しない） |
+| FileLink / FileFetch | 出口へ渡した成果物の取得用のtoken（試行・成果物、tokenのハッシュ、期限、取得した回数）と、取得の記録（返したか、返さなかった理由、IPアドレス、User-Agent。§4.4） |
+| Notification | 画面の通知。受け手、配信、Run、タスクと送ったときのタスクの名前、イベント、既読の日時（§4.4） |
 | LLMConnection | プロバイダ種別、API key（暗号化して保存）、base URL、timeout、同時実行数・rate limit（§4.8） |
 | ModelProfile / ModelProfileVersion | 接続、モデル名、token上限、単価、対応能力、受け付けるeffortの値と既定、使わせる範囲を版付きで保持（§4.8） |
 | 接続（DatabaseConnection等。種類ごと） | 種別、接続先、認証方式、資格情報（暗号化して保存）、接続のタイムアウト、同時実行数の上限（§4.9.1） |

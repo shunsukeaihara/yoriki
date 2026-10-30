@@ -3,14 +3,17 @@
 import hashlib
 import io
 import tarfile
+from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
+from artifact.models import Artifact, BlobObject
 from artifact.storage import get_storage
 from harness.context import build_messages
-from harness.sandbox import MAX_OUTPUT_FILES, collect_outputs
+from harness.sandbox import MAX_OUTPUT_FILES, SandboxSession, collect_outputs
 from run.factories import RunFactory
-from run.models import RunEvent, RunEventKind
+from run.models import ExecutionAttempt, RunEvent, RunEventKind
 
 
 def archive(entries: list[tuple[str, bytes | None, str]]) -> io.BytesIO:
@@ -53,12 +56,18 @@ def test_collects_only_regular_visible_files_in_output(tmp_path):
 def test_unchanged_files_are_not_collected_again():
     tar = archive([("output/a.txt", b"same", "file"), ("output/b.txt", b"new", "file")])
     known = {"a.txt": hashlib.sha256(b"same").hexdigest(), "b.txt": hashlib.sha256(b"old").hexdigest()}
-    assert [c.path for c in collect_outputs(tar, get_storage(), known)] == ["b.txt"]
+    present: dict[str, str] = {}
+    assert [c.path for c in collect_outputs(tar, get_storage(), known, present)] == ["b.txt"]
+    # 回収し直さなかったファイルも、今あるファイルとして中身を記録する（業務結果のファイルの確認に使う）
+    assert present == {"a.txt": known["a.txt"], "b.txt": hashlib.sha256(b"new").hexdigest()}
 
 
 def test_number_of_files_is_limited():
     tar = archive([(f"output/{i}.txt", b"x", "file") for i in range(MAX_OUTPUT_FILES + 5)])
-    assert len(collect_outputs(tar, get_storage(), {})) == MAX_OUTPUT_FILES
+    present: dict[str, str] = {}
+    assert len(collect_outputs(tar, get_storage(), {}, present)) == MAX_OUTPUT_FILES
+    # 上限を超えた分は、今あるファイルにも入れない（業務結果が指していれば、完了の前の確認で欠けているとわかる）
+    assert len(present) == MAX_OUTPUT_FILES
 
 
 @pytest.mark.django_db
@@ -83,3 +92,14 @@ def test_model_sees_the_attachment_list():
     second = build_messages(run, RunEvent.objects.filter(run=run))[1]
     assert second.text.startswith('集計も\n\n<attachments scope="earlier">\nFiles attached earlier')
     assert "- /workspace/input/請求書.pdf" in second.text
+
+
+@pytest.mark.django_db
+def test_deleted_outputs_are_not_known():
+    """削除した成果物は既知にしない（同じ中身のファイルを回収し直し、業務結果のファイルの確認で見つかるように）"""
+    run = RunFactory.create()
+    kept = Artifact.create_output(run, "a.txt", BlobObject.put(io.BytesIO(b"a")))
+    removed = Artifact.create_output(run, "b.txt", BlobObject.put(io.BytesIO(b"b")))
+    Artifact.objects.filter(pk=removed.pk).update(deleted=True)
+    session = SandboxSession(run, cast(ExecutionAttempt, SimpleNamespace(number=1)))
+    assert session._known_outputs() == {"a.txt": kept.sha256}

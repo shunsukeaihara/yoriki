@@ -431,6 +431,19 @@ def test_result_schema_needs_a_model_with_tools(api_client, app_user):
     assert "Toolを使えるモデル" in res.json()["model_profile"][0]
 
 
+def test_result_files_are_only_top_level_properties(api_client, app_user, model):
+    """業務結果のファイルの項目（出口へ渡す成果物。harness/result_files.py）は、ルートの項目だけに書ける"""
+    nested = {
+        "type": "object",
+        "properties": {"x": {"type": "object", "properties": {"f": {"type": "string", "format": "file"}}}},
+    }
+    res = _create(api_client, app_user, model, output_schema=nested)
+    assert res.status_code == 400
+    assert "format" in res.json()["output_schema"][0]
+    flat = {"type": "object", "properties": {"f": {"type": "string", "format": "file"}}}
+    assert _create(api_client, app_user, model, output_schema=flat).status_code == 201
+
+
 def test_tools_that_no_skill_allows_are_refused(api_client, app_user, model):
     """実行時はSkillとタスクの両方にあるToolだけを出すので、どのSkillも使わないToolは保存させない"""
     skill = _company_skill(tools=["read"])

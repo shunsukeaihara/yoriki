@@ -11,7 +11,7 @@ import posixpath
 import re
 import unicodedata
 from datetime import timedelta
-from typing import IO, Self
+from typing import IO, Self, cast
 
 from django.conf import settings
 from django.db import models
@@ -164,6 +164,17 @@ class ArtifactQuerySet(models.QuerySet):
             .exclude(path="")
             .exclude(messages__instruction__state__in=pending)
         )
+
+    def latest_output(self, conversation_id: int, path: str) -> "Artifact | None":
+        """会話の成果物のうち、`/workspace/output` のそのパスの最新のもの（変わっていないファイルは回収し直さないので、
+        同じ会話の前のRunのものもある）"""
+        latest = (
+            self.select_related("blob")
+            .filter(conversation_id=conversation_id, kind=ArtifactKind.OUTPUT, path=path, deleted=False)
+            .order_by("-created", "-pk")
+            .first()
+        )
+        return cast("Artifact | None", latest)
 
     def connector_results(self, conversation_id: int) -> Self:
         """会話のRunがConnectorで読んだ結果（/workspace/input/connectors/ に置くもの）。同じ会話の次の依頼でも読める

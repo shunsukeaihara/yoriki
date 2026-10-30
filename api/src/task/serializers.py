@@ -14,6 +14,7 @@ from rest_framework.utils import html
 
 from delivery.models import Destination, NotifyContent, NotifyEvent
 from delivery.serializers import DestinationChoiceSerializer
+from harness.result_files import file_format_problem
 from harness.tools import SKILL_TOOLS
 from harness.tools.base import schema_problem
 from llm.models import ModelProfile
@@ -287,7 +288,7 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
                 _("JSON Schemaとして正しくありません：%(error)s") % {"error": exc.message}
             ) from exc
         # 業務結果のSchemaは submit_result の引数になるので、全プロバイダで通る範囲に限る（harness.md §7.3）
-        if problem := schema_problem(value):
+        if problem := schema_problem(value) or file_format_problem(value):
             raise serializers.ValidationError(
                 _("業務結果のSchemaに使えない書き方があります：%(problem)s") % {"problem": problem}
             )

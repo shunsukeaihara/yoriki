@@ -576,7 +576,7 @@ paths:
         name: scope
         schema:
           type: integer
-        description: タスクの範囲（2：部門、3：全社、4：システム）
+        description: タスクの範囲（1：個人、2：部門、3：全社、4：システム）
       - name: search
         required: false
         in: query
@@ -659,6 +659,103 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MyUser'
+          description: ''
+  /api/app/v1/notifications/:
+    get:
+      operationId: app_v1_notifications_list
+      description: 本人の画面の通知（通知欄）の一覧と既読
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - app/notification
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedNotificationList'
+          description: ''
+  /api/app/v1/notifications/{uid}/read/:
+    post:
+      operationId: app_v1_notifications_read_create
+      description: 既読にする
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/notification
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Notification'
+          description: ''
+  /api/app/v1/notifications/read_all/:
+    post:
+      operationId: app_v1_notifications_read_all_create
+      description: すべて既読にする
+      tags:
+      - app/notification
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationCount'
+          description: ''
+  /api/app/v1/notifications/unread_count/:
+    get:
+      operationId: app_v1_notifications_unread_count_retrieve
+      description: 未読の数
+      parameters:
+      - in: query
+        name: unread
+        schema:
+          type: boolean
+        description: 未読だけ
+      tags:
+      - app/notification
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationCount'
           description: ''
   /api/app/v1/runs/:
     get:
@@ -2960,7 +3057,8 @@ paths:
   /api/files/{token}/:
     get:
       operationId: files_retrieve
-      description: 期限付きのtokenで成果物を取得する（ログインなし。Zapier等の外部へ渡すURL）
+      description: '出口（Zapier・Webhook）へ渡した成果物を、期限付きのtokenで取得する（ログインなし。design.md §4.4）。汎用のWebhookの出口では、出口の署名の鍵を
+        `Authorization: Bearer` で付ける。S3に保存したものは、ごく短い期限の署名付きURLへリダイレクトする'
       parameters:
       - in: path
         name: token
@@ -2979,8 +3077,14 @@ paths:
                 type: string
                 format: binary
           description: ファイル
+        '302':
+          description: 保存先の署名付きURLへのリダイレクト
+        '401':
+          description: No response body
         '404':
           description: No response body
+        '503':
+          description: 保存先から読めなかった（後で取り直せる）
   /api/hooks/v1/tasks/{task}/:
     post:
       operationId: hooks_v1_tasks_create
@@ -4092,7 +4196,7 @@ paths:
   /api/v1/destinations/:
     get:
       operationId: v1_destinations_list
-      description: 出口（Webhook・Zapier）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md
+      description: 出口（Webhook・Zapier・画面の通知）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md
         §5.5）
       parameters:
       - name: cursor
@@ -4109,9 +4213,11 @@ paths:
           enum:
           - 1
           - 2
+          - 3
         description: |-
           * `1` - Webhook
           * `2` - Zapier
+          * `3` - 画面の通知
       - name: ordering
         required: false
         in: query
@@ -4130,10 +4236,12 @@ paths:
           type: integer
           title: 使ってよい範囲
           enum:
+          - 1
           - 2
           - 3
           - 4
         description: |-
+          * `1` - 個人
           * `2` - 部門
           * `3` - 全社
           * `4` - システム
@@ -4160,7 +4268,7 @@ paths:
           description: ''
     post:
       operationId: v1_destinations_create
-      description: 出口（Webhook・Zapier）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md
+      description: 出口（Webhook・Zapier・画面の通知）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md
         §5.5）
       tags:
       - manage/destination
@@ -4264,7 +4372,7 @@ paths:
   /api/v1/destinations/{uid}/:
     get:
       operationId: v1_destinations_retrieve
-      description: 出口（Webhook・Zapier）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md
+      description: 出口（Webhook・Zapier・画面の通知）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md
         §5.5）
       parameters:
       - in: path
@@ -4285,7 +4393,7 @@ paths:
           description: ''
     put:
       operationId: v1_destinations_update
-      description: 出口（Webhook・Zapier）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md
+      description: 出口（Webhook・Zapier・画面の通知）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md
         §5.5）
       parameters:
       - in: path
@@ -4319,7 +4427,7 @@ paths:
           description: 他の変更と競合した（編集を始めた後に、他の人が版を作った）
     patch:
       operationId: v1_destinations_partial_update
-      description: 出口（Webhook・Zapier）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md
+      description: 出口（Webhook・Zapier・画面の通知）の一覧・作成・変更・停止・署名の鍵の作り直し（連携の管理者。authorization.md
         §5.5）
       parameters:
       - in: path
@@ -7844,8 +7952,15 @@ components:
           readOnly: true
           nullable: true
           title: 終了日時
+        file_fetches:
+          type: array
+          items:
+            $ref: '#/components/schemas/FileFetch'
+          readOnly: true
+          description: この送信で渡したファイルの取得の記録
       required:
       - error
+      - file_fetches
       - finished
       - http_status
       - number
@@ -7963,6 +8078,7 @@ components:
 
             * `1` - Webhook
             * `2` - Zapier
+            * `3` - 画面の通知
         kind_display:
           type: string
           readOnly: true
@@ -8005,7 +8121,7 @@ components:
         allows_sensitive_results:
           type: boolean
           default: false
-          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい
+          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面への参照だけなので、この指定によらず機密のタスクにも使える
         secret_rotated:
           type: string
           format: date-time
@@ -8056,7 +8172,7 @@ components:
           readOnly: true
         scope:
           allOf:
-          - $ref: '#/components/schemas/ConnectorScopeEnum'
+          - $ref: '#/components/schemas/SkillScopeEnum'
           readOnly: true
         department:
           allOf:
@@ -8077,10 +8193,12 @@ components:
       enum:
       - 1
       - 2
+      - 3
       type: integer
       description: |-
         * `1` - Webhook
         * `2` - Zapier
+        * `3` - 画面の通知
     DestinationRequest:
       type: object
       description: |-
@@ -8098,6 +8216,7 @@ components:
 
             * `1` - Webhook
             * `2` - Zapier
+            * `3` - 画面の通知
         scope:
           allOf:
           - $ref: '#/components/schemas/ConnectorScopeEnum'
@@ -8123,13 +8242,12 @@ components:
         url:
           type: string
           writeOnly: true
-          minLength: 1
-          description: 送り先のURL（https）。表示では返さない
+          description: 送り先のURL（https）。Webhook・Zapierでは必須、画面の通知では送らない。表示では返さない
           maxLength: 2000
         allows_sensitive_results:
           type: boolean
           default: false
-          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい
+          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面への参照だけなので、この指定によらず機密のタスクにも使える
         change_reason:
           type: string
           writeOnly: true
@@ -8138,7 +8256,6 @@ components:
       - kind
       - name
       - scope
-      - url
     DestinationRevision:
       type: object
       description: 表示専用のModelSerializer。すべての項目を読み取り専用にする
@@ -8195,6 +8312,7 @@ components:
 
             * `1` - Webhook
             * `2` - Zapier
+            * `3` - 画面の通知
         kind_display:
           type: string
           readOnly: true
@@ -8237,7 +8355,7 @@ components:
         allows_sensitive_results:
           type: boolean
           default: false
-          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい
+          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面への参照だけなので、この指定によらず機密のタスクにも使える
         secret_rotated:
           type: string
           format: date-time
@@ -8290,12 +8408,11 @@ components:
         url:
           type: string
           writeOnly: true
-          minLength: 1
-          description: 送り先のURL（https）。表示では返さない
+          description: 送り先のURL（https）。Webhook・Zapierでは必須、画面の通知では送らない。表示では返さない
           maxLength: 2000
         allows_sensitive_results:
           type: boolean
-          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい
+          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面への参照だけなので、この指定によらず機密のタスクにも使える
         change_reason:
           type: string
           writeOnly: true
@@ -8419,6 +8536,42 @@ components:
         * `1` - 良くなった
         * `2` - 同じ
         * `3` - 悪くなった
+    FileFetch:
+      type: object
+      description: 出口へ渡したファイルの取得の記録（身に覚えのない取得に気づけるように）
+      properties:
+        file:
+          type: string
+          readOnly: true
+        served:
+          type: boolean
+          readOnly: true
+          title: 返した
+        refusal:
+          type: string
+          readOnly: true
+          title: 返さなかった理由
+          maxLength: 200
+        ip_address:
+          type: string
+          readOnly: true
+          nullable: true
+          title: IPアドレス
+        user_agent:
+          type: string
+          readOnly: true
+          maxLength: 300
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created
+      - file
+      - ip_address
+      - refusal
+      - served
+      - user_agent
     Group:
       type: object
       description: Group（permissionの集まり）。ユーザーへの割り当てでは名前で指定する
@@ -9828,6 +9981,58 @@ components:
       - manageable_departments
       - usable_departments
       - username
+    Notification:
+      type: object
+      description: 画面の通知（本人の通知欄）。タスクの名前とRunの状態だけを返す
+      properties:
+        id:
+          type: string
+          readOnly: true
+        event_type:
+          allOf:
+          - $ref: '#/components/schemas/NotifyEventEnum'
+          readOnly: true
+        event_display:
+          type: string
+          readOnly: true
+        task:
+          type: string
+          readOnly: true
+        task_name:
+          type: string
+          readOnly: true
+          title: タスクの名前
+          maxLength: 200
+        run:
+          type: string
+          readOnly: true
+        read:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 既読にした日時
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created
+      - event_display
+      - event_type
+      - id
+      - read
+      - run
+      - task
+      - task_name
+    NotificationCount:
+      type: object
+      properties:
+        unread:
+          type: integer
+          readOnly: true
+      required:
+      - unread
     NotifyContentEnum:
       enum:
       - status
@@ -10277,6 +10482,25 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ModelProfileVersion'
+    PaginatedNotificationList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Notification'
     PaginatedRunList:
       type: object
       required:
@@ -10670,12 +10894,11 @@ components:
         url:
           type: string
           writeOnly: true
-          minLength: 1
-          description: 送り先のURL（https）。表示では返さない
+          description: 送り先のURL（https）。Webhook・Zapierでは必須、画面の通知では送らない。表示では返さない
           maxLength: 2000
         allows_sensitive_results:
           type: boolean
-          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい
+          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面への参照だけなので、この指定によらず機密のタスクにも使える
         change_reason:
           type: string
           writeOnly: true
@@ -14320,9 +14543,9 @@ components:
       - scope
       - scope_display
       - suspended
-    UserStreamEvent:
+    UserRunStatusEvent:
       type: object
-      description: ログインユーザー宛ての通知：自分のRunの状態の変更
+      description: 自分のRunの状態の変更
       properties:
         type:
           type: string
@@ -14342,6 +14565,26 @@ components:
       - conversation
       - status
       - sequence
+    UserNotificationEvent:
+      type: object
+      description: 画面の通知が届いた（中身は app/v1/notifications/ で読む）
+      properties:
+        type:
+          type: string
+          enum:
+          - notification
+      required:
+      - type
+    UserStreamEvent:
+      description: ログインユーザー宛ての通知
+      oneOf:
+      - $ref: '#/components/schemas/UserRunStatusEvent'
+      - $ref: '#/components/schemas/UserNotificationEvent'
+      discriminator:
+        propertyName: type
+        mapping:
+          run.status: '#/components/schemas/UserRunStatusEvent'
+          notification: '#/components/schemas/UserNotificationEvent'
   securitySchemes:
     cookieAuth:
       type: apiKey

@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-10-29（配信の土台とWebhook・ZapierのAdapter（⑥a）、PR #55 の中。このコミットの後にマージする）
+- 最終更新：2026-10-29（出口へ渡す成果物の期限付きURLと画面の通知（⑥b）、PR #56 の中。このコミットの後にマージする）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -54,6 +54,7 @@
 | #51 | タスクの入口（Webhook。design.md §4.2、authorization.md §5.5）：`task` アプリに TriggerBinding（タスクと1対1、作成時に固定。鍵はSHA-256と見分け用の先頭だけを保存し、作成時と作り直したときに一度だけ返す。停止・削除）・不変の版 TriggerBindingRevision（イベントIDの場所、項目の取り出し（タスクの入力の項目の名前とJSONのpath）、payloadの上限（既定1MiB・最大10MiB））・TriggerReceipt（重複のキーとpayloadのハッシュ。Runと同じtransactionで作る）。管理API `v1/trigger_bindings`（連携の管理者。`tasks`（付けられるタスク）・`rotate_key`・`suspend`・`resume`、`revisions`・`receipts`）。受け口 `POST hooks/v1/tasks/{task}/`（`Authorization: Bearer`。JSON・フォームの値・テキスト。payloadを `webhook_payload.json` 等として /workspace/input に置く。重複は入口で指定したイベントID・`Idempotency-Key`・推奨の形式の `event_id`。推奨の形式の `inputs`。202とrun_id、再送は200、誤りは決まったコード）と状態を確かめる口 `GET hooks/v1/tasks/{task}/runs/{run_id}/`（状態と失敗のコードだけ）。Webhookで起動するRunの実行主体はシステム用のユーザー（`user.system_user()`。ログインできず、ユーザーの管理APIに出さない）。`RunLaunch.WEBHOOK`、初期のGroup「連携の管理者」、タスクの詳細の `triggers`、nginxの `/api/hooks/` の上限を10MiBに |
 | #52 | Webhookのファイルの取り込み（design.md §4.2）：タスクの入力の型「ファイル」（値は `/workspace/input/...` のパス。テンプレートと入力のJSONにはパスが入る）。Webhookで `multipart/form-data` を受け付ける（ファイル以外はフォームの値と同じ。付けたファイルはどのフィールドのものもすべて最初の発言の添付にし、payloadのJSONには名前・置いたパス・大きさ・SHA-256を書く。項目の取り出しは `$.フィールドの名前` でファイルを指す。推奨の形式は `inputs[名前]` を `inputs` の値にし、項目に結び付かないファイルは `files`）。不正なUTF-8は置換文字にせず断る。手動実行のAPIもmultipartを受け付ける（`inputs` はJSONの文字列、ファイルは項目の名前で付ける。nginxの本文の上限を添付と同じ100mに）。URLの取得は作らない（利用者と決めた） |
 | #55 | 結果の配信の土台（design.md §4.3〜§4.5、authorization.md §5.5・§7）：`delivery` アプリに出口 Destination（種類はwebhook・zapier、使ってよい範囲（部門・全社・システム）と部門は作成時に固定、署名の鍵は暗号化して保存し作成時と作り直したときに一度だけ返す、停止・削除）・不変の版 DestinationRevision（送り先のURL（暗号化して保存し、画面にはホストと末尾だけ）、機密の結果を送ってよいか）、配信 Delivery（配信のOutboxを兼ねる。キーはRunのイベントと出口の版）・DeliveryAttempt。タスクの版に結果の通知（出口・通知するイベント（`run.completed`・`run.failed`・`run.cancelled`）・通知の内容（`status`・`result`・`status_and_result`））を足し、Runは受付時に出口の版を固定する（`Run.destination_revision`。出口を今は使えなければ受け付けない）。Runが終わると `Run.set_status()` と同じtransactionで配信を作り、送る内容（共通の形。決まった失敗のコードだけで、失敗の理由の本文は含めない）を保存する。Q2の `delivery.tasks.send_delivery` が送る直前に出口とタスクを確かめ直し（出口の停止・削除・範囲の外・機密の結果を送れない、タスクの停止・削除なら取消）、Standard Webhooksの署名を付けてPOSTする。送り先はhttpsだけで、名前を引いた先が社内のアドレスなら登録時にも送信時にも断る（`YORIKI_DELIVERY_ALLOWED_NETWORKS` で許せる）。確かめたアドレスへ接続を固定し（`runtime/registry.py` の `PinnedTransport` を `utils/http.py` へ移して共有）、リダイレクトは辿らない。一時的な障害は1分〜3時間の間隔で6回まで、送った後に応答が失われた・配信中にWorkerが止まったものは確認待ち（自動では送り直さない）。`reconcile_deliveries`（Q2のSchedule、1分ごと）。管理API（`v1/destinations`、版の履歴、停止・再開・署名の鍵の作り直し）、タスクの編集画面の候補（`app/v1/destinations/`）、タスクのRunの配信の履歴と送り直し（`app/v1/tasks/{id}/deliveries/`）。Webhookの入口の作成・変更と入口のあるタスクの保存で、`run.failed` を含む結果の通知を必須にした。初期のGroup「連携の管理者」に出口のpermissionを足した |
+| #56 | 出口へ渡す成果物と画面の通知（design.md §4.4、authorization.md §5.5・§7.1）：業務結果のSchemaのファイルの項目（ルートの項目の `"format": "file"`。値は `/workspace/output` の中のパス。`harness/result_files.py`。モデルへは `format` を外して渡し、`submit_result` でファイルがあるかをSandboxの `stat` で確かめる。ルートの項目以外はSkill・タスクの保存で断る）、送る内容の `files`（指した成果物だけ）と、送るたびに発行する取得用のURL（`/api/files/<token>/`。FileLink：tokenのハッシュ、1時間・3回まで。取得のたびに出口とタスクを `delivery/checks.py` の `send_problem()` で確かめ直す。汎用のWebhookでは出口の署名の鍵を `Authorization: Bearer` で求める。取得の記録 FileFetch を配信の履歴に出す。S3は60秒の署名付きURLへリダイレクト。以前の署名だけのtoken（`artifact/download.py` の `issue_file_token`）は外した）、`YORIKI_PUBLIC_URL`、出口の種類 in_app と個人の範囲（個人のタスクで共通の画面の通知を `Destination.personal_in_app()` が作る）、画面の通知 Notification（`delivery/in_app.py`。受け手は送るときに決める）、通知欄のAPI（`app/v1/notifications/`：一覧・`unread_count`・`read`・`read_all`）、ログインユーザー宛ての通知の `notification`（`UserStreamEvent` を `run.status` との union にした）、サイドバーの通知のボタン（`NotificationBell`。未読の数、最近の20件、開いた通知を既読に） |
 
 確認済みのこと：
 
@@ -100,7 +101,7 @@
 - CI：e2e、本体のイメージのレジストリへのpush（使うレジストリが未決。design.md §13）、Sandboxのイメージのmulti-arch（arm64）のビルドとDocker Hubへのpush・脆弱性スキャン（公開先のorgが未決）。
 - Compose：channel-listener（Channelの受信を実装するとき）。
 - 管理コマンド：`drain_workers`・`resume_workers`（Workerの実行を実装するとき）。
-- 業務のアプリは `llm`、`conversation`、`run`、`harness`、`stream`、`usage`、`runtime`（Runtime Profile、Launcher）、`artifact`、`skill`・`resources`、`connector`（土台だけ）まで。`plugin`、`task`、`delivery` 等（backend-conventions.md §1.2）は、まだない。
+- 業務のアプリは `llm`、`conversation`、`run`、`harness`、`stream`、`usage`、`runtime`（Runtime Profile、Launcher）、`artifact`、`skill`・`resources`、`connector`、`task`、`delivery` まで。`plugin`、`worker` 等（backend-conventions.md §1.2）は、まだない。
 - 権限で後回しにしたもの：システムのSkillの詳細を管理画面の中に置く（今は `/manage/system_skills` の一覧から業務画面の `/skills/[id]` を開く）、個人Connector（会話でのConnectorの段階）、業務画面の `/connectors`、ユーザーの更新APIでの所属の書込み（今は部門の所属のAPIで付け外しする。防止策は同じ）、部門の「無効」（今は論理削除で、所属と履歴は残る）、部門のものを別の部門・全社へ移す操作（authorization.md §9）、管理画面の詳細の入力欄を見るだけの人には止める（今は保存のボタンを出さないだけ。ユーザーは止める）。
 - Connectorで後回しにしたもの：Plugin Registry（`plugin` アプリ。今は種別からAdapterをコードで選ぶ。タスク・配信のPluginとあわせて作る）、Skillのスクリプトからの呼出し（`yoriki_connector`）、個人Connector、業務画面の `/connectors`、`datasource_*` を並べて実行する（今は同時実行の枠と記録をDBで扱うので1つずつ）、実行中の会話で `@` を指定したメッセージを今の作業に取り込む（今は次の依頼）、会話のConnectorの結果の件数・合計の大きさの上限（今は保持期限の切れたものを置かないだけで、Attemptごとに残りをすべて置く。添付とあわせて決める）、1つのRunからの呼出しの回数・頻度の上限（design.md §4.9.6）、出口（Destination）の機密のフラグ（タスク・配信の段階。design.md §4冒頭）、SQL ServerのSNAPSHOT分離（DB側で有効なら使う。design.md §4.9.2）、MariaDB（MySQLの `MAX_EXECUTION_TIME` がない。試していない）、HTTP・SharePoint・Google Drive・MCPのConnector、書込みの操作。PostgreSQLの証明書の確認（`verify-full`）は、OSの証明書（`sslrootcert=system`。libpq 16以降）を使い、社内のCAの証明書を指定する項目はまだない。PyMySQLは1.2.1〜1.2.3の不具合（作ったばかりのユーザーがTLSなしで初めてログインすると失敗する）を避けて1.2.0に固定している（`api/pyproject.toml`）。直った版が出たら上げる。
 - Skillで後回しにしたもの：実行中のRunでSkillを最新の公開版へ切り替える依頼（design.md §3.2）、Resource Collection、MD・CSV・PPTX以外の形式（XLSX・DOCX・PDF等）の検証、PPTXの画像としてのプレビュー（LibreOfficeを使わない方法が未決。design.md §7.6）、本文（説明・手順・Schema）の版の差分の表示（今は変わった項目名だけ。資料の差分は #40 で表示）、公開せずに捨てたDraftの資料の原本の回収、共通Skillから個人用を派生させる操作、Draftを開いた後に別の版が公開されたときの取り込み（今は破棄して開き直す）、画面のToolの選択肢と説明（今はフロントエンドに `harness.tools.ALL_TOOLS` と同じ一覧を持つ。APIで返すようにする）。
@@ -123,12 +124,12 @@
 - 認証プロキシの裏に置く場合は、前段のnginxが利用者のIPアドレスを `CF-Connecting-IP` 等で解決して `X-Forwarded-For` を上書きしているかを、導入先で確かめる（deployment.md §8.6）。解決していないと、ログインの試行回数の制限で、多くの利用者が同じIPアドレスとして数えられる。
 - ハーネスで後回しにしたもの：予算の上限の強制（今は利用量を記録するだけ。クオータの設定とあわせて作る）、圧縮の1・2段（大きいTool結果の退避と置き換え。harness.md §9.1）、添付ファイル（Artifactの段階）。
 - フロントエンドのSPAを静的なファイルにして `yoriki-api` のイメージに入れ、`frontend` のコンテナをなくす（`ssr: false` なのでNode.jsのサーバーは要らない。アプリのイメージが1つになる）。
-- 配信で後回しにしたもの：期限付きのファイルURL（`/api/files/<token>/`）と成果物の受渡し、画面の通知（in_app。通知欄のModel・API・画面）、結果を確かめる画面へのリンク（タスクのRunの画面（⑦）ができてから）、通知Skill（`prepare_notification`）と会話からの `request_delivery`、出口の接続の確認（試しに送る操作）、Plugin Registry（今は出口の種類からAdapterをコードで選ぶ）、送る直前の確認と送信の間の停止（確かめた後に停止しても、始めた1回の送信は止めない。出口の行をHTTPの間ロックし続けないため）、配信と配信の試行の保持期限と清掃、egressのproxy（`HTTPS_PROXY`。確かめたアドレスへ直接つなぐので使わない。proxyが要る導入先が出たら、proxyの側で宛先を絞る形を考える）、通知の内容の `result` と `status_and_result` の違い（今は同じ。結果を確かめる画面へのリンクを足すときに `status` 側に入れる）、`run.waiting_user`（対話の連携の段階）、出口の画面（⑦）。
+- 配信で後回しにしたもの：保存先の設定の誤りの検出（apiとWorkerを別のサーバーにしたのにLocal保存のままだと、Workerが書いた成果物をapiが読めず、取得が失敗するだけ。起動時の確認はまだない。deployment.md §8はS3を必須にしている）、結果を確かめる画面へのリンク（タスクのRunの画面（⑦）ができてから。画面の通知からのリンクも）、通知の一覧の画面（今はサイドバーの最近の20件だけ）と通知の保持期限・清掃、ファイルの取得の記録（FileLink・FileFetch）の保持期限と清掃、渡すファイルの数・合計の大きさの上限（今は回収の上限（`MAX_OUTPUT_FILES`）だけ）、汎用のWebhookへファイルを本文に載せて送る方法（外へ開く口を増やしたくない導入先が出てきたら）、実際のZapierでのファイルの取得の確認、Cloudflareの裏での `/api/files/` のrate limitの送り元のIPアドレス（nginxの `real_ip`。`/api/hooks/` も同じ）、通知Skill（`prepare_notification`）と会話からの `request_delivery`、出口の接続の確認（試しに送る操作）、Plugin Registry（今は出口の種類からAdapterをコードで選ぶ）、送る直前の確認と送信の間の停止（確かめた後に停止しても、始めた1回の送信は止めない。出口の行をHTTPの間ロックし続けないため）、配信と配信の試行の保持期限と清掃、egressのproxy（`HTTPS_PROXY`。確かめたアドレスへ直接つなぐので使わない。proxyが要る導入先が出たら、proxyの側で宛先を絞る形を考える）、通知の内容の `result` と `status_and_result` の違い（今は同じ。結果を確かめる画面へのリンクを足すときに `status` 側に入れる）、`run.waiting_user`（対話の連携の段階）、出口の画面（⑦）。
 - 招待のリンクはYorikiからメールで送らない（画面でコピーして渡す）。メールの送信は必要になった時点で追加する（design.md §10.0）。
 
 ## 4 次の作業
 
-**今の状態（2026-10-29）**：下の2の⑥（配信）を、利用者と決めたとおり⑥a・⑥b・⑥cに分けて進めている。⑥a（出口・配信の土台とWebhook・ZapierのAdapter。backendだけ）は #55 でマージ済み。次は⑥b（期限付きのファイルURLと画面の通知）。⑤（タスクとWebhookでの起動）は⑤a #49・⑤b #51・⑤c #52 でマージ済み（Tool結果を信頼しない内容として囲む作業は #50）。③b（Skillが宣言するConnectorと機密のSkill）は #48 でマージ済み。Skillの段階（下の1）は #41 までで揃った。下の2（Connectorとタスク・配信）は、①（Connectorの土台）が #42、②（Connectorの管理画面）が #44、③a（会話でのConnector）が #47、③bが #48 で済んだ。#44 と #47 の間に、利用者の指示で権限の設計をやり直し、#45（文書だけ）で [authorization.md](authorization.md) にまとめ、#46 で実装を合わせた。権限は authorization.md を正とする（design.md §3.6・§4.1・§4.9.1・§10.0はその要約）。
+**今の状態（2026-10-29）**：下の2の⑥（配信）を、利用者と決めたとおり⑥a・⑥b・⑥cに分けて進めている。⑥a（出口・配信の土台とWebhook・ZapierのAdapter。backendだけ）は #55 でマージ済み。⑥b（出口へ渡す成果物の期限付きURLと画面の通知）は #56（PRの前のCodexのレビューは終えた）。⑥bの後は⑥c（通知Skill）。⑤（タスクとWebhookでの起動）は⑤a #49・⑤b #51・⑤c #52 でマージ済み（Tool結果を信頼しない内容として囲む作業は #50）。③b（Skillが宣言するConnectorと機密のSkill）は #48 でマージ済み。Skillの段階（下の1）は #41 までで揃った。下の2（Connectorとタスク・配信）は、①（Connectorの土台）が #42、②（Connectorの管理画面）が #44、③a（会話でのConnector）が #47、③bが #48 で済んだ。#44 と #47 の間に、利用者の指示で権限の設計をやり直し、#45（文書だけ）で [authorization.md](authorization.md) にまとめ、#46 で実装を合わせた。権限は authorization.md を正とする（design.md §3.6・§4.1・§4.9.1・§10.0はその要約）。
 
 **#45 の議論の要点**（authorization.md にすべて書いてある）：
 - 範囲は「所有と管理の単位」（個人・部門・全社・システム）。部門のものは1つの部門に属する。システムのSkill・Connector・タスクは基盤の管理が扱い、会話には出さない。
@@ -230,7 +231,7 @@
 **⑥で利用者と決めたこと**：PRは「⑥a 出口（Destination）・通知の設定と版、完了時の配信のOutbox・Delivery・DeliveryAttempt・再試行、webhook・zapierのAdapter（ファイルなし） → ⑥b 期限付きのファイルURL（`/api/files/<token>/`）と画面の通知（in_app。通知欄のModel・API・画面） → ⑥c 通知Skill（`prepare_notification`）」に分ける。出口の機密のフラグは連携の管理者が付け、既定はオフ（画面の通知は認証の要る画面へのリンクだけなので、フラグがなくても機密のタスクの通知に使える、を⑥bで作る）。「Webhookで起動するタスクには失敗の通知先が必須」は⑥aで保存時に確かめる。webhook・zapierの宛先に社内のアドレスは既定で断り、基盤管理者が環境変数（`YORIKI_DELIVERY_ALLOWED_NETWORKS`）で許すネットワークを指定できる。PRの後に確かめたこと：通知の設定はタスクの版から出口を外部キーで指す形でよい。出口は使い回さず、範囲は1つ（部門の出口は1つの部門。Connectorと同じ形）にし、複数の部門・範囲で使う送り先は出口を範囲ごとに作る。
 
 **⑥aで私（Claude）の判断で決めた点**（異論があれば直す）：
-- 通知の設定（出口・通知するイベント・通知の内容）は、NotificationBindingを別のModelにせず、タスクの版の項目にした（1つのタスクに1つで、通知Skillもまだないため。通知Skillを入れる⑥cで見直す）。タスクの管理者が、タスクの範囲で使ってよい出口から選ぶ（部門のタスクはその部門の出口、全社は全社、システムはシステムだけ。個人の出口（画面の通知・本人へのDM）はまだないので、個人のタスクには通知を付けられない）。
+- 通知の設定（出口・通知するイベント・通知の内容）は、NotificationBindingを別のModelにせず、タスクの版の項目にした（1つのタスクに1つで、通知Skillもまだないため。通知Skillを入れる⑥cで見直す）。タスクの管理者が、タスクの範囲で使ってよい出口から選ぶ（部門のタスクはその部門の出口、全社は全社、システムはシステムだけ。⑥aの時点では個人の出口がなく、個人のタスクには通知を付けられなかった。⑥bで、個人のタスクで共通の画面の通知を足した）。
 - Runは受付時に出口の版を固定し、出口を今は使えなければ受け付けない（Webhookでは409の `task_unavailable`）。送る直前には、固定した版のURLへ送るが、出口の停止・削除・範囲・機密は今の状態で確かめ直す（固定した版と今の版のどちらかが機密の結果を許さなければ送らない）。タスクの停止・削除・部門の無効化・個人のタスクの持ち主の無効化でも、まだ送っていない配信を送らない（authorization.md §6。停止で止めたRunの `run.cancelled` も、停止中は送らない）。
 - 送る内容はRunが終わったときに組み立てて保存し、送り直しでも変えない（`event_id` は「RunのID.イベントの順序」）。失敗の理由の本文は送らず、決まった失敗のコードだけ（Webhookの送り元が状態を確かめる口と同じ）。⑥aでは成果物とリンクがないので、通知の内容の `result` と `status_and_result` は同じになる。
 - 署名はStandard Webhooksの形（`webhook-id`・`webhook-timestamp`・`webhook-signature`）。鍵は出口ごとに作り、版に入れない（作り直すと、まだ送っていない配信も新しい鍵で署名する）。
@@ -246,10 +247,23 @@
 
 - レビュー：PRの前に回した（利用者の指示：AIのレビューが固まってからPRで人間がレビューする）。`codex review --base main` は6回目・7回目で指摘なし、敵対的なレビューは7回目でapprove。指摘（配信の直前のタスクの停止の確認、不正なIPv6のURL、送るときの名前解決の失敗の再試行、持ち時間の切れの後に遅れて届いた受付確認、複数のアドレスを順に試す、応答の本文を読まない、前の送信が終わるまで送り直さない、持ち時間が切れた試行を終わったことにしない、httpxのログに送り先のURLが出る、authorization.md の実装状況、配信キーの記述）を直した。直さなかったもの（手動実行した人の権限、部門の付け替えの後の配信の履歴）は、上の判断に理由を書いた。
 
-**次の作業**：⑥b（期限付きのファイルURLと画面の通知）。下の「⑥bの始め方」から始める。
+**⑥bで利用者と決めたこと**：出口へ渡すのは、業務結果のSchemaで指定した成果物だけ（Runの成果物すべては渡さない）。ファイルはURLで渡す（利用者はファイルをPOSTの本文に載せる方法も考えた。どちらでも中身は出口へ渡るので、URLで増える危険は「漏れたURLで期限の間に取られる」と「認証プロキシを通さない口が増える」だけ、と整理し、期限1時間・回数の上限・ハッシュで保存・出口とタスクの確かめ直し・取得の記録・汎用のWebhookでの鍵で抑える形で「とりあえずこれで」となった。Pythonでファイルを返す速度は、Localはnginxの `X-Accel-Redirect`、S3は署名付きURLへのリダイレクトなので、Pythonはtokenの確認だけ）。URLの期限は1時間。画面の通知の受け手は、手動実行なら実行した人、入口から動いたRunならタスクを管理できる人全員。個人のタスクの出口は、⑥bでは画面の通知だけを作る。
 
-⑥bの始め方：design.md §4.4（成果物の受渡し。期限付きのファイルURL）・§4.3（in_appの完了通知）、authorization.md §5.5（個人の出口は画面の通知と本人へのDMだけ）・§7.1（期限付きURLは出口へ渡すものだけ、取得のたびにtokenと出口を確かめ、出口を止めたら未使用のtokenも失効）、deployment.md §4.1（`/api/files/<token>/`）を読み、⑥aの `delivery` アプリ（`payload.build_payload()`、`tasks.send_delivery()`、`Destination.problem_for()`）と `artifact` アプリ（`download.py`、S3の署名付きURL）を確かめてから、次を利用者に確かめる：ファイルURLの期限（例：24時間）と、どの成果物を渡すか（業務結果のSchemaで指定したもの・Runの成果物すべて等）、画面の通知の受け手（部門・全社のタスクは管理できる人全員か、起動した人か）、通知欄の画面の形（ヘッダーの通知・既読）、個人のタスクの出口（画面の通知だけを⑥bで作るか）。
+**⑥bで私（Claude）の判断で決めた点**（異論があれば直す）：
+- ファイルの項目は、業務結果のSchemaのルートの項目（文字列か、文字列の並び）にだけ書ける `"format": "file"` にした（JSON Schemaの標準の書き方に沿い、入れ子にすると取り出しと検査が複雑になるため）。値の相対パスは `/workspace/output` からとみなす。隠しファイル・symlinkは成果物として回収しないので、`submit_result` で断る。
+- 送る内容の `files` は `result` とは別の並びにし、`result` の中のパスはそのまま残す（受け手は `field` で対応が分かる）。業務結果を含まない通知の内容（`status`）では `files` を入れない。保持期限で消えた成果物は、`url` を空にして送る。
+- tokenは送信の試行ごと・ファイルごとに作る（送り直しでは新しいURL。前のURLも期限までは使える）。取得の回数は3回まで（Zapierはステップごとに取りに来ることがある）。断った取得も理由を付けて記録し、取得した側には理由を見せない（鍵がないだけなら401、それ以外は404）。
+- 汎用のWebhookの取得では、出口の署名の鍵そのものを `Authorization: Bearer` で送らせる（受け手は署名の確認のために鍵を持っているので、追加の設定が要らない）。
+- 画面の通知（Notification）は `delivery` アプリに置いた。中身はタスクの名前（送ったときのもの）とイベントだけで、業務結果は載せない。受け手がいなければ配信を失敗にする。送り直しても同じ人に重ねない。基盤管理者（superuser）はすべてのpermissionを持つので、部門・全社のタスクの「管理できる人全員」に入る。
+- 個人のタスクの出口は、出口の行を1つだけYorikiが作る（作成者は空。管理の画面・APIでは扱わない）。モデルを変えずに、タスクの版から出口を外部キーで指す形を保つため。
+- 通知の到着は、ログインユーザー宛ての通知（`notification`）で知らせ、画面は未読の数を読み直す。通知のボタンはヘッダーがないので、サイドバーの「Skill」の下に置いた。
 
+- レビュー：PRの前に回した。`codex review --base main` は9回目で指摘なし、敵対的なレビューは6回目でapprove。`codex review --base main` と敵対的なレビューの1回目の指摘（回収の上限を超えた・`submit_result` の後に消したファイルで、出口へ渡す成果物が黙って欠ける・前のRunの古いファイルを渡す → 完了の前に、完了時の `/workspace/output` の中身と照らして確かめ、欠けていれば `no_result` で失敗。回収のときに今あるファイルの中身を記録する。保存先から読めなかった取得を「返した」と記録して回数も減らす → 返せたときだけ記録し、503。権限を失った後も通知が見える → 通知のAPIをRunの結果を見られる人で絞る）を直した。2回目の指摘（署名付きURL・X-Accel-Redirect では保存先にないファイルも「返した」と記録する → 返す前に `stat` で確かめる。`patternProperties` 等の中の `format: file` を見逃す → Schemaの中をすべて辿って、許した位置以外を断る。削除済みの成果物を回収の既知のファイルに入れていて、同じ中身のファイルを回収し直さない → 削除済みを外す）も直した。3回目は、敵対的なレビューはapprove。普通のレビューの指摘（既読を続けて押すと未読の数を二重に減らす → サーバーから読み直す。authorization.md に画面の通知の機密の例外がない → 書いた）を直し、ストリーミングの途中の失敗を「返した」と記録する点は、nginx・S3から送る途中の失敗はapiから分からないので、「返した」は確かめて返し始めたことと design.md に明記した。4回目の普通のレビューの指摘（ログアウト・別の人のログインで前の人の通知が残る → ログインユーザーが変わったら消す。通知欄を開いたまま再接続しても一覧を読み直さない → 読み直す）も直した。5回目の指摘（取得のたびのLocal保存の `stat()` がファイル全体を読む → 中身を読まない `exists()` を足した。読んでいる途中に利用者が変わると前の人への応答が反映される → 要求を始めたときの利用者と照らして捨てる）も直した。6回目の普通のレビューは指摘なし。敵対的なレビューの4回目の指摘（tokenがnginx・uvicornのアクセスログに残る → `/api/files/` だけtokenを伏せたログの形式にし、uvicornと `django.request` はログのフィルターで伏せる。手元でuvicornを起動して、3つのログとも伏せられることを確かめた）を直した。7回目の普通のレビューは指摘なし。敵対的なレビューの5回目の指摘（HEADでも取得の回数を使う → `/api/files/` はGETだけ。同じ利用者でも要求が重なると古い応答で通知欄が巻き戻る → 最後に始めた要求の応答だけを反映する世代番号）を直した。8回目の普通のレビューの指摘（続けて既読にすると後の応答を捨てる → 既読の操作は利用者が変わったときだけ捨てる。⑥aの判断の項の個人のタスクの古い記述）を直した。
+- 確かめたこと：手元でapiとフロントエンドを起動し、全社の画面の通知の出口とタスクを作って、完了・失敗の通知がサイドバーのボタンに未読の数で出ること、開くと一覧が出て開いた通知が既読になること、画面を開いたまま通知が届くと未読の数がすぐ増えることを、Playwrightで確かめた（作ったデータとQ2のキューは消した）。実際のZapier・S3での取得は、まだ試していない。
+
+**次の作業**：#56 を人間のレビューとCIを経てマージする。その後は⑥c（通知Skill）。
+
+⑥cの始め方：design.md §4.3（通知Skill・Notification Binding・`prepare_notification`、候補と自動通知を同じ配信キーにまとめる、整形の失敗で業務を失敗に戻さない）・§4.5（配信キーにNotification Bindingの版を加える）、authorization.md §5.4（タスクが固定するもの）を読み、⑥aでタスクの版の項目にした通知の設定を、別のModel（NotificationBinding）に分けるかを利用者に確かめる。あわせて、通知Skillが選べる成果物（今はSchemaのファイルの項目だけ）と、会話からの `request_delivery` を⑥cに含めるかも確かめる。
 
 design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにして進める。上から順に着手する（利用者から別の指示がなければ、上から）。提案する順番：
 
@@ -261,7 +275,7 @@ design.md §12の第1段階を、1つの目的ごとに1つのPull Requestにし
    - ④ Skillのスクリプトからの呼出し（`yoriki_connector` とUnixドメインソケット。design.md §4.9.6）。後回しにしてもよい（最初の業務は `datasource_query` で動く）。
    - ⑤〜⑦の権限（範囲、実行許可、入口・出口、結果とログの見え方）は authorization.md §5.3〜§7 に従う。
    - ⑤ タスクとWebhookでの起動（backend。⑤a（#49）・⑤b（#51）・⑤c（#52）に分けた。上の「⑤で利用者と決めたこと」）：TaskDefinition・TriggerBindingと不変の版、Webhookの受け口（APIキーで認証、送り元のイベントIDか `Idempotency-Key` での重複の判定、項目の取り出し、payloadのファイル化、202とrun_id、状態を確かめる口）、TriggerReceipt・Runを同じtransactionで作る。
-   - ⑥ 配信（⑥a・⑥b・⑥cに分けた。上の「⑥で利用者と決めたこと」）：Destination・通知の設定・Delivery・DeliveryAttempt、完了時の配信Outbox、再試行のDispatcher、webhook・zapierのAdapter、標準の形式（⑥a）→ 期限付きのファイルURL、in_app（⑥b）→ `prepare_notification`・`request_delivery`（⑥c）。
+   - ⑥ 配信（⑥a・⑥b・⑥cに分けた。上の「⑥で利用者と決めたこと」。⑥aは #55、⑥bは #56）：Destination・通知の設定・Delivery・DeliveryAttempt、完了時の配信Outbox、再試行のDispatcher、webhook・zapierのAdapter、標準の形式（⑥a）→ 期限付きのファイルURL、in_app（⑥b）→ `prepare_notification`・`request_delivery`（⑥c）。
    - ⑦ タスク・Destinationの画面：一覧と編集（サンプルのpayloadで取り出しを試す）、自動実行の履歴と配信の状態、「通知を再試行」、チャットから指定したタスクを起動する。
    - 範囲の外：HTTP・SharePoint・MCPのConnector、Teams・Slack・DiscordのInteraction Binding（下の4）。
 3. **最初の2つの業務**（design.md §13。Skillとタスクとして作る）：請求書PDF → 社内DBと照合 → 取込用のCSV、契約書レビュー → Zapierへ結果。

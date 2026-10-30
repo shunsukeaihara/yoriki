@@ -6,9 +6,9 @@
 
 from typing import Any
 
-USER_STREAM_EVENT = {
+USER_RUN_STATUS_EVENT = {
     "type": "object",
-    "description": "ログインユーザー宛ての通知：自分のRunの状態の変更",
+    "description": "自分のRunの状態の変更",
     "properties": {
         "type": {"type": "string", "enum": ["run.status"]},
         "run": {"type": "string"},
@@ -17,6 +17,26 @@ USER_STREAM_EVENT = {
         "sequence": {"type": "integer"},
     },
     "required": ["type", "run", "conversation", "status", "sequence"],
+}
+USER_NOTIFICATION_EVENT = {
+    "type": "object",
+    "description": "画面の通知が届いた（中身は app/v1/notifications/ で読む）",
+    "properties": {"type": {"type": "string", "enum": ["notification"]}},
+    "required": ["type"],
+}
+USER_STREAM_EVENT = {
+    "description": "ログインユーザー宛ての通知",
+    "oneOf": [
+        {"$ref": "#/components/schemas/UserRunStatusEvent"},
+        {"$ref": "#/components/schemas/UserNotificationEvent"},
+    ],
+    "discriminator": {
+        "propertyName": "type",
+        "mapping": {
+            "run.status": "#/components/schemas/UserRunStatusEvent",
+            "notification": "#/components/schemas/UserNotificationEvent",
+        },
+    },
 }
 
 
@@ -41,7 +61,10 @@ def _stream(description: str, tag: str, schema_ref: str, parameters: list[dict[s
 
 
 def add_stream_endpoints(result: dict[str, Any], generator, request, public) -> dict[str, Any]:
-    result["components"]["schemas"]["UserStreamEvent"] = USER_STREAM_EVENT
+    schemas = result["components"]["schemas"]
+    schemas["UserRunStatusEvent"] = USER_RUN_STATUS_EVENT
+    schemas["UserNotificationEvent"] = USER_NOTIFICATION_EVENT
+    schemas["UserStreamEvent"] = USER_STREAM_EVENT
     paths = result["paths"]
     paths["/api/app/v1/stream/"] = _stream(
         "ログインユーザー宛ての通知のストリーム", "app/stream", "#/components/schemas/UserStreamEvent", []

@@ -288,7 +288,6 @@ describe('TriggerBindingPreview', () => {
     preview.mockResolvedValueOnce({ ...ok, canViewPrompt: false, prompt: null })
     preview.mockResolvedValueOnce({
       ...ok,
-      duplicate: true,
       canViewPrompt: true,
       prompt: 'ACME の請求書を確認してください。',
     })
@@ -303,8 +302,6 @@ describe('TriggerBindingPreview', () => {
     await vm.onSubmit()
     await nextTick()
     expect(wrapper.text()).toContain('ACME の請求書を確認してください。')
-    // 前に受け付けた要求と同じなら、新しいRunを作らないことを示す
-    expect(wrapper.text()).toContain('送ると前のRunを返し、新しいRunは作りません')
   })
 
   it('イベントIDだけの誤りでも断ると示し、必須のファイルの項目があれば確かめられないと示す', async () => {
@@ -383,6 +380,31 @@ describe('TriggerBindingPreview', () => {
     expect(wrapper.text()).toContain('受け付けるかは確かめられません')
     expect(wrapper.text()).toContain('実行を断られうる設定があります')
     expect(wrapper.text()).not.toContain('必須のファイルの項目')
+  })
+
+  it('前の受付と同じ要求では、権限がないとは示さずに、プロンプトを作らないことを示す', async () => {
+    preview.mockResolvedValueOnce({
+      outcome: TriggerPreviewOutcome.ACCEPTED,
+      formatError: '',
+      eventId: 'evt-1',
+      eventIdError: '',
+      values: [],
+      inputErrors: [],
+      fileInputs: [],
+      requiredFileInputs: [],
+      runProblems: [],
+      duplicate: true,
+      canViewPrompt: true,
+      prompt: null,
+    })
+    const wrapper = await mountSuspended(TriggerBindingPreview, { props: { bindingId: 'b1', settings } })
+    await wrapper.find('textarea').setValue('{"id": "evt-1"}')
+    await (wrapper.vm as unknown as { onSubmit: () => Promise<void> }).onSubmit()
+    await nextTick()
+    // 前に受け付けた要求と同じなら、新しいRunを作らないことを示す
+    expect(wrapper.text()).toContain('送ると前のRunを返し、新しいRunは作りません')
+    expect(wrapper.text()).toContain('前のRunを返すので、新しいプロンプトは作りません')
+    expect(wrapper.text()).not.toContain('権限がない')
   })
 
   it('読めないpayloadは、その理由だけを出す', async () => {

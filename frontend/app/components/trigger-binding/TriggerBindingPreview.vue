@@ -168,6 +168,10 @@ defineExpose({ onSubmit })
           <p v-if="result.outcome === TriggerPreviewOutcome.REFUSED" class="text-muted">
             {{ $t('受付で断るので、プロンプトは作りません') }}
           </p>
+          <!-- 前の受付と同じ要求は、前のRunを返すだけで、新しいプロンプトを作らない -->
+          <p v-else-if="result.duplicate" class="text-muted">
+            {{ $t('前のRunを返すので、新しいプロンプトは作りません') }}
+          </p>
           <pre
             v-else-if="result.prompt !== null"
             class="max-h-80 overflow-auto rounded-md bg-elevated p-3 text-xs whitespace-pre-wrap"

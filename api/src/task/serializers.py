@@ -29,7 +29,7 @@ from utils.serializers import ReadOnlyModelSerializer
 
 from . import checks
 from .errors import VersionConflict
-from .inputs import InputFile
+from .inputs import InputFile, clean_inputs, render
 from .models import (
     DEFAULT_MAX_PAYLOAD_BYTES,
     MAX_PAYLOAD_BYTES,
@@ -46,7 +46,7 @@ from .models import (
     TriggerKind,
     TriggerReceipt,
 )
-from .webhook import parse_path
+from .webhook import PayloadError, dedup_key, input_values, parse_path, parse_payload
 
 MAX_PROMPT_TEMPLATE = 20_000
 MAX_CHOICES = 100
@@ -809,6 +809,119 @@ class TriggerBindingKeySerializer(TriggerBindingSerializer):
 
     class Meta(TriggerBindingSerializer.Meta):
         fields = [*TriggerBindingSerializer.Meta.fields, "key"]
+
+
+class TriggerPreviewValueSerializer(serializers.Serializer):
+    name = serializers.CharField()
+    value = serializers.JSONField(help_text=_("確かめた後の値（受付時にタスクの入力になる値）"))
+
+
+class TriggerPreviewErrorSerializer(serializers.Serializer):
+    name = serializers.CharField()
+    message = serializers.CharField()
+
+
+class TriggerPreviewSerializer(serializers.Serializer):
+    """サンプルのpayloadで取り出しを試す（design.md §4.2）。保存していない受け取り方（イベントIDの場所・項目の
+    取り出し）で試せるように、それらも送れる（送らなければ今の版の値）。受付と同じ処理（payloadの読み取り、重複の
+    キー、項目の取り出しと確かめ）を通し、何も保存しない。payloadはJSONだけ（ファイルはmultipartで付けるので、型が
+    ファイルの項目は試せない）。
+
+    名前は項目の名前のまま返すため、値と誤りは名前のキーの辞書ではなく並びにする（APIクライアントのcamelCaseの
+    変換で名前を変えない）。埋め込んだ後のプロンプトは、タスクを管理できる人にだけ返す（連携の管理者がタスクの依頼文を
+    見てよいとは限らない）"""
+
+    sample = serializers.CharField(
+        max_length=MAX_PAYLOAD_BYTES,
+        trim_whitespace=False,
+        write_only=True,
+        help_text=_("サンプルのpayload（JSON）"),
+    )
+    event_id_path = serializers.CharField(
+        max_length=200,
+        required=False,
+        allow_blank=True,
+        write_only=True,
+        help_text=_("イベントIDの場所。送らなければ今の版の値"),
+    )
+    inputs = TriggerInputSerializer(
+        many=True, required=False, write_only=True, help_text=_("項目の取り出し。送らなければ今の版の値")
+    )
+
+    format_error = serializers.CharField(read_only=True, help_text=_("payloadを読めなかった理由（読めたら空）"))
+    event_id = serializers.CharField(
+        read_only=True, allow_null=True, help_text=_("重複の判定に使うイベントID（なければnull）")
+    )
+    event_id_error = serializers.CharField(read_only=True, help_text=_("イベントIDを使えない理由（使えれば空）"))
+    values = TriggerPreviewValueSerializer(many=True, read_only=True)
+    input_errors = TriggerPreviewErrorSerializer(
+        many=True, read_only=True, help_text=_("項目ごとの誤り（受付では400で断られる）")
+    )
+    file_inputs = serializers.ListField(
+        child=serializers.CharField(), read_only=True, help_text=_("型がファイルの項目（試せない）")
+    )
+    can_view_prompt = serializers.BooleanField(read_only=True)
+    prompt = serializers.CharField(
+        read_only=True, allow_null=True, help_text=_("埋め込んだ後のプロンプト（タスクを管理できる人だけ）")
+    )
+
+    def validate_event_id_path(self, value: str) -> str:
+        if value:
+            try:
+                parse_path(value)
+            except ValueError as exc:
+                raise serializers.ValidationError(str(exc)) from exc
+        return value
+
+    def preview(self, binding: TriggerBinding, user) -> dict[str, Any]:
+        data = self.validated_data
+        task = binding.task
+        revision = task.current_revision
+        definitions = revision.inputs if revision else []
+        file_inputs = [d["name"] for d in definitions if d["type"] == TaskInputType.FILE]
+        can_view_prompt = TaskDefinition.objects.manageable_by(user).filter(pk=task.pk).exists()
+        result: dict[str, Any] = {
+            "format_error": "",
+            "event_id": None,
+            "event_id_error": "",
+            "values": [],
+            "input_errors": [],
+            "file_inputs": file_inputs,
+            "can_view_prompt": can_view_prompt,
+            "prompt": None,
+        }
+        current = binding.current_revision
+        body = data["sample"].encode()
+        limit = current.max_payload_bytes if current else DEFAULT_MAX_PAYLOAD_BYTES
+        if len(body) > limit:
+            result["format_error"] = _("payloadが上限（%(limit)sバイト）を超えています") % {"limit": limit}
+            return result
+        try:
+            payload = parse_payload(body, "application/json")
+        except PayloadError as exc:
+            result["format_error"] = exc.detail
+            return result
+        event_id_path = data.get("event_id_path", current.event_id_path if current else "")
+        mappings = data.get("inputs", current.inputs if current else [])
+        try:
+            key = dedup_key(payload, event_id_path, None)
+        except PayloadError as exc:
+            result["event_id_error"] = exc.detail
+        else:
+            result["event_id"] = key.split(":", 1)[1] if key else None
+        values = input_values(payload, mappings, definitions)
+        cleaned, errors = clean_inputs(
+            [d for d in definitions if d["name"] not in file_inputs],
+            {name: value for name, value in values.items() if name not in file_inputs},
+        )
+        order = [d["name"] for d in definitions]
+        result["values"] = [{"name": name, "value": cleaned[name]} for name in order if name in cleaned]
+        # 誤りは項目の定義の順に並べ、定義にない項目（推奨の形式の inputs で送られたもの）は最後に置く
+        ranked = sorted(errors.items(), key=lambda e: order.index(e[0]) if e[0] in order else len(order))
+        result["input_errors"] = [{"name": name, "message": message} for name, message in ranked]
+        if can_view_prompt and revision is not None:
+            result["prompt"] = render(revision.prompt_template, cleaned)
+        return result
 
 
 class TriggerBindingStateSerializer(serializers.Serializer):

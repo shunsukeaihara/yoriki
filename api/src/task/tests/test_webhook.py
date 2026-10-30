@@ -31,6 +31,7 @@ from task.serializers import TriggerBindingSerializer
 from task.webhook import PayloadError, extract, parse_path, parse_payload
 from user.factories import UserFactory, grant
 from user.models import SYSTEM_USERNAME, User, system_user
+from utils.permissions import AppPermission
 
 pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("default_runtime")]
 
@@ -168,6 +169,97 @@ def test_saving_makes_a_new_version_and_detects_conflicts(api_client, integrator
     numbers = [r["number"] for r in api_client.get(f"{url}revisions/").json()["results"]]
     assert numbers == [2, 1]
     assert TriggerBindingRevision.objects.filter(binding=binding).count() == 2
+
+
+def _preview(api_client, binding, sample, **data):
+    body = {"sample": sample if isinstance(sample, str) else json.dumps(sample), **data}
+    return api_client.post(f"{BINDINGS}{binding.uid}/preview/", body, format="json")
+
+
+def test_preview_extracts_with_unsaved_settings_and_saves_nothing(api_client, app_user, integrator, webhook):
+    binding, _key = webhook
+    api_client.force_login(app_user)
+    assert _preview(api_client, binding, _payload()).status_code == 403
+
+    api_client.force_login(integrator)
+    res = _preview(
+        api_client,
+        binding,
+        {"id": "evt-9", "vendor": "ACME", "amount": "12000"},
+        event_id_path="$.id",
+        inputs=[{"name": "vendor", "path": "$.vendor"}, {"name": "amount", "path": "$.amount"}],
+    )
+    assert res.status_code == 200, res.json()
+    body = res.json()
+    assert (body["format_error"], body["event_id"], body["event_id_error"]) == ("", "evt-9", "")
+    # フォームの値のように文字で届いた整数は、受付と同じく読み替える
+    assert body["values"] == [{"name": "vendor", "value": "ACME"}, {"name": "amount", "value": 12000}]
+    assert body["input_errors"] == []
+    # 連携の管理者がタスクを管理できなければ、タスクの依頼文は返さない
+    assert (body["can_view_prompt"], body["prompt"]) == (False, None)
+    # 試すだけで、版も受付もRunも作らない
+    binding.refresh_from_db()
+    assert binding.current_revision.event_id_path == "$.event.id"
+    assert binding.current_revision.number == 1
+    assert not TriggerReceipt.objects.exists()
+    assert not Run.objects.exists()
+
+
+def test_preview_shows_the_prompt_to_task_managers(api_client, integrator, webhook):
+    binding, _key = webhook
+    api_client.force_login(grant(integrator, AppPermission.MANAGE_COMPANY_TASKS))
+    res = _preview(
+        api_client, binding, _payload(vendor="ACME"), inputs=[{"name": "vendor", "path": "$.data.vendor_name"}]
+    )
+    body = res.json()
+    assert body["can_view_prompt"] is True
+    # 受付と同じく、値は信頼しない内容として囲んで埋め込む
+    assert "ACME" in body["prompt"]
+    assert body["prompt"].endswith(" の請求書を確認してください。")
+    assert body["prompt"] != "ACME の請求書を確認してください。"
+
+
+def test_preview_reports_what_the_hook_would_refuse(api_client, integrator, webhook):
+    binding, _key = webhook
+    api_client.force_login(integrator)
+    res = _preview(api_client, binding, "{not json")
+    assert res.status_code == 200
+    assert res.json()["format_error"]
+    assert res.json()["values"] == []
+
+    # 必須の項目がない・型が合わない・イベントIDが文字でも整数でもない
+    res = _preview(api_client, binding, {"event": {"id": {"a": 1}}, "data": {"total": "abc"}})
+    body = res.json()
+    assert body["event_id"] is None
+    assert body["event_id_error"]
+    assert [e["name"] for e in body["input_errors"]] == ["vendor", "amount"]
+
+    # 取り出しを空にすると、推奨の形式の inputs と event_id を使う（定義にない項目は誤り）
+    res = _preview(
+        api_client,
+        binding,
+        {"event_id": 7, "inputs": {"vendor": "ACME", "extra": 1}},
+        event_id_path="",
+        inputs=[],
+    )
+    body = res.json()
+    assert (body["event_id"], body["values"]) == ("7", [{"name": "vendor", "value": "ACME"}])
+    assert [e["name"] for e in body["input_errors"]] == ["extra"]
+
+    # 受け取り方の誤りは、保存と同じく400
+    assert _preview(api_client, binding, "{}", event_id_path="$.event[").status_code == 400
+    assert _preview(api_client, binding, "{}", inputs=[{"name": "vendor", "path": "vendor"}]).status_code == 400
+
+
+def test_preview_skips_file_inputs_and_keeps_the_payload_limit(api_client, integrator):
+    task, _key = _file_task(api_client, integrator, max_payload_bytes=1024)
+    binding = TriggerBinding.objects.get(task=task)
+    api_client.force_login(integrator)
+    body = _preview(api_client, binding, {"inputs": {"vendor": "ACME"}}).json()
+    assert body["file_inputs"] == ["invoice"]
+    assert body["input_errors"] == []
+    body = _preview(api_client, binding, {"inputs": {"vendor": "x" * 2000}}).json()
+    assert body["format_error"]
 
 
 def test_rotating_the_key_disables_the_old_one(api_client, integrator, task, webhook):

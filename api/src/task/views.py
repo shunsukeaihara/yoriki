@@ -55,6 +55,7 @@ from .serializers import (
     TriggerBindingSerializer,
     TriggerBindingStateSerializer,
     TriggerBindingUpdateSerializer,
+    TriggerPreviewSerializer,
     TriggerReceiptSerializer,
     TriggerTaskSerializer,
 )
@@ -331,7 +332,13 @@ class AppTaskRunViewSet(TaskMixin, mixins.ListModelMixin, GenericViewSet):
 )
 class TriggerBindingViewSet(SoftDeleteMixin, ModelViewSet):
     permission_classes = [ModelPermissions]
-    action_permissions = {"suspend": "change", "resume": "change", "rotate_key": "change", "tasks": "add"}
+    action_permissions = {
+        "suspend": "change",
+        "resume": "change",
+        "rotate_key": "change",
+        "tasks": "add",
+        "preview": "view",
+    }
     lookup_field = "uid"
     queryset = TriggerBinding.objects.alive().select_related(
         "task__department", "task__current_revision", "current_revision", "created_by"
@@ -381,6 +388,19 @@ class TriggerBindingViewSet(SoftDeleteMixin, ModelViewSet):
         serializer.is_valid(raise_exception=True)
         binding = serializer.save(**changes)
         return Response(output(binding, context=self.get_serializer_context()).data)
+
+    @extend_schema(
+        description="サンプルのpayload（JSON）で、重複のキーと項目の取り出しを試す（保存しない。design.md §4.2）。"
+        "保存していない受け取り方でも試せる。埋め込んだ後のプロンプトは、タスクを管理できる人にだけ返す",
+        request=TriggerPreviewSerializer,
+        responses=TriggerPreviewSerializer,
+    )
+    @action(detail=True, methods=["post"], serializer_class=TriggerPreviewSerializer)
+    def preview(self, request, *args, **kwargs):
+        binding = self.get_object()
+        serializer = TriggerPreviewSerializer(data=request.data, context=self.get_serializer_context())
+        serializer.is_valid(raise_exception=True)
+        return Response(serializer.preview(binding, request.user))
 
     @extend_schema(
         description="入口を付けられるタスク（部門・全社・システム。まだWebhookの入口がないもの）",

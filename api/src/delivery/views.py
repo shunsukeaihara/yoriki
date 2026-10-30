@@ -17,6 +17,7 @@ from run.models import Run
 from task.models import SCOPE_PERMISSIONS
 from task.views import TaskMixin
 from user.models import Department
+from user.serializers import MinimumDepartmentSerializer
 from utils.permissions import AppUser, ModelPermissions
 from utils.views import SoftDeleteMixin
 
@@ -44,6 +45,7 @@ CONFLICT = OpenApiResponse(description="他の変更と競合した（編集を�
     tags=["manage/destination"],
 )
 @extend_schema_view(
+    list=extend_schema(parameters=[OpenApiParameter("department", str, description="部門のID")]),
     create=extend_schema(responses={201: DestinationSecretSerializer}),
     update=extend_schema(request=DestinationUpdateSerializer, responses={200: DestinationSerializer, 409: CONFLICT}),
     partial_update=extend_schema(
@@ -53,7 +55,13 @@ CONFLICT = OpenApiResponse(description="他の変更と競合した（編集を�
 )
 class DestinationViewSet(SoftDeleteMixin, ModelViewSet):
     permission_classes = [ModelPermissions]
-    action_permissions = {"suspend": "change", "resume": "change", "rotate_secret": "change"}
+    action_permissions = {
+        "suspend": "change",
+        "resume": "change",
+        "rotate_secret": "change",
+        # 作成と一覧の絞り込みで選ぶ部門の一覧（名前だけ）
+        "departments": "view",
+    }
     lookup_field = "uid"
     # 個人の出口（画面の通知）はYorikiが作り、管理では扱わない
     queryset = (
@@ -65,6 +73,12 @@ class DestinationViewSet(SoftDeleteMixin, ModelViewSet):
     filterset_fields = ["kind", "scope", "suspended"]
     search_fields = ("name",)
     ordering = ("name", "pk")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if self.action == "list" and (department := self.request.query_params.get("department")):
+            qs = qs.filter(department__uid=department)
+        return qs
 
     def get_serializer_class(self):
         if self.action in ("update", "partial_update"):
@@ -103,6 +117,27 @@ class DestinationViewSet(SoftDeleteMixin, ModelViewSet):
     @action(detail=True, methods=["post"], url_path="rotate_secret", serializer_class=DestinationStateSerializer)
     def rotate_secret(self, request, *args, **kwargs):
         return self._change_state(request, DestinationSecretSerializer, rotate_secret=True)
+
+    @extend_schema(
+        description="部門の範囲の出口の作成と一覧の絞り込みで選べる部門（有効なすべての部門。所属は問わない）。"
+        "`search` で名前を絞り込む",
+        request=None,
+        responses=MinimumDepartmentSerializer(many=True),
+        parameters=[OpenApiParameter("search", str, description="名前の一部")],
+    )
+    @action(
+        detail=False,
+        methods=["get"],
+        serializer_class=MinimumDepartmentSerializer,
+        filterset_fields=None,
+        search_fields=None,
+    )
+    def departments(self, request, *args, **kwargs):
+        qs = Department.objects.active().order_by("name", "pk")
+        if search := request.query_params.get("search", "").strip():
+            qs = qs.filter(name__icontains=search)
+        page = self.paginate_queryset(qs)
+        return self.get_paginated_response(self.get_serializer(page, many=True).data)
 
     @transaction.atomic
     def _change_state(self, request, output, **changes) -> Response:

@@ -187,7 +187,8 @@ describe('TriggerBindingForm', () => {
     vm.form.inputs.push({ name: null, path: '$.x' })
     vm.form.eventIdPath = ' $.id '
     await nextTick()
-    expect(vm.settings).toEqual({
+    expect(vm.settings).toMatchObject({
+      maxPayloadBytes: 2 * 1024 * 1024,
       eventIdPath: '$.id',
       inputs: [
         { name: 'vendor', path: '$.data.vendor_name' },
@@ -197,12 +198,17 @@ describe('TriggerBindingForm', () => {
     await vm.onSubmit()
     const data = triggerPatch.mock.calls[0]![0]
     expect(data).toMatchObject({ version: 3, eventIdPath: '$.id', maxPayloadBytes: 2 * 1024 * 1024 })
-    expect(data.inputs).toHaveLength(2)
+    // 取り出しを変えていなければ送らない（タスクから消した項目の取り出しが残っていても、ほかの設定を保存できる）
+    expect(data.inputs).toBeUndefined()
     expect(data.name).toBeUndefined()
+
+    vm.form.inputs.splice(1, 1)
+    await vm.onSubmit()
+    expect(triggerPatch.mock.calls.at(-1)![0].inputs).toEqual([{ name: 'vendor', path: '$.data.vendor_name' }])
 
     vm.form.name = '経費SaaS（本番）'
     await vm.onSubmit()
-    expect(triggerPatch.mock.calls[1]![0]).toMatchObject({ name: '経費SaaS（本番）' })
+    expect(triggerPatch.mock.calls.at(-1)![0]).toMatchObject({ name: '経費SaaS（本番）' })
   })
 })
 
@@ -224,6 +230,7 @@ describe('TriggerBindingPreview', () => {
       fileInputs: ['invoice'],
       requiredFileInputs: [],
       runProblems: [],
+      duplicate: false,
       canViewPrompt: false,
       prompt: null,
     })
@@ -252,6 +259,7 @@ describe('TriggerBindingPreview', () => {
       outcome: TriggerPreviewOutcome.ACCEPTED,
       requiredFileInputs: [],
       runProblems: [],
+      duplicate: false,
       formatError: '',
       eventId: null,
       eventIdError: '',
@@ -260,7 +268,12 @@ describe('TriggerBindingPreview', () => {
       fileInputs: [],
     }
     preview.mockResolvedValueOnce({ ...ok, canViewPrompt: false, prompt: null })
-    preview.mockResolvedValueOnce({ ...ok, canViewPrompt: true, prompt: 'ACME の請求書を確認してください。' })
+    preview.mockResolvedValueOnce({
+      ...ok,
+      duplicate: true,
+      canViewPrompt: true,
+      prompt: 'ACME の請求書を確認してください。',
+    })
     const wrapper = await mountSuspended(TriggerBindingPreview, { props: { bindingId: 'b1', settings } })
     const vm = wrapper.vm as unknown as { onSubmit: () => Promise<void> }
     await wrapper.find('textarea').setValue('{"vendor": "ACME"}')
@@ -272,6 +285,8 @@ describe('TriggerBindingPreview', () => {
     await vm.onSubmit()
     await nextTick()
     expect(wrapper.text()).toContain('ACME の請求書を確認してください。')
+    // 前に受け付けた要求と同じなら、新しいRunを作らないことを示す
+    expect(wrapper.text()).toContain('送ると前のRunを返し、新しいRunは作りません')
   })
 
   it('イベントIDだけの誤りでも断ると示し、必須のファイルの項目があれば確かめられないと示す', async () => {
@@ -289,6 +304,7 @@ describe('TriggerBindingPreview', () => {
       eventIdError: 'イベントIDは文字か整数で送ってください',
       requiredFileInputs: [],
       runProblems: [],
+      duplicate: false,
       prompt: null,
     })
     preview.mockResolvedValueOnce({
@@ -297,6 +313,7 @@ describe('TriggerBindingPreview', () => {
       eventIdError: '',
       requiredFileInputs: ['invoice'],
       runProblems: [],
+      duplicate: false,
       prompt: 'ACME を確認してください。',
     })
     const wrapper = await mountSuspended(TriggerBindingPreview, { props: { bindingId: 'b1', settings } })
@@ -355,6 +372,7 @@ describe('TriggerBindingPreview', () => {
       outcome: TriggerPreviewOutcome.REFUSED,
       requiredFileInputs: [],
       runProblems: [],
+      duplicate: false,
       formatError: 'JSONとして読めません',
       eventId: null,
       eventIdError: '',

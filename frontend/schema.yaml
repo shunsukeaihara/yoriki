@@ -14971,6 +14971,10 @@ components:
             type: string
           readOnly: true
           description: 入口・タスクの今の状態で、受付が断る・断りうる理由。入口・タスクの停止は断る。タスクの定義が保存のときの検査に通らない理由（Skillの停止等）は断りうる。定義の中身は、タスクを管理できる人にだけ詳しく返す
+        duplicate:
+          type: boolean
+          readOnly: true
+          description: 前に受け付けた要求と同じ（送ると前のRunを返し、新しいRunは作らない）
         can_view_prompt:
           type: boolean
           readOnly: true
@@ -14981,6 +14985,7 @@ components:
           description: 埋め込んだ後のプロンプト（タスクを管理できる人だけ。断る要求ではnull）
       required:
       - can_view_prompt
+      - duplicate
       - event_id
       - event_id_error
       - file_inputs
@@ -15052,6 +15057,12 @@ components:
             $ref: '#/components/schemas/TriggerInputRequest'
           writeOnly: true
           description: 項目の取り出し。送らなければ今の版の値
+        max_payload_bytes:
+          type: integer
+          maximum: 10485760
+          minimum: 1024
+          writeOnly: true
+          description: payloadの大きさの上限（バイト）。送らなければ今の版の値
       required:
       - sample
     TriggerPreviewValue:

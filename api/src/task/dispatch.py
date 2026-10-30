@@ -374,7 +374,7 @@ def receive_webhook(
     with transaction.atomic():
         _lock_task(binding)
         current, revision, key = _current_binding(binding, body, payload, idempotency_key)
-        if (existing := _received_run(current, key, payload, idempotency_key)) is not None:
+        if (existing := received_run(current, key, payload, idempotency_key)) is not None:
             return existing, False
     payload_file = InputFile(payload.file_name, payload.file_bytes)
     # 保存先への書き込みは、入口とタスクの行をロックする前に行う（保存先が遅くても、同じ入口・タスクを待たせない）。
@@ -384,7 +384,7 @@ def receive_webhook(
         with transaction.atomic():
             _lock_task(binding)
             current, revision, key = _current_binding(binding, body, payload, idempotency_key)
-            existing = _received_run(current, key, payload, idempotency_key)
+            existing = received_run(current, key, payload, idempotency_key)
             if existing is None:
                 run = start_task_run(
                     current.task,
@@ -443,9 +443,7 @@ def _current_binding(
     return current, revision, dedup_key(payload, revision.event_id_path, idempotency_key)
 
 
-def _received_run(
-    binding: TriggerBinding, key: str | None, payload: Payload, idempotency_key: str | None
-) -> Run | None:
+def received_run(binding: TriggerBinding, key: str | None, payload: Payload, idempotency_key: str | None) -> Run | None:
     """前に受け付けた同じ要求のRun。
 
     今の版と前の版のイベントIDの場所で取り出したキーのどれかで、同じ入力の受付があればそのRun（イベントIDの場所を

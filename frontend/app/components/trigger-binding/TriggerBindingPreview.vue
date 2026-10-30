@@ -4,7 +4,10 @@
  * §4.2）。保存していない受け取り方（編集中のイベントIDの場所・項目の取り出し）で試し、何も保存しない。埋め込んだ後の
  * プロンプトは、そのタスクを管理できる人にだけサーバーが返す
  */
-const props = defineProps<{ bindingId: string; settings: { eventIdPath: string; inputs: TriggerInput[] } }>()
+const props = defineProps<{
+  bindingId: string
+  settings: { eventIdPath: string; inputs: TriggerInput[]; maxPayloadBytes?: number }
+}>()
 const api = useAPI()
 const toast = useToast()
 const { t } = useI18n()
@@ -118,6 +121,14 @@ defineExpose({ onSubmit })
           variant="subtle"
           icon="i-lucide-circle-check"
           :title="$t('この要求は受け付けられます')"
+        />
+
+        <UAlert
+          v-if="result.duplicate"
+          color="info"
+          variant="subtle"
+          icon="i-lucide-copy"
+          :title="$t('前に受け付けた要求と同じです。送ると前のRunを返し、新しいRunは作りません')"
         />
 
         <div class="grid gap-1">

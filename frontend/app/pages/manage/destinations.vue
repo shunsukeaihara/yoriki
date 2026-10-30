@@ -12,7 +12,7 @@ const reloadKey = ref(0)
 const reload = () => (reloadKey.value = Date.now())
 
 const emptyParams = (): DestinationListParams => ({
-  name: undefined,
+  search: undefined,
   kind: undefined,
   scope: undefined,
   department: undefined,
@@ -64,7 +64,7 @@ const columns: TableColumn<Destination>[] = [
       </ListPageTitle>
 
       <TableSearchForm :reload="reload" :clear="clearParams">
-        <DTextField v-model="params.name" :label="$t('名前')" />
+        <DTextField v-model="params.search" :label="$t('名前')" />
         <DSelect v-model="params.kind" :label="$t('種類')" :items="destinationKindItems(t)" clearable />
         <DSelect v-model="params.scope" :label="$t('範囲')" :items="destinationScopeItems(t)" clearable />
         <DAutocomplete

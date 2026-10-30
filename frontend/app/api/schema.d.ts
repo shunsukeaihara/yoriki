@@ -6151,6 +6151,8 @@ export interface components {
             readonly required_file_inputs: string[];
             /** @description 入口・タスクの今の状態で、受付が断る・断りうる理由。入口・タスクの停止は断る。タスクの定義が保存のときの検査に通らない理由（Skillの停止等）は断りうる。定義の中身は、タスクを管理できる人にだけ詳しく返す */
             readonly run_problems: string[];
+            /** @description 前に受け付けた要求と同じ（送ると前のRunを返し、新しいRunは作らない） */
+            readonly duplicate: boolean;
             readonly can_view_prompt: boolean;
             /** @description 埋め込んだ後のプロンプト（タスクを管理できる人だけ。断る要求ではnull） */
             readonly prompt: string | null;
@@ -6187,6 +6189,8 @@ export interface components {
             event_id_path?: string;
             /** @description 項目の取り出し。送らなければ今の版の値 */
             inputs?: components["schemas"]["TriggerInputRequest"][];
+            /** @description payloadの大きさの上限（バイト）。送らなければ今の版の値 */
+            max_payload_bytes?: number;
         };
         TriggerPreviewValue: {
             name: string;

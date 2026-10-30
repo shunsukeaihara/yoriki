@@ -49,7 +49,14 @@ const removeRow = (index: number) => form.value.inputs.splice(index, 1)
 const settings = computed(() => ({
   eventIdPath: form.value.eventIdPath.trim(),
   inputs: fromTriggerInputRows(form.value.inputs),
+  maxPayloadBytes: form.value.maxPayloadKib === null ? undefined : form.value.maxPayloadKib * 1024,
 }))
+
+const inputsChanged = computed(
+  () =>
+    JSON.stringify(settings.value.inputs) !==
+    JSON.stringify(fromTriggerInputRows(toTriggerInputRows(modelValue.value?.inputs))),
+)
 
 const { onSubmit, loading, errors } = createSubmit({
   form,
@@ -61,8 +68,10 @@ const { onSubmit, loading, errors } = createSubmit({
       version: f.version,
       name,
       eventIdPath: settings.value.eventIdPath,
-      inputs: settings.value.inputs,
-      maxPayloadBytes: f.maxPayloadKib === null ? undefined : f.maxPayloadKib * 1024,
+      // 取り出しは変えたときだけ送る。サーバーは送られた取り出しをタスクの今の項目で確かめるので、タスクから消した
+      // 項目の取り出しが残っていても、ほかの設定（名前・上限等）は変えられるように
+      inputs: inputsChanged.value ? settings.value.inputs : undefined,
+      maxPayloadBytes: settings.value.maxPayloadBytes,
       changeReason: f.changeReason || undefined,
     })
   },

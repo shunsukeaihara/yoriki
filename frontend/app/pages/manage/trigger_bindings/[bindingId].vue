@@ -37,6 +37,7 @@ const previewSettings = computed(
     formRef.value?.settings ?? {
       eventIdPath: binding.value?.eventIdPath ?? '',
       inputs: [...(binding.value?.inputs ?? [])],
+      maxPayloadBytes: binding.value?.maxPayloadBytes,
     },
 )
 

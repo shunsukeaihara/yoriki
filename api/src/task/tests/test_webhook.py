@@ -298,6 +298,29 @@ def test_preview_reflects_the_state_of_the_webhook_and_the_task(api_client, inte
     assert body["run_problems"] and "タスクの管理者" not in body["run_problems"][0]
 
 
+def test_preview_uses_the_edited_limit_and_the_receipts(api_client, integrator, task, webhook):
+    binding, key = webhook
+    sample = _payload(event_id="evt-7")
+    # 編集中の上限（保存していない）で確かめる
+    api_client.force_login(integrator)
+    assert _preview(api_client, binding, sample, max_payload_bytes=1024).json()["format_error"] == ""
+    big = {**sample, "memo": "x" * 2000}
+    assert _preview(api_client, binding, big, max_payload_bytes=1024).json()["format_error"]
+    assert _preview(api_client, binding, big).json()["format_error"] == ""
+
+    # 前に受け付けた要求と同じなら、前のRunを返す（新しいRunは作らない）。同じイベントIDで違う内容なら、受付と同じく断る
+    api_client.logout()
+    assert _send(api_client, task, key, sample).status_code == 202
+    api_client.force_login(integrator)
+    body = _preview(api_client, binding, json.dumps(sample)).json()
+    assert (body["outcome"], body["duplicate"]) == ("accepted", True)
+    body = _preview(api_client, binding, _payload(event_id="evt-7", vendor="Other")).json()
+    assert (body["outcome"], body["duplicate"]) == ("refused", False)
+    assert body["run_problems"] == ["同じイベントIDで、前と違う内容を受け取りました"]
+    api_client.logout()
+    assert _send(api_client, task, key, _payload(event_id="evt-7", vendor="Other")).status_code == 409
+
+
 def test_preview_refuses_json_values_for_file_inputs(api_client, integrator):
     task, _key = _file_task(api_client, integrator)
     binding = TriggerBinding.objects.get(task=task)
@@ -308,6 +331,20 @@ def test_preview_refuses_json_values_for_file_inputs(api_client, integrator):
     assert [e["name"] for e in body["input_errors"]] == ["invoice"]
     res = _send(api_client, task, _key, {"inputs": {"vendor": "ACME", "invoice": "https://example.com/a.pdf"}})
     assert res.status_code == 400
+
+
+def test_preview_accepts_empty_optional_file_inputs(api_client, integrator):
+    optional = [*INPUTS, {"name": "invoice", "label": "請求書", "type": "file", "required": False}]
+    task = TaskDefinitionFactory.create(**notified(), scope=TaskScope.COMPANY, revision__inputs=optional)
+    res = _create_binding(api_client, integrator, task)
+    binding = TriggerBinding.objects.get(task=task)
+    for empty in (None, ""):
+        body = _preview(api_client, binding, {"inputs": {"vendor": "ACME", "invoice": empty}}).json()
+        assert (body["outcome"], body["input_errors"]) == ("accepted", [])
+    api_client.logout()
+    assert (
+        _send(api_client, task, res.json()["key"], {"inputs": {"vendor": "ACME", "invoice": None}}).status_code == 202
+    )
 
 
 def test_preview_skips_file_inputs_and_keeps_the_payload_limit(api_client, integrator):

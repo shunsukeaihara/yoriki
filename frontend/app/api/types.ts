@@ -213,7 +213,8 @@ export type DestinationWrite = Api<'DestinationRequest'>
 export type DestinationUpdate = Api<'DestinationUpdateRequest'>
 export type DestinationRevision = Api<'DestinationRevision'>
 export type DestinationListParams = ListParams & {
-  name?: string
+  // 名前の一部（DRFの検索）
+  search?: string
   kind?: DestinationKindEnum
   scope?: ConnectorScopeEnum
   department?: string

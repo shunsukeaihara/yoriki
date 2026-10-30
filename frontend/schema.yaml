@@ -2575,7 +2575,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskDefinition'
+                $ref: '#/components/schemas/TaskDefinitionDetail'
           description: ''
   /api/app/v1/tasks/{task}/deliveries/:
     get:
@@ -2890,7 +2890,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskDefinition'
+                $ref: '#/components/schemas/TaskDefinitionDetail'
           description: ''
     put:
       operationId: app_v1_tasks_update
@@ -2921,7 +2921,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskDefinition'
+                $ref: '#/components/schemas/TaskDefinitionDetail'
           description: ''
         '409':
           description: 他の変更と競合した（編集を始めた後に、他の人が版を作った）
@@ -2954,7 +2954,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskDefinition'
+                $ref: '#/components/schemas/TaskDefinitionDetail'
           description: ''
         '409':
           description: 他の変更と競合した（編集を始めた後に、他の人が版を作った）
@@ -2993,7 +2993,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskDefinition'
+                $ref: '#/components/schemas/TaskDefinitionDetail'
           description: ''
   /api/app/v1/tasks/{uid}/run/:
     post:
@@ -3052,7 +3052,126 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskDefinition'
+                $ref: '#/components/schemas/TaskDefinitionDetail'
+          description: ''
+  /api/app/v1/tasks/connector_choices/:
+    get:
+      operationId: app_v1_tasks_connector_choices_list
+      description: タスクの編集画面で選ぶConnectorの候補（その範囲のタスクに登録できる、有効なもの。authorization.md §5.4・§7.2）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - in: query
+        name: department
+        schema:
+          type: string
+        description: 部門のID（部門の範囲のとき）
+      - in: query
+        name: name
+        schema:
+          type: string
+        description: 名前
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: scope
+        schema:
+          type: integer
+        description: タスクの範囲（1：個人、2：部門、3：全社、4：システム）
+        required: true
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: 名前の一部
+      - in: query
+        name: suspended
+        schema:
+          type: boolean
+      tags:
+      - app/task
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedAppConnectorList'
+          description: ''
+  /api/app/v1/tasks/skill_choices/:
+    get:
+      operationId: app_v1_tasks_skill_choices_list
+      description: タスクの編集画面で選ぶSkillの候補（その範囲のタスクに登録できる、公開中で停止していないもの。authorization.md
+        §5.4・§7.2）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - in: query
+        name: department
+        schema:
+          type: string
+        description: 部門のID（部門の範囲のとき）
+      - in: query
+        name: name
+        schema:
+          type: string
+        description: 名前
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: scope
+        schema:
+          type: integer
+        description: タスクの範囲（1：個人、2：部門、3：全社、4：システム）
+        required: true
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: 名前の一部
+      - in: query
+        name: suspended
+        schema:
+          type: boolean
+      tags:
+      - app/task
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTaskSkillChoiceList'
           description: ''
   /api/files/{token}/:
     get:
@@ -10677,6 +10796,25 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TaskDefinitionRevision'
+    PaginatedTaskSkillChoiceList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskSkillChoice'
     PaginatedTriggerBindingList:
       type: object
       required:
@@ -13546,6 +13684,190 @@ components:
       - suspended
       - triggers
       - updated
+    TaskDefinitionDetail:
+      type: object
+      description: |-
+        タスクの詳細（編集画面）。一覧の項目に加えて、登録したSkill・Connectorの名前と、今の版のままでは実行できない
+        理由（Skillの停止・Connectorの削除・範囲の外等。保存のときと同じ検査）を返す
+      properties:
+        id:
+          type: string
+          readOnly: true
+        scope:
+          allOf:
+          - $ref: '#/components/schemas/SkillScopeEnum'
+          description: |-
+            範囲。作成した後は変えられない
+
+            * `1` - 個人
+            * `2` - 部門
+            * `3` - 全社
+            * `4` - システム
+        scope_display:
+          type: string
+          readOnly: true
+        department:
+          type: string
+          nullable: true
+          description: 部門の範囲では必須。作成した後は変えられない
+        department_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumDepartment'
+          readOnly: true
+          nullable: true
+        owner:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+          nullable: true
+        name:
+          type: string
+          maxLength: 100
+        suspended:
+          type: boolean
+          readOnly: true
+          title: 停止中
+        version:
+          type: integer
+          minimum: 0
+          description: 今の版。更新では、編集を始めた時点の値を送る（作成では送らない）
+        description:
+          type: string
+          default: ''
+          maxLength: 2000
+        prompt_template:
+          type: string
+          description: Runの最初の依頼文。{{ inputs.名前 }} に入力の値を文字として埋め込む
+          maxLength: 20000
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskSkill'
+        connectors:
+          type: array
+          items:
+            type: string
+            maxLength: 30
+          description: 使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う
+          maxItems: 10
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolsEnum'
+          description: 使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う
+          maxItems: 50
+        model_profile:
+          type: string
+        effort:
+          type: string
+          default: ''
+          description: 空ならモデルの既定
+          maxLength: 50
+        handles_sensitive_data:
+          type: boolean
+          default: false
+          description: 個人情報・機密情報を扱うタスク。機密のSkill・Connectorを使え、ローカルLLMのモデルだけを使う
+        inputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskInput'
+        output_schema:
+          nullable: true
+          description: 業務結果のSchema。なければSkillのもの
+        destination:
+          type: string
+          nullable: true
+          description: 結果の通知先（出口）。タスクの範囲で使ってよい出口だけ（候補は app/v1/destinations/）
+        notify_events:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotifyEventEnum'
+          description: 通知するイベント。Webhookの入口があるタスクでは run.failed が必須
+          maxItems: 3
+        notify_content:
+          allOf:
+          - $ref: '#/components/schemas/NotifyContentEnum'
+          default: status_and_result
+          description: |-
+            通知の内容（状態だけ・業務結果・両方）
+
+            * `status` - 状態だけ
+            * `result` - 業務結果
+            * `status_and_result` - 状態と業務結果
+        notification_skill:
+          allOf:
+          - $ref: '#/components/schemas/TaskSkill'
+          nullable: true
+          description: 通知Skillと固定の版（任意）。業務のRunの中で読み込み、通知の文章と渡すファイルを決めさせる。通知先と完了（run.completed）の通知が要る
+        model_profile_info:
+          allOf:
+          - $ref: '#/components/schemas/AppModelProfile'
+          readOnly: true
+        destination_info:
+          allOf:
+          - $ref: '#/components/schemas/DestinationChoice'
+          readOnly: true
+          nullable: true
+        can_run:
+          type: boolean
+          readOnly: true
+          description: 今、手動で実行できるか（停止中でなく、版がある）
+        triggers:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskTrigger'
+          readOnly: true
+          description: このタスクの入口（作る・変えるのは連携の管理者）
+        created_by:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+        skills_info:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskReference'
+          readOnly: true
+          description: 登録したSkill（通知Skillを含む）の名前
+        connectors_info:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskReference'
+          readOnly: true
+          description: 登録したConnectorの名前
+        problems:
+          type: array
+          items:
+            type: string
+          readOnly: true
+          description: 今の版のままでは実行できない理由（なければ空）。版を作ったときより後の変更で生じたもの
+      required:
+      - can_run
+      - connectors_info
+      - created
+      - created_by
+      - department_info
+      - destination_info
+      - id
+      - model_profile
+      - model_profile_info
+      - name
+      - owner
+      - problems
+      - prompt_template
+      - scope
+      - scope_display
+      - skills_info
+      - suspended
+      - triggers
+      - updated
     TaskDefinitionRequest:
       type: object
       description: |-
@@ -13950,6 +14272,20 @@ components:
         * `date` - 日付
         * `choice` - 選択肢
         * `file` - ファイル
+    TaskReference:
+      type: object
+      description: 版に登録したSkill・Connectorの名前（削除されたものも、登録した名前のまま出す）
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        deleted:
+          type: boolean
+      required:
+      - deleted
+      - id
+      - name
     TaskRunCreateRequest:
       type: object
       description: |-
@@ -13975,6 +14311,55 @@ components:
       required:
       - skill
       - version
+    TaskSkillChoice:
+      type: object
+      description: タスクの編集画面で選ぶSkillの候補（ID・名前・説明・範囲・版だけ。authorization.md §7.2）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+          title: 名前
+          maxLength: 100
+        description:
+          type: string
+          readOnly: true
+        scope:
+          allOf:
+          - $ref: '#/components/schemas/SkillScopeEnum'
+          readOnly: true
+          title: 範囲
+          minimum: 0
+          maximum: 32767
+        scope_display:
+          type: string
+          readOnly: true
+        department_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumDepartment'
+          readOnly: true
+          nullable: true
+        version:
+          type: integer
+          readOnly: true
+          description: 公開中の版
+        versions:
+          type: array
+          items:
+            type: integer
+          readOnly: true
+          description: 固定できる版の番号（新しい順）
+      required:
+      - department_info
+      - description
+      - id
+      - name
+      - scope
+      - scope_display
+      - version
+      - versions
     TaskSkillRequest:
       type: object
       properties:

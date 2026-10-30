@@ -2,28 +2,34 @@ import logging
 from typing import TYPE_CHECKING
 
 from django.db import transaction
+from django.db.models import Prefetch
 from django.utils.translation import gettext_lazy as _
 from django_filters import rest_framework as filters
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema, extend_schema_view
 from rest_framework import mixins, status
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.generics import get_object_or_404
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet, ModelViewSet, ReadOnlyModelViewSet
 
+from connector.serializers import AppConnectorSerializer
 from run.models import Run, RunLaunch
 from run.serializers import RunSerializer
+from skill.models import SkillVersion
+from user.models import Department
 from utils.permissions import AppUser, ModelPermissions
 from utils.views import SoftDeleteMixin
 
+from . import checks
 from .authentication import WebhookKeyAuthentication, WebhookTaskPermission
 from .dispatch import InvalidInputs, receive_webhook, start_task_run
 from .errors import CannotRun
 from .models import (
     BUSINESS_SCOPES,
     WEBHOOK_TASK_SCOPES,
+    TaskAction,
     TaskDefinition,
     TaskDefinitionRevision,
     TaskScope,
@@ -36,10 +42,12 @@ from .serializers import (
     HookErrorSerializer,
     HookReceivedSerializer,
     HookRunSerializer,
+    TaskDefinitionDetailSerializer,
     TaskDefinitionRevisionSerializer,
     TaskDefinitionSerializer,
     TaskDefinitionUpdateSerializer,
     TaskRunCreateSerializer,
+    TaskSkillChoiceSerializer,
     TaskSuspendSerializer,
     TriggerBindingKeySerializer,
     TriggerBindingRevisionSerializer,
@@ -55,6 +63,12 @@ if TYPE_CHECKING:
     from django_stubs_ext import StrPromise
 
 logger = logging.getLogger(__name__)
+
+CHOICE_PARAMETERS = [
+    OpenApiParameter("scope", int, required=True, description="タスクの範囲（1：個人、2：部門、3：全社、4：システム）"),
+    OpenApiParameter("department", str, description="部門のID（部門の範囲のとき）"),
+    OpenApiParameter("search", str, description="名前の一部"),
+]
 
 CONFLICT = OpenApiResponse(description="他の変更と競合した（編集を始めた後に、他の人が版を作った）")
 
@@ -88,12 +102,12 @@ TASK_RUN_MULTIPART = {
 
 @extend_schema(description="タスクの一覧・作成・変更・停止・手動実行", tags=["app/task"])
 @extend_schema_view(
-    create=extend_schema(responses={201: TaskDefinitionSerializer}),
+    create=extend_schema(request=TaskDefinitionSerializer, responses={201: TaskDefinitionDetailSerializer}),
     update=extend_schema(
-        request=TaskDefinitionUpdateSerializer, responses={200: TaskDefinitionSerializer, 409: CONFLICT}
+        request=TaskDefinitionUpdateSerializer, responses={200: TaskDefinitionDetailSerializer, 409: CONFLICT}
     ),
     partial_update=extend_schema(
-        request=TaskDefinitionUpdateSerializer, responses={200: TaskDefinitionSerializer, 409: CONFLICT}
+        request=TaskDefinitionUpdateSerializer, responses={200: TaskDefinitionDetailSerializer, 409: CONFLICT}
     ),
     destroy=extend_schema(description="タスクを削除する。順番待ち・実行中のRunも次の区切りで止まる"),
 )
@@ -120,6 +134,8 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
     def get_serializer_class(self):
         if self.action in ("update", "partial_update"):
             return TaskDefinitionUpdateSerializer
+        if self.action in ("retrieve", "create"):
+            return TaskDefinitionDetailSerializer
         return super().get_serializer_class()
 
     def perform_destroy(self, instance):
@@ -134,13 +150,13 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
     @extend_schema(
         description="停止する。新しいRunを受け付けず、順番待ち・実行中のRunも次の区切りで止める",
         request=None,
-        responses=TaskDefinitionSerializer,
+        responses=TaskDefinitionDetailSerializer,
     )
     @action(detail=True, methods=["post"], serializer_class=TaskSuspendSerializer)
     def suspend(self, request, *args, **kwargs):
         return self._set_suspended(request, suspended=True)
 
-    @extend_schema(description="停止を解く", request=None, responses=TaskDefinitionSerializer)
+    @extend_schema(description="停止を解く", request=None, responses=TaskDefinitionDetailSerializer)
     @action(detail=True, methods=["post"], serializer_class=TaskSuspendSerializer)
     def resume(self, request, *args, **kwargs):
         return self._set_suspended(request, suspended=False)
@@ -172,6 +188,64 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
         except CannotRun as exc:
             raise ValidationError({"non_field_errors": [str(exc)]}) from exc
         return Response(RunSerializer(run, context=self.get_serializer_context()).data, status=status.HTTP_201_CREATED)
+
+    def _choice_task(self) -> TaskDefinition:
+        """候補を求める範囲（クエリの scope・department）の、保存していないタスク。その範囲のタスクを管理できなければ
+        403（作成の画面と、管理できるタスクの編集の画面だけで使う）"""
+        params = self.request.query_params
+        try:
+            scope = TaskScope(int(params.get("scope", "")))
+        except ValueError:
+            raise ValidationError({"scope": [_("範囲を指定してください")]}) from None
+        user = self.request.user
+        department = None
+        if scope == TaskScope.DEPARTMENT:
+            department = Department.objects.active().filter(uid=params.get("department", "")).first()
+            if department is None:
+                raise ValidationError({"department": [_("部門を指定してください")]})
+        owner = user if scope == TaskScope.PERSONAL else None
+        task = TaskDefinition(scope=scope, owner=owner, department=department)  # type: ignore[misc]
+        if not task.can(user, TaskAction.MANAGE):
+            raise PermissionDenied(_("この範囲のタスクを管理する権限がありません"))
+        return task
+
+    @extend_schema(
+        description="タスクの編集画面で選ぶSkillの候補（その範囲のタスクに登録できる、公開中で停止していないもの。"
+        "authorization.md §5.4・§7.2）",
+        parameters=CHOICE_PARAMETERS,
+        responses=TaskSkillChoiceSerializer(many=True),
+    )
+    @action(detail=False, methods=["get"], url_path="skill_choices", serializer_class=TaskSkillChoiceSerializer)
+    def skill_choices(self, request, *args, **kwargs):
+        qs = (
+            checks.allowed_skills(self._choice_task())
+            .select_related("department", "current_version")
+            .prefetch_related(Prefetch("versions", queryset=SkillVersion.objects.only("skill_id", "number")))
+            .order_by("name", "pk")
+        )
+        return self._choices(request, qs)
+
+    @extend_schema(
+        description="タスクの編集画面で選ぶConnectorの候補（その範囲のタスクに登録できる、有効なもの。"
+        "authorization.md §5.4・§7.2）",
+        parameters=CHOICE_PARAMETERS,
+        responses=AppConnectorSerializer(many=True),
+    )
+    @action(detail=False, methods=["get"], url_path="connector_choices", serializer_class=AppConnectorSerializer)
+    def connector_choices(self, request, *args, **kwargs):
+        qs = (
+            checks.allowed_connectors(self._choice_task())
+            .select_related("department", "current_version", "connection")
+            .order_by("name", "pk")
+        )
+        return self._choices(request, qs)
+
+    def _choices(self, request, qs) -> Response:
+        if name := request.query_params.get("search"):
+            qs = qs.filter(name__icontains=name)
+        page = self.paginate_queryset(qs)
+        serializer = self.get_serializer(page, many=True)
+        return self.get_paginated_response(serializer.data)
 
 
 class TaskMixin:

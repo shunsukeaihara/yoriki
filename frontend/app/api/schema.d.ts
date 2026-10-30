@@ -1086,6 +1086,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/app/v1/tasks/connector_choices/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description タスクの編集画面で選ぶConnectorの候補（その範囲のタスクに登録できる、有効なもの。authorization.md §5.4・§7.2） */
+        get: operations["app_v1_tasks_connector_choices_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/tasks/skill_choices/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description タスクの編集画面で選ぶSkillの候補（その範囲のタスクに登録できる、公開中で停止していないもの。authorization.md §5.4・§7.2） */
+        get: operations["app_v1_tasks_skill_choices_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/files/{token}/": {
         parameters: {
             query?: never;
@@ -4309,6 +4343,19 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["TaskDefinitionRevision"][];
         };
+        PaginatedTaskSkillChoiceList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["TaskSkillChoice"][];
+        };
         PaginatedTriggerBindingList: {
             /**
              * Format: uri
@@ -5521,6 +5568,87 @@ export interface components {
             readonly updated: string;
         };
         /**
+         * @description タスクの詳細（編集画面）。一覧の項目に加えて、登録したSkill・Connectorの名前と、今の版のままでは実行できない
+         *     理由（Skillの停止・Connectorの削除・範囲の外等。保存のときと同じ検査）を返す
+         */
+        TaskDefinitionDetail: {
+            readonly id: string;
+            /**
+             * @description 範囲。作成した後は変えられない
+             *
+             *     * `1` - 個人
+             *     * `2` - 部門
+             *     * `3` - 全社
+             *     * `4` - システム
+             */
+            scope: components["schemas"]["SkillScopeEnum"];
+            readonly scope_display: string;
+            /** @description 部門の範囲では必須。作成した後は変えられない */
+            department?: string | null;
+            readonly department_info: components["schemas"]["MinimumDepartment"] | null;
+            readonly owner: components["schemas"]["MinimumUser"] | null;
+            name: string;
+            /** 停止中 */
+            readonly suspended: boolean;
+            /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
+            version?: number;
+            /** @default  */
+            description: string;
+            /** @description Runの最初の依頼文。{{ inputs.名前 }} に入力の値を文字として埋め込む */
+            prompt_template: string;
+            skills?: components["schemas"]["TaskSkill"][];
+            /** @description 使うConnectorのID。タスクのRunでは、エージェントはここにあるものだけを使う */
+            connectors?: string[];
+            /** @description 使ってよいTool。Skillの「使ってよいTool」と両方に入っているものだけを使う */
+            tools?: components["schemas"]["ToolsEnum"][];
+            model_profile: string;
+            /**
+             * @description 空ならモデルの既定
+             * @default
+             */
+            effort: string;
+            /**
+             * @description 個人情報・機密情報を扱うタスク。機密のSkill・Connectorを使え、ローカルLLMのモデルだけを使う
+             * @default false
+             */
+            handles_sensitive_data: boolean;
+            inputs?: components["schemas"]["TaskInput"][];
+            /** @description 業務結果のSchema。なければSkillのもの */
+            output_schema?: unknown;
+            /** @description 結果の通知先（出口）。タスクの範囲で使ってよい出口だけ（候補は app/v1/destinations/） */
+            destination?: string | null;
+            /** @description 通知するイベント。Webhookの入口があるタスクでは run.failed が必須 */
+            notify_events?: components["schemas"]["NotifyEventEnum"][];
+            /**
+             * @description 通知の内容（状態だけ・業務結果・両方）
+             *
+             *     * `status` - 状態だけ
+             *     * `result` - 業務結果
+             *     * `status_and_result` - 状態と業務結果
+             * @default status_and_result
+             */
+            notify_content: components["schemas"]["NotifyContentEnum"];
+            /** @description 通知Skillと固定の版（任意）。業務のRunの中で読み込み、通知の文章と渡すファイルを決めさせる。通知先と完了（run.completed）の通知が要る */
+            notification_skill?: components["schemas"]["TaskSkill"] | null;
+            readonly model_profile_info: components["schemas"]["AppModelProfile"];
+            readonly destination_info: components["schemas"]["DestinationChoice"] | null;
+            /** @description 今、手動で実行できるか（停止中でなく、版がある） */
+            readonly can_run: boolean;
+            /** @description このタスクの入口（作る・変えるのは連携の管理者） */
+            readonly triggers: components["schemas"]["TaskTrigger"][];
+            readonly created_by: components["schemas"]["MinimumUser"];
+            /** Format: date-time */
+            readonly created: string;
+            /** Format: date-time */
+            readonly updated: string;
+            /** @description 登録したSkill（通知Skillを含む）の名前 */
+            readonly skills_info: components["schemas"]["TaskReference"][];
+            /** @description 登録したConnectorの名前 */
+            readonly connectors_info: components["schemas"]["TaskReference"][];
+            /** @description 今の版のままでは実行できない理由（なければ空）。版を作ったときより後の変更で生じたもの */
+            readonly problems: string[];
+        };
+        /**
          * @description タスクの作成と表示（定義を管理できる人だけが見る。authorization.md §5.3）。中身は今の版の値を平らに出す。
          *
          *     中身を変えて保存すると、サーバーが新しい版を作る。更新では、編集を始めた時点の `version` を送り、その間に他の人が
@@ -5691,6 +5819,12 @@ export interface components {
          * @enum {string}
          */
         TaskInputTypeEnum: "string" | "number" | "integer" | "boolean" | "date" | "choice" | "file";
+        /** @description 版に登録したSkill・Connectorの名前（削除されたものも、登録した名前のまま出す） */
+        TaskReference: {
+            id: string;
+            name: string;
+            deleted: boolean;
+        };
         /**
          * @description 手動実行の入力。型がファイルの項目があれば multipart/form-data で送り、`inputs` はJSONの文字列にして、
          *     ファイルは項目の名前をフィールドの名前にして付ける
@@ -5706,6 +5840,21 @@ export interface components {
             skill: string;
             /** @description 固定する版の番号。Skillが新しい版を公開しても変わらない */
             version: number;
+        };
+        /** @description タスクの編集画面で選ぶSkillの候補（ID・名前・説明・範囲・版だけ。authorization.md §7.2） */
+        TaskSkillChoice: {
+            readonly id: string;
+            /** 名前 */
+            readonly name: string;
+            readonly description: string;
+            /** 範囲 */
+            readonly scope: components["schemas"]["SkillScopeEnum"];
+            readonly scope_display: string;
+            readonly department_info: components["schemas"]["MinimumDepartment"] | null;
+            /** @description 公開中の版 */
+            readonly version: number;
+            /** @description 固定できる版の番号（新しい順） */
+            readonly versions: number[];
         };
         TaskSkillRequest: {
             /** @description SkillのID */
@@ -8077,7 +8226,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TaskDefinition"];
+                    "application/json": components["schemas"]["TaskDefinitionDetail"];
                 };
             };
         };
@@ -8289,7 +8438,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TaskDefinition"];
+                    "application/json": components["schemas"]["TaskDefinitionDetail"];
                 };
             };
         };
@@ -8316,7 +8465,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TaskDefinition"];
+                    "application/json": components["schemas"]["TaskDefinitionDetail"];
                 };
             };
             /** @description 他の変更と競合した（編集を始めた後に、他の人が版を作った） */
@@ -8370,7 +8519,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TaskDefinition"];
+                    "application/json": components["schemas"]["TaskDefinitionDetail"];
                 };
             };
             /** @description 他の変更と競合した（編集を始めた後に、他の人が版を作った） */
@@ -8398,7 +8547,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TaskDefinition"];
+                    "application/json": components["schemas"]["TaskDefinitionDetail"];
                 };
             };
         };
@@ -8450,7 +8599,77 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TaskDefinition"];
+                    "application/json": components["schemas"]["TaskDefinitionDetail"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_connector_choices_list: {
+        parameters: {
+            query: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description 部門のID（部門の範囲のとき） */
+                department?: string;
+                /** @description 名前 */
+                name?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description タスクの範囲（1：個人、2：部門、3：全社、4：システム） */
+                scope: number;
+                /** @description 名前の一部 */
+                search?: string;
+                suspended?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedAppConnectorList"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_skill_choices_list: {
+        parameters: {
+            query: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description 部門のID（部門の範囲のとき） */
+                department?: string;
+                /** @description 名前 */
+                name?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description タスクの範囲（1：個人、2：部門、3：全社、4：システム） */
+                scope: number;
+                /** @description 名前の一部 */
+                search?: string;
+                suspended?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedTaskSkillChoiceList"];
                 };
             };
         };

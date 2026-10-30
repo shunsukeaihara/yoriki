@@ -10,6 +10,7 @@
 import re
 from typing import Any, Protocol
 
+from django.db.models import Q, QuerySet
 from django.utils.translation import gettext as _
 
 from connector.models import Connector, ConnectorAction, ConnectorScope, Operation
@@ -76,6 +77,31 @@ def connector_allowed(task: TaskLike, connector: Connector) -> bool:
     if task.scope == TaskScope.DEPARTMENT and connector.scope == ConnectorScope.DEPARTMENT:
         return connector.department_id == task.department_id
     return True
+
+
+def allowed_skills(task: TaskLike) -> QuerySet[Skill]:
+    """このタスクの範囲に登録できるSkill（`skill_allowed()` と同じ規則のSQL）。編集画面の候補に使う"""
+    if task.scope == TaskScope.PERSONAL:
+        return Skill.objects.usable_by(task.owner) if task.owner is not None else Skill.objects.none()
+    scopes = SCOPE_SKILLS.get(task.scope, ())
+    condition = Q(scope__in=[s for s in scopes if s != SkillScope.DEPARTMENT])
+    if SkillScope.DEPARTMENT in scopes:
+        condition |= Q(scope=SkillScope.DEPARTMENT, department_id=task.department_id, department__deleted=False)
+    return Skill.objects.filter(condition, deleted=False, suspended=False, current_version__isnull=False)
+
+
+def allowed_connectors(task: TaskLike) -> QuerySet[Connector]:
+    """このタスクの範囲に登録できるConnector（`connector_allowed()` と同じ規則のSQL）。編集画面の候補に使う"""
+    if task.scope == TaskScope.PERSONAL:
+        return Connector.objects.usable_by(task.owner) if task.owner is not None else Connector.objects.none()
+    scopes = SCOPE_CONNECTORS.get(task.scope, ())
+    condition = Q(scope__in=[s for s in scopes if s != ConnectorScope.DEPARTMENT])
+    if ConnectorScope.DEPARTMENT in scopes:
+        department = Q(scope=ConnectorScope.DEPARTMENT, department__deleted=False)
+        if task.scope == TaskScope.DEPARTMENT:
+            department &= Q(department_id=task.department_id)
+        condition |= department
+    return Connector.objects.in_service().filter(condition)
 
 
 def skill_entries(revision: Any) -> list[tuple[str, dict[str, Any]]]:

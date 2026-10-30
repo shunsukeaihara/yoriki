@@ -150,8 +150,25 @@ def test_repeated_errors_of_the_notification_tool_do_not_fail_the_work(manager):
     run = execute(run, adapter)
     assert run.status == RunStatus.COMPLETED, run.error
     *_errors, last = results(run, "prepare_notification")
-    assert "Do not call it again" in text_of(last)
+    assert "failed repeatedly and is no longer available" in text_of(last)
+    # 繰り返した後は出さない（呼び続けてステップの上限で失敗しないように）
+    assert "prepare_notification" not in [t.name for t in adapter.requests[-1].tools]
     assert Delivery.objects.get(run=run).payload["notification"] is None
+
+
+def test_repeating_a_successful_notification_keeps_it(manager):
+    """業務結果のSchemaがないタスクでも、同じ呼出しの繰り返しでRunを失敗にせず、決めた候補を送る"""
+    task = _task(schema=None)
+    run = start_task_run(task, inputs={}, actor=manager, launch=RunLaunch.MANUAL)
+    same = {"message": "請求書3件を確認しました"}
+    adapter = FakeAdapter([*[calls((f"c{i}", "prepare_notification", same)) for i in range(5)], reply("確認しました")])
+    run = execute(run, adapter)
+    assert run.status == RunStatus.COMPLETED, run.error
+    *_done, last = results(run, "prepare_notification")
+    assert not last["is_error"]
+    assert "The notification is prepared" in text_of(last)
+    assert "prepare_notification" not in [t.name for t in adapter.requests[-1].tools]
+    assert Delivery.objects.get(run=run).payload["notification"] == same
 
 
 def test_without_a_candidate_the_standard_form_is_sent(manager):

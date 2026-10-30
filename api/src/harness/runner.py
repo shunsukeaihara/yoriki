@@ -111,9 +111,15 @@ DELTA_INTERVAL = 0.15
 HEARTBEAT_INTERVAL = 20
 # 同じ呼出し・同じエラーを繰り返したときに、注意を添える回数と、止める回数（harness.md §11.3）
 REPEAT_WARN, REPEAT_STOP = 3, 5
+# prepare_notification の繰り返し。Runを失敗にせず、このRunではもう出さない
+NOTIFICATION_CLOSED = "notification_closed"
 NOTIFICATION_GIVE_UP = (
-    "prepare_notification failed repeatedly. Do not call it again: the notification is sent with the last prepared "
-    "one, or in the standard form. Write your final reply."
+    "prepare_notification failed repeatedly and is no longer available: the notification is sent with the last "
+    "prepared one, or in the standard form. Write your final reply."
+)
+NOTIFICATION_DONE = (
+    "The notification is prepared; prepare_notification is no longer available because you called it repeatedly. "
+    "Write your final reply."
 )
 # 応答の異常（空、出力の上限で切れた）を許す回数
 MAX_NUDGES = 3
@@ -190,6 +196,8 @@ class Runner:
         self.tools: tuple[Tool, ...] = ()
         # Skillで決まるTool（Run開始時に固定したManifestから作る。Runの中では変わらない）
         self.skill_tools: tuple[Tool, ...] | None = None
+        # prepare_notification を繰り返したので、このRunでは出さない（_with_repeat_notice()）。Noneなら記録から読む
+        self.notification_closed: bool | None = None
         self.nudges = 0
         # 最後に保存したときの /workspace/output のファイルと中身（SHA-256）。_checkpoint() が更新する
         self.workspace_outputs: dict[str, str] = {}
@@ -518,7 +526,17 @@ class Runner:
             tools = tuple(t for t in tools if t not in SANDBOX_TOOLS)
         if not self.run_obj.is_interactive:
             tools = tuple(t for t in tools if t.name not in ("ask_user", REQUEST_SKILL_EDIT.name))
+        if PREPARE_NOTIFICATION in tools and self._notification_closed():
+            tools = tuple(t for t in tools if t is not PREPARE_NOTIFICATION)
         return tools
+
+    def _notification_closed(self) -> bool:
+        if self.notification_closed is None:
+            self.notification_closed = any(
+                e.kind == RunEventKind.TOOL_RESULT and (e.data.get("meta") or {}).get(NOTIFICATION_CLOSED)
+                for e in self._events()
+            )
+        return self.notification_closed
 
     def _skill_tools(self) -> tuple[Tool, ...]:
         if self.skill_tools is not None:
@@ -1035,8 +1053,11 @@ class Runner:
         self.last_error_key = error_key
         if self.repeats[key] >= REPEAT_STOP or (error_key and self.error_repeats >= REPEAT_STOP):
             if call.name == PREPARE_NOTIFICATION.name:
-                # 通知の文章を作れないだけで業務を失敗にしない。前に決めた候補か標準の形で送る（design.md §4.3）
-                return ToolResult.text(NOTIFICATION_GIVE_UP)
+                # 通知の文章を作れないだけで業務を失敗にしない。このRunではもう出さず、前に決めた候補か標準の形で
+                # 送る（design.md §4.3）。記録に印を残し、別のAttemptでも出さない
+                self.notification_closed = True
+                text = NOTIFICATION_GIVE_UP if result.is_error else NOTIFICATION_DONE
+                return replace(result, content=(TextPart(text),), meta={**result.meta, NOTIFICATION_CLOSED: True})
             raise RepeatedErrors()
         notice = ""
         if self.repeats[key] >= REPEAT_WARN:

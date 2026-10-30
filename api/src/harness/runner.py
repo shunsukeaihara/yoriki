@@ -894,6 +894,8 @@ class Runner:
                 if interrupted is not None:
                     return interrupted
             tool = tools.get(call.name)
+            if tool is PREPARE_NOTIFICATION and self.notification_closed:
+                tool = None  # 同じ応答の中で、繰り返して止めた後の呼出し（_with_repeat_notice()）は実行しない
             if tool is None:
                 self._record_tool_result(call.id, call.name, ToolResult.error(_unknown_tool(call.name, tools)))
                 index += 1

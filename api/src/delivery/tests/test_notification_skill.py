@@ -171,6 +171,19 @@ def test_repeating_a_successful_notification_keeps_it(manager):
     assert Delivery.objects.get(run=run).payload["notification"] == same
 
 
+def test_calls_after_closing_in_the_same_response_are_not_run(manager):
+    run = start_task_run(_task(schema=None), inputs={}, actor=manager, launch=RunLaunch.MANUAL)
+    same = {"message": "請求書3件を確認しました"}
+    calls_in_one = [(f"c{i}", "prepare_notification", same) for i in range(5)]
+    adapter = FakeAdapter(
+        [calls(*calls_in_one, ("c5", "prepare_notification", {"message": "別の文章"})), reply("確認しました")]
+    )
+    run = execute(run, adapter)
+    assert run.status == RunStatus.COMPLETED, run.error
+    assert results(run, "prepare_notification")[-1]["is_error"]
+    assert run.notification == same
+
+
 def test_without_a_candidate_the_standard_form_is_sent(manager):
     """通知Skillが候補を作らなかった・失敗した場合も、業務は完了にし、標準の形で送る"""
     run = start_task_run(_task(), inputs={}, actor=manager, launch=RunLaunch.MANUAL)

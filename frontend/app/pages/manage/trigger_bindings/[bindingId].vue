@@ -31,15 +31,8 @@ const busy = ref(false)
 
 // 編集・停止・鍵の作り直しはサーバー側でも権限を確認し、なければ403になる
 const canChange = computed(() => hasPermission(PermissionCode.CHANGE_TRIGGER_BINDING))
-// 試すのは、編集中の受け取り方（保存していないもの）。フォームがまだなければ今の版
-const previewSettings = computed(
-  () =>
-    formRef.value?.settings ?? {
-      eventIdPath: binding.value?.eventIdPath ?? '',
-      inputs: [...(binding.value?.inputs ?? [])],
-      maxPayloadBytes: binding.value?.maxPayloadBytes,
-    },
-)
+// 試すのは、編集中の受け取り方（保存していないもの）。フォームがまだなければ今の版（送らない項目はサーバーが今の版を使う）
+const previewSettings = computed(() => formRef.value?.settings ?? { eventIdPath: binding.value?.eventIdPath ?? '' })
 
 const close = () => router.push('/manage/trigger_bindings')
 

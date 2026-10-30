@@ -268,6 +268,11 @@ def test_preview_reports_what_the_hook_would_refuse(api_client, integrator, webh
     # 受け取り方の誤りは、保存と同じく400
     assert _preview(api_client, binding, "{}", event_id_path="$.event[").status_code == 400
     assert _preview(api_client, binding, "{}", inputs=[{"name": "vendor", "path": "vendor"}]).status_code == 400
+    # 保存できない取り出し（同じ項目を2回、タスクにない項目）では試さない（保存と同じく400）
+    twice = [{"name": "vendor", "path": "$.a"}, {"name": "vendor", "path": "$.b"}]
+    assert _preview(api_client, binding, "{}", inputs=twice).status_code == 400
+    res = _preview(api_client, binding, "{}", inputs=[{"name": "unknown", "path": "$.a"}])
+    assert (res.status_code, list(res.json())) == (400, ["inputs"])
 
 
 def test_preview_reflects_the_state_of_the_webhook_and_the_task(api_client, integrator, task, webhook):

@@ -610,6 +610,21 @@ class TriggerTaskSerializer(ReadOnlyModelSerializer):
         fields = ["id", "name", "scope", "scope_display", "department", "suspended", "inputs"]
 
 
+def _check_trigger_inputs(value: list[dict[str, str]]) -> list[dict[str, str]]:
+    """項目の取り出しの数と重複（入口の保存と、サンプルを試すときに共通）"""
+    if len(value) > checks.MAX_INPUTS:
+        raise serializers.ValidationError(_("取り出す項目は%(limit)s個までです") % {"limit": checks.MAX_INPUTS})
+    if len({i["name"] for i in value}) != len(value):
+        raise serializers.ValidationError(_("同じ項目を2回指定しています"))
+    return [{"name": i["name"], "path": i["path"]} for i in value]
+
+
+def unknown_trigger_inputs(task: TaskDefinition, mappings: list[dict[str, str]]) -> list[str]:
+    """タスクの今の版にない項目の名前（入口の保存と、サンプルを試すときに断る）"""
+    names = {i["name"] for i in (task.current_revision.inputs if task.current_revision else [])}
+    return [i["name"] for i in mappings if i["name"] not in names]
+
+
 class TriggerBindingSerializer(serializers.ModelSerializer):
     """入口の作成と表示（連携の管理者。authorization.md §5.5）。受け取り方は今の版の値を平らに出す。
 
@@ -687,11 +702,7 @@ class TriggerBindingSerializer(serializers.ModelSerializer):
         return f"/api/hooks/v1/tasks/{obj.task.uid}/"
 
     def validate_inputs(self, value: list[dict[str, str]]) -> list[dict[str, str]]:
-        if len(value) > checks.MAX_INPUTS:
-            raise serializers.ValidationError(_("取り出す項目は%(limit)s個までです") % {"limit": checks.MAX_INPUTS})
-        if len({i["name"] for i in value}) != len(value):
-            raise serializers.ValidationError(_("同じ項目を2回指定しています"))
-        return [{"name": i["name"], "path": i["path"]} for i in value]
+        return _check_trigger_inputs(value)
 
     def validate_event_id_path(self, value: str) -> str:
         if value:
@@ -717,9 +728,8 @@ class TriggerBindingSerializer(serializers.ModelSerializer):
         content = {name: sent[name] if name in sent else getattr(current, name) for name in TRIGGER_REVISION_FIELDS}
         # タスクの今の版にない項目は取り出せない。確かめるのは作成時と取り出しを送ったときだけ（タスクから項目を
         # 消した後も、名前や上限は変えられるように。消した項目の取り出しは受付時に使わない）
-        names = {i["name"] for i in (task.current_revision.inputs if task.current_revision else [])}
         sent_inputs = sent.get("inputs", []) if self.instance else content["inputs"]
-        if unknown := [i["name"] for i in sent_inputs if i["name"] not in names]:
+        if unknown := unknown_trigger_inputs(task, sent_inputs):
             raise serializers.ValidationError(
                 {"inputs": _("タスクにない項目です：%(names)s") % {"names": ", ".join(unknown)}}
             )
@@ -915,11 +925,19 @@ class TriggerPreviewSerializer(serializers.Serializer):
                 raise serializers.ValidationError(str(exc)) from exc
         return value
 
+    def validate_inputs(self, value: list[dict[str, str]]) -> list[dict[str, str]]:
+        return _check_trigger_inputs(value)  # 保存できない取り出しでは試さない（保存と同じく400）
+
     def preview(self, binding: TriggerBinding, user) -> dict[str, Any]:
         """受付（task.dispatch.receive_webhook()）と同じ順で確かめる：入口の停止 → payload → 前の受付との重複（同じ
         要求なら、ここで前のRunを返して終わる） → タスクの状態とRunを始められるか → 項目"""
         data = self.validated_data
         task = binding.task
+        # 送った取り出しは保存と同じく、タスクの今の版にない項目を断る（保存できない受け取り方では試さない）
+        if "inputs" in data and (unknown := unknown_trigger_inputs(task, data["inputs"])):
+            raise serializers.ValidationError(
+                {"inputs": _("タスクにない項目です：%(names)s") % {"names": ", ".join(unknown)}}
+            )
         revision = task.current_revision
         current = binding.current_revision
         definitions = revision.inputs if revision else []
@@ -998,9 +1016,7 @@ def _task_problems(task: TaskDefinition, *, detailed: bool) -> tuple[list[str], 
         return [str(problem)], []
     assert revision is not None  # in_service() が確かめた
     try:
-        # 通知先の行をロックするので、transactionの中で確かめる（何も作らない）
-        with transaction.atomic():
-            plan_run(task, revision)
+        plan_run(task, revision, lock=False)  # 読むだけ（受付を待たせない）
     except CannotRun as exc:
         generic = _("タスクを今は実行できません（タスクの管理者に確かめてください）")
         return [str(exc) if detailed else str(generic)], []

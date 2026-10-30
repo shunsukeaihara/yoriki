@@ -134,11 +134,11 @@ class RunPlan:
     destination_revision: DestinationRevision | None
 
 
-def plan_run(task: TaskDefinition, revision: TaskDefinitionRevision) -> RunPlan:
+def plan_run(task: TaskDefinition, revision: TaskDefinitionRevision, *, lock: bool = True) -> RunPlan:
     """タスクの今の版でRunを始められるかを確かめ、Runに固定するものを決める。始められなければ CannotRun。
 
-    何も作らない（通知先の行をロックするので、transactionの中で呼ぶ）。受付（_start()）と、入口の画面でサンプルを
-    試すとき（受付と同じ判定を見せる）に使う"""
+    何も作らない。受付（_start()）は `lock` で通知先の行をロックする（transactionの中で呼ぶ）。入口の画面でサンプルを
+    試すとき（受付と同じ判定を見せる）は `lock=False` で読むだけにし、受付を待たせない"""
     profile = revision.model_profile
     version = profile.current_version
     if version is None or not profile.is_active or profile.deleted:
@@ -182,7 +182,7 @@ def plan_run(task: TaskDefinition, revision: TaskDefinitionRevision) -> RunPlan:
         output_schema=output_schema,
         notification=notification,
         connector_catalog=connector_catalog,
-        destination_revision=_destination_revision(task, revision),
+        destination_revision=_destination_revision(task, revision, lock=lock),
     )
 
 
@@ -295,17 +295,16 @@ def _fixed_skills(
     return entries, output_schema
 
 
-def _destination_revision(task: TaskDefinition, revision: TaskDefinitionRevision) -> DestinationRevision | None:
+def _destination_revision(
+    task: TaskDefinition, revision: TaskDefinitionRevision, *, lock: bool = True
+) -> DestinationRevision | None:
     """結果の通知先の今の版（Runに固定する）。通知先を今は使えなければ CannotRun（受け付けた後に送れないRunを
     作らない）"""
     if revision.destination_id is None:
         return None
     # 停止・版の更新と同時に受け付けないよう、出口の行をロックする（タスクの行の後に取る）
-    destination = (
-        Destination.objects.select_for_update(of=("self",))
-        .select_related("current_revision", "department")
-        .get(pk=revision.destination_id)
-    )
+    destinations = Destination.objects.select_for_update(of=("self",)) if lock else Destination.objects.all()
+    destination = destinations.select_related("current_revision", "department").get(pk=revision.destination_id)
     if problem := destination.problem_for(task, sensitive=revision.handles_sensitive_data):
         raise CannotRun(
             _("結果の通知先「%(name)s」を使えません（%(reason)s）。") % {"name": destination.name, "reason": problem}

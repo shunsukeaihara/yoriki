@@ -45,18 +45,25 @@ const isMissing = (name: string | null) => Boolean(name) && !inputOf(name)
 const addRow = () => form.value.inputs.push({ name: null, path: '' })
 const removeRow = (index: number) => form.value.inputs.splice(index, 1)
 
-/** 編集中の受け取り方（保存していなくても、サンプルのpayloadで試せる） */
-const settings = computed(() => ({
-  eventIdPath: form.value.eventIdPath.trim(),
-  inputs: fromTriggerInputRows(form.value.inputs),
-  maxPayloadBytes: form.value.maxPayloadKib === null ? undefined : form.value.maxPayloadKib * 1024,
-}))
-
-const inputsChanged = computed(
-  () =>
-    JSON.stringify(settings.value.inputs) !==
-    JSON.stringify(fromTriggerInputRows(toTriggerInputRows(modelValue.value?.inputs))),
-)
+/**
+ * 編集中の受け取り方（保存にも、保存していない設定でサンプルを試すのにも使う）。取り出しと上限は、変えたときだけ
+ * 入れる（送らなければサーバーは今の版の値を使う）。サーバーは送られた取り出しをタスクの今の項目で確かめるので、
+ * タスクから消した項目の取り出しが残っていても、ほかの設定（名前・上限等）を保存でき、試せるように。上限はKiBで
+ * 編集するので、変えていなければ元のバイト数を丸めて送らない
+ */
+const settings = computed(() => {
+  const inputs = fromTriggerInputRows(form.value.inputs)
+  const saved = modelValue.value
+  const inputsChanged =
+    JSON.stringify(inputs) !== JSON.stringify(fromTriggerInputRows(toTriggerInputRows(saved?.inputs)))
+  const kib = form.value.maxPayloadKib
+  const limitChanged = kib !== null && kib !== toForm(saved).maxPayloadKib
+  return {
+    eventIdPath: form.value.eventIdPath.trim(),
+    inputs: inputsChanged ? inputs : undefined,
+    maxPayloadBytes: limitChanged ? kib * 1024 : undefined,
+  }
+})
 
 const { onSubmit, loading, errors } = createSubmit({
   form,
@@ -67,11 +74,7 @@ const { onSubmit, loading, errors } = createSubmit({
     return api.manage.triggerBindings(id).patch({
       version: f.version,
       name,
-      eventIdPath: settings.value.eventIdPath,
-      // 取り出しは変えたときだけ送る。サーバーは送られた取り出しをタスクの今の項目で確かめるので、タスクから消した
-      // 項目の取り出しが残っていても、ほかの設定（名前・上限等）は変えられるように
-      inputs: inputsChanged.value ? settings.value.inputs : undefined,
-      maxPayloadBytes: settings.value.maxPayloadBytes,
+      ...settings.value,
       changeReason: f.changeReason || undefined,
     })
   },

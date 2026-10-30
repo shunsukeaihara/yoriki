@@ -187,17 +187,12 @@ describe('TriggerBindingForm', () => {
     vm.form.inputs.push({ name: null, path: '$.x' })
     vm.form.eventIdPath = ' $.id '
     await nextTick()
-    expect(vm.settings).toMatchObject({
-      maxPayloadBytes: 2 * 1024 * 1024,
-      eventIdPath: '$.id',
-      inputs: [
-        { name: 'vendor', path: '$.data.vendor_name' },
-        { name: 'amount', path: '$.data.total' },
-      ],
-    })
+    // 取り出しと上限は、変えていなければ入れない（サーバーは今の版の値を使う）
+    expect(vm.settings).toEqual({ eventIdPath: '$.id', inputs: undefined, maxPayloadBytes: undefined })
     await vm.onSubmit()
     const data = triggerPatch.mock.calls[0]![0]
-    expect(data).toMatchObject({ version: 3, eventIdPath: '$.id', maxPayloadBytes: 2 * 1024 * 1024 })
+    expect(data).toMatchObject({ version: 3, eventIdPath: '$.id' })
+    expect(data.maxPayloadBytes).toBeUndefined()
     // 取り出しを変えていなければ送らない（タスクから消した項目の取り出しが残っていても、ほかの設定を保存できる）
     expect(data.inputs).toBeUndefined()
     expect(data.name).toBeUndefined()
@@ -209,6 +204,29 @@ describe('TriggerBindingForm', () => {
     vm.form.name = '経費SaaS（本番）'
     await vm.onSubmit()
     expect(triggerPatch.mock.calls.at(-1)![0]).toMatchObject({ name: '経費SaaS（本番）' })
+  })
+})
+
+describe('TriggerBindingForm（上限）', () => {
+  beforeEach(() => {
+    triggerPatch.mockReset().mockResolvedValue(binding)
+  })
+
+  it('KiBで割り切れない上限は、変えなければ丸めて送らず、変えたらKiBから送る', async () => {
+    const wrapper = await mountSuspended(TriggerBindingForm, {
+      props: { modelValue: { ...binding, maxPayloadBytes: 1_500_000 } },
+    })
+    const vm = wrapper.vm as unknown as Exposed & {
+      form: { maxPayloadKib: number | null }
+      settings: { maxPayloadBytes?: number }
+    }
+    await vm.onSubmit()
+    expect(triggerPatch.mock.calls[0]![0].maxPayloadBytes).toBeUndefined()
+    vm.form.maxPayloadKib = 512
+    await nextTick()
+    expect(vm.settings.maxPayloadBytes).toBe(512 * 1024)
+    await vm.onSubmit()
+    expect(triggerPatch.mock.calls[1]![0].maxPayloadBytes).toBe(512 * 1024)
   })
 })
 

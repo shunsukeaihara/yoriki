@@ -6,7 +6,7 @@
  */
 const props = defineProps<{
   bindingId: string
-  settings: { eventIdPath: string; inputs: TriggerInput[]; maxPayloadBytes?: number }
+  settings: { eventIdPath: string; inputs?: TriggerInput[]; maxPayloadBytes?: number }
 }>()
 const api = useAPI()
 const toast = useToast()

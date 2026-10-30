@@ -31,8 +31,9 @@ def todo_events():
 
 
 def prefetch_todos() -> Prefetch:
-    """RunSerializer の todos を一覧で先に読む"""
-    return Prefetch("events", queryset=todo_events(), to_attr="todo_events")
+    """RunSerializer の todos を一覧で先に読む。Runごとに最新の1件だけを読む（PostgreSQLの DISTINCT ON）"""
+    latest = todo_events().order_by("run_id", "-sequence").distinct("run_id")
+    return Prefetch("events", queryset=latest, to_attr="todo_events")
 
 
 class TodoSerializer(serializers.Serializer):

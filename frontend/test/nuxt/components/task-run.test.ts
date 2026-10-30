@@ -91,6 +91,8 @@ describe('TaskRunDeliveries', () => {
           next: null,
           previous: null,
         })
+        // 一度読めなくても、読み直しは続ける
+        .mockRejectedValueOnce(new Error('network'))
         .mockResolvedValue({
           results: [delivery('a', DeliveryStatus.DELIVERED, '受付確認済み')],
           next: null,
@@ -102,10 +104,14 @@ describe('TaskRunDeliveries', () => {
       await vi.advanceTimersByTimeAsync(5000)
       await flushPromises()
       expect(list).toHaveBeenCalledTimes(2)
+      expect(wrapper.text()).toContain('配信中')
+      await vi.advanceTimersByTimeAsync(5000)
+      await flushPromises()
+      expect(list).toHaveBeenCalledTimes(3)
       expect(wrapper.text()).toContain('受付確認済み')
       // 確定したら読み直さない
       await vi.advanceTimersByTimeAsync(20000)
-      expect(list).toHaveBeenCalledTimes(2)
+      expect(list).toHaveBeenCalledTimes(3)
     } finally {
       vi.useRealTimers()
     }

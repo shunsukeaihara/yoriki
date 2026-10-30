@@ -469,8 +469,11 @@ def test_task_runs_are_listed_without_a_query_per_run(api_client, app_user, mode
     for vendor in ("A", "B"):
         api_client.post(_url(task, "run/"), {"inputs": {"vendor": vendor}}, format="json")
     run = Run.objects.filter(task__uid=task["id"]).earliest("pk")
+    old = [{"content": "確認", "status": "pending"}]
     todos = [{"content": "確認", "status": "in_progress"}]
-    RunEvent.record(run, RunEventKind.TOOL_RESULT, {"name": "todo_write", "is_error": False, "value": {"todos": todos}})
+    for value in (old, todos):  # 最新の計画だけを出す
+        data = {"name": "todo_write", "is_error": False, "value": {"todos": value}}
+        RunEvent.record(run, RunEventKind.TOOL_RESULT, data)
 
     def count():
         with CaptureQueriesContext(connection) as queries:

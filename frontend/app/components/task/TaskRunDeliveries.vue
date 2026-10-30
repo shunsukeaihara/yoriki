@@ -30,8 +30,8 @@ const schedulePoll = () => {
   clearTimeout(pollTimer)
   if (!sending.value) return
   pollTimer = setTimeout(() => {
-    // 読めなくても、次の読み直しか「読み直す」で戻る
-    fetchAll().catch(() => {})
+    // 読めなかったときは一覧が変わらないので、ここで次を予約する（読めたときは一覧の変化で予約し直す）
+    fetchAll().catch(schedulePoll)
   }, POLL_INTERVAL)
 }
 watch(items, schedulePoll)

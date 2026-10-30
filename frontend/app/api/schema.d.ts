@@ -5568,8 +5568,8 @@ export interface components {
             readonly updated: string;
         };
         /**
-         * @description タスクの詳細（編集画面）。一覧の項目に加えて、登録したSkill・Connectorの名前と、今の版のままでは実行できない
-         *     理由（Skillの停止・Connectorの削除・範囲の外等。保存のときと同じ検査）を返す
+         * @description タスクの詳細（編集画面）。一覧の項目に加えて、登録したSkill・Connectorの名前と、今の版が保存のときの検査に
+         *     通らない理由（Skillの停止・Connectorの削除・範囲の外等。多くは実行も断られる）を返す
          */
         TaskDefinitionDetail: {
             readonly id: string;
@@ -5645,7 +5645,7 @@ export interface components {
             readonly skills_info: components["schemas"]["TaskReference"][];
             /** @description 登録したConnectorの名前 */
             readonly connectors_info: components["schemas"]["TaskReference"][];
-            /** @description 今の版のままでは実行できない理由（なければ空）。版を作ったときより後の変更で生じたもの */
+            /** @description 今の版が、保存のときの検査に通らない理由（なければ空）。版を作ったときより後の変更（Skillの停止・Connectorの削除等）で生じたもので、多くは実行も断られる */
             readonly problems: string[];
         };
         /**

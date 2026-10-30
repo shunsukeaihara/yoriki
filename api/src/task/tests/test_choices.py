@@ -157,7 +157,7 @@ def test_detail_shows_names_and_problems(api_client, app_user):
     assert task["problems"] == []
     assert notify.uid not in {s["id"] for s in task["skills_info"]}
 
-    # 版を作った後にSkillを止め、Connectorを消すと、今の版のままでは実行できない理由が出る
+    # 版を作った後にSkillを止め、Connectorを消すと、今の版が保存のときの検査に通らない理由が出る
     skill.suspended = True
     skill.save()
     connector.deleted = True

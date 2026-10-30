@@ -178,7 +178,11 @@ const onDelete = async () => {
           color="warning"
           variant="subtle"
           icon="i-lucide-triangle-alert"
-          :title="$t('今の版のままでは実行できません。設定を直して保存してください')"
+          :title="
+            $t(
+              '今の版に、保存のときの検査に通らない設定があります。実行が断られることがあるので、直して保存してください',
+            )
+          "
           :description="task.problems.join('、')"
         />
         <div v-if="task.triggers.length" class="grid gap-1 rounded-md border border-default p-3 text-sm">

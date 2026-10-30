@@ -205,6 +205,35 @@ export type TaskListParams = ListParams & {
 export type TaskChoiceParams = ListParams & { scope: SkillScopeEnum; department?: string | null }
 export type TaskRunListParams = ListParams & { status?: RunStatusEnum }
 
+// 出口（Destination）と入口（TriggerBinding）の管理（連携の管理者。authorization.md §5.5）。中身は今の版の値を平らに持つ
+export type Destination = Api<'Destination'>
+// 作成と署名の鍵の作り直しの応答。署名の鍵はこのときだけ返る
+export type DestinationSecret = Api<'DestinationSecret'>
+export type DestinationWrite = Api<'DestinationRequest'>
+export type DestinationUpdate = Api<'DestinationUpdateRequest'>
+export type DestinationRevision = Api<'DestinationRevision'>
+export type DestinationListParams = ListParams & {
+  // 名前の一部（DRFの検索）
+  search?: string
+  kind?: DestinationKindEnum
+  scope?: ConnectorScopeEnum
+  department?: string
+  suspended?: boolean
+}
+export type TriggerBinding = Api<'TriggerBinding'>
+// 作成と鍵の作り直しの応答。鍵はこのときだけ返る
+export type TriggerBindingKey = Api<'TriggerBindingKey'>
+export type TriggerBindingWrite = Api<'TriggerBindingRequest'>
+export type TriggerBindingUpdate = Api<'TriggerBindingUpdateRequest'>
+export type TriggerBindingRevision = Api<'TriggerBindingRevision'>
+export type TriggerInput = Api<'TriggerInput'>
+export type TriggerTask = Api<'TriggerTask'>
+export type TriggerReceipt = Api<'TriggerReceipt'>
+export type TriggerPreview = Api<'TriggerPreview'>
+export type TriggerPreviewOutcomeEnum = Schemas['TriggerPreviewOutcomeEnum']
+export type TriggerPreviewRequest = Api<'TriggerPreviewRequest'>
+export type TriggerBindingListParams = ListParams & { search?: string; suspended?: boolean }
+
 export type ConversationListParams = ListParams
 export type ArtifactListParams = ListParams & { kind?: ArtifactKindEnum }
 export type RunListParams = ListParams & { status?: RunStatusEnum; conversation?: string }

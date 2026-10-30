@@ -4,7 +4,7 @@ from typing import Any
 import jsonschema
 from django.conf import settings
 from django.core.files.uploadedfile import UploadedFile
-from django.db import transaction
+from django.db import models, transaction
 from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
@@ -28,8 +28,9 @@ from utils.fields import NormalizedTextField
 from utils.serializers import ReadOnlyModelSerializer
 
 from . import checks
-from .errors import VersionConflict
-from .inputs import InputFile
+from .dispatch import plan_run, received_run
+from .errors import CannotRun, VersionConflict
+from .inputs import InputFile, clean_inputs, render
 from .models import (
     DEFAULT_MAX_PAYLOAD_BYTES,
     MAX_PAYLOAD_BYTES,
@@ -46,7 +47,7 @@ from .models import (
     TriggerKind,
     TriggerReceipt,
 )
-from .webhook import parse_path
+from .webhook import PayloadError, dedup_key, input_values, parse_path, parse_payload
 
 MAX_PROMPT_TEMPLATE = 20_000
 MAX_CHOICES = 100
@@ -596,17 +597,43 @@ class TriggerInputSerializer(serializers.Serializer):
         return value
 
 
+class TriggerTaskInputSerializer(serializers.Serializer):
+    """入口の画面に出すタスクの入力の項目。取り出しの設定に要るもの（名前・表示名・型・必須）だけを返し、説明・
+    選択肢・文字数の上限等のタスクの定義の中身は返さない（連携の管理者がタスクを管理できるとは限らない。
+    authorization.md §5.3）"""
+
+    name = serializers.CharField(read_only=True)
+    label = serializers.CharField(read_only=True)  # type: ignore[assignment]
+    type = serializers.ChoiceField(choices=TaskInputType.choices, read_only=True)
+    required = serializers.BooleanField(read_only=True, default=False)  # type: ignore[assignment]
+
+
 class TriggerTaskSerializer(ReadOnlyModelSerializer):
     """入口の画面に出すタスク（名前と範囲と入力の項目。項目の取り出しの設定に使う）"""
 
     id = serializers.CharField(source="uid", read_only=True)
     scope_display = serializers.CharField(source="get_scope_display", read_only=True)
     department = MinimumDepartmentSerializer(read_only=True, allow_null=True)
-    inputs = TaskInputSerializer(source="current_revision.inputs", many=True, read_only=True)
+    inputs = TriggerTaskInputSerializer(source="current_revision.inputs", many=True, read_only=True)
 
     class Meta:
         model = TaskDefinition
         fields = ["id", "name", "scope", "scope_display", "department", "suspended", "inputs"]
+
+
+def _check_trigger_inputs(value: list[dict[str, str]]) -> list[dict[str, str]]:
+    """項目の取り出しの数と重複（入口の保存と、サンプルを試すときに共通）"""
+    if len(value) > checks.MAX_INPUTS:
+        raise serializers.ValidationError(_("取り出す項目は%(limit)s個までです") % {"limit": checks.MAX_INPUTS})
+    if len({i["name"] for i in value}) != len(value):
+        raise serializers.ValidationError(_("同じ項目を2回指定しています"))
+    return [{"name": i["name"], "path": i["path"]} for i in value]
+
+
+def unknown_trigger_inputs(task: TaskDefinition, mappings: list[dict[str, str]]) -> list[str]:
+    """タスクの今の版にない項目の名前（入口の保存と、サンプルを試すときに断る）"""
+    names = {i["name"] for i in (task.current_revision.inputs if task.current_revision else [])}
+    return [i["name"] for i in mappings if i["name"] not in names]
 
 
 class TriggerBindingSerializer(serializers.ModelSerializer):
@@ -686,11 +713,7 @@ class TriggerBindingSerializer(serializers.ModelSerializer):
         return f"/api/hooks/v1/tasks/{obj.task.uid}/"
 
     def validate_inputs(self, value: list[dict[str, str]]) -> list[dict[str, str]]:
-        if len(value) > checks.MAX_INPUTS:
-            raise serializers.ValidationError(_("取り出す項目は%(limit)s個までです") % {"limit": checks.MAX_INPUTS})
-        if len({i["name"] for i in value}) != len(value):
-            raise serializers.ValidationError(_("同じ項目を2回指定しています"))
-        return [{"name": i["name"], "path": i["path"]} for i in value]
+        return _check_trigger_inputs(value)
 
     def validate_event_id_path(self, value: str) -> str:
         if value:
@@ -716,9 +739,8 @@ class TriggerBindingSerializer(serializers.ModelSerializer):
         content = {name: sent[name] if name in sent else getattr(current, name) for name in TRIGGER_REVISION_FIELDS}
         # タスクの今の版にない項目は取り出せない。確かめるのは作成時と取り出しを送ったときだけ（タスクから項目を
         # 消した後も、名前や上限は変えられるように。消した項目の取り出しは受付時に使わない）
-        names = {i["name"] for i in (task.current_revision.inputs if task.current_revision else [])}
         sent_inputs = sent.get("inputs", []) if self.instance else content["inputs"]
-        if unknown := [i["name"] for i in sent_inputs if i["name"] not in names]:
+        if unknown := unknown_trigger_inputs(task, sent_inputs):
             raise serializers.ValidationError(
                 {"inputs": _("タスクにない項目です：%(names)s") % {"names": ", ".join(unknown)}}
             )
@@ -809,6 +831,229 @@ class TriggerBindingKeySerializer(TriggerBindingSerializer):
 
     class Meta(TriggerBindingSerializer.Meta):
         fields = [*TriggerBindingSerializer.Meta.fields, "key"]
+
+
+class TriggerPreviewValueSerializer(serializers.Serializer):
+    name = serializers.CharField()
+    value = serializers.JSONField(help_text=_("確かめた後の値（受付時にタスクの入力になる値）"))
+
+
+class TriggerPreviewErrorSerializer(serializers.Serializer):
+    name = serializers.CharField()
+    message = serializers.CharField()
+
+
+class TriggerPreviewOutcome(models.TextChoices):
+    """サンプルの要求を受付がどうするか"""
+
+    ACCEPTED = "accepted", _("受け付ける")
+    REFUSED = "refused", _("断る")
+    # 必須のファイルの項目があり、JSONのサンプルでは確かめられない（ファイルはmultipartで付けるため）
+    UNCONFIRMED = "unconfirmed", _("確かめられない")
+
+
+class TriggerPreviewSerializer(serializers.Serializer):
+    """サンプルのpayloadで取り出しを試す（design.md §4.2）。保存していない受け取り方（イベントIDの場所・項目の
+    取り出し）で試せるように、それらも送れる（送らなければ今の版の値）。受付と同じ処理（payloadの読み取り、重複の
+    キー、項目の取り出しと確かめ）を通し、何も保存しない。payloadはJSONだけ（ファイルはmultipartで付けるので、型が
+    ファイルの項目は試せない）。
+
+    名前は項目の名前のまま返すため、値と誤りは名前のキーの辞書ではなく並びにする（APIクライアントのcamelCaseの
+    変換で名前を変えない）。埋め込んだ後のプロンプトは、タスクを管理できる人にだけ返す（連携の管理者がタスクの依頼文を
+    見てよいとは限らない）"""
+
+    sample = serializers.CharField(
+        max_length=MAX_PAYLOAD_BYTES,
+        trim_whitespace=False,
+        write_only=True,
+        help_text=_("サンプルのpayload（JSON）"),
+    )
+    event_id_path = serializers.CharField(
+        max_length=200,
+        required=False,
+        allow_blank=True,
+        write_only=True,
+        help_text=_("イベントIDの場所。送らなければ今の版の値"),
+    )
+    inputs = TriggerInputSerializer(
+        many=True, required=False, write_only=True, help_text=_("項目の取り出し。送らなければ今の版の値")
+    )
+    max_payload_bytes = serializers.IntegerField(
+        min_value=1024,
+        max_value=MAX_PAYLOAD_BYTES,
+        required=False,
+        write_only=True,
+        help_text=_("payloadの大きさの上限（バイト）。送らなければ今の版の値"),
+    )
+
+    outcome = serializers.ChoiceField(
+        choices=TriggerPreviewOutcome.choices,
+        read_only=True,
+        help_text=_(
+            "受付がこの要求をどうするか（入口・タスクの停止、payloadを読めない・イベントIDを使えない・項目の誤りが"
+            "あれば断る。ほかに断る理由がなく、必須のファイルの項目か、タスクの定義に断られうる設定があれば確かめられない）"
+        ),
+    )
+    format_error = serializers.CharField(read_only=True, help_text=_("payloadを読めなかった理由（読めたら空）"))
+    event_id = serializers.CharField(
+        read_only=True, allow_null=True, help_text=_("重複の判定に使うイベントID（なければnull）")
+    )
+    event_id_error = serializers.CharField(read_only=True, help_text=_("イベントIDを使えない理由（使えれば空）"))
+    values = TriggerPreviewValueSerializer(many=True, read_only=True)
+    input_errors = TriggerPreviewErrorSerializer(
+        many=True, read_only=True, help_text=_("項目ごとの誤り（受付では400で断られる）")
+    )
+    file_inputs = serializers.ListField(
+        child=serializers.CharField(), read_only=True, help_text=_("型がファイルの項目（試せない）")
+    )
+    required_file_inputs = serializers.ListField(
+        child=serializers.CharField(), read_only=True, help_text=_("型がファイルの必須の項目")
+    )
+    run_problems = serializers.ListField(
+        child=serializers.CharField(),
+        read_only=True,
+        help_text=_(
+            "入口・タスクの今の状態で、受付が断る・断りうる理由。入口・タスクの停止は断る。タスクの定義が保存のときの"
+            "検査に通らない理由（Skillの停止等）は断りうる。定義の中身は、タスクを管理できる人にだけ詳しく返す"
+        ),
+    )
+    duplicate = serializers.BooleanField(
+        read_only=True,
+        help_text=_("前に受け付けた要求と同じ（送ると前のRunを返し、新しいRunは作らない）"),
+    )
+    can_view_prompt = serializers.BooleanField(read_only=True)
+    prompt = serializers.CharField(
+        read_only=True,
+        allow_null=True,
+        help_text=_("埋め込んだ後のプロンプト（タスクを管理できる人だけ。断る要求ではnull）"),
+    )
+
+    def validate_event_id_path(self, value: str) -> str:
+        if value:
+            try:
+                parse_path(value)
+            except ValueError as exc:
+                raise serializers.ValidationError(str(exc)) from exc
+        return value
+
+    def validate_inputs(self, value: list[dict[str, str]]) -> list[dict[str, str]]:
+        return _check_trigger_inputs(value)  # 保存できない取り出しでは試さない（保存と同じく400）
+
+    def preview(self, binding: TriggerBinding, user) -> dict[str, Any]:
+        """受付（task.dispatch.receive_webhook()）と同じ順で確かめる：入口の停止 → payload → 前の受付との重複（同じ
+        要求なら、ここで前のRunを返して終わる） → タスクの状態とRunを始められるか → 項目"""
+        data = self.validated_data
+        task = binding.task
+        # 送った取り出しは保存と同じく、タスクの今の版にない項目を断る（保存できない受け取り方では試さない）
+        if "inputs" in data and (unknown := unknown_trigger_inputs(task, data["inputs"])):
+            raise serializers.ValidationError(
+                {"inputs": _("タスクにない項目です：%(names)s") % {"names": ", ".join(unknown)}}
+            )
+        revision = task.current_revision
+        current = binding.current_revision
+        definitions = revision.inputs if revision else []
+        files = [d for d in definitions if d["type"] == TaskInputType.FILE]
+        can_view_prompt = TaskDefinition.objects.manageable_by(user).filter(pk=task.pk).exists()
+        refusals: list[str] = []
+        if binding.suspended or current is None:
+            refusals.append(str(_("この入口は停止中です")))
+        result: dict[str, Any] = {
+            "outcome": TriggerPreviewOutcome.REFUSED,
+            "format_error": "",
+            "event_id": None,
+            "event_id_error": "",
+            "values": [],
+            "input_errors": [],
+            "file_inputs": [d["name"] for d in files],
+            "required_file_inputs": [d["name"] for d in files if d.get("required")],
+            "run_problems": refusals,
+            "duplicate": False,
+            "can_view_prompt": can_view_prompt,
+            "prompt": None,
+        }
+        # 対にならないサロゲートは、サンプルの欄（CharField）が400で断るので、ここではUTF-8にできる
+        body = data["sample"].encode()
+        limit = data.get("max_payload_bytes", current.max_payload_bytes if current else DEFAULT_MAX_PAYLOAD_BYTES)
+        if len(body) > limit:
+            result["format_error"] = _("payloadが上限（%(limit)sバイト）を超えています") % {"limit": limit}
+            return result
+        try:
+            payload = parse_payload(body, "application/json")
+        except PayloadError as exc:
+            result["format_error"] = exc.detail
+            return result
+        try:
+            key = dedup_key(payload, data.get("event_id_path", current.event_id_path if current else ""), None)
+            result["event_id"] = key.split(":", 1)[1] if key else None
+            # 前の受付との重複（受付と同じ判定。読むだけ）。同じ要求なら、タスクの状態や項目によらず前のRunを返す
+            if not refusals and received_run(binding, key, payload, None) is not None:
+                result["duplicate"] = True
+                result["outcome"] = TriggerPreviewOutcome.ACCEPTED
+                return result
+        except PayloadError as exc:
+            if exc.code == "event_id_reused":  # 同じイベントIDで違う内容は409で断る
+                refusals.append(exc.detail)
+            else:
+                result["event_id_error"] = exc.detail
+        doubts: list[str] = []
+        if not refusals:
+            task_refusals, doubts = _task_problems(task, detailed=can_view_prompt)
+            refusals += task_refusals
+            result["run_problems"] = [*refusals, *doubts]
+        mappings = data.get("inputs", current.inputs if current else [])
+        cleaned, errors, absent_files = _preview_inputs(payload, mappings, definitions)
+        order = [d["name"] for d in definitions]
+        result["values"] = [{"name": name, "value": cleaned[name]} for name in order if name in cleaned]
+        # 誤りは項目の定義の順に並べ、定義にない項目（推奨の形式の inputs で送られたもの）は最後に置く
+        ranked = sorted(errors.items(), key=lambda e: order.index(e[0]) if e[0] in order else len(order))
+        result["input_errors"] = [{"name": name, "message": message} for name, message in ranked]
+        if refusals or result["event_id_error"] or errors:
+            return result  # 断る要求ではRunを作らないので、プロンプトもない（欠けた値で埋めたものを見せない）
+        unconfirmed = bool(doubts) or bool(absent_files & set(result["required_file_inputs"]))
+        result["outcome"] = TriggerPreviewOutcome.UNCONFIRMED if unconfirmed else TriggerPreviewOutcome.ACCEPTED
+        if can_view_prompt and revision is not None:
+            result["prompt"] = render(revision.prompt_template, cleaned)
+        return result
+
+
+def _task_problems(task: TaskDefinition, *, detailed: bool) -> tuple[list[str], list[str]]:
+    """タスクの今の状態で、受付が断る理由と、断りうる理由。
+
+    断るのは、タスクの停止等と、Runを始められないもの（モデル設定・実行環境・Skill・Connector・通知先。受付と同じ
+    task.dispatch.plan_run()）。断りうるのは、定義が保存のときの検査に通らないもの（受付は断らないものもある。受付時に
+    既定に戻すeffort等）。理由はタスクの定義の中身に触れるので、`detailed`（タスクを管理できる人）のときだけ詳しく返す"""
+    revision = task.current_revision
+    if problem := checks.task_problem(task) or ("" if task.in_service() else _("タスクの今の版がありません")):
+        return [str(problem)], []
+    assert revision is not None  # in_service() が確かめた
+    try:
+        plan_run(task, revision, lock=False)  # 読むだけ（受付を待たせない）
+    except CannotRun as exc:
+        generic = _("タスクを今は実行できません（タスクの管理者に確かめてください）")
+        return [str(exc) if detailed else str(generic)], []
+    content = {name: getattr(revision, name) for name in REVISION_FIELDS}
+    problems = [str(m) for messages in checks.content_errors(task, content).values() for m in messages]
+    if problems and not detailed:
+        return [], [str(_("タスクの定義に、実行を断られうる設定があります（タスクの管理者に確かめてください）"))]
+    return [], problems
+
+
+def _preview_inputs(
+    payload, mappings: list[dict[str, str]], definitions: list[dict[str, Any]]
+) -> tuple[dict[str, Any], dict[str, str], set[str]]:
+    """受付と同じく項目を取り出して確かめる。（確かめた値、項目ごとの誤り、値のないファイルの項目）。
+
+    型がファイルの項目は、JSONに値があれば受付と同じく断る（JSONの値はファイルの項目の値にしない）。値がない（null・
+    空を含む）項目は、multipartで付けるファイルを指すので、ここでは確かめない"""
+    values = input_values(payload, mappings, definitions)
+    absent_files = {
+        d["name"] for d in definitions if d["type"] == TaskInputType.FILE and values.get(d["name"]) in (None, "")
+    }
+    cleaned, errors = clean_inputs(
+        [d for d in definitions if d["name"] not in absent_files],
+        {name: value for name, value in values.items() if name not in absent_files},
+    )
+    return cleaned, errors, absent_files
 
 
 class TriggerBindingStateSerializer(serializers.Serializer):

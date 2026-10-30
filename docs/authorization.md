@@ -3,7 +3,7 @@
 Yorikiの権限（誰が何を見て、使い、変えられるか）と、Runが誰の権限で何を読みどこへ出せるかを定める。対象はSkill・Connector・タスク・入口（Trigger）・出口（配信先）と、管理画面の操作。製品の要件は [design.md](design.md) を正とし、権限については本書を正とする（design.md §3.6・§4.1・§4.9.1・§10.0は本書の要約）。Djangoでの書き方は [backend-conventions.md](backend-conventions.md) §6.3、画面の出し分けは [frontend-conventions.md](frontend-conventions.md) §6 に従う。
 
 - 版：0.1 設計案（2026年10月27日。design.md 0.33）
-- タスク（定義と版、手動実行）・Webhookの入口・出口（Webhook・Zapier・画面の通知）と配信、出口へ渡す成果物の期限付きURLは実装した。タスクの画面（業務画面の `/tasks` と管理画面の `/manage/system_tasks`。一覧・作成・編集・手動実行・版の履歴）も実装した。スケジュールの入口、チャットからのタスクの起動、本人へのDM・Slack・Teamsの出口、入口・出口の管理画面、タスクのRunの画面（配信の状態と通知の再試行）はまだ実装していない。その部分は方針で、細部は各段階で実物に即して詰める。
+- タスク（定義と版、手動実行）・Webhookの入口・出口（Webhook・Zapier・画面の通知）と配信、出口へ渡す成果物の期限付きURLは実装した。タスクの画面（業務画面の `/tasks` と管理画面の `/manage/system_tasks`。一覧・作成・編集・手動実行・版の履歴）と、入口・出口の管理画面（`/manage/trigger_bindings`・`/manage/destinations`。サンプルのpayloadで取り出しを試す）も実装した。スケジュールの入口、チャットからのタスクの起動、本人へのDM・Slack・Teamsの出口、タスクのRunの画面（配信の状態と通知の再試行）はまだ実装していない。その部分は方針で、細部は各段階で実物に即して詰める。
 
 ---
 

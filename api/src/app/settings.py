@@ -249,6 +249,7 @@ SPECTACULAR_SETTINGS = {
         "CsvColumnTypeEnum": "resources.formats.COLUMN_TYPES",
         "ConnectorKindEnum": "connector.models.ConnectorKind",
         "TriggerKindEnum": "task.models.TriggerKind",
+        "TaskInputTypeEnum": "task.models.TaskInputType",
         "DestinationKindEnum": "delivery.models.DestinationKind",
         "NotifyEventEnum": "delivery.models.NotifyEvent",
         "NotifyContentEnum": "delivery.models.NotifyContent",

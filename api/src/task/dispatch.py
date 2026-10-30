@@ -8,6 +8,7 @@
 import json
 import logging
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from django.db import transaction
@@ -25,7 +26,7 @@ from harness.untrusted import untrusted
 from llm.models import ModelProfileVersion
 from run.dispatch import enqueue_run
 from run.models import Run, RunEvent, RunEventKind, RunKind, RunLaunch, RunStatus, RunTrigger
-from runtime.models import RuntimeProfile
+from runtime.models import RuntimeProfile, RuntimeProfileVersion
 from user.models import system_user
 
 from . import checks
@@ -119,15 +120,25 @@ def start_task_run(
         raise
 
 
-def _start(
-    task: TaskDefinition,
-    revision: TaskDefinitionRevision,
-    inputs: dict[str, Any],
-    *,
-    actor,
-    launch,
-    files: Sequence[InputFile],
-) -> Run:
+@dataclass
+class RunPlan:
+    """タスクの版から決めた、Runに固定するもの（plan_run()）"""
+
+    version: ModelProfileVersion
+    effort: str
+    runtime_version: RuntimeProfileVersion
+    entries: list[dict[str, Any]]
+    output_schema: dict[str, Any] | None
+    notification: str
+    connector_catalog: dict[str, Any] | None
+    destination_revision: DestinationRevision | None
+
+
+def plan_run(task: TaskDefinition, revision: TaskDefinitionRevision, *, lock: bool = True) -> RunPlan:
+    """タスクの今の版でRunを始められるかを確かめ、Runに固定するものを決める。始められなければ CannotRun。
+
+    何も作らない。受付（_start()）は `lock` で通知先の行をロックする（transactionの中で呼ぶ）。入口の画面でサンプルを
+    試すとき（受付と同じ判定を見せる）は `lock=False` で読むだけにし、受付を待たせない"""
     profile = revision.model_profile
     version = profile.current_version
     if version is None or not profile.is_active or profile.deleted:
@@ -163,10 +174,32 @@ def _start(
     if output_schema and not version.supports_tools:
         # 業務結果は submit_result で確定するので、モデル設定の今の版がToolを使えなければ受け付けない
         raise CannotRun(_("このタスクのモデル設定はToolを使えないので、業務結果を確定できません。"))
-    destination_revision = _destination_revision(task, revision)
+    return RunPlan(
+        version=version,
+        effort=effort,
+        runtime_version=runtime_version,
+        entries=entries,
+        output_schema=output_schema,
+        notification=notification,
+        connector_catalog=connector_catalog,
+        destination_revision=_destination_revision(task, revision, lock=lock),
+    )
+
+
+def _start(
+    task: TaskDefinition,
+    revision: TaskDefinitionRevision,
+    inputs: dict[str, Any],
+    *,
+    actor,
+    launch,
+    files: Sequence[InputFile],
+) -> Run:
+    plan = plan_run(task, revision)
+    sensitive = revision.handles_sensitive_data
     conversation = Conversation.objects.create(
         owner=actor,
-        model_profile=profile,
+        model_profile=revision.model_profile,
         effort=revision.effort,
         purpose=ConversationPurpose.TASK,
         handles_sensitive_data=sensitive,
@@ -179,14 +212,14 @@ def _start(
         conversation=conversation, sender=actor, role=MessageRole.USER, body=text
     )
     fixed: dict[str, Any] = {
-        "model_version": version.pk,
-        "effort": effort,
-        "runtime_version": runtime_version.pk,
+        "model_version": plan.version.pk,
+        "effort": plan.effort,
+        "runtime_version": plan.runtime_version.pk,
         "handles_sensitive_data": sensitive,
-        "skills": entries,
+        "skills": plan.entries,
         "skill_catalog": None,
         "connectors": [],
-        "connector_catalog": connector_catalog,
+        "connector_catalog": plan.connector_catalog,
         "task": {
             "task": task.uid,
             "name": task.name,
@@ -194,9 +227,9 @@ def _start(
             "number": revision.number,
             "launch": launch,
             "connectors": revision.connectors,
-            "output_schema": output_schema,
+            "output_schema": plan.output_schema,
             "inputs": inputs,
-            "notification_instructions": notification,
+            "notification_instructions": plan.notification,
         },
     }
     run = Run.objects.create(
@@ -204,9 +237,9 @@ def _start(
         owner=actor,
         trigger=RunTrigger.TASK,
         kind=RunKind.WORK,
-        model_version=version,
-        effort=effort,
-        runtime_version=runtime_version,
+        model_version=plan.version,
+        effort=plan.effort,
+        runtime_version=plan.runtime_version,
         handles_sensitive_data=sensitive,
         manifest={"fixed": fixed, "appended": []},
         task=task,
@@ -214,7 +247,7 @@ def _start(
         launch=launch,
         task_scope=task.scope,
         task_department=task.department,
-        destination_revision=destination_revision,
+        destination_revision=plan.destination_revision,
     )
     message.run = run
     message.save(update_fields=["run"])
@@ -228,9 +261,9 @@ def _start(
         RunEventKind.USER_MESSAGE,
         user_message_data(
             message,
-            _first_message(text, inputs, launch, notification=notification),
-            skills=entries,
-            connector_catalog=connector_catalog,
+            _first_message(text, inputs, launch, notification=plan.notification),
+            skills=plan.entries,
+            connector_catalog=plan.connector_catalog,
         ),
         actor=actor,
     )
@@ -262,17 +295,16 @@ def _fixed_skills(
     return entries, output_schema
 
 
-def _destination_revision(task: TaskDefinition, revision: TaskDefinitionRevision) -> DestinationRevision | None:
+def _destination_revision(
+    task: TaskDefinition, revision: TaskDefinitionRevision, *, lock: bool = True
+) -> DestinationRevision | None:
     """結果の通知先の今の版（Runに固定する）。通知先を今は使えなければ CannotRun（受け付けた後に送れないRunを
     作らない）"""
     if revision.destination_id is None:
         return None
     # 停止・版の更新と同時に受け付けないよう、出口の行をロックする（タスクの行の後に取る）
-    destination = (
-        Destination.objects.select_for_update(of=("self",))
-        .select_related("current_revision", "department")
-        .get(pk=revision.destination_id)
-    )
+    destinations = Destination.objects.select_for_update(of=("self",)) if lock else Destination.objects.all()
+    destination = destinations.select_related("current_revision", "department").get(pk=revision.destination_id)
     if problem := destination.problem_for(task, sensitive=revision.handles_sensitive_data):
         raise CannotRun(
             _("結果の通知先「%(name)s」を使えません（%(reason)s）。") % {"name": destination.name, "reason": problem}
@@ -374,7 +406,7 @@ def receive_webhook(
     with transaction.atomic():
         _lock_task(binding)
         current, revision, key = _current_binding(binding, body, payload, idempotency_key)
-        if (existing := _received_run(current, key, payload, idempotency_key)) is not None:
+        if (existing := received_run(current, key, payload, idempotency_key)) is not None:
             return existing, False
     payload_file = InputFile(payload.file_name, payload.file_bytes)
     # 保存先への書き込みは、入口とタスクの行をロックする前に行う（保存先が遅くても、同じ入口・タスクを待たせない）。
@@ -384,7 +416,7 @@ def receive_webhook(
         with transaction.atomic():
             _lock_task(binding)
             current, revision, key = _current_binding(binding, body, payload, idempotency_key)
-            existing = _received_run(current, key, payload, idempotency_key)
+            existing = received_run(current, key, payload, idempotency_key)
             if existing is None:
                 run = start_task_run(
                     current.task,
@@ -443,9 +475,7 @@ def _current_binding(
     return current, revision, dedup_key(payload, revision.event_id_path, idempotency_key)
 
 
-def _received_run(
-    binding: TriggerBinding, key: str | None, payload: Payload, idempotency_key: str | None
-) -> Run | None:
+def received_run(binding: TriggerBinding, key: str | None, payload: Payload, idempotency_key: str | None) -> Run | None:
     """前に受け付けた同じ要求のRun。
 
     今の版と前の版のイベントIDの場所で取り出したキーのどれかで、同じ入力の受付があればそのRun（イベントIDの場所を

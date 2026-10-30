@@ -4332,6 +4332,11 @@ paths:
         schema:
           type: string
       - in: query
+        name: department
+        schema:
+          type: string
+        description: 部門のID
+      - in: query
         name: kind
         schema:
           type: integer
@@ -4663,6 +4668,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Destination'
+          description: ''
+  /api/v1/destinations/departments/:
+    get:
+      operationId: v1_destinations_departments_list
+      description: 部門の範囲の出口の作成と一覧の絞り込みで選べる部門（有効なすべての部門。所属は問わない）。`search` で名前を絞り込む
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: search
+        schema:
+          type: string
+        description: 名前の一部
+      tags:
+      - manage/destination
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedMinimumDepartmentList'
           description: ''
   /api/v1/groups/:
     get:
@@ -5949,6 +5993,39 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/trigger_bindings/{uid}/preview/:
+    post:
+      operationId: v1_trigger_bindings_preview_create
+      description: サンプルのpayload（JSON）で、重複のキーと項目の取り出しを試す（保存しない。design.md §4.2）。保存していない受け取り方でも試せる。埋め込んだ後のプロンプトは、タスクを管理できる人にだけ返す
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/trigger_binding
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerPreviewRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TriggerPreviewRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TriggerPreviewRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerPreview'
+          description: ''
   /api/v1/trigger_bindings/{uid}/resume/:
     post:
       operationId: v1_trigger_bindings_resume_create
@@ -14830,6 +14907,185 @@ components:
       - 1
       type: integer
       description: '* `1` - Webhook'
+    TriggerPreview:
+      type: object
+      description: |-
+        サンプルのpayloadで取り出しを試す（design.md §4.2）。保存していない受け取り方（イベントIDの場所・項目の
+        取り出し）で試せるように、それらも送れる（送らなければ今の版の値）。受付と同じ処理（payloadの読み取り、重複の
+        キー、項目の取り出しと確かめ）を通し、何も保存しない。payloadはJSONだけ（ファイルはmultipartで付けるので、型が
+        ファイルの項目は試せない）。
+
+        名前は項目の名前のまま返すため、値と誤りは名前のキーの辞書ではなく並びにする（APIクライアントのcamelCaseの
+        変換で名前を変えない）。埋め込んだ後のプロンプトは、タスクを管理できる人にだけ返す（連携の管理者がタスクの依頼文を
+        見てよいとは限らない）
+      properties:
+        outcome:
+          allOf:
+          - $ref: '#/components/schemas/TriggerPreviewOutcomeEnum'
+          readOnly: true
+          description: |-
+            受付がこの要求をどうするか（入口・タスクの停止、payloadを読めない・イベントIDを使えない・項目の誤りがあれば断る。ほかに断る理由がなく、必須のファイルの項目か、タスクの定義に断られうる設定があれば確かめられない）
+
+            * `accepted` - 受け付ける
+            * `refused` - 断る
+            * `unconfirmed` - 確かめられない
+        format_error:
+          type: string
+          readOnly: true
+          description: payloadを読めなかった理由（読めたら空）
+        event_id:
+          type: string
+          readOnly: true
+          nullable: true
+          description: 重複の判定に使うイベントID（なければnull）
+        event_id_error:
+          type: string
+          readOnly: true
+          description: イベントIDを使えない理由（使えれば空）
+        values:
+          type: array
+          items:
+            $ref: '#/components/schemas/TriggerPreviewValue'
+          readOnly: true
+        input_errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/TriggerPreviewError'
+          readOnly: true
+          description: 項目ごとの誤り（受付では400で断られる）
+        file_inputs:
+          type: array
+          items:
+            type: string
+          readOnly: true
+          description: 型がファイルの項目（試せない）
+        required_file_inputs:
+          type: array
+          items:
+            type: string
+          readOnly: true
+          description: 型がファイルの必須の項目
+        run_problems:
+          type: array
+          items:
+            type: string
+          readOnly: true
+          description: 入口・タスクの今の状態で、受付が断る・断りうる理由。入口・タスクの停止は断る。タスクの定義が保存のときの検査に通らない理由（Skillの停止等）は断りうる。定義の中身は、タスクを管理できる人にだけ詳しく返す
+        duplicate:
+          type: boolean
+          readOnly: true
+          description: 前に受け付けた要求と同じ（送ると前のRunを返し、新しいRunは作らない）
+        can_view_prompt:
+          type: boolean
+          readOnly: true
+        prompt:
+          type: string
+          readOnly: true
+          nullable: true
+          description: 埋め込んだ後のプロンプト（タスクを管理できる人だけ。断る要求ではnull）
+      required:
+      - can_view_prompt
+      - duplicate
+      - event_id
+      - event_id_error
+      - file_inputs
+      - format_error
+      - input_errors
+      - outcome
+      - prompt
+      - required_file_inputs
+      - run_problems
+      - values
+    TriggerPreviewError:
+      type: object
+      properties:
+        name:
+          type: string
+        message:
+          type: string
+      required:
+      - message
+      - name
+    TriggerPreviewErrorRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        message:
+          type: string
+          minLength: 1
+      required:
+      - message
+      - name
+    TriggerPreviewOutcomeEnum:
+      enum:
+      - accepted
+      - refused
+      - unconfirmed
+      type: string
+      description: |-
+        * `accepted` - 受け付ける
+        * `refused` - 断る
+        * `unconfirmed` - 確かめられない
+    TriggerPreviewRequest:
+      type: object
+      description: |-
+        サンプルのpayloadで取り出しを試す（design.md §4.2）。保存していない受け取り方（イベントIDの場所・項目の
+        取り出し）で試せるように、それらも送れる（送らなければ今の版の値）。受付と同じ処理（payloadの読み取り、重複の
+        キー、項目の取り出しと確かめ）を通し、何も保存しない。payloadはJSONだけ（ファイルはmultipartで付けるので、型が
+        ファイルの項目は試せない）。
+
+        名前は項目の名前のまま返すため、値と誤りは名前のキーの辞書ではなく並びにする（APIクライアントのcamelCaseの
+        変換で名前を変えない）。埋め込んだ後のプロンプトは、タスクを管理できる人にだけ返す（連携の管理者がタスクの依頼文を
+        見てよいとは限らない）
+      properties:
+        sample:
+          type: string
+          writeOnly: true
+          minLength: 1
+          description: サンプルのpayload（JSON）
+          maxLength: 10485760
+        event_id_path:
+          type: string
+          writeOnly: true
+          description: イベントIDの場所。送らなければ今の版の値
+          maxLength: 200
+        inputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/TriggerInputRequest'
+          writeOnly: true
+          description: 項目の取り出し。送らなければ今の版の値
+        max_payload_bytes:
+          type: integer
+          maximum: 10485760
+          minimum: 1024
+          writeOnly: true
+          description: payloadの大きさの上限（バイト）。送らなければ今の版の値
+      required:
+      - sample
+    TriggerPreviewValue:
+      type: object
+      properties:
+        name:
+          type: string
+        value:
+          description: 確かめた後の値（受付時にタスクの入力になる値）
+      required:
+      - name
+      - value
+    TriggerPreviewValueRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+        value:
+          description: 確かめた後の値（受付時にタスクの入力になる値）
+      required:
+      - name
+      - value
     TriggerReceipt:
       type: object
       description: 入口の受付の履歴（連携の管理者）。Runの結果・ログは返さない（タスクを管理できる人がタスクの画面で見る）
@@ -14915,7 +15171,7 @@ components:
         inputs:
           type: array
           items:
-            $ref: '#/components/schemas/TaskInput'
+            $ref: '#/components/schemas/TriggerTaskInput'
           readOnly: true
       required:
       - department
@@ -14925,6 +15181,32 @@ components:
       - scope
       - scope_display
       - suspended
+    TriggerTaskInput:
+      type: object
+      description: |-
+        入口の画面に出すタスクの入力の項目。取り出しの設定に要るもの（名前・表示名・型・必須）だけを返し、説明・
+        選択肢・文字数の上限等のタスクの定義の中身は返さない（連携の管理者がタスクを管理できるとは限らない。
+        authorization.md §5.3）
+      properties:
+        name:
+          type: string
+          readOnly: true
+        label:
+          type: string
+          readOnly: true
+        type:
+          allOf:
+          - $ref: '#/components/schemas/TaskInputTypeEnum'
+          readOnly: true
+        required:
+          type: boolean
+          readOnly: true
+          default: false
+      required:
+      - label
+      - name
+      - required
+      - type
     UserRunStatusEvent:
       type: object
       description: 自分のRunの状態の変更

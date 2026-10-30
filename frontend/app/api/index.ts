@@ -294,6 +294,50 @@ const createAPI = () => {
         tables: (waitSeconds: number) =>
           http.get<ConnectorTables, ConnectorTables>(`v1/database_connections/${id}/tables/`, waitFor(waitSeconds)),
       }),
+      // 出口（Webhook・Zapier）。作成と署名の鍵の作り直しの応答にだけ、署名の鍵（signingSecret）が入る
+      destinations: (id?: string) => ({
+        ...readOnlyResource<Destination, DestinationListParams>(http, 'v1/destinations', id),
+        create: (data: DestinationWrite) => http.post<DestinationSecret, DestinationSecret>('v1/destinations/', data),
+        // 更新では種類・範囲・部門を送れない
+        patch: (data: Partial<DestinationUpdate>) =>
+          http.patch<Destination, Destination>(`v1/destinations/${id}/`, data),
+        delete: () => http.delete<undefined, undefined>(`v1/destinations/${id}/`),
+        suspend: () => http.post<Destination, Destination>(`v1/destinations/${id}/suspend/`),
+        resume: () => http.post<Destination, Destination>(`v1/destinations/${id}/resume/`),
+        rotateSecret: () => http.post<DestinationSecret, DestinationSecret>(`v1/destinations/${id}/rotate_secret/`),
+        // 作成と一覧の絞り込みで選ぶ部門（所属を問わず有効なすべて）
+        departments: (params?: ListParams) =>
+          http.get<Paginated<MinimumDepartment>, Paginated<MinimumDepartment>>('v1/destinations/departments/', {
+            params,
+          }),
+        revisions: (number?: number) =>
+          readOnlyResource<DestinationRevision>(http, `v1/destinations/${id}/revisions`, number?.toString()),
+      }),
+      // タスクの入口（Webhook）。作成と鍵の作り直しの応答にだけ、鍵（key）が入る
+      triggerBindings: (id?: string) => ({
+        ...readOnlyResource<TriggerBinding, TriggerBindingListParams>(http, 'v1/trigger_bindings', id),
+        create: (data: TriggerBindingWrite) =>
+          http.post<TriggerBindingKey, TriggerBindingKey>('v1/trigger_bindings/', data),
+        // 更新ではタスクを送れない
+        patch: (data: Partial<TriggerBindingUpdate>) =>
+          http.patch<TriggerBinding, TriggerBinding>(`v1/trigger_bindings/${id}/`, data),
+        delete: () => http.delete<undefined, undefined>(`v1/trigger_bindings/${id}/`),
+        suspend: () => http.post<TriggerBinding, TriggerBinding>(`v1/trigger_bindings/${id}/suspend/`),
+        resume: () => http.post<TriggerBinding, TriggerBinding>(`v1/trigger_bindings/${id}/resume/`),
+        rotateKey: () => http.post<TriggerBindingKey, TriggerBindingKey>(`v1/trigger_bindings/${id}/rotate_key/`),
+        // サンプルのpayloadで取り出しを試す（保存しない）
+        preview: (data: TriggerPreviewRequest) =>
+          http.post<TriggerPreview, TriggerPreview>(`v1/trigger_bindings/${id}/preview/`, data),
+        // 入口を付けられるタスク（まだWebhookの入口がない、部門・全社・システムのもの）
+        tasks: (params?: ListParams) =>
+          http.get<Paginated<TriggerTask>, Paginated<TriggerTask>>('v1/trigger_bindings/tasks/', { params }),
+        revisions: (number?: number) =>
+          readOnlyResource<TriggerBindingRevision>(http, `v1/trigger_bindings/${id}/revisions`, number?.toString()),
+        receipts: (params?: ListParams) =>
+          http.get<Paginated<TriggerReceipt>, Paginated<TriggerReceipt>>(`v1/trigger_bindings/${id}/receipts/`, {
+            params,
+          }),
+      }),
       connectors: (id?: string) => ({
         ...resource<Connector, ConnectorWrite, ConnectorListParams>(http, 'v1/connectors', id),
         // 更新では使うDB接続を送れない

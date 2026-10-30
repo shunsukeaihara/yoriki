@@ -145,6 +145,28 @@ def test_a_department_destination_needs_a_department(api_client, integrator):
     assert res.json()["department_info"]["id"] == department.uid
 
 
+def test_departments_to_choose_and_filtering_by_department(api_client, app_user, integrator):
+    sales = DepartmentFactory.create(name="営業部")
+    accounting = DepartmentFactory.create(name="経理部")
+    DepartmentFactory.create(name="旧部門", deleted=True)
+    api_client.force_login(app_user)
+    assert api_client.get(f"{DESTINATIONS}departments/").status_code == 403
+
+    # 所属は問わず、有効な部門を名前で選ぶ
+    api_client.force_login(integrator)
+    names = [d["name"] for d in api_client.get(f"{DESTINATIONS}departments/").json()["results"]]
+    assert names == ["営業部", "経理部"]
+    res = api_client.get(f"{DESTINATIONS}departments/", {"search": "経理"})
+    assert [d["id"] for d in res.json()["results"]] == [accounting.uid]
+
+    for department in (sales, accounting):
+        _create(
+            api_client, integrator, scope=DestinationScope.DEPARTMENT, department=department.uid, name=department.name
+        )
+    res = api_client.get(DESTINATIONS, {"department": sales.uid})
+    assert [d["name"] for d in res.json()["results"]] == ["営業部"]
+
+
 def test_updating_makes_a_revision_and_conflicts_with_other_changes(api_client, integrator):
     data = _create(api_client, integrator).json()
     url = f"{DESTINATIONS}{data['id']}/"

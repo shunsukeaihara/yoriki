@@ -35,6 +35,15 @@ export const PermissionCode = {
   ADD_CONNECTOR: 'connector.add_connector',
   CHANGE_CONNECTOR: 'connector.change_connector',
   DELETE_CONNECTOR: 'connector.delete_connector',
+  // 入口と出口（連携の管理者。authorization.md §5.5）
+  VIEW_TRIGGER_BINDING: 'task.view_triggerbinding',
+  ADD_TRIGGER_BINDING: 'task.add_triggerbinding',
+  CHANGE_TRIGGER_BINDING: 'task.change_triggerbinding',
+  DELETE_TRIGGER_BINDING: 'task.delete_triggerbinding',
+  VIEW_DESTINATION: 'delivery.view_destination',
+  ADD_DESTINATION: 'delivery.add_destination',
+  CHANGE_DESTINATION: 'delivery.change_destination',
+  DELETE_DESTINATION: 'delivery.delete_destination',
   // 範囲ごとのSkillの編集・公開（authorization.md §5.1）。部門は管理できる部門（manageableDepartments）にだけ効く
   EDIT_DEPARTMENT_SKILLS: 'skill.can_edit_department_skills',
   PUBLISH_DEPARTMENT_SKILLS: 'skill.can_publish_department_skills',

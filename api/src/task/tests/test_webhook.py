@@ -16,6 +16,7 @@ from artifact.tests.test_api import body_of
 from conversation.models import ConversationPurpose
 from delivery.factories import DestinationFactory
 from run.models import Run, RunEndReason, RunEvent, RunEventKind, RunLaunch, RunStatus, RunTrigger
+from runtime.models import RuntimeProfile
 from task.dispatch import WEBHOOK_NOTE, discard_files, receive_webhook, store_files
 from task.factories import TaskDefinitionFactory
 from task.inputs import InputFile
@@ -31,6 +32,7 @@ from task.serializers import TriggerBindingSerializer
 from task.webhook import PayloadError, extract, parse_path, parse_payload
 from user.factories import UserFactory, grant
 from user.models import SYSTEM_USERNAME, User, system_user
+from utils.permissions import AppPermission
 
 pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("default_runtime")]
 
@@ -115,6 +117,10 @@ def test_creating_a_webhook_needs_the_permission_and_shows_the_key_once(api_clie
     assert data["version"] == 1
     assert data["max_payload_bytes"] == 1024 * 1024
     assert data["task_info"]["inputs"][0]["name"] == "vendor"
+    # 取り出しの設定に要るものだけ（説明・選択肢等のタスクの定義の中身は返さない）
+    assert set(data["task_info"]["inputs"][0]) == {"name", "label", "type", "required"}
+    candidates = api_client.get(f"{BINDINGS}tasks/").json()["results"]
+    assert all(set(i) == {"name", "label", "type", "required"} for c in candidates for i in c["inputs"])
     # 鍵は保存せず、一覧・詳細にも出さない
     binding = TriggerBinding.objects.get(uid=data["id"])
     assert data["key"] not in (binding.key_hash, binding.key_prefix)
@@ -168,6 +174,210 @@ def test_saving_makes_a_new_version_and_detects_conflicts(api_client, integrator
     numbers = [r["number"] for r in api_client.get(f"{url}revisions/").json()["results"]]
     assert numbers == [2, 1]
     assert TriggerBindingRevision.objects.filter(binding=binding).count() == 2
+
+
+def _preview(api_client, binding, sample, **data):
+    body = {"sample": sample if isinstance(sample, str) else json.dumps(sample), **data}
+    return api_client.post(f"{BINDINGS}{binding.uid}/preview/", body, format="json")
+
+
+def test_preview_extracts_with_unsaved_settings_and_saves_nothing(api_client, app_user, integrator, webhook):
+    binding, _key = webhook
+    api_client.force_login(app_user)
+    assert _preview(api_client, binding, _payload()).status_code == 403
+
+    api_client.force_login(integrator)
+    res = _preview(
+        api_client,
+        binding,
+        {"id": "evt-9", "vendor": "ACME", "amount": "12000"},
+        event_id_path="$.id",
+        inputs=[{"name": "vendor", "path": "$.vendor"}, {"name": "amount", "path": "$.amount"}],
+    )
+    assert res.status_code == 200, res.json()
+    body = res.json()
+    assert (body["outcome"], body["format_error"], body["event_id"], body["event_id_error"]) == (
+        "accepted",
+        "",
+        "evt-9",
+        "",
+    )
+    # フォームの値のように文字で届いた整数は、受付と同じく読み替える
+    assert body["values"] == [{"name": "vendor", "value": "ACME"}, {"name": "amount", "value": 12000}]
+    assert body["input_errors"] == []
+    # 連携の管理者がタスクを管理できなければ、タスクの依頼文は返さない
+    assert (body["can_view_prompt"], body["prompt"]) == (False, None)
+    # 試すだけで、版も受付もRunも作らない
+    binding.refresh_from_db()
+    assert binding.current_revision.event_id_path == "$.event.id"
+    assert binding.current_revision.number == 1
+    assert not TriggerReceipt.objects.exists()
+    assert not Run.objects.exists()
+
+
+def test_preview_shows_the_prompt_to_task_managers(api_client, integrator, webhook):
+    binding, _key = webhook
+    api_client.force_login(grant(integrator, AppPermission.MANAGE_COMPANY_TASKS))
+    res = _preview(
+        api_client, binding, _payload(vendor="ACME"), inputs=[{"name": "vendor", "path": "$.data.vendor_name"}]
+    )
+    body = res.json()
+    assert body["can_view_prompt"] is True
+    # 受付と同じく、値は信頼しない内容として囲んで埋め込む
+    assert "ACME" in body["prompt"]
+    assert body["prompt"].endswith(" の請求書を確認してください。")
+    assert body["prompt"] != "ACME の請求書を確認してください。"
+
+
+def test_preview_reports_what_the_hook_would_refuse(api_client, integrator, webhook):
+    binding, _key = webhook
+    api_client.force_login(integrator)
+    res = _preview(api_client, binding, "{not json")
+    assert res.status_code == 200
+    assert (res.json()["outcome"], res.json()["values"]) == ("refused", [])
+    assert res.json()["format_error"]
+    # 要求の本文のJSONで \\ud800 とエスケープした、対にならないサロゲートは、サンプルの欄の誤り（400。500にしない）
+    res = api_client.post(
+        f"{BINDINGS}{binding.uid}/preview/",
+        json.dumps({"sample": '{"data": {"vendor_name": "\ud800"}}'}),
+        content_type="application/json",
+    )
+    assert (res.status_code, list(res.json())) == (400, ["sample"])
+
+    # イベントIDだけが使えなくても、受付は断る（プロンプトも作らない）
+    api_client.force_login(grant(integrator, AppPermission.MANAGE_COMPANY_TASKS))
+    res = _preview(api_client, binding, {"event": {"id": [1]}, "data": {"vendor_name": "ACME"}})
+    assert (res.json()["outcome"], res.json()["input_errors"], res.json()["prompt"]) == ("refused", [], None)
+    assert res.json()["event_id_error"]
+
+    # 必須の項目がない・型が合わない・イベントIDが文字でも整数でもない
+    res = _preview(api_client, binding, {"event": {"id": {"a": 1}}, "data": {"total": "abc"}})
+    body = res.json()
+    assert body["event_id"] is None
+    assert body["event_id_error"]
+    assert [e["name"] for e in body["input_errors"]] == ["vendor", "amount"]
+
+    # 取り出しを空にすると、推奨の形式の inputs と event_id を使う（定義にない項目は誤り）
+    res = _preview(
+        api_client,
+        binding,
+        {"event_id": 7, "inputs": {"vendor": "ACME", "extra": 1}},
+        event_id_path="",
+        inputs=[],
+    )
+    body = res.json()
+    assert (body["event_id"], body["values"]) == ("7", [{"name": "vendor", "value": "ACME"}])
+    assert [e["name"] for e in body["input_errors"]] == ["extra"]
+
+    # 受け取り方の誤りは、保存と同じく400
+    assert _preview(api_client, binding, "{}", event_id_path="$.event[").status_code == 400
+    assert _preview(api_client, binding, "{}", inputs=[{"name": "vendor", "path": "vendor"}]).status_code == 400
+    # 保存できない取り出し（同じ項目を2回、タスクにない項目）では試さない（保存と同じく400）
+    twice = [{"name": "vendor", "path": "$.a"}, {"name": "vendor", "path": "$.b"}]
+    assert _preview(api_client, binding, "{}", inputs=twice).status_code == 400
+    res = _preview(api_client, binding, "{}", inputs=[{"name": "unknown", "path": "$.a"}])
+    assert (res.status_code, list(res.json())) == (400, ["inputs"])
+
+
+def test_preview_reflects_the_state_of_the_webhook_and_the_task(api_client, integrator, task, webhook):
+    binding, _key = webhook
+    api_client.force_login(integrator)
+    sample = _payload()
+    # 入口・タスクの停止は、受付と同じく断る
+    TriggerBinding.objects.filter(pk=binding.pk).update(suspended=True)
+    body = _preview(api_client, binding, sample).json()
+    assert (body["outcome"], body["run_problems"], body["prompt"]) == ("refused", ["この入口は停止中です"], None)
+    TriggerBinding.objects.filter(pk=binding.pk).update(suspended=False)
+    TaskDefinition.objects.filter(pk=task.pk).update(suspended=True)
+    body = _preview(api_client, binding, sample).json()
+    assert (body["outcome"], body["run_problems"]) == ("refused", ["タスクが停止されました"])
+    TaskDefinition.objects.filter(pk=task.pk).update(suspended=False)
+    assert _preview(api_client, binding, sample).json()["outcome"] == "accepted"
+
+    # Runを始められない（既定の実行環境がない・通知先の停止）なら、受付と同じく断る。理由はタスクを管理できる人にだけ
+    # 詳しく見せる
+    RuntimeProfile.objects.update(is_default=False)
+    body = _preview(api_client, binding, sample).json()
+    assert (body["outcome"], body["run_problems"]) == (
+        "refused",
+        ["タスクを今は実行できません（タスクの管理者に確かめてください）"],
+    )
+    api_client.force_login(grant(integrator, AppPermission.MANAGE_COMPANY_TASKS))
+    body = _preview(api_client, binding, sample).json()
+    assert body["outcome"] == "refused"
+    assert "Runtime Profile" in body["run_problems"][0]
+    api_client.logout()
+    assert _send(api_client, task, _key, sample).status_code == 409
+
+
+def test_preview_uses_the_edited_limit_and_the_receipts(api_client, integrator, task, webhook):
+    binding, key = webhook
+    sample = _payload(event_id="evt-7")
+    # 編集中の上限（保存していない）で確かめる
+    api_client.force_login(integrator)
+    assert _preview(api_client, binding, sample, max_payload_bytes=1024).json()["format_error"] == ""
+    big = {**sample, "memo": "x" * 2000}
+    assert _preview(api_client, binding, big, max_payload_bytes=1024).json()["format_error"]
+    assert _preview(api_client, binding, big).json()["format_error"] == ""
+
+    # 前に受け付けた要求と同じなら、前のRunを返す（新しいRunは作らない）。同じイベントIDで違う内容なら、受付と同じく断る
+    api_client.logout()
+    assert _send(api_client, task, key, sample).status_code == 202
+    api_client.force_login(integrator)
+    body = _preview(api_client, binding, json.dumps(sample)).json()
+    assert (body["outcome"], body["duplicate"]) == ("accepted", True)
+    body = _preview(api_client, binding, _payload(event_id="evt-7", vendor="Other")).json()
+    assert (body["outcome"], body["duplicate"]) == ("refused", False)
+    assert body["run_problems"] == ["同じイベントIDで、前と違う内容を受け取りました"]
+    api_client.logout()
+    assert _send(api_client, task, key, _payload(event_id="evt-7", vendor="Other")).status_code == 409
+
+    # 受付と同じく、重複はタスクの状態や項目より先に判定する（停止した後の再送も前のRunを返す）
+    TaskDefinition.objects.filter(pk=task.pk).update(suspended=True)
+    api_client.force_login(integrator)
+    body = _preview(api_client, binding, json.dumps(sample)).json()
+    assert (body["outcome"], body["duplicate"], body["run_problems"]) == ("accepted", True, [])
+    api_client.logout()
+    assert _send(api_client, task, key, sample).status_code == 200
+
+
+def test_preview_refuses_json_values_for_file_inputs(api_client, integrator):
+    task, _key = _file_task(api_client, integrator)
+    binding = TriggerBinding.objects.get(task=task)
+    api_client.force_login(integrator)
+    # JSONの値（URL等）はファイルの項目の値にしない。受付と同じく断る
+    body = _preview(api_client, binding, {"inputs": {"vendor": "ACME", "invoice": "https://example.com/a.pdf"}}).json()
+    assert body["outcome"] == "refused"
+    assert [e["name"] for e in body["input_errors"]] == ["invoice"]
+    res = _send(api_client, task, _key, {"inputs": {"vendor": "ACME", "invoice": "https://example.com/a.pdf"}})
+    assert res.status_code == 400
+
+
+def test_preview_accepts_empty_optional_file_inputs(api_client, integrator):
+    optional = [*INPUTS, {"name": "invoice", "label": "請求書", "type": "file", "required": False}]
+    task = TaskDefinitionFactory.create(**notified(), scope=TaskScope.COMPANY, revision__inputs=optional)
+    res = _create_binding(api_client, integrator, task)
+    binding = TriggerBinding.objects.get(task=task)
+    for empty in (None, ""):
+        body = _preview(api_client, binding, {"inputs": {"vendor": "ACME", "invoice": empty}}).json()
+        assert (body["outcome"], body["input_errors"]) == ("accepted", [])
+    api_client.logout()
+    assert (
+        _send(api_client, task, res.json()["key"], {"inputs": {"vendor": "ACME", "invoice": None}}).status_code == 202
+    )
+
+
+def test_preview_skips_file_inputs_and_keeps_the_payload_limit(api_client, integrator):
+    task, _key = _file_task(api_client, integrator, max_payload_bytes=1024)
+    binding = TriggerBinding.objects.get(task=task)
+    api_client.force_login(integrator)
+    body = _preview(api_client, binding, {"inputs": {"vendor": "ACME"}}).json()
+    assert (body["file_inputs"], body["required_file_inputs"]) == (["invoice"], ["invoice"])
+    assert body["input_errors"] == []
+    # 必須のファイルの項目は、JSONのサンプルでは確かめられない（受け付けるとは言わない）
+    assert body["outcome"] == "unconfirmed"
+    body = _preview(api_client, binding, {"inputs": {"vendor": "x" * 2000}}).json()
+    assert body["format_error"]
 
 
 def test_rotating_the_key_disables_the_old_one(api_client, integrator, task, webhook):

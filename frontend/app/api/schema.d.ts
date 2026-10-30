@@ -1614,6 +1614,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/destinations/departments/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 部門の範囲の出口の作成と一覧の絞り込みで選べる部門（有効なすべての部門。所属は問わない）。`search` で名前を絞り込む */
+        get: operations["v1_destinations_departments_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/groups/": {
         parameters: {
             query?: never;
@@ -2006,6 +2023,23 @@ export interface paths {
         head?: never;
         /** @description タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（連携の管理者。authorization.md §5.5） */
         patch: operations["v1_trigger_bindings_partial_update"];
+        trace?: never;
+    };
+    "/api/v1/trigger_bindings/{uid}/preview/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description サンプルのpayload（JSON）で、重複のキーと項目の取り出しを試す（保存しない。design.md §4.2）。保存していない受け取り方でも試せる。埋め込んだ後のプロンプトは、タスクを管理できる人にだけ返す */
+        post: operations["v1_trigger_bindings_preview_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/trigger_bindings/{uid}/resume/": {
@@ -6083,6 +6117,91 @@ export interface components {
          * @enum {integer}
          */
         TriggerKindEnum: 1;
+        /**
+         * @description サンプルのpayloadで取り出しを試す（design.md §4.2）。保存していない受け取り方（イベントIDの場所・項目の
+         *     取り出し）で試せるように、それらも送れる（送らなければ今の版の値）。受付と同じ処理（payloadの読み取り、重複の
+         *     キー、項目の取り出しと確かめ）を通し、何も保存しない。payloadはJSONだけ（ファイルはmultipartで付けるので、型が
+         *     ファイルの項目は試せない）。
+         *
+         *     名前は項目の名前のまま返すため、値と誤りは名前のキーの辞書ではなく並びにする（APIクライアントのcamelCaseの
+         *     変換で名前を変えない）。埋め込んだ後のプロンプトは、タスクを管理できる人にだけ返す（連携の管理者がタスクの依頼文を
+         *     見てよいとは限らない）
+         */
+        TriggerPreview: {
+            /**
+             * @description 受付がこの要求をどうするか（入口・タスクの停止、payloadを読めない・イベントIDを使えない・項目の誤りがあれば断る。ほかに断る理由がなく、必須のファイルの項目か、タスクの定義に断られうる設定があれば確かめられない）
+             *
+             *     * `accepted` - 受け付ける
+             *     * `refused` - 断る
+             *     * `unconfirmed` - 確かめられない
+             */
+            readonly outcome: components["schemas"]["TriggerPreviewOutcomeEnum"];
+            /** @description payloadを読めなかった理由（読めたら空） */
+            readonly format_error: string;
+            /** @description 重複の判定に使うイベントID（なければnull） */
+            readonly event_id: string | null;
+            /** @description イベントIDを使えない理由（使えれば空） */
+            readonly event_id_error: string;
+            readonly values: components["schemas"]["TriggerPreviewValue"][];
+            /** @description 項目ごとの誤り（受付では400で断られる） */
+            readonly input_errors: components["schemas"]["TriggerPreviewError"][];
+            /** @description 型がファイルの項目（試せない） */
+            readonly file_inputs: string[];
+            /** @description 型がファイルの必須の項目 */
+            readonly required_file_inputs: string[];
+            /** @description 入口・タスクの今の状態で、受付が断る・断りうる理由。入口・タスクの停止は断る。タスクの定義が保存のときの検査に通らない理由（Skillの停止等）は断りうる。定義の中身は、タスクを管理できる人にだけ詳しく返す */
+            readonly run_problems: string[];
+            /** @description 前に受け付けた要求と同じ（送ると前のRunを返し、新しいRunは作らない） */
+            readonly duplicate: boolean;
+            readonly can_view_prompt: boolean;
+            /** @description 埋め込んだ後のプロンプト（タスクを管理できる人だけ。断る要求ではnull） */
+            readonly prompt: string | null;
+        };
+        TriggerPreviewError: {
+            name: string;
+            message: string;
+        };
+        TriggerPreviewErrorRequest: {
+            name: string;
+            message: string;
+        };
+        /**
+         * @description * `accepted` - 受け付ける
+         *     * `refused` - 断る
+         *     * `unconfirmed` - 確かめられない
+         * @enum {string}
+         */
+        TriggerPreviewOutcomeEnum: "accepted" | "refused" | "unconfirmed";
+        /**
+         * @description サンプルのpayloadで取り出しを試す（design.md §4.2）。保存していない受け取り方（イベントIDの場所・項目の
+         *     取り出し）で試せるように、それらも送れる（送らなければ今の版の値）。受付と同じ処理（payloadの読み取り、重複の
+         *     キー、項目の取り出しと確かめ）を通し、何も保存しない。payloadはJSONだけ（ファイルはmultipartで付けるので、型が
+         *     ファイルの項目は試せない）。
+         *
+         *     名前は項目の名前のまま返すため、値と誤りは名前のキーの辞書ではなく並びにする（APIクライアントのcamelCaseの
+         *     変換で名前を変えない）。埋め込んだ後のプロンプトは、タスクを管理できる人にだけ返す（連携の管理者がタスクの依頼文を
+         *     見てよいとは限らない）
+         */
+        TriggerPreviewRequest: {
+            /** @description サンプルのpayload（JSON） */
+            sample: string;
+            /** @description イベントIDの場所。送らなければ今の版の値 */
+            event_id_path?: string;
+            /** @description 項目の取り出し。送らなければ今の版の値 */
+            inputs?: components["schemas"]["TriggerInputRequest"][];
+            /** @description payloadの大きさの上限（バイト）。送らなければ今の版の値 */
+            max_payload_bytes?: number;
+        };
+        TriggerPreviewValue: {
+            name: string;
+            /** @description 確かめた後の値（受付時にタスクの入力になる値） */
+            value: unknown;
+        };
+        TriggerPreviewValueRequest: {
+            name: string;
+            /** @description 確かめた後の値（受付時にタスクの入力になる値） */
+            value: unknown;
+        };
         /** @description 入口の受付の履歴（連携の管理者）。Runの結果・ログは返さない（タスクを管理できる人がタスクの画面で見る） */
         TriggerReceipt: {
             readonly id: string;
@@ -6113,7 +6232,19 @@ export interface components {
             readonly department: components["schemas"]["MinimumDepartment"] | null;
             /** 停止中 */
             readonly suspended: boolean;
-            readonly inputs: components["schemas"]["TaskInput"][];
+            readonly inputs: components["schemas"]["TriggerTaskInput"][];
+        };
+        /**
+         * @description 入口の画面に出すタスクの入力の項目。取り出しの設定に要るもの（名前・表示名・型・必須）だけを返し、説明・
+         *     選択肢・文字数の上限等のタスクの定義の中身は返さない（連携の管理者がタスクを管理できるとは限らない。
+         *     authorization.md §5.3）
+         */
+        TriggerTaskInput: {
+            readonly name: string;
+            readonly label: string;
+            readonly type: components["schemas"]["TaskInputTypeEnum"];
+            /** @default false */
+            readonly required: boolean;
         };
         /** @description 自分のRunの状態の変更 */
         UserRunStatusEvent: {
@@ -9689,6 +9820,8 @@ export interface operations {
             query?: {
                 /** @description The pagination cursor value. */
                 cursor?: string;
+                /** @description 部門のID */
+                department?: string;
                 /**
                  * @description * `1` - Webhook
                  *     * `2` - Zapier
@@ -9971,6 +10104,34 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Destination"];
+                };
+            };
+        };
+    };
+    v1_destinations_departments_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description 名前の一部 */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedMinimumDepartmentList"];
                 };
             };
         };
@@ -11070,6 +11231,33 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    v1_trigger_bindings_preview_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TriggerPreviewRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["TriggerPreviewRequest"];
+                "multipart/form-data": components["schemas"]["TriggerPreviewRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerPreview"];
+                };
             };
         };
     };

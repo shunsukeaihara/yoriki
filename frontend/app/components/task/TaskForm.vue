@@ -33,12 +33,16 @@ const toForm = (task: TaskDetail) => ({
 const form = ref(toForm(props.task))
 const saved = ref(JSON.stringify(form.value))
 const version = ref(props.task.version ?? 0)
+// 名前は版の外にあり、名前だけの変更では版が増えないので、変えたときだけ送る（古い画面から、別の人が変えた名前を
+// 黙って戻さないように）
+const savedName = ref(props.task.name)
 
 /** 中身を入れ直す（保存の後、最新の状態を読み込んだ後） */
 const reset = (task: TaskDetail = props.task) => {
   form.value = toForm(task)
   saved.value = JSON.stringify(form.value)
   version.value = task.version ?? 0
+  savedName.value = task.name
   errors.value = {}
 }
 const dirty = computed(() => JSON.stringify(form.value) !== saved.value)
@@ -143,7 +147,7 @@ const { onSubmit, loading, errors } = createSubmit({
   fn: (data) =>
     api.tasks(props.task.id).patch({
       version: version.value,
-      name: data.name,
+      ...(data.name !== savedName.value ? { name: data.name } : {}),
       description: data.description,
       promptTemplate: data.promptTemplate,
       inputs: fromInputRows(data.inputs),

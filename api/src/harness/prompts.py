@@ -74,8 +74,18 @@ TOOL_GUIDANCE = {
 }
 
 
+# 通知Skillのあるタスクの submit_result の節。確定した後に prepare_notification を呼ぶ順番に揃える
+SUBMIT_RESULT_WITH_NOTIFICATION = (
+    "- This work has a result schema. When the work is done and checked, call `submit_result` alone with the "
+    "result, then `prepare_notification`, then write your final reply."
+)
+
+
 def system_prompt(tools: tuple[Tool, ...]) -> str:
-    lines = [TOOL_GUIDANCE[t.name] for t in tools if t.name in TOOL_GUIDANCE]
+    sections = dict(TOOL_GUIDANCE)
+    if any(t.name == "prepare_notification" for t in tools):
+        sections["submit_result"] = SUBMIT_RESULT_WITH_NOTIFICATION
+    lines = [sections[t.name] for t in tools if t.name in sections]
     guidance = ("# Tools\n- Call independent tools together in one response.\n" + "\n".join(lines)) if lines else ""
     template = (PROMPT_DIR / "system.md").read_text()
     return template.replace("{tool_guidance}", guidance).strip()

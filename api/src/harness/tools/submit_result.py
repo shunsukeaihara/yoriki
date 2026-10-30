@@ -62,9 +62,11 @@ def execute(
     # 引数はRunnerが実行の前にSchemaで検証している
     if problem := _file_problem(schema, arguments, context):
         return problem
+    # 通知の候補（prepare_notification）は前の業務結果から作ったものなので消す。作り直さなければ標準の形で送る
     with context.run.fenced(context.attempt) as run:
-        Run.objects.filter(pk=run.pk).update(result=arguments, updated=timezone.now())
+        Run.objects.filter(pk=run.pk).update(result=arguments, notification=None, updated=timezone.now())
     context.run.result = arguments
+    context.run.notification = None
     return ToolResult.text(recorded, value={"result": arguments})
 
 

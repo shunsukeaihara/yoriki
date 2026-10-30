@@ -115,6 +115,28 @@ def test_the_notification_skill_prepares_the_message_sent_on_completion(manager)
     assert Notification.objects.get(delivery=delivery).message == "請求書3件を確認しました。差異はありません。"
 
 
+def test_resubmitting_the_result_clears_the_candidate(manager):
+    """業務結果を確定し直したら、前の結果から作った通知の文章は送らない（作り直さなければ標準の形）"""
+    run = start_task_run(_task(), inputs={}, actor=manager, launch=RunLaunch.MANUAL)
+    adapter = FakeAdapter(
+        [
+            calls(("c1", "submit_result", {"ok": True})),
+            calls(("c2", "prepare_notification", {"message": "差異はありません"})),
+            calls(("c3", "submit_result", {"ok": False})),
+            reply("差異がありました"),
+        ]
+    )
+    run = execute(run, adapter)
+    assert run.status == RunStatus.COMPLETED, run.error
+    assert run.notification is None
+    payload = Delivery.objects.get(run=run).payload
+    assert (payload["result"], payload["notification"]) == ({"ok": False}, None)
+    # system prompt でも、確定した後に prepare_notification を呼ぶ順番を伝える
+    assert "then `prepare_notification`, then write your final reply" in next(
+        m.text for m in adapter.requests[0].messages if m.role == "system"
+    )
+
+
 def test_without_a_candidate_the_standard_form_is_sent(manager):
     """通知Skillが候補を作らなかった・失敗した場合も、業務は完了にし、標準の形で送る"""
     run = start_task_run(_task(), inputs={}, actor=manager, launch=RunLaunch.MANUAL)

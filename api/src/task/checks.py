@@ -1,6 +1,6 @@
 """タスクに登録できるもの（authorization.md §5.4）と、タスクのRunの実行許可（authorization.md §6）。
 
-- 保存するとき（`content_errors()`）：Skill（通知Skillを含む）・Connectorがタスクの範囲で登録できるか、Skillが
+- 保存するとき（`content_errors()`）：Skill・Connectorがタスクの範囲で登録できるか、Skillが
   宣言したConnectorと操作がタスクに入っているか、機密の区分とモデル設定が合うか、プロンプトのテンプレートが入力の項目だけを使うか。
 - 実行するとき（`skill_problem()`・`connector_permitted()`・`task_problem()`）：受付時、実行の区切りごと、Connectorの
   操作のたびに、固定したものが今も有効でタスクの範囲の中にあるかを確かめ直す。部門・全社・システムのタスクは、
@@ -105,16 +105,9 @@ def allowed_connectors(task: TaskLike) -> QuerySet[Connector]:
 
 
 def skill_entries(revision: Any) -> list[tuple[str, dict[str, Any]]]:
-    """版に登録したSkill（業務のSkillと通知Skill）の（項目の名前、`{"skill", "version"}`）。`revision` は版か版の中身の
-    辞書。通知Skillも業務のSkillと同じく、タスクの範囲・Connectorの宣言・モデルで確かめ、Runで読み込む"""
-    if isinstance(revision, dict):
-        skills, notification_skill = revision["skills"], revision["notification_skill"]
-    else:
-        skills, notification_skill = revision.skills, revision.notification_skill
-    entries = [("skills", entry) for entry in skills]
-    if notification_skill:
-        entries.append(("notification_skill", notification_skill))
-    return entries
+    """版に登録したSkillの（項目の名前、`{"skill", "version"}`）。`revision` は版か版の中身の辞書"""
+    skills = revision["skills"] if isinstance(revision, dict) else revision.skills
+    return [("skills", entry) for entry in skills]
 
 
 def placeholders(template: str) -> list[str]:
@@ -188,7 +181,7 @@ def _check_connectors(task: TaskLike, content: dict[str, Any], errors: Errors) -
 
 
 def skill_tools(skills: dict[str, tuple[Skill, SkillVersion | None]]) -> set[str]:
-    """固定したSkill（業務のSkillと通知Skill）の「使ってよいTool」を合わせたもの。タスクのRunはこれだけを使う"""
+    """固定したSkillの「使ってよいTool」を合わせたもの。タスクのRunはこれだけを使う"""
     return {t for _s, v in skills.values() if v is not None for t in v.tools}
 
 
@@ -207,9 +200,6 @@ def _check_skills(
             )
         elif not skill_allowed(task, skill):
             errors.add(field, _("Skill「%(name)s」は、このタスクでは使えません") % {"name": skill.name})
-        elif field == "notification_skill" and version.output_schema:
-            # 業務結果は業務のSkillかタスクのもの。通知Skillの本文に別の形が載ると、モデルが確定する形を誤る
-            errors.add(field, _("業務結果のSchemaを持つSkillは、通知Skillにできません"))
         else:
             schemas += 1 if version.output_schema else 0
             _check_declarations(skill, version, content, errors, field)
@@ -256,15 +246,18 @@ def _check_declarations(
 def _check_notification(task: TaskLike, content: dict[str, Any], errors: Errors) -> None:
     """結果の通知の出口が、タスクの範囲で使えて、機密の区分に合うか（authorization.md §5.4・§7）"""
     destination: Destination | None = content["destination"]
-    if content["notification_skill"] and (
+    if content["notification_instructions"] and (
         destination is None
         or NotifyEvent.COMPLETED not in content["notify_events"]
         or content["notify_content"] == NotifyContent.STATUS
     ):
-        # 通知Skillが決めた文章とファイルは、完了の通知の業務結果と一緒に送る（design.md §4.3）
+        # 通知の書き方で決めた文章とファイルは、完了の通知の業務結果と一緒に送る（design.md §4.3）
         errors.add(
-            "notification_skill",
-            _("通知Skillを使うには、通知先と完了（run.completed）の通知を選び、通知の内容に業務結果を含めてください"),
+            "notification_instructions",
+            _(
+                "通知の書き方を使うには、通知先と完了（run.completed）の通知を選び、通知の内容に業務結果を"
+                "含めてください"
+            ),
         )
     if destination is None:
         if content["notify_events"]:
@@ -300,8 +293,8 @@ def _check_model(content: dict[str, Any], skills: dict[str, tuple[Skill, SkillVe
     if schema and not version.supports_tools:
         # 業務結果は submit_result で確定するので、Toolを使えないモデルでは確定できない（harness.md §10.5）
         errors.add("model_profile", _("業務結果のSchemaがあるタスクには、Toolを使えるモデルを選んでください"))
-    elif content["notification_skill"] and not version.supports_tools:
-        errors.add("model_profile", _("通知Skillを使うタスクには、Toolを使えるモデルを選んでください"))
+    elif content["notification_instructions"] and not version.supports_tools:
+        errors.add("model_profile", _("通知の書き方を決めたタスクには、Toolを使えるモデルを選んでください"))
     elif skill_tools(skills) and not version.supports_tools:
         errors.add("model_profile", _("このモデルはToolを使えません。Toolを使わないか、別のモデルを選んでください"))
     for _skill, skill_version in skills.values():

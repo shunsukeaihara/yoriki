@@ -23,9 +23,9 @@ Call it once when the work is done and you have checked the result, before your 
 you call it again, the new result replaces the previous one. After it succeeds, {after}"""
 
 AFTER = "write a short final reply to the user and do not call other tools."
-# 通知Skillのあるタスクでは、確定した後に prepare_notification を呼ばせる（design.md §4.3）
+# 通知の書き方のあるタスクでは、確定した後に prepare_notification を呼ばせる（design.md §4.3）
 AFTER_WITH_NOTIFICATION = (
-    "call prepare_notification as the notification skill instructs, then write a short final reply to the user. Do "
+    "call prepare_notification as the notification instructions say, then write a short final reply to the user. Do "
     "not call other tools."
 )
 

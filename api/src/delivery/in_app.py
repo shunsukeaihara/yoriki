@@ -51,7 +51,7 @@ def notify(delivery: Delivery) -> Outcome:
     run = delivery.run
     task = run.task
     assert task is not None  # recipients() はタスクのないRunでは空を返す
-    # 通知Skillが決めた通知の文章（送る内容に業務結果を含むときだけある。delivery/payload.py）
+    # 通知の書き方に従って決めた通知の文章（送る内容に業務結果を含むときだけある。delivery/payload.py）
     message = (delivery.payload.get("notification") or {}).get("message") or ""
     Notification.objects.bulk_create(
         [

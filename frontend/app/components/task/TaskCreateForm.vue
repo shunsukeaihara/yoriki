@@ -53,6 +53,7 @@ const { onSubmit, loading, errors } = createSubmit({
       effort: '',
       handlesSensitiveData: false,
       notifyContent: NotifyContent.STATUS_AND_RESULT,
+      notificationInstructions: '',
     }),
   onSuccess: (result) => {
     emit('created', result)

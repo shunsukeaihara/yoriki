@@ -50,6 +50,7 @@ from .webhook import parse_path
 
 MAX_PROMPT_TEMPLATE = 20_000
 MAX_CHOICES = 100
+MAX_NOTIFICATION_INSTRUCTIONS = 4000
 
 
 class TaskSkillSerializer(serializers.Serializer):
@@ -202,14 +203,15 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
         default=NotifyContent.STATUS_AND_RESULT,
         help_text=_("通知の内容（状態だけ・業務結果・両方）"),
     )
-    notification_skill = TaskSkillSerializer(
-        source="current_revision.notification_skill",
+    notification_instructions = NormalizedTextField(
+        source="current_revision.notification_instructions",
+        max_length=MAX_NOTIFICATION_INSTRUCTIONS,
         required=False,
-        allow_null=True,
-        default=None,
+        allow_blank=True,
+        default="",
         help_text=_(
-            "通知Skillと固定の版（任意）。業務のRunの中で読み込み、通知の文章と渡すファイルを決めさせる。通知先と"
-            "完了（run.completed）の通知が要る"
+            "通知の書き方（任意）。業務のRunの最後に、これに従って完了の通知の文章と渡すファイルを決めさせる。"
+            "通知先と完了（run.completed）の通知が要り、通知の内容に業務結果を含める。空なら決まった形で送る"
         ),
     )
     change_reason = serializers.CharField(max_length=500, required=False, allow_blank=True, write_only=True)
@@ -259,9 +261,6 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
         if len({e["skill"] for e in value}) != len(value):
             raise serializers.ValidationError(_("同じSkillを2回登録しています"))
         return [{"skill": e["skill"], "version": e["version"]} for e in value]
-
-    def validate_notification_skill(self, value: dict[str, Any] | None) -> dict[str, Any] | None:
-        return None if value is None else {"skill": value["skill"], "version": value["version"]}
 
     def validate_connectors(self, value: list[str]) -> list[str]:
         if len(set(value)) != len(value):
@@ -321,12 +320,6 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
             attrs["name"] = attrs["name"].strip()
             self._check_unique_name(task, attrs["name"])
         content = self._content(attrs, task.current_revision if self.instance else None)
-        if content["notification_skill"] and content["notification_skill"]["skill"] in {
-            e["skill"] for e in content["skills"]
-        }:
-            raise serializers.ValidationError(
-                {"notification_skill": _("業務のSkillに登録したSkillを、通知Skillにはできません")}
-            )
         if errors := checks.content_errors(task, content):
             raise serializers.ValidationError(errors)
         attrs["content"] = content
@@ -402,7 +395,7 @@ class TaskDefinitionDetailSerializer(TaskDefinitionSerializer):
     """タスクの詳細（編集画面）。一覧の項目に加えて、登録したSkill・Connectorの名前と、今の版が保存のときの検査に
     通らない理由（Skillの停止・Connectorの削除・範囲の外等。多くは実行も断られる）を返す"""
 
-    skills_info = serializers.SerializerMethodField(help_text=_("登録したSkill（通知Skillを含む）の名前"))
+    skills_info = serializers.SerializerMethodField(help_text=_("登録したSkillの名前"))
     connectors_info = serializers.SerializerMethodField(help_text=_("登録したConnectorの名前"))
     problems = serializers.SerializerMethodField(
         help_text=_(
@@ -487,7 +480,6 @@ class TaskDefinitionRevisionSerializer(ReadOnlyModelSerializer):
 
     id = serializers.CharField(source="uid", read_only=True)
     skills = TaskSkillSerializer(many=True, read_only=True)
-    notification_skill = TaskSkillSerializer(read_only=True, allow_null=True)
     inputs = TaskInputSerializer(many=True, read_only=True)
     model_profile: "serializers.SlugRelatedField[ModelProfile]" = serializers.SlugRelatedField(
         slug_field="uid", read_only=True

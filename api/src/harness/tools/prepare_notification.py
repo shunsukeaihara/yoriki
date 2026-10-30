@@ -1,4 +1,4 @@
-"""通知の候補を決める（design.md §4.3）。通知SkillのあるタスクのRunにだけ出す。
+"""通知の候補を決める（design.md §4.3）。通知の書き方のあるタスクのRunにだけ出す。
 
 通知の文章（`message`）と、出口へ渡すファイルの絞り込み（`files`。業務結果のファイルの項目で指したものの中からだけ）を
 Runに記録する。送るのはRunが完了したときで、完了の通知の内容に載せる（delivery/payload.py）。呼ばなくても、標準の形で
@@ -18,14 +18,14 @@ from .base import Effect, Tool, ToolContext, ToolResult
 NAME = "prepare_notification"
 MAX_MESSAGE = 2000
 
-DESCRIPTION = f"""Prepare the notification that is sent when this work completes, as the notification skill \
-instructs.
+DESCRIPTION = f"""Prepare the notification that is sent when this work completes, as the notification \
+instructions of the task say.
 
-Write `message`: a short text for the people who receive the notification, in the language the skill says. If the \
-work has a result to submit, call submit_result first. `files` chooses which of the result files to send: paths in \
-{OUTPUT_DIR} that the submitted result points to. Omit it to send all of them, or pass [] to send none. You cannot \
-add other files, and you cannot choose where or when it is sent. Calling it again replaces the previous one. Nothing \
-is sent now."""
+Write `message`: a short text for the people who receive the notification, in the language the instructions say. \
+If the work has a result to submit, call submit_result first. `files` chooses which of the result files to send: \
+paths in {OUTPUT_DIR} that the submitted result points to. Omit it to send all of them, or pass [] to send none. \
+You cannot add other files, and you cannot choose where or when it is sent. Calling it again replaces the previous \
+one. Nothing is sent now."""
 
 PARAMETERS: dict[str, Any] = {
     "type": "object",

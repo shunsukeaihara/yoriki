@@ -26,7 +26,7 @@ const toForm = (task: TaskDetail) => ({
   destination: task.destination ?? null,
   notifyEvents: [...(task.notifyEvents ?? [])] as string[],
   notifyContent: task.notifyContent,
-  notificationSkill: task.notificationSkill ? { ...task.notificationSkill } : null,
+  notificationInstructions: task.notificationInstructions ?? '',
   changeReason: '',
 })
 const form = ref(toForm(props.task))
@@ -122,19 +122,12 @@ const destinationItems = computed(() => {
 watch(
   () => form.value.destination,
   (value) => {
-    if (!value) {
-      form.value.notifyEvents = []
-      form.value.notificationSkill = null
-    }
+    if (!value) form.value.notifyEvents = []
   },
 )
 
-// 通知Skillは1つ。Skillの選択欄を使い回すため、並びとして扱う
-const notificationSkills = computed({
-  get: () => (form.value.notificationSkill ? [form.value.notificationSkill] : []),
-  set: (value: TaskSkill[]) => (form.value.notificationSkill = value[0] ?? null),
-})
-const canUseNotificationSkill = computed(
+// 通知の書き方は、完了の通知に業務結果を載せるときだけ使う（サーバーでも確かめる）
+const canUseNotificationInstructions = computed(
   () =>
     Boolean(form.value.destination) &&
     form.value.notifyEvents.includes(NotifyEvent.COMPLETED) &&
@@ -162,7 +155,7 @@ const { onSubmit, loading, errors } = createSubmit({
       destination: data.destination,
       notifyEvents: data.destination ? (data.notifyEvents as NotifyEventEnum[]) : [],
       notifyContent: data.notifyContent,
-      notificationSkill: data.notificationSkill,
+      notificationInstructions: data.notificationInstructions,
       changeReason: data.changeReason,
     }),
   onSuccess: (result) => {
@@ -237,7 +230,6 @@ defineExpose({ onSubmit, loading, canPost, dirty, reset })
         :hint="$t('版を固定します。Skillが新しい版を公開しても、タスクを保存し直すまで変わりません')"
         :choices="skillChoices"
         :info="task.skillsInfo"
-        :exclude="form.notificationSkill ? [form.notificationSkill.skill] : []"
         :error-messages="flattenRowErrors(errors.skills)"
       />
       <DSelect
@@ -319,20 +311,18 @@ defineExpose({ onSubmit, loading, canPost, dirty, reset })
           :items="notifyContentItems(t)"
           :error-messages="errors.notifyContent"
         />
-        <TaskSkillsField
-          v-if="canUseNotificationSkill || form.notificationSkill"
-          v-model="notificationSkills"
-          :label="$t('通知Skill')"
+        <DTextarea
+          v-if="canUseNotificationInstructions || form.notificationInstructions"
+          v-model="form.notificationInstructions"
+          :label="$t('通知の書き方')"
+          :rows="4"
           :hint="
             $t(
-              '完了の通知の文章と、渡す成果物を決めるSkillです（任意）。業務のRunの最後に使います。なければ決まった形で送ります',
+              '完了の通知に載せる文章と、渡す成果物の選び方を書きます（任意）。業務の最後に、エージェントがこれに従って通知の文章を作ります。空なら決まった形で送ります',
             )
           "
-          :choices="skillChoices"
-          :info="task.skillsInfo"
-          :exclude="form.skills.map((s) => s.skill)"
-          :max="1"
-          :error-messages="flattenRowErrors(errors.notificationSkill)"
+          :error-messages="errors.notificationInstructions"
+          class="max-w-none"
         />
       </template>
     </DFormSection>

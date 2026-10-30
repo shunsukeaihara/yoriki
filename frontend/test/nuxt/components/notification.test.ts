@@ -54,7 +54,7 @@ describe('NotificationBell', () => {
     expect(wrapper.text()).toContain('3')
   })
 
-  it('開くと一覧を読み、通知Skillが決めた文章を文字として出す', async () => {
+  it('開くと一覧を読み、エージェントが決めた文章を文字として出す', async () => {
     list.mockResolvedValue({
       results: [notification('n1', null, '3件の請求書を確認しました。\n<b>差異</b>は1件です')],
       next: null,

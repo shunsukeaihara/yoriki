@@ -556,8 +556,10 @@ class Runner:
             # 業務結果のSchemaはタスクのもの（なければSkillのもの）。`skill` は出さない（authorization.md §5.4）
             allowed = tasks.allowed_tools(self.run_obj, {name for version in explicit for name in version.tools})
             tools = tuple(t for t in (*ALL_TOOLS, *datasource) if t.name in allowed)
-            # 通知Skillが通知の文章と渡すファイルを決める（design.md §4.3）
-            notification = bool(tasks.task_entry(self.run_obj).get("notification_skill"))
+            # 通知の書き方に従って、通知の文章と渡すファイルを決める（design.md §4.3）。通知Skillを固定していた頃に
+            # 受け付けたRunも同じ
+            entry = tasks.task_entry(self.run_obj)
+            notification = bool(entry.get("notification_instructions") or entry.get("notification_skill"))
             if schema := tasks.output_schema(self.run_obj):
                 tools += (make_submit_result_tool(schema, notification=notification),)
             if notification:

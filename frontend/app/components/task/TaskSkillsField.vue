@@ -11,12 +11,10 @@ const props = withDefaults(
     choices: readonly TaskSkillChoice[]
     /** 保存済みの登録の名前（候補にないSkillの名前を出すため） */
     info: readonly TaskReference[]
-    /** 選べないSkill（業務のSkillと通知Skillで重ねない） */
-    exclude?: readonly string[]
     max?: number
     errorMessages?: string[]
   }>(),
-  { hint: undefined, exclude: () => [], max: MAX_TASK_SKILLS, errorMessages: undefined },
+  { hint: undefined, max: MAX_TASK_SKILLS, errorMessages: undefined },
 )
 const modelValue = defineModel<TaskSkill[]>({ required: true })
 const { t } = useI18n()
@@ -41,7 +39,7 @@ const isOld = (entry: TaskSkill) => {
 
 const addItems = computed(() =>
   props.choices
-    .filter((c) => !modelValue.value.some((e) => e.skill === c.id) && !props.exclude.includes(c.id))
+    .filter((c) => !modelValue.value.some((e) => e.skill === c.id))
     .map((c) => ({
       value: c.id,
       title: c.scope === TaskScope.DEPARTMENT ? `${c.name}（${c.departmentInfo?.name ?? ''}）` : c.name,
@@ -52,7 +50,7 @@ const adding = ref<string | null>(null)
 watch(adding, (id) => {
   if (!id) return
   const choice = choiceOf(id)
-  // 並びは入れ替えて渡す（親が computed の setter で受け取ることがあるため、その場で書き換えない）
+  // 並びは入れ替えて渡す（親が computed の setter で受け取っても変更が伝わるように、その場で書き換えない）
   if (choice) modelValue.value = [...modelValue.value, { skill: id, version: choice.version }]
   nextTick(() => (adding.value = null))
 })

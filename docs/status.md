@@ -273,6 +273,7 @@
 - 画面の通知（in_app）にも通知の文章を載せる（受け手はRunの結果を見られる人に限っているため。業務結果そのもの・成果物は載せない）。通知欄では3行まで表示する。
 - 送る内容の形の版（`version`）は1のまま（`notification` の項目を足しただけで、まだ外の受け手がいないため）。
 
+- レビュー：PRの前に回した。`codex review --base main` は5回目から指摘なし、敵対的なレビューは8回目でapprove。直した指摘：Toolを使えないモデルで通知SkillがToolを要すると受付ごと断る → 通知Skillを読み込まずに標準の形へ。`submit_result` の説明・結果・system promptが「ほかのToolを呼ばない」で `prepare_notification` と矛盾 → 通知Skillのあるタスクでは順番を揃える。authorization.md の進行の制御のTool・backend-conventions.md の NotificationBinding の記述・design.md の概念例が古い → 直した。業務結果を確定し直しても古い通知の文章が残る → 候補を消す。`prepare_notification` の誤りの繰り返しでRun全体が失敗する・呼び続けてステップの上限で失敗する・同じ応答の残りが実行される → そのRunでは出さない。通知Skillの業務結果のSchemaが最初の発言に載る → 業務結果のSchemaを持つSkillは通知Skillにできない。画面の通知の機密の根拠（authorization.md・status.md）が「状態だけ」のまま → 受け手をRunの結果を見られる人に限る、に書き直した。直さなかった指摘：権限を失った人の開いたままの通知欄に取得済みの文章が残る（アプリ全体で同じ。§3に記録）。
 - テスト：`delivery/tests/test_notification_skill.py`（Runnerから `prepare_notification` → 完了の配信と画面の通知の文章、候補がないときの標準の形、失敗に載せない、ファイルの絞り込みと断るパス、Toolを使えないモデル、保存時の検査）と、フロントエンドの通知欄の文章の表示。
 
 **次の作業**：⑥cのPRを人間のレビューとCIを経てマージする。その後は⑦（タスク・出口の画面）。

@@ -20,7 +20,13 @@ const emit = defineEmits<{
 
 // 入力の項目はタスクの版で決まる。版が変わったら、親がこのフォームを作り直す（key）
 const inputs = props.task.inputs ?? []
-const emptyValue = (input: TaskInput): TaskRunInputs[string] => (input.type === TaskInputType.BOOLEAN ? false : null)
+// 必須の真偽はチェックボックス（初期値はいいえ）。任意の真偽は「未指定」も選べるようにし、未指定なら送らない
+const emptyValue = (input: TaskInput): TaskRunInputs[string] =>
+  input.type === TaskInputType.BOOLEAN && input.required ? false : null
+const booleanItems = computed(() => [
+  { value: true, title: t('はい') },
+  { value: false, title: t('いいえ') },
+])
 const form = ref<TaskRunInputs>(Object.fromEntries(inputs.map((i) => [i.name, emptyValue(i)])))
 const choiceItems = (input: TaskInput) => (input.choices ?? []).map((value) => ({ value, title: value }))
 // 入力欄ごとに v-model の型を合わせる（値は form にまとめて持つ）
@@ -38,6 +44,7 @@ const fields = inputs.map((input) => ({
     set: (value: boolean) => (form.value[input.name] = value),
   }),
   file: modelOf<File>(input.name),
+  choice: modelOf<boolean>(input.name),
 }))
 
 const { onSubmit, loading, errors } = createSubmit({
@@ -88,9 +95,19 @@ defineExpose({ onSubmit, loading, canPost })
   <DFormStack>
     <DFormAlert :errors="generalErrors" />
     <p v-if="!fields.length" class="text-sm text-muted">{{ $t('このタスクには入力の項目がありません') }}</p>
-    <template v-for="{ input, text, number, flag, file } in fields" :key="input.name">
+    <template v-for="{ input, text, number, flag, file, choice } in fields" :key="input.name">
+      <DSelect
+        v-if="input.type === TaskInputType.BOOLEAN && !input.required"
+        v-model="choice.value"
+        :label="input.label"
+        :hint="input.description"
+        :items="booleanItems"
+        :placeholder="$t('未指定')"
+        clearable
+        :error-messages="errorsOf(input.name)"
+      />
       <DCheckbox
-        v-if="input.type === TaskInputType.BOOLEAN"
+        v-else-if="input.type === TaskInputType.BOOLEAN"
         v-model="flag.value"
         :label="input.label"
         :hint="input.description"

@@ -21,7 +21,8 @@ const created = (value: TaskDetail) => {
 </script>
 
 <template>
-  <DDialog ref="dialog" @update:open="onOpen">
+  <!-- 送信中は閉じさせない（閉じて開き直すと、フォームが作り直されて、もう一度作れてしまうため） -->
+  <DDialog ref="dialog" :dismissible="!formRef?.loading" :close="!formRef?.loading" @update:open="onOpen">
     <template #trigger="{ on }">
       <slot name="trigger" :on="on" />
     </template>
@@ -30,7 +31,9 @@ const created = (value: TaskDetail) => {
       <TaskCreateForm :key="formKey" ref="formRef" :scopes="scopes" @created="created" />
     </template>
     <template #footer="{ closeDialog }">
-      <DBtn color="neutral" variant="ghost" @click="closeDialog()">{{ $t('キャンセル') }}</DBtn>
+      <DBtn color="neutral" variant="ghost" :disabled="formRef?.loading" @click="closeDialog()">
+        {{ $t('キャンセル') }}
+      </DBtn>
       <DBtn :disabled="!formRef?.canPost" :loading="formRef?.loading" @click="formRef?.onSubmit()">
         {{ $t('作る') }}
       </DBtn>

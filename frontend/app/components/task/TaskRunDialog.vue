@@ -1,0 +1,47 @@
+<script setup lang="ts">
+import TaskRunForm from './TaskRunForm.vue'
+import DDialog from '../common/DDialog.vue'
+
+const props = defineProps<{ task: TaskDetail }>()
+const emit = defineEmits<{ started: [value: Run] }>()
+
+const dialog = ref<InstanceType<typeof DDialog> | null>(null)
+const formRef = ref<InstanceType<typeof TaskRunForm> | null>(null)
+// 開くたびにフォームを作り直し、前回の入力やエラーを残さない（タスクの版が変われば入力の項目も変わる）
+const formKey = ref(0)
+const onOpen = (open: boolean) => {
+  if (open) formKey.value += 1
+}
+
+const started = (value: Run) => {
+  emit('started', value)
+  dialog.value?.closeDialog()
+}
+</script>
+
+<template>
+  <DDialog ref="dialog" @update:open="onOpen">
+    <template #trigger="{ on }">
+      <slot name="trigger" :on="on" />
+    </template>
+    <template #header>{{ $t('「{name}」を実行', { name: props.task.name }) }}</template>
+    <template #content>
+      <p class="mb-4 text-sm text-muted">
+        {{
+          props.task.scope === TaskScope.PERSONAL
+            ? $t('タスクの今の版（版 {number}）で、自分の権限で実行します', { number: props.task.version })
+            : $t('タスクの今の版（版 {number}）で、タスクの範囲の権限で実行します。結果は通知先にも送ります', {
+                number: props.task.version,
+              })
+        }}
+      </p>
+      <TaskRunForm :key="formKey" ref="formRef" :task="props.task" @started="started" />
+    </template>
+    <template #footer="{ closeDialog }">
+      <DBtn color="neutral" variant="ghost" @click="closeDialog()">{{ $t('キャンセル') }}</DBtn>
+      <DBtn icon="i-lucide-play" :disabled="!formRef?.canPost" :loading="formRef?.loading" @click="formRef?.onSubmit()">
+        {{ $t('実行') }}
+      </DBtn>
+    </template>
+  </DDialog>
+</template>

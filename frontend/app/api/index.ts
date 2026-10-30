@@ -166,6 +166,48 @@ const createAPI = () => {
       // 資料の原本。ブラウザのリンクで開く（ダウンロードとして返る）
       fileUrl: (fileId: string) => `${config.public.apiEndpoint}app/v1/skills/${id}/files/${fileId}/download/`,
     }),
+    // タスク（design.md §4.1）。一覧は管理できるものだけ。保存のたびに版が増え、更新では編集を始めた時点の version を送る
+    tasks: (id?: string) => ({
+      list: (params?: TaskListParams) => http.get<Paginated<Task>, Paginated<Task>>('app/v1/tasks/', { params }),
+      get: () => http.get<TaskDetail, TaskDetail>(`app/v1/tasks/${id}/`),
+      create: (data: TaskCreate) => http.post<TaskDetail, TaskDetail>('app/v1/tasks/', data),
+      patch: (data: TaskUpdate) => http.patch<TaskDetail, TaskDetail>(`app/v1/tasks/${id}/`, data),
+      delete: () => http.delete<undefined, undefined>(`app/v1/tasks/${id}/`),
+      suspend: () => http.post<TaskDetail, TaskDetail>(`app/v1/tasks/${id}/suspend/`),
+      resume: () => http.post<TaskDetail, TaskDetail>(`app/v1/tasks/${id}/resume/`),
+      // 手動実行。いつも multipart で送り、inputs はJSONの文字列にする（項目の名前のキーを変換しないため）。
+      // 型がファイルの項目は、項目の名前のフィールドでファイルを付ける
+      run: (inputs: TaskRunInputs) => {
+        const form = new FormData()
+        const values: Record<string, unknown> = {}
+        for (const [name, value] of Object.entries(inputs)) {
+          if (value instanceof File) form.append(name, value)
+          else if (value !== null && value !== '') values[name] = value
+        }
+        form.append('inputs', JSON.stringify(values))
+        return http.post<Run, Run>(`app/v1/tasks/${id}/run/`, form, { timeout: UPLOAD_TIMEOUT })
+      },
+      // 版は版番号で識別する
+      revisions: () => ({
+        list: (params?: ListParams) =>
+          http.get<Paginated<TaskRevision>, Paginated<TaskRevision>>(`app/v1/tasks/${id}/revisions/`, { params }),
+      }),
+      // Runの履歴（結果を見られるもの）
+      runs: () => ({
+        list: (params?: TaskRunListParams) =>
+          http.get<Paginated<Run>, Paginated<Run>>(`app/v1/tasks/${id}/runs/`, { params }),
+      }),
+      // 編集画面で選ぶ候補（その範囲のタスクに登録できるもの。authorization.md §7.2）
+      skillChoices: (params: TaskChoiceParams) =>
+        http.get<Paginated<TaskSkillChoice>, Paginated<TaskSkillChoice>>('app/v1/tasks/skill_choices/', { params }),
+      connectorChoices: (params: TaskChoiceParams) =>
+        http.get<Paginated<AppConnector>, Paginated<AppConnector>>('app/v1/tasks/connector_choices/', { params }),
+    }),
+    // タスクの編集画面で選ぶ出口の候補（タスクを管理できる範囲の、停止していないもの）
+    destinations: {
+      list: (params: TaskChoiceParams) =>
+        http.get<Paginated<DestinationChoice>, Paginated<DestinationChoice>>('app/v1/destinations/', { params }),
+    },
     runs: (id?: string) => ({
       ...readOnlyResource<Run, RunListParams>(http, 'app/v1/runs', id),
       cancel: (data: RunCancel) => http.post<Run, Run>(`app/v1/runs/${id}/cancel/`, data),

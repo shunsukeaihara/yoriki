@@ -35,7 +35,7 @@ jobs:
       - run: |
           cp -r site _site
           rm _site/README.md
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
       - id: deployment

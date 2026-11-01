@@ -320,7 +320,8 @@ class AppLaunchableTaskViewSet(ReadOnlyModelViewSet):
             OpenApiParameter(
                 "client_request_id",
                 str,
-                description="画面が起動ごとに作るID（任意。64文字まで）。同じ会話で同じIDの再送には、前に起動したRunを"
+                required=True,
+                description="画面が起動ごとに作るID（64文字まで）。同じ会話で同じIDの再送には、前に起動したRunを"
                 "返す（応答が失われた後の再送で、二重に起動しない）",
             ),
             OpenApiParameter(
@@ -337,8 +338,8 @@ class AppLaunchableTaskViewSet(ReadOnlyModelViewSet):
             Conversation.objects.owned_by(request.user), uid=request.query_params.get("conversation", "")
         )
         client_request_id = request.query_params.get("client_request_id", "")
-        if len(client_request_id) > 64:
-            raise ValidationError({"client_request_id": [_("64文字までにしてください")]})
+        if not client_request_id or len(client_request_id) > 64:
+            raise ValidationError({"client_request_id": [_("起動のID（64文字まで）を指定してください")]})
         # 同じ要求の再送には、前に起動したRunを返す（版や入力、今も起動できるかを確かめ直さない。起動の後に印を
         # 外されても、起動済みのRunは残るため）
         run = launched_run(conversation, client_request_id)

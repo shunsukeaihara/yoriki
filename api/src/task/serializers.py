@@ -539,7 +539,6 @@ class LaunchableTaskSerializer(ReadOnlyModelSerializer):
     department_info = MinimumDepartmentSerializer(source="department", read_only=True, allow_null=True)
     description = serializers.CharField(source="current_revision.description", read_only=True)
     version = serializers.IntegerField(source="version_number", read_only=True, help_text=_("今の版"))
-    handles_sensitive_data = serializers.BooleanField(source="current_revision.handles_sensitive_data", read_only=True)
     inputs = TaskInputSerializer(source="current_revision.inputs", many=True, read_only=True)
 
     class Meta:
@@ -552,7 +551,6 @@ class LaunchableTaskSerializer(ReadOnlyModelSerializer):
             "name",
             "description",
             "version",
-            "handles_sensitive_data",
             "inputs",
         ]
 

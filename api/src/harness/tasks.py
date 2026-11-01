@@ -41,12 +41,12 @@ def launcher(run: Run) -> User | None:
 
 def revoked_task(run: Run) -> str:
     """タスクのRunを続けられなくなった理由（タスクの停止・削除、個人のタスクの持ち主・チャットから起動した人の
-    無効化）。なければ空文字"""
+    無効化、起動した人が起動できる部門から外れた）。なければ空文字"""
     if not is_task_run(run):
         return ""
     reason = checks.task_problem(load_task(run))
     if not reason and run.launch == RunLaunch.CHAT:
-        reason = checks.launcher_inactive(launcher(run))
+        reason = checks.launcher_scope_problem(launcher(run), run)
     if reason:
         return _("タスクを続けられなくなったので、作業を止めました（%(reason)s）。") % {"reason": reason}
     return ""

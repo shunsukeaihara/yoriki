@@ -679,7 +679,8 @@ paths:
         name: client_request_id
         schema:
           type: string
-        description: 画面が起動ごとに作るID（任意。64文字まで）。同じ会話で同じIDの再送には、前に起動したRunを返す（応答が失われた後の再送で、二重に起動しない）
+        description: 画面が起動ごとに作るID（64文字まで）。同じ会話で同じIDの再送には、前に起動したRunを返す（応答が失われた後の再送で、二重に起動しない）
+        required: true
       - in: query
         name: conversation
         schema:
@@ -9484,9 +9485,6 @@ components:
           type: integer
           readOnly: true
           description: 今の版
-        handles_sensitive_data:
-          type: boolean
-          readOnly: true
         inputs:
           type: array
           items:
@@ -9495,7 +9493,6 @@ components:
       required:
       - department_info
       - description
-      - handles_sensitive_data
       - id
       - inputs
       - name

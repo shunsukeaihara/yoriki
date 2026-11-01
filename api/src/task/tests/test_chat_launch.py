@@ -1,6 +1,8 @@
 """チャットからのタスクの起動（authorization.md §5.3・§6・§7.1）。起動できる人、起動した人の権限、会話のカード、
 起動した人が見られる結果"""
 
+import uuid
+
 import pytest
 
 from artifact.factories import ArtifactFactory
@@ -43,6 +45,7 @@ def _task(scope=TaskScope.COMPANY, *, department=None, name="請求書チェッ�
 def _launch(api_client, user, task, conversation=None, inputs=None, **params):
     conversation = conversation or ConversationFactory.create(owner=user)
     api_client.force_login(user)
+    params.setdefault("client_request_id", uuid.uuid4().hex)
     query = "&".join(f"{k}={v}" for k, v in {"conversation": conversation.uid, **params}.items())
     return api_client.post(
         f"{LAUNCHABLE}{task.uid}/run/?{query}", {"inputs": inputs or {"vendor": "A商事"}}, format="json"
@@ -88,7 +91,7 @@ def test_candidates_show_only_the_name_description_and_inputs(api_client, app_us
     assert (data["id"], data["description"], data["version"]) == (task.uid, "請求書を確認します", 1)
     assert [i["name"] for i in data["inputs"]] == ["vendor"]
     # 依頼文・使うもの・出口は、管理できる人だけに見せる
-    assert not {"prompt_template", "skills", "connectors", "destination"} & set(data)
+    assert not {"prompt_template", "skills", "connectors", "destination", "handles_sensitive_data"} & set(data)
 
 
 def test_system_tasks_cannot_be_marked(api_client):
@@ -136,6 +139,7 @@ def test_launch_starts_a_run_of_the_launcher_and_adds_a_card(api_client, app_use
 
 def test_launch_needs_an_own_conversation_and_the_current_version(api_client, app_user):
     task = _task()
+    assert _launch(api_client, app_user, task, client_request_id="").status_code == 400
     other = ConversationFactory.create()
     assert _launch(api_client, app_user, task, other).status_code == 404
     assert _launch(api_client, app_user, task, version=2).status_code == 409
@@ -294,5 +298,13 @@ def test_delivery_is_not_sent_after_the_launcher_lost_a_fixed_connector(api_clie
         payload={},
     )
     assert send_problem(delivery) == ""
+    # 部門の所属は残したまま、固定したConnectorを起動した人が使えなくなった
+    connector.department = DepartmentFactory.create()
+    connector.save(update_fields=["department"])
+    DepartmentMembershipFactory.create(department=connector.department, user=UserFactory.create())
+    assert send_problem(delivery) != ""
+    connector.department = department
+    connector.save(update_fields=["department"])
+    assert send_problem(delivery) == ""
     membership.delete()  # 起動した後に部門を離れた
-    assert "経理DB" in send_problem(delivery)
+    assert "部門から外れました" in send_problem(delivery)

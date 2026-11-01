@@ -4,7 +4,7 @@
 from django.utils.translation import gettext as _
 
 from run.models import RunLaunch
-from task.checks import launcher_inactive, launcher_problem, task_problem
+from task.checks import launcher_problem, launcher_scope_problem, task_problem
 from user.models import User
 
 from .models import URL_KINDS, Delivery, Destination
@@ -31,7 +31,7 @@ def send_problem(delivery: Delivery) -> str:
         # チャットから起動したRunは、起動した人が今も有効で、固定したSkill・Connectorを今も使えるかも確かめる
         # （authorization.md §6。DBから読み直す）
         launcher = User.objects.filter(pk=run.owner_id).first()
-        problem = launcher_inactive(launcher) or (
+        problem = launcher_scope_problem(launcher, run) or (
             launcher_problem(launcher, run.task_revision) if run.task_revision is not None else ""
         )
     return problem

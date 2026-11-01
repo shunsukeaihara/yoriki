@@ -284,8 +284,8 @@ def _department_task_with_connector(manager, department):
     )
 
 
-def test_chat_launched_run_is_refused_the_connector_the_launcher_lost(app_user):
-    """チャットから起動したRunは、操作のたびに「タスクの版の一覧 ∩ 起動した人の今の権限」で判定する"""
+def test_chat_launched_run_stops_when_the_launcher_leaves_the_department(app_user):
+    """チャットから起動したRunは、起動した人が今もそのタスクを起動できる立場かを区切りごとに確かめる"""
     department = DepartmentFactory.create()
     manager = grant(UserFactory.create(), AppPermission.MANAGE_DEPARTMENT_TASKS)
     DepartmentMembershipFactory.create(department=department, user=manager)
@@ -294,6 +294,20 @@ def test_chat_launched_run_is_refused_the_connector_the_launcher_lost(app_user):
     run = start_task_run(task, inputs={}, actor=app_user, launch=RunLaunch.CHAT)
     assert (run.owner, run.launch) == (app_user, RunLaunch.CHAT)
     membership.delete()  # 起動した後に部門を離れた
+    run = execute(run, FakeAdapter([]))
+    assert (run.status, run.end_reason) == (RunStatus.FAILED, RunEndReason.TASK)
+    assert "部門から外れました" in run.error
+
+
+def test_chat_launched_run_is_refused_the_connector_the_launcher_cannot_use(app_user, monkeypatch):
+    """Connectorの操作のたびに、起動した人の今の権限でも判定する（タスクの範囲では使えても断る）"""
+    department = DepartmentFactory.create()
+    manager = grant(UserFactory.create(), AppPermission.MANAGE_DEPARTMENT_TASKS)
+    DepartmentMembershipFactory.create(department=department, user=manager)
+    task = _department_task_with_connector(manager, department)
+    DepartmentMembershipFactory.create(department=department, user=app_user)
+    run = start_task_run(task, inputs={}, actor=app_user, launch=RunLaunch.CHAT)
+    monkeypatch.setattr(tasks.checks, "launcher_connector_permitted", lambda user, connector: False)
     adapter = FakeAdapter(
         [calls(("c1", "datasource_query", {"connector": "経理DB", "sql": "SELECT 1"})), reply("使えませんでした")]
     )

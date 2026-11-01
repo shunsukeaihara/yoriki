@@ -19,6 +19,7 @@ from connector.models import Connector, ConnectorAction, ConnectorScope, Operati
 from delivery.models import Destination, NotifyContent, NotifyEvent
 from skill import connectors as skill_connectors
 from skill.models import Skill, SkillAction, SkillScope, SkillVersion
+from user.models import Department, manageable_department_ids
 
 from .models import TaskScope
 
@@ -358,6 +359,22 @@ def connector_permitted(task, connector: Connector, *, connectors: list[str]) ->
 def launcher_inactive(user) -> str:
     """起動した人が今は無効なら理由。Workerでは、確かめ直すたびにDBから読んだユーザーを渡す"""
     return "" if user is not None and user.is_active else _("起動した人のアカウントが無効です")
+
+
+def launcher_scope_problem(user, run: Any) -> str:
+    """起動した人が、Runを実行したときのタスクの範囲と部門のタスクを、今もチャットから起動できる立場か（印・停止は
+    見ない。印を外しても起動済みのRunは止めない）。できなければ理由"""
+    if reason := launcher_inactive(user):
+        return reason
+    if run.task_scope == TaskScope.PERSONAL:
+        allowed = run.owner_id == user.pk
+    elif run.task_scope == TaskScope.DEPARTMENT:
+        allowed = Department.objects.joined_by(user).filter(
+            pk=run.task_department_id
+        ).exists() or run.task_department_id in manageable_department_ids(user)
+    else:
+        allowed = run.task_scope == TaskScope.COMPANY
+    return "" if allowed else _("起動した人がこのタスクを起動できる部門から外れました")
 
 
 def launcher_skill_problem(user, skill: Skill) -> str:

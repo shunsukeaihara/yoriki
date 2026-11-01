@@ -3588,7 +3588,6 @@ export interface components {
             readonly description: string;
             /** @description 今の版 */
             readonly version: number;
-            readonly handles_sensitive_data: boolean;
             readonly inputs: components["schemas"]["TaskInput"][];
         };
         /**
@@ -7118,8 +7117,8 @@ export interface operations {
     app_v1_launchable_tasks_run_create: {
         parameters: {
             query: {
-                /** @description 画面が起動ごとに作るID（任意。64文字まで）。同じ会話で同じIDの再送には、前に起動したRunを返す（応答が失われた後の再送で、二重に起動しない） */
-                client_request_id?: string;
+                /** @description 画面が起動ごとに作るID（64文字まで）。同じ会話で同じIDの再送には、前に起動したRunを返す（応答が失われた後の再送で、二重に起動しない） */
+                client_request_id: string;
                 /** @description 起動した会話のID（カードを足す） */
                 conversation: string;
                 /** @description 画面で確かめた版（任意）。今の版と違えば409にし、確かめていない入力の項目では起動しない */

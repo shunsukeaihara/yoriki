@@ -12,7 +12,7 @@ from typing import Any
 
 from django.conf import settings
 from django.db import models, transaction
-from django.db.models import Max, Q
+from django.db.models import Exists, Max, OuterRef, Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -67,6 +67,7 @@ class RunLaunch(models.IntegerChoices):
 
     MANUAL = 1, _("タスクの画面からの手動実行")
     WEBHOOK = 2, _("Webhook")
+    CHAT = 3, _("チャットからの起動")
 
 
 class RunKind(models.IntegerChoices):
@@ -96,6 +97,16 @@ class RunEndReason(models.IntegerChoices):
     INTERNAL = 99, _("内部のエラー")
 
 
+def _visible_condition(user) -> Q:
+    from task.models import manageable_condition  # noqa: PLC0415  taskのModelがrunを参照するため
+
+    own = Q(owner=user, conversation__owner=user, conversation__deleted=False) & ~Q(trigger=RunTrigger.TASK)
+    task = Q(trigger=RunTrigger.TASK) & manageable_condition(
+        user, scope_field="task_scope", owner_field="owner", department_field="task_department"
+    )
+    return own | task
+
+
 class RunQuerySet(models.QuerySet):
     def visible_to(self, user) -> "RunQuerySet":
         """結果とログ（イベント・確認・実行中の進み具合）を見られるRun（authorization.md §7.1）。会話・評価のRunは
@@ -103,13 +114,24 @@ class RunQuerySet(models.QuerySet):
         今の範囲では判定しない"""
         if not user.is_active:
             return self.none()
-        from task.models import manageable_condition  # noqa: PLC0415  taskのModelがrunを参照するため
+        return self.filter(_visible_condition(user))
 
-        own = Q(owner=user, conversation__owner=user, conversation__deleted=False) & ~Q(trigger=RunTrigger.TASK)
-        task = Q(trigger=RunTrigger.TASK) & manageable_condition(
-            user, scope_field="task_scope", owner_field="owner", department_field="task_department"
-        )
-        return self.filter(own | task)
+    def results_visible_to(self, user) -> "RunQuerySet":
+        """結果（状態、最後の応答、業務結果、成果物）だけでも見られるRun。結果とログを見られるRun（`visible_to()`）に、
+        チャットから起動した人の、自分が起動したRunを足す（起動した後に権限を失っても見られる。
+        authorization.md §7.1）"""
+        if not user.is_active:
+            return self.none()
+        return self.filter(_visible_condition(user) | Q(trigger=RunTrigger.TASK, launch=RunLaunch.CHAT, owner=user))
+
+    def with_logs_visible(self, user) -> "RunQuerySet":
+        """ログも見られるか（`logs_visible()`）を注釈する。結果だけを見られるRun（`results_visible_to()`）で使う"""
+        return self.annotate(logs_visible=Exists(Run.objects.visible_to(user).filter(pk=OuterRef("pk"))))
+
+
+def logs_visible(run: "Run") -> bool:
+    """`RunQuerySet.with_logs_visible()` で読んだRunのログを見られるか。注釈がなければ見られないとする"""
+    return bool(getattr(run, "logs_visible", False))
 
 
 class Run(models.Model):

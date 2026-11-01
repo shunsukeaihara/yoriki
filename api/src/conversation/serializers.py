@@ -13,7 +13,7 @@ from harness.connectors import MAX_EXPLICIT_CONNECTORS
 from harness.skills import MAX_EXPLICIT_SKILLS, unsupported_skills
 from llm.models import ModelProfile
 from llm.serializers import AppModelProfileSerializer
-from run.models import ACTIVE_STATUSES, Run
+from run.models import ACTIVE_STATUSES, Run, RunEndReason, RunStatus
 from run.serializers import RunSerializer
 from skill.models import Skill, SkillAction
 from utils.fields import NormalizedTextField
@@ -184,6 +184,44 @@ class MessageSkillEditSerializer(serializers.Serializer):
     name = serializers.CharField(read_only=True)
 
 
+class LaunchedTaskRunSerializer(serializers.ModelSerializer):
+    """チャットから起動したタスクのRun（会話のカード）。起動した人が見られる結果だけ（authorization.md §7.1）"""
+
+    id = serializers.CharField(source="uid", read_only=True)
+    task = serializers.CharField(source="task.uid", read_only=True)
+    task_name = serializers.SerializerMethodField(help_text=_("受付時のタスクの名前"))
+    status = serializers.ChoiceField(choices=RunStatus.choices, read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    end_reason = serializers.ChoiceField(choices=RunEndReason.choices, read_only=True, allow_null=True)
+    end_reason_display = serializers.CharField(source="get_end_reason_display", read_only=True, allow_null=True)
+    response = serializers.SerializerMethodField(help_text=_("エージェントの最後の応答（終わるまでは空）"))
+
+    class Meta:
+        model = Run
+        fields = [
+            "id",
+            "task",
+            "task_name",
+            "status",
+            "status_display",
+            "end_reason",
+            "end_reason_display",
+            "error",
+            "response",
+            "created",
+            "finished",
+        ]
+        read_only_fields = fields
+
+    def get_task_name(self, obj: Run) -> str:
+        fixed = ((obj.manifest or {}).get("fixed") or {}).get("task") or {}
+        return fixed.get("name") or (obj.task.name if obj.task else "")
+
+    def get_response(self, obj: Run) -> str:
+        message = obj.conversation.messages.filter(role=MessageRole.AGENT).order_by("-pk").first()
+        return message.body if message else ""
+
+
 class MessageSerializer(serializers.ModelSerializer):
     """会話のメッセージ。投稿すると、新しい依頼・今の作業への追加指示・確認への回答・次の依頼のどれかになる"""
 
@@ -248,6 +286,9 @@ class MessageSerializer(serializers.ModelSerializer):
         help_text=_("auto：実行中なら今の作業への追加指示、確認待ちなら回答。next：今の作業の後に始める"),
     )
     instruction = InstructionInfoSerializer(read_only=True, allow_null=True)
+    task_run = LaunchedTaskRunSerializer(
+        read_only=True, allow_null=True, help_text=_("チャットから起動したタスクのRun（カードとして出すメッセージ）")
+    )
 
     class Meta:
         model = ConversationMessage
@@ -269,6 +310,7 @@ class MessageSerializer(serializers.ModelSerializer):
             "client_message_id",
             "mode",
             "instruction",
+            "task_run",
             "created",
         ]
         read_only_fields = ["created"]

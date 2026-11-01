@@ -80,13 +80,16 @@ def start_task_run(
     launch: RunLaunch,
     files: Sequence[InputFile] = (),
     expected_version: int | None = None,
+    conversation: Conversation | None = None,
 ) -> Run:
     """タスクの今の版でRunを始める。始められなければ CannotRun（入力の誤りは InvalidInputs）。
     `expected_version` を渡すと、今の版がそれと違えば VersionConflict（画面で確かめた版と違う定義で動かさない）。
 
     `inputs` は値か、ロックした後の今の版から値を作る関数（Webhookでは、項目の型を今の版で決めるため）。型がファイルの
     項目の値は InputFile。`files` は項目の値のほかに /workspace/input に置くファイル（Webhookのpayload等）。呼び出し元の
-    transactionの中で呼べば、Runの受付と同時に確定させたいもの（TriggerReceipt）を同じtransactionで作れる"""
+    transactionの中で呼べば、Runの受付と同時に確定させたいもの（TriggerReceipt）を同じtransactionで作れる。
+
+    チャットからの起動では、`conversation`（起動した会話）にRunを指すカードを足す。タスクのRunは会話の文脈を引き継がない"""
     # 保存先への書き込みは、タスクの行をロックする前に行う（保存先が遅くても、同じタスクの受付や更新を待たせない）
     sent = inputs.values() if isinstance(inputs, dict) else ()
     written = store_files([*files, *(v for v in sent if isinstance(v, InputFile))])
@@ -103,6 +106,8 @@ def start_task_run(
                 raise VersionConflict()
             if launch == RunLaunch.MANUAL and not task.can(actor, TaskAction.RUN):
                 raise CannotRun(_("このタスクを実行する権限がないか、タスクが停止中です"))
+            if launch == RunLaunch.CHAT and not task.can(actor, TaskAction.LAUNCH):
+                raise CannotRun(_("このタスクをチャットから起動する権限がないか、タスクが停止中です"))
             # 入口からの起動は、タスクに固定したものの範囲で動く（authorization.md §6。個人のタスクはスケジュールだけ）
             if launch == RunLaunch.WEBHOOK and (not task.in_service() or task.scope == TaskScope.PERSONAL):
                 raise CannotRun(_("タスクが停止中か、削除されています"))
@@ -110,11 +115,17 @@ def start_task_run(
                 raise CannotRun(reason)
             revision = task.current_revision
             assert revision is not None  # can()・in_service() が確かめた
+            # チャットからの起動は、起動した人の権限を超えない（authorization.md §6）
+            if launch == RunLaunch.CHAT and (reason := checks.launcher_problem(actor, revision)):
+                raise CannotRun(reason)
             values = inputs(revision) if callable(inputs) else inputs
             cleaned, errors = clean_inputs(revision.inputs, values)
             if errors:
                 raise InvalidInputs(errors)
-            return _start(task, revision, cleaned, actor=actor, launch=launch, files=files)
+            run = _start(task, revision, cleaned, actor=actor, launch=launch, files=files)
+            if conversation is not None:
+                _add_launch_card(conversation, run, actor=actor)
+            return run
     except BaseException:
         discard_files(written)
         raise
@@ -269,6 +280,15 @@ def _start(
     )
     enqueue_run(run)
     return run
+
+
+def _add_launch_card(conversation: Conversation, run: Run, *, actor) -> None:
+    """起動した会話に、起動したタスクのRunを指すカードを足す。会話のRunの文脈には入らない（文脈はRunEventから
+    組み立てる）ので、タスクの結果が会話のモデルへ渡ることはない"""
+    ConversationMessage.objects.create(
+        conversation=conversation, sender=actor, role=MessageRole.SYSTEM, body="", task_run=run
+    )
+    Conversation.objects.filter(pk=conversation.pk).update(last_posted=timezone.now())
 
 
 def _fixed_skills(

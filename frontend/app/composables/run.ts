@@ -21,6 +21,7 @@ export const RunKind = {
 export const RunLaunch = {
   MANUAL: 1,
   WEBHOOK: 2,
+  CHAT: 3,
 } as const satisfies Record<string, RunLaunchEnum>
 
 // バックエンドの CANCELLABLE_STATUSES・ACTIVE_STATUSES と同じ

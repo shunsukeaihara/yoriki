@@ -28,7 +28,7 @@ const placeholderExample = (name: string) => `{{ inputs.${name || t('名前')} }
   <DFormSection
     :title="$t('入力の項目')"
     :description="
-      $t('手動実行とWebhookで受け取る値です。依頼文の中に {example} と書くと、値を埋め込みます', {
+      $t('手動実行・チャットからの起動・Webhookで受け取る値です。依頼文の中に {example} と書くと、値を埋め込みます', {
         example: placeholderExample(''),
       })
     "

@@ -52,6 +52,7 @@ class TaskAction(Enum):
 
     MANAGE = "manage"  # 定義を見る・作る・変える・停止する・削除する
     RUN = "run"  # タスクの画面から手動で実行する（停止中・版のないタスクは実行できない）
+    LAUNCH = "launch"  # チャットから起動する（印のある、停止していない、版のあるタスク）
 
 
 class TaskInputType(models.TextChoices):
@@ -101,12 +102,49 @@ def can_manage(user, scope: int, *, owner_id: int | None, department_id: int | N
     return scope != TaskScope.DEPARTMENT or department_id in manageable_department_ids(user)
 
 
+def launchable_condition(user) -> Q:
+    """チャットから起動できる人の条件（SQL。authorization.md §5.3）。個人は本人、部門は実際に所属する人と管理できる
+    部門の人、全社は全員。部門は `can_use_all_departments` では広がらない（監査のための権限で業務を動かさない）"""
+    departments = Department.objects.joined_by(user) | Department.objects.manageable_by(user)
+    return (
+        Q(scope=TaskScope.PERSONAL, owner=user)
+        | Q(scope=TaskScope.DEPARTMENT, department__in=departments.values("pk"))
+        | Q(scope=TaskScope.COMPANY)
+    )
+
+
+def can_launch(user, task: "TaskDefinition") -> bool:
+    """1件の判定。`launchable_condition()` と同じ規則"""
+    if not user.is_active:
+        return False
+    if task.scope == TaskScope.PERSONAL:
+        return task.owner_id == user.pk
+    if task.scope == TaskScope.DEPARTMENT:
+        return Department.objects.joined_by(user).filter(
+            pk=task.department_id
+        ).exists() or task.department_id in manageable_department_ids(user)
+    return task.scope == TaskScope.COMPANY
+
+
 class TaskQuerySet(models.QuerySet):
     def manageable_by(self, user) -> Self:
         """管理できるタスク（`TaskAction.MANAGE`）"""
         if not user.is_active:
             return self.none()
         return self.filter(manageable_condition(user), deleted=False)
+
+    def launchable_by(self, user) -> Self:
+        """チャットから起動できるタスク（`TaskAction.LAUNCH`）。起動した人が固定したSkill・Connectorを使えるかは、起動の
+        ときに確かめる（task/checks.py の `launcher_problem()`）"""
+        if not user.is_active:
+            return self.none()
+        return self.filter(
+            launchable_condition(user),
+            chat_launchable=True,
+            suspended=False,
+            deleted=False,
+            current_revision__isnull=False,
+        ).exclude(scope=TaskScope.DEPARTMENT, department__deleted=True)
 
 
 class TaskDefinition(models.Model):
@@ -135,6 +173,9 @@ class TaskDefinition(models.Model):
     )
     # 停止。新しいRunを受け付けず、順番待ちのRunも動かさず、実行中のRunも次の区切りで止める（authorization.md §6）
     suspended = models.BooleanField(_("停止中"), default=False)
+    # チャットから起動できる（authorization.md §5.3）。版の外に持ち、停止と同じく切り替える。システムのタスクには
+    # 付けない
+    chat_launchable = models.BooleanField(_("チャットから起動できる"), default=False)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+", verbose_name=_("作成者")
     )
@@ -157,6 +198,9 @@ class TaskDefinition(models.Model):
                     | Q(scope__in=[TaskScope.COMPANY, TaskScope.SYSTEM], owner__isnull=True, department__isnull=True)
                 ),
                 name="task_scope_owner",
+            ),
+            models.CheckConstraint(
+                condition=~Q(scope=TaskScope.SYSTEM, chat_launchable=True), name="task_system_not_chat_launchable"
             ),
             # チャットからの起動の候補で名前を使うので、同じ範囲の中では名前を重ねない
             models.UniqueConstraint(
@@ -182,6 +226,8 @@ class TaskDefinition(models.Model):
     def can(self, user, action: TaskAction) -> bool:
         """利用者がこの操作をできるか（authorization.md §5.3・§6）。一覧の `TaskQuerySet.manageable_by()` と同じ規則。
         作る前の判定にも使う（保存していないタスクでも、範囲・持ち主・部門があれば判定できる）"""
+        if action == TaskAction.LAUNCH:
+            return self.chat_launchable and self.in_service() and can_launch(user, self)
         if self.deleted or not can_manage(user, self.scope, owner_id=self.owner_id, department_id=self.department_id):
             return False
         return action != TaskAction.RUN or self.in_service()
@@ -255,6 +301,15 @@ class TaskDefinition(models.Model):
         self.suspended = suspended
         if suspended:
             current.stop_runs(_("タスクが停止されました"), actor=actor)
+
+    @transaction.atomic
+    def set_chat_launchable(self, chat_launchable: bool) -> None:
+        """チャットから起動できるかを切り替える（版を作らない）。外しても、起動済みのRunは止めない"""
+        current = TaskDefinition.objects.select_for_update(of=("self",)).get(pk=self.pk)
+        if current.chat_launchable != chat_launchable:
+            current.chat_launchable = chat_launchable
+            current.save(update_fields=["chat_launchable", "updated"])
+        self.chat_launchable = chat_launchable
 
     @transaction.atomic
     def soft_delete(self, *, actor=None) -> None:

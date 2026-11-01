@@ -1,12 +1,15 @@
 from django.db.models import Q
+from django.utils.functional import cached_property
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework.decorators import action
+from rest_framework.generics import get_object_or_404
 from rest_framework.mixins import CreateModelMixin, ListModelMixin, RetrieveModelMixin
 from rest_framework.parsers import MultiPartParser
 from rest_framework.viewsets import GenericViewSet
 
 from conversation.views import MyConversationMixin
+from run.models import Run, logs_visible
 from run.views import MyRunMixin
 from utils.permissions import AppUser
 
@@ -47,7 +50,8 @@ class AppConversationArtifactViewSet(
 )
 class AppRunArtifactViewSet(MyRunMixin, ListModelMixin, RetrieveModelMixin, GenericViewSet):
     """タスクのRunの成果物は、実行したときのタスクの範囲を管理できる人が取得する（タスクのRunの会話は会話のAPIに
-    出さない）。取得のたびにRunを見られるかを判定し直す"""
+    出さない）。チャットから起動した人は、自分が起動したRunの成果物だけを取得できる（添付・Connectorの結果はログとして
+    扱う。authorization.md §7.1）。取得のたびにRunを見られるかを判定し直す"""
 
     permission_classes = [AppUser]
     lookup_field = "uid"
@@ -56,8 +60,16 @@ class AppRunArtifactViewSet(MyRunMixin, ListModelMixin, RetrieveModelMixin, Gene
     filterset_fields = ["kind"]
     ordering = ("-created", "-pk")
 
+    @cached_property
+    def run(self) -> Run:
+        user = self.request.user
+        return get_object_or_404(Run.objects.results_visible_to(user).with_logs_visible(user), uid=self.kwargs["run"])
+
     def get_queryset(self):
-        return super().get_queryset().filter(Q(kind=ArtifactKind.OUTPUT) | ~Q(path=""))
+        qs = super().get_queryset()
+        if not logs_visible(self.run):
+            return qs.filter(kind=ArtifactKind.OUTPUT)
+        return qs.filter(Q(kind=ArtifactKind.OUTPUT) | ~Q(path=""))
 
     @extend_schema(description="ファイルを取得する（ダウンロードとして返す）", request=None, responses=FILE_RESPONSE)
     @action(detail=True, methods=["get"], serializer_class=None)

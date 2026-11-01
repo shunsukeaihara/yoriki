@@ -3,7 +3,7 @@ import TaskRunForm from './TaskRunForm.vue'
 import DDialog from '../common/DDialog.vue'
 
 const props = defineProps<{ task: TaskDetail }>()
-const emit = defineEmits<{ started: [value: Run]; conflicted: []; unknown: [] }>()
+const emit = defineEmits<{ started: [value: Run | TaskRun]; conflicted: []; unknown: [] }>()
 
 const dialog = ref<InstanceType<typeof DDialog> | null>(null)
 const formRef = ref<InstanceType<typeof TaskRunForm> | null>(null)
@@ -13,7 +13,7 @@ const onOpen = (open: boolean) => {
   if (open) formKey.value += 1
 }
 
-const started = (value: Run) => {
+const started = (value: Run | TaskRun) => {
   emit('started', value)
   dialog.value?.closeDialog()
 }

@@ -3,7 +3,10 @@
  * タスクの Run（design.md §11.9「自動実行の履歴」）。起動のしかたと起動元、受付時の版と入力、処理の状態、作業の記録と
  * 応答（会話の表示を読むだけで使う）、業務結果、添付と成果物、通知の配信の状態を出す。見られるのは Run の結果とログを
  * 見られる人（タスクを管理できる人。authorization.md §7.1）。「処理完了・通知失敗」でも結果は残り、「通知を再試行」は
- * 保存した内容を送り直すだけで、処理はやり直さない（処理の再実行はまだない）
+ * 保存した内容を送り直すだけで、処理はやり直さない（処理の再実行はまだない）。
+ *
+ * チャットから起動した人は、結果（状態・自分の入力・応答・業務結果・成果物）だけを見る（`canViewLogs` が偽）。最初の
+ * 依頼（タスクの依頼文から作る）、作業の記録、配信、Runのストリームはログなので出さない
  */
 import TaskRunDeliveries from '~/components/task/TaskRunDeliveries.vue'
 
@@ -32,6 +35,7 @@ const {
 await Promise.all([messages.refresh(), fetchFiles()])
 
 const deliveriesRef = ref<InstanceType<typeof TaskRunDeliveries> | null>(null)
+const canViewLogs = computed(() => run.value?.canViewLogs ?? false)
 
 /** 読み直す。イベントが続けて届いても、まとめて1回にする（会話の画面と同じ） */
 let syncing = false
@@ -58,9 +62,19 @@ const reload = async () => {
   await syncNow()
 }
 
-// 動いている間は Run のストリームを受け取る（終わったら、最後のイベントで読み直す）
+// 動いている間は Run のストリームを受け取る（終わったら、最後のイベントで読み直す）。ストリームはログなので、結果だけを
+// 見る人（チャットから起動した人）は、ログインユーザー宛ての Run の状態の通知で読み直す
 const activeRunId = computed(() => (run.value && isActiveRun(run.value) ? run.value.id : null))
-const live = useRunLive(activeRunId, { onEvent: () => sync(), onReconnect: () => sync() })
+const live = useRunLive(
+  computed(() => (canViewLogs.value ? activeRunId.value : null)),
+  { onEvent: () => sync(), onReconnect: () => sync() },
+)
+useUserEvents(
+  (event) => {
+    if (!canViewLogs.value && event.type === 'run.status' && event.run === runId) sync()
+  },
+  { onReconnect: () => !canViewLogs.value && sync() },
+)
 
 // --- 表示 ---
 
@@ -109,7 +123,7 @@ const stop = async () => {
   if (!ok) return
   stopping.value = true
   try {
-    await api.runs(runId).cancel({})
+    await api.tasks(taskId).runs(runId).cancel({})
     await syncNow()
   } catch (err) {
     toast.add({ title: t('停止できませんでした'), description: makeErrorMsg(err), color: 'error' })
@@ -123,7 +137,7 @@ const stop = async () => {
   <UDashboardPanel :id="`task-run-${runId}`">
     <template #header>
       <UDashboardNavbar :title="run?.taskName">
-        <template #leading>
+        <template v-if="canViewLogs" #leading>
           <DBtn
             :to="listPath"
             color="neutral"
@@ -166,6 +180,7 @@ const stop = async () => {
                 <template v-if="item?.kind === 'run'">
                   <RunWork
                     v-if="item.runId === run.id"
+                    :show-log="canViewLogs"
                     :run="run"
                     :events="activeRunId ? live.events.value : undefined"
                     :delta="activeRunId ? live.delta.value : undefined"
@@ -236,7 +251,7 @@ const stop = async () => {
             </dl>
           </section>
 
-          <section class="grid gap-2">
+          <section v-if="canViewLogs" class="grid gap-2">
             <h3 class="text-xs font-semibold text-muted">{{ $t('通知') }}</h3>
             <TaskRunDeliveries ref="deliveriesRef" :task-id="taskId" :run-id="runId" />
           </section>

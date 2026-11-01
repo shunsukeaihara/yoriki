@@ -232,6 +232,7 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
             "owner",
             "name",
             "suspended",
+            "chat_launchable",
             "version",
             *REVISION_FIELDS,
             "model_profile_info",
@@ -243,7 +244,7 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
             "created",
             "updated",
         ]
-        read_only_fields = ["suspended", "created", "updated"]
+        read_only_fields = ["suspended", "chat_launchable", "created", "updated"]
 
     def get_can_run(self, obj: TaskDefinition) -> bool:
         return obj.in_service()
@@ -506,6 +507,54 @@ class TaskSuspendSerializer(serializers.Serializer):
 
     def to_representation(self, instance):
         return TaskDefinitionDetailSerializer(instance, context=self.context).data
+
+
+class TaskChatLaunchSerializer(serializers.Serializer):
+    chat_launchable = serializers.BooleanField(help_text=_("チャットから起動できるようにするか"))
+
+    def validate(self, attrs):
+        task: TaskDefinition = self.instance  # type: ignore[assignment]
+        if attrs["chat_launchable"] and task.scope == TaskScope.SYSTEM:
+            raise serializers.ValidationError(_("システムのタスクはチャットから起動できません"))
+        return attrs
+
+    def update(self, instance: TaskDefinition, validated_data) -> TaskDefinition:
+        instance.set_chat_launchable(validated_data["chat_launchable"])
+        return instance
+
+    def create(self, validated_data):
+        raise NotImplementedError
+
+    def to_representation(self, instance):
+        return TaskDefinitionDetailSerializer(instance, context=self.context).data
+
+
+class LaunchableTaskSerializer(ReadOnlyModelSerializer):
+    """チャットから起動できるタスク（入力欄の `/` の候補）。起動できる人には、名前と説明と、入力のフォームに要る項目の
+    定義だけを見せる（依頼文・使うもの・出口等の定義の中身は、管理できる人だけ。authorization.md §5.3）"""
+
+    id = serializers.CharField(source="uid", read_only=True)
+    scope = serializers.ChoiceField(choices=TaskScope.choices, read_only=True)
+    scope_display = serializers.CharField(source="get_scope_display", read_only=True)
+    department_info = MinimumDepartmentSerializer(source="department", read_only=True, allow_null=True)
+    description = serializers.CharField(source="current_revision.description", read_only=True)
+    version = serializers.IntegerField(source="version_number", read_only=True, help_text=_("今の版"))
+    handles_sensitive_data = serializers.BooleanField(source="current_revision.handles_sensitive_data", read_only=True)
+    inputs = TaskInputSerializer(source="current_revision.inputs", many=True, read_only=True)
+
+    class Meta:
+        model = TaskDefinition
+        fields = [
+            "id",
+            "scope",
+            "scope_display",
+            "department_info",
+            "name",
+            "description",
+            "version",
+            "handles_sensitive_data",
+            "inputs",
+        ]
 
 
 class TaskSkillChoiceSerializer(ReadOnlyModelSerializer):
@@ -1157,7 +1206,9 @@ class TaskRunSerializer(RunSerializer):
     task_version = serializers.IntegerField(source="task_revision.number", read_only=True)
     launch = serializers.ChoiceField(choices=RunLaunch.choices, read_only=True)
     launch_display = serializers.CharField(source="get_launch_display", read_only=True)
-    started_by = serializers.SerializerMethodField(help_text=_("手動実行した人（入口からのRunでは空）"))
+    started_by = serializers.SerializerMethodField(
+        help_text=_("手動実行した人かチャットから起動した人（入口からのRunでは空）")
+    )
     receipt = serializers.SerializerMethodField(help_text=_("入口からのRunの受付（手動実行では空）"))
     inputs = serializers.SerializerMethodField(
         help_text=_(
@@ -1166,6 +1217,12 @@ class TaskRunSerializer(RunSerializer):
         )
     )
     deliveries_info = TaskRunDeliveryStateSerializer(source="deliveries", many=True, read_only=True)
+    can_view_logs = serializers.SerializerMethodField(
+        help_text=_(
+            "ログ（作業の記録、最初の依頼、配信）も見られるか。偽なら、チャットから起動した人として結果だけを見ている"
+            "（作業の計画・使ったSkill・配信は空にする。authorization.md §7.1）"
+        )
+    )
 
     class Meta(RunSerializer.Meta):
         fields = [
@@ -1179,8 +1236,20 @@ class TaskRunSerializer(RunSerializer):
             "receipt",
             "inputs",
             "deliveries_info",
+            "can_view_logs",
         ]
         read_only_fields = fields
+
+    def get_can_view_logs(self, obj: Run) -> bool:
+        # 一覧はタスクを管理できる人だけなので、注釈のない一覧では真
+        return getattr(obj, "logs_visible", True)
+
+    def to_representation(self, instance: Run) -> dict[str, Any]:
+        data = super().to_representation(instance)
+        if not data["can_view_logs"]:
+            # 起動した人には結果だけを見せる。作業の計画と使ったSkill（タスクの定義）、配信の履歴はログとして扱う
+            data.update(todos=[], skills=[], deliveries_info=[])
+        return data
 
     def get_task_name(self, obj: Run) -> str:
         # 名前は版の外なので、受付時にManifestへ固定した名前を使う（後で名前を変えても、過去のRunは変えない）
@@ -1190,7 +1259,7 @@ class TaskRunSerializer(RunSerializer):
     @extend_schema_field(MinimumUserSerializer(allow_null=True))
     def get_started_by(self, obj: Run) -> dict[str, Any] | None:
         # 入口からのRunの実行主体はシステム用のユーザーなので、起動した人として出さない
-        if obj.launch != RunLaunch.MANUAL:
+        if obj.launch not in (RunLaunch.MANUAL, RunLaunch.CHAT):
             return None
         return dict(MinimumUserSerializer(obj.owner).data)
 

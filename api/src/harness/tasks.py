@@ -3,16 +3,18 @@
 タスクのRunは、受付時に固定したタスクの版（Manifestの `fixed.task`）の範囲で動く。エージェントが使えるのは、固定した
 Skillの版と、固定したConnectorだけで、`skill` で探して読み込むことも、利用者の使えるConnectorから選ぶこともしない。
 Toolは、Skillの「使ってよいTool」とタスクのToolの一覧の両方に入っているものだけ。使えるかは、起動した人ではなく
-タスクの範囲で、区切りと操作のたびに確かめ直す（task/checks.py）。
+タスクの範囲で、区切りと操作のたびに確かめ直す（task/checks.py）。チャットから起動したRunは、それに加えて起動した人
+（`Run.owner`）の今の権限でも確かめる（タスクの版の一覧 ∩ 起動した人の今の権限。authorization.md §6）。
 """
 
 from typing import Any
 
 from django.utils.translation import gettext as _
 
-from run.models import Run, RunTrigger
+from run.models import Run, RunLaunch, RunTrigger
 from task import checks
 from task.models import TaskDefinition
+from user.models import User
 
 
 def is_task_run(run: Run) -> bool:
@@ -30,11 +32,22 @@ def load_task(run: Run) -> TaskDefinition | None:
     return TaskDefinition.objects.select_related("owner", "department").filter(pk=run.task_id).first()
 
 
+def launcher(run: Run) -> User | None:
+    """チャットから起動したRunの、起動した人（権限の判定のため、毎回DBから読む）。ほかのRunでは None"""
+    if not is_task_run(run) or run.launch != RunLaunch.CHAT:
+        return None
+    return User.objects.filter(pk=run.owner_id).first()
+
+
 def revoked_task(run: Run) -> str:
-    """タスクのRunを続けられなくなった理由（タスクの停止・削除、個人のタスクの持ち主の無効化）。なければ空文字"""
+    """タスクのRunを続けられなくなった理由（タスクの停止・削除、個人のタスクの持ち主・チャットから起動した人の
+    無効化）。なければ空文字"""
     if not is_task_run(run):
         return ""
-    if reason := checks.task_problem(load_task(run)):
+    reason = checks.task_problem(load_task(run))
+    if not reason and run.launch == RunLaunch.CHAT:
+        reason = checks.launcher_inactive(launcher(run))
+    if reason:
         return _("タスクを続けられなくなったので、作業を止めました（%(reason)s）。") % {"reason": reason}
     return ""
 
@@ -44,20 +57,29 @@ def skill_problem(run: Run, skill, version) -> str:
     task = load_task(run)
     if task is None:
         return _("タスクが削除されました")
-    return checks.skill_problem(
+    if reason := checks.skill_problem(
         task,
         skill,
         version,
         connectors=task_entry(run).get("connectors", []),
         sensitive=run.handles_sensitive_data,
-    )
+    ):
+        return reason
+    if run.launch == RunLaunch.CHAT:
+        user = launcher(run)
+        return checks.launcher_inactive(user) or checks.launcher_skill_problem(user, skill)
+    return ""
 
 
 def connector_permitted(run: Run, connector) -> bool:
     task = load_task(run)
-    return task is not None and checks.connector_permitted(
-        task, connector, connectors=task_entry(run).get("connectors", [])
-    )
+    connectors = task_entry(run).get("connectors", [])
+    if task is None or not checks.connector_permitted(task, connector, connectors=connectors):
+        return False
+    if run.launch == RunLaunch.CHAT:
+        user = launcher(run)
+        return user is not None and checks.launcher_connector_permitted(user, connector)
+    return True
 
 
 def allowed_tools(run: Run, skill_tools: set[str]) -> set[str]:

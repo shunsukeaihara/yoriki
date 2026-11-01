@@ -1,6 +1,7 @@
 from rest_framework.routers import DefaultRouter
 
 from .views import (
+    AppLaunchableTaskViewSet,
     AppTaskRevisionViewSet,
     AppTaskRunMessageViewSet,
     AppTaskRunViewSet,
@@ -15,6 +16,7 @@ from .views import (
 router = DefaultRouter()
 
 router.register("app/v1/tasks", AppTaskViewSet, basename="app_task_viewset")
+router.register("app/v1/launchable_tasks", AppLaunchableTaskViewSet, basename="app_launchable_task_viewset")
 router.register("app/v1/tasks/(?P<task>[^/]+)/revisions", AppTaskRevisionViewSet, basename="app_task_revision_viewset")
 router.register("app/v1/tasks/(?P<task>[^/]+)/runs", AppTaskRunViewSet, basename="app_task_run_viewset")
 router.register(

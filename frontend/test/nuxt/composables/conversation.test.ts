@@ -15,6 +15,7 @@ const message = (id: string, role: MessageRoleEnum, run: string | null, instruct
     skillsInfo: [],
     connectorsInfo: [],
     skillEdit: null,
+    taskRun: null,
     instruction,
     created: `2026-10-21T00:00:0${id.slice(1)}Z`,
   }) satisfies Message

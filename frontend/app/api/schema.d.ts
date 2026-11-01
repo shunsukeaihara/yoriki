@@ -232,6 +232,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/app/v1/launchable_tasks/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description チャットから起動できるタスク（会話の入力欄の `/` の候補）と、チャットからの起動（authorization.md §5.3・§6） */
+        get: operations["app_v1_launchable_tasks_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/launchable_tasks/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description チャットから起動できるタスク（会話の入力欄の `/` の候補）と、チャットからの起動（authorization.md §5.3・§6） */
+        get: operations["app_v1_launchable_tasks_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/launchable_tasks/{uid}/run/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description チャットからタスクを起動する。起動した人の権限で動き、固定したSkill・Connectorを起動した人がすべて使えなければ断る。入力は手動実行と同じく、タスクの定義で決めた項目だけを受け付ける（会話の文脈は渡さない）。起動した会話に、Runを指すカードのメッセージを足す */
+        post: operations["app_v1_launchable_tasks_run_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/app/v1/model_profiles/": {
         parameters: {
             query?: never;
@@ -1005,7 +1056,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description タスクのRunの履歴（結果とログを見られるもの。authorization.md §7.1） */
+        /** @description タスクのRunの履歴（結果とログを見られるもの。authorization.md §7.1）。1つのRunは、チャットから起動した人も結果だけを読める（`can_view_logs` が偽。作業の計画・使ったSkill・配信は空にする） */
         get: operations["app_v1_tasks_runs_list"];
         put?: never;
         post?: never;
@@ -1022,7 +1073,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description タスクのRunの会話のメッセージ（最初の依頼とエージェントの応答。タスクのRunの会話は会話のAPIに出さない） */
+        /** @description タスクのRunの会話のメッセージ（最初の依頼とエージェントの応答。タスクのRunの会話は会話のAPIに出さない）。チャットから起動した人には、エージェントの応答だけを返す（最初の依頼はタスクの定義から作るので見せない） */
         get: operations["app_v1_tasks_runs_messages_list"];
         put?: never;
         post?: never;
@@ -1039,10 +1090,27 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description タスクのRunの履歴（結果とログを見られるもの。authorization.md §7.1） */
+        /** @description タスクのRunの履歴（結果とログを見られるもの。authorization.md §7.1）。1つのRunは、チャットから起動した人も結果だけを読める（`can_view_logs` が偽。作業の計画・使ったSkill・配信は空にする） */
         get: operations["app_v1_tasks_runs_retrieve"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/tasks/{task}/runs/{uid}/cancel/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description Runの停止を依頼する（Runの結果を見られる人。チャットから起動した人も、自分が起動したRunを止められる） */
+        post: operations["app_v1_tasks_runs_cancel_create"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1067,6 +1135,23 @@ export interface paths {
         head?: never;
         /** @description タスクの一覧・作成・変更・停止・手動実行 */
         patch: operations["app_v1_tasks_partial_update"];
+        trace?: never;
+    };
+    "/api/app/v1/tasks/{uid}/chat_launch/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description チャットから起動できるかを切り替える（版を作らない。authorization.md §5.3）。システムのタスクには付けない */
+        post: operations["app_v1_tasks_chat_launch_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/app/v1/tasks/{uid}/resume/": {
@@ -3489,6 +3574,45 @@ export interface components {
             /** 有効 */
             is_active?: boolean;
         };
+        /**
+         * @description チャットから起動できるタスク（入力欄の `/` の候補）。起動できる人には、名前と説明と、入力のフォームに要る項目の
+         *     定義だけを見せる（依頼文・使うもの・出口等の定義の中身は、管理できる人だけ。authorization.md §5.3）
+         */
+        LaunchableTask: {
+            readonly id: string;
+            readonly scope: components["schemas"]["SkillScopeEnum"];
+            readonly scope_display: string;
+            readonly department_info: components["schemas"]["MinimumDepartment"] | null;
+            /** 名前 */
+            readonly name: string;
+            readonly description: string;
+            /** @description 今の版 */
+            readonly version: number;
+            readonly handles_sensitive_data: boolean;
+            readonly inputs: components["schemas"]["TaskInput"][];
+        };
+        /** @description チャットから起動したタスクのRun（会話のカード）。起動した人が見られる結果だけ（authorization.md §7.1） */
+        LaunchedTaskRun: {
+            readonly id: string;
+            readonly task: string;
+            /** @description 受付時のタスクの名前 */
+            readonly task_name: string;
+            readonly status: components["schemas"]["RunStatusEnum"];
+            readonly status_display: string;
+            readonly end_reason: (components["schemas"]["RunEndReasonEnum"] | components["schemas"]["NullEnum"]) | null;
+            readonly end_reason_display: string | null;
+            /** 失敗の理由 */
+            readonly error: string;
+            /** @description エージェントの最後の応答（終わるまでは空） */
+            readonly response: string;
+            /** Format: date-time */
+            readonly created: string;
+            /**
+             * 終了日時
+             * Format: date-time
+             */
+            readonly finished: string | null;
+        };
         /** @description パスワードでのログイン。有効なSSOの設定があれば基盤管理者だけ（utils.backends.PasswordBackend） */
         LoginRequest: {
             /** @description メールアドレス */
@@ -3607,6 +3731,8 @@ export interface components {
             readonly connectors_info: components["schemas"]["MessageConnector"][];
             readonly skill_edit: components["schemas"]["MessageSkillEdit"] | null;
             readonly instruction: components["schemas"]["InstructionInfo"] | null;
+            /** @description チャットから起動したタスクのRun（カードとして出すメッセージ） */
+            readonly task_run: components["schemas"]["LaunchedTaskRun"] | null;
             /** Format: date-time */
             readonly created: string;
         };
@@ -4177,6 +4303,19 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["LLMConnection"][];
+        };
+        PaginatedLaunchableTaskList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["LaunchableTask"][];
         };
         PaginatedManageUserList: {
             /**
@@ -4917,9 +5056,10 @@ export interface components {
         /**
          * @description * `1` - タスクの画面からの手動実行
          *     * `2` - Webhook
+         *     * `3` - チャットからの起動
          * @enum {integer}
          */
-        RunLaunchEnum: 1 | 2;
+        RunLaunchEnum: 1 | 2 | 3;
         /** @description 確定したメッセージとTool実行（利用者の発言、エージェントの応答、Toolの結果） */
         RunMessageEvent: {
             /**
@@ -5576,6 +5716,10 @@ export interface components {
             texts: components["schemas"]["TextDiff"][];
             elements: components["schemas"]["ElementDiff"][];
         };
+        TaskChatLaunchRequest: {
+            /** @description チャットから起動できるようにするか */
+            chat_launchable: boolean;
+        };
         /**
          * @description タスクの作成と表示（定義を管理できる人だけが見る。authorization.md §5.3）。中身は今の版の値を平らに出す。
          *
@@ -5601,6 +5745,8 @@ export interface components {
             name: string;
             /** 停止中 */
             readonly suspended: boolean;
+            /** チャットから起動できる */
+            readonly chat_launchable: boolean;
             /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
             version?: number;
             /** @default  */
@@ -5677,6 +5823,8 @@ export interface components {
             name: string;
             /** 停止中 */
             readonly suspended: boolean;
+            /** チャットから起動できる */
+            readonly chat_launchable: boolean;
             /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
             version?: number;
             /** @default  */
@@ -5952,13 +6100,15 @@ export interface components {
             readonly task_version: number;
             readonly launch: components["schemas"]["RunLaunchEnum"];
             readonly launch_display: string;
-            /** @description 手動実行した人（入口からのRunでは空） */
+            /** @description 手動実行した人かチャットから起動した人（入口からのRunでは空） */
             readonly started_by: components["schemas"]["MinimumUser"] | null;
             /** @description 入口からのRunの受付（手動実行では空） */
             readonly receipt: components["schemas"]["TaskRunReceipt"] | null;
             /** @description 受け付けた入力の値（型がファイルの項目は /workspace/input の中のパス）。項目の名前のキーの辞書にすると、APIクライアントのcamelCaseの変換で名前が変わるので、並びにする */
             readonly inputs: components["schemas"]["TaskRunInputValue"][];
             readonly deliveries_info: components["schemas"]["TaskRunDeliveryState"][];
+            /** @description ログ（作業の記録、最初の依頼、配信）も見られるか。偽なら、チャットから起動した人として結果だけを見ている（作業の計画・使ったSkill・配信は空にする。authorization.md §7.1） */
+            readonly can_view_logs: boolean;
         };
         /**
          * @description 手動実行の入力。型がファイルの項目があれば multipart/form-data で送り、`inputs` はJSONの文字列にして、
@@ -6905,6 +7055,105 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PaginatedDestinationChoiceList"];
                 };
+            };
+        };
+    };
+    app_v1_launchable_tasks_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /**
+                 * @description * `1` - 個人
+                 *     * `2` - 部門
+                 *     * `3` - 全社
+                 *     * `4` - システム
+                 */
+                scope?: 1 | 2 | 3 | 4;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedLaunchableTaskList"];
+                };
+            };
+        };
+    };
+    app_v1_launchable_tasks_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LaunchableTask"];
+                };
+            };
+        };
+    };
+    app_v1_launchable_tasks_run_create: {
+        parameters: {
+            query: {
+                /** @description 起動した会話のID（カードを足す） */
+                conversation: string;
+                /** @description 画面で確かめた版（任意）。今の版と違えば409にし、確かめていない入力の項目では起動しない */
+                version?: number;
+            };
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["TaskRunCreateRequest"];
+                "multipart/form-data": {
+                    /** @description ファイル以外の入力の項目の名前と値（JSONのオブジェクトの文字列） */
+                    inputs?: string;
+                } & {
+                    [key: string]: string;
+                };
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskRun"];
+                };
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、他の人が版を作った） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -8651,8 +8900,9 @@ export interface operations {
                 /**
                  * @description * `1` - タスクの画面からの手動実行
                  *     * `2` - Webhook
+                 *     * `3` - チャットからの起動
                  */
-                launch?: 1 | 2 | null;
+                launch?: 1 | 2 | 3 | null;
                 /** @description Which field to use when ordering the results. */
                 ordering?: string;
                 /** @description Number of results to return per page. */
@@ -8739,6 +8989,41 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TaskRun"];
                 };
+            };
+        };
+    };
+    app_v1_tasks_runs_cancel_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RunCancelRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["RunCancelRequest"];
+                "multipart/form-data": components["schemas"]["RunCancelRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskRun"];
+                };
+            };
+            /** @description 他の処理と競合した */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -8848,6 +9133,33 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    app_v1_tasks_chat_launch_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskChatLaunchRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["TaskChatLaunchRequest"];
+                "multipart/form-data": components["schemas"]["TaskChatLaunchRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDefinitionDetail"];
+                };
             };
         };
     };

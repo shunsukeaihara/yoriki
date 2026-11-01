@@ -5,6 +5,8 @@
  * を選ぶと、そのメッセージは Skill の編集の依頼になる（別の Run で行う）。
  * 機密の Skill は個人情報・機密情報を扱う会話でだけ、宣言した Connector を使えない Skill は使えないので、理由を添えて
  * 選べない項目として出す（design.md §4冒頭・§4.9.1）。
+ * チャットから起動できるタスクも出し、選ぶと入力のダイアログを開く（authorization.md §5.3・§6。タスクの Run は会話の
+ * 文脈を引き継がず、別の作業として動く）。
  */
 const props = defineProps<{
   /** 使える Skill */
@@ -17,11 +19,13 @@ const props = defineProps<{
   sensitive: boolean
   /** 使う Skill をこれ以上選べない */
   full?: boolean
+  /** チャットから起動できるタスク */
+  tasks?: LaunchableTask[]
   disabled?: boolean
 }>()
 const open = defineModel<boolean>('open', { default: false })
 const searchTerm = defineModel<string>('searchTerm', { default: '' })
-const emit = defineEmits<{ select: [skill: Skill]; edit: [skill: Skill]; create: [] }>()
+const emit = defineEmits<{ select: [skill: Skill]; edit: [skill: Skill]; create: []; launch: [task: LaunchableTask] }>()
 const { t } = useI18n()
 
 const scopeLabel = (skill: Skill) => {
@@ -91,6 +95,18 @@ const groups = computed(() => [
       },
     ],
   },
+  {
+    id: 'task',
+    label: t('タスクを起動する（会話とは別の作業）'),
+    items: (props.tasks ?? []).map((task) => ({
+      id: `task-${task.id}`,
+      label: task.name,
+      suffix: task.departmentInfo ? `${task.scopeDisplay} ${task.departmentInfo.name}` : task.scopeDisplay,
+      description: task.description || undefined,
+      icon: 'i-lucide-workflow',
+      onSelect: choose(() => emit('launch', task)),
+    })),
+  },
 ])
 </script>
 
@@ -109,8 +125,8 @@ const groups = computed(() => [
         v-model:search-term="searchTerm"
         :groups="groups"
         :fuse="{ fuseOptions: { keys: ['label', 'description', 'suffix'] } }"
-        :placeholder="t('Skillを検索')"
-        :empty="t('該当するSkillがありません')"
+        :placeholder="t('Skill・タスクを検索')"
+        :empty="t('該当するSkill・タスクがありません')"
         class="max-h-80 w-[min(28rem,calc(100vw-2rem))]"
       />
     </template>

@@ -52,12 +52,14 @@ const fields = inputs.map((input) => ({
   choice: modelOf<boolean>(input.name),
 }))
 
+// チャットからの起動のID。フォームを作るたびに作り、同じフォームからの再送では同じIDを送る（二重に起動しない）
+const clientRequestId = crypto.randomUUID()
 const { onSubmit, loading, errors } = createSubmit({
   form,
   // 画面で確かめた版を送る。別の版ができていれば409になり、確かめていない定義では実行しない
   fn: (data): Promise<Run | TaskRun> =>
     props.conversationId
-      ? api.launchableTasks(props.task.id).run(props.conversationId, props.task.version ?? 0, data)
+      ? api.launchableTasks(props.task.id).run(props.conversationId, props.task.version ?? 0, clientRequestId, data)
       : api.tasks(props.task.id).run(props.task.version ?? 0, data),
   onSuccess: (run) => {
     emit('started', run)
@@ -75,7 +77,9 @@ const { onSubmit, loading, errors } = createSubmit({
       toast.add({
         title: t('受け付けたかを確かめられませんでした'),
         description: props.conversationId
-          ? t('会話にタスクのカードが出ていれば受け付けています。出ていなければ、もう一度起動してください')
+          ? t(
+              '会話にタスクのカードが出ていれば受け付けています。出ていなければ、もう一度起動してください（同じ起動は二重になりません）',
+            )
           : t('実行の履歴に出ていれば受け付けています。出ていなければ、もう一度実行してください'),
         color: 'warning',
       })

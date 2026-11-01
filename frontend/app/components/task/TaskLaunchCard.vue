@@ -15,16 +15,19 @@ const runPath = computed(() => `/tasks/${props.run.task}/runs/${props.run.id}`)
       <UIcon name="i-lucide-workflow" class="size-4 shrink-0 text-muted" />
       <span class="min-w-0 font-medium break-words">{{ $t('タスク「{name}」', { name: run.taskName }) }}</span>
       <RunStatusBadge :run="run" />
-      <span v-if="run.endReasonDisplay && run.endReasonDisplay !== run.statusDisplay" class="text-xs text-muted">{{
-        run.endReasonDisplay
-      }}</span>
+      <span
+        v-if="!failed && run.endReasonDisplay && run.endReasonDisplay !== run.statusDisplay"
+        class="text-xs text-muted"
+        >{{ run.endReasonDisplay }}</span
+      >
     </div>
+    <!-- 失敗の理由の本文はログなので、起動した人には終わり方だけを出す（authorization.md §7.1） -->
     <UAlert
-      v-if="failed && run.error"
+      v-if="failed"
       color="error"
       variant="subtle"
       icon="i-lucide-circle-x"
-      :description="run.error"
+      :title="run.endReasonDisplay || run.statusDisplay"
     />
     <MarkdownContent v-if="run.response" :text="run.response" />
     <div>

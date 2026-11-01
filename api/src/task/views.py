@@ -1,7 +1,7 @@
 import logging
 from typing import TYPE_CHECKING, cast
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Prefetch
 from django.utils.functional import cached_property
 from django.utils.translation import gettext_lazy as _
@@ -30,7 +30,7 @@ from utils.views import SoftDeleteMixin
 
 from . import checks
 from .authentication import WebhookKeyAuthentication, WebhookTaskPermission
-from .dispatch import InvalidInputs, receive_webhook, start_task_run
+from .dispatch import InvalidInputs, launched_run, receive_webhook, start_task_run
 from .errors import CannotRun, VersionConflict
 from .models import (
     BUSINESS_SCOPES,
@@ -318,12 +318,18 @@ class AppLaunchableTaskViewSet(ReadOnlyModelViewSet):
         parameters=[
             OpenApiParameter("conversation", str, required=True, description="起動した会話のID（カードを足す）"),
             OpenApiParameter(
+                "client_request_id",
+                str,
+                description="画面が起動ごとに作るID（任意。64文字まで）。同じ会話で同じIDの再送には、前に起動したRunを"
+                "返す（応答が失われた後の再送で、二重に起動しない）",
+            ),
+            OpenApiParameter(
                 "version",
                 int,
                 description="画面で確かめた版（任意）。今の版と違えば409にし、確かめていない入力の項目では起動しない",
             ),
         ],
-        responses={201: TaskRunSerializer, 409: CONFLICT},
+        responses={201: TaskRunSerializer, 200: TaskRunSerializer, 409: CONFLICT},
     )
     @action(detail=True, methods=["post"], serializer_class=TaskRunCreateSerializer)
     def run(self, request, *args, **kwargs):
@@ -331,6 +337,12 @@ class AppLaunchableTaskViewSet(ReadOnlyModelViewSet):
         conversation = get_object_or_404(
             Conversation.objects.owned_by(request.user), uid=request.query_params.get("conversation", "")
         )
+        client_request_id = request.query_params.get("client_request_id", "")
+        if len(client_request_id) > 64:
+            raise ValidationError({"client_request_id": [_("64文字までにしてください")]})
+        # 同じ要求の再送には、前に起動したRunを返す（版や入力を確かめ直さない）
+        if (run := launched_run(conversation, client_request_id)) is not None:
+            return self._launched(request, run, status.HTTP_200_OK)
         version = request.query_params.get("version")
         if version is not None and not version.isdigit():
             raise ValidationError({"version": [_("版の番号を指定してください")]})
@@ -346,16 +358,24 @@ class AppLaunchableTaskViewSet(ReadOnlyModelViewSet):
                 launch=RunLaunch.CHAT,
                 expected_version=int(version) if version is not None else None,
                 conversation=conversation,
+                client_request_id=client_request_id,
             )
+        except IntegrityError:
+            # 同じ要求が同時に届き、先に受け付けた方がある
+            if (run := launched_run(conversation, client_request_id)) is None:
+                raise
+            return self._launched(request, run, status.HTTP_200_OK)
         except VersionConflict as exc:
             raise Conflict(VERSION_CHANGED) from exc
         except InvalidInputs as exc:
             raise ValidationError({"inputs": exc.errors}) from exc
         except CannotRun as exc:
             raise ValidationError({"non_field_errors": [str(exc)]}) from exc
+        return self._launched(request, run, status.HTTP_201_CREATED)
+
+    def _launched(self, request, run: Run, code: int) -> Response:
         run = Run.objects.with_logs_visible(request.user).get(pk=run.pk)
-        data = TaskRunSerializer(run, context=self.get_serializer_context()).data
-        return Response(data, status=status.HTTP_201_CREATED)
+        return Response(TaskRunSerializer(run, context=self.get_serializer_context()).data, status=code)
 
 
 class TaskMixin:

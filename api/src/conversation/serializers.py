@@ -185,7 +185,8 @@ class MessageSkillEditSerializer(serializers.Serializer):
 
 
 class LaunchedTaskRunSerializer(serializers.ModelSerializer):
-    """チャットから起動したタスクのRun（会話のカード）。起動した人が見られる結果だけ（authorization.md §7.1）"""
+    """チャットから起動したタスクのRun（会話のカード）。起動した人が見られる結果だけ（authorization.md §7.1。失敗の
+    理由の本文はログとして扱い、終わり方だけを出す）"""
 
     id = serializers.CharField(source="uid", read_only=True)
     task = serializers.CharField(source="task.uid", read_only=True)
@@ -206,7 +207,6 @@ class LaunchedTaskRunSerializer(serializers.ModelSerializer):
             "status_display",
             "end_reason",
             "end_reason_display",
-            "error",
             "response",
             "created",
             "finished",

@@ -676,6 +676,11 @@ paths:
       description: チャットからタスクを起動する。起動した人の権限で動き、固定したSkill・Connectorを起動した人がすべて使えなければ断る。入力は手動実行と同じく、タスクの定義で決めた項目だけを受け付ける（会話の文脈は渡さない）。起動した会話に、Runを指すカードのメッセージを足す
       parameters:
       - in: query
+        name: client_request_id
+        schema:
+          type: string
+        description: 画面が起動ごとに作るID（任意。64文字まで）。同じ会話で同じIDの再送には、前に起動したRunを返す（応答が失われた後の再送で、二重に起動しない）
+      - in: query
         name: conversation
         schema:
           type: string
@@ -713,6 +718,12 @@ paths:
       - cookieAuth: []
       responses:
         '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskRun'
+          description: ''
+        '200':
           content:
             application/json:
               schema:
@@ -9493,7 +9504,9 @@ components:
       - version
     LaunchedTaskRun:
       type: object
-      description: チャットから起動したタスクのRun（会話のカード）。起動した人が見られる結果だけ（authorization.md §7.1）
+      description: |-
+        チャットから起動したタスクのRun（会話のカード）。起動した人が見られる結果だけ（authorization.md §7.1。失敗の
+        理由の本文はログとして扱い、終わり方だけを出す）
       properties:
         id:
           type: string
@@ -9522,10 +9535,6 @@ components:
           type: string
           readOnly: true
           nullable: true
-        error:
-          type: string
-          readOnly: true
-          title: 失敗の理由
         response:
           type: string
           readOnly: true
@@ -9544,7 +9553,6 @@ components:
       - created
       - end_reason
       - end_reason_display
-      - error
       - finished
       - id
       - response
@@ -14939,7 +14947,7 @@ components:
         can_view_logs:
           type: boolean
           readOnly: true
-          description: ログ（作業の記録、最初の依頼、配信）も見られるか。偽なら、チャットから起動した人として結果だけを見ている（作業の計画・使ったSkill・配信は空にする。authorization.md
+          description: ログ（作業の記録、最初の依頼、配信）も見られるか。偽なら、チャットから起動した人として結果だけを見ている（作業の計画・使ったSkill・配信・失敗の理由の本文・ステップ数は空にする。authorization.md
             §7.1）
       required:
       - can_view_logs

@@ -238,3 +238,30 @@ def test_delivery_is_not_sent_after_the_launcher_is_deactivated(api_client, app_
     app_user.is_active = False
     app_user.save(update_fields=["is_active"])
     assert "起動した人" in send_problem(delivery)
+
+
+def test_launcher_does_not_see_the_error_text(api_client, app_user):
+    task = _task()
+    conversation = ConversationFactory.create(owner=app_user)
+    run = Run.objects.get(uid=_launch(api_client, app_user, task, conversation).json()["id"])
+    Run.objects.filter(pk=run.pk).update(status=RunStatus.FAILED, error="provider: 内部のエラー文", step_count=3)
+    data = api_client.get(f"/api/app/v1/tasks/{task.uid}/runs/{run.uid}/").json()
+    assert (data["error"], data["step_count"]) == ("", 0)
+    messages = api_client.get(f"/api/app/v1/conversations/{conversation.uid}/messages/").json()["results"]
+    [card] = [m["task_run"] for m in messages if m["task_run"]]
+    assert "error" not in card
+    assert card["status"] == RunStatus.FAILED
+
+
+def test_resending_the_same_launch_returns_the_first_run(api_client, app_user):
+    task = _task()
+    conversation = ConversationFactory.create(owner=app_user)
+    first = _launch(api_client, app_user, task, conversation, client_request_id="req-1")
+    assert first.status_code == 201
+    again = _launch(api_client, app_user, task, conversation, client_request_id="req-1")
+    assert (again.status_code, again.json()["id"]) == (200, first.json()["id"])
+    assert Run.objects.filter(task=task).count() == 1
+    assert ConversationMessage.objects.filter(conversation=conversation).exclude(task_run=None).count() == 1
+    # 別の起動（別のID）は新しいRun
+    assert _launch(api_client, app_user, task, conversation, client_request_id="req-2").status_code == 201
+    assert Run.objects.filter(task=task).count() == 2

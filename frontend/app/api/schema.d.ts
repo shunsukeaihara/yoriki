@@ -3591,7 +3591,10 @@ export interface components {
             readonly handles_sensitive_data: boolean;
             readonly inputs: components["schemas"]["TaskInput"][];
         };
-        /** @description チャットから起動したタスクのRun（会話のカード）。起動した人が見られる結果だけ（authorization.md §7.1） */
+        /**
+         * @description チャットから起動したタスクのRun（会話のカード）。起動した人が見られる結果だけ（authorization.md §7.1。失敗の
+         *     理由の本文はログとして扱い、終わり方だけを出す）
+         */
         LaunchedTaskRun: {
             readonly id: string;
             readonly task: string;
@@ -3601,8 +3604,6 @@ export interface components {
             readonly status_display: string;
             readonly end_reason: (components["schemas"]["RunEndReasonEnum"] | components["schemas"]["NullEnum"]) | null;
             readonly end_reason_display: string | null;
-            /** 失敗の理由 */
-            readonly error: string;
             /** @description エージェントの最後の応答（終わるまでは空） */
             readonly response: string;
             /** Format: date-time */
@@ -6107,7 +6108,7 @@ export interface components {
             /** @description 受け付けた入力の値（型がファイルの項目は /workspace/input の中のパス）。項目の名前のキーの辞書にすると、APIクライアントのcamelCaseの変換で名前が変わるので、並びにする */
             readonly inputs: components["schemas"]["TaskRunInputValue"][];
             readonly deliveries_info: components["schemas"]["TaskRunDeliveryState"][];
-            /** @description ログ（作業の記録、最初の依頼、配信）も見られるか。偽なら、チャットから起動した人として結果だけを見ている（作業の計画・使ったSkill・配信は空にする。authorization.md §7.1） */
+            /** @description ログ（作業の記録、最初の依頼、配信）も見られるか。偽なら、チャットから起動した人として結果だけを見ている（作業の計画・使ったSkill・配信・失敗の理由の本文・ステップ数は空にする。authorization.md §7.1） */
             readonly can_view_logs: boolean;
         };
         /**
@@ -7117,6 +7118,8 @@ export interface operations {
     app_v1_launchable_tasks_run_create: {
         parameters: {
             query: {
+                /** @description 画面が起動ごとに作るID（任意。64文字まで）。同じ会話で同じIDの再送には、前に起動したRunを返す（応答が失われた後の再送で、二重に起動しない） */
+                client_request_id?: string;
                 /** @description 起動した会話のID（カードを足す） */
                 conversation: string;
                 /** @description 画面で確かめた版（任意）。今の版と違えば409にし、確かめていない入力の項目では起動しない */
@@ -7140,6 +7143,14 @@ export interface operations {
             };
         };
         responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskRun"];
+                };
+            };
             201: {
                 headers: {
                     [name: string]: unknown;

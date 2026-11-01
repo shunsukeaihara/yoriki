@@ -215,10 +215,11 @@ const createAPI = () => {
     launchableTasks: (id?: string) => ({
       list: (params?: ListParams) =>
         http.get<Paginated<LaunchableTask>, Paginated<LaunchableTask>>('app/v1/launchable_tasks/', { params }),
-      run: (conversation: string, version: number, inputs: TaskRunInputs) =>
+      // clientRequestId は起動ごとに画面が作るID。応答が失われた後の再送では、前に起動したRunが返る
+      run: (conversation: string, version: number, clientRequestId: string, inputs: TaskRunInputs) =>
         http.post<TaskRun, TaskRun>(`app/v1/launchable_tasks/${id}/run/`, taskRunForm(inputs), {
           timeout: UPLOAD_TIMEOUT,
-          params: { conversation, version },
+          params: { conversation, version, client_request_id: clientRequestId },
         }),
     }),
     // タスクの編集画面で選ぶ出口の候補（タスクを管理できる範囲の、停止していないもの）

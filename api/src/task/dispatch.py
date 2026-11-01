@@ -81,6 +81,7 @@ def start_task_run(
     files: Sequence[InputFile] = (),
     expected_version: int | None = None,
     conversation: Conversation | None = None,
+    client_request_id: str = "",
 ) -> Run:
     """タスクの今の版でRunを始める。始められなければ CannotRun（入力の誤りは InvalidInputs）。
     `expected_version` を渡すと、今の版がそれと違えば VersionConflict（画面で確かめた版と違う定義で動かさない）。
@@ -89,7 +90,9 @@ def start_task_run(
     項目の値は InputFile。`files` は項目の値のほかに /workspace/input に置くファイル（Webhookのpayload等）。呼び出し元の
     transactionの中で呼べば、Runの受付と同時に確定させたいもの（TriggerReceipt）を同じtransactionで作れる。
 
-    チャットからの起動では、`conversation`（起動した会話）にRunを指すカードを足す。タスクのRunは会話の文脈を引き継がない"""
+    チャットからの起動では、`conversation`（起動した会話）にRunを指すカードを足す。タスクのRunは会話の文脈を引き継がない。
+    `client_request_id` はカードの `client_message_id` にする（同じ要求の再送は、会話ごとの一意の制約で
+    IntegrityError）"""
     # 保存先への書き込みは、タスクの行をロックする前に行う（保存先が遅くても、同じタスクの受付や更新を待たせない）
     sent = inputs.values() if isinstance(inputs, dict) else ()
     written = store_files([*files, *(v for v in sent if isinstance(v, InputFile))])
@@ -124,7 +127,7 @@ def start_task_run(
                 raise InvalidInputs(errors)
             run = _start(task, revision, cleaned, actor=actor, launch=launch, files=files)
             if conversation is not None:
-                _add_launch_card(conversation, run, actor=actor)
+                _add_launch_card(conversation, run, actor=actor, client_request_id=client_request_id)
             return run
     except BaseException:
         discard_files(written)
@@ -282,11 +285,29 @@ def _start(
     return run
 
 
-def _add_launch_card(conversation: Conversation, run: Run, *, actor) -> None:
+def launched_run(conversation: Conversation, client_request_id: str) -> Run | None:
+    """同じ起動の要求（画面が送るID）で、前に起動したRun。なければ None"""
+    if not client_request_id:
+        return None
+    card = (
+        ConversationMessage.objects.filter(conversation=conversation, client_message_id=client_request_id)
+        .exclude(task_run=None)
+        .select_related("task_run")
+        .first()
+    )
+    return card.task_run if card else None
+
+
+def _add_launch_card(conversation: Conversation, run: Run, *, actor, client_request_id: str = "") -> None:
     """起動した会話に、起動したタスクのRunを指すカードを足す。会話のRunの文脈には入らない（文脈はRunEventから
     組み立てる）ので、タスクの結果が会話のモデルへ渡ることはない"""
     ConversationMessage.objects.create(
-        conversation=conversation, sender=actor, role=MessageRole.SYSTEM, body="", task_run=run
+        conversation=conversation,
+        sender=actor,
+        role=MessageRole.SYSTEM,
+        body="",
+        task_run=run,
+        client_message_id=client_request_id,
     )
     Conversation.objects.filter(pk=conversation.pk).update(last_posted=timezone.now())
 

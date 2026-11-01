@@ -1142,7 +1142,9 @@ class TaskRunDeliveryStateSerializer(ReadOnlyModelSerializer):
 
 class TaskRunInputValueSerializer(serializers.Serializer):
     name = serializers.CharField(read_only=True)
-    label = serializers.CharField(read_only=True, help_text=_("受付時のタスクの版の表示名（その版にない項目は名前）"))
+    label = serializers.CharField(  # type: ignore[assignment]
+        read_only=True, help_text=_("受付時のタスクの版の表示名（その版にない項目は名前）")
+    )
     value = serializers.JSONField(read_only=True)
 
 

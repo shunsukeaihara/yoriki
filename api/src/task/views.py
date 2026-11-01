@@ -30,7 +30,7 @@ from utils.views import SoftDeleteMixin
 
 from . import checks
 from .authentication import WebhookKeyAuthentication, WebhookTaskPermission
-from .dispatch import InvalidInputs, launched_run, receive_webhook, start_task_run
+from .dispatch import InvalidInputs, LaunchIdConflict, launched_run, receive_webhook, start_task_run
 from .errors import CannotRun, VersionConflict
 from .models import (
     BUSINESS_SCOPES,
@@ -342,8 +342,11 @@ class AppLaunchableTaskViewSet(ReadOnlyModelViewSet):
             raise ValidationError({"client_request_id": [_("起動のID（64文字まで）を指定してください")]})
         # 同じ要求の再送には、前に起動したRunを返す（版や入力、今も起動できるかを確かめ直さない。起動の後に印を
         # 外されても、起動済みのRunは残るため）
-        run = launched_run(conversation, client_request_id)
-        if run is not None and run.task is not None and run.task.uid == kwargs["uid"]:
+        try:
+            run = launched_run(conversation, client_request_id, kwargs["uid"])
+        except LaunchIdConflict as exc:
+            raise Conflict(str(exc)) from exc
+        if run is not None:
             return self._launched(request, run, status.HTTP_200_OK)
         task = self.get_object()
         version = request.query_params.get("version")
@@ -364,8 +367,12 @@ class AppLaunchableTaskViewSet(ReadOnlyModelViewSet):
                 client_request_id=client_request_id,
             )
         except IntegrityError:
-            # 同じ要求が同時に届き、先に受け付けた方がある（同じIDで別のタスクを起動しようとしたときも、前のRunを返す）
-            if (run := launched_run(conversation, client_request_id)) is None:
+            # 同じ要求が同時に届き、先に受け付けた方がある。別の要求とIDが重なったときは409
+            try:
+                run = launched_run(conversation, client_request_id, task.uid)
+            except LaunchIdConflict as exc:
+                raise Conflict(str(exc)) from exc
+            if run is None:
                 raise
             return self._launched(request, run, status.HTTP_200_OK)
         except VersionConflict as exc:

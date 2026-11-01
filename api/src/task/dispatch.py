@@ -285,17 +285,24 @@ def _start(
     return run
 
 
-def launched_run(conversation: Conversation, client_request_id: str) -> Run | None:
-    """同じ起動の要求（画面が送るID）で、前に起動したRun。なければ None"""
-    if not client_request_id:
-        return None
-    card = (
+class LaunchIdConflict(CannotRun):
+    """起動のIDが、同じ会話の別のメッセージか、別のタスクの起動で使われている"""
+
+
+def launched_run(conversation: Conversation, client_request_id: str, task_uid: str) -> Run | None:
+    """同じ起動の要求（画面が送るID）で、前にこのタスクを起動したRun。IDが使われていなければ None。別のメッセージか
+    別のタスクの起動で使われていれば LaunchIdConflict"""
+    message = (
         ConversationMessage.objects.filter(conversation=conversation, client_message_id=client_request_id)
-        .exclude(task_run=None)
         .select_related("task_run__task")
         .first()
     )
-    return card.task_run if card else None
+    if message is None:
+        return None
+    run = message.task_run
+    if run is None or run.task is None or run.task.uid != task_uid:
+        raise LaunchIdConflict(_("この起動のIDは、別の要求で使われています"))
+    return run
 
 
 def _add_launch_card(conversation: Conversation, run: Run, *, actor, client_request_id: str = "") -> None:

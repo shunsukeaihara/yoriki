@@ -271,6 +271,12 @@ def test_resending_the_same_launch_returns_the_first_run(api_client, app_user):
     again = _launch(api_client, app_user, task, conversation, client_request_id="req-1")
     assert (again.status_code, again.json()["id"]) == (200, first.json()["id"])
     task.set_chat_launchable(True)
+    # 同じ会話の別のメッセージ・別のタスクの起動と重なるIDは断る
+    ConversationMessageFactory.create(conversation=conversation, client_message_id="msg-1")
+    assert _launch(api_client, app_user, task, conversation, client_request_id="msg-1").status_code == 409
+    other = _task(name="別のタスク")
+    assert _launch(api_client, app_user, other, conversation, client_request_id="req-1").status_code == 409
+    assert Run.objects.filter(task=other).count() == 0
     # 別の起動（別のID）は新しいRun
     assert _launch(api_client, app_user, task, conversation, client_request_id="req-2").status_code == 201
     assert Run.objects.filter(task=task).count() == 2

@@ -4,7 +4,7 @@
 from django.utils.translation import gettext as _
 
 from run.models import RunLaunch
-from task.checks import launcher_inactive, task_problem
+from task.checks import launcher_inactive, launcher_problem, task_problem
 from user.models import User
 
 from .models import URL_KINDS, Delivery, Destination
@@ -28,6 +28,10 @@ def send_problem(delivery: Delivery) -> str:
         problem = _("出口が機密の結果を送ってよい先ではありません")
     problem = problem or task_problem(run.task)
     if not problem and run.launch == RunLaunch.CHAT:
-        # チャットから起動したRunは、起動した人が今も有効かも確かめる（authorization.md §6。DBから読み直す）
-        problem = launcher_inactive(User.objects.filter(pk=run.owner_id).first())
+        # チャットから起動したRunは、起動した人が今も有効で、固定したSkill・Connectorを今も使えるかも確かめる
+        # （authorization.md §6。DBから読み直す）
+        launcher = User.objects.filter(pk=run.owner_id).first()
+        problem = launcher_inactive(launcher) or (
+            launcher_problem(launcher, run.task_revision) if run.task_revision is not None else ""
+        )
     return problem

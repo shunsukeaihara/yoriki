@@ -14947,7 +14947,7 @@ components:
         can_view_logs:
           type: boolean
           readOnly: true
-          description: ログ（作業の記録、最初の依頼、配信）も見られるか。偽なら、チャットから起動した人として結果だけを見ている（作業の計画・使ったSkill・配信・失敗の理由の本文・ステップ数は空にする。authorization.md
+          description: ログ（作業の記録、最初の依頼、配信）も見られるか。偽なら、チャットから起動した人として結果だけを見ている（作業の計画・使ったSkill・モデル設定・配信・失敗の理由の本文・ステップ数は空にする。authorization.md
             §7.1）
       required:
       - can_view_logs

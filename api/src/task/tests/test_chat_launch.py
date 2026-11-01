@@ -11,7 +11,7 @@ from conversation.factories import ConversationFactory, ConversationMessageFacto
 from conversation.models import ConversationMessage, MessageRole
 from delivery.checks import send_problem
 from delivery.factories import DestinationFactory
-from delivery.models import Delivery
+from delivery.models import Delivery, DestinationScope
 from llm.factories import ModelProfileFactory
 from run.models import Run, RunEvent, RunEventKind, RunLaunch, RunStatus, RunTrigger
 from skill.factories import SkillFactory, SkillVersionFactory
@@ -246,7 +246,7 @@ def test_launcher_does_not_see_the_error_text(api_client, app_user):
     run = Run.objects.get(uid=_launch(api_client, app_user, task, conversation).json()["id"])
     Run.objects.filter(pk=run.pk).update(status=RunStatus.FAILED, error="provider: 内部のエラー文", step_count=3)
     data = api_client.get(f"/api/app/v1/tasks/{task.uid}/runs/{run.uid}/").json()
-    assert (data["error"], data["step_count"]) == ("", 0)
+    assert (data["error"], data["step_count"], data["model_profile_name"]) == ("", 0, "")
     messages = api_client.get(f"/api/app/v1/conversations/{conversation.uid}/messages/").json()["results"]
     [card] = [m["task_run"] for m in messages if m["task_run"]]
     assert "error" not in card
@@ -262,6 +262,37 @@ def test_resending_the_same_launch_returns_the_first_run(api_client, app_user):
     assert (again.status_code, again.json()["id"]) == (200, first.json()["id"])
     assert Run.objects.filter(task=task).count() == 1
     assert ConversationMessage.objects.filter(conversation=conversation).exclude(task_run=None).count() == 1
+    # 起動の後に印を外しても、同じ要求の再送には前のRunを返す
+    task.set_chat_launchable(False)
+    again = _launch(api_client, app_user, task, conversation, client_request_id="req-1")
+    assert (again.status_code, again.json()["id"]) == (200, first.json()["id"])
+    task.set_chat_launchable(True)
     # 別の起動（別のID）は新しいRun
     assert _launch(api_client, app_user, task, conversation, client_request_id="req-2").status_code == 201
     assert Run.objects.filter(task=task).count() == 2
+
+
+def test_delivery_is_not_sent_after_the_launcher_lost_a_fixed_connector(api_client, app_user):
+    department = DepartmentFactory.create()
+    membership = DepartmentMembershipFactory.create(department=department, user=app_user)
+    connector = ConnectorFactory.create(name="経理DB", scope=ConnectorScope.DEPARTMENT, department=department)
+    destination = DestinationFactory.create(scope=DestinationScope.DEPARTMENT, department=department)
+    task = _task(
+        TaskScope.DEPARTMENT,
+        department=department,
+        connectors=[connector.uid],
+        destination=destination,
+        notify_events=["run.completed"],
+    )
+    run = Run.objects.get(uid=_launch(api_client, app_user, task).json()["id"])
+    assert run.destination_revision is not None
+    delivery = Delivery.objects.create(
+        run=run,
+        run_event=RunEvent.record(run, RunEventKind.STATUS, {"status": RunStatus.COMPLETED}),
+        event_type="run.completed",
+        destination_revision=run.destination_revision,
+        payload={},
+    )
+    assert send_problem(delivery) == ""
+    membership.delete()  # 起動した後に部門を離れた
+    assert "経理DB" in send_problem(delivery)

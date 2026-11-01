@@ -10,6 +10,8 @@ const props = defineProps<{
   task: TaskDetail | LaunchableTask
   /** チャットから起動するときの、起動した会話（カードが足される） */
   conversationId?: string
+  /** チャットからの起動のID。同じIDの再送には前に起動したRunが返る（二重に起動しない） */
+  clientRequestId?: string
 }>()
 const api = useAPI()
 const toast = useToast()
@@ -52,14 +54,14 @@ const fields = inputs.map((input) => ({
   choice: modelOf<boolean>(input.name),
 }))
 
-// チャットからの起動のID。フォームを作るたびに作り、同じフォームからの再送では同じIDを送る（二重に起動しない）
-const clientRequestId = crypto.randomUUID()
 const { onSubmit, loading, errors } = createSubmit({
   form,
   // 画面で確かめた版を送る。別の版ができていれば409になり、確かめていない定義では実行しない
   fn: (data): Promise<Run | TaskRun> =>
     props.conversationId
-      ? api.launchableTasks(props.task.id).run(props.conversationId, props.task.version ?? 0, clientRequestId, data)
+      ? api
+          .launchableTasks(props.task.id)
+          .run(props.conversationId, props.task.version ?? 0, props.clientRequestId ?? crypto.randomUUID(), data)
       : api.tasks(props.task.id).run(props.task.version ?? 0, data),
   onSuccess: (run) => {
     emit('started', run)

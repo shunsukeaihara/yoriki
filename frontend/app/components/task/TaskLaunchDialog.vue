@@ -15,20 +15,32 @@ const dialog = ref<InstanceType<typeof DDialog> | null>(null)
 const formRef = ref<InstanceType<typeof TaskRunForm> | null>(null)
 // 開くたびにフォームを作り直し、前回の入力やエラーを残さない（選んだタスクと版で入力の項目が変わる）
 const formKey = ref(0)
+// 起動のID。受け付けたかが分からなかった起動は、同じタスクを開き直したときも同じIDで送る（先の起動を受け付けて
+// いれば、サーバーがそのRunを返すので二重に起動しない）。起動できた・断られたら次は新しいIDにする
+const requestId = ref(crypto.randomUUID())
+let unknownTaskId: string | null = null
 watch(open, (value) => {
-  if (value) formKey.value += 1
+  if (!value) return
+  formKey.value += 1
+  if (unknownTaskId !== props.task?.id) {
+    requestId.value = crypto.randomUUID()
+    unknownTaskId = null
+  }
 })
 
 const started = (value: Run | TaskRun) => {
+  unknownTaskId = null
   emit('started', value as TaskRun)
   dialog.value?.closeDialog()
 }
 // 版が変わった・受け付けたかが分からないときは、閉じて親に読み直させる
 const conflicted = () => {
+  unknownTaskId = null
   emit('conflicted')
   dialog.value?.closeDialog()
 }
 const unknown = () => {
+  unknownTaskId = props.task?.id ?? null
   emit('unknown')
   dialog.value?.closeDialog()
 }
@@ -54,6 +66,7 @@ const unknown = () => {
           ref="formRef"
           :task="props.task"
           :conversation-id="props.conversationId"
+          :client-request-id="requestId"
           @started="started"
           @conflicted="conflicted"
           @unknown="unknown"

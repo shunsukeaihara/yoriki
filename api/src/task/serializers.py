@@ -1220,7 +1220,8 @@ class TaskRunSerializer(RunSerializer):
     can_view_logs = serializers.SerializerMethodField(
         help_text=_(
             "ログ（作業の記録、最初の依頼、配信）も見られるか。偽なら、チャットから起動した人として結果だけを見ている"
-            "（作業の計画・使ったSkill・配信・失敗の理由の本文・ステップ数は空にする。authorization.md §7.1）"
+            "（作業の計画・使ったSkill・モデル設定・配信・失敗の理由の本文・ステップ数は空にする。"
+            "authorization.md §7.1）"
         )
     )
 
@@ -1247,9 +1248,11 @@ class TaskRunSerializer(RunSerializer):
     def to_representation(self, instance: Run) -> dict[str, Any]:
         data = super().to_representation(instance)
         if not data["can_view_logs"]:
-            # 起動した人には結果だけを見せる。作業の計画と使ったSkill（タスクの定義）、配信の履歴、失敗の理由の本文
-            # （プロバイダのエラー文等を含みうる）とステップ数はログとして扱う。終わり方は結果として出す
-            data.update(todos=[], skills=[], deliveries_info=[], error="", step_count=0)
+            # 起動した人には結果だけを見せる。作業の計画、使ったSkillとモデル設定（タスクの定義）、配信の履歴、失敗の
+            # 理由の本文（プロバイダのエラー文等を含みうる）とステップ数はログとして扱う。終わり方は結果として出す
+            data.update(
+                todos=[], skills=[], deliveries_info=[], error="", step_count=0, model_profile_name="", effort=""
+            )
         return data
 
     def get_task_name(self, obj: Run) -> str:

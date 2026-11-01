@@ -292,7 +292,7 @@ def launched_run(conversation: Conversation, client_request_id: str) -> Run | No
     card = (
         ConversationMessage.objects.filter(conversation=conversation, client_message_id=client_request_id)
         .exclude(task_run=None)
-        .select_related("task_run")
+        .select_related("task_run__task")
         .first()
     )
     return card.task_run if card else None

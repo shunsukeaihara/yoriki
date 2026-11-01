@@ -6108,7 +6108,7 @@ export interface components {
             /** @description 受け付けた入力の値（型がファイルの項目は /workspace/input の中のパス）。項目の名前のキーの辞書にすると、APIクライアントのcamelCaseの変換で名前が変わるので、並びにする */
             readonly inputs: components["schemas"]["TaskRunInputValue"][];
             readonly deliveries_info: components["schemas"]["TaskRunDeliveryState"][];
-            /** @description ログ（作業の記録、最初の依頼、配信）も見られるか。偽なら、チャットから起動した人として結果だけを見ている（作業の計画・使ったSkill・配信・失敗の理由の本文・ステップ数は空にする。authorization.md §7.1） */
+            /** @description ログ（作業の記録、最初の依頼、配信）も見られるか。偽なら、チャットから起動した人として結果だけを見ている（作業の計画・使ったSkill・モデル設定・配信・失敗の理由の本文・ステップ数は空にする。authorization.md §7.1） */
             readonly can_view_logs: boolean;
         };
         /**

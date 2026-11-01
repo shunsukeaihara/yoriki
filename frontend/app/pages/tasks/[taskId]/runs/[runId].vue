@@ -230,10 +230,13 @@ const stop = async () => {
               </template>
               <dt class="text-muted">{{ $t('タスクの版') }}</dt>
               <dd>{{ $t('版 {number}', { number: run.taskVersion }) }}</dd>
-              <dt class="text-muted">{{ $t('モデル') }}</dt>
-              <dd class="min-w-0 break-words">
-                {{ run.modelProfileName }}<template v-if="run.effort"> · {{ run.effort }}</template>
-              </dd>
+              <!-- モデル設定はタスクの定義なので、結果だけを見る人には出さない -->
+              <template v-if="canViewLogs">
+                <dt class="text-muted">{{ $t('モデル') }}</dt>
+                <dd class="min-w-0 break-words">
+                  {{ run.modelProfileName }}<template v-if="run.effort"> · {{ run.effort }}</template>
+                </dd>
+              </template>
               <dt class="text-muted">{{ $t('受付') }}</dt>
               <dd>{{ formatDatetime(run.created) }}</dd>
               <dt class="text-muted">{{ $t('終了') }}</dt>

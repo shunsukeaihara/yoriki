@@ -333,16 +333,18 @@ class AppLaunchableTaskViewSet(ReadOnlyModelViewSet):
     )
     @action(detail=True, methods=["post"], serializer_class=TaskRunCreateSerializer)
     def run(self, request, *args, **kwargs):
-        task = self.get_object()
         conversation = get_object_or_404(
             Conversation.objects.owned_by(request.user), uid=request.query_params.get("conversation", "")
         )
         client_request_id = request.query_params.get("client_request_id", "")
         if len(client_request_id) > 64:
             raise ValidationError({"client_request_id": [_("64文字までにしてください")]})
-        # 同じ要求の再送には、前に起動したRunを返す（版や入力を確かめ直さない）
-        if (run := launched_run(conversation, client_request_id)) is not None:
+        # 同じ要求の再送には、前に起動したRunを返す（版や入力、今も起動できるかを確かめ直さない。起動の後に印を
+        # 外されても、起動済みのRunは残るため）
+        run = launched_run(conversation, client_request_id)
+        if run is not None and run.task is not None and run.task.uid == kwargs["uid"]:
             return self._launched(request, run, status.HTTP_200_OK)
+        task = self.get_object()
         version = request.query_params.get("version")
         if version is not None and not version.isdigit():
             raise ValidationError({"version": [_("版の番号を指定してください")]})
@@ -361,7 +363,7 @@ class AppLaunchableTaskViewSet(ReadOnlyModelViewSet):
                 client_request_id=client_request_id,
             )
         except IntegrityError:
-            # 同じ要求が同時に届き、先に受け付けた方がある
+            # 同じ要求が同時に届き、先に受け付けた方がある（同じIDで別のタスクを起動しようとしたときも、前のRunを返す）
             if (run := launched_run(conversation, client_request_id)) is None:
                 raise
             return self._launched(request, run, status.HTTP_200_OK)

@@ -13,6 +13,8 @@ const { unreadCount, list, read, readAll, handlers } = vi.hoisted(() => ({
 }))
 
 mockNuxtImport('useAPI', () => () => ({ notifications: { unreadCount, list, read, readAll } }))
+const { navigate } = vi.hoisted(() => ({ navigate: vi.fn() }))
+mockNuxtImport('navigateTo', () => navigate)
 mockNuxtImport('useUserEvents', () => (handler: (event: UserStreamEvent) => void) => handlers.push(handler))
 
 const notification = (id: string, readAt: string | null = null, message = ''): AppNotification => ({
@@ -66,6 +68,19 @@ describe('NotificationBell', () => {
     expect(list).toHaveBeenCalled()
     expect(document.body.textContent).toContain('3件の請求書を確認しました。')
     expect(document.body.textContent).toContain('<b>差異</b>は1件です')
+    wrapper.unmount()
+  })
+
+  it('通知を押すと既読にして、そのタスクの Run の画面を開く', async () => {
+    navigate.mockReset()
+    const wrapper = await mountSuspended(NotificationBell, { attachTo: document.body })
+    await wrapper.find('button').trigger('click')
+    await flushPromises()
+    const item = [...document.body.querySelectorAll('button')].find((b) => b.textContent?.includes('請求書チェック'))
+    item!.click()
+    await flushPromises()
+    expect(read).toHaveBeenCalledWith('n1')
+    expect(navigate).toHaveBeenCalledWith('/tasks/t1/runs/r1')
     wrapper.unmount()
   })
 

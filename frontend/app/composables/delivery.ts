@@ -30,6 +30,39 @@ export const destinationKindItems = (t: T) => [
   },
 ]
 
+// 配信の状態（delivery.models.DeliveryStatus。design.md §4.5）。表示はサーバーの statusDisplay を使う
+export const DeliveryStatus = {
+  PENDING: 1,
+  SENDING: 2,
+  RETRY_WAIT: 3,
+  DELIVERED: 10,
+  FAILED: 20,
+  UNKNOWN: 21,
+  CANCELLED: 30,
+} as const satisfies Record<string, DeliveryStatusEnum>
+
+/** 人が送り直せる状態（delivery.models.RETRYABLE_BY_HAND。失敗・確認待ち・取消） */
+export const isRetryableDelivery = (delivery: Pick<Delivery, 'status'>) =>
+  delivery.status === DeliveryStatus.FAILED ||
+  delivery.status === DeliveryStatus.UNKNOWN ||
+  delivery.status === DeliveryStatus.CANCELLED
+
+export const deliveryStatusColor = (status: DeliveryStatusEnum) => {
+  switch (status) {
+    case DeliveryStatus.DELIVERED:
+      return 'success'
+    case DeliveryStatus.FAILED:
+      return 'error'
+    case DeliveryStatus.UNKNOWN:
+    case DeliveryStatus.RETRY_WAIT:
+      return 'warning'
+    case DeliveryStatus.CANCELLED:
+      return 'neutral'
+    default:
+      return 'primary'
+  }
+}
+
 // 出口の範囲（delivery.models.DestinationScope。個人の出口はYorikiが作るので、管理では部門・全社・システム）
 export const DestinationScope = ConnectorScope
 

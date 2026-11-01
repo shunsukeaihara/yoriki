@@ -1,5 +1,6 @@
 <script setup lang="ts">
-// サイドバーの通知のボタン。未読の数を出し、開くと最近の通知を一覧にする。開いた通知は既読にする
+// サイドバーの通知のボタン。未読の数を出し、開くと最近の通知を一覧にする。通知を押すと既読にして、そのタスクの Run の
+// 画面を開く
 defineProps<{ collapsed?: boolean }>()
 const store = useNotificationStore()
 const toast = useToast()
@@ -24,6 +25,12 @@ useUserEvents(
 watch(open, (value) => {
   if (value) store.reload().catch(notify)
 })
+
+const select = async (item: AppNotification) => {
+  open.value = false
+  store.markRead(item).catch(notify)
+  await navigateTo(`/tasks/${item.task}/runs/${item.run}`)
+}
 
 const icons: Record<NotifyEventEnum, string> = {
   'run.completed': 'i-lucide-circle-check',
@@ -77,7 +84,7 @@ const colors: Record<NotifyEventEnum, string> = {
             :key="item.id"
             type="button"
             class="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-elevated"
-            @click="store.markRead(item).catch(notify)"
+            @click="select(item)"
           >
             <UIcon :name="icons[item.eventType]" :class="['mt-0.5 size-4 shrink-0', colors[item.eventType]]" />
             <span class="flex min-w-0 flex-1 flex-col">

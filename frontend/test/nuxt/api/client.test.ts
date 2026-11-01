@@ -51,6 +51,13 @@ describe('snakeProps', () => {
     })
   })
 
+  it('出口へ送った内容（配信の payload）の中は変えない', () => {
+    expect(camelProps({ payload: { event_id: 'e1', task_name: '請求書チェック' }, attempt_count: 1 })).toEqual({
+      payload: { event_id: 'e1', task_name: '請求書チェック' },
+      attemptCount: 1,
+    })
+  })
+
   it('File・Date・FormData は変換せずにそのまま渡す', () => {
     const file = new File(['x'], 'a.txt')
     const date = new Date()

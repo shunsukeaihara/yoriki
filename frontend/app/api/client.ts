@@ -11,7 +11,7 @@ type KeyConverter = (key: string) => string
 
 /**
  * 値の中のキーを変換しない項目（snake_case の名前）。利用者・エージェント・DBが決めるキーを持つJSON（Skillの
- * JSON Schema、業務結果、Toolの引数、Connectorの列名 → 説明、platform → digest）は、変換すると別の名前になる
+ * JSON Schema、業務結果、Toolの引数、Connectorの列名 → 説明、platform → digest、出口へ送った内容）は、変換すると別の名前になる
  * （invoice_no → invoiceNo、VendorCode → vendor_code）。項目の名前そのものは変換する
  */
 const RAW_VALUE_KEYS = new Set([
@@ -24,6 +24,8 @@ const RAW_VALUE_KEYS = new Set([
   'params',
   'columns',
   'platform_digests',
+  // 配信で出口へ送った内容（送ったそのままを見せる）
+  'payload',
 ])
 
 const convertKeys = (value: unknown, fn: KeyConverter): unknown => {

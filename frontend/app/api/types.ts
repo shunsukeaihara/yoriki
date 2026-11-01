@@ -203,7 +203,16 @@ export type TaskListParams = ListParams & {
 }
 // 編集画面の候補（Skill・Connector・出口）を求める範囲
 export type TaskChoiceParams = ListParams & { scope: SkillScopeEnum; department?: string | null }
-export type TaskRunListParams = ListParams & { status?: RunStatusEnum }
+export type TaskRunListParams = ListParams & { status?: RunStatusEnum; launch?: RunLaunchEnum }
+// タスクのRun（起動のしかた、受付時の版と入力、配信の状態を足したもの）と、配信の履歴（タスクを管理できる人）
+export type RunLaunchEnum = Schemas['RunLaunchEnum']
+export type TaskRun = Api<'TaskRun'>
+export type TaskRunReceipt = Api<'TaskRunReceipt'>
+export type TaskRunDeliveryState = Api<'TaskRunDeliveryState'>
+export type DeliveryStatusEnum = Schemas['DeliveryStatusEnum']
+export type Delivery = Api<'Delivery'>
+export type DeliveryAttempt = Api<'DeliveryAttempt'>
+export type DeliveryListParams = ListParams & { run?: string; status?: DeliveryStatusEnum }
 
 // 出口（Destination）と入口（TriggerBinding）の管理（連携の管理者。authorization.md §5.5）。中身は今の版の値を平らに持つ
 export type Destination = Api<'Destination'>

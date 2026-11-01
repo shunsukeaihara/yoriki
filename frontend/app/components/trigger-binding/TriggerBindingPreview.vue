@@ -172,10 +172,13 @@ defineExpose({ onSubmit })
           <p v-else-if="result.duplicate" class="text-muted">
             {{ $t('前のRunを返すので、新しいプロンプトは作りません') }}
           </p>
-          <pre
+          <!-- 埋め込んだ値は目立たせる（モデルへは信頼しない内容の囲みのまま渡す） -->
+          <p
             v-else-if="result.prompt !== null"
-            class="max-h-80 overflow-auto rounded-md bg-elevated p-3 text-xs whitespace-pre-wrap"
-            >{{ result.prompt }}</pre>
+            class="max-h-80 overflow-auto rounded-md bg-elevated p-3 font-mono text-xs"
+          >
+            <TaskPromptText :text="result.prompt" />
+          </p>
           <p v-else class="text-muted">
             {{ $t('このタスクを管理する権限がないので、タスクの依頼文は表示しません') }}
           </p>

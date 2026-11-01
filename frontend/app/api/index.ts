@@ -193,10 +193,18 @@ const createAPI = () => {
         list: (params?: ListParams) =>
           http.get<Paginated<TaskRevision>, Paginated<TaskRevision>>(`app/v1/tasks/${id}/revisions/`, { params }),
       }),
-      // Runの履歴（結果を見られるもの）
-      runs: () => ({
-        list: (params?: TaskRunListParams) =>
-          http.get<Paginated<Run>, Paginated<Run>>(`app/v1/tasks/${id}/runs/`, { params }),
+      // Runの履歴（結果とログを見られるもの）。会話のメッセージは、タスクのRunでは会話のAPIに出ないのでここで読む
+      runs: (rid?: string) => ({
+        ...readOnlyResource<TaskRun, TaskRunListParams>(http, `app/v1/tasks/${id}/runs`, rid),
+        messages: () => ({
+          list: (params?: ListParams) =>
+            http.get<Paginated<Message>, Paginated<Message>>(`app/v1/tasks/${id}/runs/${rid}/messages/`, { params }),
+        }),
+      }),
+      // Runの配信の履歴と送り直し（エージェントは動かし直さない）
+      deliveries: (did?: string) => ({
+        ...readOnlyResource<Delivery, DeliveryListParams>(http, `app/v1/tasks/${id}/deliveries`, did),
+        retry: () => http.post<Delivery, Delivery>(`app/v1/tasks/${id}/deliveries/${did}/retry/`),
       }),
       // 編集画面で選ぶ候補（その範囲のタスクに登録できるもの。authorization.md §7.2）
       skillChoices: (params: TaskChoiceParams) =>
@@ -216,6 +224,11 @@ const createAPI = () => {
       events: () => ({
         list: (params?: ListParams) =>
           http.get<Paginated<RunStreamEvent>, Paginated<RunStreamEvent>>(`app/v1/runs/${id}/events/`, { params }),
+      }),
+      // Runの添付と成果物（タスクのRunのファイルは、会話のAPIではなくここで取得する）
+      artifacts: (aid?: string) => ({
+        ...readOnlyResource<Artifact, ArtifactListParams>(http, `app/v1/runs/${id}/artifacts`, aid),
+        downloadUrl: () => `${config.public.apiEndpoint}app/v1/runs/${id}/artifacts/${aid}/download/`,
       }),
       clarifications: (cid?: string) => ({
         ...readOnlyResource<Clarification, ClarificationListParams>(http, `app/v1/runs/${id}/clarifications`, cid),

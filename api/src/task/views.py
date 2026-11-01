@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 
 from django.db import transaction
 from django.db.models import Prefetch
+from django.utils.functional import cached_property
 from django.utils.translation import gettext_lazy as _
 from django_filters import rest_framework as filters
 from drf_spectacular.types import OpenApiTypes
@@ -14,9 +15,13 @@ from rest_framework.generics import get_object_or_404
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet, ModelViewSet, ReadOnlyModelViewSet
 
+from artifact.models import Artifact
 from connector.serializers import AppConnectorSerializer
+from conversation.models import ConversationMessage
+from conversation.serializers import MessageSerializer
+from delivery.models import Delivery
 from run.models import Run, RunLaunch
-from run.serializers import RunSerializer
+from run.serializers import RunSerializer, prefetch_todos
 from skill.models import SkillVersion
 from user.models import Department
 from utils.exceptions import Conflict
@@ -48,6 +53,7 @@ from .serializers import (
     TaskDefinitionSerializer,
     TaskDefinitionUpdateSerializer,
     TaskRunCreateSerializer,
+    TaskRunSerializer,
     TaskSkillChoiceSerializer,
     TaskSuspendSerializer,
     TriggerBindingKeySerializer,
@@ -300,20 +306,63 @@ class AppTaskRevisionViewSet(TaskMixin, ReadOnlyModelViewSet):
 @extend_schema(
     description="タスクのRunの履歴（結果とログを見られるもの。authorization.md §7.1）", tags=["app/task/run"]
 )
-class AppTaskRunViewSet(TaskMixin, mixins.ListModelMixin, GenericViewSet):
+class AppTaskRunViewSet(TaskMixin, ReadOnlyModelViewSet):
+    """一覧はタスクを今管理できる人（タスクの画面の実行の履歴）。1つのRunは、Runの結果とログを見られる人（実行した
+    ときの範囲と部門で判定する。authorization.md §7.1）なら、タスクを移した・消した後も読める"""
+
     permission_classes = [AppUser]
-    queryset = Run.objects.select_related("conversation", "model_version__profile")
-    serializer_class = RunSerializer
-    filterset_fields = ["status"]
+    lookup_field = "uid"
+    queryset = Run.objects.select_related(
+        "task",
+        "conversation",
+        "model_version__profile",
+        "task_revision",
+        "owner",
+        "trigger_receipt__binding",
+        "trigger_receipt__binding_revision",
+    ).prefetch_related(
+        prefetch_todos(),
+        Prefetch(
+            "deliveries",
+            queryset=Delivery.objects.select_related("destination_revision__destination").order_by("created", "pk"),
+        ),
+    )
+    serializer_class = TaskRunSerializer
+    filterset_fields = ["status", "launch"]
     ordering = ("-created", "-pk")
 
     def get_queryset(self):
-        return (
-            super()
-            .get_queryset()
-            .filter(task=self.task)
-            .filter(pk__in=Run.objects.visible_to(self.request.user).values("pk"))
+        qs = super().get_queryset().filter(pk__in=Run.objects.visible_to(self.request.user).values("pk"))
+        if self.action == "list":
+            return qs.filter(task=self.task)
+        return qs.filter(task__uid=self.kwargs["task"])
+
+
+@extend_schema(
+    description="タスクのRunの会話のメッセージ（最初の依頼とエージェントの応答。タスクのRunの会話は会話のAPIに出さない）",
+    tags=["app/task/run"],
+)
+class AppTaskRunMessageViewSet(mixins.ListModelMixin, GenericViewSet):
+    permission_classes = [AppUser]
+    queryset = ConversationMessage.objects.select_related("run", "sender", "instruction").prefetch_related(
+        Prefetch("attachments", queryset=Artifact.objects.select_related("blob", "run").order_by("pk")),
+    )
+    serializer_class = MessageSerializer
+    ordering = "-pk"
+
+    @cached_property
+    def conversation(self):
+        """URLのRunの会話（Runの結果とログを見られる人だけ。タスクを移した・消した後も読める。タスクのRunの会話は
+        1つのRunだけを持つ）"""
+        runs = (
+            Run.objects.visible_to(self.request.user)
+            .filter(task__uid=self.kwargs["task"])
+            .select_related("conversation")
         )
+        return get_object_or_404(runs, uid=self.kwargs["run"]).conversation
+
+    def get_queryset(self):
+        return super().get_queryset().filter(conversation=self.conversation)
 
 
 @extend_schema(

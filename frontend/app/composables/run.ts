@@ -17,6 +17,12 @@ export const RunKind = {
   EVALUATION: 3,
 } as const satisfies Record<string, RunKindEnum>
 
+// バックエンドの run.models.RunLaunch と同じ値（タスクのRunの起動のしかた）。表示はサーバーの launchDisplay を使う
+export const RunLaunch = {
+  MANUAL: 1,
+  WEBHOOK: 2,
+} as const satisfies Record<string, RunLaunchEnum>
+
 // バックエンドの CANCELLABLE_STATUSES・ACTIVE_STATUSES と同じ
 const CANCELLABLE: RunStatusEnum[] = [RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.WAITING_USER, RunStatus.RETRY_WAIT]
 const ACTIVE: RunStatusEnum[] = [...CANCELLABLE, RunStatus.CANCELLING]

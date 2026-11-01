@@ -172,3 +172,26 @@ export const rowErrorsOf = (errors: unknown, index: number, field: string): stri
   const value = row && typeof row === 'object' ? (row as Record<string, unknown>)[field] : undefined
   return Array.isArray(value) ? value.map(String) : undefined
 }
+
+// 依頼文に埋め込んだ値の囲み（api の harness/untrusted.py の untrusted()。中の閉じる印は崩してあるので、最初の閉じる
+// 印までが1つの値）
+const UNTRUSTED_RE = /<untrusted_content source="([^"]*)">([\s\S]*?)<\/untrusted_content>/g
+
+export type PromptSegment = { text: string; source: string | null }
+
+/**
+ * 値を埋め込んだ依頼文を、地の文と埋め込んだ値（source は `input:項目の名前` 等）に分ける。モデルへは囲みのまま
+ * 渡しているが、画面では値を目立たせて出す
+ */
+export const splitUntrusted = (text: string): PromptSegment[] => {
+  const segments: PromptSegment[] = []
+  let last = 0
+  for (const match of text.matchAll(UNTRUSTED_RE)) {
+    if (match.index > last) segments.push({ text: text.slice(last, match.index), source: null })
+    const source = match[1]!.replaceAll('&lt;', '<').replaceAll('&quot;', '"').replaceAll('&amp;', '&')
+    segments.push({ text: match[2]!, source })
+    last = match.index + match[0].length
+  }
+  if (last < text.length) segments.push({ text: text.slice(last), source: null })
+  return segments
+}

@@ -83,3 +83,18 @@ describe('taskChoiceParams', () => {
     expect(taskChoiceParams({ scope: TaskScope.COMPANY, departmentInfo: null }).department).toBeNull()
   })
 })
+
+describe('splitUntrusted', () => {
+  it('依頼文を地の文と埋め込んだ値に分ける。値の中の崩した閉じる印では切らない', () => {
+    const text =
+      '<untrusted_content source="input:vendor">A&lt;b&gt;商事<\\/untrusted_content></untrusted_content> の請求書（' +
+      '<untrusted_content source="input:a&quot;b">INV-1</untrusted_content>）'
+    expect(splitUntrusted(text)).toEqual([
+      { text: 'A&lt;b&gt;商事<\\/untrusted_content>', source: 'input:vendor' },
+      { text: ' の請求書（', source: null },
+      { text: 'INV-1', source: 'input:a"b' },
+      { text: '）', source: null },
+    ])
+    expect(splitUntrusted('値のない依頼文')).toEqual([{ text: '値のない依頼文', source: null }])
+  })
+})

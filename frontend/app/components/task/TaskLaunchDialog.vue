@@ -19,13 +19,16 @@ const formKey = ref(0)
 // いれば、サーバーがそのRunを返すので二重に起動しない）。起動できた・断られたら次は新しいIDにする
 const requestId = ref(crypto.randomUUID())
 let unknownTaskId: string | null = null
+// 受け付けたかが分からなかった起動を開き直したときは、前の入力を入れたフォームにする（同じIDで送り直すので、入力も
+// 前と同じにする。先の起動を受け付けていれば、サーバーはそのRunを返す）
+const initialValues = ref<TaskRunInputs | undefined>()
 watch(open, (value) => {
   if (!value) return
   formKey.value += 1
-  if (unknownTaskId !== props.task?.id) {
-    requestId.value = crypto.randomUUID()
-    unknownTaskId = null
-  }
+  if (unknownTaskId === props.task?.id) return
+  requestId.value = crypto.randomUUID()
+  initialValues.value = undefined
+  unknownTaskId = null
 })
 
 const started = (value: Run | TaskRun) => {
@@ -39,8 +42,9 @@ const conflicted = () => {
   emit('conflicted')
   dialog.value?.closeDialog()
 }
-const unknown = () => {
+const unknown = (values: TaskRunInputs) => {
   unknownTaskId = props.task?.id ?? null
+  initialValues.value = values
   emit('unknown')
   dialog.value?.closeDialog()
 }
@@ -61,12 +65,20 @@ const unknown = () => {
             {{ $t('入力と処理の記録は、タスクを管理する人も見られます') }}
           </li>
         </ul>
+        <p v-if="initialValues" class="mb-2 text-sm text-warning">
+          {{
+            $t(
+              '前の起動を受け付けたかを確かめられませんでした。同じ入力で起動すると、受け付けていれば二重には起動しません',
+            )
+          }}
+        </p>
         <TaskRunForm
           :key="formKey"
           ref="formRef"
           :task="props.task"
           :conversation-id="props.conversationId"
           :client-request-id="requestId"
+          :initial-values="initialValues"
           @started="started"
           @conflicted="conflicted"
           @unknown="unknown"

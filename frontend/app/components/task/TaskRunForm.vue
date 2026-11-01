@@ -12,6 +12,8 @@ const props = defineProps<{
   conversationId?: string
   /** チャットからの起動のID。同じIDの再送には前に起動したRunが返る（二重に起動しない） */
   clientRequestId?: string
+  /** 入力の初期値（受け付けたかが分からなかった起動を、同じ入力で送り直すとき） */
+  initialValues?: TaskRunInputs
 }>()
 const api = useAPI()
 const toast = useToast()
@@ -21,8 +23,8 @@ const emit = defineEmits<{
   failed: [error: unknown]
   /** 画面を開いた後に版が変わった（409）。最新の状態を読み込み直す */
   conflicted: []
-  /** 応答を受け取れなかった（受け付けたかが分からない）。実行の履歴で確かめる */
-  unknown: []
+  /** 応答を受け取れなかった（受け付けたかが分からない）。実行の履歴で確かめる。送った入力の値を渡す */
+  unknown: [values: TaskRunInputs]
 }>()
 
 // 入力の項目はタスクの版で決まる。版が変わったら、親がこのフォームを作り直す（key）
@@ -34,7 +36,9 @@ const booleanItems = computed(() => [
   { value: true, title: t('はい') },
   { value: false, title: t('いいえ') },
 ])
-const form = ref<TaskRunInputs>(Object.fromEntries(inputs.map((i) => [i.name, emptyValue(i)])))
+const form = ref<TaskRunInputs>(
+  Object.fromEntries(inputs.map((i) => [i.name, props.initialValues?.[i.name] ?? emptyValue(i)])),
+)
 const choiceItems = (input: TaskInput) => (input.choices ?? []).map((value) => ({ value, title: value }))
 // 入力欄ごとに v-model の型を合わせる（値は form にまとめて持つ）
 const modelOf = <V,>(name: string) =>
@@ -75,7 +79,7 @@ const { onSubmit, loading, errors } = createSubmit({
       toast.add({ title: t('エラー'), description: makeErrorMsg(err), color: 'error' })
     } else if (err instanceof AxiosError && !err.response) {
       // 送った後に応答だけが失われたときは、受け付けている。再送で二重に実行しないよう、先に履歴を見せる
-      emit('unknown')
+      emit('unknown', { ...form.value })
       toast.add({
         title: t('受け付けたかを確かめられませんでした'),
         description: props.conversationId

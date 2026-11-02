@@ -136,6 +136,12 @@ def test_resent_request_returns_the_run_started_before(api_client, manager):
     assert rerun.status_code == 201, rerun.json()
     resent = _fix(api_client, manager, task, conversation=run.conversation, client_request_id="req-2")
     assert (resent.status_code, resent.json()["id"]) == (200, rerun.json()["id"])
+    # 追加の指示のメッセージのIDと重なれば、再送とせずに断る
+    rerun_run = Run.objects.get(uid=rerun.json()["id"])
+    api_client.force_login(manager)
+    sent = _post(api_client, rerun_run.conversation, client_message_id="msg-1")
+    assert sent.status_code == 201, sent.json()
+    assert _fix(api_client, manager, task, client_request_id="msg-1").status_code == 409
     # 同じIDでも、ほかの人の要求とは重ならない
     colleague = grant(UserFactory.create(), AppPermission.MANAGE_COMPANY_TASKS)
     assert _fix(api_client, colleague, task, client_request_id="req-1").status_code == 201

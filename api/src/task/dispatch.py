@@ -351,7 +351,8 @@ class AlreadyStarted(Exception):
 
 
 def fix_started_run(task: TaskDefinition, user, client_request_id: str) -> Run | None:
-    """同じ人のこのタスクの修正チャットで、同じID（最初の依頼の `client_message_id`）で動かしたRun"""
+    """同じ人のこのタスクの修正チャットで、同じID（最初の依頼の `client_message_id`）で動かしたRun。IDが修正チャットの
+    ほかのメッセージ（追加の指示・回答）で使われていれば LaunchIdConflict"""
     message = (
         ConversationMessage.objects.filter(
             conversation__owner=user,
@@ -364,7 +365,12 @@ def fix_started_run(task: TaskDefinition, user, client_request_id: str) -> Run |
         .order_by("pk")
         .first()
     )
-    return message.run if message is not None else None
+    if message is None:
+        return None
+    first = ConversationMessage.objects.filter(run=message.run).order_by("pk").values_list("pk", flat=True).first()
+    if first != message.pk:
+        raise LaunchIdConflict(_("この要求のIDは、別の要求で使われています"))
+    return message.run
 
 
 class LaunchIdConflict(CannotRun):

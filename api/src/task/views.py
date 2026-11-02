@@ -273,7 +273,11 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
         if not client_request_id or len(client_request_id) > 64:
             raise ValidationError({"client_request_id": [_("要求のID（64文字まで）を指定してください")]})
         # 同じ要求の再送には、前に動かしたRunを返す（入力や版を確かめ直さない）
-        if (existing := fix_started_run(task, request.user, client_request_id)) is not None:
+        try:
+            existing = fix_started_run(task, request.user, client_request_id)
+        except LaunchIdConflict as exc:
+            raise Conflict(str(exc)) from exc
+        if existing is not None:
             return Response(RunSerializer(existing, context=self.get_serializer_context()).data)
         conversation = None
         if uid := request.query_params.get("conversation"):
@@ -297,6 +301,8 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
             )
         except AlreadyStarted as exc:
             return Response(RunSerializer(exc.run, context=self.get_serializer_context()).data)
+        except LaunchIdConflict as exc:
+            raise Conflict(str(exc)) from exc
         except IntegrityError as exc:
             # 同じ修正チャットで、別のメッセージがこのIDを使っている
             raise Conflict(_("この要求のIDは、別の要求で使われています")) from exc

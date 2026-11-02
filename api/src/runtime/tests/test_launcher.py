@@ -2,15 +2,20 @@
 （design.md §7.2の対策の1）"""
 
 import io
+import json
+import queue
+import threading
 import time
 import uuid
 from decimal import Decimal
 from typing import Any, cast
+from unittest import mock
 
 import pytest
+from docker.utils.socket import STDERR, STDOUT
 
 from runtime.factories import RuntimeProfileFactory
-from runtime.launcher import Launcher, Sandbox, SandboxSpec, SandboxUnavailable, verify_container
+from runtime.launcher import Launcher, Relay, Sandbox, SandboxSpec, SandboxUnavailable, verify_container
 
 
 def spec(**overrides: Any) -> SandboxSpec:
@@ -191,7 +196,29 @@ class TestSandbox:
         info = sandbox.api.inspect_container(sandbox.container_id)
         s = spec(image=info["Config"]["Image"], runtime=settings.YORIKI_SANDBOX_RUNTIME)
         assert verify_container(info, s) == []
-        assert sandbox.helper("version", {}) | {"python": ""} == {"ok": True, "contract": 1, "python": ""}
+        assert sandbox.helper("version", {}) | {"python": ""} == {"ok": True, "contract": 2, "python": ""}
+
+    def test_relay_passes_requests_from_scripts_and_returns_responses(self, sandbox, tmp_path):
+        received = []
+
+        def on_request(relay, request_id, request):
+            received.append(request)
+            relay.respond(request_id, {"ok": False, "error": {"code": "unavailable", "message": "応答です"}})
+
+        relay = sandbox.start_relay(on_request)
+        script = (
+            "import yoriki_connector as c\n"
+            "try:\n    c.describe('販売DB')\nexcept c.ConnectorError as e:\n    print(e.code, e.message)\n"
+        )
+        path = tmp_path / "out.log"
+        request = {"command": f'python -c "{script}"', "cwd": "/workspace/work", "env": {"PATH": "/usr/local/bin:/bin"}}
+        execution = sandbox.start_exec(request, path.open("wb"), output_limit=4096)
+        assert execution.done.wait(timeout=60)
+        assert path.read_text() == "unavailable 応答です\n"
+        assert received == [{"op": "describe", "connector": "販売DB"}]
+        relay.close()
+        assert relay.done.wait(timeout=30)
+        assert not relay.respond(1, {"ok": True})
 
     def test_exec_writes_the_output_and_reports_the_exit_code(self, sandbox, tmp_path):
         path = tmp_path / "out.log"
@@ -294,3 +321,95 @@ def test_out_of_memory(state, expected):
         api = Api()
 
     assert Sandbox(cast(Any, Client()), "c1", "yoriki-test").out_of_memory() is expected
+
+
+class FakeAttached:
+    """中継の出力の代わり。`raw` への書込みと閉じたことを記録する"""
+
+    def __init__(self, frames):
+        self.frames = frames
+        self.raw = mock.Mock()
+
+    def __enter__(self):
+        return iter(self.frames)
+
+    def __exit__(self, *exc_info):
+        pass
+
+
+class TestRelay:
+    def test_requests_are_passed_on_and_responses_written(self):
+        received = []
+        relay = Relay("e" * 64, lambda r, i, req: received.append((i, req)))
+        attached = FakeAttached(
+            [(STDERR, b'{"event": "ready"}\n'), (STDOUT, b'{"id": 1, "request": {"op": "de'), (STDOUT, b'scribe"}}\n')]
+        )
+        relay._pump(cast(Any, attached))
+        assert relay.ready.is_set()
+        assert received == [(1, {"op": "describe"})]
+
+    def test_a_line_over_the_limit_closes_the_relay(self, monkeypatch):
+        monkeypatch.setattr("runtime.launcher.RELAY_MAX_LINE", 100)
+        received = []
+        relay = Relay("e" * 64, lambda r, i, req: received.append(i))
+        attached = FakeAttached([(STDOUT, b"x" * 60), (STDOUT, b"x" * 60), (STDOUT, b'{"id": 2, "request": {}}\n')])
+        relay._pump(cast(Any, attached))
+        assert "longer than 100 bytes" in relay.error
+        assert relay.done.is_set()
+        assert received == []
+        attached.raw.shutdown.assert_called_once()
+        assert not relay.respond(1, {"ok": True})
+
+    def test_a_complete_line_over_the_limit_also_closes_the_relay(self, monkeypatch):
+        monkeypatch.setattr("runtime.launcher.RELAY_MAX_LINE", 100)
+        received = []
+        relay = Relay("e" * 64, lambda r, i, req: received.append(i))
+        attached = FakeAttached([(STDOUT, b"x" * 150 + b"\n" + b'{"id": 2, "request": {}}\n')])
+        relay._pump(cast(Any, attached))
+        assert "longer than 100 bytes" in relay.error
+        assert received == []
+
+    def test_responses_do_not_wait_for_a_relay_that_stops_reading(self, monkeypatch):
+        monkeypatch.setattr("runtime.launcher.RELAY_MAX_OUTGOING", 2)
+        blocked = threading.Event()
+        relay = Relay("e" * 64, lambda r, i, req: None)
+        raw = mock.Mock()
+        raw.sendall.side_effect = lambda _line: blocked.wait(5)
+        relay._raw = raw
+        relay._outgoing = queue.Queue(2)
+        threading.Thread(target=relay._write, args=(raw,), daemon=True).start()
+
+        started = time.monotonic()
+        results = [relay.respond(i, {"ok": True}) for i in range(10)]
+
+        assert time.monotonic() - started < 1
+        assert results[:2] == [True, True]
+        assert results[-1] is False
+        assert relay.error == "the relay does not read the responses"
+        raw.shutdown.assert_called()
+        blocked.set()
+
+    def test_large_responses_are_replaced_and_the_total_is_bounded(self, monkeypatch):
+        monkeypatch.setattr("runtime.launcher.RELAY_MAX_RESPONSE", 200)
+        monkeypatch.setattr("runtime.launcher.RELAY_MAX_OUTGOING_BYTES", 500)
+        relay = Relay("e" * 64, lambda r, i, req: None)
+        relay._raw = mock.Mock()
+
+        assert relay.respond(1, {"ok": True, "tables": ["x" * 300]})
+        line = json.loads(relay._outgoing.get_nowait() or b"")
+        assert line["response"]["error"]["code"] == "too_large"
+        relay._outgoing_bytes = 0
+        assert relay.respond(2, {"ok": True, "v": "y" * 150})
+        assert relay.respond(3, {"ok": True, "v": "y" * 150})
+        assert not relay.respond(4, {"ok": True, "v": "y" * 150})
+        assert relay.error == "the relay does not read the responses"
+
+    def test_too_many_lines_close_the_relay(self, monkeypatch):
+        monkeypatch.setattr("runtime.launcher.RELAY_MAX_LINES", 5)
+        received = []
+        relay = Relay("e" * 64, lambda r, i, req: received.append(i))
+        lines = b"".join(b'{"id": %d, "request": {}}\n' % i for i in range(3))
+        relay._pump(cast(Any, FakeAttached([(STDOUT, lines), (STDOUT, lines), (STDOUT, lines)])))
+        assert "more than 5 lines" in relay.error
+        assert received == [0, 1, 2]
+        assert relay.done.is_set()

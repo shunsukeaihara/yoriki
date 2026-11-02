@@ -60,6 +60,7 @@ yoriki/
 - buildxでamd64とarm64をビルドし、provenanceとSBOMを付けてDocker Hubへpushする。イメージ名は `<org>/yoriki-sandbox-<profile>`、タグは日付（`YYYY.MM.DD`）とする（例：`<org>/yoriki-sandbox-docs:2026.10.16`）。
 - 公開したdigest（index＝manifest listのdigest）をworkflowの出力とリリースノートに残す。管理画面でRuntime Profileの新しい版としてdigestを登録すると、以後に始めるRunで使われる（既定のRuntime Profileの場合。design.md §7.3）。
 - イメージにはラベル `org.yoriki.sandbox-contract=<契約番号>` を付ける。Runnerが対応しない契約番号のイメージは、管理画面で登録できない。契約を変えたらCONTRACT.mdとラベルの番号を同時に上げ、契約テストで検出できるようにする。
+- Runnerは対応する契約番号のイメージだけを起動する（Workerでもラベルを確かめる）。契約番号を上げたRunnerに更新するときは、次の順で行う：(1) 新しい契約のイメージを公開する、(2) 実行中・順番待ち・回答待ちのRunを終えるか停止する（Runは開始時のRuntime Profileの版を固定しているので、古い契約の版に固定されたRunは、更新後にSandboxを起動できずに失敗する）、(3) 本体を更新し、新しいイメージのdigestを既定のRuntime Profileの新しい版として登録する。古い契約の版は、更新後は新しいRunにも使えない。
 - リポジトリがprivateの間も、Docker Hubのイメージはpublicで公開できる。ただし、レイヤーの中身は誰でも見られるので、秘密情報や社内向けの設定を入れない。
 
 ---

@@ -85,7 +85,7 @@ def test_image_declares_the_contract():
             check=True,
         ).stdout
     )
-    assert labels["org.yoriki.sandbox-contract"] == "1"
+    assert labels["org.yoriki.sandbox-contract"] == "2"
     config = json.loads(
         subprocess.run(
             ["docker", "image", "inspect", "--format", "{{json .Config}}", IMAGE],

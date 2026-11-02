@@ -75,7 +75,7 @@ class FakeRegistry:
         )
 
 
-LABELS = {"org.yoriki.sandbox-contract": "1", "org.yoriki.sandbox-profile": "docs"}
+LABELS = {"org.yoriki.sandbox-contract": "2", "org.yoriki.sandbox-profile": "docs"}
 
 
 class TestParseReference:
@@ -103,7 +103,7 @@ class TestInspect:
     def test_multi_platform_index(self):
         registry = FakeRegistry({"linux/amd64": LABELS, "linux/arm64": LABELS})
         image = registry.inspect()
-        assert image.contract == 1
+        assert image.contract == 2
         assert image.platforms == ["linux/amd64", "linux/arm64"]
         assert set(image.platform_digests) == {"linux/amd64", "linux/arm64"}
         assert image.python_version == "3.13.16"
@@ -119,14 +119,14 @@ class TestInspect:
         assert image.platforms == ["linux/amd64"]
 
     def test_unsupported_contract(self):
-        registry = FakeRegistry({"linux/amd64": LABELS | {"org.yoriki.sandbox-contract": "2"}})
+        registry = FakeRegistry({"linux/amd64": LABELS | {"org.yoriki.sandbox-contract": "1"}})
         with pytest.raises(RegistryError, match="契約番号"):
             registry.inspect()
 
     def test_missing_or_mixed_labels(self):
         with pytest.raises(RegistryError, match="ラベル"):
             FakeRegistry({"linux/amd64": {}}).inspect()
-        mixed = {"linux/amd64": LABELS, "linux/arm64": LABELS | {"org.yoriki.sandbox-contract": "2"}}
+        mixed = {"linux/amd64": LABELS, "linux/arm64": LABELS | {"org.yoriki.sandbox-contract": "1"}}
         with pytest.raises(RegistryError, match="ラベル"):
             FakeRegistry(mixed).inspect()
 

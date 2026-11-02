@@ -3,6 +3,7 @@
 import base64
 import json
 import subprocess
+import threading
 import time
 
 import pytest
@@ -51,7 +52,7 @@ def samples(sandbox):
 
 def test_version(sandbox):
     version = sandbox.helper("version", {})
-    assert (version["ok"], version["contract"]) == (True, 1)
+    assert (version["ok"], version["contract"]) == (True, 2)
     assert version["python"].startswith("3.13.")
 
 
@@ -389,3 +390,106 @@ class TestEnv:
         assert sandbox.helper("version", {})["ok"]
         sandbox.sh("python -m pip uninstall -y xlsxwriter")
         assert sandbox.sh("python -c 'import xlsxwriter; print(xlsxwriter.__version__)'").strip() == before
+
+
+class TestRelay:
+    """`relay` と `yoriki_connector`（CONTRACT.md §1・§4.9）。Runnerの代わりに、テストが標準入出力で応答する"""
+
+    def _start(self, sandbox):
+        proc = subprocess.Popen(
+            ["docker", "exec", "-i", sandbox.name, "/opt/yoriki/bin/yoriki-sandbox", "relay"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        ready = json.loads(proc.stderr.readline())
+        assert ready == {"event": "ready", "socket": "/tmp/yoriki/connector.sock"}
+        return proc
+
+    def _script(self, sandbox, code: str):
+        """スクリプトを別のスレッドで動かす（応答を返すまで終わらない）"""
+        box: dict = {}
+        thread = threading.Thread(target=lambda: box.update(result=sandbox.exec(f"python - <<'PY'\n{code}\nPY")))
+        thread.start()
+        return thread, box
+
+    def _answer(self, proc, response) -> dict:
+        message = json.loads(proc.stdout.readline())
+        proc.stdin.write(json.dumps({"id": message["id"], "response": response}).encode() + b"\n")
+        proc.stdin.flush()
+        return message["request"]
+
+    def test_query_and_describe_through_the_relay(self, sandbox):
+        sandbox.sh("printf 'code,name\\r\\nA001,髙橋商店\\r\\nA002,\\r\\n' > /workspace/work/result.csv")
+        proc = self._start(sandbox)
+        try:
+            code = (
+                "import datetime, yoriki_connector as c\n"
+                "r = c.query('販売DB', 'SELECT code, name FROM vendors WHERE code IN (?, ?) AND d > ?',"
+                " ['A001', 2, datetime.date(2026, 1, 2)])\n"
+                "print(r.columns, r.rows, r.row_count, r.truncated, r.path)\n"
+                "print(c.describe('販売DB'))\n"
+                "try:\n    c.query('販売DB', 'SELECT 1')\nexcept c.ConnectorError as e:\n    print(e.code, e.message)\n"
+            )
+            thread, box = self._script(sandbox, code)
+            request = self._answer(
+                proc, {"ok": True, "path": "/workspace/work/result.csv", "row_count": 2, "truncated": False}
+            )
+            assert request == {
+                "op": "query",
+                "connector": "販売DB",
+                "sql": "SELECT code, name FROM vendors WHERE code IN (?, ?) AND d > ?",
+                "params": ["A001", "2", "2026-01-02"],
+            }
+            assert self._answer(proc, {"ok": True, "tables": [{"name": "vendors"}]}) == {
+                "op": "describe",
+                "connector": "販売DB",
+            }
+            self._answer(proc, {"ok": False, "error": {"code": "unavailable", "message": "Not now."}})
+            thread.join(timeout=60)
+            lines = box["result"].output.splitlines()
+            assert lines == [
+                "['code', 'name'] [{'code': 'A001', 'name': '髙橋商店'}, {'code': 'A002', 'name': ''}] 2 False "
+                "/workspace/work/result.csv",
+                "[{'name': 'vendors'}]",
+                "unavailable Not now.",
+            ]
+        finally:
+            proc.stdin.close()
+            assert proc.wait(timeout=30) == 0
+
+    def test_columns_with_the_same_name_are_kept(self, sandbox):
+        sandbox.sh("printf 'id,id,id\\r\\n1,2,3\\r\\n' > /workspace/work/dup.csv")
+        proc = self._start(sandbox)
+        try:
+            code = (
+                "import yoriki_connector as c\nr = c.query('db', 'SELECT a.id, b.id, c.id')\nprint(r.columns, r.rows)"
+            )
+            thread, box = self._script(sandbox, code)
+            self._answer(proc, {"ok": True, "path": "/workspace/work/dup.csv", "row_count": 1})
+            thread.join(timeout=60)
+            assert box["result"].output.strip() == "['id', 'id', 'id'] [{'id': '1', 'id_2': '2', 'id_3': '3'}]"
+        finally:
+            proc.stdin.close()
+            proc.wait(timeout=30)
+
+    def test_rate_limited_requests_are_retried(self, sandbox):
+        sandbox.sh("printf 'n\\r\\n1\\r\\n' > /workspace/work/one.csv")
+        proc = self._start(sandbox)
+        try:
+            thread, box = self._script(sandbox, "import yoriki_connector as c\nprint(c.query('db', 'SELECT 1').rows)")
+            self._answer(proc, {"ok": False, "error": {"code": "rate_limited", "message": "slow", "retry_after": 0.2}})
+            self._answer(proc, {"ok": True, "path": "/workspace/work/one.csv", "row_count": 1})
+            thread.join(timeout=60)
+            assert box["result"].output.strip() == "[{'n': '1'}]"
+        finally:
+            proc.stdin.close()
+            proc.wait(timeout=30)
+
+    def test_without_the_relay_scripts_get_an_error(self, sandbox):
+        sandbox.sh("rm -rf /tmp/yoriki")
+        output = sandbox.sh(
+            "python -c \"import yoriki_connector as c\ntry:\n    c.describe('db')\n"
+            'except c.ConnectorError as e:\n    print(e.code)"'
+        )
+        assert output.strip() == "unavailable"

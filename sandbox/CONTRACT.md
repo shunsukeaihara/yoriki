@@ -1,6 +1,6 @@
 # Sandboxの契約
 
-契約番号：**1**
+契約番号：**2**
 
 Runner（`api/` のLauncherとTool）とSandboxイメージの取り決め。イメージはラベル `org.yoriki.sandbox-contract` に、この番号を記録する。Runnerは対応する契約番号のイメージだけを、Runtime Profileとして登録させる（deployment.md §2.1）。
 
@@ -18,6 +18,7 @@ Runner（`api/` のLauncherとTool）とSandboxイメージの取り決め。イ
 | 補助コマンド | `/opt/yoriki/bin/yoriki-sandbox`（§4） |
 | Python | `/usr/local/bin/python3`（mise.tomlの版）。頻出ライブラリは、全依存の版とSHA-256を固定したlockから、このPythonに入れてある（design.md §7.6）。補助コマンドもこれで動く |
 | lock | `/opt/yoriki/requirements.lock`（イメージに入れたpackageの全依存の版とSHA-256）。追加するpackageの依存を解くときに使う |
+| `yoriki_connector` | Skillのスクリプトが社内DB等のConnectorを使うPythonのライブラリ（`/opt/yoriki/python`。イメージのPythonの `site-packages` の `.pth` で読めるようにする）。`query(connector, sql, params)`（`columns` はSQLのとおりの列名、`rows` は列名をキーにした行で、同じ名前の列は2つめから `名前_2`）・`describe(connector)`。要求は §4.9 の中継のソケットへ送り、結果のCSVはRunnerが `/workspace/input/connectors/` に置いたものを読む |
 | `/packages` | 空のディレクトリ。追加するpackageのbundle（wheelとlock）を、Launcherが読取り専用でmountする |
 | 入っているもの | harness.md §8.5のGNUのツールとPython、`images/<profile>/requirements.in` のライブラリ、日本語のフォント（Noto CJK） |
 | 入れないもの | 秘密情報、社内向けの設定、`sudo`。パッケージの追加（apt・ネットワークからのpip）はSandboxの中ではできない |
@@ -154,3 +155,14 @@ Runnerは、呼出しごとに次の環境変数だけを渡す（harness.md §8
 | `unreadable` | 壊れたファイル等で読めない |
 | `too_large` | 大きすぎる |
 | `timeout` | 時間がかかりすぎた（`grep`） |
+
+### 4.9 `relay`
+
+Skillのスクリプト（`yoriki_connector`）からの要求を、Runnerへ中継する（design.md §4.9.6）。Runnerが、スクリプトからConnectorを呼べるRunで、Sandboxを起動した後に `docker exec -i` で始める。
+
+- 引数のJSONは読まない。標準入力は、閉じられるまでRunnerからの応答に使う。閉じられたら終わる（待っている要求には応答しない）。
+- `/tmp/yoriki/connector.sock` にUnixドメインソケットを作り（ディレクトリは `0700`、ソケットは `0600`）、開いたら標準エラーに `{"event": "ready", "socket": "/tmp/yoriki/connector.sock"}` を1行で書く。
+- 1つの接続で1つの要求を受ける。要求はJSONのオブジェクトを1行（1MiBまで）で、`op`（`query`・`describe`）と引数（`connector`、`query` は `sql` と文字列の `params`）。中身はRunnerが確かめる（中継は確かめない）。
+- 要求を受けたら、標準出力に `{"id": N, "request": {...}}` を1行で書く。Runnerは標準入力に `{"id": N, "response": {...}}` を1行で返し、中継はそれを接続へ1行で返して閉じる。
+- 応答は成功が `{"ok": true, ...}`、失敗が `{"ok": false, "error": {"code": "...", "message": "..."}}`。頻度の上限では `code` が `rate_limited` で、`retry_after`（秒）を付ける。待っている要求が16を超えたら、中継が `busy` で断る。
+- 中継はSandboxの中のプロセスなので、Sandboxの中のコマンドから止められる・置き換えられる。Runnerは届いた要求をいつも確かめ直すので、権限の境界ではない（Runnerは止まった中継を始め直す）。

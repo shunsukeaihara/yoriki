@@ -11,7 +11,7 @@ from connector.errors import ConnectorError, ConnectorErrorKind
 from connector.factories import ConnectorFactory
 from harness import script_connectors
 from harness.connectors import DATASOURCE_TOOL_NAMES
-from harness.sandbox import SCRIPT_REQUESTS_BUSY, SandboxSession
+from harness.sandbox import SCRIPT_REQUESTS_BUSY, SCRIPT_REQUESTS_PER_CALL, SandboxSession
 from harness.script_connectors import ScriptConnectors
 from run.models import RunEvent, RunEventKind, ToolInvocation, ToolStatus
 from run.tasks import claim_run
@@ -314,3 +314,27 @@ def test_unexpected_errors_close_the_record(attempt, monkeypatch):
     assert invocation.status == ToolStatus.FAILED
     assert invocation.ended is not None
     assert (invocation.value or {})["error"] == "internal"
+
+
+def test_invalid_requests_also_count_toward_the_rate_limit(attempt, monkeypatch):
+    monkeypatch.setattr(script_connectors, "MAX_CALLS_PER_MINUTE", 2)
+    handler = make(attempt, clock=Clock())
+    assert handler.handle({"op": "drop"})["error"]["code"] == "invalid_argument"
+    assert handler.handle({"op": "drop"})["error"]["code"] == "invalid_argument"
+
+    assert handler.handle(QUERY)["error"]["code"] == "rate_limited"
+    assert FakeDatasource.calls == []
+
+
+def test_session_answers_a_limited_number_of_requests_per_call(attempt):
+    session = SandboxSession(attempt.run, attempt)
+    session.script_handler = FakeHandler()
+    relay: Any = FakeRelay()
+    for i in range(SCRIPT_REQUESTS_PER_CALL + 3):
+        session.script_requests.put((relay, i, {"op": "describe"}))
+
+    session.serve_script_requests()
+    assert len(relay.responses) == SCRIPT_REQUESTS_PER_CALL
+    session.serve_script_requests()
+    assert len(relay.responses) == SCRIPT_REQUESTS_PER_CALL + 3
+    session.close()

@@ -57,6 +57,7 @@ SNAPSHOT_PATHS = ["work", "output"]
 MAX_OUTPUT_FILES = 200
 # Skillのスクリプトからの要求を、処理を待つ列に積める数（design.md §4.9.6）。あふれた要求への応答
 MAX_SCRIPT_REQUESTS = 32
+SCRIPT_REQUESTS_PER_CALL = 8
 SCRIPT_REQUESTS_BUSY = {
     "ok": False,
     "error": {"code": "busy", "message": "Too many requests are waiting. Retry later.", "retry_after": 1},
@@ -464,8 +465,11 @@ class SandboxSession:
             self.relay_failed = True
 
     def serve_script_requests(self, timeout: float = 0) -> None:
-        """届いている要求を処理する。`timeout` 秒まで、最初の要求を待つ。Runnerのスレッドから呼ぶ"""
-        while True:
+        """届いている要求を処理する。`timeout` 秒まで、最初の要求を待つ。Runnerのスレッドから呼ぶ。
+
+        1回に処理するのは `SCRIPT_REQUESTS_PER_CALL` 件まで（要求が届き続けても、呼び出し側がleaseの延長・取消の
+        確かめ・ステップの区切りへ戻れるように）。残りは次に呼んだときに処理する"""
+        for _ in range(SCRIPT_REQUESTS_PER_CALL):
             try:
                 relay, request_id, request = (
                     self.script_requests.get(timeout=timeout) if timeout else self.script_requests.get_nowait()

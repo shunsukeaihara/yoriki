@@ -69,7 +69,10 @@ class ScriptConnectors:
         return bool(catalog_names(self.run)) and bool(set(DATASOURCE_TOOL_NAMES) & self.exposed())
 
     def handle(self, request: dict[str, Any]) -> dict[str, Any]:
-        """要求を処理して、スクリプトへ返す応答を作る"""
+        """要求を処理して、スクリプトへ返す応答を作る。頻度の上限は、断る要求も含めて数える（中継はSandboxの
+        中のもので、不正な要求を流し続けられるため）"""
+        if limited := self._rate_limit():
+            return limited
         operation = request.get("op")
         name = OPERATIONS.get(operation) if isinstance(operation, str) else None
         if name is None:
@@ -86,11 +89,11 @@ class ScriptConnectors:
         tool = next(t for t in make_datasource_tools(names) if t.name == name)
         if problem := tool.validate(arguments):
             return _error("invalid_argument", problem)
-        if limited := self._limit():
+        if limited := self._run_limit():
             return limited
         return self._execute(name, arguments)
 
-    def _limit(self) -> dict[str, Any] | None:
+    def _rate_limit(self) -> dict[str, Any] | None:
         now = self.clock()
         while self.recent and now - self.recent[0] >= 60:
             self.recent.popleft()
@@ -101,6 +104,10 @@ class ScriptConnectors:
                 f"Too many connector calls from scripts (up to {MAX_CALLS_PER_MINUTE} per minute).",
                 retry_after=round(retry_after, 1),
             )
+        self.recent.append(now)
+        return None
+
+    def _run_limit(self) -> dict[str, Any] | None:
         if self.count is None:
             self.count = ToolInvocation.objects.filter(run=self.run, call_id__startswith=SCRIPT_CALL_PREFIX).count()
         if self.count >= MAX_CALLS_PER_RUN:
@@ -110,7 +117,6 @@ class ScriptConnectors:
                 "the rows you need with fewer queries (for example WHERE ... IN (...) or one query for the whole "
                 "table), then join them in the script.",
             )
-        self.recent.append(now)
         self.count += 1
         return None
 

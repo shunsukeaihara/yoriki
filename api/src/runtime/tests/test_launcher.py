@@ -2,6 +2,8 @@
 （design.md §7.2の対策の1）"""
 
 import io
+import queue
+import threading
 import time
 import uuid
 from decimal import Decimal
@@ -356,3 +358,32 @@ class TestRelay:
         assert received == []
         attached.raw.shutdown.assert_called_once()
         assert not relay.respond(1, {"ok": True})
+
+    def test_a_complete_line_over_the_limit_also_closes_the_relay(self, monkeypatch):
+        monkeypatch.setattr("runtime.launcher.RELAY_MAX_LINE", 100)
+        received = []
+        relay = Relay("e" * 64, lambda r, i, req: received.append(i))
+        attached = FakeAttached([(STDOUT, b"x" * 150 + b"\n" + b'{"id": 2, "request": {}}\n')])
+        relay._pump(cast(Any, attached))
+        assert "longer than 100 bytes" in relay.error
+        assert received == []
+
+    def test_responses_do_not_wait_for_a_relay_that_stops_reading(self, monkeypatch):
+        monkeypatch.setattr("runtime.launcher.RELAY_MAX_OUTGOING", 2)
+        blocked = threading.Event()
+        relay = Relay("e" * 64, lambda r, i, req: None)
+        raw = mock.Mock()
+        raw.sendall.side_effect = lambda _line: blocked.wait(5)
+        relay._raw = raw
+        relay._outgoing = queue.Queue(2)
+        threading.Thread(target=relay._write, args=(raw,), daemon=True).start()
+
+        started = time.monotonic()
+        results = [relay.respond(i, {"ok": True}) for i in range(10)]
+
+        assert time.monotonic() - started < 1
+        assert results[:2] == [True, True]
+        assert results[-1] is False
+        assert relay.error == "the relay does not read the responses"
+        raw.shutdown.assert_called()
+        blocked.set()

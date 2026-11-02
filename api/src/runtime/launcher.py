@@ -8,6 +8,7 @@ Dockerの操作はDockerのSDK（docker-py）で行い、apiのイメージにdo
 import contextlib
 import json
 import logging
+import queue
 import socket
 import threading
 from collections.abc import Callable, Iterator
@@ -222,14 +223,20 @@ class Exec:
         return next((e["pgid"] for e in self.events if e.get("event") == "started"), None)
 
 
-# 中継から受け取る1行の大きさの上限（バイト）。中継はSandboxの中のもので置き換えられうるので、Worker側でも区切る
+# 中継から受け取る1行の大きさの上限（バイト）と、書く前の応答を積める数。中継はSandboxの中のもので置き換えられ
+# うるので、Worker側でも区切る
 RELAY_MAX_LINE = 2 * 1024 * 1024
+RELAY_MAX_OUTGOING = 64
 
 
 class Relay:
     """Sandboxの中の `yoriki-sandbox relay`（CONTRACT.md §4.9）との通信路。Skillのスクリプトからの要求を、
     受け取るたびに `on_request` へ渡す（受け取るスレッドで呼ぶので、`on_request` はDBに触らず、列に積むだけにする）。
-    応答は `respond` で返す。要求の中身はSandboxの中で作られたものなので、確かめるのは受け取った側"""
+    応答は `respond` で返す。要求の中身はSandboxの中で作られたものなので、確かめるのは受け取った側。
+
+    中継はSandboxの中のもので、止められる・置き換えられるので、Worker側で守る：受け取る1行は `RELAY_MAX_LINE`
+    までで、超えたら閉じる。応答は書込みのスレッドが書き、呼んだスレッド（Runner）は書き終わりを待たない。中継が
+    読まずに書込みが詰まり、書く前の応答が `RELAY_MAX_OUTGOING` を超えたら閉じる"""
 
     def __init__(self, exec_id: str, on_request: Callable[["Relay", int, dict[str, Any]], None]):
         self.exec_id = exec_id
@@ -238,27 +245,47 @@ class Relay:
         self.done = threading.Event()
         self.error = ""
         self._raw: socket.socket | None = None
+        self._closed = False
         self._lock = threading.Lock()
+        self._outgoing: queue.Queue[bytes | None] = queue.Queue(RELAY_MAX_OUTGOING)
 
     def respond(self, request_id: int, response: dict[str, Any]) -> bool:
-        """応答を返す。通信路が閉じていて返せなければFalse"""
+        """応答を書込みの列に積む。通信路が閉じていて返せなければFalse。待たない"""
         line = json.dumps({"id": request_id, "response": response}, ensure_ascii=False).encode() + b"\n"
         with self._lock:
-            if self._raw is None or self.done.is_set():
+            if self._closed or self.done.is_set():
                 return False
             try:
-                self._raw.sendall(line)
-            except OSError:
-                return False
-        return True
+                self._outgoing.put_nowait(line)
+                return True
+            except queue.Full:
+                pass
+        self.error = "the relay does not read the responses"
+        logger.warning("relay %s: %s", self.exec_id[:12], self.error)
+        self.close()
+        return False
 
     def close(self) -> None:
-        """標準入力を閉じる（中継のプロセスは終わる）。待っている要求には応答しない"""
+        """標準入力を閉じる（中継のプロセスは終わる）。待っている要求には応答しない。待たない"""
         with self._lock:
-            if self._raw is not None:
-                with contextlib.suppress(OSError):
-                    self._raw.shutdown(socket.SHUT_WR)
-                self._raw = None
+            self._closed = True
+            raw = self._raw
+        if raw is not None:
+            # 書込みのスレッドが詰まっていても、shutdownで書込みが失敗して抜ける
+            with contextlib.suppress(OSError):
+                raw.shutdown(socket.SHUT_WR)
+        with contextlib.suppress(queue.Full):
+            self._outgoing.put_nowait(None)
+
+    def _write(self, raw: socket.socket) -> None:
+        while True:
+            line = self._outgoing.get()
+            if line is None or self._closed:
+                return
+            try:
+                raw.sendall(line)
+            except OSError:
+                return
 
     def _pump(self, attached: "_Attached") -> None:
         pending_out = pending_err = b""
@@ -266,33 +293,40 @@ class Relay:
             with attached as frames:
                 with self._lock:
                     self._raw = attached.raw
+                if attached.raw is not None:
+                    threading.Thread(
+                        target=self._write,
+                        args=(attached.raw,),
+                        name=f"sandbox-relay-w-{self.exec_id[:12]}",
+                        daemon=True,
+                    ).start()
                 for stream, chunk in frames:
+                    lines = b""
                     if stream == STDOUT:
                         lines, _sep, pending_out = (pending_out + chunk).rpartition(b"\n")
-                        for line in lines.splitlines():
-                            self._dispatch(line)
                     elif stream == STDERR:
                         lines, _sep, pending_err = (pending_err + chunk).rpartition(b"\n")
-                        if any(e.get("event") == "ready" for e in _events(lines)):
-                            self.ready.set()
-                    if len(pending_out) > RELAY_MAX_LINE or len(pending_err) > RELAY_MAX_LINE:
+                    longest = max(len(pending_out), len(pending_err), *(len(line) for line in lines.split(b"\n")))
+                    if longest > RELAY_MAX_LINE:
                         # 上限を超える行を送る中継は壊れているか置き換えられている。読むのをやめて閉じる
                         self.error = f"the relay sent a line longer than {RELAY_MAX_LINE} bytes"
                         logger.warning("relay %s: %s", self.exec_id[:12], self.error)
-                        self.close()
                         break
+                    if stream == STDOUT:
+                        for line in lines.splitlines():
+                            self._dispatch(line)
+                    elif any(e.get("event") == "ready" for e in _events(lines)):
+                        self.ready.set()
         except (OSError, DockerException) as exc:
             self.error = str(exc)
         finally:
+            self.close()
             with self._lock:
                 self._raw = None
             self.done.set()
             self.ready.set()
 
     def _dispatch(self, line: bytes) -> None:
-        if len(line) > RELAY_MAX_LINE:
-            logger.warning("relay %s: ignoring a line longer than the limit", self.exec_id[:12])
-            return
         try:
             message = json.loads(line)
             request_id, request = message["id"], message["request"]

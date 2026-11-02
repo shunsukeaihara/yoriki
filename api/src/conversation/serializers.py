@@ -257,7 +257,8 @@ class LaunchedTaskRunSerializer(serializers.ModelSerializer):
         return fixed.get("name") or (obj.task.name if obj.task else "")
 
     def get_response(self, obj: Run) -> str:
-        message = obj.conversation.messages.filter(role=MessageRole.AGENT).order_by("-pk").first()
+        # このRunの応答（修正チャットのように、1つの会話に複数のRunがあっても混ざらないように）
+        message = obj.messages.filter(role=MessageRole.AGENT).order_by("-pk").first()
         return message.body if message else ""
 
 

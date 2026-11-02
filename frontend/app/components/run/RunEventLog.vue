@@ -114,7 +114,7 @@ const formatArguments = (call: ToolCallInfo) => JSON.stringify(call.arguments, n
             }}</pre>
           </div>
         </UChatTool>
-        <RunScriptCalls v-if="entry.scripts.length" :calls="entry.scripts" class="ml-6" />
+        <RunScriptCalls v-if="entry.scripts.length" :calls="entry.scripts" during class="ml-6" />
       </div>
       <RunScriptCalls v-else-if="entry.kind === 'scripts'" :calls="entry.scripts" />
       <p v-else class="flex items-start gap-2 text-sm text-muted">

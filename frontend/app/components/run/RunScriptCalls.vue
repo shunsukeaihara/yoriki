@@ -3,7 +3,7 @@
  * Skill のスクリプトからの Connector の呼出し（design.md §4.9.6）。作業の記録の中で、まとめて折り畳んで出す。
  * 結果の行はモデルにもここにも出さず、行数と失敗の理由だけを出す。
  */
-const props = defineProps<{ calls: ScriptCall[] }>()
+const props = withDefaults(defineProps<{ calls: ScriptCall[]; during?: boolean }>(), { during: false })
 const { t } = useI18n()
 
 // 1回の Run で 1,000 回まで呼べるので、先頭から決まった数ずつ出す
@@ -12,6 +12,19 @@ const limit = ref(PAGE)
 
 const failed = computed(() => props.calls.filter((c) => c.status === ToolStatus.FAILED).length)
 const shown = computed(() => props.calls.slice(0, limit.value))
+
+// コマンドの下に出すときは、その終わりを待つ間に処理した照会（バックグラウンドのジョブからの照会も含みうる。
+// どのジョブからの要求かは記録していない）
+const summary = computed(() => {
+  const n = props.calls.length
+  if (props.during)
+    return failed.value
+      ? t('この間に処理したスクリプトからの照会（{n}件、失敗 {failed}件）', { n, failed: failed.value })
+      : t('この間に処理したスクリプトからの照会（{n}件）', { n })
+  return failed.value
+    ? t('スクリプトからの照会（{n}件、失敗 {failed}件）', { n, failed: failed.value })
+    : t('スクリプトからの照会（{n}件）', { n })
+})
 
 const outcome = (call: ScriptCall) => {
   switch (call.status) {
@@ -36,11 +49,7 @@ const outcome = (call: ScriptCall) => {
       icon="i-lucide-database"
       trailing-icon="i-lucide-chevron-down"
     >
-      {{
-        failed
-          ? $t('スクリプトからの照会（{n}件、失敗 {failed}件）', { n: calls.length, failed })
-          : $t('スクリプトからの照会（{n}件）', { n: calls.length })
-      }}
+      {{ summary }}
     </DBtn>
     <template #content>
       <ul class="mt-1 grid gap-2 border-l-2 border-default pl-3 text-xs">

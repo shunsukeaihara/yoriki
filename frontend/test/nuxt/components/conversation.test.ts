@@ -261,7 +261,7 @@ describe('RunEventLog', () => {
       ['scripts', ['s3']],
       ['tool', []],
     ])
-    expect(wrapper.text()).toContain('スクリプトからの照会（2件、失敗 1件）')
+    expect(wrapper.text()).toContain('この間に処理したスクリプトからの照会（2件、失敗 1件）')
     expect(wrapper.text()).toContain('スクリプトからの照会（1件）')
   })
 

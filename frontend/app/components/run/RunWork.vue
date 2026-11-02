@@ -59,6 +59,8 @@ const fetchScriptCalls = async () => {
 // 読んでいる間に求められたら、読み終えてからもう一度読む（Run の終わりの後の呼出しを取りこぼさない）
 let loadingScriptCalls = false
 let refreshAgain = false
+// 読めなかったら、記録の中に「読み直す」を出す（Run が終わった後は、ほかに読み直す機会がない）
+const scriptCallsFailed = ref(false)
 const refreshScriptCalls = async () => {
   if (!props.showLog) return
   if (loadingScriptCalls) {
@@ -71,6 +73,9 @@ const refreshScriptCalls = async () => {
       refreshAgain = false
       await fetchScriptCalls()
     } while (refreshAgain)
+    scriptCallsFailed.value = false
+  } catch {
+    scriptCallsFailed.value = true
   } finally {
     loadingScriptCalls = false
   }
@@ -173,7 +178,20 @@ const unsentNotice = computed(() => {
     <RunTodoList v-if="run.todos.length" :todos="run.todos" />
 
     <template v-if="showLog">
-      <RunEventLog v-if="active" :events="events" :script-calls="scriptCalls" active />
+      <template v-if="active">
+        <RunEventLog :events="events" :script-calls="scriptCalls" active />
+        <DBtn
+          v-if="scriptCallsFailed"
+          variant="link"
+          color="warning"
+          size="xs"
+          class="px-0"
+          icon="i-lucide-refresh-cw"
+          @click="refreshScriptCalls"
+        >
+          {{ $t('スクリプトからの照会の記録を読めませんでした。読み直す') }}
+        </DBtn>
+      </template>
       <UCollapsible v-else v-model:open="open">
         <DBtn
           variant="link"
@@ -187,7 +205,20 @@ const unsentNotice = computed(() => {
         <template #content>
           <div class="mt-2 border-l-2 border-default pl-3">
             <USkeleton v-if="loading && !events.length" class="h-6 w-48" />
-            <RunEventLog v-else :events="events" :script-calls="scriptCalls" />
+            <template v-else>
+              <RunEventLog :events="events" :script-calls="scriptCalls" />
+              <DBtn
+                v-if="scriptCallsFailed"
+                variant="link"
+                color="warning"
+                size="xs"
+                class="px-0"
+                icon="i-lucide-refresh-cw"
+                @click="refreshScriptCalls"
+              >
+                {{ $t('スクリプトからの照会の記録を読めませんでした。読み直す') }}
+              </DBtn>
+            </template>
           </div>
         </template>
       </UCollapsible>

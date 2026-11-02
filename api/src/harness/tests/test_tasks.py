@@ -263,3 +263,65 @@ def test_runs_accepted_with_a_task_tool_list_keep_it():
     assert tasks.allowed_tools(old, {"read", "shell"}) == {"read"}
     new = Run(manifest={"fixed": {"task": {}}})
     assert tasks.allowed_tools(new, {"read", "shell"}) == {"read", "shell"}
+
+
+# --- チャットから起動したRun（authorization.md §6） ---
+
+
+def _department_task_with_connector(manager, department):
+    connector = ConnectorFactory.create(
+        name="経理DB", scope=ConnectorScope.DEPARTMENT, department=department, version__tables=TABLES
+    )
+    skill = SkillFactory.create(scope=SkillScope.COMPANY, name="照合", owner=None)
+    SkillVersionFactory.create(skill=skill, tools=["datasource_query"], connectors=[])
+    return TaskDefinitionFactory.create(
+        scope=TaskScope.DEPARTMENT,
+        department=department,
+        created_by=manager,
+        chat_launchable=True,
+        revision__skills=[{"skill": skill.uid, "version": 1}],
+        revision__connectors=[connector.uid],
+    )
+
+
+def test_chat_launched_run_stops_when_the_launcher_leaves_the_department(app_user):
+    """チャットから起動したRunは、起動した人が今もそのタスクを起動できる立場かを区切りごとに確かめる"""
+    department = DepartmentFactory.create()
+    manager = grant(UserFactory.create(), AppPermission.MANAGE_DEPARTMENT_TASKS)
+    DepartmentMembershipFactory.create(department=department, user=manager)
+    task = _department_task_with_connector(manager, department)
+    membership = DepartmentMembershipFactory.create(department=department, user=app_user)
+    run = start_task_run(task, inputs={}, actor=app_user, launch=RunLaunch.CHAT)
+    assert (run.owner, run.launch) == (app_user, RunLaunch.CHAT)
+    membership.delete()  # 起動した後に部門を離れた
+    run = execute(run, FakeAdapter([]))
+    assert (run.status, run.end_reason) == (RunStatus.FAILED, RunEndReason.TASK)
+    assert "部門から外れました" in run.error
+
+
+def test_chat_launched_run_is_refused_the_connector_the_launcher_cannot_use(app_user, monkeypatch):
+    """Connectorの操作のたびに、起動した人の今の権限でも判定する（タスクの範囲では使えても断る）"""
+    department = DepartmentFactory.create()
+    manager = grant(UserFactory.create(), AppPermission.MANAGE_DEPARTMENT_TASKS)
+    DepartmentMembershipFactory.create(department=department, user=manager)
+    task = _department_task_with_connector(manager, department)
+    DepartmentMembershipFactory.create(department=department, user=app_user)
+    run = start_task_run(task, inputs={}, actor=app_user, launch=RunLaunch.CHAT)
+    monkeypatch.setattr(tasks.checks, "launcher_connector_permitted", lambda user, connector: False)
+    adapter = FakeAdapter(
+        [calls(("c1", "datasource_query", {"connector": "経理DB", "sql": "SELECT 1"})), reply("使えませんでした")]
+    )
+    run = execute(run, adapter)
+    [queried] = results(run, "datasource_query")
+    assert queried["is_error"]
+    assert "cannot be used now" in text_of(queried)
+
+
+def test_chat_launched_run_stops_when_the_launcher_is_deactivated(app_user):
+    task = TaskDefinitionFactory.create(scope=TaskScope.COMPANY, created_by=app_user, chat_launchable=True)
+    run = start_task_run(task, inputs={}, actor=app_user, launch=RunLaunch.CHAT)
+    app_user.is_active = False
+    app_user.save(update_fields=["is_active"])
+    run = execute(run, FakeAdapter([]))
+    assert (run.status, run.end_reason) == (RunStatus.FAILED, RunEndReason.TASK)
+    assert "起動した人" in run.error

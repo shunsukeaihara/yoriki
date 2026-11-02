@@ -34,6 +34,11 @@ const connectorChoices = computed(() =>
   conversation.value?.modelProfileInfo?.supportsTools ? usableConnectors.value : [],
 )
 
+// 入力欄の `/` の一覧に出す、チャットから起動できるタスク（authorization.md §5.3）
+const { items: launchableTasks, fetchAll: fetchLaunchableTasks } = useFetchAll(() =>
+  api.launchableTasks().list({ pageSize: 200 }),
+)
+
 const messages = useConversationMessages(conversationId)
 const { items: runs, fetchAll: fetchRuns } = useFetchAll(() =>
   api.runs().list({ conversation: conversationId, pageSize: 200 }),
@@ -44,7 +49,14 @@ const {
   loading: filesLoading,
   fetchAll: fetchFiles,
 } = useFetchAll(() => api.conversations(conversationId).artifacts().list({ pageSize: 200 }))
-await Promise.all([messages.refresh(), fetchRuns(), fetchFiles(), fetchSkills(), fetchConnectors()])
+await Promise.all([
+  messages.refresh(),
+  fetchRuns(),
+  fetchFiles(),
+  fetchSkills(),
+  fetchConnectors(),
+  fetchLaunchableTasks(),
+])
 
 const activeRun = computed(() => conversation.value?.activeRun ?? null)
 const activeRunId = computed(() => activeRun.value?.id ?? null)
@@ -95,13 +107,28 @@ const sync = useDebounceFn(syncNow, 300, { maxWait: 2000 })
 
 // 接続し直したときは、切れていた間の変化（保存しない通知、LLM の出力の差分）を取得し直す
 const live = useRunLive(activeRunId, { onEvent: () => sync(), onReconnect: () => sync() })
-// 別のタブや外部のスレッドから、この会話で新しい Run が始まった場合
+// この会話から起動したタスクの Run（カードの状態と応答を出す。タスクの Run は別の会話で動く）
+const launchedRunIds = computed(() => new Set(messages.items.value.flatMap((m) => (m.taskRun ? [m.taskRun.id] : []))))
+// 別のタブや外部のスレッドから、この会話で新しい Run が始まった場合と、起動したタスクの Run の状態が変わった場合
 useUserEvents(
   (event) => {
-    if (event.type === 'run.status' && event.conversation === conversationId && event.run !== activeRunId.value) sync()
+    if (event.type !== 'run.status') return
+    if (event.conversation === conversationId && event.run !== activeRunId.value) sync()
+    else if (launchedRunIds.value.has(event.run)) sync()
   },
   { onReconnect: () => sync() },
 )
+
+// --- タスクの起動 ---
+
+const launchTask = ref<LaunchableTask | null>(null)
+const launchOpen = ref(false)
+const openLaunch = (task: LaunchableTask) => {
+  launchTask.value = task
+  launchOpen.value = true
+}
+// 版が変わったときは、候補（入力の項目）を読み直す。起動した・受け付けたかが分からないときは、カードを読み直す
+const onLaunchConflicted = () => fetchLaunchableTasks()
 
 // --- 表示 ---
 
@@ -303,6 +330,8 @@ const menuItems = computed(() => [
                 </template>
                 <template v-else-if="item?.kind === 'message'">
                   <MarkdownContent v-if="item.message.role === MessageRole.AGENT" :text="item.message.body" />
+                  <!-- この会話から起動したタスクの Run -->
+                  <TaskLaunchCard v-else-if="item.message.taskRun" :run="item.message.taskRun" />
                   <!-- システムのメッセージ（次の依頼を始められなかった理由等） -->
                   <p
                     v-else-if="item.message.role === MessageRole.SYSTEM"
@@ -371,6 +400,7 @@ const menuItems = computed(() => [
             :skills="usableSkills"
             :editable-skills="editableSkills"
             :connectors="connectorChoices"
+            :tasks="launchableTasks"
             :sensitive="sensitive"
             :has-open-question="hasOpenQuestion"
             :attachments="attachments.items.value"
@@ -382,6 +412,15 @@ const menuItems = computed(() => [
             @attach="attach"
             @remove-attachment="attachments.remove"
             @retry-attachments="attachments.upload(conversationId)"
+            @launch="openLaunch"
+          />
+          <TaskLaunchDialog
+            v-model:open="launchOpen"
+            :task="launchTask"
+            :conversation-id="conversationId"
+            @started="syncNow"
+            @unknown="syncNow"
+            @conflicted="onLaunchConflicted"
           />
         </UContainer>
       </template>

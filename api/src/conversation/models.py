@@ -93,6 +93,16 @@ class ConversationMessage(models.Model):
     # Skillの編集の依頼（{"id", "name"}。新しいSkillを作る依頼ではidが空）。空でなければ、このメッセージで始めるRunは
     # Skillの編集のRunになる（入力欄の `/` での明示か、request_skill_edit の承認。design.md §11.6）
     skill_edit = models.JSONField(_("Skillの編集の依頼"), default=dict, blank=True)
+    # チャットから起動したタスクのRun（authorization.md §6）。起動した会話に、そのRunを指すカードとして出す。タスクの
+    # Runは会話の文脈を引き継がず、このメッセージも会話のRunの文脈には入らない（文脈はRunEventから組み立てる）
+    task_run = models.ForeignKey(
+        "run.Run",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="launch_messages",
+        verbose_name=_("起動したタスクのRun"),
+    )
     # 画面が送るID。再送されたメッセージを二重に受け付けない（design.md §5.5）
     client_message_id = models.CharField(_("クライアントのメッセージID"), max_length=64, blank=True)
 

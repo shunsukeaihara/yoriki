@@ -192,6 +192,10 @@ export type TaskSkill = Api<'TaskSkill'>
 export type TaskReference = Api<'TaskReference'>
 export type TaskSkillChoice = Api<'TaskSkillChoice'>
 export type DestinationChoice = Api<'DestinationChoice'>
+export type TaskChatLaunch = Api<'TaskChatLaunchRequest'>
+// チャットから起動できるタスク（名前・説明・入力の項目だけ）と、会話のカードに出す起動したRun（authorization.md §7.1）
+export type LaunchableTask = Api<'LaunchableTask'>
+export type LaunchedTaskRun = Api<'LaunchedTaskRun'>
 export type DestinationKindEnum = Schemas['DestinationKindEnum']
 // 手動実行の入力の値。キーは項目の名前（変換しない）。型がファイルの項目は File
 export type TaskRunInputs = Record<string, string | number | boolean | File | null>

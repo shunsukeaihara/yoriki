@@ -175,19 +175,15 @@ const createAPI = () => {
       delete: () => http.delete<undefined, undefined>(`app/v1/tasks/${id}/`),
       suspend: () => http.post<TaskDetail, TaskDetail>(`app/v1/tasks/${id}/suspend/`),
       resume: () => http.post<TaskDetail, TaskDetail>(`app/v1/tasks/${id}/resume/`),
-      // 手動実行。いつも multipart で送り、inputs はJSONの文字列にする（項目の名前のキーを変換しないため）。
-      // 型がファイルの項目は、項目の名前のフィールドでファイルを付ける。version は画面で確かめた版（違えば409）で、
-      // 入力の項目の名前と重ならないようクエリで送る
-      run: (version: number, inputs: TaskRunInputs) => {
-        const form = new FormData()
-        const values: Record<string, unknown> = {}
-        for (const [name, value] of Object.entries(inputs)) {
-          if (value instanceof File) form.append(name, value)
-          else if (value !== null && value !== '') values[name] = value
-        }
-        form.append('inputs', JSON.stringify(values))
-        return http.post<Run, Run>(`app/v1/tasks/${id}/run/`, form, { timeout: UPLOAD_TIMEOUT, params: { version } })
-      },
+      // 手動実行。いつも multipart で送る（taskRunForm()）。version は画面で確かめた版（違えば409）で、入力の項目の
+      // 名前と重ならないようクエリで送る
+      run: (version: number, inputs: TaskRunInputs) =>
+        http.post<Run, Run>(`app/v1/tasks/${id}/run/`, taskRunForm(inputs), {
+          timeout: UPLOAD_TIMEOUT,
+          params: { version },
+        }),
+      // チャットから起動できるかの切り替え（版を作らない）
+      chatLaunch: (data: TaskChatLaunch) => http.post<TaskDetail, TaskDetail>(`app/v1/tasks/${id}/chat_launch/`, data),
       // 版は版番号で識別する
       revisions: () => ({
         list: (params?: ListParams) =>
@@ -200,6 +196,8 @@ const createAPI = () => {
           list: (params?: ListParams) =>
             http.get<Paginated<Message>, Paginated<Message>>(`app/v1/tasks/${id}/runs/${rid}/messages/`, { params }),
         }),
+        // 停止。チャットから起動した人も、自分が起動したRunを止められる
+        cancel: (data: RunCancel) => http.post<TaskRun, TaskRun>(`app/v1/tasks/${id}/runs/${rid}/cancel/`, data),
       }),
       // Runの配信の履歴と送り直し（エージェントは動かし直さない）
       deliveries: (did?: string) => ({
@@ -211,6 +209,18 @@ const createAPI = () => {
         http.get<Paginated<TaskSkillChoice>, Paginated<TaskSkillChoice>>('app/v1/tasks/skill_choices/', { params }),
       connectorChoices: (params: TaskChoiceParams) =>
         http.get<Paginated<AppConnector>, Paginated<AppConnector>>('app/v1/tasks/connector_choices/', { params }),
+    }),
+    // チャットから起動できるタスク（入力欄の `/` の候補）と起動。起動は手動実行と同じく multipart で送り、起動した会話と
+    // 画面で確かめた版はクエリで送る。起動した会話にはRunを指すカードが足される
+    launchableTasks: (id?: string) => ({
+      list: (params?: ListParams) =>
+        http.get<Paginated<LaunchableTask>, Paginated<LaunchableTask>>('app/v1/launchable_tasks/', { params }),
+      // clientRequestId は起動ごとに画面が作るID。応答が失われた後の再送では、前に起動したRunが返る
+      run: (conversation: string, version: number, clientRequestId: string, inputs: TaskRunInputs) =>
+        http.post<TaskRun, TaskRun>(`app/v1/launchable_tasks/${id}/run/`, taskRunForm(inputs), {
+          timeout: UPLOAD_TIMEOUT,
+          params: { conversation, version, client_request_id: clientRequestId },
+        }),
     }),
     // タスクの編集画面で選ぶ出口の候補（タスクを管理できる範囲の、停止していないもの）
     destinations: {
@@ -396,6 +406,21 @@ const toFormData = (data: Record<string, string | number | Blob | null | undefin
     if (value === null || value === undefined) continue
     form.append(key, value instanceof Blob ? value : String(value))
   }
+  return form
+}
+
+/**
+ * タスクの手動実行・チャットからの起動の multipart の本文。inputs はJSONの文字列にする（項目の名前のキーを変換しない
+ * ため）。型がファイルの項目は、項目の名前のフィールドでファイルを付ける。空の値は送らない
+ */
+const taskRunForm = (inputs: TaskRunInputs) => {
+  const form = new FormData()
+  const values: Record<string, unknown> = {}
+  for (const [name, value] of Object.entries(inputs)) {
+    if (value instanceof File) form.append(name, value)
+    else if (value !== null && value !== '') values[name] = value
+  }
+  form.append('inputs', JSON.stringify(values))
   return form
 }
 

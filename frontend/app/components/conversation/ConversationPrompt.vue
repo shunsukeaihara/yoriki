@@ -9,6 +9,7 @@
  * 編集の依頼は別の Run で行うので、使う Skill とは一緒に選べず、実行中なら今の作業の後に始める。
  * 使う Connector は、ボタンか、行の始めか空白の後で `@` を打つと開く一覧から選ぶ（harness.md §10.2）。使える
  * Connector の一覧も依頼を始めるときに決めるので、実行中なら今の作業の後に始める。
+ * `/` の一覧でタスクを選ぶと、呼び出し側が入力のダイアログを開いて起動する（入力欄の本文は送らない）。
  */
 const props = defineProps<{
   activeRun?: Run | null
@@ -21,6 +22,8 @@ const props = defineProps<{
   editableSkills?: Skill[]
   /** 指定できる Connector */
   connectors?: AppConnector[]
+  /** チャットから起動できるタスク */
+  tasks?: LaunchableTask[]
   /** 個人情報・機密情報を扱う会話（機密の Connector を選べる） */
   sensitive?: boolean
   sending?: boolean
@@ -38,6 +41,7 @@ const emit = defineEmits<{
   attach: [files: File[]]
   removeAttachment: [key: string]
   retryAttachments: []
+  launch: [task: LaunchableTask]
 }>()
 const { t } = useI18n()
 
@@ -112,7 +116,7 @@ const placeholder = computed(() => {
   if (props.activeRun && selectedConnectors.value.length)
     return t('今の作業が終わった後に、Connectorを使って始める依頼を入力してください')
   // `@` は vue-i18n のリンクの記法なので、文字として出すには {'@'} と書く
-  if (!props.activeRun) return t("依頼を入力してください（/ でSkill、{'@'} でConnectorを指定）")
+  if (!props.activeRun) return t("依頼を入力してください（/ でSkill・タスク、{'@'} でConnectorを指定）")
   if (mode.value === MessageMode.NEXT) return t('今の作業が終わった後に始める依頼を入力してください')
   if (props.hasOpenQuestion) return t('質問への回答を入力してください')
   return t('今の作業への追加の指示を入力してください')
@@ -222,10 +226,12 @@ const onSubmit = () => {
           :selected="selectedSkills.map((s) => s.id)"
           :sensitive="sensitive ?? false"
           :full="skillsFull"
+          :tasks="tasks ?? []"
           :disabled="disabled"
           @select="selectSkill"
           @edit="chooseEdit"
           @create="chooseEdit(null)"
+          @launch="emit('launch', $event)"
         />
         <ConversationConnectorPicker
           v-model:open="connectorPickerOpen"

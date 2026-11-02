@@ -2,20 +2,29 @@
 import { AxiosError } from 'axios'
 
 /**
- * タスクの手動実行（authorization.md §6）。タスクの今の版で、決めた入力の項目の値だけを渡す（自由な依頼文は受けない）。
- * 部門・全社・システムのタスクは、起動した人ではなくタスクの範囲で動く。型と必須はサーバーが確かめ、項目ごとに返す
+ * タスクの手動実行とチャットからの起動（authorization.md §6）。タスクの今の版で、決めた入力の項目の値だけを渡す（自由な
+ * 依頼文は受けない）。手動実行では部門・全社・システムのタスクは起動した人ではなくタスクの範囲で動き、チャットからの
+ * 起動（`conversationId` を渡す）では起動した人の権限で動く。型と必須はサーバーが確かめ、項目ごとに返す
  */
-const props = defineProps<{ task: TaskDetail }>()
+const props = defineProps<{
+  task: TaskDetail | LaunchableTask
+  /** チャットから起動するときの、起動した会話（カードが足される） */
+  conversationId?: string
+  /** チャットからの起動のID。同じIDの再送には前に起動したRunが返る（二重に起動しない） */
+  clientRequestId?: string
+  /** 入力の初期値（受け付けたかが分からなかった起動を、同じ入力で送り直すとき） */
+  initialValues?: TaskRunInputs
+}>()
 const api = useAPI()
 const toast = useToast()
 const { t } = useI18n()
 const emit = defineEmits<{
-  started: [value: Run]
+  started: [value: Run | TaskRun]
   failed: [error: unknown]
   /** 画面を開いた後に版が変わった（409）。最新の状態を読み込み直す */
   conflicted: []
-  /** 応答を受け取れなかった（受け付けたかが分からない）。実行の履歴で確かめる */
-  unknown: []
+  /** 応答を受け取れなかった（受け付けたかが分からない）。実行の履歴で確かめる。送った入力の値を渡す */
+  unknown: [values: TaskRunInputs]
 }>()
 
 // 入力の項目はタスクの版で決まる。版が変わったら、親がこのフォームを作り直す（key）
@@ -27,7 +36,9 @@ const booleanItems = computed(() => [
   { value: true, title: t('はい') },
   { value: false, title: t('いいえ') },
 ])
-const form = ref<TaskRunInputs>(Object.fromEntries(inputs.map((i) => [i.name, emptyValue(i)])))
+const form = ref<TaskRunInputs>(
+  Object.fromEntries(inputs.map((i) => [i.name, props.initialValues?.[i.name] ?? emptyValue(i)])),
+)
 const choiceItems = (input: TaskInput) => (input.choices ?? []).map((value) => ({ value, title: value }))
 // 入力欄ごとに v-model の型を合わせる（値は form にまとめて持つ）
 const modelOf = <V,>(name: string) =>
@@ -50,10 +61,15 @@ const fields = inputs.map((input) => ({
 const { onSubmit, loading, errors } = createSubmit({
   form,
   // 画面で確かめた版を送る。別の版ができていれば409になり、確かめていない定義では実行しない
-  fn: (data) => api.tasks(props.task.id).run(props.task.version ?? 0, data),
+  fn: (data): Promise<Run | TaskRun> =>
+    props.conversationId
+      ? api
+          .launchableTasks(props.task.id)
+          .run(props.conversationId, props.task.version ?? 0, props.clientRequestId ?? crypto.randomUUID(), data)
+      : api.tasks(props.task.id).run(props.task.version ?? 0, data),
   onSuccess: (run) => {
     emit('started', run)
-    toast.add({ title: t('実行を始めました'), color: 'success' })
+    toast.add({ title: props.conversationId ? t('タスクを起動しました') : t('実行を始めました'), color: 'success' })
   },
   onError: (err) => {
     emit('failed', err)
@@ -63,10 +79,14 @@ const { onSubmit, loading, errors } = createSubmit({
       toast.add({ title: t('エラー'), description: makeErrorMsg(err), color: 'error' })
     } else if (err instanceof AxiosError && !err.response) {
       // 送った後に応答だけが失われたときは、受け付けている。再送で二重に実行しないよう、先に履歴を見せる
-      emit('unknown')
+      emit('unknown', { ...form.value })
       toast.add({
         title: t('受け付けたかを確かめられませんでした'),
-        description: t('実行の履歴に出ていれば受け付けています。出ていなければ、もう一度実行してください'),
+        description: props.conversationId
+          ? t(
+              '会話にタスクのカードが出ていれば受け付けています。出ていなければ、もう一度起動してください（同じ起動は二重になりません）',
+            )
+          : t('実行の履歴に出ていれば受け付けています。出ていなければ、もう一度実行してください'),
         color: 'warning',
       })
     } else {
@@ -86,7 +106,8 @@ const generalErrors = computed(() => ({
   ],
 }))
 
-const canPost = computed(() => Boolean(props.task.canRun))
+// 起動の候補は起動できるタスクだけなので、チャットからの起動ではいつも送れる（断る理由はサーバーが返す）
+const canPost = computed(() => ('canRun' in props.task ? Boolean(props.task.canRun) : true))
 
 defineExpose({ onSubmit, loading, canPost })
 </script>

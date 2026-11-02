@@ -106,6 +106,35 @@ const onSuspend = async () => {
   }
 }
 
+// チャットから起動できるか（版を作らずにすぐ切り替える。authorization.md §5.3）。システムのタスクには付けない
+const chatLaunchLabel = computed(() => {
+  switch (task.value?.scope) {
+    case TaskScope.PERSONAL:
+      return t('自分が、会話の入力欄の / から起動できます。')
+    case TaskScope.DEPARTMENT:
+      return t('部門に所属する人が、会話の入力欄の / から自分の権限で起動できます。')
+    default:
+      return t('全社員が、会話の入力欄の / から自分の権限で起動できます。')
+  }
+})
+const changingChatLaunch = ref(false)
+const onChatLaunch = async (value: boolean) => {
+  if (!task.value) return
+  changingChatLaunch.value = true
+  try {
+    const updated = await api.tasks(taskId).chatLaunch({ chatLaunchable: value })
+    task.value = updated
+    toast.add({
+      title: updated.chatLaunchable ? t('チャットから起動できるようにしました') : t('チャットからの起動を止めました'),
+      color: 'success',
+    })
+  } catch (err) {
+    toast.add({ title: t('エラー'), description: makeErrorMsg(err), color: 'error' })
+  } finally {
+    changingChatLaunch.value = false
+  }
+}
+
 const onDelete = async () => {
   const ok = await confirm({
     title: t('タスクを削除しますか？'),
@@ -209,6 +238,23 @@ const onDelete = async () => {
             <UBadge v-if="trigger.suspended" color="error" variant="subtle" size="sm">{{ $t('停止中') }}</UBadge>
           </div>
           <p class="text-xs text-muted">{{ $t('入口は連携の管理者が管理画面で作り、鍵を管理します') }}</p>
+        </div>
+
+        <div v-if="task.scope !== TaskScope.SYSTEM" class="grid gap-1 rounded-md border border-default p-3 text-sm">
+          <DSwitch
+            :model-value="task.chatLaunchable"
+            :label="$t('チャットから起動できる')"
+            :disabled="changingChatLaunch"
+            @update:model-value="onChatLaunch"
+          />
+          <p class="text-xs text-muted">
+            {{ chatLaunchLabel }}
+            <template v-if="task.scope !== TaskScope.PERSONAL">{{
+              $t(
+                '起動した人が使うSkill・Connectorをすべて使えなければ断ります。入力と処理の記録はタスクの管理者も見られます',
+              )
+            }}</template>
+          </p>
         </div>
 
         <UAlert

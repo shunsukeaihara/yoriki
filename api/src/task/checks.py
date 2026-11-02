@@ -5,6 +5,8 @@
 - 実行するとき（`skill_problem()`・`connector_permitted()`・`task_problem()`）：受付時、実行の区切りごと、Connectorの
   操作のたびに、固定したものが今も有効でタスクの範囲の中にあるかを確かめ直す。部門・全社・システムのタスクは、
   起動した人ではなくタスクの範囲で判定する（人が指示を出せない起動のため）。個人のタスクは本人の今の権限でも判定する。
+- チャットから起動したRun（`launcher_problem()`・`launcher_skill_problem()`・`launcher_connector_permitted()`）：
+  それに加えて、起動した人の今の権限でも判定する（タスクの版の一覧 ∩ 起動した人の今の権限）。
 """
 
 import re
@@ -17,6 +19,7 @@ from connector.models import Connector, ConnectorAction, ConnectorScope, Operati
 from delivery.models import Destination, NotifyContent, NotifyEvent
 from skill import connectors as skill_connectors
 from skill.models import Skill, SkillAction, SkillScope, SkillVersion
+from user.models import Department, manageable_department_ids
 
 from .models import TaskScope
 
@@ -348,3 +351,56 @@ def declaration_problem(task, version: Any, *, connectors: list[str], sensitive:
 def connector_permitted(task, connector: Connector, *, connectors: list[str]) -> bool:
     """タスクのRunがこのConnectorを今使えるか：タスクに固定したもので、今も有効で範囲の中にある"""
     return connector.uid in connectors and task_problem(task) == "" and connector_allowed(task, connector)
+
+
+# --- チャットから起動したRun（authorization.md §6） ---
+
+
+def launcher_inactive(user) -> str:
+    """起動した人が今は無効なら理由。Workerでは、確かめ直すたびにDBから読んだユーザーを渡す"""
+    return "" if user is not None and user.is_active else _("起動した人のアカウントが無効です")
+
+
+def launcher_scope_problem(user, run: Any) -> str:
+    """起動した人が、Runを実行したときのタスクの範囲と部門のタスクを、今もチャットから起動できる立場か（印・停止は
+    見ない。印を外しても起動済みのRunは止めない）。できなければ理由"""
+    if reason := launcher_inactive(user):
+        return reason
+    if run.task_scope == TaskScope.PERSONAL:
+        allowed = run.owner_id == user.pk
+    elif run.task_scope == TaskScope.DEPARTMENT:
+        allowed = Department.objects.joined_by(user).filter(
+            pk=run.task_department_id
+        ).exists() or run.task_department_id in manageable_department_ids(user)
+    else:
+        allowed = run.task_scope == TaskScope.COMPANY
+    return "" if allowed else _("起動した人がこのタスクを起動できる部門から外れました")
+
+
+def launcher_skill_problem(user, skill: Skill) -> str:
+    """起動した人がこのSkillを今は使えない理由（使えれば空文字）"""
+    return "" if skill.can(user, SkillAction.USE) else _("起動した人がこのSkillを使えません")
+
+
+def launcher_connector_permitted(user, connector: Connector) -> bool:
+    return connector.can(user, ConnectorAction.USE)
+
+
+def launcher_problem(user, revision: Any) -> str:
+    """チャットから起動する人が、タスクの版に固定したSkill・Connectorをすべて使えなければ理由（起動の前に断る。
+    authorization.md §6）。出口は起動した人とは照らし合わせない（タスクの範囲で判定する）"""
+    if reason := launcher_inactive(user):
+        return reason
+    skills = load_skills([entry for _field, entry in skill_entries(revision)])
+    for skill, _version in skills.values():
+        if launcher_skill_problem(user, skill):
+            return _("Skill「%(name)s」を使う権限がないので、このタスクを起動できません。") % {"name": skill.name}
+    connectors = load_connectors(revision.connectors)
+    for uid in revision.connectors:
+        connector = connectors.get(uid)
+        if connector is None or not launcher_connector_permitted(user, connector):
+            name = connector.name if connector else uid
+            return _("Connector「%(name)s」を使う権限がないので、このタスクを起動できません。") % {"name": name}
+    if len(skills) < len(revision.skills):
+        return _("固定したSkillの版がありません。タスクの定義を確かめてください。")
+    return ""

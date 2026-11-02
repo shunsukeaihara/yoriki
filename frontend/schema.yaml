@@ -594,6 +594,144 @@ paths:
               schema:
                 $ref: '#/components/schemas/PaginatedDestinationChoiceList'
           description: ''
+  /api/app/v1/launchable_tasks/:
+    get:
+      operationId: app_v1_launchable_tasks_list
+      description: チャットから起動できるタスク（会話の入力欄の `/` の候補）と、チャットからの起動（authorization.md §5.3・§6）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: scope
+        schema:
+          type: integer
+          title: 範囲
+          enum:
+          - 1
+          - 2
+          - 3
+          - 4
+        description: |-
+          * `1` - 個人
+          * `2` - 部門
+          * `3` - 全社
+          * `4` - システム
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - app/launchable_task
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedLaunchableTaskList'
+          description: ''
+  /api/app/v1/launchable_tasks/{uid}/:
+    get:
+      operationId: app_v1_launchable_tasks_retrieve
+      description: チャットから起動できるタスク（会話の入力欄の `/` の候補）と、チャットからの起動（authorization.md §5.3・§6）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/launchable_task
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LaunchableTask'
+          description: ''
+  /api/app/v1/launchable_tasks/{uid}/run/:
+    post:
+      operationId: app_v1_launchable_tasks_run_create
+      description: チャットからタスクを起動する。起動した人の権限で動き、固定したSkill・Connectorを起動した人がすべて使えなければ断る。入力は手動実行と同じく、タスクの定義で決めた項目だけを受け付ける（会話の文脈は渡さない）。起動した会話に、Runを指すカードのメッセージを足す
+      parameters:
+      - in: query
+        name: client_request_id
+        schema:
+          type: string
+        description: 画面が起動ごとに作るID（64文字まで）。同じ会話で同じIDの再送には、前に起動したRunを返す（応答が失われた後の再送で、二重に起動しない）
+        required: true
+      - in: query
+        name: conversation
+        schema:
+          type: string
+        description: 起動した会話のID（カードを足す）
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      - in: query
+        name: version
+        schema:
+          type: integer
+        description: 画面で確かめた版（任意）。今の版と違えば409にし、確かめていない入力の項目では起動しない
+      tags:
+      - app/launchable_task
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskRunCreateRequest'
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                inputs:
+                  type: string
+                  description: ファイル以外の入力の項目の名前と値（JSONのオブジェクトの文字列）
+              additionalProperties:
+                type: string
+                format: binary
+                description: 型がファイルの項目。フィールドの名前は項目の名前
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskRun'
+          description: ''
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskRun'
+          description: ''
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、他の人が版を作った）
   /api/app/v1/model_profiles/:
     get:
       operationId: app_v1_model_profiles_list
@@ -2805,7 +2943,8 @@ paths:
   /api/app/v1/tasks/{task}/runs/:
     get:
       operationId: app_v1_tasks_runs_list
-      description: タスクのRunの履歴（結果とログを見られるもの。authorization.md §7.1）
+      description: タスクのRunの履歴（結果とログを見られるもの。authorization.md §7.1）。1つのRunは、チャットから起動した人も結果だけを読める（`can_view_logs`
+        が偽。作業の計画・使ったSkill・配信は空にする）
       parameters:
       - name: cursor
         required: false
@@ -2822,9 +2961,11 @@ paths:
           enum:
           - 1
           - 2
+          - 3
         description: |-
           * `1` - タスクの画面からの手動実行
           * `2` - Webhook
+          * `3` - チャットからの起動
       - name: ordering
         required: false
         in: query
@@ -2886,7 +3027,7 @@ paths:
   /api/app/v1/tasks/{task}/runs/{run}/messages/:
     get:
       operationId: app_v1_tasks_runs_messages_list
-      description: タスクのRunの会話のメッセージ（最初の依頼とエージェントの応答。タスクのRunの会話は会話のAPIに出さない）
+      description: タスクのRunの会話のメッセージ（最初の依頼とエージェントの応答。タスクのRunの会話は会話のAPIに出さない）。チャットから起動した人には、エージェントの応答だけを返す（最初の依頼はタスクの定義から作るので見せない）
       parameters:
       - name: cursor
         required: false
@@ -2938,7 +3079,8 @@ paths:
   /api/app/v1/tasks/{task}/runs/{uid}/:
     get:
       operationId: app_v1_tasks_runs_retrieve
-      description: タスクのRunの履歴（結果とログを見られるもの。authorization.md §7.1）
+      description: タスクのRunの履歴（結果とログを見られるもの。authorization.md §7.1）。1つのRunは、チャットから起動した人も結果だけを読める（`can_view_logs`
+        が偽。作業の計画・使ったSkill・配信は空にする）
       parameters:
       - in: path
         name: task
@@ -2962,6 +3104,46 @@ paths:
               schema:
                 $ref: '#/components/schemas/TaskRun'
           description: ''
+  /api/app/v1/tasks/{task}/runs/{uid}/cancel/:
+    post:
+      operationId: app_v1_tasks_runs_cancel_create
+      description: Runの停止を依頼する（Runの結果を見られる人。チャットから起動した人も、自分が起動したRunを止められる）
+      parameters:
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/task/run
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RunCancelRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/RunCancelRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/RunCancelRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskRun'
+          description: ''
+        '409':
+          description: 他の処理と競合した
   /api/app/v1/tasks/{uid}/:
     get:
       operationId: app_v1_tasks_retrieve
@@ -3065,6 +3247,39 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/app/v1/tasks/{uid}/chat_launch/:
+    post:
+      operationId: app_v1_tasks_chat_launch_create
+      description: チャットから起動できるかを切り替える（版を作らない。authorization.md §5.3）。システムのタスクには付けない
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/task
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskChatLaunchRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TaskChatLaunchRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TaskChatLaunchRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDefinitionDetail'
+          description: ''
   /api/app/v1/tasks/{uid}/resume/:
     post:
       operationId: app_v1_tasks_resume_create
@@ -9237,6 +9452,111 @@ components:
           title: 有効
       required:
       - name
+    LaunchableTask:
+      type: object
+      description: |-
+        チャットから起動できるタスク（入力欄の `/` の候補）。起動できる人には、名前と説明と、入力のフォームに要る項目の
+        定義だけを見せる（依頼文・使うもの・出口等の定義の中身は、管理できる人だけ。authorization.md §5.3）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        scope:
+          allOf:
+          - $ref: '#/components/schemas/SkillScopeEnum'
+          readOnly: true
+        scope_display:
+          type: string
+          readOnly: true
+        department_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumDepartment'
+          readOnly: true
+          nullable: true
+        name:
+          type: string
+          readOnly: true
+          title: 名前
+          maxLength: 100
+        description:
+          type: string
+          readOnly: true
+        version:
+          type: integer
+          readOnly: true
+          description: 今の版
+        inputs:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskInput'
+          readOnly: true
+      required:
+      - department_info
+      - description
+      - id
+      - inputs
+      - name
+      - scope
+      - scope_display
+      - version
+    LaunchedTaskRun:
+      type: object
+      description: |-
+        チャットから起動したタスクのRun（会話のカード）。起動した人が見られる結果だけ（authorization.md §7.1。失敗の
+        理由の本文はログとして扱い、終わり方だけを出す）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        task:
+          type: string
+          readOnly: true
+        task_name:
+          type: string
+          readOnly: true
+          description: 受付時のタスクの名前
+        status:
+          allOf:
+          - $ref: '#/components/schemas/RunStatusEnum'
+          readOnly: true
+        status_display:
+          type: string
+          readOnly: true
+        end_reason:
+          readOnly: true
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/RunEndReasonEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        end_reason_display:
+          type: string
+          readOnly: true
+          nullable: true
+        response:
+          type: string
+          readOnly: true
+          description: エージェントの最後の応答（終わるまでは空）
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        finished:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 終了日時
+      required:
+      - created
+      - end_reason
+      - end_reason_display
+      - finished
+      - id
+      - response
+      - status
+      - status_display
+      - task
+      - task_name
     LoginRequest:
       type: object
       description: パスワードでのログイン。有効なSSOの設定があれば基盤管理者だけ（utils.backends.PasswordBackend）
@@ -9498,6 +9818,12 @@ components:
           - $ref: '#/components/schemas/InstructionInfo'
           readOnly: true
           nullable: true
+        task_run:
+          allOf:
+          - $ref: '#/components/schemas/LaunchedTaskRun'
+          readOnly: true
+          nullable: true
+          description: チャットから起動したタスクのRun（カードとして出すメッセージ）
         created:
           type: string
           format: date-time
@@ -9513,6 +9839,7 @@ components:
       - sender
       - skill_edit
       - skills_info
+      - task_run
     MessageConnector:
       type: object
       description: メッセージで指定したConnector（送ったときの名前）
@@ -10634,6 +10961,25 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/LLMConnection'
+    PaginatedLaunchableTaskList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/LaunchableTask'
     PaginatedManageUserList:
       type: object
       required:
@@ -11990,10 +12336,12 @@ components:
       enum:
       - 1
       - 2
+      - 3
       type: integer
       description: |-
         * `1` - タスクの画面からの手動実行
         * `2` - Webhook
+        * `3` - チャットからの起動
     RunMessageEvent:
       type: object
       description: 確定したメッセージとTool実行（利用者の発言、エージェントの応答、Toolの結果）
@@ -13719,6 +14067,14 @@ components:
       - layout_before
       - slide
       - texts
+    TaskChatLaunchRequest:
+      type: object
+      properties:
+        chat_launchable:
+          type: boolean
+          description: チャットから起動できるようにするか
+      required:
+      - chat_launchable
     TaskDefinition:
       type: object
       description: |-
@@ -13764,6 +14120,10 @@ components:
           type: boolean
           readOnly: true
           title: 停止中
+        chat_launchable:
+          type: boolean
+          readOnly: true
+          title: チャットから起動できる
         version:
           type: integer
           minimum: 0
@@ -13863,6 +14223,7 @@ components:
           readOnly: true
       required:
       - can_run
+      - chat_launchable
       - created
       - created_by
       - department_info
@@ -13921,6 +14282,10 @@ components:
           type: boolean
           readOnly: true
           title: 停止中
+        chat_launchable:
+          type: boolean
+          readOnly: true
+          title: チャットから起動できる
         version:
           type: integer
           minimum: 0
@@ -14038,6 +14403,7 @@ components:
           description: 今の版が、保存のときの検査に通らない理由（なければ空）。版を作ったときより後の変更（Skillの停止・Connectorの削除等）で生じたもので、多くは実行も断られる
       required:
       - can_run
+      - chat_launchable
       - connectors_info
       - created
       - created_by
@@ -14557,7 +14923,7 @@ components:
           - $ref: '#/components/schemas/MinimumUser'
           nullable: true
           readOnly: true
-          description: 手動実行した人（入口からのRunでは空）
+          description: 手動実行した人かチャットから起動した人（入口からのRunでは空）
         receipt:
           allOf:
           - $ref: '#/components/schemas/TaskRunReceipt'
@@ -14575,7 +14941,13 @@ components:
           items:
             $ref: '#/components/schemas/TaskRunDeliveryState'
           readOnly: true
+        can_view_logs:
+          type: boolean
+          readOnly: true
+          description: ログ（作業の記録、最初の依頼、配信）も見られるか。偽なら、チャットから起動した人として結果だけを見ている（作業の計画・使ったSkill・モデル設定・配信・失敗の理由の本文・ステップ数は空にする。authorization.md
+            §7.1）
       required:
+      - can_view_logs
       - conversation
       - created
       - deliveries_info

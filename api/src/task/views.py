@@ -1,7 +1,7 @@
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Prefetch
 from django.utils.functional import cached_property
 from django.utils.translation import gettext_lazy as _
@@ -17,11 +17,11 @@ from rest_framework.viewsets import GenericViewSet, ModelViewSet, ReadOnlyModelV
 
 from artifact.models import Artifact
 from connector.serializers import AppConnectorSerializer
-from conversation.models import ConversationMessage
+from conversation.models import Conversation, ConversationMessage, MessageRole
 from conversation.serializers import MessageSerializer
 from delivery.models import Delivery
-from run.models import Run, RunLaunch
-from run.serializers import RunSerializer, prefetch_todos
+from run.models import Run, RunLaunch, RunQuerySet, logs_visible
+from run.serializers import RunCancelSerializer, RunSerializer, prefetch_todos
 from skill.models import SkillVersion
 from user.models import Department
 from utils.exceptions import Conflict
@@ -30,7 +30,7 @@ from utils.views import SoftDeleteMixin
 
 from . import checks
 from .authentication import WebhookKeyAuthentication, WebhookTaskPermission
-from .dispatch import InvalidInputs, receive_webhook, start_task_run
+from .dispatch import InvalidInputs, LaunchIdConflict, launched_run, receive_webhook, start_task_run
 from .errors import CannotRun, VersionConflict
 from .models import (
     BUSINESS_SCOPES,
@@ -48,6 +48,8 @@ from .serializers import (
     HookErrorSerializer,
     HookReceivedSerializer,
     HookRunSerializer,
+    LaunchableTaskSerializer,
+    TaskChatLaunchSerializer,
     TaskDefinitionDetailSerializer,
     TaskDefinitionRevisionSerializer,
     TaskDefinitionSerializer,
@@ -171,6 +173,19 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
     def resume(self, request, *args, **kwargs):
         return self._set_suspended(request, suspended=False)
 
+    @extend_schema(
+        description="チャットから起動できるかを切り替える（版を作らない。authorization.md §5.3）。"
+        "システムのタスクには付けない",
+        request=TaskChatLaunchSerializer,
+        responses=TaskDefinitionDetailSerializer,
+    )
+    @action(detail=True, methods=["post"], url_path="chat_launch", serializer_class=TaskChatLaunchSerializer)
+    def chat_launch(self, request, *args, **kwargs):
+        serializer = self.get_serializer(instance=self.get_object(), data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
+
     def _set_suspended(self, request, *, suspended: bool) -> Response:
         serializer = self.get_serializer(instance=self.get_object(), data={})
         serializer.is_valid(raise_exception=True)
@@ -278,6 +293,101 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
         return self.get_paginated_response(serializer.data)
 
 
+@extend_schema(
+    description="チャットから起動できるタスク（会話の入力欄の `/` の候補）と、チャットからの起動"
+    "（authorization.md §5.3・§6）",
+    tags=["app/launchable_task"],
+)
+class AppLaunchableTaskViewSet(ReadOnlyModelViewSet):
+    permission_classes = [AppUser]
+    lookup_field = "uid"
+    queryset = TaskDefinition.objects.none()
+    serializer_class = LaunchableTaskSerializer
+    filterset_fields = ["scope"]
+    search_fields = ["name"]
+    ordering = ("scope", "name", "pk")
+
+    def get_queryset(self):
+        return TaskDefinition.objects.launchable_by(self.request.user).select_related("department", "current_revision")
+
+    @extend_schema(
+        description="チャットからタスクを起動する。起動した人の権限で動き、固定したSkill・Connectorを起動した人がすべて"
+        "使えなければ断る。入力は手動実行と同じく、タスクの定義で決めた項目だけを受け付ける（会話の文脈は渡さない）。"
+        "起動した会話に、Runを指すカードのメッセージを足す",
+        request={"application/json": TaskRunCreateSerializer, "multipart/form-data": TASK_RUN_MULTIPART},
+        parameters=[
+            OpenApiParameter("conversation", str, required=True, description="起動した会話のID（カードを足す）"),
+            OpenApiParameter(
+                "client_request_id",
+                str,
+                required=True,
+                description="画面が起動ごとに作るID（64文字まで）。同じ会話で同じIDの再送には、前に起動したRunを"
+                "返す（応答が失われた後の再送で、二重に起動しない）",
+            ),
+            OpenApiParameter(
+                "version",
+                int,
+                description="画面で確かめた版（任意）。今の版と違えば409にし、確かめていない入力の項目では起動しない",
+            ),
+        ],
+        responses={201: TaskRunSerializer, 200: TaskRunSerializer, 409: CONFLICT},
+    )
+    @action(detail=True, methods=["post"], serializer_class=TaskRunCreateSerializer)
+    def run(self, request, *args, **kwargs):
+        conversation = get_object_or_404(
+            Conversation.objects.owned_by(request.user), uid=request.query_params.get("conversation", "")
+        )
+        client_request_id = request.query_params.get("client_request_id", "")
+        if not client_request_id or len(client_request_id) > 64:
+            raise ValidationError({"client_request_id": [_("起動のID（64文字まで）を指定してください")]})
+        # 同じ要求の再送には、前に起動したRunを返す（版や入力、今も起動できるかを確かめ直さない。起動の後に印を
+        # 外されても、起動済みのRunは残るため）
+        try:
+            run = launched_run(conversation, client_request_id, kwargs["uid"])
+        except LaunchIdConflict as exc:
+            raise Conflict(str(exc)) from exc
+        if run is not None:
+            return self._launched(request, run, status.HTTP_200_OK)
+        task = self.get_object()
+        version = request.query_params.get("version")
+        if version is not None and not version.isdigit():
+            raise ValidationError({"version": [_("版の番号を指定してください")]})
+        if version is not None and int(version) != task.version_number:
+            raise Conflict(VERSION_CHANGED)
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            run = start_task_run(
+                task,
+                inputs=serializer.validated_data["inputs"],
+                actor=request.user,
+                launch=RunLaunch.CHAT,
+                expected_version=int(version) if version is not None else None,
+                conversation=conversation,
+                client_request_id=client_request_id,
+            )
+        except IntegrityError:
+            # 同じ要求が同時に届き、先に受け付けた方がある。別の要求とIDが重なったときは409
+            try:
+                run = launched_run(conversation, client_request_id, task.uid)
+            except LaunchIdConflict as exc:
+                raise Conflict(str(exc)) from exc
+            if run is None:
+                raise
+            return self._launched(request, run, status.HTTP_200_OK)
+        except VersionConflict as exc:
+            raise Conflict(VERSION_CHANGED) from exc
+        except InvalidInputs as exc:
+            raise ValidationError({"inputs": exc.errors}) from exc
+        except CannotRun as exc:
+            raise ValidationError({"non_field_errors": [str(exc)]}) from exc
+        return self._launched(request, run, status.HTTP_201_CREATED)
+
+    def _launched(self, request, run: Run, code: int) -> Response:
+        run = Run.objects.with_logs_visible(request.user).get(pk=run.pk)
+        return Response(TaskRunSerializer(run, context=self.get_serializer_context()).data, status=code)
+
+
 class TaskMixin:
     """URLのtaskを、利用者が管理できるタスクに限定して取得する"""
 
@@ -304,11 +414,14 @@ class AppTaskRevisionViewSet(TaskMixin, ReadOnlyModelViewSet):
 
 
 @extend_schema(
-    description="タスクのRunの履歴（結果とログを見られるもの。authorization.md §7.1）", tags=["app/task/run"]
+    description="タスクのRunの履歴（結果とログを見られるもの。authorization.md §7.1）。1つのRunは、チャットから起動した"
+    "人も結果だけを読める（`can_view_logs` が偽。作業の計画・使ったSkill・配信は空にする）",
+    tags=["app/task/run"],
 )
 class AppTaskRunViewSet(TaskMixin, ReadOnlyModelViewSet):
-    """一覧はタスクを今管理できる人（タスクの画面の実行の履歴）。1つのRunは、Runの結果とログを見られる人（実行した
-    ときの範囲と部門で判定する。authorization.md §7.1）なら、タスクを移した・消した後も読める"""
+    """一覧はタスクを今管理できる人（タスクの画面の実行の履歴）。1つのRunは、Runの結果を見られる人（実行した
+    ときの範囲と部門で判定する。チャットから起動した人を含む。authorization.md §7.1）なら、タスクを移した・消した後も
+    読める"""
 
     permission_classes = [AppUser]
     lookup_field = "uid"
@@ -332,14 +445,31 @@ class AppTaskRunViewSet(TaskMixin, ReadOnlyModelViewSet):
     ordering = ("-created", "-pk")
 
     def get_queryset(self):
-        qs = super().get_queryset().filter(pk__in=Run.objects.visible_to(self.request.user).values("pk"))
+        user = self.request.user
         if self.action == "list":
-            return qs.filter(task=self.task)
-        return qs.filter(task__uid=self.kwargs["task"])
+            return super().get_queryset().filter(pk__in=Run.objects.visible_to(user).values("pk"), task=self.task)
+        qs = cast(RunQuerySet, super().get_queryset())
+        return qs.filter(
+            pk__in=Run.objects.results_visible_to(user).values("pk"), task__uid=self.kwargs["task"]
+        ).with_logs_visible(user)
+
+    @extend_schema(
+        description="Runの停止を依頼する（Runの結果を見られる人。チャットから起動した人も、自分が起動したRunを止められる）",
+        request=RunCancelSerializer,
+        responses={200: TaskRunSerializer, 409: OpenApiResponse(description="他の処理と競合した")},
+    )
+    @action(detail=True, methods=["post"], serializer_class=RunCancelSerializer)
+    def cancel(self, request, *args, **kwargs):
+        run = self.get_object()
+        serializer = self.get_serializer(instance=run, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(actor=request.user)
+        return Response(TaskRunSerializer(self.get_object(), context=self.get_serializer_context()).data)
 
 
 @extend_schema(
-    description="タスクのRunの会話のメッセージ（最初の依頼とエージェントの応答。タスクのRunの会話は会話のAPIに出さない）",
+    description="タスクのRunの会話のメッセージ（最初の依頼とエージェントの応答。タスクのRunの会話は会話のAPIに出さない）。"
+    "チャットから起動した人には、エージェントの応答だけを返す（最初の依頼はタスクの定義から作るので見せない）",
     tags=["app/task/run"],
 )
 class AppTaskRunMessageViewSet(mixins.ListModelMixin, GenericViewSet):
@@ -351,18 +481,25 @@ class AppTaskRunMessageViewSet(mixins.ListModelMixin, GenericViewSet):
     ordering = "-pk"
 
     @cached_property
-    def conversation(self):
-        """URLのRunの会話（Runの結果とログを見られる人だけ。タスクを移した・消した後も読める。タスクのRunの会話は
-        1つのRunだけを持つ）"""
+    def run(self) -> Run:
+        """URLのRun（Runの結果を見られる人だけ。タスクを移した・消した後も読める。タスクのRunの会話は1つのRunだけを
+        持つ）"""
+        user = self.request.user
         runs = (
-            Run.objects.visible_to(self.request.user)
+            Run.objects.results_visible_to(user)
             .filter(task__uid=self.kwargs["task"])
             .select_related("conversation")
+            .with_logs_visible(user)
         )
-        return get_object_or_404(runs, uid=self.kwargs["run"]).conversation
+        return get_object_or_404(runs, uid=self.kwargs["run"])
+
+    @property
+    def conversation(self):
+        return self.run.conversation
 
     def get_queryset(self):
-        return super().get_queryset().filter(conversation=self.conversation)
+        qs = super().get_queryset().filter(conversation=self.conversation)
+        return qs if logs_visible(self.run) else qs.filter(role=MessageRole.AGENT)
 
 
 @extend_schema(

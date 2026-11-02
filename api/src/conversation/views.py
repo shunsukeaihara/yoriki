@@ -64,7 +64,9 @@ class AppConversationViewSet(SoftDeleteMixin, ModelViewSet):
 @extend_schema(description="会話のメッセージに関するAPI", tags=["app/conversation/message"])
 class AppConversationMessageViewSet(MyConversationMixin, ListModelMixin, CreateModelMixin, GenericViewSet):
     permission_classes = [AppUser]
-    queryset = ConversationMessage.objects.select_related("run", "sender", "instruction").prefetch_related(
+    queryset = ConversationMessage.objects.select_related(
+        "run", "sender", "instruction", "task_run__task", "task_run__conversation"
+    ).prefetch_related(
         Prefetch("attachments", queryset=Artifact.objects.select_related("blob", "run").order_by("pk")),
     )
     serializer_class = MessageSerializer

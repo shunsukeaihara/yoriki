@@ -4,15 +4,20 @@
  * 書きかけの応答を出す。実行中の Run はストリームのイベント（events・delta）を受け取り、終わった Run は記録を
  * 開いたときに API から読む。
  */
-const props = defineProps<{
-  run: Run
-  /** ストリームで受け取ったイベント。渡さなければ、記録を開いたときに API から読む */
-  events?: RunStreamEvent[]
-  /** 書きかけの応答（LLM の出力の差分） */
-  delta?: string
-  /** 回答待ちの確認 */
-  clarifications?: Clarification[]
-}>()
+const props = withDefaults(
+  defineProps<{
+    run: Run
+    /** 作業の記録を出すか。結果だけを見る人（チャットから起動した人。authorization.md §7.1）には出さない */
+    showLog?: boolean
+    /** ストリームで受け取ったイベント。渡さなければ、記録を開いたときに API から読む */
+    events?: RunStreamEvent[]
+    /** 書きかけの応答（LLM の出力の差分） */
+    delta?: string
+    /** 回答待ちの確認 */
+    clarifications?: Clarification[]
+  }>(),
+  { showLog: true, events: undefined, delta: undefined, clarifications: undefined },
+)
 const emit = defineEmits<{ answered: [value: Clarification] }>()
 const api = useAPI()
 
@@ -78,24 +83,26 @@ const formattedResult = computed(() => (props.run.result == null ? '' : JSON.str
 
     <RunTodoList v-if="run.todos.length" :todos="run.todos" />
 
-    <RunEventLog v-if="active" :events="events" active />
-    <UCollapsible v-else v-model:open="open">
-      <DBtn
-        variant="link"
-        color="neutral"
-        size="sm"
-        class="px-0"
-        :trailing-icon="open ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
-      >
-        {{ $t('作業の記録') }}
-      </DBtn>
-      <template #content>
-        <div class="mt-2 border-l-2 border-default pl-3">
-          <USkeleton v-if="loading && !events.length" class="h-6 w-48" />
-          <RunEventLog v-else :events="events" />
-        </div>
-      </template>
-    </UCollapsible>
+    <template v-if="showLog">
+      <RunEventLog v-if="active" :events="events" active />
+      <UCollapsible v-else v-model:open="open">
+        <DBtn
+          variant="link"
+          color="neutral"
+          size="sm"
+          class="px-0"
+          :trailing-icon="open ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+        >
+          {{ $t('作業の記録') }}
+        </DBtn>
+        <template #content>
+          <div class="mt-2 border-l-2 border-default pl-3">
+            <USkeleton v-if="loading && !events.length" class="h-6 w-48" />
+            <RunEventLog v-else :events="events" />
+          </div>
+        </template>
+      </UCollapsible>
+    </template>
 
     <MarkdownContent v-if="streamingText" :text="streamingText" />
 

@@ -273,7 +273,7 @@ docker compose -f deploy/compose.yaml exec api python manage.py resume_workers
 ```
 
 - design.md §10の順序（イメージ → migration → 起動）に従う。
-- `drain_workers`・`resume_workers` はまだない（Workerが受け付けを止めて実行中のRunを待つ仕組みとあわせて作る）。それまでは手順2と6を飛ばす。
+- `drain_workers`・`resume_workers` はまだない（Workerが受け付けを止めて実行中のRunを待つ仕組みとあわせて作る）。それまでは手順2と6の代わりに、利用の少ない時間を選び、手順5の前に実行中のRunがないこと（Djangoの管理画面のRunで、状態が「作業中」「順番待ち」「再試行待ち」「停止中」のもの）を確かめる。入れ替えで止まったRunは、新しいqclusterが最後のCheckpointから再開する（Checkpointは今はAttemptを終えるときだけ作るので、それより後のWorkspaceの変更は失われ、モデルに知らせる。harness.md §11.1）。Workerサーバーは、手順5と同じときに入れ替え、古いイメージのqclusterを残さない。
 - migrationは、旧バージョンのコードでも動く形（列の追加は先、削除は次のリリース）で書き、更新中に旧apiが動いていても壊れないようにする。
 - Workerサーバー（§3.2）は、手順2のdrainの後、手順6の再開の前に同じイメージへ入れ替える。
 

@@ -85,7 +85,7 @@
 - gVisorで後回しにしたもの：rootless Dockerとの組み合わせ（確かめていない。gVisorではuserns-remapを使う）、メモリの超過でSandboxごと止まるのを避ける方法（gVisorの中の上限をホストのcgroupより先に効かせる設定は、runscの外から指定できなかった）、プロセス数の換算（×2＋64）の見直し（試験の値から決めた）。
 - `read` の画像で後回しにしたもの：上限（1回の要求で20枚、長辺1568px、`read` の1回で5ページ）をモデル設定の値にする（harness.md §12。上限の小さいローカルLLMで要るとき）、画面の作業の記録でTool結果の画像を見せる、Tool結果の画像のBlobObjectの清掃（Runを消すときや保持期限。今は残り続ける）。
 - 補助コマンドが返すパス（symlinkを辿った先）と、モデルが指定したパスが違うと、読んだ版の記録が見つからず `edit` が「まだ読んでいない」になる（symlinkを使うときだけ）。
-- 会話の画面で後回しにしたもの：添付と成果物の一覧（Artifactの段階）、次の依頼の開始前の編集・取消（design.md §11.2。APIもまだない）、会話のタイトルの変更、実行履歴の画面（`/runs`）。
+- 会話の画面で後回しにしたもの：次の依頼の開始前の編集・取消（design.md §11.2。APIもまだない）、会話のタイトルの変更、実行履歴の画面（`/runs`）。
 - Provider Adapterは、実際のプロバイダのAPIではまだ試していない（API keyが要る）。テストは各社の応答を差し替えて確かめている。
 - LLMの接続の同時実行数・1分あたりの要求数の上限は、項目があるだけで、まだ守らせていない（DB接続の同時実行数は守らせている）。
 - 契約テストの代表的なコマンドは111件。harness.md §8.5の目標（数百）へ、Skillで使われたコマンドから増やす。
@@ -111,7 +111,7 @@
 
 1. **Skill**：済み（#34〜#41）。後回しにしたものは §3。
 2. **Connector・タスク・配信**：済み（#42〜#73）。範囲の外：HTTP・SharePoint・MCPのConnector、Teams・Slack・DiscordのInteraction Binding（下の4）。
-   - design.md §12 の第1段階のうち、ほかに残るもの（§3）：Plugin Registry（下の4とあわせて）、クオータと予算の強制、清掃（`cleanup_artifacts` 等）、`install_python_packages`・PackageBundle・EnvironmentRevision、Sandboxのイメージの Docker Hub への配布、実行履歴の画面（`/runs`）と添付・成果物の一覧。順番は、最初の2つの業務で要るものから利用者と決める。
+   - design.md §12 の第1段階のうち、ほかに残るもの（§3）：Plugin Registry（下の4とあわせて）、クオータと予算の強制、清掃（`cleanup_artifacts` 等）、`install_python_packages`・PackageBundle・EnvironmentRevision、Sandboxのイメージの Docker Hub への配布、実行履歴の画面（`/runs`）。順番は、最初の2つの業務で要るものから利用者と決める。
 3. **最初の2つの業務**（design.md §13。Skillとタスクとして作る）：請求書PDF → 社内DBと照合 → 取込用のCSV、契約書レビュー → Zapierへ結果。
 4. **Channel Plugin**（Teams・Slack・Discord。`plugin` のRegistry）。
 

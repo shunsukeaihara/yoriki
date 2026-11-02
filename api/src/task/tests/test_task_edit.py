@@ -434,3 +434,23 @@ def test_update_task_is_not_saved_by_an_attempt_that_lost_the_lease(api_client, 
         UPDATE_TASK.execute(arguments, ToolContext(run, attempt, ToolCall("c1", "update_task", arguments)))
     task.refresh_from_db()
     assert task.version_number == 1
+
+
+def test_edit_run_collects_outputs_like_those_of_earlier_runs(api_client, manager, settings, tmp_path):
+    """前のタスクのRunと同じパス・中身の成果物も、編集のRunの成果物として回収する"""
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path / "workspaces")
+    task = _task(manager)
+    first = _fix(api_client, manager, task)
+    Artifact.create_output(first, "report.txt", BlobObject.put(io.BytesIO(b"c")))
+    Run.objects.filter(pk=first.pk).update(status=RunStatus.COMPLETED)
+    second = _finished_fix_in(api_client, manager, task, first.conversation)
+    res = _post(api_client, first.conversation)
+    assert res.status_code == 201, res.json()
+    run = ConversationMessage.objects.get(uid=res.json()["id"]).run
+    assert run is not None
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    session = SandboxSession(run, attempt)
+    assert session._known_outputs() == {}
+    session.close()
+    assert second.pk < run.pk

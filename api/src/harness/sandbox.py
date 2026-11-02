@@ -595,6 +595,9 @@ class SandboxSession:
             # タスクのRunは空のWorkspaceから始めるので、このRunの成果物だけを既知にする（修正チャットの前の実行と
             # 同じ中身のファイルも、このRunの成果物として回収する）
             outputs = outputs.filter(run=self.run)
+        elif self.run.kind == RunKind.TASK_EDIT:
+            # 修正チャットのタスクの編集のRunは、直前のタスクのRunから後の成果物だけを既知にする（Workspaceと同じ範囲）
+            outputs = outputs.filter(run__in=self.run.fix_chat_runs())
         rows = outputs.order_by("created", "pk").values_list("path", "blob__sha256")
         for path, sha256 in rows:
             known[path] = sha256

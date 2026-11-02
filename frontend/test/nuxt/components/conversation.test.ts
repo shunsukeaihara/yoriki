@@ -264,4 +264,17 @@ describe('RunEventLog', () => {
     expect(wrapper.text()).toContain('スクリプトからの照会（2件、失敗 1件）')
     expect(wrapper.text()).toContain('スクリプトからの照会（1件）')
   })
+
+  it('同じミリ秒の中でも、イベントより前に処理した呼出しはその前に出す', async () => {
+    const wrapper = await mountSuspended(RunEventLog, {
+      props: {
+        events: [
+          message(1, '2026-11-02T09:00:00.123900+09:00', [{ id: 'c1', name: 'read', arguments: { path: 'a' } }]),
+        ],
+        scriptCalls: [scriptCall('s1', '', '2026-11-02T09:00:00.123400+09:00')],
+      },
+    })
+    const entries = (wrapper.vm as unknown as { entries: { kind: string }[] }).entries
+    expect(entries.map((e) => e.kind)).toEqual(['scripts', 'tool'])
+  })
 })

@@ -11,6 +11,12 @@ const props = withDefaults(defineProps<{ events: RunStreamEvent[]; scriptCalls?:
 })
 const { t } = useI18n()
 
+// サーバーの日時（ISO 8601）をマイクロ秒にする。Date.parse はミリ秒までしか見ず、同じミリ秒の前後を比べられない
+const microseconds = (value: string) => {
+  const fraction = value.match(/\.(\d+)/)?.[1] ?? ''
+  return Date.parse(value.replace(/\.\d+/, '')) * 1000 + Number(fraction.padEnd(6, '0').slice(0, 6))
+}
+
 type LogEntry =
   | { kind: 'text'; key: string; text: string }
   | { kind: 'tool'; key: string; call: ToolCallInfo; result: ToolResultInfo | null; scripts: ScriptCall[] }
@@ -35,8 +41,8 @@ const entries = computed<LogEntry[]>(() => {
   let next = 0
   const flushBetween = (before?: string) => {
     const start = next
-    const limit = before === undefined ? Infinity : Date.parse(before)
-    while (next < between.length && Date.parse(between[next]!.created) < limit) next += 1
+    const limit = before === undefined ? Infinity : microseconds(before)
+    while (next < between.length && microseconds(between[next]!.created) < limit) next += 1
     if (next > start) list.push({ kind: 'scripts', key: `scripts-${start}`, scripts: between.slice(start, next) })
   }
   // 同じ記録が続いたら（再試行等）、1行にまとめて回数を出す

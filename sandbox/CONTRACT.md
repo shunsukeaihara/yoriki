@@ -18,7 +18,7 @@ Runner（`api/` のLauncherとTool）とSandboxイメージの取り決め。イ
 | 補助コマンド | `/opt/yoriki/bin/yoriki-sandbox`（§4） |
 | Python | `/usr/local/bin/python3`（mise.tomlの版）。頻出ライブラリは、全依存の版とSHA-256を固定したlockから、このPythonに入れてある（design.md §7.6）。補助コマンドもこれで動く |
 | lock | `/opt/yoriki/requirements.lock`（イメージに入れたpackageの全依存の版とSHA-256）。追加するpackageの依存を解くときに使う |
-| `yoriki_connector` | Skillのスクリプトが社内DB等のConnectorを使うPythonのライブラリ（`/opt/yoriki/python`。イメージのPythonの `site-packages` の `.pth` で読めるようにする）。`query(connector, sql, params)`（`columns` はSQLのとおりの列名、`rows` は列名をキーにした行で、同じ名前の列は2つめから `名前_2`）・`describe(connector)`。要求は §4.9 の中継のソケットへ送り、結果のCSVはRunnerが `/workspace/input/connectors/` に置いたものを読む |
+| `yoriki_connector` | Skillのスクリプトが社内DB等のConnectorを使うPythonのライブラリ（`/opt/yoriki/python`。イメージのPythonの `site-packages` の `.pth` で読めるようにする）。`query(connector, sql, params)`（`columns` はSQLのとおりの列名、`rows` は列名をキーにした行で、値はすべて文字列（NULLは空文字）。同じ名前の列は2つめから `名前_2`）・`describe(connector)`。`rate_limited`（`retry_after` の秒）と `busy` では、ライブラリが待ってやり直す。要求は §4.9 の中継のソケットへ送り、結果のCSVはRunnerが `/workspace/input/connectors/` に置いたものを読む |
 | `/packages` | 空のディレクトリ。追加するpackageのbundle（wheelとlock）を、Launcherが読取り専用でmountする |
 | 入っているもの | harness.md §8.5のGNUのツールとPython、`images/<profile>/requirements.in` のライブラリ、日本語のフォント（Noto CJK） |
 | 入れないもの | 秘密情報、社内向けの設定、`sudo`。パッケージの追加（apt・ネットワークからのpip）はSandboxの中ではできない |

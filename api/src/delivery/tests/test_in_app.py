@@ -1,5 +1,5 @@
-"""画面の通知（in_app。design.md §4.3・§4.4、authorization.md §5.5・§7.1）。受け手は送るときに決め、今もタスクを
-管理できる人に限る。個人のタスクには全員で共通の出口（受け手は持ち主）を使い、機密のタスクにも使える"""
+"""画面の通知（in_app。design.md §4.3・§4.4、authorization.md §5.5・§7.1）。受け手は送るときに決め、今もRunの
+結果を見られる人に限る。個人のタスクには全員で共通の出口（受け手は持ち主）を使い、機密のタスクにも使える"""
 
 from unittest import mock
 
@@ -94,6 +94,19 @@ def test_a_webhook_run_notifies_everyone_who_can_manage_the_task():
     delivery = _finish(_task(), system_user(), launch=RunLaunch.WEBHOOK)
     assert _recipients(delivery) == {m.pk for m in managers}
     assert inactive.pk not in _recipients(delivery)
+
+
+def test_a_chat_launched_run_notifies_only_the_person_who_launched_it():
+    """チャットから起動したRunは、タスクを管理できない社員が起動しても、起動した人だけに知らせ、その人の通知欄に出る"""
+    employee = UserFactory.create()
+    manager = grant(UserFactory.create(), AppPermission.MANAGE_COMPANY_TASKS)
+    delivery = _finish(_task(chat_launchable=True), employee, launch=RunLaunch.CHAT)
+    assert delivery.status == DeliveryStatus.DELIVERED
+    assert _recipients(delivery) == {employee.pk}
+    assert manager.pk not in _recipients(delivery)
+    client = APIClient()
+    client.force_login(employee)
+    assert client.get(f"{NOTIFICATIONS}unread_count/").json() == {"unread": 1}
 
 
 def test_a_department_task_notifies_only_managers_of_that_department():

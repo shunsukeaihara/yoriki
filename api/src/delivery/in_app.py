@@ -4,16 +4,18 @@
 
 - 個人のタスク：持ち主
 - 部門・全社・システムのタスクの手動実行：実行した人
+- チャットから起動したRun：起動した人
 - 入口（Webhook）から動いたRun：タスクを管理できる人全員
 
-どれも、Runを実行したときのタスクの範囲と部門で、今もタスクを管理できる人に限る（Runの結果を見られる人と同じ。
-authorization.md §7.1）。同じ配信を同じ人へ二度載せない（送り直しても重ならない）。
+どれも、今もそのRunの結果を見られる人に限る（Runを実行したときのタスクの範囲と部門で、今もタスクを管理できる人。
+チャットから起動した人は、管理できなくても自分が起動したRunの結果を見られる。authorization.md §7.1）。
+同じ配信を同じ人へ二度載せない（送り直しても重ならない）。
 """
 
 from django.contrib.auth import get_user_model
 from django.utils.translation import gettext as _
 
-from run.models import RunLaunch
+from run.models import Run, RunLaunch
 from stream.notifier import notify_notification
 from task.models import SCOPE_PERMISSIONS, TaskScope, can_manage
 
@@ -29,6 +31,11 @@ def recipients(delivery: Delivery) -> list:
     if task is None or run.task_scope is None:
         return []
     users = get_user_model().objects.filter(is_active=True)
+    if run.launch == RunLaunch.CHAT:
+        launcher = users.filter(pk=run.owner_id).first()
+        if launcher is None or not Run.objects.results_visible_to(launcher).filter(pk=run.pk).exists():
+            return []
+        return [launcher]
     if run.task_scope == TaskScope.PERSONAL:
         candidates = users.filter(pk=task.owner_id)
     elif run.launch == RunLaunch.MANUAL:

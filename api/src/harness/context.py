@@ -22,6 +22,7 @@ from runtime.launcher import WORK_DIR
 from .connectors import catalog_text as connector_catalog_text
 from .skill_edit import runtime_text as skill_edit_text
 from .skills import catalog_text
+from .task_edit import runtime_text as task_edit_text
 
 logger = logging.getLogger(__name__)
 
@@ -304,6 +305,9 @@ def runtime_context(run: Run, *, user_name: str) -> str:
         lines.append(connector_catalog_text(connectors))
     # Skillの編集のRunの対象（harness.md §10.9）
     if edit := skill_edit_text(run):
+        lines.append(edit)
+    # 修正チャットのタスクの編集のRunの対象（harness.md §10.10）
+    if edit := task_edit_text(run):
         lines.append(edit)
     lines.append("</runtime_context>")
     return "\n".join(lines)

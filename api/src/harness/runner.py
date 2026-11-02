@@ -88,16 +88,19 @@ from .recovery import request_model_switch
 from .result_files import missing_files
 from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, SandboxSession
 from .skill_edit import revoked_edit
-from .skills import explicit_versions, revoked_skill
+from .skills import SkillContentSource, explicit_versions, revoked_skill
+from .task_edit import revoked_task_edit
 from .tools import ALL_TOOLS, ASK_USER, SANDBOX_TOOLS, WORKSPACE_WRITING_TOOLS
 from .tools.base import Effect, Tool, ToolContext, ToolResult
 from .tools.datasource import make_datasource_tools
 from .tools.prepare_notification import PREPARE_NOTIFICATION
 from .tools.request_skill_edit import REQUEST_SKILL_EDIT
+from .tools.request_task_edit import REQUEST_TASK_EDIT
 from .tools.skill_admin import CREATE_SKILL, SKILL_ADMIN_TOOLS
 from .tools.skill_tool import make_skill_tool
 from .tools.submit_result import NAME as SUBMIT_RESULT
 from .tools.submit_result import make_submit_result_tool, original_schema
+from .tools.task_admin import TASK_ADMIN_TOOLS
 from .tools.test_skill_draft import TEST_SKILL_DRAFT
 
 logger = logging.getLogger(__name__)
@@ -125,8 +128,14 @@ NOTIFICATION_DONE = (
 MAX_NUDGES = 3
 # 並べて実行するToolの数の上限（harness.md §7.6）
 MAX_PARALLEL = 4
-# Tool呼出し（ask_user・request_skill_edit・test_skill_draft）に対応する確認。結果はその呼出しへの結果として記録する
-TOOL_CLARIFICATIONS = (ClarificationKind.QUESTION, ClarificationKind.SKILL_EDIT, ClarificationKind.EVALUATION)
+# Tool呼出し（ask_user・request_skill_edit・request_task_edit・test_skill_draft）に対応する確認。結果はその呼出しへの
+# 結果として記録する
+TOOL_CLARIFICATIONS = (
+    ClarificationKind.QUESTION,
+    ClarificationKind.SKILL_EDIT,
+    ClarificationKind.TASK_EDIT,
+    ClarificationKind.EVALUATION,
+)
 
 REPEAT_NOTICE = (
     "\n\n[You are repeating the same tool call with identical arguments. Check the previous result and try a "
@@ -452,9 +461,10 @@ class Runner:
     def _revoked(self) -> tuple[RunEndReason, str] | None:
         """続けられなくなった理由。タスクの停止・削除・部門の無効化（authorization.md §6・§9）と、Skillの停止・権限の
         失効（design.md §3.2）は、始めた後のRunでも次の区切りから効く。編集の対象が機密になったら、読んだ中身を次の
-        モデルの呼出しで送らない（harness.md §10.9）"""
+        モデルの呼出しで送らない（harness.md §10.9）。タスクの編集のRunは、依頼した人がタスクを管理できなくなった・
+        タスクが削除された・機密でない修正チャットでタスクが機密になったら止める（harness.md §10.10）"""
         run = self.run_obj
-        if reason := tasks.revoked_task(run):
+        if reason := tasks.revoked_task(run) or revoked_task_edit(run):
             return RunEndReason.TASK, reason
         if reason := revoked_skill(run) or revoked_edit(run):
             return RunEndReason.SKILL, reason
@@ -525,7 +535,9 @@ class Runner:
         if self.run_obj.runtime_version_id is None:
             tools = tuple(t for t in tools if t not in SANDBOX_TOOLS)
         if not self.run_obj.is_interactive:
-            tools = tuple(t for t in tools if t.name not in ("ask_user", REQUEST_SKILL_EDIT.name))
+            tools = tuple(
+                t for t in tools if t.name not in ("ask_user", REQUEST_SKILL_EDIT.name, REQUEST_TASK_EDIT.name)
+            )
         if PREPARE_NOTIFICATION in tools and self._notification_closed():
             tools = tuple(t for t in tools if t is not PREPARE_NOTIFICATION)
         return tools
@@ -551,22 +563,12 @@ class Runner:
             tools = (*ALL_TOOLS, *datasource, *SKILL_ADMIN_TOOLS, TEST_SKILL_DRAFT)
             if not ((self.run_obj.manifest or {}).get("fixed") or {}).get("skill_edit", {}).get("skill"):
                 tools += (CREATE_SKILL,)
+        elif self.run_obj.kind == RunKind.TASK_EDIT:
+            # タスクの編集のRun：作業ファイルを読み書きするToolと、タスク管理のToolだけ。Skill・Connectorは使わない
+            # （harness.md §10.10）
+            tools = (*ALL_TOOLS, *TASK_ADMIN_TOOLS)
         elif tasks.is_task_run(self.run_obj):
-            # タスクのRun：固定したSkillの「使ってよいTool」を合わせたものだけ。
-            # 業務結果のSchemaはタスクのもの（なければSkillのもの）。`skill` は出さない（authorization.md §5.4）
-            allowed = tasks.allowed_tools(self.run_obj, {name for version in explicit for name in version.tools})
-            tools = tuple(t for t in (*ALL_TOOLS, *datasource) if t.name in allowed)
-            # 通知の書き方に従って、通知の文章と渡すファイルを決める（design.md §4.3）。通知Skillを固定していた頃に
-            # 受け付けたRunも同じ
-            entry = tasks.task_entry(self.run_obj)
-            notification = bool(entry.get("notification_instructions") or entry.get("notification_skill"))
-            if schema := tasks.output_schema(self.run_obj):
-                tools += (make_submit_result_tool(schema, notification=notification),)
-            if notification:
-                tools += (PREPARE_NOTIFICATION,)
-            if self.run_obj.is_task_fix and ASK_USER not in tools:
-                # 修正チャットでは、タスクを管理する人が答える。尋ねても作業の権限は増えない（harness.md §7.5の5）
-                tools += (ASK_USER,)
+            tools = self._task_run_tools(explicit, datasource)
         elif explicit:
             allowed = {name for version in explicit for name in version.tools}
             tools = tuple(t for t in (*ALL_TOOLS, *datasource) if t.name in allowed)
@@ -582,6 +584,27 @@ class Runner:
                 tools += (make_skill_tool(names),)
             tools += (REQUEST_SKILL_EDIT,)
         self.skill_tools = tools
+        return tools
+
+    def _task_run_tools(self, explicit: list[SkillContentSource], datasource: tuple[Tool, ...]) -> tuple[Tool, ...]:
+        """タスクのRun：固定したSkillの「使ってよいTool」を合わせたものだけ。
+        業務結果のSchemaはタスクのもの（なければSkillのもの）。`skill` は出さない（authorization.md §5.4）"""
+        allowed = tasks.allowed_tools(self.run_obj, {name for version in explicit for name in version.tools})
+        tools = tuple(t for t in (*ALL_TOOLS, *datasource) if t.name in allowed)
+        # 通知の書き方に従って、通知の文章と渡すファイルを決める（design.md §4.3）。通知Skillを固定していた頃に
+        # 受け付けたRunも同じ
+        entry = tasks.task_entry(self.run_obj)
+        notification = bool(entry.get("notification_instructions") or entry.get("notification_skill"))
+        if schema := tasks.output_schema(self.run_obj):
+            tools += (make_submit_result_tool(schema, notification=notification),)
+        if notification:
+            tools += (PREPARE_NOTIFICATION,)
+        if self.run_obj.is_task_fix:
+            # 修正チャットでは、タスクを管理する人が答える。尋ねても、定義を直す提案をしても、作業の権限は
+            # 増えない（harness.md §7.5の5・§10.10）
+            if ASK_USER not in tools:
+                tools += (ASK_USER,)
+            tools += (REQUEST_TASK_EDIT,)
         return tools
 
     @staticmethod
@@ -1111,8 +1134,8 @@ class Runner:
             self._record_tool_result(call.id, call.name, ToolResult.error(text), ToolStatus.CANCELLED)
 
     def _wait_for_user(self, call: ToolCall, rest: list[ToolCall]) -> bool:
-        """ask_user・request_skill_edit・test_skill_draft の結果は記録せずにWAITING_USERにし、Attemptを終える
-        （harness.md §10.3・§10.9）"""
+        """ask_user・request_skill_edit・request_task_edit・test_skill_draft の結果は記録せずにWAITING_USERにし、
+        Attemptを終える（harness.md §10.3・§10.9・§10.10）"""
         self._close_calls(rest, "Not executed: waiting for the user's answer. Call again after the answer if needed.")
         invocation = ToolInvocation.objects.get(run=self.run_obj, call_id=call.id)
         self._checkpoint()

@@ -59,6 +59,9 @@ const unsentNotice = computed(() => {
       <UBadge v-if="run.kind === RunKind.SKILL_EDIT" color="warning" variant="subtle" icon="i-lucide-pencil">
         {{ $t('Skillの編集') }}
       </UBadge>
+      <UBadge v-if="run.kind === RunKind.TASK_EDIT" color="warning" variant="subtle" icon="i-lucide-pencil">
+        {{ $t('タスクの編集') }}
+      </UBadge>
       <UBadge v-if="run.taskInfo" color="info" variant="subtle" icon="i-lucide-workflow">
         {{ $t('タスク「{name}」・版 {number}', { name: run.taskInfo.name, number: run.taskInfo.number }) }}
       </UBadge>
@@ -90,6 +93,8 @@ const unsentNotice = computed(() => {
 
     <!-- Skill の編集の Run で変えた Skill（design.md §11.6） -->
     <RunSkillChanges v-if="run.skillChanges.length" :changes="run.skillChanges" />
+    <!-- タスクの編集の Run で保存したタスクの版（design.md §11.11） -->
+    <RunTaskChanges v-if="run.taskChanges.length" :changes="run.taskChanges" />
 
     <RunTodoList v-if="run.todos.length" :todos="run.todos" />
 

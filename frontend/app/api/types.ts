@@ -158,6 +158,7 @@ export type RunEventKindEnum = Schemas['RunEventKindEnum']
 export type Run = Api<'Run'>
 export type RunKindEnum = Schemas['RunKindEnum']
 export type RunSkillChange = Api<'RunSkillChange'>
+export type RunTaskChange = Api<'RunTaskChange'>
 export type Todo = Api<'Todo'>
 export type RunCancel = Api<'RunCancelRequest'>
 // モデル名が ClarificationRequest なので、これは出力用の型（入力用は ClarificationAnswerRequest）

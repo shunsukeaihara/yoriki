@@ -7255,9 +7255,12 @@ components:
       type: object
       description: |-
         確認の対象。Skillの編集の確認で、対象のSkill（新しいSkillならskillが空）と変更の要約。Draftの評価では、
-        評価のIDと対象のSkill・Draftのrevision・ケースの数
+        評価のIDと対象のSkill・Draftのrevision・ケースの数。タスクの編集の確認では、対象のタスクと変更の要約
       properties:
         skill:
+          type: string
+          readOnly: true
+        task:
           type: string
           readOnly: true
         name:
@@ -7286,6 +7289,7 @@ components:
       - scope
       - skill
       - summary
+      - task
     ClarificationEvent:
       type: object
       description: エージェントからの確認（回答待ち）
@@ -7323,12 +7327,14 @@ components:
       - 2
       - 3
       - 4
+      - 5
       type: integer
       description: |-
         * `1` - エージェントからの質問
         * `2` - モデルの切り替えの確認
         * `3` - Skillの編集の確認
         * `4` - Draftの評価
+        * `5` - タスクの編集の確認
     ClarificationOption:
       type: object
       properties:
@@ -9146,6 +9152,16 @@ components:
         * `1` - 良くなった
         * `2` - 同じ
         * `3` - 悪くなった
+    FieldEnum:
+      enum:
+      - prompt_template
+      - notification_instructions
+      - input_description
+      type: string
+      description: |-
+        * `prompt_template` - 依頼文
+        * `notification_instructions` - 通知の書き方
+        * `input_description` - 入力の項目の説明
     FileFetch:
       type: object
       description: 出口へ渡したファイルの取得の記録（身に覚えのない取得に気づけるように）
@@ -12302,6 +12318,12 @@ components:
             $ref: '#/components/schemas/RunSkillChange'
           readOnly: true
           description: Skillの編集のRunで変えたSkill
+        task_changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunTaskChange'
+          readOnly: true
+          description: タスクの編集のRunで保存したタスクの版
         created:
           type: string
           format: date-time
@@ -12333,6 +12355,7 @@ components:
       - status
       - status_display
       - step_count
+      - task_changes
       - task_info
       - todos
       - trigger
@@ -12435,11 +12458,13 @@ components:
       - 1
       - 2
       - 3
+      - 4
       type: integer
       description: |-
         * `1` - 業務
         * `2` - Skillの編集
         * `3` - Draftの評価
+        * `4` - タスクの編集
     RunLaunchEnum:
       enum:
       - 1
@@ -12744,6 +12769,59 @@ components:
           clarification.requested: '#/components/schemas/ClarificationEvent'
           run.event: '#/components/schemas/RunOtherEvent'
           run.delta: '#/components/schemas/RunDeltaEvent'
+    RunTaskChange:
+      type: object
+      description: タスクの編集のRunで保存したタスクの版（update_task の結果。harness.md §10.10）
+      properties:
+        task:
+          type: string
+          readOnly: true
+          description: タスクのID
+        name:
+          type: string
+          readOnly: true
+        scope:
+          type: string
+          readOnly: true
+          description: 範囲（「部門 経理部」等）
+        version:
+          type: integer
+          readOnly: true
+          description: 保存した版
+        changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunTaskFieldChange'
+          readOnly: true
+          description: 変えた項目の変更の前後
+      required:
+      - changes
+      - name
+      - scope
+      - task
+      - version
+    RunTaskFieldChange:
+      type: object
+      properties:
+        field:
+          allOf:
+          - $ref: '#/components/schemas/FieldEnum'
+          readOnly: true
+        input:
+          type: string
+          readOnly: true
+          description: 入力の項目の説明では、項目の表示名
+        before:
+          type: string
+          readOnly: true
+        after:
+          type: string
+          readOnly: true
+      required:
+      - after
+      - before
+      - field
+      - input
     RunTaskInfo:
       type: object
       description: タスクのRunの、受付時のタスクと版、起動のしかた、通知（Manifestに固定したもの）
@@ -15079,6 +15157,12 @@ components:
             $ref: '#/components/schemas/RunSkillChange'
           readOnly: true
           description: Skillの編集のRunで変えたSkill
+        task_changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/RunTaskChange'
+          readOnly: true
+          description: タスクの編集のRunで保存したタスクの版
         created:
           type: string
           format: date-time
@@ -15163,6 +15247,7 @@ components:
       - status_display
       - step_count
       - task
+      - task_changes
       - task_info
       - task_name
       - task_version

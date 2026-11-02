@@ -317,9 +317,10 @@ const menuItems = computed(() => [
         <UDashboardNavbar :title="conversation?.title || $t('新しい会話')">
           <template #right>
             <ConversationModelSettings
-              v-if="conversation && !fixTask"
+              v-if="conversation"
               :conversation="conversation"
               :models="models"
+              :fix-chat="Boolean(fixTask)"
               class="hidden sm:flex"
               @updated="onUpdated"
             />
@@ -336,8 +337,13 @@ const menuItems = computed(() => [
           </template>
         </UDashboardNavbar>
         <!-- 狭い画面では、モデルの切り替えを見出しの下の行に出す -->
-        <UDashboardToolbar v-if="conversation && !fixTask" class="sm:hidden">
-          <ConversationModelSettings :conversation="conversation" :models="models" @updated="onUpdated" />
+        <UDashboardToolbar v-if="conversation" class="sm:hidden">
+          <ConversationModelSettings
+            :conversation="conversation"
+            :models="models"
+            :fix-chat="Boolean(fixTask)"
+            @updated="onUpdated"
+          />
         </UDashboardToolbar>
         <!-- 修正チャット：直すタスクと、もう一度動かす操作 -->
         <UDashboardToolbar v-if="fixTask">
@@ -481,7 +487,7 @@ const menuItems = computed(() => [
             :sending="sending"
             :stopping="stopping"
             :fix-chat="Boolean(fixTask)"
-            :disabled="Boolean(fixTask) && !activeRun"
+            :disabled="Boolean(fixTask?.deleted)"
             class="sticky bottom-0 z-10 rounded-b-none"
             @submit="send"
             @stop="stop"

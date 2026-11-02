@@ -2590,10 +2590,11 @@ export interface components {
         };
         /**
          * @description 確認の対象。Skillの編集の確認で、対象のSkill（新しいSkillならskillが空）と変更の要約。Draftの評価では、
-         *     評価のIDと対象のSkill・Draftのrevision・ケースの数
+         *     評価のIDと対象のSkill・Draftのrevision・ケースの数。タスクの編集の確認では、対象のタスクと変更の要約
          */
         ClarificationContext: {
             readonly skill: string;
+            readonly task: string;
             readonly name: string;
             readonly scope: string;
             readonly summary: string;
@@ -2620,9 +2621,10 @@ export interface components {
          *     * `2` - モデルの切り替えの確認
          *     * `3` - Skillの編集の確認
          *     * `4` - Draftの評価
+         *     * `5` - タスクの編集の確認
          * @enum {integer}
          */
-        ClarificationKindEnum: 1 | 2 | 3 | 4;
+        ClarificationKindEnum: 1 | 2 | 3 | 4 | 5;
         ClarificationOption: {
             readonly label: string;
             readonly description: string;
@@ -3437,6 +3439,13 @@ export interface components {
          * @enum {integer}
          */
         EvaluationVerdictEnum: 1 | 2 | 3;
+        /**
+         * @description * `prompt_template` - 依頼文
+         *     * `notification_instructions` - 通知の書き方
+         *     * `input_description` - 入力の項目の説明
+         * @enum {string}
+         */
+        FieldEnum: "prompt_template" | "notification_instructions" | "input_description";
         /** @description 出口へ渡したファイルの取得の記録（身に覚えのない取得に気づけるように） */
         FileFetch: {
             readonly file: string;
@@ -5015,6 +5024,8 @@ export interface components {
             readonly result: unknown;
             /** @description Skillの編集のRunで変えたSkill */
             readonly skill_changes: components["schemas"]["RunSkillChange"][];
+            /** @description タスクの編集のRunで保存したタスクの版 */
+            readonly task_changes: components["schemas"]["RunTaskChange"][];
             /** Format: date-time */
             readonly created: string;
             /** Format: date-time */
@@ -5080,9 +5091,10 @@ export interface components {
          * @description * `1` - 業務
          *     * `2` - Skillの編集
          *     * `3` - Draftの評価
+         *     * `4` - タスクの編集
          * @enum {integer}
          */
-        RunKindEnum: 1 | 2 | 3;
+        RunKindEnum: 1 | 2 | 3 | 4;
         /**
          * @description * `1` - タスクの画面からの手動実行
          *     * `2` - Webhook
@@ -5198,6 +5210,25 @@ export interface components {
             readonly comment: string;
         };
         RunStreamEvent: components["schemas"]["RunStatusEvent"] | components["schemas"]["RunMessageEvent"] | components["schemas"]["ClarificationEvent"] | components["schemas"]["RunOtherEvent"] | components["schemas"]["RunDeltaEvent"];
+        /** @description タスクの編集のRunで保存したタスクの版（update_task の結果。harness.md §10.10） */
+        RunTaskChange: {
+            /** @description タスクのID */
+            readonly task: string;
+            readonly name: string;
+            /** @description 範囲（「部門 経理部」等） */
+            readonly scope: string;
+            /** @description 保存した版 */
+            readonly version: number;
+            /** @description 変えた項目の変更の前後 */
+            readonly changes: components["schemas"]["RunTaskFieldChange"][];
+        };
+        RunTaskFieldChange: {
+            readonly field: components["schemas"]["FieldEnum"];
+            /** @description 入力の項目の説明では、項目の表示名 */
+            readonly input: string;
+            readonly before: string;
+            readonly after: string;
+        };
         /** @description タスクのRunの、受付時のタスクと版、起動のしかた、通知（Manifestに固定したもの） */
         RunTaskInfo: {
             readonly id: string;
@@ -6146,6 +6177,8 @@ export interface components {
             readonly result: unknown;
             /** @description Skillの編集のRunで変えたSkill */
             readonly skill_changes: components["schemas"]["RunSkillChange"][];
+            /** @description タスクの編集のRunで保存したタスクの版 */
+            readonly task_changes: components["schemas"]["RunTaskChange"][];
             /** Format: date-time */
             readonly created: string;
             /** Format: date-time */

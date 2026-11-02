@@ -102,6 +102,51 @@ SKILL_CHANGE_TOOLS = (
 )
 
 
+class RunTaskFieldChangeSerializer(serializers.Serializer):
+    field = serializers.ChoiceField(
+        choices=[
+            ("prompt_template", _("依頼文")),
+            ("notification_instructions", _("通知の書き方")),
+            ("input_description", _("入力の項目の説明")),
+        ],
+        read_only=True,
+    )
+    input = serializers.CharField(read_only=True, help_text=_("入力の項目の説明では、項目の表示名"))
+    before = serializers.CharField(read_only=True)
+    after = serializers.CharField(read_only=True)
+
+
+class RunTaskChangeSerializer(serializers.Serializer):
+    """タスクの編集のRunで保存したタスクの版（update_task の結果。harness.md §10.10）"""
+
+    task = serializers.CharField(read_only=True, help_text=_("タスクのID"))
+    name = serializers.CharField(read_only=True)
+    scope = serializers.CharField(read_only=True, help_text=_("範囲（「部門 経理部」等）"))
+    version = serializers.IntegerField(read_only=True, help_text=_("保存した版"))
+    changes = RunTaskFieldChangeSerializer(many=True, read_only=True, help_text=_("変えた項目の変更の前後"))
+
+
+def task_changes(run: Run) -> list[dict[str, Any]]:
+    """タスクの編集のRunで保存した版。何度か保存したら、最後の版にまとめ、項目ごとに最初の前と最後の後を出す"""
+    events = RunEvent.objects.filter(
+        run=run, kind=RunEventKind.TOOL_RESULT, data__name="update_task", data__is_error=False
+    ).order_by("sequence")
+    merged: dict[str, Any] | None = None
+    for event in events:
+        value = event.data.get("value") or {}
+        if "task" not in value:
+            continue
+        if merged is None:
+            merged = {**value, "changes": list(value["changes"])}
+            continue
+        changes = {(c["field"], c["input"]): c for c in merged["changes"]}
+        for change in value["changes"]:
+            key = (change["field"], change["input"])
+            changes[key] = {**change, "before": changes[key]["before"]} if key in changes else change
+        merged = {**value, "changes": [c for c in changes.values() if c["before"] != c["after"]]}
+    return [merged] if merged is not None else []
+
+
 def skill_changes(run: Run) -> list[dict[str, Any]]:
     """Skillの編集のRunで変えたSkillの、Skillごとの最後の状態。公開していない変更は、前の公開の後の変更点をまとめる"""
     events = RunEvent.objects.filter(
@@ -182,6 +227,7 @@ class RunSerializer(serializers.ModelSerializer):
     skills = serializers.SerializerMethodField(help_text=_("使っているSkillと版"))
     result = serializers.JSONField(read_only=True, allow_null=True, help_text=_("業務結果（submit_result の内容）"))
     skill_changes = serializers.SerializerMethodField(help_text=_("Skillの編集のRunで変えたSkill"))
+    task_changes = serializers.SerializerMethodField(help_text=_("タスクの編集のRunで保存したタスクの版"))
     trigger = serializers.ChoiceField(choices=RunTrigger.choices, read_only=True)
     task_info = serializers.SerializerMethodField(help_text=_("タスクのRunの、受付時のタスクと版（ほかのRunでは空）"))
 
@@ -205,6 +251,7 @@ class RunSerializer(serializers.ModelSerializer):
             "skills",
             "result",
             "skill_changes",
+            "task_changes",
             "created",
             "updated",
             "finished",
@@ -238,6 +285,12 @@ class RunSerializer(serializers.ModelSerializer):
         if obj.kind != RunKind.SKILL_EDIT:
             return []
         return list(RunSkillChangeSerializer(skill_changes(obj), many=True).data)
+
+    @extend_schema_field(RunTaskChangeSerializer(many=True))
+    def get_task_changes(self, obj: Run) -> list[dict[str, Any]]:
+        if obj.kind != RunKind.TASK_EDIT:
+            return []
+        return list(RunTaskChangeSerializer(task_changes(obj), many=True).data)
 
 
 class RunCancelSerializer(serializers.Serializer):
@@ -285,9 +338,10 @@ class ClarificationAnswerItemSerializer(serializers.Serializer):
 
 class ClarificationContextSerializer(serializers.Serializer):
     """確認の対象。Skillの編集の確認で、対象のSkill（新しいSkillならskillが空）と変更の要約。Draftの評価では、
-    評価のIDと対象のSkill・Draftのrevision・ケースの数"""
+    評価のIDと対象のSkill・Draftのrevision・ケースの数。タスクの編集の確認では、対象のタスクと変更の要約"""
 
     skill = serializers.CharField(read_only=True, required=False)
+    task = serializers.CharField(read_only=True, required=False)
     name = serializers.CharField(read_only=True, required=False)
     scope = serializers.CharField(read_only=True, required=False)
     summary = serializers.CharField(read_only=True, required=False)

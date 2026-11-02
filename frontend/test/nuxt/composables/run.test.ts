@@ -18,6 +18,7 @@ const run = (overrides: Partial<Run>): Run => ({
   skills: [],
   result: null,
   skillChanges: [],
+  taskChanges: [],
   created: '2026-10-21T00:00:00Z',
   updated: '2026-10-21T00:00:00Z',
   finished: null,
@@ -41,6 +42,8 @@ describe('run', () => {
     expect(hasWorkToShow(run({ todos: [{ content: '読む', status: TodoStatus.COMPLETED }] }))).toBe(true)
     // Skill の編集の Run は、1回の応答で終わっても編集の Run であることを出す
     expect(hasWorkToShow(run({ kind: RunKind.SKILL_EDIT }))).toBe(true)
+    // タスクの編集の Run も、編集の Run であることを出す
+    expect(hasWorkToShow(run({ kind: RunKind.TASK_EDIT }))).toBe(true)
     // 修正チャットのタスクの Run は、1回の応答で終わってもタスクと送るはずだった通知を出す
     const taskInfo = {
       id: 't1',

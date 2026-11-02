@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * エージェントからの確認（ask_user）、モデルにつながらないときの切り替えの確認、Skill の編集の提案の確認
- * （request_skill_edit。design.md §11.6）に答える。
+ * （request_skill_edit。design.md §11.6）、タスクの定義を直す提案の確認（request_task_edit。design.md §11.11）に答える。
  * 質問ごとに選択肢から選ぶか自由記述で答え、全体の補足も書ける。回答を受け付けると Run が再開する。
  */
 const props = defineProps<{ runId: string; clarification: Clarification }>()
@@ -12,8 +12,9 @@ const api = useAPI()
 
 const isModelSwitch = computed(() => props.clarification.kind === ClarificationKind.MODEL_SWITCH)
 const isSkillEdit = computed(() => props.clarification.kind === ClarificationKind.SKILL_EDIT)
+const isTaskEdit = computed(() => props.clarification.kind === ClarificationKind.TASK_EDIT)
 // 選択肢から選ぶ確認（自由記述の回答欄を出さない）
-const choiceOnly = computed(() => isModelSwitch.value || isSkillEdit.value)
+const choiceOnly = computed(() => isModelSwitch.value || isSkillEdit.value || isTaskEdit.value)
 
 const emptyForm = (): ClarificationAnswer => ({
   answers: props.clarification.questions.map(() => ({ selected: [], text: '' })),
@@ -46,7 +47,7 @@ const alertErrors = computed<ValidationErrors>(() => ({
 }))
 
 const canPost = computed(() =>
-  isSkillEdit.value
+  isSkillEdit.value || isTaskEdit.value
     ? form.value.answers!.some((a) => (a.selected ?? []).length > 0)
     : form.value.answers!.some((a) => (a.selected ?? []).length > 0 || a.text?.trim()) ||
       Boolean(form.value.comment?.trim()),
@@ -85,6 +86,14 @@ const canPost = computed(() =>
         class="text-xs"
       >
         {{ $t('Skillの今の内容を見る') }}
+      </ULink>
+      <ULink
+        v-if="isTaskEdit && clarification.target?.task"
+        :to="`/tasks/${clarification.target.task}`"
+        target="_blank"
+        class="text-xs"
+      >
+        {{ $t('タスクの今の定義を見る') }}
       </ULink>
       <DTextField
         v-if="!choiceOnly"

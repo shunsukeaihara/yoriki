@@ -253,13 +253,18 @@ class Artifact(models.Model):
         )
 
     @classmethod
-    def attach(cls, conversation, artifacts: list["Artifact"]) -> None:
-        """メッセージで送る添付に、/workspace/input の中の名前を決める（input_paths()）。会話の行ロックの中で呼ぶ"""
-        used = set(
-            cls.objects.filter(conversation=conversation, kind=ArtifactKind.ATTACHMENT)
-            .exclude(path="")
-            .values_list("path", flat=True)
-        )
+    def attach(cls, conversation, artifacts: list["Artifact"], *, run=None, fresh: bool = False) -> None:
+        """メッセージで送る添付に、/workspace/input の中の名前を決める（input_paths()）。会話の行ロックの中で呼ぶ。
+
+        名前の重なりは会話の添付の中で見る。Workspaceを引き継がないタスクのRun（修正チャット）では、そのRunの添付の
+        中だけで見る（`run`。最初の依頼の添付は、まだRunがないので `fresh`）。動かし直しても同じ名前で置くため"""
+        if fresh:
+            used: set[str] = set()
+        else:
+            existing = cls.objects.filter(conversation=conversation, kind=ArtifactKind.ATTACHMENT).exclude(path="")
+            if run is not None:
+                existing = existing.filter(run=run)
+            used = set(existing.values_list("path", flat=True))
         for artifact, path in zip(artifacts, input_paths([a.name for a in artifacts], used), strict=True):
             artifact.path = path
             artifact.save(update_fields=["path"])

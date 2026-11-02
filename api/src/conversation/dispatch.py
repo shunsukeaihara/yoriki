@@ -164,7 +164,9 @@ def post_message(
         )
         if len(unsent) != len(attachments):
             raise CannotStart(_("送信済みの添付が含まれています。添付し直してください。"))
-        Artifact.attach(conversation, unsent)
+        fix_run = active_run(conversation) if conversation.is_task_fix else None
+        # 修正チャットでは、動いているタスクのRunの添付の中で名前を決める（Runごとに /workspace/input を分けるため）
+        Artifact.attach(conversation, unsent, run=fix_run)
         message.attachments.set(unsent)
     conversation.last_posted = timezone.now()
     fields = ["last_posted", "updated"]

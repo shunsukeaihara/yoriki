@@ -95,6 +95,16 @@ class ConversationSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"model_profile": _("モデル設定を選んでください")})
             attrs["model_profile"] = profile
         sensitive = attrs.get("handles_sensitive_data", getattr(self.instance, "handles_sensitive_data", False))
+        if (
+            self.instance is not None
+            and self.instance.is_task_fix
+            and sensitive != self.instance.handles_sensitive_data
+        ):
+            # 修正チャットの機密の区分は、始めたときのタスクの版で決まる（タスクのRunはタスクのモデルで動くので、会話を
+            # 機密にしてもローカルLLMにならない。design.md §11.11）
+            raise serializers.ValidationError(
+                {"handles_sensitive_data": _("修正チャットの機密の区分は変えられません。タスクの設定で変えてください")}
+            )
         if self.instance is not None and self.instance.handles_sensitive_data and not sensitive:
             raise serializers.ValidationError(
                 {"handles_sensitive_data": _("個人情報・機密情報を扱う会話は、扱わない会話に戻せません")}

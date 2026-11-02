@@ -547,7 +547,9 @@ def _place_files(
         )
         for file in placed
     ]
-    Artifact.attach(conversation, artifacts)
+    # 修正チャットでは、前の実行の添付と名前を重ねてよい（Runごとに /workspace/input を分けるので、動かし直しても
+    # 同じ名前で置く）
+    Artifact.attach(conversation, artifacts, fresh=conversation.purpose == ConversationPurpose.TASK_FIX)
     paths = {id(file): artifact.describe()["path"] for file, artifact in zip(placed, artifacts, strict=True)}
     values = {name: paths[id(v)] if isinstance(v, InputFile) else v for name, v in inputs.items()}
     return artifacts, values

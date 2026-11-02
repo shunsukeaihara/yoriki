@@ -2,9 +2,11 @@
 タスク専用の会話でタスクを動かし、追加の指示・回答を出す。出口へは送らず、Workspaceは実行ごとに分ける"""
 
 import io
+import json
 import uuid
 
 import pytest
+from django.core.files.uploadedfile import SimpleUploadedFile
 
 from artifact.factories import ArtifactFactory
 from artifact.models import Artifact, ArtifactKind, BlobObject
@@ -189,6 +191,37 @@ def test_fix_chat_of_another_task_or_person_is_not_used(api_client, manager):
     assert _fix(api_client, colleague, task, conversation=conversation).status_code == 404
     chat = ConversationFactory.create(owner=manager)
     assert _fix(api_client, manager, task, conversation=chat).status_code == 404
+
+
+def test_rerun_places_files_under_the_same_names(api_client, manager):
+    """前の実行の添付と同じ名前のファイルも、動かし直したRunでは同じパスに置く（Runごとに /workspace/input を分ける）"""
+    inputs = [*INPUTS, {"name": "invoice", "label": "請求書", "type": "file", "required": True}]
+    task = _task(manager, inputs=inputs)
+    api_client.force_login(manager)
+
+    def send(conversation=None):
+        query = f"client_request_id={uuid.uuid4().hex}" + (f"&conversation={conversation.uid}" if conversation else "")
+        body = {"inputs": json.dumps({"vendor": "A商事"}), "invoice": SimpleUploadedFile("請求書.pdf", b"%PDF")}
+        res = api_client.post(f"/api/app/v1/tasks/{task.uid}/fix_chat/?{query}", body)
+        assert res.status_code == 201, res.json()
+        return Run.objects.get(uid=res.json()["id"])
+
+    first = _finish(send())
+    second = send(first.conversation)
+    path = "/workspace/input/請求書.pdf"
+    assert first.manifest["fixed"]["task"]["inputs"]["invoice"] == path
+    assert second.manifest["fixed"]["task"]["inputs"]["invoice"] == path
+
+
+def test_sensitivity_of_a_fix_chat_is_fixed(api_client, manager):
+    task = _task(manager)
+    conversation = Run.objects.get(uid=_fix(api_client, manager, task).json()["id"]).conversation
+    res = api_client.patch(
+        f"/api/app/v1/conversations/{conversation.uid}/", {"handles_sensitive_data": True}, format="json"
+    )
+    assert res.status_code == 400
+    conversation.refresh_from_db()
+    assert not conversation.handles_sensitive_data
 
 
 def test_task_that_became_sensitive_needs_a_new_fix_chat(api_client, manager):

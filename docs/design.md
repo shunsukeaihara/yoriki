@@ -136,6 +136,7 @@ instructions: |
 tools:
   - shell
   - read
+  - datasource_query
 assets:
   - key: field-master
     role: master
@@ -896,13 +897,13 @@ Conversationは社員が見る履歴の単位、Runは実行要求の単位、At
 ### 5.2 実行の流れ
 
 1. Trigger Adapterがチャット・Webhook等を認証・正規化し、タスクまたは会話設定から共通の実行要求を組み立てる。追加指示・確認回答は既存Runの会話処理へ渡す。
-2. APIが認証、権限、添付上限、同時実行数、予算、TriggerReceiptの重複を検証し、Run・Manifest・起動・対話・通知・モデル（ModelProfileの版）・Connectorの固定・予算予約を作成する。
+2. APIが認証、権限、添付上限、同時実行数、予算、TriggerReceiptの重複を検証し、Run・Manifest・起動・対話・通知・モデル（ModelProfileの版）・Connectorの固定・予算予約を作成する（初期の実装は予算の検証・予約・精算をせず、利用量を記録するだけ。§9）。
 3. 同じDB transactionでOutboxを記録する。DispatcherがQClusterへRun IDを通知する。
 4. WorkerがRunを原子的にclaimし、Attemptとleaseを作成する。
 5. 固定されたSkillと必要な内容を読み込む。コマンド処理が必要な場合は、許可された添付・資料と実行環境を復元してSandboxを起動する。
 6. RunnerがLLMとToolを反復し、結果を記録する。Tool前後の安全な区切りで追加指示と取消を確認する。Python依存の追加はEnvironment Revision、Skillの変更はSkill Draftとして管理し、安全な区切りでCheckpointを確定する。
 7. 未反映の指示がないことを確認し、成果物と必要な最終Workspace snapshotを保存・検証する。業務結果Schemaを検証し、ResultEnvelope、Checkpoint、完了イベント、設定済み通知の配信Outboxを同じDB transactionで確定してRunを完了する。通知候補が不正なら標準形式を使う。配信は確定後に非同期で行い、人間も同じConversationで結果を確認できる。
-8. 必要な永続化を確認してWorkspace Persistence Adapterで一時領域を解放し、Sandboxを削除して実使用量に基づき予算予約を精算する。Skill編集Runでは公開結果またはDraft参照を残す。
+8. 必要な永続化を確認してWorkspace Persistence Adapterで一時領域を解放し、Sandboxを削除して実使用量に基づき予算予約を精算する（初期の実装は精算しない。手順2）。Skill編集Runでは公開結果またはDraft参照を残す。
 
 QClusterは実行通知を担う。実行状態の正本はPostgreSQLに置き、QClusterの結果テーブルをRun履歴として使用しない。Outboxの再送による重複通知はRunのclaimで吸収する。
 

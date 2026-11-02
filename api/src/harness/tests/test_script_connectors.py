@@ -11,7 +11,7 @@ from connector.errors import ConnectorError, ConnectorErrorKind
 from connector.factories import ConnectorFactory
 from harness import script_connectors
 from harness.connectors import DATASOURCE_TOOL_NAMES
-from harness.sandbox import SandboxSession
+from harness.sandbox import SCRIPT_REQUESTS_BUSY, SandboxSession
 from harness.script_connectors import ScriptConnectors
 from run.models import RunEvent, RunEventKind, ToolInvocation, ToolStatus
 from run.tasks import claim_run
@@ -275,3 +275,42 @@ def test_runner_gives_the_session_a_handler_for_the_run(attempt):
     runner.tools = tuple(runner._exposed_tools())
     assert runner.session.script_handler.available()
     runner.session.close()
+
+
+def test_requests_over_the_queue_limit_are_answered_busy(attempt, monkeypatch):
+    session = SandboxSession(attempt.run, attempt)
+    session.script_handler = FakeHandler()
+    session.script_requests = queue.Queue(1)
+    started = {}
+
+    class FakeSandbox:
+        def start_relay(self, on_request):
+            started["on_request"] = on_request
+            return FakeRelay()
+
+    session.sandbox = FakeSandbox()  # type: ignore[assignment]
+    session._start_relay()
+    relay: Any = FakeRelay()
+    started["on_request"](relay, 1, {"op": "describe"})
+    started["on_request"](relay, 2, {"op": "describe"})
+
+    assert relay.responses == [(2, SCRIPT_REQUESTS_BUSY)]
+    session.serve_script_requests()
+    assert relay.responses[1] == (1, {"ok": True, "n": 1})
+    session.sandbox = None
+    session.close()
+
+
+def test_unexpected_errors_close_the_record(attempt, monkeypatch):
+    def broken(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(script_connectors, "run_query", broken)
+
+    response = make(attempt).handle(QUERY)
+
+    assert response == {"ok": False, "error": {"code": "internal", "message": "The request failed."}}
+    invocation = ToolInvocation.objects.get(run=attempt.run)
+    assert invocation.status == ToolStatus.FAILED
+    assert invocation.ended is not None
+    assert (invocation.value or {})["error"] == "internal"

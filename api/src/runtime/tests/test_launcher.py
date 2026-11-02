@@ -6,11 +6,13 @@ import time
 import uuid
 from decimal import Decimal
 from typing import Any, cast
+from unittest import mock
 
 import pytest
+from docker.utils.socket import STDERR, STDOUT
 
 from runtime.factories import RuntimeProfileFactory
-from runtime.launcher import Launcher, Sandbox, SandboxSpec, SandboxUnavailable, verify_container
+from runtime.launcher import Launcher, Relay, Sandbox, SandboxSpec, SandboxUnavailable, verify_container
 
 
 def spec(**overrides: Any) -> SandboxSpec:
@@ -316,3 +318,41 @@ def test_out_of_memory(state, expected):
         api = Api()
 
     assert Sandbox(cast(Any, Client()), "c1", "yoriki-test").out_of_memory() is expected
+
+
+class FakeAttached:
+    """中継の出力の代わり。`raw` への書込みと閉じたことを記録する"""
+
+    def __init__(self, frames):
+        self.frames = frames
+        self.raw = mock.Mock()
+
+    def __enter__(self):
+        return iter(self.frames)
+
+    def __exit__(self, *exc_info):
+        pass
+
+
+class TestRelay:
+    def test_requests_are_passed_on_and_responses_written(self):
+        received = []
+        relay = Relay("e" * 64, lambda r, i, req: received.append((i, req)))
+        attached = FakeAttached(
+            [(STDERR, b'{"event": "ready"}\n'), (STDOUT, b'{"id": 1, "request": {"op": "de'), (STDOUT, b'scribe"}}\n')]
+        )
+        relay._pump(cast(Any, attached))
+        assert relay.ready.is_set()
+        assert received == [(1, {"op": "describe"})]
+
+    def test_a_line_over_the_limit_closes_the_relay(self, monkeypatch):
+        monkeypatch.setattr("runtime.launcher.RELAY_MAX_LINE", 100)
+        received = []
+        relay = Relay("e" * 64, lambda r, i, req: received.append(i))
+        attached = FakeAttached([(STDOUT, b"x" * 60), (STDOUT, b"x" * 60), (STDOUT, b'{"id": 2, "request": {}}\n')])
+        relay._pump(cast(Any, attached))
+        assert "longer than 100 bytes" in relay.error
+        assert relay.done.is_set()
+        assert received == []
+        attached.raw.shutdown.assert_called_once()
+        assert not relay.respond(1, {"ok": True})

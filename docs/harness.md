@@ -659,7 +659,7 @@ Runが使うSkill（`/` で指定したものと、読み込んだもの）が�
 - 機密のフラグの付いたConnectorは、機密の会話・タスクのRun（`handles_sensitive_data`。開始時の会話の区分を持つ）にだけ一覧に出し、使わせる。機密の会話はローカルLLMのモデルだけで、扱わない会話に戻せないので、Connectorの情報はクラウドのモデルへ渡らない。`@` で機密のConnectorを指定できるのも機密の会話だけ。会話を途中で機密にしたら、実行中のRunにも印を付け（モデルの切り替えの候補がローカルLLMだけになる）、機密のConnectorは次の依頼から一覧に出す。操作のたびにも、Runの区分とモデル（ローカルLLMか）を確かめる。
 - Skillのスクリプトからの呼出し（design.md §4.9.6。`harness/script_connectors.py`）も、同じConnectorの処理とToolInvocationの記録を通す。
   - Sandboxを起動したとき、このRunに `datasource_query`・`datasource_describe` を出していて、Connectorの一覧があれば、Sandboxの中の中継（`yoriki-sandbox relay`。sandbox/CONTRACT.md §4.9）を `docker exec` で始める。中継が止まっていれば、次にコマンドを始めるときに始め直す。始められなければ、スクリプトからは呼べないまま続ける（ライブラリが `unavailable` を返す）。
-  - 中継から届いた要求は、受け取るスレッドで列に積むだけにし、Runnerのスレッドで1つずつ処理する。処理するのは、ジョブの終わりを待つ間（`shell`・`job_output`。要求が届けばすぐ処理する）と、ステップの区切り（終わったジョブを知らせる前）。モデルの応答を待つ間は処理しないので、スクリプトは待つ。
+  - 中継から届いた要求は、受け取るスレッドで列に積むだけにし（32件まで。あふれたら `busy`。中継はSandboxの中のもので置き換えられうるので、受け取る1行も2MiBまでにし、超えたら通信路を閉じる）、Runnerのスレッドで1つずつ処理する。処理するのは、ジョブの終わりを待つ間（`shell`・`job_output`。要求が届けばすぐ処理する）と、ステップの区切り（終わったジョブを知らせる前）。モデルの応答を待つ間は処理しないので、スクリプトは待つ。
   - 引数は、Toolと同じSchema（`connector` は一覧の名前のenum、知らない項目は断る）で確かめる。操作のToolをこのRunに今出していなければ断る（Skillの「使ってよいTool」で外したRunでは、スクリプトからも呼べない）。
   - 呼出しはToolInvocation（`call_id` は `script-` で始まる。`value` に `via: "script"` と、そのときに実行していたToolの呼出しのID `during`）に記録し、RunEventには入れない（モデルの文脈に結果を入れない）。結果のCSVはToolと同じくArtifactにして `/workspace/input/connectors/{invocation_id}/result.csv` に置き、スクリプトには場所・列・行数・打ち切ったかを返す（行はライブラリがファイルから読む）。
   - 上限：1つのRunで1,000回（Attemptをまたいで、記録した呼出しを数える）、1分に120回（Attemptの中で数える。超えたら `rate_limited` と待つ秒数を返し、ライブラリが待ってやり直す）。

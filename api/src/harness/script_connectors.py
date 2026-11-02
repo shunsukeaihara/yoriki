@@ -22,7 +22,9 @@ from django.utils import timezone
 from nanoid import generate
 
 from llm.providers.base import TextPart, ToolCall
+from run.errors import LeaseLost
 from run.models import ExecutionAttempt, Run, ToolInvocation, ToolStatus
+from runtime.launcher import SandboxUnavailable
 
 from .connectors import DATASOURCE_TOOL_NAMES, catalog_names
 from .tools.base import ToolContext, ToolResult
@@ -129,11 +131,18 @@ class ScriptConnectors:
             self.run, self.attempt, call, invocation=invocation.uid, session=self.session, exposed=self.exposed()
         )
         outcome: Described | Queried | ToolResult
-        if name == DESCRIBE_NAME:
-            outcome = describe_tables(arguments, context)
-        else:
-            # 行はファイルで渡すので、メモリには残さない
-            outcome = run_query(arguments, context, keep=0)
+        try:
+            if name == DESCRIBE_NAME:
+                outcome = describe_tables(arguments, context)
+            else:
+                # 行はファイルで渡すので、メモリには残さない
+                outcome = run_query(arguments, context, keep=0)
+        except (LeaseLost, SandboxUnavailable):
+            # Attemptを終える。実行中の記録は、Attemptの終わりに結果不明として閉じる
+            raise
+        except Exception:
+            logger.exception("run %s: a connector call from a script failed", self.run.uid)
+            outcome = ToolResult.text("The request failed.", is_error=True, value={"error": "internal"})
         if isinstance(outcome, ToolResult):
             value = origin | (outcome.value or {})
             response = _error(str(value.get("error") or "unavailable"), _text(outcome))

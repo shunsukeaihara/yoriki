@@ -222,6 +222,10 @@ class Exec:
         return next((e["pgid"] for e in self.events if e.get("event") == "started"), None)
 
 
+# 中継から受け取る1行の大きさの上限（バイト）。中継はSandboxの中のもので置き換えられうるので、Worker側でも区切る
+RELAY_MAX_LINE = 2 * 1024 * 1024
+
+
 class Relay:
     """Sandboxの中の `yoriki-sandbox relay`（CONTRACT.md §4.9）との通信路。Skillのスクリプトからの要求を、
     受け取るたびに `on_request` へ渡す（受け取るスレッドで呼ぶので、`on_request` はDBに触らず、列に積むだけにする）。
@@ -271,6 +275,12 @@ class Relay:
                         lines, _sep, pending_err = (pending_err + chunk).rpartition(b"\n")
                         if any(e.get("event") == "ready" for e in _events(lines)):
                             self.ready.set()
+                    if len(pending_out) > RELAY_MAX_LINE or len(pending_err) > RELAY_MAX_LINE:
+                        # 上限を超える行を送る中継は壊れているか置き換えられている。読むのをやめて閉じる
+                        self.error = f"the relay sent a line longer than {RELAY_MAX_LINE} bytes"
+                        logger.warning("relay %s: %s", self.exec_id[:12], self.error)
+                        self.close()
+                        break
         except (OSError, DockerException) as exc:
             self.error = str(exc)
         finally:
@@ -280,6 +290,9 @@ class Relay:
             self.ready.set()
 
     def _dispatch(self, line: bytes) -> None:
+        if len(line) > RELAY_MAX_LINE:
+            logger.warning("relay %s: ignoring a line longer than the limit", self.exec_id[:12])
+            return
         try:
             message = json.loads(line)
             request_id, request = message["id"], message["request"]

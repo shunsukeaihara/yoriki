@@ -55,6 +55,12 @@ WORKSPACE = "/workspace"
 SNAPSHOT_PATHS = ["work", "output"]
 # 1回に回収する成果物（/workspace/output のファイル）の数の上限（design.md §7.4）
 MAX_OUTPUT_FILES = 200
+# Skillのスクリプトからの要求を、処理を待つ列に積める数（design.md §4.9.6）。あふれた要求への応答
+MAX_SCRIPT_REQUESTS = 32
+SCRIPT_REQUESTS_BUSY = {
+    "ok": False,
+    "error": {"code": "busy", "message": "Too many requests are waiting. Retry later.", "retry_after": 1},
+}
 # 同時に動かせるジョブの数（harness.md §8.3）
 MAX_JOBS = 4
 # ジョブを止めるときに、TERMの後でKILLを送るまで待つ時間（秒）
@@ -221,7 +227,8 @@ class SandboxSession:
         self.relay: Relay | None = None
         # 中継を始められなかった。このAttemptでは始め直さない（コマンドを始めるたびに待たないように）
         self.relay_failed = False
-        self.script_requests: queue.Queue[tuple[Relay, int, dict[str, Any]]] = queue.Queue()
+        # 列に積める数には上限を置く（中継はSandboxの中のもので、上限を守るとは限らない）。あふれたら busy で返す
+        self.script_requests: queue.Queue[tuple[Relay, int, dict[str, Any]]] = queue.Queue(MAX_SCRIPT_REQUESTS)
 
     @property
     def started(self) -> bool:
@@ -441,10 +448,16 @@ class SandboxSession:
         if self.relay is not None and not self.relay.done.is_set():
             return
         requests = self.script_requests
+
+        def enqueue(relay: Relay, request_id: int, request: dict[str, Any]) -> None:
+            # 受け取るスレッドで呼ばれる。DBに触らず、積むだけにする
+            try:
+                requests.put_nowait((relay, request_id, request))
+            except queue.Full:
+                relay.respond(request_id, SCRIPT_REQUESTS_BUSY)
+
         try:
-            self.relay = self.sandbox.start_relay(
-                lambda relay, request_id, request: requests.put((relay, request_id, request))
-            )
+            self.relay = self.sandbox.start_relay(enqueue)
         except SandboxUnavailable as exc:
             logger.warning("run %s: cannot start the connector relay: %s", self.run.uid, exc)
             self.relay = None

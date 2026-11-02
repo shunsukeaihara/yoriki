@@ -9237,7 +9237,9 @@ export interface operations {
     };
     app_v1_tasks_fix_chat_create: {
         parameters: {
-            query?: {
+            query: {
+                /** @description 画面が要求ごとに作るID（64文字まで）。このタスクの自分の修正チャットで同じIDの要求を受け付け済みなら、そのRunを返す（応答が失われた後の再送で、二重に動かさない） */
+                client_request_id: string;
                 /** @description 動かし直す修正チャットのID（このタスクの、自分の修正チャット） */
                 conversation?: string;
                 /** @description 画面で確かめた版（任意）。今の版と違えば409にし、確かめていない定義では動かさない */
@@ -9261,6 +9263,14 @@ export interface operations {
             };
         };
         responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
             201: {
                 headers: {
                     [name: string]: unknown;

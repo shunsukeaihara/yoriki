@@ -30,7 +30,15 @@ from utils.views import SoftDeleteMixin
 
 from . import checks
 from .authentication import WebhookKeyAuthentication, WebhookTaskPermission
-from .dispatch import InvalidInputs, LaunchIdConflict, launched_run, receive_webhook, start_task_run
+from .dispatch import (
+    AlreadyStarted,
+    InvalidInputs,
+    LaunchIdConflict,
+    fix_started_run,
+    launched_run,
+    receive_webhook,
+    start_task_run,
+)
 from .errors import CannotRun, VersionConflict
 from .models import (
     BUSINESS_SCOPES,
@@ -244,16 +252,29 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
                 "conversation", str, description="動かし直す修正チャットのID（このタスクの、自分の修正チャット）"
             ),
             OpenApiParameter(
+                "client_request_id",
+                str,
+                required=True,
+                description="画面が要求ごとに作るID（64文字まで）。このタスクの自分の修正チャットで同じIDの要求を"
+                "受け付け済みなら、そのRunを返す（応答が失われた後の再送で、二重に動かさない）",
+            ),
+            OpenApiParameter(
                 "version",
                 int,
                 description="画面で確かめた版（任意）。今の版と違えば409にし、確かめていない定義では動かさない",
             ),
         ],
-        responses={201: RunSerializer, 409: CONFLICT},
+        responses={201: RunSerializer, 200: RunSerializer, 409: CONFLICT},
     )
     @action(detail=True, methods=["post"], url_path="fix_chat", serializer_class=TaskRunCreateSerializer)
     def fix_chat(self, request, *args, **kwargs):
         task = self.get_object()
+        client_request_id = request.query_params.get("client_request_id", "")
+        if not client_request_id or len(client_request_id) > 64:
+            raise ValidationError({"client_request_id": [_("要求のID（64文字まで）を指定してください")]})
+        # 同じ要求の再送には、前に動かしたRunを返す（入力や版を確かめ直さない）
+        if (existing := fix_started_run(task, request.user, client_request_id)) is not None:
+            return Response(RunSerializer(existing, context=self.get_serializer_context()).data)
         conversation = None
         if uid := request.query_params.get("conversation"):
             conversation = get_object_or_404(Conversation.objects.owned_by(request.user).filter(task=task), uid=uid)
@@ -272,7 +293,13 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
                 launch=RunLaunch.FIX,
                 expected_version=int(version) if version is not None else None,
                 conversation=conversation,
+                client_request_id=client_request_id,
             )
+        except AlreadyStarted as exc:
+            return Response(RunSerializer(exc.run, context=self.get_serializer_context()).data)
+        except IntegrityError as exc:
+            # 同じ修正チャットで、別のメッセージがこのIDを使っている
+            raise Conflict(_("この要求のIDは、別の要求で使われています")) from exc
         except VersionConflict as exc:
             raise Conflict(VERSION_CHANGED) from exc
         except InvalidInputs as exc:

@@ -3289,6 +3289,12 @@ paths:
         を省くと、新しい修正チャットを作る。タスクに固定したものの範囲で動き、実行中の追加の指示と確認への回答を受け付け、出口へは送らない。入力は手動実行と同じ
       parameters:
       - in: query
+        name: client_request_id
+        schema:
+          type: string
+        description: 画面が要求ごとに作るID（64文字まで）。このタスクの自分の修正チャットで同じIDの要求を受け付け済みなら、そのRunを返す（応答が失われた後の再送で、二重に動かさない）
+        required: true
+      - in: query
         name: conversation
         schema:
           type: string
@@ -3325,6 +3331,12 @@ paths:
       - cookieAuth: []
       responses:
         '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Run'
+          description: ''
+        '200':
           content:
             application/json:
               schema:

@@ -102,7 +102,9 @@ def start_task_run(
 
     修正チャット（`RunLaunch.FIX`）では、`conversation`（そのタスクの修正チャット）の中でRunを動かす。省けば新しい
     修正チャットを作る（Runの `conversation` で返す）。動かせるのはタスクを管理できる人で、停止中のタスクも動かせる。
-    出口へは送らない（design.md §11.11）"""
+    出口へは送らない（design.md §11.11）。`client_request_id` は最初の依頼の `client_message_id` にし、同じ人の
+    このタスクの修正チャットで同じIDの要求が受け付け済みなら、AlreadyStarted でそのRunを知らせる（応答が失われた後の
+    再送で二重に動かさない。タスクの行のロックの中で確かめる）"""
     # 保存先への書き込みは、タスクの行をロックする前に行う（保存先が遅くても、同じタスクの受付や更新を待たせない）
     sent = inputs.values() if isinstance(inputs, dict) else ()
     written = store_files([*files, *(v for v in sent if isinstance(v, InputFile))])
@@ -114,20 +116,18 @@ def start_task_run(
                 .select_related("owner", "department", "current_revision__model_profile__current_version")
                 .get(pk=task.pk)
             )
+            # 修正チャットの再送には前に受け付けたRunを返す（版や入力、今も動かせるかを確かめ直さない。チャットからの
+            # 起動と同じ）
+            if (
+                launch == RunLaunch.FIX
+                and client_request_id
+                and (existing := fix_started_run(task, actor, client_request_id)) is not None
+            ):
+                raise AlreadyStarted(existing)
             # 画面で確かめた版と違えば、実行できるかより先に知らせる（画面に最新の状態を読み込ませる）
             if expected_version is not None and task.version_number != expected_version:
                 raise VersionConflict()
-            if launch == RunLaunch.MANUAL and not task.can(actor, TaskAction.RUN):
-                raise CannotRun(_("このタスクを実行する権限がないか、タスクが停止中です"))
-            if launch == RunLaunch.CHAT and not task.can(actor, TaskAction.LAUNCH):
-                raise CannotRun(_("このタスクをチャットから起動する権限がないか、タスクが停止中です"))
-            if launch == RunLaunch.FIX and (not task.can(actor, TaskAction.MANAGE) or task.current_revision is None):
-                raise CannotRun(_("このタスクを管理する権限がないか、タスクに版がありません"))
-            # 入口からの起動は、タスクに固定したものの範囲で動く（authorization.md §6。個人のタスクはスケジュールだけ）
-            if launch == RunLaunch.WEBHOOK and (not task.in_service() or task.scope == TaskScope.PERSONAL):
-                raise CannotRun(_("タスクが停止中か、削除されています"))
-            if reason := checks.task_problem(task, allow_suspended=launch == RunLaunch.FIX):
-                raise CannotRun(reason)
+            _check_launch(task, actor, launch)
             revision = task.current_revision
             assert revision is not None  # can()・in_service() が確かめた
             # チャットからの起動は、起動した人の権限を超えない（authorization.md §6）
@@ -139,7 +139,16 @@ def start_task_run(
                 raise InvalidInputs(errors)
             if launch == RunLaunch.FIX:
                 fix_chat = _fix_chat(task, revision, actor=actor, conversation=conversation)
-                return _start(task, revision, cleaned, actor=actor, launch=launch, files=files, conversation=fix_chat)
+                return _start(
+                    task,
+                    revision,
+                    cleaned,
+                    actor=actor,
+                    launch=launch,
+                    files=files,
+                    conversation=fix_chat,
+                    client_request_id=client_request_id,
+                )
             run = _start(task, revision, cleaned, actor=actor, launch=launch, files=files)
             if conversation is not None:
                 _add_launch_card(conversation, run, actor=actor, client_request_id=client_request_id)
@@ -147,6 +156,21 @@ def start_task_run(
     except BaseException:
         discard_files(written)
         raise
+
+
+def _check_launch(task: TaskDefinition, actor, launch: RunLaunch) -> None:
+    """起動のしかたごとに、動かしてよいかを確かめる（authorization.md §6）。だめなら CannotRun"""
+    if launch == RunLaunch.MANUAL and not task.can(actor, TaskAction.RUN):
+        raise CannotRun(_("このタスクを実行する権限がないか、タスクが停止中です"))
+    if launch == RunLaunch.CHAT and not task.can(actor, TaskAction.LAUNCH):
+        raise CannotRun(_("このタスクをチャットから起動する権限がないか、タスクが停止中です"))
+    if launch == RunLaunch.FIX and (not task.can(actor, TaskAction.MANAGE) or task.current_revision is None):
+        raise CannotRun(_("このタスクを管理する権限がないか、タスクに版がありません"))
+    # 入口からの起動は、タスクに固定したものの範囲で動く（authorization.md §6。個人のタスクはスケジュールだけ）
+    if launch == RunLaunch.WEBHOOK and (not task.in_service() or task.scope == TaskScope.PERSONAL):
+        raise CannotRun(_("タスクが停止中か、削除されています"))
+    if reason := checks.task_problem(task, allow_suspended=launch == RunLaunch.FIX):
+        raise CannotRun(reason)
 
 
 @dataclass
@@ -227,8 +251,10 @@ def _start(
     launch,
     files: Sequence[InputFile],
     conversation: Conversation | None = None,
+    client_request_id: str = "",
 ) -> Run:
-    """Runを作る。`conversation` は修正チャット（なければRunごとの会話を作る）"""
+    """Runを作る。`conversation` は修正チャット（なければRunごとの会話を作る）。`client_request_id` は修正チャットの
+    最初の依頼の `client_message_id`"""
     fixing = launch == RunLaunch.FIX
     plan = plan_run(task, revision, deliver=not fixing)
     sensitive = revision.handles_sensitive_data
@@ -247,7 +273,11 @@ def _start(
     attachments, inputs = _place_files(conversation, files, inputs, actor=actor)
     text = render(revision.prompt_template, inputs)
     message = ConversationMessage.objects.create(
-        conversation=conversation, sender=actor, role=MessageRole.USER, body=text
+        conversation=conversation,
+        sender=actor,
+        role=MessageRole.USER,
+        body=text,
+        client_message_id=client_request_id if fixing else "",
     )
     fixed: dict[str, Any] = {
         "model_version": plan.version.pk,
@@ -307,6 +337,31 @@ def _start(
     )
     enqueue_run(run)
     return run
+
+
+class AlreadyStarted(Exception):
+    """修正チャットで、同じ要求（画面が送るID）を前に受け付けている。`run` はそのとき動かしたRun"""
+
+    def __init__(self, run: Run):
+        super().__init__(run.uid)
+        self.run = run
+
+
+def fix_started_run(task: TaskDefinition, user, client_request_id: str) -> Run | None:
+    """同じ人のこのタスクの修正チャットで、同じID（最初の依頼の `client_message_id`）で動かしたRun"""
+    message = (
+        ConversationMessage.objects.filter(
+            conversation__owner=user,
+            conversation__purpose=ConversationPurpose.TASK_FIX,
+            conversation__task=task,
+            client_message_id=client_request_id,
+            run__isnull=False,
+        )
+        .select_related("run__conversation")
+        .order_by("pk")
+        .first()
+    )
+    return message.run if message is not None else None
 
 
 class LaunchIdConflict(CannotRun):

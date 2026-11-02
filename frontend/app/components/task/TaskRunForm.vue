@@ -11,7 +11,7 @@ const props = defineProps<{
   task: TaskDetail | LaunchableTask
   /** チャットから起動するときの、起動した会話（カードが足される） */
   conversationId?: string
-  /** チャットからの起動のID。同じIDの再送には前に起動したRunが返る（二重に起動しない） */
+  /** チャットからの起動・修正チャットの要求のID。同じIDの再送には前に起動したRunが返る（二重に起動しない） */
   clientRequestId?: string
   /** 入力の初期値（受け付けたかが分からなかった起動を、同じ入力で送り直すとき・修正チャットで動かし直すとき） */
   initialValues?: TaskRunInputs
@@ -68,7 +68,9 @@ const { onSubmit, loading, errors } = createSubmit({
   // 画面で確かめた版を送る。別の版ができていれば409になり、確かめていない定義では実行しない
   fn: (data): Promise<Run | TaskRun> =>
     props.fix
-      ? api.tasks(props.task.id).fixChat(props.task.version ?? 0, data, props.fixConversationId)
+      ? api
+          .tasks(props.task.id)
+          .fixChat(props.task.version ?? 0, props.clientRequestId ?? crypto.randomUUID(), data, props.fixConversationId)
       : props.conversationId
         ? api
             .launchableTasks(props.task.id)

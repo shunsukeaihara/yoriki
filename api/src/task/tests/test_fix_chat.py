@@ -2,6 +2,7 @@
 タスク専用の会話でタスクを動かし、追加の指示・回答を出す。出口へは送らず、Workspaceは実行ごとに分ける"""
 
 import io
+import uuid
 
 import pytest
 
@@ -51,6 +52,7 @@ def _task(manager, **revision):
 
 def _fix(api_client, user, task, *, conversation=None, inputs=None, **params):
     api_client.force_login(user)
+    params.setdefault("client_request_id", uuid.uuid4().hex)
     if conversation is not None:
         params["conversation"] = conversation.uid
     query = "&".join(f"{k}={v}" for k, v in params.items())
@@ -106,6 +108,28 @@ def test_fix_chat_starts_a_task_run_in_a_conversation_of_the_task(api_client, ma
     # 会話の一覧に出て、直すタスクが分かる
     listed = api_client.get("/api/app/v1/conversations/").json()["results"]
     assert [(c["id"], c["task"]["name"]) for c in listed] == [(conversation.uid, "請求書チェック")]
+
+
+def test_resent_request_returns_the_run_started_before(api_client, manager):
+    """応答が失われた後の再送で、二重に動かさない（新しい修正チャットでも、動かし直しでも）"""
+    task = _task(manager)
+    first = _fix(api_client, manager, task, client_request_id="req-1")
+    assert first.status_code == 201, first.json()
+    again = _fix(api_client, manager, task, client_request_id="req-1", inputs={"vendor": "B物産"})
+    assert (again.status_code, again.json()["id"]) == (200, first.json()["id"])
+    assert Run.objects.filter(task=task).count() == 1
+    run = _finish(Run.objects.get(uid=first.json()["id"]))
+    rerun = _fix(api_client, manager, task, conversation=run.conversation, client_request_id="req-2")
+    assert rerun.status_code == 201, rerun.json()
+    resent = _fix(api_client, manager, task, conversation=run.conversation, client_request_id="req-2")
+    assert (resent.status_code, resent.json()["id"]) == (200, rerun.json()["id"])
+    # 同じIDでも、ほかの人の要求とは重ならない
+    colleague = grant(UserFactory.create(), AppPermission.MANAGE_COMPANY_TASKS)
+    assert _fix(api_client, colleague, task, client_request_id="req-1").status_code == 201
+    # IDは必須
+    api_client.force_login(manager)
+    res = api_client.post(f"/api/app/v1/tasks/{task.uid}/fix_chat/", {"inputs": {"vendor": "A商事"}}, format="json")
+    assert res.status_code == 400
 
 
 def test_only_managers_start_a_fix_chat(api_client, manager):

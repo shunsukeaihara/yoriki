@@ -1286,6 +1286,12 @@ paths:
         description: A search term.
         schema:
           type: string
+      - in: query
+        name: since
+        schema:
+          type: string
+          format: date-time
+        description: この日時以後に作ったもの
       tags:
       - app/run/script_call
       security:

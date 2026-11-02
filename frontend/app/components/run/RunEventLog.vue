@@ -35,7 +35,8 @@ const entries = computed<LogEntry[]>(() => {
   let next = 0
   const flushBetween = (before?: string) => {
     const start = next
-    while (next < between.length && (before === undefined || between[next]!.created < before)) next += 1
+    const limit = before === undefined ? Infinity : Date.parse(before)
+    while (next < between.length && Date.parse(between[next]!.created) < limit) next += 1
     if (next > start) list.push({ kind: 'scripts', key: `scripts-${start}`, scripts: between.slice(start, next) })
   }
   // 同じ記録が続いたら（再試行等）、1行にまとめて回数を出す

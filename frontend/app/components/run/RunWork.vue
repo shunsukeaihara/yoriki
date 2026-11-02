@@ -35,24 +35,45 @@ watch(open, (value) => {
 const events = computed(() => props.events ?? loadedEvents.value)
 
 // Skill のスクリプトからの Connector の呼出し。モデルの文脈（イベント）に入らないので、別に読む。実行中は、
-// 呼出しを処理しうる間（shell・job_output の終わりを待つ間）に読み直し、Tool の結果が届いたら最後に読む
-const {
-  items: scriptCalls,
-  loading: loadingScriptCalls,
-  fetchAll: fetchScriptCalls,
-} = useFetchAll(() => api.runs(props.run.id).scriptCalls().list({ pageSize: 200 }))
+// 呼出しを処理しうる間（shell・job_output の終わりを待つ間）に読み直し、Tool の結果が届いたら最後に読む。
+// 読み直すのは、まだ終わっていない呼出し（なければ最後の呼出し）から後だけ（1 Run で 1,000 回まで呼べるため）
+const scriptCalls = ref<ScriptCall[]>([])
+const UNFINISHED: ToolStatusEnum[] = [ToolStatus.REQUESTED, ToolStatus.RUNNING]
+const fetchScriptCalls = async () => {
+  const known = scriptCalls.value
+  const since = (known.find((c) => UNFINISHED.includes(c.status)) ?? known.at(-1))?.created
+  let page = await api
+    .runs(props.run.id)
+    .scriptCalls()
+    .list({ pageSize: 200, ...(since ? { since } : {}) })
+  let fresh = page.results
+  while (page.next) {
+    page = await api.http.get<Paginated<ScriptCall>, Paginated<ScriptCall>>(page.next)
+    fresh = fresh.concat(page.results)
+  }
+  // since 以後のものはすべて読み直したので、手元のものは読み直さなかった分（since より前）だけを残す。
+  // 時刻はミリ秒より細かいので、比べずに ID で除く
+  const ids = new Set(fresh.map((c) => c.id))
+  scriptCalls.value = since ? [...known.filter((c) => !ids.has(c.id)), ...fresh] : fresh
+}
 // 読んでいる間に求められたら、読み終えてからもう一度読む（Run の終わりの後の呼出しを取りこぼさない）
+let loadingScriptCalls = false
 let refreshAgain = false
 const refreshScriptCalls = async () => {
   if (!props.showLog) return
-  if (loadingScriptCalls.value) {
+  if (loadingScriptCalls) {
     refreshAgain = true
     return
   }
-  do {
-    refreshAgain = false
-    await fetchScriptCalls()
-  } while (refreshAgain)
+  loadingScriptCalls = true
+  try {
+    do {
+      refreshAgain = false
+      await fetchScriptCalls()
+    } while (refreshAgain)
+  } finally {
+    loadingScriptCalls = false
+  }
 }
 const waitingTools = computed(() => {
   const results = new Set<string>()

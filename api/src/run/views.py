@@ -88,6 +88,15 @@ class AppRunEventViewSet(MyRunMixin, ListModelMixin, GenericViewSet):
         return {**super().get_serializer_context(), "run_uid": self.run.uid}
 
 
+class ScriptCallFilter(filters.FilterSet):
+    # 実行中の画面は、まだ終わっていない呼出しから後だけを読み直す（全件を読み直さない）
+    since = filters.IsoDateTimeFilter(label=_("この日時以後に作ったもの"), field_name="created", lookup_expr="gte")
+
+    class Meta:
+        model = ToolInvocation
+        fields = ["since"]
+
+
 @extend_schema(description="Skillのスクリプトからの呼出し（Connector）の記録", tags=["app/run/script_call"])
 class AppScriptCallViewSet(MyRunMixin, ListModelMixin, GenericViewSet):
     """作業の記録と同じく、Runの結果とログを見られる人だけ（チャットから起動した人には出さない。
@@ -96,6 +105,7 @@ class AppScriptCallViewSet(MyRunMixin, ListModelMixin, GenericViewSet):
     permission_classes = [AppUser]
     queryset = ToolInvocation.objects.filter(call_id__startswith=SCRIPT_CALL_PREFIX)
     serializer_class = ScriptCallSerializer
+    filterset_class = ScriptCallFilter
     ordering = ("created", "pk")
 
 

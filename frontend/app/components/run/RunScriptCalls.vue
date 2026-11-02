@@ -6,11 +6,12 @@
 const props = defineProps<{ calls: ScriptCall[] }>()
 const { t } = useI18n()
 
-// 1回の Run で 1,000 回まで呼べるので、画面に出すのは先頭から決まった数まで
-const SHOWN = 100
+// 1回の Run で 1,000 回まで呼べるので、先頭から決まった数ずつ出す
+const PAGE = 100
+const limit = ref(PAGE)
 
 const failed = computed(() => props.calls.filter((c) => c.status === ToolStatus.FAILED).length)
-const shown = computed(() => props.calls.slice(0, SHOWN))
+const shown = computed(() => props.calls.slice(0, limit.value))
 
 const outcome = (call: ScriptCall) => {
   switch (call.status) {
@@ -57,8 +58,10 @@ const outcome = (call: ScriptCall) => {
           }}</pre>
           <p v-if="call.error" class="whitespace-pre-wrap text-muted">{{ call.error }}</p>
         </li>
-        <li v-if="calls.length > SHOWN" class="text-muted">
-          {{ $t('ほか {n}件', { n: calls.length - SHOWN }) }}
+        <li v-if="calls.length > limit">
+          <DBtn variant="link" color="neutral" size="xs" class="px-0" @click="limit += PAGE">
+            {{ $t('さらに表示（残り {n}件）', { n: calls.length - limit }) }}
+          </DBtn>
         </li>
       </ul>
     </template>

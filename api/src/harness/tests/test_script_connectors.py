@@ -444,6 +444,9 @@ def test_script_calls_are_listed_for_the_work_log(attempt, fake_datasource, app_
     ]
     assert (calls[0]["sql"], calls[0]["params"], calls[0]["truncated"]) == (QUERY["sql"], ["001"], False)
     assert "公開していない表です" in calls[2]["error"]
+    # 実行中の画面は、指定した日時以後のものだけを読み直す
+    res = client.get(f"/api/app/v1/runs/{attempt.run.uid}/script_calls/", {"since": calls[1]["created"]})
+    assert [c["id"] for c in res.json()["results"]] == [calls[1]["id"], calls[2]["id"]]
     # Runのログを見られない人には出さない
     client.force_authenticate(other_user)
     assert client.get(f"/api/app/v1/runs/{attempt.run.uid}/script_calls/").status_code == 404

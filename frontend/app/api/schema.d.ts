@@ -7744,6 +7744,8 @@ export interface operations {
                 page_size?: number;
                 /** @description A search term. */
                 search?: string;
+                /** @description この日時以後に作ったもの */
+                since?: string;
             };
             header?: never;
             path: {

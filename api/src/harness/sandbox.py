@@ -464,12 +464,12 @@ class SandboxSession:
             self.relay = None
             self.relay_failed = True
 
-    def serve_script_requests(self, timeout: float = 0) -> None:
+    def serve_script_requests(self, timeout: float = 0, *, limit: int = SCRIPT_REQUESTS_PER_CALL) -> None:
         """届いている要求を処理する。`timeout` 秒まで、最初の要求を待つ。Runnerのスレッドから呼ぶ。
 
-        1回に処理するのは `SCRIPT_REQUESTS_PER_CALL` 件まで（要求が届き続けても、呼び出し側がleaseの延長・取消の
-        確かめ・ステップの区切りへ戻れるように）。残りは次に呼んだときに処理する"""
-        for _ in range(SCRIPT_REQUESTS_PER_CALL):
+        1回に処理するのは `limit` 件まで（要求が届き続けても、呼び出し側がleaseの延長・取消の確かめ・ステップの
+        区切りへ戻れるように）。残りは次に呼んだときに処理する"""
+        for _ in range(limit):
             try:
                 relay, request_id, request = (
                     self.script_requests.get(timeout=timeout) if timeout else self.script_requests.get_nowait()
@@ -563,8 +563,9 @@ class SandboxSession:
             if remaining <= 0 or interrupted():
                 return False
             if self.relay is not None:
-                # 待つ間に、ジョブのスクリプトからの要求を処理する（要求が届けばすぐ処理する）
-                self.serve_script_requests(timeout=min(remaining, 0.2))
+                # 待つ間に、ジョブのスクリプトからの要求を処理する（要求が届けばすぐ処理する）。1件ずつにして、
+                # 間で待つ時間の期限と取消を確かめる（処理中の1件は止められないので、その分は期限を過ぎうる）
+                self.serve_script_requests(timeout=min(remaining, 0.2), limit=1)
             else:
                 job.execution.done.wait(min(remaining, 1.0))
             if time.monotonic() - last_beat >= 15:

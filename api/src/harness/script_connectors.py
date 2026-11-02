@@ -12,6 +12,7 @@ Connectorの一覧、操作のたびの権限の確かめ直し（依頼した�
 返す。スクリプトの不具合で社内DBに大量の問い合わせが流れないよう、1つのRunの回数と、1分あたりの頻度に上限を置く。
 """
 
+import json
 import logging
 import time
 from collections import deque
@@ -24,7 +25,7 @@ from nanoid import generate
 from llm.providers.base import TextPart, ToolCall
 from run.errors import LeaseLost
 from run.models import ExecutionAttempt, Run, ToolInvocation, ToolStatus
-from runtime.launcher import SandboxUnavailable
+from runtime.launcher import RELAY_MAX_RESPONSE, SandboxUnavailable
 
 from .connectors import DATASOURCE_TOOL_NAMES, catalog_names
 from .tools.base import ToolContext, ToolResult
@@ -39,6 +40,8 @@ SCRIPT_CALL_PREFIX = "script-"
 # 1つのRunでスクリプトから呼べる回数（Attemptをまたいで数える）と、1分あたりの回数
 MAX_CALLS_PER_RUN = 1000
 MAX_CALLS_PER_MINUTE = 120
+# スクリプトへ返す応答の大きさの上限（バイト）。中継で返せる大きさ（包む分を除く）
+MAX_RESPONSE_BYTES = RELAY_MAX_RESPONSE - 1024
 
 
 class ScriptConnectors:
@@ -157,6 +160,14 @@ class ScriptConnectors:
             value = origin | outcome.value()
             response = _described(outcome) if isinstance(outcome, Described) else _queried(outcome)
             status = ToolStatus.SUCCEEDED
+            if len(json.dumps(response, ensure_ascii=False).encode()) > MAX_RESPONSE_BYTES:
+                # 中継で返せる大きさを超える（表・列の多いdescribe）。記録も失敗にする
+                response = _error(
+                    "too_large",
+                    "The result is too large to return to the script. Use datasource_describe as a tool instead.",
+                )
+                value["error"] = "too_large"
+                status = ToolStatus.FAILED
         with self.run.fenced(self.attempt):
             ToolInvocation.objects.filter(pk=invocation.pk).update(status=status, value=value, ended=timezone.now())
         return response

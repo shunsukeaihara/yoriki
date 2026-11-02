@@ -2,7 +2,8 @@
 ToolInvocationに記録して、結果はスクリプトへ返す。回数・頻度の上限"""
 
 import queue
-from typing import Any
+import time
+from typing import Any, cast
 
 import pytest
 
@@ -338,3 +339,36 @@ def test_session_answers_a_limited_number_of_requests_per_call(attempt):
     session.serve_script_requests()
     assert len(relay.responses) == SCRIPT_REQUESTS_PER_CALL + 3
     session.close()
+
+
+def test_waiting_for_a_job_answers_one_request_at_a_time_and_keeps_the_deadline(attempt, monkeypatch):
+    class SlowHandler(FakeHandler):
+        def handle(self, request):
+            time.sleep(0.3)
+            return super().handle(request)
+
+    session = SandboxSession(attempt.run, attempt)
+    session.script_handler = SlowHandler()
+    session.relay = FakeRelay()  # type: ignore[assignment]
+    relay: Any = FakeRelay()
+    for i in range(3):
+        session.script_requests.put((relay, i, {"op": "describe"}))
+    monkeypatch.setattr(session, "refresh", lambda job: False)
+
+    assert not session.wait(cast(Any, object()), 0.2)
+
+    # 処理中の1件は止められないが、期限を過ぎた後に次の要求は始めない
+    assert len(relay.responses) == 1
+    session.relay = None
+    session.close()
+
+
+def test_a_result_too_large_for_the_relay_is_refused_and_recorded(attempt, monkeypatch):
+    monkeypatch.setattr(script_connectors, "MAX_RESPONSE_BYTES", 100)
+
+    response = make(attempt).handle({"op": "describe", "connector": "販売管理"})
+
+    assert response["error"]["code"] == "too_large"
+    invocation = ToolInvocation.objects.get(run=attempt.run)
+    assert invocation.status == ToolStatus.FAILED
+    assert (invocation.value or {})["error"] == "too_large"

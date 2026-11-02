@@ -227,6 +227,9 @@ class Exec:
 # うるので、Worker側でも区切る
 RELAY_MAX_LINE = 2 * 1024 * 1024
 RELAY_MAX_OUTGOING = 64
+# 応答1件の大きさの上限（バイト。`yoriki_connector` が受け取れる大きさより小さく）と、書く前の応答の合計の上限
+RELAY_MAX_RESPONSE = 4 * 1024 * 1024
+RELAY_MAX_OUTGOING_BYTES = 16 * 1024 * 1024
 
 
 class Relay:
@@ -236,7 +239,8 @@ class Relay:
 
     中継はSandboxの中のもので、止められる・置き換えられるので、Worker側で守る：受け取る1行は `RELAY_MAX_LINE`
     までで、超えたら閉じる。応答は書込みのスレッドが書き、呼んだスレッド（Runner）は書き終わりを待たない。中継が
-    読まずに書込みが詰まり、書く前の応答が `RELAY_MAX_OUTGOING` を超えたら閉じる"""
+    読まずに書込みが詰まり、書く前の応答が `RELAY_MAX_OUTGOING` 件か `RELAY_MAX_OUTGOING_BYTES` を超えたら閉じる。
+    応答1件は `RELAY_MAX_RESPONSE` までで、超えたらエラーの応答に差し替える"""
 
     def __init__(self, exec_id: str, on_request: Callable[["Relay", int, dict[str, Any]], None]):
         self.exec_id = exec_id
@@ -248,18 +252,31 @@ class Relay:
         self._closed = False
         self._lock = threading.Lock()
         self._outgoing: queue.Queue[bytes | None] = queue.Queue(RELAY_MAX_OUTGOING)
+        self._outgoing_bytes = 0
 
     def respond(self, request_id: int, response: dict[str, Any]) -> bool:
-        """応答を書込みの列に積む。通信路が閉じていて返せなければFalse。待たない"""
+        """応答を書込みの列に積む。通信路が閉じていて返せなければFalse。待たない。大きすぎる応答は、エラーの
+        応答に差し替える"""
         line = json.dumps({"id": request_id, "response": response}, ensure_ascii=False).encode() + b"\n"
+        if len(line) > RELAY_MAX_RESPONSE:
+            too_large = {
+                "ok": False,
+                "error": {
+                    "code": "too_large",
+                    "message": f"The response is larger than {RELAY_MAX_RESPONSE} bytes. Ask for less.",
+                },
+            }
+            line = json.dumps({"id": request_id, "response": too_large}).encode() + b"\n"
         with self._lock:
             if self._closed or self.done.is_set():
                 return False
-            try:
-                self._outgoing.put_nowait(line)
-                return True
-            except queue.Full:
-                pass
+            if self._outgoing_bytes + len(line) <= RELAY_MAX_OUTGOING_BYTES:
+                try:
+                    self._outgoing.put_nowait(line)
+                    self._outgoing_bytes += len(line)
+                    return True
+                except queue.Full:
+                    pass
         self.error = "the relay does not read the responses"
         logger.warning("relay %s: %s", self.exec_id[:12], self.error)
         self.close()
@@ -286,6 +303,8 @@ class Relay:
                 raw.sendall(line)
             except OSError:
                 return
+            with self._lock:
+                self._outgoing_bytes -= len(line)
 
     def _pump(self, attached: "_Attached") -> None:
         pending_out = pending_err = b""

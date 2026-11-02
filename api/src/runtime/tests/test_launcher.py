@@ -2,6 +2,7 @@
 （design.md §7.2の対策の1）"""
 
 import io
+import json
 import queue
 import threading
 import time
@@ -387,3 +388,18 @@ class TestRelay:
         assert relay.error == "the relay does not read the responses"
         raw.shutdown.assert_called()
         blocked.set()
+
+    def test_large_responses_are_replaced_and_the_total_is_bounded(self, monkeypatch):
+        monkeypatch.setattr("runtime.launcher.RELAY_MAX_RESPONSE", 200)
+        monkeypatch.setattr("runtime.launcher.RELAY_MAX_OUTGOING_BYTES", 500)
+        relay = Relay("e" * 64, lambda r, i, req: None)
+        relay._raw = mock.Mock()
+
+        assert relay.respond(1, {"ok": True, "tables": ["x" * 300]})
+        line = json.loads(relay._outgoing.get_nowait() or b"")
+        assert line["response"]["error"]["code"] == "too_large"
+        relay._outgoing_bytes = 0
+        assert relay.respond(2, {"ok": True, "v": "y" * 150})
+        assert relay.respond(3, {"ok": True, "v": "y" * 150})
+        assert not relay.respond(4, {"ok": True, "v": "y" * 150})
+        assert relay.error == "the relay does not read the responses"

@@ -30,6 +30,10 @@ VERSION_CHANGED = (
 )
 
 
+class _Revoked(Exception):
+    """保存の直前に、依頼した人がタスクを直せなくなった（保存を取りやめる）"""
+
+
 def _target(context: ToolContext) -> tuple[TaskDefinition | None, ToolResult | None]:
     task = edit_target(context.run)
     if task is None:
@@ -203,6 +207,30 @@ def _update_data(arguments: dict[str, Any], before: TaskDefinitionRevision) -> d
     return data
 
 
+def _save(context: ToolContext, task: TaskDefinition, data: dict[str, Any]) -> TaskDefinition | ToolResult:
+    """画面の更新と同じSerializerで保存する。保存できなければ、モデル向けの誤り"""
+    user = requester(context.run)
+    serializer = TaskDefinitionUpdateSerializer(
+        instance=task, data=data, partial=True, context={"request": SimpleNamespace(user=user)}
+    )
+    try:
+        with transaction.atomic():
+            serializer.is_valid(raise_exception=True)
+            saved = serializer.save(actor=user)
+            # 確かめてから保存するまでの間に、権限が外れた・タスクが機密になったなら保存しない（タスクの行は
+            # revise() がロックしている）
+            if problem := target_problem(context.run, edit_target(context.run)):
+                raise _Revoked(problem)
+    except _Revoked as exc:
+        return ToolResult.error(f"{exc}. The change was not saved. Stop and tell the user.")
+    except Conflict:
+        latest = TaskDefinition.objects.filter(pk=task.pk).select_related("current_revision").first()
+        return ToolResult.error(VERSION_CHANGED.format(version=latest.version_number if latest else "unknown"))
+    except drf_exceptions.ValidationError as exc:
+        return ToolResult.error(f"The change was not saved: {_errors_text(exc.detail)}. Fix it and call again.")
+    return saved
+
+
 def execute_update_task(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     task, error = _target(context)
     if task is None:
@@ -213,19 +241,9 @@ def execute_update_task(arguments: dict[str, Any], context: ToolContext) -> Tool
     data = _update_data(arguments, before)
     if isinstance(data, ToolResult):
         return data
-    user = requester(context.run)
-    serializer = TaskDefinitionUpdateSerializer(
-        instance=task, data=data, partial=True, context={"request": SimpleNamespace(user=user)}
-    )
-    try:
-        with transaction.atomic():
-            serializer.is_valid(raise_exception=True)
-            saved = serializer.save(actor=user)
-    except Conflict:
-        latest = TaskDefinition.objects.filter(pk=task.pk).select_related("current_revision").first()
-        return ToolResult.error(VERSION_CHANGED.format(version=latest.version_number if latest else "unknown"))
-    except drf_exceptions.ValidationError as exc:
-        return ToolResult.error(f"The change was not saved: {_errors_text(exc.detail)}. Fix it and call again.")
+    saved = _save(context, task, data)
+    if isinstance(saved, ToolResult):
+        return saved
     after = saved.current_revision
     assert after is not None  # revise() が作った
     if after.pk == before.pk:

@@ -305,6 +305,7 @@ def test_messages_are_instructions_to_the_running_task(api_client, manager):
     run.set_status(RunStatus.CANCELLED)
     instruction.refresh_from_db()
     assert instruction.state == InstructionState.STARTED
+    assert instruction.run is not None
     assert (instruction.run.kind, instruction.run.parent) == (RunKind.TASK_EDIT, run)
 
 
@@ -330,6 +331,7 @@ def test_instruction_left_when_the_run_ends_becomes_an_edit_request(api_client, 
     run.set_status(RunStatus.CANCELLED)
     instruction = UserInstruction.objects.get(message__uid=res.json()["id"])
     assert instruction.state == InstructionState.STARTED
+    assert instruction.run is not None
     assert instruction.run.kind == RunKind.TASK_EDIT
     assert not run.conversation.messages.filter(role=MessageRole.SYSTEM).exists()
 

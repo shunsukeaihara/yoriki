@@ -680,6 +680,10 @@ class Checkpoint(models.Model):
         if run.isolated_workspace:
             # タスクのRunは、ほかのRunのWorkspaceを引き継がない（修正チャットの前の実行のものも）
             return cls.objects.filter(run=run).order_by("-sequence", "-pk").first()
+        if run.kind == RunKind.TASK_EDIT:
+            # 修正チャットのタスクの編集のRunは、直前のタスクのRunから後のものだけ（直前のタスクのRunがCheckpointを
+            # 残さなければ、さらに前の実行のものではなく空のWorkspaceから始める。harness.md §10.10）
+            return cls.objects.filter(run__in=run.fix_chat_runs()).order_by("-run_id", "-sequence", "-pk").first()
         return (
             cls.objects.filter(run__conversation_id=run.conversation_id, run_id__lte=run.pk)
             .order_by("-run_id", "-sequence", "-pk")

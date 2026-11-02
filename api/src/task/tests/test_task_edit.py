@@ -241,7 +241,7 @@ def test_update_task_needs_the_manager_on_every_call(api_client, manager):
     arguments = {"expected_version": 1, "change_reason": "x", "prompt_template": PROMPT + "。"}
     result = UPDATE_TASK.execute(arguments, ToolContext(run, attempt, ToolCall("c1", "update_task", arguments)))
     assert result.is_error
-    assert "管理できなくなりました" in result.content[0].text
+    assert "管理できなくなりました" in str(result.content[0])
 
 
 def test_other_fields_stay_on_the_task_screen(api_client, manager):
@@ -278,6 +278,7 @@ def test_request_task_edit_asks_and_queues_an_edit_request(api_client, manager):
     run.set_status(RunStatus.CANCELLED)
     instruction.refresh_from_db()
     assert instruction.state == InstructionState.STARTED
+    assert instruction.run is not None
     assert instruction.run.kind == RunKind.TASK_EDIT
 
 
@@ -324,7 +325,7 @@ def test_edit_run_sees_the_files_of_the_last_task_run(api_client, manager, setti
             path=name,
             run=run,
         )
-        run.messages.order_by("pk").first().attachments.add(artifact)
+        run.messages.order_by("pk")[0].attachments.add(artifact)
 
     # 実行ごとに /workspace/input を分けるので、同じ名前の添付がある
     attach(first, "請求書.csv", b"first")
@@ -340,10 +341,51 @@ def test_edit_run_sees_the_files_of_the_last_task_run(api_client, manager, setti
     run = ConversationMessage.objects.get(uid=res.json()["id"]).run
     assert run is not None
     # 作業ファイルは直前のタスクのRunのCheckpointから
-    assert Checkpoint.latest_for(run).run == second
+    checkpoint = Checkpoint.latest_for(run)
+    assert checkpoint is not None
+    assert checkpoint.run == second
     attempt = claim_run(run.pk)
     assert attempt is not None
     session = SandboxSession(run, attempt)
     session.sync_inputs()
     assert (session.input_dir / "請求書.csv").read_bytes() == b"second"
     session.close()
+
+
+def test_edit_run_does_not_restore_files_of_earlier_runs(api_client, manager):
+    """直前のタスクのRunがCheckpointを残さなければ、さらに前の実行の作業ファイルではなく空のWorkspaceから始める"""
+    task = _task(manager)
+    first = _fix(api_client, manager, task)
+    attempt = claim_run(first.pk)
+    assert attempt is not None
+    Checkpoint.objects.create(
+        run=first, attempt=attempt, sequence=1, storage="local:x", key="runs/a.tar", size=1, sha256="0" * 64
+    )
+    Run.objects.filter(pk=first.pk).update(status=RunStatus.COMPLETED)
+    _finished_fix_in(api_client, manager, task, first.conversation)
+    res = _post(api_client, first.conversation)
+    assert res.status_code == 201, res.json()
+    run = ConversationMessage.objects.get(uid=res.json()["id"]).run
+    assert run is not None
+    assert Checkpoint.latest_for(run) is None
+
+
+def _finished_fix_in(api_client, manager, task, conversation) -> Run:
+    run = _fix(api_client, manager, task, conversation=conversation)
+    run.set_status(RunStatus.CANCELLED)
+    return run
+
+
+def test_update_task_is_not_saved_when_the_manager_is_revoked_meanwhile(api_client, manager, monkeypatch):
+    """確かめてから保存するまでの間に権限が外れたら、保存を取りやめる"""
+    from harness.tools import task_admin  # noqa: PLC0415
+
+    task = _task(manager)
+    run = _edit(api_client, manager, task)
+    checks = iter(["", "修正チャットの持ち主がこのタスクを管理できなくなりました"])
+    monkeypatch.setattr(task_admin, "target_problem", lambda _run, _task: next(checks))
+    result = _update(run, {"expected_version": 1, "change_reason": "x", "prompt_template": PROMPT + "。"})
+    assert result["is_error"]
+    assert "not saved" in result["content"][0]["text"]
+    task.refresh_from_db()
+    assert task.version_number == 1

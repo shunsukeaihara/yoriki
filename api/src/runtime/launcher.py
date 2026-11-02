@@ -5,12 +5,14 @@ Dockerの操作はここに集め、Runnerは決まった操作（補助コマ�
 Dockerの操作はDockerのSDK（docker-py）で行い、apiのイメージにdocker CLIを入れない。
 """
 
+import collections
 import contextlib
 import json
 import logging
 import queue
 import socket
 import threading
+import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -227,6 +229,9 @@ class Exec:
 # うるので、Worker側でも区切る
 RELAY_MAX_LINE = 2 * 1024 * 1024
 RELAY_MAX_OUTGOING = 64
+# 中継から受け取る行の速さの上限（`RELAY_RATE_WINDOW` 秒に `RELAY_MAX_LINES` 行）。超えたら閉じる
+RELAY_MAX_LINES = 500
+RELAY_RATE_WINDOW = 10.0
 # 応答1件の大きさの上限（バイト。`yoriki_connector` が受け取れる大きさより小さく）と、書く前の応答の合計の上限
 RELAY_MAX_RESPONSE = 4 * 1024 * 1024
 RELAY_MAX_OUTGOING_BYTES = 16 * 1024 * 1024
@@ -253,6 +258,8 @@ class Relay:
         self._lock = threading.Lock()
         self._outgoing: queue.Queue[bytes | None] = queue.Queue(RELAY_MAX_OUTGOING)
         self._outgoing_bytes = 0
+        self._received: collections.deque[float] = collections.deque()
+        self._warned = False
 
     def respond(self, request_id: int, response: dict[str, Any]) -> bool:
         """応答を書込みの列に積む。通信路が閉じていて返せなければFalse。待たない。大きすぎる応答は、エラーの
@@ -332,6 +339,12 @@ class Relay:
                         logger.warning("relay %s: %s", self.exec_id[:12], self.error)
                         break
                     if stream == STDOUT:
+                        if not self._within_rate(lines.count(b"\n") + 1 if lines else 0):
+                            self.error = (
+                                f"the relay sent more than {RELAY_MAX_LINES} lines in {RELAY_RATE_WINDOW:g} seconds"
+                            )
+                            logger.warning("relay %s: %s", self.exec_id[:12], self.error)
+                            break
                         for line in lines.splitlines():
                             self._dispatch(line)
                     elif any(e.get("event") == "ready" for e in _events(lines)):
@@ -345,12 +358,21 @@ class Relay:
             self.done.set()
             self.ready.set()
 
+    def _within_rate(self, count: int) -> bool:
+        now = time.monotonic()
+        while self._received and now - self._received[0] >= RELAY_RATE_WINDOW:
+            self._received.popleft()
+        self._received.extend([now] * count)
+        return len(self._received) <= RELAY_MAX_LINES
+
     def _dispatch(self, line: bytes) -> None:
         try:
             message = json.loads(line)
             request_id, request = message["id"], message["request"]
         except (ValueError, KeyError, TypeError):
-            logger.warning("relay %s: ignoring a malformed line", self.exec_id[:12])
+            if not self._warned:
+                self._warned = True
+                logger.warning("relay %s: ignoring a malformed line", self.exec_id[:12])
             return
         if isinstance(request_id, int) and not isinstance(request_id, bool) and isinstance(request, dict):
             self.on_request(self, request_id, request)

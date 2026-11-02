@@ -403,3 +403,13 @@ class TestRelay:
         assert relay.respond(3, {"ok": True, "v": "y" * 150})
         assert not relay.respond(4, {"ok": True, "v": "y" * 150})
         assert relay.error == "the relay does not read the responses"
+
+    def test_too_many_lines_close_the_relay(self, monkeypatch):
+        monkeypatch.setattr("runtime.launcher.RELAY_MAX_LINES", 5)
+        received = []
+        relay = Relay("e" * 64, lambda r, i, req: received.append(i))
+        lines = b"".join(b'{"id": %d, "request": {}}\n' % i for i in range(3))
+        relay._pump(cast(Any, FakeAttached([(STDOUT, lines), (STDOUT, lines), (STDOUT, lines)])))
+        assert "more than 5 lines" in relay.error
+        assert received == [0, 1, 2]
+        assert relay.done.is_set()

@@ -1,13 +1,13 @@
 # Yoriki — 社内AI Agent基盤 設計企画書
 
 作成日：2026年10月2日  
-更新日：2026年11月2日  
-版：0.43 設計案  
+更新日：2026年11月3日  
+版：0.44 設計案  
 対象：サービス企画、開発、運用担当
 
 プロダクト名はYoriki（よりき）とする（0.16でYuhitsuから変更）。同名の製品・サービスがあることは承知の上で、検索での見つけやすさは重視しない。名称の商標・ドメイン等の確認は本設計の対象外とする。
 
-主な改訂内容は§15を参照。0.19では、業務ごとのAgent（業務の設定）とSkillを束ねる業務のPluginをやめ、標準のエージェント1つとSkillを中心とするモデルにした（§3.1）。0.20では、Webhookのpayloadをそのまま渡し、必要な項目だけを取り出す受け取り方にした（§4.2）。0.21では、ハーネスの設計を [harness.md](harness.md) にまとめ、コマンドを常駐のシェルではなく呼出しごとに実行する方式にした（§4.8、§7.5）。0.22では、Sandboxの頻出ライブラリをイメージのPythonに入れ、Run専用の環境はその上の薄い環境にした（§7.6）。0.23では、Runtime ProfileをSkillではなくRunの単位で決めることにした（§7.3）。0.24では、snapshotを戻せないWorkerでの再開を、空のWorkspaceで続けてエージェントに知らせる扱いにした（§7.9）。0.25では、Sandboxの実行環境の既定をgVisor（runsc）にした（§7.2）。0.26では、同じ会話の中では依頼が変わっても文脈とWorkspaceを引き継ぐことにした（§5.1、§7.1）。0.27では、Skillの部門の範囲を、役割とは別の部門と所属で表すことにした（§3.6）。0.28では、会話でSkillを使う形（一覧の固定、実行中の指定は次の依頼、業務結果を確定できるRun）を決めた（§11.4）。0.29では、Skillの編集のRunの始め方（入力欄での明示と、業務のRunからの提案の確認）と、対象のSkillを1つに固定することを決めた（§11.6）。0.31では、社内DBのConnectorを使える人（役割と部門）、MySQLのドライバ（PyMySQL）、SQLの検査の範囲を決めた（§4.9）。0.32では、接続先と資格情報（接続）をConnectorから分け、1つの接続の上に、公開する範囲と使える人の違うConnectorを複数作れるようにした。権限を所属とpermissionの2軸で判定し、Groupを判定に使わないことにした（§3.6、§4.9.1）。0.33では、権限の設計を [authorization.md](authorization.md) にまとめた。Skill・Connector・タスク・入口・出口が範囲（個人・部門・全社・システム）を持ち、利用・業務の管理・基盤の管理の3つの層で判定する。部門の中の役割と特別な部門をやめ、タスクのRunは起動のしかたで決まる実行許可で動かし、管理APIをすべてpermissionで判定することにした（§3.6、§4.1、§4.9.1、§10.0）。0.34では、Skillが使うConnector・操作・表を宣言し、公開時にConnectorの境界の中にあるかを検証することと、機密のSkill（機密のConnectorを宣言したSkillと、機密のフラグを付けたSkill）を決めた（§4冒頭、§4.9.1）。0.35では、タスクの定義からToolの一覧をなくし、タスクのRunは固定したSkillの「使ってよいTool」を使うことにした（§4.1）。0.36では、通知Skillをやめ、タスクに通知の書き方の文を書く形にした（§4.3）。
+主な改訂内容と、各版で決めたことは§15を参照。
 
 ## 1 目的と基本方針
 
@@ -65,7 +65,7 @@ Skillは指示文に加え、その業務で使うファイル一式を保持で
 | イメージ配布 | 公開Docker Hubの共通イメージをdigestで固定して利用する |
 | 通信 | Sandboxのネットワークを無効化し、LLM・package取得・結果通知・外部データ接続（Connector）は管理された経路で行う |
 | LLM選択 | 管理画面で登録したモデル設定から、会話とタスクでモデルを直接選ぶ。effortはモデルごとの値を使い、自動で上げ下げするのはeffortだけ。モデルの切り替えは利用者が明示したときだけで、障害時は会話なら利用者に切り替えを求め、タスクならエラーを通知する（§4.8） |
-| 外部データ | 社内DB・SharePoint等へControl PlaneのConnectorを介して接続し、Bindingで許可した操作だけを使う（§4.9） |
+| 外部データ | 社内DB・SharePoint等へControl PlaneのConnectorを介して接続し、Connectorの境界（公開する表・操作）で許可した操作だけを使う（§4.9） |
 | 認証 | 社員は社内SSO（OIDC）でYorikiにログインし、ログイン状態をセッションCookieで保つ。SSOのない導入先では、Yorikiのアカウント（基盤管理者が招待し、本人がパスワードを設定する）でログインする。前段に認証プロキシがあっても、Yoriki自身でログインする（§10.0） |
 | 履歴と再開 | メッセージ、実行イベント、利用バージョン、成果物、再開状態を保存する |
 | 運用 | 中間生成物を自動削除し、停止Workerや孤立コンテナを回収する |
@@ -122,7 +122,7 @@ Skillは範囲（個人・部門・全社・システム）ごとに公開する
 
 ### 3.3 Skillの定義例
 
-以下は本基盤独自の形式案であり、既存製品のSkill形式との互換を前提としない。
+以下は本基盤独自の形式で、既存製品のSkill形式との互換を前提としない。項目名は実装（`skill/models.py`）に合わせ、入出力のSchemaはJSON Schemaをそのまま持つ（例では省略）。
 
 ```yaml
 skill_id: check-bl-fields
@@ -135,21 +135,21 @@ instructions: |
   ...
 tools:
   - shell
-  - read_file
-  - publish_artifact
+  - read
 assets:
-  - name: field-master
-    resource: bl-field-master
-    version: 4
-resource_collections:
+  - key: field-master
+    role: master
+    resource_version: 4
+resource_collections:   # 未実装（後で作る）
   - id: logistics-glossary
     version: 4
 connectors:
-  - id: core-db
-    operations: [query]
+  - connector: core-db
+    operations: [datasource_query]
+    tables: [public.bl_fields]
 requires: [tool_calling]
-input_schema_ref: bl-check-input-v1
-output_schema_ref: bl-check-result-v1
+input_schema: {...}
+output_schema: {...}
 ```
 
 Skillが要求する権限（Tool、Connector、資料）は、ユーザーの権限と管理者の組織ポリシーの範囲内でのみ有効にする。`connectors` は省略してよく、その場合は会話のRunでだけ、エージェントが利用者の使えるConnectorから探して使う（タスクのRunでは、タスクに固定したConnectorだけ。authorization.md §5.4）。Skillから任意のホストパス、Dockerオプション、実行イメージ、接続先URLを指定できる仕組みにはしない。実行環境はRunの単位で決まる承認済みのRuntime Profileを使い（Skillからは選ばない。§7.3）、接続先は登録済みのConnectorから選ぶだけにする。
@@ -166,25 +166,28 @@ version: 5
 instructions: |
   提供された情報をもとに顧客への回答案を作成する。
   不明な事項は推測せず、確認事項として列挙する。
-input_schema_ref: customer-response-input-v1
-output_schema_ref: customer-response-output-v1
-allowed_tools: []
+input_schema: {...}
+output_schema: {...}
+tools: []
 ```
 
 Skill本文の変更にはDocker imageの再ビルドもWorkerの再起動も必要ない。共通Runnerが固定されたSkill Versionを読み込んで実行する。shellを必要とするSkillでは、許可されたToolを同じRunnerから呼び出す。
 
 ### 3.5 エージェントによるSkillの作成と修正
 
-Skill編集はDjango側の管理Toolとして提供する。エージェントへDBの直接編集やホスト上のSkillファイルの書換えを許可する必要はない。管理画面とエージェントは同じ検証・公開処理を利用する。
+Skill編集はDjango側の管理Toolとして提供する。エージェントへDBの直接編集やホスト上のSkillファイルの書換えを許可する必要はない。Skillの画面（業務画面の `/skills/[id]`）とエージェントは同じ検証・公開処理（Serializerと `Skill.can()`）を利用する。
 
-| Tool案 | 操作 |
+| Tool | 操作 |
 |---|---|
-| list_skills / get_skill | 利用者が閲覧できるSkillと現在版を取得 |
-| create_skill_draft | 新規Skillまたは既存Skillの指定版からDraftを作る |
+| get_skill | 編集のRunに固定した1つのSkillの公開中の版とDraftを取得し、資料を `/workspace/master` に置く |
+| create_skill | 新しいSkillを作る（既存のSkillのDraftは、`update_skill_draft` が公開中の版から開く） |
 | update_skill_draft | Draftの本文等を期待revision付きで変更 |
+| stage_skill_asset / remove_skill_asset | Sandboxのファイルを資料として加える・置き換える、資料を外す（§3.9） |
 | test_skill_draft | Draftと公開中の版を評価ケースで試し、比べる（§3.7.1） |
-| publish_skill_draft | Skill Versionを作り、権限があれば公開範囲の最新の公開版にする |
+| publish_skill_draft | Skill Versionを作り、公開範囲の最新の公開版にする。公開の権限がなければ版を作らず、変更案として保存したと返す |
 | rollback_skill | 公開範囲の最新の公開版を、選択した過去の版へ戻す |
+
+Toolの引数と動きの詳細は harness.md §10.9。
 
 例えば社員が「このチェックではNotify Partyが空でもエラーにしないで。Skillも直しておいて」と依頼した場合、エージェントは対象Skillを特定し、既存版を読み、該当する条件だけを修正する。差分と必要な試行結果を記録し、公開権限と公開設定の範囲で反映する。結果には新しい版、反映範囲、変更点を表示する。
 
@@ -210,7 +213,7 @@ Skill編集はDjango側の管理Toolとして提供する。エージェント�
 
 公開の権限は編集の権限を含む。個人のSkillは本人だけが扱い、基盤管理者にも画面とAPIでは見せない。Skillの範囲は作成時に決め、通常の操作では変えない（広げる場合は、その範囲に新しいSkillを作る。組織の再編での付け替えは authorization.md §9）。
 
-自動公開の可否はscopeごとのポリシーで定める。権限がある操作に追加の承認を一律要求しない。公開権限がなければDraftとして保存し、未反映であることを明示する。必要なら閲覧可能な共通Skillから個人用を派生させるが、元Skillの公開範囲を拡大したり他者の資料を複製公開したりしない。
+公開できるかは範囲ごとの公開の権限で決まる（authorization.md §5.1）。権限がある操作に追加の承認を一律要求しない。公開権限がなければDraftとして保存し、未反映であることを明示する。必要なら閲覧可能な共通Skillから個人用を派生させるが、元Skillの公開範囲を拡大したり他者の資料を複製公開したりしない。
 
 編集の権限（本文・例示・入出力Schema、そのSkillの資料の追加・置換）と、公開の権限（Toolの変更、資料の検証の条件の変更、公開・切戻し・停止）を分ける（authorization.md §5.1）。Skillは Secret を持たず、範囲（共有範囲）は通常の操作では変えない（組織の再編の別の操作。authorization.md §9）。Skill管理Toolを持つエージェントでも自分の実行権限を増やせない。入出力Schemaの変更時は、そのSkillを使うTask Definition・通知設定との互換性を検証する。
 
@@ -218,17 +221,17 @@ Skillの資料は、そのSkillのDraftの中だけで追加・置換する（�
 
 実際のTool許可は、ユーザー権限、Skillの許可、組織ポリシー、Runで確定した実行範囲、対象Resource・Connectorの権限を照合して決める。Skill本文は権限の根拠にしない。コマンド不要の業務Runで別Skillのshell権限が混入しないよう、Toolは実行コンテキストごとに限定する。
 
-業務処理とSkill編集は別の実行コンテキストにし、必要なら同じConversation内の関連Runとして実行する。これにより、業務Skillが`allowed_tools: []`でも、ユーザーが編集を依頼したときはSkill管理Toolを使える。編集中のSkillやDraftを読み込んでも、管理Toolの権限は変化しない。
+業務処理とSkill編集は別の実行コンテキストにし、必要なら同じConversation内の関連Runとして実行する。これにより、業務Skillが`tools: []`でも、ユーザーが編集を依頼したときはSkill管理Toolを使える。編集中のSkillやDraftを読み込んでも、管理Toolの権限は変化しない。
 
 ### 3.7 差分と競合と評価
 
 Draftにbase versionとrevisionを持たせ、更新・公開時に期待値を照合する。DraftはSkillごとに1つとし、複数人が同じDraftを編集する（revisionで競合を検出する）。公開するとDraftは閉じ、次の変更は新しいDraftで行う。別の変更が先に公開されていた場合は無条件上書きをせず、最新との差分から修正案を再構成する。Skillと公開範囲のいずれの競合も検出する。
 
-SkillChangeには依頼ユーザー、Run ID、元の版、変更理由、差分、試行結果、公開先と公開版を記録する。公開処理にはoperation keyを付け、Workerの再送でも同じ変更が重複公開されないようにする。
+SkillChangeには依頼ユーザー、Run ID、元の版、変更理由、差分、公開先と公開版を記録する（試行の結果は評価（SkillEvaluation。§3.7.1）に持つ）。公開処理にはoperation keyを付け、Workerの再送でも同じ変更が重複公開されないようにする。
 
-評価は、Schema等の機械的検証と、業務例に対する旧版・新版の比較を使う。必須ケースはscopeの設定で定め、単純な文言修正まで一律に重い試験を要求しない。エージェントによる評価だけで正しさが保証されるとは扱わない。共有Skillに個別顧客の添付内容を不用意に転記しないよう、例示は公開先に適した内容へ一般化する。
+評価は、Schema等の機械的検証と、業務例に対する旧版・新版の比較を使う。必須のケースは評価ケースごとの「公開の前に必須」の印で定め（§3.7.1）、単純な文言修正まで一律に重い試験を要求しない。エージェントによる評価だけで正しさが保証されるとは扱わない。共有Skillに個別顧客の添付内容を不用意に転記しないよう、例示は公開先に適した内容へ一般化する。
 
-Draftの試行は独立した評価Runで行い、利用量を記録する。評価対象のDraftにはSkill公開Toolを渡さず、Skill編集の再帰実行を防ぐ。Skillを元に戻す場合は、旧版の本文とファイル参照を新しいDraftの基にして公開する（公開範囲の最新の公開版を旧版へ戻す操作も監査する）。公開履歴は削除しない。
+Draftの試行は独立した評価Runで行い、利用量を記録する。評価対象のDraftにはSkill公開Toolを渡さず、Skill編集の再帰実行を防ぐ。Skillを元に戻す場合は、Draftを通さず、選んだ過去の版と同じ中身・資料で新しい版を作って公開中の版にする（切戻しの元の版を記録し、監査する）。公開履歴は削除しない。
 
 #### 3.7.1 Draftの評価
 
@@ -243,7 +246,7 @@ Draftの試行は独立した評価Runで行い、利用量を記録する。評
 - **LLMの判定**：両方のRunが終わったら、評価のモデルに、依頼・確認する観点・両方の最後の応答と業務結果を渡し、Draftが「良くなった・同じ・悪くなった」と理由を返させる（Toolの呼出しで受け取る。Toolに対応しないモデルでは判定しない）。判定の利用量はDraftの側のRunに記録する。判定は参考として表示し、公開の条件には使わない（エージェントによる評価だけで正しさが保証されるとは扱わない）。
 - 評価は停止できる（動いている評価のRunを止める）。
 
-**公開の条件**：部門・全社のSkillで必須のケースがあれば、今のDraftのrevisionで、必須のケースそれぞれの直近の（終わった）評価の結果が「通過」でなければ公開できない（画面・`publish_skill_draft` とも）。必須のケースは複数の評価に分けて試してよい（1回の評価のケースの数に上限があるため）が、後の評価で通過しなければ、前の通過では満たさない。評価の後に変えた必須のケースは、評価し直すまで満たさない。必須のケースを作らなければ、文言の修正は評価なしで公開できる。切戻しには評価を求めない。
+**公開の条件**：個人以外（部門・全社・システム）のSkillで必須のケースがあれば、今のDraftのrevisionで、必須のケースそれぞれの直近の（終わった）評価の結果が「通過」でなければ公開できない（画面・`publish_skill_draft` とも）。必須のケースは複数の評価に分けて試してよい（1回の評価のケースの数に上限があるため）が、後の評価で通過しなければ、前の通過では満たさない。評価の後に変えた必須のケースは、評価し直すまで満たさない。必須のケースを作らなければ、文言の修正は評価なしで公開できる。切戻しには評価を求めない。
 
 ### 3.8 Skillごとの参照ファイル
 
@@ -254,6 +257,7 @@ Skillには複数のファイルを持たせ、それぞれに安定したasset 
 | 参照資料 | MD、PDF | 業務ルール、用語、手順を読み取る |
 | マスターデータ | CSV、JSON、XLSX | 名寄せ、コード変換、検証、計算に使う |
 | テンプレート | PPTX、DOCX、XLSX | 原本をコピーし、今回の成果物を作成する |
+| スクリプト | py等 | 書き直さずに実行するか、コピーして直して使う（harness.md §10.1） |
 
 MVPはMD・CSV・PPTXの保持・取得・置換を対象とし、形式に応じたエージェントによる編集を順に実装する。ファイルが保存できることと、その全要素をエージェントが編集できることは別の対応能力として表示する。PPTXは原本のバイナリを保持し、抽出テキストやプレビューだけを保存する方式にはしない。
 
@@ -292,21 +296,19 @@ assets:
 | 内容の編集 | 「ルールMDに支店を区別する条件を追記して」 | 指定版を取得して編集し、新しい候補ファイルを作成 |
 | 行や値の更新 | 「顧客CSVのこの会社の正式名を変更して」 | 対象キーと列を特定し、変更行を検証 |
 | ファイル置換 | 「この添付PPTXを今後のテンプレートにして」 | 添付原本を指定assetの新しい版として登録 |
-| ファイル追加 | 「この対応表もSkillから参照して」 | 用途と公開範囲を設定し、新しいassetをDraftへ追加 |
+| ファイル追加 | 「この対応表もSkillから参照して」 | 用途を設定し、新しいassetをDraftへ追加 |
 | ファイルだけ切戻し | 「テンプレートだけ一つ前に戻して」 | 旧Resource Versionを参照する新しいSkill Versionを公開 |
 
 エージェント向けには次の管理Toolを追加する。IDやpathをLLMが指定できること自体を権限の根拠にせず、サーバーが対象Skill・Draft・元ファイル・候補Artifactを照合する。
 
-| Tool案 | 操作 |
+| Tool | 操作 |
 |---|---|
-| list_skill_assets / read_skill_asset | 固定版の一覧、metadata、許可された内容を取得 |
-| update_skill_text_asset | MD等の内容変更を期待版付きでDraftへ保存 |
-| stage_skill_asset | エージェントが生成した候補Artifactを追加・置換対象へ紐づける |
-| replace_skill_asset_from_upload | 当該ユーザーの添付IDから、指定assetの置換候補を作る |
-| validate_skill_assets | 形式・容量・業務Schema・プレビュー等を検証 |
+| get_skill | 公開中の版とDraftの資料の一覧・検証の結果を返し、資料を `/workspace/master` に読取り専用で置く |
+| stage_skill_asset | Sandboxのファイル（編集した候補、または `/workspace/input` の添付）を、資料の追加・置換としてDraftへ登録し、検証の結果と差分を返す |
+| remove_skill_asset | Draftから資料を外す |
 | publish_skill_draft | 本文とファイル参照を含むSkill Versionを公開し、公開範囲の最新の公開版にする |
 
-MDの修正や添付のそのままの置換は管理APIだけで行える。CSVの加工やPPTXの編集でコードが必要な場合は、編集用Runの許可されたSandboxで作業する。業務Skillがコマンド不要でも、別の編集コンテキストに適切なToolを付与できるが、業務Skill自身の権限を増やす操作にはしない。
+資料の編集・置換は、MDの修正も含め、編集のRunのSandboxで行い `stage_skill_asset` で登録する（添付のそのままの置換は、添付のパスを渡すだけで、エージェントによる再生成を挟まない）。画面からは管理APIで資料を置き換えられる。業務Skillがコマンド不要でも、別の編集コンテキストに適切なToolを付与できるが、業務Skill自身の権限を増やす操作にはしない。
 
 形式ごとの検証方針は次のとおりとする。既定の検証条件は管理側で保持し、候補ファイルの内容から検証を無効化させない。
 
@@ -344,7 +346,7 @@ Run限定の参照差替えも開始時に固定する。進行中のRunでマ�
 
 ### 3.11 起動・通知・保存のPlugin契約
 
-Plugin Registryに拡張種別を設け、Adapter実装、契約版、設定Schema、対応能力を登録する。Pluginはサーバーに配備する拡張の配布・管理の単位、Adapterは基盤が呼び出す実装、Bindingはタスク等から選択する具体的な設定とする（Connectorも同じ扱い。§4.9）。Skillは自然言語の手順を担い、Adapterの通信・保存・権限処理を置き換えない。
+Plugin Registryに拡張種別を設け、Adapter実装、契約版、設定Schema、対応能力を登録する。Pluginはサーバーに配備する拡張の配布・管理の単位、Adapterは基盤が呼び出す実装、Bindingはタスク等から選択する具体的な設定とする（Connectorは、接続と、その上の版付きのConnector（公開する表・操作等の境界）で表し、Bindingは持たない。§4.9）。Skillは自然言語の手順を担い、Adapterの通信・保存・権限処理を置き換えない。
 
 | 拡張種別 | 基盤から見た契約 | 主な選択場所 | 初期実装 |
 |---|---|---|---|
@@ -363,7 +365,7 @@ Channel Pluginにはcreate_thread、send_thread_message、receive_thread_reply�
 
 Adapterの実装コードはレビュー済みのサーバーpackage・imageとして配備し、インストールと有効化は基盤管理者が行う。DBのSkill本文や外部入力から任意のmodule path、配布URL、コードを読み込まない。通知の書き方はタスクの定義の一部で、タスクを管理できる人が変える。通知先・利用権限・認証情報・保存先の変更は、それぞれの管理権限で検証する。
 
-タスク公開時にTrigger Binding、Interaction Binding、Notification Bindingの不変Revisionを作り、Runへ使用版を固定する。Pluginの実装版も記録し、処理中Run・未配信Deliveryが依存する版を維持する。更新で互換性が失われる場合は対象を待機させ、drain・旧版併存・明示的な移行を行う。強制停止や権限失効は固定版にも適用する。Storageの物理位置と移行は7.10節の別手順で扱う。
+タスクは保存のたびに不変の版を作り、入口（Trigger Binding）・出口（Destination）も、それぞれの保存のたびに版を作る。Runは受付時にタスク・入口・出口の版を固定する（初期の実装では、通知の設定はタスクの版の項目で、Notification Bindingを別に持たない。§4.1・§4.3）。Pluginの実装版も記録し、処理中Run・未配信Deliveryが依存する版を維持する。更新で互換性が失われる場合は対象を待機させ、drain・旧版併存・明示的な移行を行う。強制停止や権限失効は固定版にも適用する。Storageの物理位置と移行は7.10節の別手順で扱う。
 
 API・Plugin契約・設定例は本基盤独自の設計案であり、外部製品のPlugin形式や既存の実装済みAPIを意味しない。
 
@@ -409,7 +411,7 @@ LLM経路はDjango側のPythonモジュールとして実装し、RunnerはQClus
 - **Connectorの機密のフラグ**：個人情報を主な中身とする接続先（人事DB、顧客の個人情報のDB等）のConnectorに、Connector管理者が付ける（§4.9.1）。フラグの付いたConnectorは、機密（個人情報・機密情報を扱う）のタスク・会話にだけ一覧に出し、使わせる。Run受付時と操作のたびにも、会話・タスクの区分とモデルを確かめる。社員名・担当者名が入る程度の普通の業務データは区別しない（ほとんどの業務データに含まれるため）。一部の列だけが個人情報の場合は、フラグではなく公開する範囲（その列を除いたビュー）で外す。
 - **機密の会話・タスク**：会話を始めるときのウィザードで、個人情報や機密情報を扱うかを確かめ、扱う場合（機密の会話）はローカルLLMのモデルだけに絞る（§11.3）。会話の途中でモデルを切り替えるときも同じ制限をかける（§4.8）。会話は途中から機密にできるが、一度機密にしたら扱わない会話には戻せない（戻せると、機密の情報を含む文脈がクラウドのモデルへ渡る）。機密のConnectorと機密のSkill（次項）は機密の会話・タスクでだけ使える。途中で機密にした会話では、次の依頼から使える（一覧は依頼を始めるときに決める）。タスクの機密はTask Definitionで決める。
 - **機密のSkill**：機密のConnectorを宣言したSkill（§4.9.1）と、機密のフラグを付けたSkillを機密のSkillとして扱い、機密の会話・タスクにだけ一覧に出し、使わせる。宣言による機密は、宣言したConnectorの今の版のフラグで実行のたびに決める（後でConnectorに機密のフラグが付けば、Skillも機密になる）。フラグは、資料（マスター等）そのものに個人情報・機密情報を含むSkillに、Skillの管理者が付ける（Draftの項目で、公開すると版に入る）。付けるのは編集の権限、外すのは公開の権限だけ（authorization.md §5.1）。機密のSkillは、会話からの編集（§3.5）も機密の会話でだけ行い、Draftの評価（§3.7.1）もローカルLLMのモデルで、機密のRunとして動かす。
-- **出口の機密のフラグ**：機密の会話・タスクの結果は、機密の結果を送ってよいとした出口（Destination。§4.4）にだけ送る。フラグは連携の管理者が付け、既定は送らない。
+- **出口の機密のフラグ**：機密の会話・タスクの結果は、機密の結果を送ってよいとした出口（Destination。§4.4）にだけ送る（画面の通知は、認証の要る画面への参照だけなので、フラグがなくても使える）。フラグは連携の管理者が付け、既定は送らない。
 
 入力や添付の内容から個人情報を検出して警告・マスキングする仕組み（DLP）は、必要になってから追加する。Connectorで取得した社内DB・SharePoint等の内容も、要約や抜粋としてLLMへ渡る点は同じである（§4.9）。
 
@@ -422,7 +424,7 @@ Task Definitionは「起動方法＋実行プロンプト＋使うSkillとモデ
 | 設定 | 内容 |
 |---|---|
 | task_idと名前 | 業務タスクの識別子 |
-| trigger | Plugin・Binding、接続設定、起動元の認証、項目の取り出し（任意）、重複のキー、ファイルの取り込み、上限（§4.2）。payloadは取り出しの有無によらず、そのままファイルとしても渡す |
+| trigger | Plugin・Binding、接続設定、起動元の認証、項目の取り出し（任意）、重複のキー、ファイルの取り込み、上限（§4.2）。payloadは取り出しの有無によらず、そのままファイルとしても渡す。初期の実装では、入口（TriggerBinding）はタスクとは別の定義で、連携の管理者が作り（authorization.md §5.5）、タスクの画面では見るだけ |
 | 実行内容 | 使うSkill（固定の版。payloadの読み方を書いたSkillを含む）、Connector、モデル設定とeffort、プロンプトテンプレート、入力の形と制限、業務結果Schema。タスクの定義も版を持ち、Runは受付時の版に固定する。版はConnectorと同じく保存のたびにサーバーが作り（中身が同じなら作らない）、SkillのようなDraftと評価は持たない。名前・停止・チャットから起動できるかは版の外に持つ。範囲と部門は作成時に決めて変えない（付け替えは組織の再編の操作。authorization.md §9）。名前は同じ範囲の中で重ねない。登録できるのは、Skill 5つ（公開中で停止していないもの。固定する版は過去の版でもよい）・Connector 10個・入力の項目30個まで。業務結果の形を決めているSkillが複数あれば、タスクの業務結果のSchemaを必須にする |
 | 実行条件 | 範囲（個人・部門・全社・システム）、チャットから起動できるか、利用枠、回答待ちの期限。誰の権限で動くかは起動のしかたで決まる（下記） |
 | interaction | 任意の双方向Channel Plugin・Binding、チャネル、返信モード、スレッドの運用方針 |
@@ -436,7 +438,9 @@ Task Definitionは「起動方法＋実行プロンプト＋使うSkillとモデ
 - タスクのRunは会話の文脈を引き継がない。Webhookの入口とタスクは1対1にする。
 
 ```yaml
-# 本基盤独自の設定案。Skillの版はタスクの変更で決め、次の変更まで変えない（Skillを公開しても切り替わらない）。
+# 本基盤独自の設定案（概念の例）。初期の実装では、trigger は入口としてタスクの外に持ち（§4.2）、notification は
+# タスクの版の項目（destination・notify_events・notify_content・notification_instructions）で持つ。
+# Skillの版はタスクの変更で決め、次の変更まで変えない（Skillを公開しても切り替わらない）。
 # Run受付時には、このタスクの版を固定して記録する。
 task_id: invoice-check
 name: 請求書チェック
@@ -492,9 +496,9 @@ notification:
 
 同じスレッドへ結果も載せる場合はinteraction側の完了イベントに含める。notificationで同じ対話スレッドを指定する場合も同じ配信へ統合し、完了報告と結果の重複投稿を避ける。結果通知のためだけに別スレッドを作らない。
 
-初期の実装では、結果の通知の設定（出口・対象イベント・通知内容・通知の書き方）をTask Definitionの版の項目として持ち、Notification Bindingを別のModelにしない（1つのタスクに1つの結果通知のため。1つのタスクに複数の通知を持たせるときに見直す。通知の書き方は§4.3）。部門のタスクはその部門の出口、全社のタスクは全社の出口、システムのタスクはシステムの出口だけを選べ、機密のタスクは機密の結果を送ってよい出口だけを選べる。Runは受付時に出口の版を固定し、出口を今は使えなければ（停止・削除・範囲の外・機密の結果を送れない）受け付けない。
+初期の実装では、結果の通知の設定（出口・対象イベント・通知内容・通知の書き方）をTask Definitionの版の項目として持ち、Notification Bindingを別のModelにしない（1つのタスクに1つの結果通知のため。1つのタスクに複数の通知を持たせるときに見直す。通知の書き方は§4.3）。部門のタスクはその部門の出口、全社のタスクは全社の出口、システムのタスクはシステムの出口、個人のタスクは個人の画面の通知（全員で共通の出口）だけを選べ、機密のタスクは機密の結果を送ってよい出口（と画面の通知）だけを選べる。Runは受付時に出口の版を固定し、出口を今は使えなければ（停止・削除・範囲の外・機密の結果を送れない）受け付けない。
 
-公開済みTask Definition RevisionにBinding Revisionを関連付け、RunにはSkill・資料・モデル設定・受け取ったpayloadとファイル・生成した依頼文とともに固定する。通知の書き方（タスクの版に含む）、通知Adapter、Interaction BindingとChannel Plugin、Destinationの版も対象に含める。設定変更は次のRunから反映し、再試行中のRunやDeliveryを新しい通知先へ暗黙に向けない。ただし、固定した出口が停止・削除・タスクの範囲の外になったら、配信の直前に確かめて送らない（authorization.md §7.2）。Secretは値を保存せず参照を持ち、資格情報の更新・失効は別に反映する。
+Runは受付時のTask Definition Revisionと入口の版（TriggerReceipt）を記録し、Skill・資料・モデル設定・受け取ったpayloadとファイル・生成した依頼文とともに固定する。通知の書き方（タスクの版に含む）、通知Adapter、Interaction BindingとChannel Plugin、Destinationの版も対象に含める。設定変更は次のRunから反映し、再試行中のRunやDeliveryを新しい通知先へ暗黙に向けない。ただし、固定した出口が停止・削除・タスクの範囲の外になったか、機密の結果を送れなくなったら、配信の直前に今の版で確かめて送らない（authorization.md §7.2）。資格情報は暗号化して保存し、更新・失効は別に反映する。
 
 通常チャットにはTask Definitionを必須にしない。既定のchat Triggerと画面内の結果表示を使い、必要に応じてタスクを指定して実行する。チャットからの起動は、「チャットから起動できる」の印（版の外に持ち、停止と同じく切り替える。システムのタスクには付けない）のあるタスクを、会話の入力欄の `/` の一覧から選び、手動実行と同じく型を決めた入力だけを渡して起動する（会話の文章は渡さない）。タスクのRunは別の会話で動き、起動した会話にはRunを指すカード（状態と最後の応答）を出す。カードは会話のRunの文脈に入れない。PipelineRunやTaskRunは追加せず、共通Runへ起動元とBindingを関連付ける。タスクの起動Pluginを増やしても、RunnerにPlugin別の業務分岐を増やさない。
 
@@ -523,13 +527,13 @@ Webhook AdapterはAPIキー・署名等で認証し、URLを知っているだ�
 - **項目の取り出し（任意）**：Bindingに、取り出す項目を表で書く（タスクの入力の項目の名前と、payloadの中の場所（JSONのpath。`$.data.items[0]["vendor name"]` の形））。必須か、型（文字・数値・整数・真偽・日付・選択肢・ファイル）と取りうる値は、タスクの版の入力の項目で決め、手動実行と同じ規則で確かめる（フォームの値のように数値・真偽が文字で届いたときは読み替え、文字の項目に数値が来たら文字にする）。Bindingの版は項目の名前とJSONのpathだけを持つ。タスクの今の版にない項目の取り出しは保存できず、後でタスクから項目を消したら、受付時にはその取り出しを使わない。取り出した値はプロンプトのテンプレートに `{{ inputs.名前 }}` で埋め込める。値は文字として埋め込むだけで、式やコードとして評価しない。値は利用者の指示ではないデータなので、信頼しない内容として囲んで埋め込む（harness.md §6.3）。必須の項目がない要求と型の合わない要求は、受付時に400で断り、Runを作らない。型がファイルの項目は、multipartで付けたファイル（項目の場所は `$.フィールドの名前`）を指し、値は作業場所に置いたファイルのパス（`/workspace/input/...`）になる（手動実行でもファイルを付ける）。JSONの値（URL等）はファイルの項目の値にしない。設定画面では、サンプルのpayloadを貼ると、取り出した値（受付で断る要求なら項目ごとの誤り）と重複の判定のキーを表示して確かめられる（保存していない設定でも試せ、何も保存しない）。埋め込んだ後のプロンプトは、そのタスクを管理できる人にだけ表示する（連携の管理者がタスクの依頼文を見てよいとは限らないため）。初期の実装：試すのは入口ごとの操作で、入口を見られる連携の管理者が使える。送らなかった設定は今の版の値で試す。サンプルはJSONだけで試し（フォームの値・multipartは試さない）、型がファイルの項目は試せないことを示す。試した結果として受付の判定（受け付ける・断る・確かめられない）を返す。判定は受付と同じ順（入口の停止 → payload → 前の受付との重複 → タスクの状態とRunを始められるか → 項目）で、受付と同じ処理を使う（何も作らず、行もロックしない）。同じ要求なら前のRunを返すと示し、同じイベントIDで違う内容なら断る。ほかに断る理由がなく、値のない必須のファイルの項目か、保存のときの検査に通らない定義があれば「確かめられない」とする（定義の検査の中身はタスクを管理できる人にだけ詳しく返す）。保存できない取り出し（同じ項目を2回・タスクにない項目・数の上限）は、保存と同じく400にして試さない。断る要求では、埋め込んだ後のプロンプトを作らない。入口の作成ではタスクと名前だけを決め、受け取り方は作った後にサンプルで試しながら決める。
 - **Bindingに置くもの**：Runを作る前にサーバーが決めることだけを置く。受け口と認証、重複の判定に使う送り元のイベントIDの場所（任意）、項目の取り出し（任意）、payloadの大きさの上限（multipartのファイルを含む。既定1MiB・最大10MiB。multipartのファイル以外の値の合計は、Djangoのフォームと同じ上限（`DATA_UPLOAD_MAX_MEMORY_SIZE`。既定2.5MiB）まで。超えたら413で、大きな文章はJSONで送るよう案内する）。ファイルの項目ごとの形式・大きさの制限は持たない。ファイルの数は、最初の発言に付けられる添付の数（`YORIKI_ATTACHMENTS_PER_MESSAGE`）からpayloadのファイルの分を引いた数まで。
 - **重複の判定**：重複のキーは、Bindingで指定した送り元のイベントID、要求の `Idempotency-Key` ヘッダー、推奨の形式の `event_id`（Bindingでイベントの場所を指定していないときだけ）の順に使う。イベントIDと `Idempotency-Key` は出所を付けて分ける（同じ値でも別のキー）。本文の内容（hash）だけではキーにしない（同じ内容の別の出来事を、再送と区別できないため）。同じ内容かは、JSON・フォームの値を並び順と空白によらない形にしたhash、テキストを本文のhashで判定し、multipartのファイルは名前・大きさ・中身のSHA-256で比べる（置いたパスは比べない。multipartの要求のhashには形式の印を付け、ファイルの記述と同じ形の辞書をJSONで送っても同じ内容にしない）。重複は入口ごとに判定する（鍵を作り直しても同じ入口なら同じ）。同じキーと同じ内容なら前のRunを返し、同じキーで違う内容は409で断る。Bindingの版でイベントIDの場所を変えた後も、前の版の場所で取り出したキーで同じ内容の受付があれば前のRunを返す（違う内容で断る判定には今の版のキーだけを使い、前の版のキーで同じ内容の受付が見つかれば、今の版のキーが別の受付と重なっていても前のRunを返す）。どれもない場合は重複の判定をせず、届くたびに新しいRunを作る。この場合は、送り元が再送すると二重に実行されることを設定画面に表示する。
-- **失敗を必ず知らせる**：Webhookで起動するタスクは、失敗を知らせる先を必須とする（`run.failed` を含む結果通知か、対話のチャネル）。ないTask Definitionは公開できない（初期の実装：Webhookの入口の作成・変更と、入口のあるタスクの保存で、`run.failed` を含む結果通知がなければ断る。この確認を入れる前に作った入口の受付は止めない）。受付時の202にはrun_idを含め、送り元は同じ認証で状態を確かめる口（`GET /api/hooks/v1/tasks/{task}/runs/{run_id}/`。その入口が受け付けたRunだけについて、状態（Runの状態の名前。`queued` 等）と、失敗・取消なら終わり方の名前（harness.md §4.3。`step_limit` 等）だけを返す。エラーの本文やログ由来の情報は、鍵の持ち主に返さない。authorization.md §7.1）でも結果を確かめられる。画面は、これらを入れるふつうのフォームと項目の表にする（項目の場所はJSONのpathを文字で入れる）。
+- **失敗を必ず知らせる**：Webhookで起動するタスクは、失敗を知らせる先を必須とする（`run.failed` を含む結果通知か、対話のチャネル）。ないTask Definitionは保存できない（初期の実装：Webhookの入口の作成・変更と、入口のあるタスクの保存で、`run.failed` を含む結果通知がなければ断る。この確認を入れる前に作った入口の受付は止めない）。受付時の202にはrun_idを含め、送り元は同じ認証で状態を確かめる口（`GET /api/hooks/v1/tasks/{task}/runs/{run_id}/`。その入口が受け付けたRunだけについて、状態（Runの状態の名前。`queued` 等）と、失敗・取消なら終わり方の名前（harness.md §4.3。`step_limit` 等）だけを返す。エラーの本文やログ由来の情報は、鍵の持ち主に返さない。authorization.md §7.1）でも結果を確かめられる。画面は、これらを入れるふつうのフォームと項目の表にする（項目の場所はJSONのpathを文字で入れる）。
 - **推奨の形式**：送る形を決められる送り元（Zapier等）向けに、Yorikiの推奨の形式（`event_id`、`message`、`inputs`、`files`）を示す。この形式で送れば、重複のキー（`event_id`。Bindingでイベントの場所を指定していないとき）と項目の取り出し（`inputs` の値をそのまま入力の値にする。Bindingで取り出しを指定していないとき）とファイルの取り込みはBindingの設定なしで行う。フォームの値・multipartでは、`inputs[名前]` のフィールドを `inputs` の値として読み（`inputs` という名前の値も送られていれば、どちらも送られた名前のまま残す。型がファイルの項目には `inputs[名前]` でファイルを付ける）、項目に結び付かないファイルは `files` のフィールドで付ける（付けたファイルは、どのフィールドのものもすべて作業場所に置く）。タスクの入力の項目にない名前が `inputs` にあれば400。`message` は他の値と同じくpayloadのファイルに残るデータで、依頼文としては扱わない（入口は自由な依頼文を受けない。authorization.md §6）。推奨であり、必須にはしない。
 - **受け付ける形式と実行主体**：本文はJSON、フォームの値（JSONにしてファイルに置く）、multipart/form-data（ファイル以外はフォームの値と同じ。ファイルは作業場所に置く）、テキスト（`webhook_payload.txt`。項目は取り出せない）を受け付ける。JSONは `+json` の形式も受け付け、`NaN`・`Infinity`・`1e999` のような標準でない数は400で断る。multipartで、同じ名前のフィールドに文字とファイルを一緒に送ったもの、置換文字を含む名前（RFC 2231の `filename*=` 等）、不正なUTF-8の値は400で断る（違う値が同じに読まれないように）。認証は `Authorization: Bearer <鍵>`（鍵は作成時と作り直したときに一度だけ表示し、DBにはSHA-256と見分け用の先頭だけを保存する）。Runの実行主体（`Run.owner`・会話の持ち主）は、ログインできないシステム用のユーザーにする（利用量の記録と実行時の文脈の名前に使い、権限の判定には使わない）。受付の応答は、受け付けたら202、同じイベントの再送には前のRunを200、形と項目の誤りは400（項目ごとの誤り）、鍵がないか正しくなければ401、別のタスクのURLは、あるかどうかも見せず404、停止中の入口は403、同じイベントIDで違う内容とタスクを今は実行できないときは409（理由はタスクの中身を含むので送り元には返さず、ログに残す。認証の後に鍵の作り直し・停止・版の変更があれば、受付のtransactionの中で確かめ直して断る。断った要求のpayloadは残さない）、上限を超えた本文は413、受け付けない形式は415。
 
 取り出した項目の誤りは受付時に400で返せる。それ以外の形の誤りに気づくのはRunを始めた後になり、送り元には受付時に202を返しているので、読み取れなかった場合（Skillの読み取りのスクリプトで形を確かめて合わなかった場合を含む）は、Runの失敗として、必須にした失敗の通知先へ知らせる。
 
-chat Adapterでは、新規依頼、既存Runへの追加指示（人が起動したRunで、起動した本人からのものだけ）、確認への回答を共通の会話処理へ渡し、全メッセージで新規Runを作らない。外部起動でも確認が必要ならWAITING_USERとし、設定した外部スレッドまたはWebの同じConversationで回答できる。外部スレッドではチャネル参加者なら誰でも対応できる。無人運用では入力不足で終了する設定も持たせる。人が回答しても元のRunの権限は増やさない。Channel Pluginからの返信は新規ExecutionRequestではなくConversationInputとして、既存Run・ClarificationRequest・UserInstructionへ振り分ける。
+chat Adapterでは、新規依頼、既存Runへの追加指示（人が起動したRunで、起動した本人からのものだけ）、確認への回答を共通の会話処理へ渡し、全メッセージで新規Runを作らない。外部起動でも、対話のBindingがあるタスクでは確認が必要ならWAITING_USERとし、設定した外部スレッドで回答できる。外部スレッドではチャネル参加者なら誰でも対応できる。対話のBindingのないタスクでは尋ねず（`ask_user` を出さない）、置いた前提を結果に書かせる（harness.md §7.5・§10.3）。人が回答しても元のRunの権限は増やさない。Channel Pluginからの返信は新規ExecutionRequestではなくConversationInputとして、既存Run・ClarificationRequest・UserInstructionへ振り分ける。
 
 ### 4.3 Notification Plugin・通知の書き方と完了イベント
 
@@ -577,7 +581,7 @@ Adapterはvalidate_config、validate_destination、prepare_payload、deliverを�
 
 Zapier Adapterは汎用Webhook Adapterの送信処理を再利用できる。Teams・Slack・Discordは4.6〜4.7節の双方向Channel Pluginを初期対象とし、その送信部分も同じNotification Adapter契約で動かす。将来ほかの送り先を追加するときも、Runの完了処理を変更せずAdapterと設定Schemaを追加する。通知先はendpointに限定せず、登録済みユーザー・channel・宛先等をDestinationとして表す。最初から全経路の実装や多宛先配信を要求しない。
 
-ResultEnvelopeはresult_id、run_id、タスク版、結果Schema版、確定データ、Artifact ID・ファイル名・MIME・サイズ・SHA-256を持つ。共通イベントには安定したevent_id、event_type、発生時刻、結果参照を持たせる。有効期限付きURLは配信時にArtifact Serviceへ発行を依頼し、永続的なArtifact IDと区別する。内部ログ、会話全体、Skillの原本は自動的に結果へ含めない。
+ResultEnvelopeはresult_id、run_id、タスク版、結果Schema版、確定データ、Artifact ID・ファイル名・MIME・サイズ・SHA-256を持つ（目標の形。初期の実装で送る内容は下記）。共通イベントには安定したevent_id、event_type、発生時刻、結果参照を持たせる。有効期限付きURLは配信時にArtifact Serviceへ発行を依頼し、永続的なArtifact IDと区別する。内部ログ、会話全体、Skillの原本は自動的に結果へ含めない。
 
 Zapierでファイルとして使うURLは、追加ログイン不要で直接取得できる必要がある。対象ファイルに限定した期限付きURLを発行し、社内SSOの画面URLを渡さない。どの保存先でも、出口へ渡すのはAPIのtoken付き取得経路だけにする。APIは取得のたびにtokenと出口が有効かを確かめ、S3保存時は確かめた後にごく短い期限（例：1分）の署名付きURLへリダイレクトしてよい（出口を止めたらすぐ取得できなくするため。authorization.md §7.1）。保存Backendを切り替えても、通知の候補はArtifactのパスを扱い続ける。取得経路の到達性と期限は配信設定時に検証する。
 
@@ -587,11 +591,11 @@ Zapierでファイルとして使うURLは、追加ログイン不要で直接�
 
 **in_appのAdapter（初期の実装）**：送り先のURLを持たず、受け手の通知欄に通知（タスクの名前とRunの状態と、送る内容にあれば、通知の書き方に従ってエージェントが決めた通知の文章。業務結果・成果物は載せない）を載せ、受け手の画面へログインユーザー宛ての通知（`notification`。realtime.md §3）で知らせる。受け手は送るときに決める：個人のタスクは持ち主、部門・全社・システムのタスクの手動実行は実行した人、チャットから起動したRunは起動した人、入口から動いたRunはタスクを管理できる人全員。同じ配信を同じ人へ二度載せない（送り直しても重ならない）。どれも、今もRunの結果を見られる人（Runを実行したときのタスクの範囲と部門で今も管理できる人と、チャットから起動した人。authorization.md §7.1）に限り、いなければ配信の失敗にする。通知欄は、送った後に権限を失った人には見せない（Runの結果を見られる人で絞る）。認証の要る画面の中だけで、Runの結果を見られる人にだけ見せるので、出口の機密のフラグがなくても機密のタスクに使える（通知の文章が機密の情報を含んでも、受け手はもともとそのRunの結果を見られる人だけ）。個人のタスクの出口は、全員で共通の画面の通知を1つだけYorikiが作る（最初に選ぶときに作る。管理の画面では扱わない）。通知のボタン（未読の数）はサイドバーに置き、通知欄では通知の文章を3行まで表示する。
 
-Destinationは接続情報、Secret参照、許可scope、対応内容、timeout、再試行方針を版付きで管理する。送信前にも有効性を再確認し、失効した宛先には再送しない。URL型Adapterは登録時・接続時に許可範囲とredirect先を検証する。ZapierのHook URL等をLLMや通常ログへ露出しない。通知Pluginの追加によってSandboxの通信制限を緩めない。
+Destinationは接続情報、資格情報、許可scope、対応内容、timeout、再試行方針を管理する（初期の実装では、版に入るのはURLと機密のフラグで、署名の鍵と範囲は版の外、timeoutと再試行の方針は定数）。送信前にも有効性を再確認し、失効した宛先には再送しない。URL型Adapterは登録時・接続時に許可範囲とredirect先を検証する。ZapierのHook URL等をLLMや通常ログへ露出しない。通知Pluginの追加によってSandboxの通信制限を緩めない。
 
 ### 4.5 実行状態と通知の再試行
 
-RunのCOMPLETEDは業務結果と成果物の確定を表す。Deliveryは配信待ち、配信中、受付確認済み、再試行待ち、失敗、取消を別に保持し、「処理完了・通知失敗」を表現する。保存済み結果を使って配信だけ再試行し、エージェントの実行や通知の文章の作成をやり直さない。通信ごとの送信内容・URL有効期限はDeliveryAttemptへ記録し、再送でURLを更新してもevent_idと業務結果は維持する。
+RunのCOMPLETEDは業務結果と成果物の確定を表す。Deliveryは配信待ち、配信中、受付確認済み、再試行待ち、失敗、確認待ち（送った後に応答が失われる等で、届いたか分からない。自動では送り直さない）、取消を別に保持し、「処理完了・通知失敗」を表現する。保存済み結果を使って配信だけ再試行し、エージェントの実行や通知の文章の作成をやり直さない。通信ごとの送信内容・URL有効期限はDeliveryAttemptへ記録し、再送でURLを更新してもevent_idと業務結果は維持する。
 
 配信キーはrun_event_id、Notification Binding Revision、Destination Revisionから作る（初期の実装は、通知の設定をTask Definitionの版の項目にし、Runがその版を固定するので、配信キーはrun_event_idとDestination Revisionの2つ（`uniq_delivery_key`）。通知の書き方で作った候補も同じ配信に載せる（§4.3）。Notification Bindingを別のModelにするとき（1つのタスクに複数の通知を持たせるとき）に、その版をキーに加える）。同じ完了イベントの自動通知とTool候補を統合でき、確認待ちが複数回発生しても別のRunEventとして通知できる。対話用の送信もInteraction Bindingから解決した送信Bindingとthread参照を使い、同じDelivery／Outboxで管理する。質問ごとにClarificationRequestのID・世代を持つ別イベントとする。同じイベントを同じ対話スレッドへ送る設定が重複した場合は一つの配信へ正規化する。手動送信は別のoperation keyを持つ。外部送信で、受付後に応答が失われる等、送ったかどうか分からない障害では、自動で送り直さず確認待ちにする（authorization.md §6）。受信側のevent_idによる重複処理は補助として使い、exactly-onceとは表現しない。
 
@@ -715,15 +719,15 @@ sequenceDiagram
 
 種別の違いは、クラウドサービス（OpenAI・Anthropic・Gemini）かセルフホスト（ローカルLLM）かだけである。どの種別も、接続先ごとに複数の接続を登録できる。
 
-- **プロバイダ接続（LLMConnection）**：種別、API keyのSecret参照、base URL（ローカルLLMのみ）、timeout、同時実行数・rate limitを持つ。permissionを持つ人（既定では基盤管理者）だけが登録・変更できる。API keyはSandboxへ渡さず、ログ・画面へも出さない。MVPではProvider AdapterをControl Planeのプロセス（apiと、Runnerが動くqcluster。同じイメージ）の中で動かす。QClusterだけのWorkerサーバー（§6.1）のRunnerも、HTTPを介さず同じプロセスの中のProvider Adapterを通してLLMを呼ぶ（モデルのAPIへ直接接続しない）。API keyを読めるのはControl Planeと同じ信頼範囲のサーバーだけにし、SandboxとLLMへは渡さない。API keyは管理画面で接続と一緒に登録し、DBに暗号化して保存する（鍵はDBに置かず環境変数で渡す。deployment.md §5）。API keyは書き込み専用で、画面とAPIには末尾の4文字だけを出す。接続の種別とbase URLは、作成した後は変えられない。接続先ごとに接続を作り（複数を登録できる）、API keyはいつでも差し替えられる。接続先を後から変えられると、登録済みのAPI keyが別のサーバーへ送られたり、モデル設定の版の呼出し先が後から変わったりするため。接続先を変えるときは新しい接続を作り、モデル設定の新しい版でそれを選ぶ。クラウドサービス（OpenAI・Anthropic・Gemini）の接続先は固定し、base URLを指定できるのはローカルLLMだけにする。Connector・外部連携の資格情報も同じ方式で保存する（§4.9）。
+- **プロバイダ接続（LLMConnection）**：種別、API key（DBに暗号化して保存）、base URL（ローカルLLMのみ）、timeout、同時実行数・rate limitを持つ。permissionを持つ人（既定では基盤管理者）だけが登録・変更できる。API keyはSandboxへ渡さず、ログ・画面へも出さない。MVPではProvider AdapterをControl Planeのプロセス（apiと、Runnerが動くqcluster。同じイメージ）の中で動かす。QClusterだけのWorkerサーバー（§6.1）のRunnerも、HTTPを介さず同じプロセスの中のProvider Adapterを通してLLMを呼ぶ（モデルのAPIへ直接接続しない）。API keyを読めるのはControl Planeと同じ信頼範囲のサーバーだけにし、SandboxとLLMへは渡さない。API keyは管理画面で接続と一緒に登録し、DBに暗号化して保存する（鍵はDBに置かず環境変数で渡す。deployment.md §5）。API keyは書き込み専用で、画面とAPIには末尾の4文字だけを出す。接続の種別とbase URLは、作成した後は変えられない。接続先ごとに接続を作り（複数を登録できる）、API keyはいつでも差し替えられる。接続先を後から変えられると、登録済みのAPI keyが別のサーバーへ送られたり、モデル設定の版の呼出し先が後から変わったりするため。接続先を変えるときは新しい接続を作り、モデル設定の新しい版でそれを選ぶ。クラウドサービス（OpenAI・Anthropic・Gemini）の接続先は固定し、base URLを指定できるのはローカルLLMだけにする。Connector・外部連携の資格情報も同じ方式で保存する（§4.9）。
 - **モデル設定（ModelProfile）**：接続、モデル名、最大入力・出力token、入出力の単価（100万tokenあたりの米ドル）、対応能力（Tool呼出し、画像入力、構造化出力、prompt caching、推論の制御）を版付きで持つ。単価はUsageLedgerの金額計算に使い、ローカルLLMは0または設定した原価とする。管理画面とAPIでは1つの設定として見え、中身を変えて保存するとサーバーが新しい版を作る（編集を始めた時点の版番号を送り、その間に別の版ができていれば競合として断る）。版の履歴は読み取り専用で見られる。
 - **effort（推論の量）**：推論の制御に対応したモデル設定は、そのモデルが受け付けるeffortの値（各社の指定そのまま。例：OpenAIの `reasoning_effort`、Anthropicのeffortやthinkingの予算、Geminiのthinkingの予算）と既定の値を持つ。Yoriki独自の段階には読み替えず、Provider Adapterはモデル設定の値をそのまま各社のAPIへ渡す。推論のtokenは出力の単価で計算し、UsageLedgerに分けて記録する。予算の予約では、最大出力tokenに推論の分を含めて見積もる。
 - **会話とタスクでの選択**：利用者が、会話の開始時にモデル設定を直接選ぶ（基盤管理者が既定のモデル設定を決める）。タスクはTask Definitionで選ぶ。effortは、選んだモデルの既定の値から始まり、利用者が固定することも、自動に任せることもできる。個人情報や機密情報を扱う会話・タスク（機密のConnector・Skillを使えるのはこれだけ）では、ローカルLLMのモデル設定だけを選べる（§4冒頭）。どのモデル設定をどの部門・タスクに使わせるかも設定できる。Run受付時に使うモデル設定の版を固定し、実行中に管理画面でモデル設定を変えても進行中のRunは切り替えない。
 - **自動の切り替えはeffortだけ**：Runnerは、選んだモデルの中で、そのモデルが受け付けるeffortの範囲で上げ下げしてよい（例：同じ失敗が続いたら上げる、要約・整形のような軽い手順は下げる、予算の残りが少なければ下げる）。規則は設定で決め、最初の実装は利用者の明示とSkillの指定だけとし、自動の規則は実際の利用量と費用を見てから決める（データの形は最初から自動にも耐えるようにする）。利用者がeffortを固定した会話・タスクでは自動で変えない。モデル設定（送り先とモデル）は自動では変えない。
 - **モデルの切り替えは利用者が明示したときだけ**：会話の途中で、利用者が別のモデル設定やeffortを指定できる（「高性能なモデルで考え直して」「ここからは軽いモデルでいい」、画面の操作）。会話の履歴とTool結果はProvider Adapterの共通の形で引き継ぐが、推論の途中経過（プロバイダ固有）は持ち越さず、prompt cachingの効果もなくなる。
-- **障害のとき**：接続障害・timeout・rate limit・再試行できる5xxでは、Runnerが同じモデルで間をおいて再試行する。それでもつながらなければ、別のモデルへ自動では切り替えない。会話では、利用者に「このモデルにつながりません。別のモデルで続けますか」と確認を求めて回答を待つ（WAITING_USER。候補は、下の条件を満たすモデル設定だけ。候補がなければ「もう一度試しますか」と尋ね、同じモデルでもう一度試すことだけを選べる）。利用者が選べば、そのモデルで続ける。タスクではRunを失敗とし、タスクの通知設定でエラーを通知する。入力が長すぎる等、指示の内容による失敗では再試行もしない。
+- **障害のとき**：接続障害・timeout・rate limit・再試行できる5xxでは、Runnerが同じモデルで間をおいて再試行する。それでもつながらなければ、別のモデルへ自動では切り替えない。会話では、利用者に「このモデルにつながりません。別のモデルで続けますか」と確認を求めて回答を待つ（WAITING_USER。候補は、下の条件を満たすモデル設定と「同じモデルでもう一度試す」。候補のモデルがなければ「もう一度試しますか」と尋ねる）。利用者が選べば、そのモデルで続ける。タスクではRunを失敗とし、タスクの通知設定でエラーを通知する（修正チャットのタスクのRunは会話と同じく確認で待つ。§11.11）。入力が長すぎる等、指示の内容による失敗では再試行もしない。
 - **切り替えにかける条件**：利用者がモデルを切り替えるときも、Runnerがeffortを変えるときも、切り替える前に確かめる。個人情報や機密情報を扱う会話・タスク（機密のConnectorは、これらでだけ使える）ではローカルLLMのモデル設定だけ、Skillが必要とする能力（Manifestに追記したSkillを含む）を持つモデルだけ、その会話・タスク・部門に許したモデル設定だけにする。予算は切り替えた先の単価で予約と残額の確認をやり直す。切り替えるたびに、きっかけ（利用者・自動の規則）と元・先のモデル設定の版・effortをRunEventに記録し、Manifestへ追記する（Skillの版の追記と同じ。§3.2）。料金はUsageLedgerに、実際に使ったモデル設定の版の単価で記録する。
-- **能力の検証**：Skillが必要とする能力（Tool呼出し、画像入力、推論の制御等）を、使うモデルが持つかを、Task Definitionの公開時と、Run開始時・モデルの切り替え時（会話でSkillを指定したとき、エージェントがSkillを読み込むときを含む）に確かめ、満たさない組合せでは使わない。エージェントには、使うモデルで使えないSkillを候補として見せない。ローカルLLMでTool呼出しが不安定なモデルは、Tool呼出し不可として登録する。
+- **能力の検証**：Skillが必要とする能力（Tool呼出し、画像入力、推論の制御等）を、使うモデルが持つかを、Task Definitionの保存時と、Run開始時・モデルの切り替え時（会話でSkillを指定したとき、エージェントがSkillを読み込むときを含む）に確かめ、満たさない組合せでは使わない。エージェントには、使うモデルで使えないSkillを候補として見せない。ローカルLLMでTool呼出しが不安定なモデルは、Tool呼出し不可として登録する。
 
 Provider Adapterは、メッセージ・Tool定義・オプションを受け取り、テキストの差分、Tool呼出し、利用量、プロバイダの要求IDを共通のイベントとして返す。プロバイダ固有の機能（prompt caching等）は能力として宣言し、Runnerは能力がある場合だけ使う。実装は各社のAPIクライアント（`openai`・`anthropic`・`google-genai`）を直接使い、ローカルLLMはOpenAI互換のAPIとして `openai` クライアントで呼ぶ。SDKの自動再試行は切り、再試行とeffortの調整はRunnerが判断する。
 
@@ -738,10 +742,10 @@ Provider Adapterは、メッセージ・Tool定義・オプションを受け取
 | 項目 | 内容 |
 |---|---|
 | 登録 | Connector管理者（permissionを持つ人）が管理画面で、接続とConnectorを登録する。接続は、種類ごとに項目の違う接続先（DBの種別・ホスト・DB名、HTTPのホスト等）、認証方式、資格情報（パスワード・token等。DBに暗号化して保存する。§4.8）を持つ。Connectorは、1つの接続の上で、公開する範囲（表・ビュー、サイト・フォルダ等）、上限、機密のフラグを版付きで持つ。1つの接続の上に、範囲と使える人の違うConnectorを複数作れる（例：同じ販売管理DBの上に、経理部向けの「取引先マスタ」と営業部向けの「受注実績」） |
-| 操作 | Connectorは提供する操作を、読取り（`read`）と書込み（`write`）に分類して宣言する。例：`sharepoint.search`（read）、`sharepoint.download`（read）、`sharepoint.upload`（write） |
+| 操作 | Connectorは提供する操作を、読取り（`read`）と書込み（`write`）に分類して宣言する。例：`sharepoint_search`（read）、`sharepoint_download`（read）、`sharepoint_upload`（write） |
 | 利用の許可 | 所属とpermissionの2軸で判定する（[authorization.md](authorization.md) §5.2）。Connectorは範囲（個人・部門・全社・システム）を持つ。部門のConnectorは1つの部門に属し、使える部門の人が会話で使える（表の名前と説明を見て、操作する。列の説明の読み取りは `datasource_describe` で行う。管理画面の試し実行と接続先の表の一覧は編集の権限。authorization.md §5.2）。全社のConnectorは全員が使える。システムのConnectorはシステムタスクだけが使い、会話には出さない。個人のConnectorは本人のOAuthのtokenで動き、本人だけが使う。部門・全社・システムのConnectorの作成・編集・削除は、Connector管理者（`connector.add_connector`・`change_connector`・`delete_connector`）が所属を問わず行う。使える範囲を変えると、実行中のRunにも次の操作から効く。会話ではエージェントが利用者の使えるConnectorから探して使い、タスクではタスクに固定したConnectorだけを使う。既定は読取りの操作だけとし、書込みは今は持たない（入れるときは出口として扱い、タスクに許された書込み先だけにする） |
 | 機密のフラグ | 個人情報を主な中身とする接続先には、Connector管理者が機密のフラグ（境界の版の項目）を付ける。フラグの付いたConnectorは、機密の会話・タスク（§4冒頭）でだけ一覧に出し、使わせる（機密の会話はローカルLLMのモデルだけで、扱わない会話に戻せないので、クラウドのモデルへは渡らない。harness.md §10.2）。一部の列だけが個人情報の場合は、フラグではなく公開する範囲で外す |
-| Skillからの利用 | Skillは、使うConnectorと、その操作（例：`datasource.describe`・`datasource.query`、`sharepoint.download`）と対象（社内DBでは使う表。省けばそのConnectorの公開する表のどれでも）を要件として宣言できる（宣言しなくてもよく、その場合は会話のRunでだけ、エージェントが利用者の使えるConnectorから探して使う。タスクのRunでは、タスクに固定したConnectorだけを使う。1つのSkillが宣言できるConnectorは5つまで、1つのConnectorで宣言できる表は100まで）。宣言は要件で、使える範囲を広げも狭めもしない。社員やエージェントがチャットでSkillを作るときも同じ。公開時に、宣言したConnectorが有効で公開する人が使えること、Skillの範囲に合うこと（部門のSkillはその部門か全社のConnector、全社のSkillは全社のConnector、システムのSkillはシステム・部門・全社のConnector、個人のSkillは本人が使えるConnector。authorization.md §5.4のタスクと同じ）、宣言した操作と表がConnectorの今の版の境界の中にあること、操作のToolがSkillの「使ってよいTool」にあることを検証する。実行時は、宣言したConnectorを利用者が使えないSkillと、宣言した操作・表をConnectorの今の版が公開しなくなったSkillを、モデルの能力を満たさないSkillと同じく一覧に出さず、読み込ませない（§4.8のモデルの能力の検証と同じ）。表と操作の境界は、操作のたびにConnectorのその時点の版で強制する |
+| Skillからの利用 | Skillは、使うConnectorと、その操作（例：`datasource_describe`・`datasource_query`、`sharepoint_download`）と対象（社内DBでは使う表。省けばそのConnectorの公開する表のどれでも）を要件として宣言できる（宣言しなくてもよく、その場合は会話のRunでだけ、エージェントが利用者の使えるConnectorから探して使う。タスクのRunでは、タスクに固定したConnectorだけを使う。1つのSkillが宣言できるConnectorは5つまで、1つのConnectorで宣言できる表は100まで）。宣言は要件で、使える範囲を広げも狭めもしない。社員やエージェントがチャットでSkillを作るときも同じ。公開時に、宣言したConnectorが有効で公開する人が使えること、Skillの範囲に合うこと（部門のSkillはその部門か全社のConnector、全社のSkillは全社のConnector、システムのSkillはシステム・部門・全社のConnector、個人のSkillは本人が使えるConnector。authorization.md §5.4のタスクと同じ）、宣言した操作と表がConnectorの今の版の境界の中にあること、操作のToolがSkillの「使ってよいTool」にあることを検証する。実行時は、宣言したConnectorを利用者が使えないSkillと、宣言した操作・表をConnectorの今の版が公開しなくなったSkillを、モデルの能力を満たさないSkillと同じく一覧に出さず、読み込ませない（§4.8のモデルの能力の検証と同じ）。表と操作の境界は、操作のたびにConnectorのその時点の版で強制する |
 | 結果 | ファイルや大量の結果はArtifactとして保存し、Sandboxの `/workspace/input/connectors/{invocation_id}/` へ読取り専用で展開する（§7.1）。LLMには件数・ファイル名・先頭部分などの要約だけを返す |
 | 記録 | 操作、引数、対象、件数・サイズ、所要時間、Connectorの版をToolInvocationに記録する |
 
@@ -765,7 +769,7 @@ Connectorは「接続」「境界」「使い方」の3層に分けて管理す�
 
 #### 4.9.2 社内DB（データソース）
 
-社内DBは、SQLで読取りだけを行うConnectorとして扱う。エージェントには `datasource.describe`（公開している表・列の説明）と `datasource.query`（SELECT文と引数）を渡し、結果はCSVのArtifactとして保存して `/workspace/input/connectors/{invocation_id}/` へ置く（§7.1）。初期の種別はPostgreSQL、MySQL、SQL Serverとする。
+社内DBは、SQLで読取りだけを行うConnectorとして扱う。エージェントには `datasource_describe`（公開している表・列の説明）と `datasource_query`（SELECT文と引数）を渡し、結果はCSVのArtifactとして保存して `/workspace/input/connectors/{invocation_id}/` へ置く（§7.1）。初期の種別はPostgreSQL、MySQL、SQL Serverとする。
 
 書込みの禁止は、次のように複数の層で強制する。LLMへの指示やSkillの記述には頼らない。
 
@@ -785,8 +789,8 @@ Connectorは「接続」「境界」「使い方」の3層に分けて管理す�
 - SQLの検査（上の3）は、sqlglotで各DBの方言（`tsql`、`postgres`、`mysql`）として構文解析して行う。文の中のすべての表が、同じ文のCTEか公開した表・ビューであること（スコープごとに解決する）、書込み・`SELECT INTO`・ロックを取る読取り・表のヒント・表を返す関数・別のDBやサーバーの表がないこと、ファイルの入出力や文字列のSQLを実行する関数（`pg_read_file`、`query_to_xml`、`LOAD_FILE`、`OPENROWSET` 等）を使っていないことを確かめる。実行するSQLは、検査した構文木から作り直したもの（コメントを外す）にし、検査したものと実行するものを食い違わせない。引数の場所は、どの種別でも `?` で書く。
 - 表の名前にスキーマを書かなければ、Connectorの既定のスキーマ（PostgreSQLは `public`、SQL Serverは `dbo`）として検査する。実行するSQLでは、その表の名前に検査したスキーマを付ける（DBが別のスキーマで解決しないようにするため。SQL Serverの `dbo`、PostgreSQLの `pg_catalog` への読み替え）。MySQLはDB名がスキーマで、別のDBの表は使えない。表の名前は、PostgreSQLでは引用符のない名前を小文字として、MySQL・SQL Serverでは書いたとおりに、公開した名前（DBから読んだ実際の名前）と比べる（大文字・小文字を区別するかがDBの設定で変わるため、区別する設定で別の表を通さない）。
 - 結果は、サーバー側のcursor（MySQLはバッファしないcursor）で少しずつ取り出し、行数・サイズの上限で打ち切る（残りの行は読まない）。
-- `datasource.describe` は、公開しているビュー・表の列名・型と、管理者が付けた説明を返す。列の意味の詳しい説明やSQLのひな形は、SkillのResource（データ辞書）に置く（§4.9.1の「使い方」）。
-- 3種類とも同じAdapterの契約（§4.9.4）で実装し、種別ごとの違いはドライバ、読取り専用の設定、実行時間の上限、SQLの方言だけに閉じ込める。
+- `datasource_describe` は、公開しているビュー・表の列名・型と、管理者が付けた説明を返す。列の意味の詳しい説明やSQLのひな形は、SkillのResource（データ辞書）に置く（§4.9.1の「使い方」）。
+- 3種類とも同じAdapterの基底クラス（`connector/adapters/base.py`。`check`・`list_tables`・`describe`・`check_query`・`query`）で実装し、種別ごとの違いはドライバ、読取り専用の設定、実行時間の上限、SQLの方言だけに閉じ込める。
 
 #### 4.9.3 SharePoint等のファイル・SaaS
 
@@ -800,21 +804,21 @@ Webの検索と取得も、初期段階の後にConnector（Web検索・Web取�
 
 #### 4.9.4 Adapterの契約
 
-ConnectorのAdapterは `validate_config`、`describe`（提供する操作と入出力のSchema）、`execute`（操作の実行）を実装し、他のPluginと同じRegistryで管理する。接続のSecretとtokenはControl Planeの中だけで使い、Runner・Sandbox・ログへ出さない。QClusterだけのWorkerサーバー（§6.1）のRunnerも、社内DB・SaaSへ直接接続せず、Connector（同じプロセス内のConnectorの処理）を通す。HTTPを介さないだけで、操作のたびの利用の許可の確認（そのRunの実行許可と、その時点の所属・範囲。authorization.md §6）、利用者の権限のtoken、読取り専用の多層の強制（§4.9.2）、行数・サイズ・時間の上限、ToolInvocationへの記録はすべてこの処理の中で行う。接続情報はControl Planeと同じ信頼範囲のサーバーの中だけで使い、SandboxとLLMへは渡さない。
+ConnectorのAdapterは `validate_config`、`describe`（提供する操作と入出力のSchema）、`execute`（操作の実行）を実装し、他のPluginと同じRegistryで管理する（Plugin Registryを作るときの契約。初期の実装は社内DBの基底クラスで、種別からAdapterをコードで選ぶ。§4.9.2）。接続のSecretとtokenはControl Planeの中だけで使い、Runner・Sandbox・ログへ出さない。QClusterだけのWorkerサーバー（§6.1）のRunnerも、社内DB・SaaSへ直接接続せず、Connector（同じプロセス内のConnectorの処理）を通す。HTTPを介さないだけで、操作のたびの利用の許可の確認（そのRunの実行許可と、その時点の所属・範囲。authorization.md §6）、利用者の権限のtoken、読取り専用の多層の強制（§4.9.2）、行数・サイズ・時間の上限、ToolInvocationへの記録はすべてこの処理の中で行う。接続情報はControl Planeと同じ信頼範囲のサーバーの中だけで使い、SandboxとLLMへは渡さない。
 
 #### 4.9.5 Connectorが動く場所
 
-Connectorは独立したサービスではなく、`yoriki-api` のイメージに含まれるPythonのコード（Adapter）である。登録内容・Binding・Secretの参照はDBにあり、操作は、それを呼んだプロセスの中で実行される。
+Connectorは独立したサービスではなく、`yoriki-api` のイメージに含まれるPythonのコード（Adapter）である。登録内容（接続・Connectorの版）と暗号化した資格情報はDBにあり、操作は、それを呼んだプロセスの中で実行される。
 
 | 呼び出し元 | 動く場所 |
 |---|---|
-| エージェントのTool（`datasource.query` 等） | そのRunを実行しているWorkerのqclusterのプロセス |
+| エージェントのTool（`datasource_query` 等） | そのRunを実行しているWorkerのqclusterのプロセス |
 | 管理画面での接続確認・スキーマの表示 | apiのプロセス |
 
 このため、Workerを増やすとConnectorを実行する場所も増える。次の点に注意する。
 
 - **接続先への到達**：すべてのWorkerサーバー（とapiのサーバー）から、社内DB・SharePoint等へ接続できるようにする（ファイアウォールの許可）。
-- **接続数**：Workerの台数と実行枠の分だけ、社内DBへの接続が増える。接続ごとに同時実行数の上限を持ち（同じ接続の上のConnectorを合わせて数える）、DB（advisory lock等）で全Workerを通して数える。社内DBへの接続は操作ごとに開いて閉じ、プロセスで長く持ち続けない。
+- **接続数**：Workerの台数と実行枠の分だけ、社内DBへの接続が増える。接続ごとに同時実行数の上限を持ち（同じ接続の上のConnectorを合わせて数える）、DBで全Workerを通して数える（接続の行をロックして枠の行（ConnectionLease。期限付き）を数える）。社内DBへの接続は操作ごとに開いて閉じ、プロセスで長く持ち続けない。
 - **OAuthのtokenの更新**：利用者のtokenのrefreshは、行ロックを取ってから1つのWorkerだけが行う。Microsoft等はrefresh tokenを使うたびに新しいものに替えるため、複数のWorkerが同時に更新すると片方が無効になる。
 - **MCPサーバー**：HTTPで接続するMCPサーバーを使う。Workerごとにプロセスを起動するstdio形式のMCPサーバーは、初期には使わない。
 
@@ -848,7 +852,7 @@ Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプ�
 | Run | 共通実行要求、起動Binding版、タスク版、固定したModelProfileの版とSkill Version、実行許可（誰の権限か・起動の種類・タスクの版。authorization.md §6）、実行したときのタスクの範囲と部門（結果・ログを見られる人の判定に使う。authorization.md §7.1）、状態、Manifest、予算、親Run、適用済み指示sequence |
 | ExecutionAttempt | Worker、試行番号、lease、fencing token、開始・終了、失敗理由 |
 | RunEvent | 単調なsequence、イベント種別、表示用内容、モデル用の内容とモデルの履歴への効き方（harness.md §5）、時刻 |
-| Checkpoint | メッセージ参照（対応するRunEventのsequence）、Tool結果、再開状態、ファイルsnapshot参照、schema version |
+| Checkpoint | Workspaceのsnapshotの参照（保存先・key・大きさ・SHA-256）と、それに反映されているRunEventのsequence、保存の前に止めたジョブ。会話の文脈・Tool結果はRunEventから、指示の反映はUserInstructionから組み立てる |
 | Artifact | 論理ID、BlobObject参照、hash、サイズ、MIME、所有者、Run、保持期限 |
 | BlobObject / BlobLocation | 不変bytesのID・hash、backend_id・設定世代、object key、物理版、移行状態 |
 | WorkspaceSnapshot | Adapter・format版、ファイルManifest、環境参照、Checkpoint、保存・検証状態 |
@@ -892,7 +896,7 @@ Conversationは社員が見る履歴の単位、Runは実行要求の単位、At
 ### 5.2 実行の流れ
 
 1. Trigger Adapterがチャット・Webhook等を認証・正規化し、タスクまたは会話設定から共通の実行要求を組み立てる。追加指示・確認回答は既存Runの会話処理へ渡す。
-2. APIが認証、権限、添付上限、同時実行数、予算、TriggerReceiptの重複を検証し、Run・Manifest・起動・対話・通知・モデル（ModelProfileの版）・Connector Bindingの固定版・予算予約を作成する。
+2. APIが認証、権限、添付上限、同時実行数、予算、TriggerReceiptの重複を検証し、Run・Manifest・起動・対話・通知・モデル（ModelProfileの版）・Connectorの固定・予算予約を作成する。
 3. 同じDB transactionでOutboxを記録する。DispatcherがQClusterへRun IDを通知する。
 4. WorkerがRunを原子的にclaimし、Attemptとleaseを作成する。
 5. 固定されたSkillと必要な内容を読み込む。コマンド処理が必要な場合は、許可された添付・資料と実行環境を復元してSandboxを起動する。
@@ -932,7 +936,7 @@ Skill公開等の確定済み操作や外部への配信はRun停止だけで巻
 
 ### 5.4 再開に必要なファイル
 
-会話履歴だけではshell作業を再開できない。Workspaceを使うRunのCheckpointは、その時点の再開用Workspace snapshotと対応させる。入力とマスター資料は版とhashで復元し、作業ファイルはsnapshotから復元する。Sandbox・Workspaceを作らないテキスト処理では、会話・Tool結果・状態のCheckpointだけを保存し、空のsnapshotを必須にしない。
+会話履歴だけではshell作業を再開できない。Workspaceを使うRunのCheckpointは、その時点の再開用Workspace snapshotと対応させる。入力とマスター資料は版とhashで復元し、作業ファイルはsnapshotから復元する。Sandbox・Workspaceを作らないテキスト処理ではCheckpointを作らない（会話の文脈はRunEventから組み立てる。harness.md §11.1）。
 
 MVPではworkspace.file_snapshot Adapterで、再開地点・待機時・正常完了時にサイズ制限付きでworkとoutputの必要内容を保存する。取消・障害時には保存可能な範囲を退避する。実行中のプロセス、開いたファイルハンドル、メモリ状態は保存しない。Checkpoint間で落ちた場合は、最後に確定した地点から操作をやり直す。
 
@@ -944,13 +948,13 @@ Skill Draftと公開結果はControl Planeへ永続化し、Workspaceに依存�
 
 Skillファイル編集の候補もArtifact Storeへ保存し、Draftから参照する。編集中RunのWorkspaceを削除しても候補と原本は失われない。公開前の候補を通常の業務Runが最新版として参照することはなく、Draftを試す評価Runだけへ供給する。
 
-Checkpointには適用済み指示sequenceと追加された入力Artifactの参照も含める。別Workerで復元したときに、すでに適用した指示を二重処理せず、未適用の指示を順に取得できるようにする。
+指示の反映はUserInstructionの状態と、反映したときに記録するRunEvent（`message.user`）で持つ。別Workerで復元したときに、すでに適用した指示を二重処理せず、未適用の指示を順に取得できるようにする。
 
 ### 5.5 実行中の追加指示
 
-追加メッセージは先にDBへ保存し、受付結果を即時に返す。UserInstructionに対象、受付順序、`RECEIVED`、`APPLYING`、`APPLIED`、`NEEDS_CLARIFICATION`等の反映状態を持たせる。受付と反映完了を区別し、ユーザーが修正の適用を確認できるようにする。
+追加メッセージは先にDBへ保存し、受付結果を即時に返す。UserInstructionに対象、種類（今の作業への追加指示 `CURRENT`・次の依頼 `NEXT`）、受付順序、反映状態（`RECEIVED`・`APPLIED`・`STARTED`（次の依頼から新しいRunを始めた）・`DISCARDED`）を持たせる。受付と反映完了を区別し、ユーザーが修正の適用を確認できるようにする。
 
-現在の作業への指示は、実行中のToolが完了した区切り、または安全に停止できる地点で取り込む。取り込んだ時点を`APPLIED`としてCheckpointへ記録し、結果の再生成が必要なら「条件を反映して再実行中」と表示する。受付時点で進行中のコマンドをすでに変更できたかのように表示しない。緊急の停止は指示の通常順序待ちにせず、取消経路を使う。
+現在の作業への指示は、実行中のToolが完了した区切り、または安全に停止できる地点で取り込む。取り込んだ時点で`APPLIED`にしてRunEventに記録し、結果の再生成が必要なら「条件を反映して再実行中」と表示する。受付時点で進行中のコマンドをすでに変更できたかのように表示しない。緊急の停止は指示の通常順序待ちにせず、取消経路を使う。
 
 追加指示による変更は元のメッセージの上書きではなく、順序付きの実行指示として記録する。Skillの固定版、予算、Tool権限を暗黙に変更しない。追加添付は権限・容量・hashを検証し、入力追加イベントとして対象Runへ関連付ける。既存の入力ファイルを上書きしない。
 
@@ -994,7 +998,7 @@ Workerはworker_id、承認済みruntime profile、OS/architecture、Python ABI�
 | Skill操作 | 委任されたSkill本文・ファイル操作。ユーザーと対象scopeも再検証 |
 | 通知候補登録 | 固定Bindingへの通知候補登録。項目・成果物の送信権限を検証し、完了前には配信しない |
 | LLM呼出し | 固定したModelProfileでのLLM呼出し。同じプロセス内のProvider Adapterを通す。API keyはControl Planeと同じ信頼範囲のサーバーの中だけで使い、Sandboxへ渡さない（§4.8） |
-| Connector操作 | Connector（同じプロセス内のConnectorの処理）を通した操作の実行。固定したBindingで許可された操作だけを受け付け、fencing tokenを照合する（§4.9） |
+| Connector操作 | Connector（同じプロセス内のConnectorの処理）を通した操作の実行。Connectorの今の版の境界と、Runに固定したSkill・タスクで許可された操作だけを受け付け、fencing tokenを照合する（§4.9） |
 
 各操作では、対象Attemptのleaseとfencing token（§6.3）、Run開始時に固定した権限・Binding・ModelProfileを照合し、対象Attemptのファイル・LLM・Connector操作・イベント操作だけを許可する。WorkerサーバーはDBの認証情報とSecretを持つので、Control Planeと同じ信頼範囲のサーバーに限る。Workerは信頼された運用コンポーネントであり、Sandboxとは権限を分ける。
 
@@ -1018,7 +1022,7 @@ LLM呼出しが成功した直後に応答保存に失敗した場合も、呼�
 
 | パス | 権限 | 用途と保持 |
 |---|---|---|
-| /workspace/input | RO | 同じ会話でそれまでに送った添付すべて（前の依頼の添付も残る）。原本はArtifact Storeに保存し、Attemptごとに置き直す。同じ名前の添付は「名前 (2).拡張子」のように分ける。添付のファイル名は200文字までで、UTF-8で230バイトまでに切る（多くのファイルシステムの255バイトから、重なりで付ける「 (2)」等の分を残す） |
+| /workspace/input | RO | 同じ会話でそれまでに送った添付すべて（前の依頼の添付も残る。タスクのRunと修正チャットは除く。§7.9）。原本はArtifact Storeに保存し、Attemptごとに置き直す。同じ名前の添付は「名前 (2).拡張子」のように分ける。添付のファイル名は200文字までで、UTF-8で230バイトまでに切る（多くのファイルシステムの255バイトから、重なりで付ける「 (2)」等の分を残す） |
 | /workspace/input/connectors/{invocation_id}/ | RO | Connector操作の結果（CSV、ダウンロードしたファイル等）。Artifactから展開する（§4.9） |
 | /workspace/master | RO | 使うSkillに紐付いた資料、マスター、テンプレートの固定版 |
 | /workspace/work | RW | 中間ファイル。原則として実行終了後に破棄 |
@@ -1052,7 +1056,7 @@ tmpfs:
 
 これは制限方針の例であり、完成したComposeサービス定義ではない。mountはinput・master・packagesをRO、work・output・envをRWとし、bind mountを使う場合に指定できるhost pathをLauncher側で固定する。privileged、host network、host PID、デバイス、DockerソケットはSandboxに渡さない。標準seccompを維持し、対応環境ではAppArmor等も使う。
 
-CPU・メモリ上限ではディスク書込み量を制限できない。初期のwork、output、envは合計サイズを制限できるtmpfs等で管理し、そのメモリもコンテナ上限に含める。packageの展開サイズと処理用メモリを合わせてRuntime Profileの上限を決める。大容量用途では専用filesystemのproject quota等へ移行する。bind mount先への定期的なサイズ確認だけを容量制限として扱わない。
+CPU・メモリ上限ではディスク書込み量を制限できない。初期のwork、output、envは、それぞれ大きさを制限したtmpfs（Runtime Profileの `work_mb`・`output_mb`・`env_mb`）で管理し、そのメモリもコンテナ上限に含める。packageの展開サイズと処理用メモリを合わせてRuntime Profileの上限を決める。大容量用途では専用filesystemのproject quota等へ移行する。bind mount先への定期的なサイズ確認だけを容量制限として扱わない。
 
 Linuxコマンドの禁止リストを主要な防御にしない。ネットワーク、mount、UID、資源制限で境界を強制する。Dockerはホストkernelを共有するため、Sandboxは既定でgVisor（runsc）で動かし、コマンドのシステムコールをホストのkernelに直接届けない（対策の5）。さらに厳密な敵対コード隔離が必要になった段階では専用実行ホスト、microVM等を再評価する。
 
@@ -1093,7 +1097,7 @@ Launcherは承認済みimage digest、固定mount根、資源上限、container 
 
 ### 7.4 成果物の回収
 
-回収はコンテナ内の書込みを停止した後に実施する。通常ファイルだけを対象にし、symlink、特殊ファイル、許可外パス、過大なファイル数・総量を拒否する。外部から取得したsnapshotやarchiveを復元するときもパストラバーサルと展開量を検証する。
+回収はコンテナ内の書込みを停止した後に実施する。通常ファイルだけを対象にし、symlink、特殊ファイル、許可外パスを拒否する。ファイル数は上限（`MAX_OUTPUT_FILES`）まで回収し、業務結果が指すファイルを回収できなければ完了にしない。総量はoutputのtmpfsの大きさで制限する。外部から取得したsnapshotやarchiveを復元するときもパストラバーサルと展開量を検証する。
 
 Artifact Storeへ保存後、hashとサイズを記録し、その参照をDBへ確定する。保存に失敗したRunはCOMPLETEDにしない。回収はAttemptを終えるたび（確認待ち・完了・停止・失敗）に、Workspace snapshotと同じtarから行う。隠しファイルと、会話の同じパスの最新の成果物と中身が同じファイルは回収し直さない。作り直したファイルは新しいArtifactにし、前の版も残す。成果物の取得権限はRunの結果を見られる人（authorization.md §7.1。実行したときの範囲と部門で判定する）に基づき、HTML等の生成物をアプリと同じoriginで無条件に実行しない。
 
@@ -1105,12 +1109,12 @@ Artifact Storeへ保存後、hashとサイズを記録し、その参照をDBへ
 # エージェントが呼ぶToolの概念例
 shell(
     command="/workspace/env/bin/python /workspace/work/process.py",
-    cwd="/workspace/work",
+    workdir="/workspace/work",
     timeout_seconds=120,
 )
 ```
 
-コマンドは常駐のシェルを持たず、呼出しごとに新しいbashを `docker exec` で起動して実行する（harness.md §8）。cwdはRunの状態に持って毎回渡し、コマンドの中の `cd`・`export` は次の呼出しへ残らない。サーバーはcwd、環境変数、timeout、出力サイズを検証し、上限を強制する。標準入力を閉じた非対話実行とする。戻り値はexit code、上限付きの出力、打切り有無、退避した全体の場所とする。取消では該当process groupを停止し、Run終了時はコンテナ全体を停止する。
+コマンドは常駐のシェルを持たず、呼出しごとに新しいbashを `docker exec` で起動して実行する（harness.md §8）。作業ディレクトリは呼出しごとの `workdir` で指定し（既定は `/workspace/work`。Runの状態として持ち越さない）、コマンドの中の `cd`・`export` は次の呼出しへ残らない。サーバーは作業ディレクトリ、環境変数、timeout、出力サイズを検証し、上限を強制する。標準入力を閉じた非対話実行とする。戻り値はexit code、上限付きの出力、打切り有無、退避した全体の場所とする。取消では該当process groupを停止し、Run終了時はコンテナ全体を停止する。
 
 timeoutまでに終わらないコマンドは止めずにバックグラウンドのジョブへ移し、job IDを返して出力の取得・停止を行う（初めからバックグラウンドで始めることもできる）。終わったジョブは次のステップでエージェントに知らせる。セッションとprocessはAttemptに属し、別Workerへの再開で引き継がない。LLM呼出しの間も続けるprocessがある場合、Checkpoint保存前に停止または整合する状態へ移す。
 
@@ -1197,7 +1201,7 @@ Workspace Persistence Adapterの契約は、capture、verify、restore、release
 
 WorkspaceSnapshotにはsnapshot_id、schema_version、Adapter ID・実装版・設定版、Run／Attempt／Checkpoint、保存時刻、ファイル一覧・相対path・hash・Artifact参照、Environment Revisionを持たせる。通常はworkとoutputの必要内容を保存し、inputとmasterは固定Resource Versionから再取得する。envはimage digestと、追加したpackageのlock・保管wheelから再構築する。メモリ、実行中process、接続、開いたファイルハンドルは保存しない。
 
-基本の退避タイミングは、再開可能なTool境界、WAITING_USERへの移行、正常完了時とする。正常完了時にも続行用の最終snapshotを保存し、成功Runの作業領域を消した後に実際の最終ファイルから続けられるようにする。同じ会話の次の依頼（子のRun）は、親のRunの最後のCheckpointから始める。Sandboxを使わずに終わった依頼にはCheckpointがないので、さらに前の依頼をたどる。頻度・容量・再開保持期限はセットアップの既定値と業務ポリシーで制限する。再開を提供しない業務を設ける場合はその状態を明示し、保存失敗を黙って省略しない。
+基本の退避タイミングは、再開可能なTool境界、WAITING_USERへの移行、正常完了時とする。正常完了時にも続行用の最終snapshotを保存し、成功Runの作業領域を消した後に実際の最終ファイルから続けられるようにする。同じ会話の次の依頼（子のRun）は、親のRunの最後のCheckpointから始める。Sandboxを使わずに終わった依頼にはCheckpointがないので、さらに前の依頼をたどる。タスクのRunは前のRunのWorkspaceを引き継がず、修正チャットのタスクの編集のRunは直前のタスクのRunから後の範囲だけを使う（harness.md §10.10）。頻度・容量・再開保持期限はセットアップの既定値と業務ポリシーで制限する。再開を提供しない業務を設ける場合はその状態を明示し、保存失敗を黙って省略しない。
 
 snapshot本体・Manifest・環境参照が利用可能であることをverifyした後、対応CheckpointをDBで確定する。通常の待機・完了では、必要なsnapshotを保存する前にWorkspaceを解放しない。保存障害は上限付きで再試行し、必須の永続化ができなければ完了扱いにしない。取消要求やWorker障害では最新の退避ができない場合があるため、停止を優先し、最後に確定したCheckpointと未保存範囲を記録する。
 
@@ -1251,7 +1255,7 @@ package取得の一時領域と未参照wheel cacheにも容量上限と保持�
 
 チャット添付をSkill資料へ登録した場合は、元の添付と別の永続参照・保持条件を付与する。bytesの重複保存は避けてもよいが、元のRunや添付を削除したことで公開中のSkill資料が消えないようにする。Skillからの削除は新しい公開版で参照を外す操作とし、旧版やRunが参照する原本を直ちに物理削除しない。
 
-RUNNINGというDB表示だけで清掃対象外にし続けない。lease、heartbeat、実在コンテナ、最大実行時間を照合する。Worker起動時と定期実行時に孤立コンテナ、期限切れWorkspace、未参照snapshot、途中保存Artifactを回収する。
+RUNNINGというDB表示だけで清掃対象外にし続けない。lease、heartbeat、実在コンテナ、最大実行時間を照合する。Worker起動時と定期実行時に孤立コンテナ、期限切れWorkspace、未参照snapshot、途中保存Artifactを回収する（初期の実装は、Sandboxを起動するときに残ったコンテナを消すだけ。定期の回収は清掃とあわせて作る）。
 
 Workspaceパスはサーバーが生成したAttempt IDから組み立てる。削除時は専用rootの直下であることを検証し、symlinkを辿らない。ユーザーやLLMが指定した文字列をそのまま再帰削除に渡さない。
 
@@ -1263,7 +1267,7 @@ Run受付時に予算を原子的に予約し、複数Runから同じ残額を�
 
 モデル料金は版管理し、利用量と料金表の版を残す。料金やusageが確定しない要求は保守的に予約を維持し、Reconcilerが照合する。tokenだけで課金が決まらないモデル・Toolにも対応できるLedger構造にする。
 
-Sandboxのstdout・stderrは最大サイズを制限する。巨大なコマンド出力をそのままLLMへ投入して費用を増やさない。上限到達時は途中結果と理由を保存し、明示的な追加枠がなければ実行を継続しない。
+Sandboxのstdout・stderrは最大サイズを制限する。巨大なコマンド出力をそのままLLMへ投入して費用を増やさない。モデルへは先頭と末尾だけを渡し、全体は作業領域へ退避する。Worker側の上限を超えた分は捨て（コマンドは止めない）、捨てたことを出力に書く（harness.md §7.7・§8.3）。
 
 package取得は取得時間、転送量、展開量、件数で上限を設ける。Skill作成・修正とDraft評価もRunとして利用量を記録し、ユーザーまたは対象部門の予算へ計上する。エージェントが評価や修正を繰り返す場合は反復回数を制限する。公開版の数だけでLLM費用を算定しない。
 
@@ -1283,7 +1287,9 @@ Skillファイルは1ファイルのサイズ、Skillあたりの件数・総量
 | channel-listener（必要時） | Discord Gateway・Slack Socket Mode等の受信接続 | 受信位置とスレッド対応はDBへ保存 |
 | migrate（手動実行） | DB migration。更新手順の中で明示的に実行する | なし |
 
-APIとQClusterは同じDjango imageを使い、起動commandを分ける。SandboxはRunごとに動的生成する。API、PostgreSQL等を外部へ直接公開せず、Nginxだけを公開する。画面とAPIは同じドメインに置き、APIは `/api/` の下に置く。nginxはパスを書き換えずに転送し、CORSは使わない（deployment.md §4）。エージェントの実行枠を増やす場合はQClusterだけのWorkerサーバー（`compose.qcluster.yaml`）を使い、すべてのサーバーを同じ私設ネットワークに置く（§6.1、deployment.md §3.2）。アプリサーバーを複数台にする構成は deployment.md §8.4 とする。社内SSO（§10.0）を利用し、通常社員、業務管理者、Skill公開者、基盤管理者の権限を分ける。
+表は主なサービス。静的ファイルを配る `static`、バックアップの `backup` 等を含む全体は deployment.md §3.1。
+
+APIとQClusterは同じDjango imageを使い、起動commandを分ける。SandboxはRunごとに動的生成する。API、PostgreSQL等を外部へ直接公開せず、Nginxだけを公開する。画面とAPIは同じドメインに置き、APIは `/api/` の下に置く。nginxはパスを書き換えずに転送し、CORSは使わない（deployment.md §4）。エージェントの実行枠を増やす場合はQClusterだけのWorkerサーバー（`compose.qcluster.yaml`）を使い、すべてのサーバーを同じ私設ネットワークに置く（§6.1、deployment.md §3.2）。アプリサーバーを複数台にする構成は deployment.md §8.4 とする。社内SSO（§10.0）を利用し、権限は所属とpermissionで判定する（authorization.md）。
 
 Webhook受信endpointは対話ログインへのredirectを使わず、専用のAPI認証・サイズ上限・rate limitを適用する。成果物配信は期限付き取得tokenで対象Artifactだけへアクセスできる経路を用意する。これらのアプリAPIはNginx経由とし、DBやWorkerへの外部経路は作らない。S3の構成では、APIが確かめた後の短い期限の署名付きURLで、対象objectの取得だけS3へ直接接続する。
 
@@ -1312,12 +1318,12 @@ Artifact Storeはサーバー設定でLocalまたはS3 Backendを選べるよう
 
 **Yorikiのアカウント**：有効なSSOの設定がない導入先では、Yorikiのアカウント（メールアドレスとパスワード）でログインする。
 
-- アカウントはユーザー管理者（permissionを持つ人。既定では基盤管理者）が管理画面で作る（メールアドレス、表示名、Group、所属）。社員が自分でアカウントを作ることはできない。
+- アカウントはユーザー管理者（permissionを持つ人。既定では基盤管理者）が管理画面で作る（メールアドレス、表示名、Group。所属は部門の画面で付ける）。社員が自分でアカウントを作ることはできない。
 - 作成すると、期限付き（既定は7日）で1回だけ使える招待のリンクを発行し、画面に表示する。ユーザー管理者がリンクをコピーして本人に渡し、本人がリンクを開いてパスワードを設定する。パスワードを忘れた場合も、ユーザー管理者が再設定のリンクを同じ方法で発行する。自分の持たないpermissionを持つアカウント（基盤管理者を含む）には、変更もリンクの発行もできない。Yorikiからのメールの送信は、必要になった時点で追加する。
 - 招待・再設定のリンクも、SSOが有効な間は基盤管理者のアカウントにしか使えない（SSOだけでログインするという規則を、リンクから迂回させない）。基盤管理者以外のアカウントには、SSOが有効な間はリンクを発行できず、リンクを開いてもパスワードの設定とログインを断る。SSOを有効にした時点で、基盤管理者以外の未使用のリンクはすべて無効にする。
 - パスワードはDjango標準の方式でハッシュ化し、Djangoのパスワードの検証（長さ、よくあるパスワード、メールアドレスとの類似等）を通す。
 - ログインの試行回数を制限する。失敗は、アカウントごと（送信元のIPアドレスをまとめて）と送信元のIPアドレスごと（アカウントをまとめて）の2つで別々に数え、どちらかが決まった回数に達したら一定時間ログインを止める。アカウントごとにも数えるのは、多数のIPアドレスから同じアカウント（特に基盤管理者）のパスワードを推測させないため。試行の記録はPostgreSQLに置き、複数のプロセス・サーバーで同じ制限を守る。Django管理画面のログインも同じ制限を受ける。
-- アカウントごとの制限は、他人がそのアカウントを止められることにもなる。止める時間は短くし（既定15分）、基盤管理者がサーバーから管理コマンドで解除できるようにする。止めたことは監査ログと運用の通知に残す。
+- アカウントごとの制限は、他人がそのアカウントを止められることにもなる。止める時間は短くし（既定15分）、基盤管理者がサーバーから管理コマンド（django-axesの `axes_reset_username` 等）で解除できるようにする。止めたことはdjango-axesの記録（DB）に残る（運用の通知はまだない）。
 - ユーザー管理者はアカウントを無効にできる。無効にしたアカウントはログインできず、セッションも使えない。
 
 **SSOへの切り替え**：Yorikiのアカウントを使っていた導入先で後からSSOを設定した場合、SSOで初めてログインしたときに、同じメールアドレスのアカウントがあればそのアカウントに紐付け、Group・所属・会話・Skill等を引き継ぐ。SSOはテナント・ドメインを固定し、許可したドメインのメールアドレスだけを受け付けるので、メールアドレスの一致を本人の確認とみなす。紐付けた後は、SSOが有効な間はパスワードでログインできない。
@@ -1364,7 +1370,7 @@ Hubのpull制限は契約等で異なるため、具体的な回数を設計へ�
 
 ### 10.2 サーバーセットアップのPlugin設定例
 
-次は本基盤独自の設定案であり、そのままDjangoやDocker Composeへ渡す設定ではない。配備済みのPluginを選択し、AdapterのSchemaで検証する。起動・対話・結果通知のフロー設定と、基盤全体の保存設定を分ける。Channel Pluginの資格情報は登録済み接続へ保持し、利用する接続・チャネルを各フローで選ぶ。
+次は本基盤独自の設定案（Plugin Registryを作るときの形）であり、そのままDjangoやDocker Composeへ渡す設定ではない。初期の実装では、保存先は環境変数（`YORIKI_STORAGE_BACKEND`・`YORIKI_STORAGE_ID`、移行前の保存先は `YORIKI_STORAGE_PREVIOUS`。deployment.md §7.2）で選ぶ。配備済みのPluginを選択し、AdapterのSchemaで検証する。起動・対話・結果通知のフロー設定と、基盤全体の保存設定を分ける。Channel Pluginの資格情報は登録済み接続へ保持し、利用する接続・チャネルを各フローで選ぶ。
 
 ```yaml
 # Local保存の初期構成例
@@ -1469,7 +1475,7 @@ credential_refはサーバーのIAM role等またはSecret管理へ解決する�
 >
 > エージェント：個人用の名寄せSkillを更新しました。次回から支店を区別します。
 
-会話を始めるときは、ウィザードで扱う内容とモデル（既定を選んでおく）を確かめる。個人情報や機密情報を扱うと答えた場合は、ローカルLLMのモデルだけを選べるようにする。会話の途中でも、モデルとeffortの切り替えを画面と言葉で頼める。モデルにつながらないときは、別のモデルで続けるかを利用者に確かめる（§4.8）。機密のConnectorは、機密の会話でだけ使える（§4冒頭）。会話の途中で機密の会話にできるが、扱わない会話には戻せない。何を入力するかは利用者の判断で、ウィザードはその確認のためのものである。
+会話を始めるときは、ウィザードで扱う内容とモデル（既定を選んでおく）を確かめる。個人情報や機密情報を扱うと答えた場合は、ローカルLLMのモデルだけを選べるようにする。会話の途中でも、モデルとeffortを画面で切り替えられる（言葉での依頼は後で）。モデルにつながらないときは、別のモデルで続けるかを利用者に確かめる（§4.8）。機密のConnectorは、機密の会話でだけ使える（§4冒頭）。会話の途中で機密の会話にできるが、扱わない会話には戻せない。何を入力するかは利用者の判断で、ウィザードはその確認のためのものである。
 
 最後の更新先は例として個人用を示している。実際には利用中のSkill、ユーザーが指定した反映範囲、公開権限に従う。共有Skillを扱っている場合は部門・全社等の反映先を明示する。
 
@@ -1477,14 +1483,14 @@ credential_refはサーバーのIAM role等またはSecret管理へ解決する�
 
 | メッセージや操作 | 扱いと表示 |
 |---|---|
-| 「支店は別にして」 | 現在の作業への追加指示として受付し、適用時に「条件を反映して再実行中」と表示 |
+| 「支店は別にして」（入力欄の既定の送り方） | 現在の作業への追加指示として受付し、適用時に「条件を反映して再実行中」と表示 |
 | エージェントの確認に対する回答 | 対応する質問へ記録し、必要な情報が揃えば同じ作業を再開 |
-| 「終わったら集計もして」 | 次の依頼として保存し、先行作業の後に実行 |
+| 「終わったら集計もして」（入力欄で「次の依頼にする」を選んで送る） | 次の依頼として保存し、先行作業の後に実行 |
 | 「/請求書の照合 この3件も」（Skillを指定したメッセージ） | Skillの版は依頼を始めるときに決めるので、次の依頼として保存し、先行作業の後に実行 |
-| 「今の処理を止めて」または停止ボタン | 取消を要求し、「停止中」から停止確認後の表示へ遷移 |
+| 停止ボタン | 取消を要求し、「停止中」から停止確認後の表示へ遷移（「止めて」という文は追加の指示としてエージェントへ渡る） |
 | 完了後の「この条件でやり直して」 | 前の結果を残し、新しい続行Runで再処理 |
 
-入力欄は実行中も利用できるようにする。メッセージが現在の作業への修正か別の依頼か判断できない場合のみ確認する。画面に対象の作業と受付状態を示し、意図が違えばユーザーが訂正できるようにする。処理を変更できない段階であれば、その結果を明示して次の実行へ引き継ぐ。
+入力欄は実行中も利用できるようにする。現在の作業への追加の指示か次の依頼かは、利用者が送るときに選ぶ（本文から推測しない）。画面に対象の作業と受付状態を示し、意図が違えばユーザーが訂正できるようにする。処理を変更できない段階であれば、その結果を明示して次の実行へ引き継ぐ。
 
 ユーザーが新しい条件を伝えた後、古い条件で作った結果を最新版として表示しない。成果物には生成元の作業と条件の版を関連付け、以前の結果と再生成した結果を区別する。指示の反映は5.5節の順序・競合制御に従う。
 
@@ -1524,14 +1530,14 @@ Skillの編集は、業務のRunとは別のSkillの編集のRun（同じ会話�
 | 始め方 | 流れ |
 |---|---|
 | 入力欄で明示する | `/` の一覧で、編集できるSkillの「編集」か「新しいSkillを作る」を選んで送る。そのメッセージが編集のRunになる（実行中なら次の依頼）。Skillを使う指定（`/` で選んだSkill）と同じメッセージにはしない |
-| 業務のRunから提案する | 利用者が「今後も」「Skillも直して」と頼んだら、エージェントが対象のSkillと変更の要約を添えて編集を提案する（`request_skill_edit`）。サーバーは対象を利用者が編集できるSkillから特定し、「Skill『X』の編集を始めますか」という確認で確認待ちにする（選択肢は「Skillを編集する」「今回だけにする」）。承認されたら、要約を依頼の本文とする編集のRunを次の依頼として受け付け、業務のRunはそのまま続ける（今の作業には今回の条件として反映する）。業務のRunが終わると編集のRunが始まる |
+| 業務のRunから提案する | 利用者が「今後も」「Skillも直して」と頼んだら、エージェントが対象のSkillと変更の要約を添えて編集を提案する（`request_skill_edit`。Skillの名前を空にすれば新しいSkillを作る提案）。サーバーは対象を利用者が編集できるSkillから特定し、「Skill「X」を編集しますか？」（個人以外は範囲も添える。新しいSkillなら「新しいSkillを作りますか？」）という確認で確認待ちにする（選択肢は「Skillを編集する」「今回だけにする」）。承認されたら、要約を依頼の本文とする編集のRunを次の依頼として受け付け、業務のRunはそのまま続ける（今の作業には今回の条件として反映する）。業務のRunが終わると編集のRunが始まる |
 
 編集のRunは、対象のSkillを1つだけ持ち、Run開始時にManifestへ固定する（新しいSkillを作る場合は、作ったSkillを追記する）。Skill管理のToolは対象のSkillにだけ働き、別のSkillを変えるには別の依頼にする。読み込んだ資料の中の指示で、依頼と関係のないSkillが書き換わる経路を作らないため。権限は業務画面のSkillのAPIと同じ判定（§3.6、authorization.md §5.1。依頼した人の範囲・所属・permission）で、Toolの変更・公開・切戻しは公開の権限を持つ人だけが行える。公開の権限がなければ変更をDraftに保存して「変更案を保存」と示す。進行中・確認待ちの業務のRunは元の版を使い続ける（§3.2）。
 
 
 ### 11.7 管理画面とアクセス制御
 
-Skillの画面（部門・全社・個人は業務画面、システムは管理画面。authorization.md §7.3）にはDraft編集、差分、Publish、版の切戻し、緊急停止を用意する。Skillや資料に担当者を持たせ、必要な評価ケースと変更理由を保存する。緊急停止は新規Runだけでなく既存Runの次のTool・LLM呼出しにも適用する。
+Skillの画面（部門・全社・個人は業務画面、システムは管理画面。authorization.md §7.3）にはDraft編集、差分、Publish、版の切戻し、緊急停止を用意する。必要な評価ケースと変更理由を保存する。緊急停止は新規Runだけでなく既存Runの次のTool・LLM呼出しにも適用する。
 
 会話、追加指示、添付、成果物、Skill変更の各APIで所有者と権限を検証する。別ユーザーのIDを推測して閲覧・変更できないようにする。業務Skillの本文修正で共有範囲、Tool、資料アクセスの権限が増えないことは、チャットと管理画面の両方で同じ制約として適用する。
 
@@ -1557,9 +1563,9 @@ Skillの画面（部門・全社・個人は業務画面、システムは管理
 
 ### 11.9 タスクの起動方法と通知方法の管理
 
-フロー設定画面の中心項目は、起動方法、使うSkill、モデル、実行プロンプト、「質問・やり取りのチャネル」、必要なら「結果の連携先」とする。対話先はTeams・Slack・Discordとそのチャネルを選ぶだけで設定できる。参加者全員が対応できるため、回答者一覧やアカウント紐付けの設定欄は設けない。起動・通知Pluginを選ぶと、そのconfig_schemaに対応した設定欄を表示する。Webhookでは受け口と認証、必要なら取り出す項目の表（サンプルのpayloadで試せる）、通知では登録済みDestinationを選ぶ。利用者に複雑なフロー図の作成を求めず（処理の流れを組む画面は作らない）、請求書チェック、営業資料作成等のタスクを一覧から管理できるようにする。
+タスクの画面の中心項目は、使うSkill、モデル、依頼文、「質問・やり取りのチャネル」、必要なら「結果の連携先」とする。起動方法のうち入口（Webhook等）は、連携の管理者が管理画面（`/manage/trigger_bindings`）で作り、タスクの画面では見るだけ（authorization.md §5.5）。対話先はTeams・Slack・Discordとそのチャネルを選ぶだけで設定できる。参加者全員が対応できるため、回答者一覧やアカウント紐付けの設定欄は設けない。入口の管理画面では、受け口と認証、必要なら取り出す項目の表（サンプルのpayloadで試せる）を設定する。通知では登録済みDestinationを選ぶ。利用者に複雑なフロー図の作成を求めず（処理の流れを組む画面は作らない）、請求書チェック、営業資料作成等のタスクを一覧から管理できるようにする。
 
-通知内容は「完了状態」「作業結果」「完了状態と作業結果」から選び、必要なら通知の書き方を書く。対話チャネルと結果連携先は初期仕様ではそれぞれフローごとに最大一つとし、選択したPluginとDestinationの互換性を保存前に検証する。プレビューには通知先、対象イベント、送信する項目・成果物を示す。
+通知内容は「状態だけ」「業務結果」「状態と業務結果」から選び、必要なら通知の書き方を書く。対話チャネルと結果連携先は初期仕様ではそれぞれフローごとに最大一つとし、選択したPluginとDestinationの互換性を保存前に検証する。プレビューには通知先、対象イベント、送信する項目・成果物を示す。
 
 追加設定として入力項目・添付（型と取りうる値）、出力項目・成果物、連携元認証、予算、回答期限、通知イベントを設ける。誰の権限で動くかは設定せず、タスクの範囲と起動のしかたで決まる（authorization.md §6）。Destinationの接続先と認証情報は連携の管理者が管理画面で管理し、タスクでは選ぶだけにする。タスクを管理できる人は、タスクの範囲に許された出口を選べるが、出口の接続先・受信者や、出口・入口を使ってよい範囲は変えられない（連携の管理者だけ。authorization.md §5.5）。
 
@@ -1577,7 +1583,7 @@ Skillの画面（部門・全社・個人は業務画面、システムは管理
 
 対話チャネルの参加者は同じスレッドから回答・取消を行える（追加指示は、人が起動したRunで、起動した本人だけ）。Web画面を使える人はWebチャットからも対応できる。自動実行の結果をチャットで修正して新しいRunを作るときは、再配信の有無と通知先を明示する。通常の会話を続けただけで、すべての応答が自動的に外部へ送られる設計にはしない。
 
-タスク定義、Trigger Binding、Interaction Binding、Notification Binding、Destinationの更新も公開版・差分・監査記録を持ち、既存Runと次回実行への適用を区別する。エージェントへタスク設定編集を委任する場合は専用の管理操作として扱い、既存のSkill本文編集とは別の権限を検証する。外部から渡されたプロンプトやファイル内容を設定変更の依頼として扱わない。
+タスク定義、Trigger Binding、Interaction Binding、Notification Binding、Destinationの更新も、保存のたびに不変の版を作って監査記録を持ち（初期の実装では、Notification Bindingはタスクの版の項目で、版の差分の表示はまだない）、既存Runと次回実行への適用を区別する。エージェントへタスク設定編集を委任する場合は専用の管理操作として扱い、既存のSkill本文編集とは別の権限を検証する。外部から渡されたプロンプトやファイル内容を設定変更の依頼として扱わない。
 
 実行コードを含むPluginの導入とStorage Backend・Workspace退避方式の選択は、サーバー管理者のセットアップ設定とする。通常のタスク設定画面やチャットにbucket名・保存root・接続資格情報を持ち込まない。運用画面では設定済みPluginの版、互換性、接続状態、退避・復元の失敗を確認できるようにする。
 
@@ -1589,7 +1595,7 @@ Skillの画面（部門・全社・個人は業務画面、システムは管理
 
 複数人が答えた場合は、採用済みの回答者と内容、後から届いた指示の扱いを表示する。人が起動したRunでは、起動した本人からの質問待ちではないときの追加指示も同じスレッドで受け付け（ほかの参加者と、入口から起動したRunからは受け付けない）、途中でWeb画面へ移っても同じ履歴が見える。結果には必要な要約と許可された成果物リンクを載せる。
 
-フロー設定画面には、チャネル参加者が質問・結果を閲覧し対応できることと、その接続で「返信だけで回答できるか」を表示する。完了後のスレッドは履歴として残し、次回の自動実行には新しいスレッドを使う。
+タスクの画面には、チャネル参加者が質問・結果を閲覧し対応できることと、その接続で「返信だけで回答できるか」を表示する。完了後のスレッドは履歴として残し、次回の自動実行には新しいスレッドを使う。
 
 ### 11.11 タスクの修正チャット
 
@@ -1622,7 +1628,7 @@ Skillの画面（部門・全社・個人は業務画面、システムは管理
 - 直せるのは文章だけ：依頼文（プロンプトのテンプレート）、通知の書き方、入力の項目の説明。Skillの版・Connector・出口・モデル・入力の項目の形は、タスクの画面で直す（使えるものと権限の判定を画面に寄せる）。エージェントには、直せない項目はタスクの画面で直すよう伝えさせる。
 - 保存すると新しい版になり、次の実行から使う（順番待ち・実行中のRunは元の版のまま。§4.1）。保存は画面の保存と同じ検査を通し、依頼した人がタスクを管理できるかを呼ぶたびに確かめる。明示の依頼か確認の承認があれば、追加の確認なしで保存する（Skillの編集と同じ）。変更の理由には要約を残す。
 - 結果には、タスクの名前、版、変えた項目の変更の前後を出し、タスクの画面へのリンクを置く。
-- 編集のRunは、Skill・Connectorを使わず、タスクの定義を読む・直すToolと、作業ファイルを読み書きするSandboxのToolだけを使う。モデルは修正チャットのモデル設定（始めたときはタスクのモデル設定）を使い、会話の画面で切り替えられる（Toolを使えるモデルだけ。タスクのRunは切り替えない）。
+- 編集のRunは、Skill・Connectorを使わず、タスクの定義を読む・直すToolと、作業ファイルを読み書きするSandboxのTool、`ask_user`・`todo_write` だけを使う。モデルは修正チャットのモデル設定（始めたときはタスクのモデル設定）を使い、会話の画面で切り替えられる（Toolを使えるモデルだけ。タスクのRunは切り替えない）。
 - タスクが機密になった後は、機密でない修正チャットでは定義を直す依頼も受け付けず、動いている編集のRunも止める（機密のタスクの定義をクラウドのモデルへ送らない。新しい修正チャットで直す）。
 - Skillの修正（タスクが固定したSkillの中身）は修正チャットでは扱わず、ふつうの会話のSkillの編集で行い、タスクの画面で固定する版を上げる。
 
@@ -1634,7 +1640,7 @@ SkillとPluginのRegistry、公開版固定、ファイル添付、QCluster実�
 
 同じ段階で、社内SSO（OIDC。Google Workspace・Microsoft 365）、Provider Adapter（§4.8）、読取り専用のデータソースConnector（§4.9.2）、SSEによる画面の更新（§11.5）を実装する。
 
-同じ段階で、コマンド不要のSkillと、会話からのSkill Draft作成・修正・公開を実装する。個人・共有scope、更新権限と公開権限、楽観的競合検出、公開の冪等性を備える。まず頻出ライブラリ同梱で処理を動かし、管理されたpackage追加Toolを順に接続する。package追加は本企画の実装対象に含める。
+同じ段階で、コマンド不要のSkillと、会話からのSkill Draft作成・修正・公開を実装する。個人・部門・全社・システムの範囲、編集の権限と公開の権限、楽観的競合検出、公開の冪等性を備える。まず頻出ライブラリ同梱で処理を動かし、管理されたpackage追加Toolを順に接続する。package追加は本企画の実装対象に含める。
 
 社員向けにはSkillの指定（`/`）、チャット、現在の作業表示、添付・成果物欄、停止、履歴を用意する。メッセージをRunから独立して保存し、実行中の追加指示の受付と反映状態、次の依頼の待機を実装する。コマンド操作ごとの承認を通常フローへ入れない。
 
@@ -1722,7 +1728,7 @@ QClusterだけを動かすWorkerサーバー（同じ私設ネットワーク、
 | 実行と配信の表示 | 処理完了・通知失敗・通知受付済みを区別し、外部の後続処理完了と混同しない |
 | 起動Pluginの差替え | Chat・Webhookが共通の実行要求へ変換され、同じRunモデル・認可・クオータで処理される |
 | 通知Pluginの差替え | タスクごとに画面内・Webhook・Zapierを選べ、既存Runは固定したBindingとDestinationを使う |
-| 通知内容とSkill | 完了状態・作業結果・両方を選べ、整形失敗時も業務結果を保持して標準通知または配信失敗として扱う |
+| 通知内容と通知の書き方 | 状態だけ・業務結果・両方を選べ、整形失敗時も業務結果を保持して標準通知または配信失敗として扱う |
 | Plugin互換性 | 未導入・非互換の設定を拒否し、停止したAdapterの保留処理を別Pluginへ勝手に転送しない |
 | 保存先の選択 | LocalとS3で添付・成果物・MD/CSV/PPTX原本・snapshot・wheelを同じ論理IDと権限で扱える |
 | 完了後のWorkspace | 確定snapshotから作業ファイルと環境を復元でき、Worker側清掃後も続行できる |
@@ -1782,7 +1788,7 @@ Sandboxイメージの定義は本体と同じリポジトリの `sandbox/` で�
 
 外部LLMへ渡してよいデータかどうかは、システムでは自動で判断できない。外部へ送ってはいけないデータを送らないようにするのは利用者であり、個人情報や機密情報を扱う場合はローカルLLMの利用を推奨する（§4冒頭）。請求書・契約書等の業務文書は外部LLMへ渡してよい。人事情報や顧客の個人情報など、個人情報を主な内容とするデータは業務の運用で扱わないようにする。LLMプロバイダとは、入力を学習に使わない法人向けの条件で契約・設定する。
 
-実装着手前に選ぶ項目は、既定のモデルと初期の業務で使うモデル（ModelProfile）とeffortの選定、Skillと資料の編集・公開権限とscope、予算、保持期限、対応ファイル形式と編集能力、マスターのSchema、ファイル容量上限、初期packageカタログ、Docker Hubの組織名と本体イメージのレジストリである。Worker分散を見据えたデータモデルは先に作り、Workerサーバーは実行量に応じて追加する。
+導入までに決める項目（未決）は、初期の業務で使うモデル（ModelProfile）とeffortの選定、予算、マスターのSchema、初期packageカタログ、Docker Hubの組織名と本体イメージのレジストリである。権限と範囲は authorization.md、対応ファイル形式と編集能力は§3.9、保持期限とファイル容量上限は設定の既定値（`YORIKI_ARTIFACT_RETENTION_DAYS`・`YORIKI_UPLOAD_MAX_MB`。`deploy/env/yoriki.env.example`）で決めた。Worker分散を見据えたデータモデルは先に作り、Workerサーバーは実行量に応じて追加する。
 
 導入時には有効にするPluginと版、初期タスク、連携主体と認証方式、入力・出力Schema、タスクごとの通知Plugin・通知の書き方・Destination、外部送信を許可する成果物、対話Plugin・接続チャネル、回答期限、配信とURLの期限を決める。保存先の接続設定、容量、snapshotの保持・復元条件、バックアップと移行手順も設定する。初期実装は既存Runへ結び付く設定と配信履歴で開始し、固定順の多段パイプラインは将来の別要件とする。
 
@@ -1802,7 +1808,7 @@ Sandboxイメージの定義は本体と同じリポジトリの `sandbox/` で�
 - [Zapier Trigger Zap workflows from webhooks](https://help.zapier.com/hc/en-us/articles/8496288690317-Trigger-Zaps-from-webhooks)：Catch Hookの受信と応答の扱い。
 - [Zapier Send files in Zap workflows](https://help.zapier.com/hc/en-us/articles/8496288813453-Send-files-in-Zap-workflows)：ファイル取得URLの条件。
 - [Zapier How to get started with Webhooks by Zapier](https://help.zapier.com/hc/en-us/articles/8496083355661-How-to-get-started-with-Webhooks-by-Zapier)：JSON送信とWebhook URLの取扱い。
-- [Django File storage API](https://docs.djangoproject.com/en/5.2/ref/files/storage/)：Storageの共通操作と、保存方式によってローカルpathを提供できない点。
+- [Django File storage API](https://docs.djangoproject.com/en/6.1/ref/files/storage/)：Storageの共通操作と、保存方式によってローカルpathを提供できない点。
 - [Amazon S3 presigned URLs](https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html)：期限付きURLの利用と、署名に用いた資格情報による有効期間の制約。
 - [Teams Channel and group conversations](https://learn.microsoft.com/en-us/microsoftteams/platform/bots/how-to/conversations/channel-and-group-conversations)：チャネルのスレッド内会話。
 - [Teams Send proactive messages](https://learn.microsoft.com/en-us/microsoftteams/platform/bots/how-to/conversations/send-proactive-messages)：自動実行からの投稿とスレッド参照。
@@ -1844,9 +1850,11 @@ Sandboxイメージの定義は本体と同じリポジトリの `sandbox/` で�
 | 0.28 | 2026年10月25日 | 会話でSkillを使う形を決めた。エージェントに見せるSkillの一覧はRunを始めるときに決めて固定し、実行中にSkillを指定したメッセージは次の依頼として受け付ける。途中で読み込んだSkillのためにToolの一覧は変えないので、業務結果を確定させる（`submit_result`）のは、`/` かTask DefinitionでSkillを指定したRunだけにする（§11.4、harness.md §7.5・§10.1） |
 | 0.29 | 2026年10月25日 | Skillの編集のRun（関連Run）の始め方を決めた。入力欄の `/` で「編集」「新しいSkillを作る」を選んで送るか、業務のRunでエージェントが提案した編集を利用者が確認で承認したときだけ始まる。編集のRunは対象のSkillを1つだけ持ってManifestに固定し、Skill管理のToolはそのSkillにだけ働く（§11.6、harness.md §10.9） |
 | 0.30 | 2026年10月25日 | Draftの評価の形を決めた。評価ケースをSkillごとに持ち、公開中の版とDraftを独立した評価のRunで動かして、機械的な検証（完了・業務結果・期待値）とLLMの判定（参考）で比べる。部門・全社のSkillでは、公開の権限を持つ人が必須の印を付けたケースが、今のDraftで通過するまで公開できない（§3.7.1、harness.md §10.9） |
-| 0.32 | 2026年10月26日 | 接続先と資格情報を持つ接続（社内DBではDB接続）をConnectorから分けた。1つの接続の上に、公開する範囲・上限・機密のフラグ・使える人の違うConnectorを複数作れる。接続は版を持たず、資格情報を入れ直せば接続先も変えられる（種別は変えない）。同時実行数の上限は接続ごとにした。権限は所属（部門）とpermissionの2軸で判定し、Groupは判定に使わない（permissionをまとめる入れ物）。部門に「すべての部門の範囲を含む」印を設け、所属の判定をSkillとConnectorで共通にする。Connectorを見る・使うのは所属だけ、作成・編集・削除は所属とpermission、接続先はpermissionだけで判定する。役割・部門と操作を指定する利用の許可（ConnectorPermission）はやめ、Connectorの使える部門（空なら全社向け）にした（§3.6、§4.9.1、§4.9.5、§5.1） |
 | 0.31 | 2026年10月26日 | 社内DBのConnectorを実装する形を決めた。使える人は役割（Group）と部門（Department）で指定し、基盤管理者はすべて使える。MySQLのドライバをmysqlclientからPyMySQLに変えた（GPLの条件とクライアントライブラリのビルドが要らない）。SQLの検査の範囲、既定のスキーマ、結果の取り出し方を記した。Webhook等で起動したRunの実行主体はタスクに設定した社員（既定は作成者）とし、権限を失っていれば起動を断る（§4.1、§4.9.1、§4.9.2） |
+| 0.32 | 2026年10月26日 | 接続先と資格情報を持つ接続（社内DBではDB接続）をConnectorから分けた。1つの接続の上に、公開する範囲・上限・機密のフラグ・使える人の違うConnectorを複数作れる。接続は版を持たず、資格情報を入れ直せば接続先も変えられる（種別は変えない）。同時実行数の上限は接続ごとにした。権限は所属（部門）とpermissionの2軸で判定し、Groupは判定に使わない（permissionをまとめる入れ物）。部門に「すべての部門の範囲を含む」印を設け、所属の判定をSkillとConnectorで共通にする。Connectorを見る・使うのは所属だけ、作成・編集・削除は所属とpermission、接続先はpermissionだけで判定する。役割・部門と操作を指定する利用の許可（ConnectorPermission）はやめ、Connectorの使える部門（空なら全社向け）にした（§3.6、§4.9.1、§4.9.5、§5.1） |
 | 0.33 | 2026年10月27日 | 権限の設計を [authorization.md](authorization.md) にまとめた。Skill・Connector・タスク・入口・出口が範囲（個人・部門・全社・システム）を持ち、利用（範囲と所属）・業務の管理（範囲と所属とpermission）・基盤の管理（permissionだけ）の3つの層で判定する。部門の中の役割（0.27）と「すべての部門の範囲を含む」部門の印（0.32）をやめ、`user.can_use_all_departments`・`user.can_manage_all_departments` にした。Connectorの使える部門（多対多、空なら全社向け）をやめ、範囲と1つの部門にした。タスクはSkillの版を固定し、Runは起動のしかたで決まる実行許可で動かす（0.31の、タスクに設定した社員の権限で動く形をやめた）。入口・出口に範囲を持たせ、メールの送信は持たない。管理APIをすべてpermissionで判定し、`is_superuser` をアプリの判定とフロントエンドに持ち込まない（§3.2、§3.6、§4.1、§4.9.1、§10.0） |
+| 0.34 | 2026年10月27日 | Skillが使うConnector・操作・表を宣言する形と、公開時の検証（Connectorが有効で公開する人が使える、Skillの範囲に合う、境界の中にある、操作のToolを許している）を決めた。宣言したConnectorを使えない利用者には、そのSkillを会話で使わせない（業務画面で見るのは範囲と所属で決まる）。機密のConnectorを宣言したSkillと、Skillの管理者が機密のフラグを付けたSkillを機密のSkillとし、機密の会話・タスクでだけ使い、編集・評価も機密のRunで行う（§3.2、§4冒頭、§4.9.1） |
+| 0.35 | 2026年10月30日 | タスクの定義からToolの一覧をなくした。タスクのRunは、固定したSkillの「使ってよいTool」を合わせたものを使う。Skillの「使ってよいTool」は公開の権限でしか変えられず、Sandboxは外のネットワークとConnectorの資格情報に届かず、Connectorはタスクに固定したものだけなので、タスクの側で同じ一覧をもう一度選ばせても守れるものが少ないため。Connectorを登録したタスクには、Connectorの操作を許すSkillが要る（§4.1） |
 | 0.36 | 2026年10月30日 | 通知Skill（通知の手順をSkillとして固定する形）をやめ、タスクの版に通知の書き方の文（`notification_instructions`）を置く形にした。中身はタスクごとに決まる整形の手順で、Skillとして使い回す場面がなく、Skillを別に作って公開する手間だけが増えるため。`prepare_notification` で文章と渡すファイルを決める仕組みは変えない。通知Pluginが同梱する既定の手順も、Skillではなくタスクへ写す雛形にした（§3.11、§4.1、§4.3） |
 | 0.37 | 2026年10月31日 | Webhookの入口の設定画面でサンプルのpayloadを試したとき、埋め込んだ後のプロンプトは、そのタスクを管理できる人にだけ表示することにした（連携の管理者がタスクの依頼文を見てよいとは限らない）。取り出した値・項目ごとの誤り・重複の判定のキーは連携の管理者に見せる（§4.2） |
 | 0.38 | 2026年10月31日 | タスクのRunの画面（§11.9）を作り、画面の通知からそこへ移れるようにした。出口へ送る内容に画面へのリンクを入れることは、送り先の受け手がその画面を見られるとは限らないので後回しにした（§4.4） |
@@ -1855,5 +1863,4 @@ Sandboxイメージの定義は本体と同じリポジトリの `sandbox/` で�
 | 0.41 | 2026年11月2日 | Skillのスクリプトからの呼出し（§4.9.6）の通信路を、ホストのUnixドメインソケットのmountから、RunnerがSandboxの中に `docker exec` で始める中継に変えた（gVisorでホストのソケットへの接続を許す設定が要らず、手元のDocker Desktopでも同じに動くため）。呼べる条件はエージェントのToolと同じ（Connectorの権限と、そのRunでToolを出しているか）にし、回数・頻度の上限を決めた |
 | 0.42 | 2026年11月2日 | Skillのスクリプトからの呼出し（§4.9.6）を、画面の作業の記録で、そのときに実行していたコマンドの下に出すことにした（結果の行は出さない。見せる相手は作業の記録と同じ）。system promptでの案内を決めた |
 | 0.43 | 2026年11月2日 | 開発の状況の文書（status.md）に溜まっていた、実装の中で決めた点のうち設計書になかったものを移した（§3.7.1の評価、§4.1のタスクの版と上限、§4.2の受付と取り出しを試す判定、§4.3〜§4.5の配信、§4.9.1のConnector、§5.1の項目、§7.1の添付の名前、§11.9のタスクのRunの画面と手動実行、§11.11の修正チャット）。§4.3の見出しを、通知Skillをやめた（0.36）のに合わせた。Connectorと出口の機密のフラグを付ける人と既定を、実装に合わせた。チャットから起動したRunの画面の通知は、起動した人だけに送ることにした（§4.4） |
-| 0.35 | 2026年10月30日 | タスクの定義からToolの一覧をなくした。タスクのRunは、固定したSkillの「使ってよいTool」を合わせたものを使う。Skillの「使ってよいTool」は公開の権限でしか変えられず、Sandboxは外のネットワークとConnectorの資格情報に届かず、Connectorはタスクに固定したものだけなので、タスクの側で同じ一覧をもう一度選ばせても守れるものが少ないため。Connectorを登録したタスクには、Connectorの操作を許すSkillが要る（§4.1） |
-| 0.34 | 2026年10月27日 | Skillが使うConnector・操作・表を宣言する形と、公開時の検証（Connectorが有効で公開する人が使える、Skillの範囲に合う、境界の中にある、操作のToolを許している）を決めた。宣言したConnectorを使えない利用者には、そのSkillを会話で使わせない（業務画面で見るのは範囲と所属で決まる）。機密のConnectorを宣言したSkillと、Skillの管理者が機密のフラグを付けたSkillを機密のSkillとし、機密の会話・タスクでだけ使い、編集・評価も機密のRunで行う（§3.2、§4冒頭、§4.9.1） |
+| 0.44 | 2026年11月3日 | 本書と harness.md を今の実装と突き合わせ、古い記述と実装と合わない記述を直した（Skillの例の項目名とSkill管理のTool、切戻し、資料の用途のスクリプト、タスクに公開がないこと、入口がタスクの外の定義であること、Connectorの操作名、配信の状態、Checkpointの中身、UserInstructionの状態、`workdir`、入力欄での送り方の選択、Composeのサービス等）。まだ作っていない部分は「初期の実装」として今の動きを書き、残りを status.md §3 に載せた。冒頭の版の要約は§15と重なるのでやめた |

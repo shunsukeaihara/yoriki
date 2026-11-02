@@ -1,5 +1,5 @@
-"""文脈の圧縮（harness.md §9）。初期はLLMによる要約だけを行う（大きいTool結果の退避と置き換えは、Sandboxの
-Toolを加える段階で足す）。置き換えは COMPACTION のRunEventとして追記し、元の記録は消さない"""
+"""文脈の圧縮（harness.md §9）。LLMによる要約を行う（大きいTool結果の退避は harness/tools/output.py。古いTool結果の
+置き換えはまだない）。要約による置き換えは COMPACTION のRunEventとして追記し、元の記録は消さない"""
 
 from dataclasses import dataclass
 

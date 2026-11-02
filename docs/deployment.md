@@ -273,7 +273,7 @@ docker compose -f deploy/compose.yaml exec api python manage.py resume_workers
 ```
 
 - design.md §10の順序（イメージ → migration → 起動）に従う。
-- `drain_workers`・`resume_workers` は、Workerの実行（Run）を実装するときに作る。それまでは手順2と6を飛ばす。
+- `drain_workers`・`resume_workers` はまだない（Workerが受け付けを止めて実行中のRunを待つ仕組みとあわせて作る）。それまでは手順2と6を飛ばす。
 - migrationは、旧バージョンのコードでも動く形（列の追加は先、削除は次のリリース）で書き、更新中に旧apiが動いていても壊れないようにする。
 - Workerサーバー（§3.2）は、手順2のdrainの後、手順6の再開の前に同じイメージへ入れ替える。
 

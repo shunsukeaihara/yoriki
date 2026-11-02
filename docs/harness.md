@@ -2,7 +2,7 @@
 
 Yorikiの標準のエージェント（design.md §3.1）の実行ループ、Tool、文脈の組み立て、Sandboxでの実行、業務の層を定める。製品の要件・データモデル・状態遷移は [design.md](design.md)（§3〜§7、§11）を正とし、本書はそれをRunnerの実装に落とす方針を定める。Djangoのコードの書き方は [backend-conventions.md](backend-conventions.md)、画面への配信は [realtime.md](realtime.md) に従う。
 
-- 版：0.1 設計案（2026年10月21日）
+- 版：0.1 設計案（2026年10月21日。2026年11月3日に今の実装と突き合わせて直した）
 - 各社のAgent SDK・CLI製品は使わず、Provider Adapter（`llm/providers/`）の上にYoriki自身のRunnerを置く（design.md §4.8）。
 - 公開されているハーネスを読んで設計思想を学んだ（§2）。コードは写さず、考え方だけを取り入れる。
 
@@ -12,15 +12,15 @@ Yorikiの標準のエージェント（design.md §3.1）の実行ループ、To
 
 - **RunEventを正本にする**：モデルに送るものは、すべてRunEventから組み立てる。モデルへの入力になる新しい情報は、必ず先にRunEventとして記録する。どのWorker・どのAttemptでも、同じRunEventから同じ要求を組み立て直せる（§5）。
 - **ループは小さく、Toolで広げる**：1ステップは「文脈を組み立てる → モデルを呼ぶ → 要求されたToolを実行する → 結果を記録する」だけにする。業務の振る舞いはToolとSkillで与え、ループには業務ごとの分岐を入れない（§4）。
-- **shellはコマンドごとに `docker exec` で実行する**：常駐のシェルは持たない。cwdはRunnerが覚えて毎回渡す。長いコマンドはバックグラウンドのジョブにし、終わったら次のステップで知らせる（§8）。
+- **shellはコマンドごとに `docker exec` で実行する**：常駐のシェルは持たない。作業ディレクトリは呼出しごとの `workdir`（既定は `/workspace/work`）で、持ち越さない。長いコマンドはバックグラウンドのジョブにし、終わったら次のステップで知らせる（§8）。
 - **ファイルは形式ごとに読む**：`read` はテキスト・PDF・Excel・Word・PowerPoint・CSV・画像を、形式に合った形で返す。処理はSandboxの中の補助コマンド（`yoriki-sandbox`）で行う（§7.8、§8.4）。
 - **編集は文字列の置換にそろえる**：すべてのモデルで `edit(path, old_string, new_string)` を使う。読んでいないファイル、読んだ後に変わったファイルへの書込みは断る（§7.8）。
-- **Toolの一覧はRunの開始時に決めて変えない**：利用者の権限・Skill・モデルの能力・Sandboxの有無から決め、prompt cacheを保つ。実行するときに、サーバーで権限を確かめ直す（§7.5）。
+- **Toolの一覧はRunの開始時に決めて変えない**：利用者の権限・Skill・モデルの能力・Sandboxの有無から決め、prompt cacheを保つ。実行するときに、サーバーで権限を確かめ直す（§7.5）。例外として、繰り返して止めた `prepare_notification` は、それ以降の一覧から外す（§10.5）。
 - **確認待ちでWorkerを手放す**：`ask_user` を呼んだらRunをWAITING_USERにしてAttemptを終える。回答はそのTool呼出しの結果として記録し、新しいAttemptで続ける（§10.3）。
 - **出力は上限で切り、全体は退避する**：上限を超えたTool結果は、先頭と末尾だけをモデルに見せ、全体はファイルに残して場所を示す（§7.7）。
 - **文脈の圧縮は安い手段から順に**：大きいTool結果の退避 → 古いTool結果の要約への置き換え → LLMによる要約、の順に行う。圧縮もRunEvent（置き換えの記録）として追記し、元の記録は消さない（§9）。
 - **障害の後は、やり直す前に確かめる**：結果が記録されていないTool呼出しは「結果不明」としてモデルに返す。副作用のある操作を自動でやり直さない（§11）。
-- **ファイルの入力は、SDKで扱えるものに対応する**：メッセージを部品の並び（テキスト・画像・文書・音声・動画）にし、Provider Adapterが各社の形に変える。OpenAIの公式APIはResponses APIへ移す（§12）。
+- **ファイルの入力は、SDKで扱えるものに対応する**：メッセージを部品の並び（テキスト・画像・文書・音声・動画）にし、Provider Adapterが各社の形に変える。OpenAIの公式APIはResponses APIを使う（§12）。
 
 ---
 
@@ -72,11 +72,13 @@ flowchart LR
 | モジュール | 内容 |
 |---|---|
 | `harness/runner.py` | ループ（§4） |
-| `harness/context.py` | RunEventからの要求の組立（§5）、system prompt（§6） |
-| `harness/compaction.py` | 文脈の圧縮（§9） |
+| `harness/context.py` | RunEventからの要求の組立（§5）、実行時の文脈（§6.2） |
+| `harness/prompts.py`・`harness/prompts/` | system prompt（§6.1。本文は `prompts/system.md`、Toolの節の文は `prompts.py`）。版（内容のhash）は `request.header` に記録する |
+| `harness/compaction.py` | 文脈の圧縮と要約の指示文（§9） |
 | `harness/tools/` | Toolの定義と実行（§7）。Toolごとに1モジュール |
-| `harness/prompts/` | system promptと要約の指示文（Markdown）。版はhashでManifestに記録する |
 | `harness/sandbox.py` | Launcherを通したSandboxの操作と、`yoriki-sandbox` との取り決め（§8） |
+
+表は主なもの。ほかに、信頼しない内容の囲み（`untrusted.py`。§6.3）、Skill・Connector・タスク（`skills.py`・`connectors.py`・`tasks.py`。§10）、Skill・タスクの編集のRun（`skill_edit.py`・`task_edit.py`）、モデルの障害時の確認（`recovery.py`）、業務結果のファイル（`result_files.py`）、スクリプトからのConnectorの中継（`script_connectors.py`）がある。
 
 RunnerはQClusterのプロセスの中で動き、Provider Adapter・Connector・Artifact Serviceを同じプロセスの関数として呼ぶ（design.md §6.2）。Sandboxには、LLMのAPI key、DB・Connectorの資格情報、Dockerソケットを渡さない（design.md §4）。
 
@@ -113,7 +115,7 @@ RunnerはQClusterのプロセスの中で動き、Provider Adapter・Connector�
 
 ### 4.3 Runの終わり方
 
-終わり方には名前を付け、RunEventとRunの状態（design.md §5.3）に記録する。どの終わり方でも、`/workspace/output` の成果物とWorkspace snapshotは保存できる範囲で保存する（SWE-agentの途中提出と同じ考え方）。
+終わり方には名前を付け、RunEventとRunの状態（design.md §5.3）に記録する。`waiting_user`・`retry_wait` はAttemptの終わり方で、Runの終わり方（`end_reason`。終わりの状態のときだけ `run.status` に記録する）には入らない。どの終わり方でも、`/workspace/output` の成果物とWorkspace snapshotは保存できる範囲で保存する（SWE-agentの途中提出と同じ考え方）。
 
 | 終わり方 | きっかけ | Runの状態 |
 |---|---|---|
@@ -124,13 +126,13 @@ RunnerはQClusterのプロセスの中で動き、Provider Adapter・Connector�
 | `step_limit` | ステップ数の上限 | FAILED |
 | `budget` | 予算の上限 | FAILED |
 | `context` | 圧縮しても文脈に収まらない | FAILED |
-| `provider` | 再試行してもモデルにつながらない（タスクのRun） | FAILED |
-| `repeated_errors` | 同じ誤りの繰返し、Tool呼出しの形の誤りの連続（§11.3） | FAILED |
+| `provider` | 再試行してもモデルにつながらない（答える人がいないRun）か、再試行できないエラー | FAILED |
+| `repeated_errors` | 同じ誤りの繰返し（§11.3）、応答の異常（空の応答・最大出力tokenで切れた）の繰返し（§11.2） | FAILED |
 | `no_result` | 業務結果のSchemaがあるのに `submit_result` を呼ばずに終わった | FAILED |
 | `skill` | Runが使うSkill（`/` で指定した・読み込んだもの）が停止・削除されたか、利用者が使えなくなった（§10.1） | FAILED |
 | `attempts` | 復旧できる障害の再試行が上限に達した | FAILED |
 | `expired` | 確認の回答期限が切れた | FAILED |
-| `sandbox` | 実行環境（Runtime Profile・Sandbox）を使えない | FAILED |
+| `sandbox` | 実行環境（Runtime Profile・Sandbox）を使えない。Sandboxを繰り返し失って再試行の上限に達したときもこれ | FAILED |
 | `task` | タスクのRunを続けられない（部門の無効化、個人のタスクの持ち主・チャットから起動した人の無効化、起動できる立場を外れた、修正チャットの持ち主が管理できなくなった等。authorization.md §6。タスクの停止・削除は停止の依頼なので `cancelled`） | FAILED |
 | `internal` | 想定していない例外 | FAILED |
 
@@ -153,10 +155,10 @@ Toolを使わせない最後のステップでも、Toolの定義を外すとpro
 
 ### 5.1 原則
 
-- モデルに送るものは、すべてRunEventから組み立てる。system prompt、Toolの定義、モデル設定の版とeffort、実行時の文脈（日時・cwd・予算の残り等）も含める。
+- モデルに送るものは、すべてRunEventから組み立てる。system prompt、Toolの定義、モデル設定の版とeffort、実行時の文脈（日時・作業ディレクトリ・予算の残り等）も含める。
 - モデルへの入力になる新しい情報は、必ず先にRunEventとして記録する。メモリの中だけの状態から要求を作らない。
 - RunEventは追記だけで、書き換え・削除をしない。圧縮も、置き換えの記録として追記する（§9）。
-- 要求の組立はRunEventの並びとモデル設定の版だけから決まる関数にする（`harness/context.py`）。同じRunEventからは、どのWorkerでも同じ要求になる。
+- 履歴の組立はRunEventの並びとモデル設定の版だけから決まる関数にする（`harness/context.py`）。同じRunEventからは、どのWorkerでも同じ履歴になる（system promptとToolの定義は、§6.1のとおり今のコードから作る）。
 
 ### 5.2 RunEventの種類
 
@@ -166,27 +168,25 @@ design.md §5.1のRunEvent（単調なsequence、イベント種別、表示用�
 |---|---|---|
 | `request.header` | system promptとToolの定義の一覧の版（内容のhash。中身は §6.1 のとおりDBに保存する）、モデル設定の版、effort。変わったときだけ記録する | 要求の組立に使う |
 | `context.snapshot` | 実行時の文脈（§6.2）。変わったときだけ記録する | 追加 |
-| `message.user` | 依頼、追加指示、Skillの明示（`/`）・Connectorの明示（`@`）の展開、添付の一覧 | 追加 |
+| `message.user` | 依頼、追加指示（取り込んだときに記録し、UserInstructionを反映済みにする）、Skillの明示（`/`）・Connectorの明示（`@`）の展開、添付の一覧 | 追加 |
 | `message.assistant` | 本文、Tool呼出し（ID・名前・引数の元の文字列）、推論の途中経過（プロバイダ固有。§5.5）、利用量、要求ID | 追加 |
 | `message.assistant_attempt` | 失敗・中断・再試行した応答 | 入れない |
 | `tool.call` | ToolInvocationの行として、実行の前に作る（RunEventには記録しない） | 入れない（`message.assistant` に含まれる） |
 | `tool.result` | モデル用の内容（部品の並び。画像はbytesを保存先に置き、BlobObjectの参照だけを持つ。§12）、`is_error`、型のある値（ToolInvocationに保存）、画面用の情報、退避したファイルの場所 | 追加 |
 | `compaction` | 置き換える範囲（sequenceの始まりと終わり）、要約、要約に使ったモデル設定の版と利用量 | 範囲を置き換え |
-| `skill.loaded`・`model.switched`・`effort.changed` | Manifestへの追記（design.md §3.2、§4.8） | `context.snapshot` か `tool.result` で伝える |
-| `instruction.applied` | 取り込んだ追加指示（UserInstructionのsequence） | `message.user` で伝える |
+| `skill.loaded`・`model.switched` | Manifestへの追記（design.md §3.2、§4.8）。effortの変更も `model.switched` に含める | `context.snapshot` か `tool.result` で伝える |
 | `clarification.requested`・`clarification.answered` | 確認待ちの質問と回答（§10.3） | `tool.result` で伝える |
-| `job.started`・`job.finished` | バックグラウンドのジョブ（§8.3） | 終了は `context.snapshot` で伝える |
+| `job.finished` | バックグラウンドのジョブの終了（§8.3） | 追加（利用者の発言の位置に入れる） |
 | `llm.retry` | プロバイダの再試行（待つ前に記録する） | 入れない |
 | `deliverable.presented` | 成果物の宣言（§10.5） | 入れない |
-| `run.status` | Runの状態の遷移（design.md §5.3）。状態の更新と同じtransactionで記録し、画面の `run.status`（realtime.md）はここから作る | 入れない |
-| `run.finished` | 終わり方（§4.3） | 入れない |
+| `run.status` | Runの状態の遷移（design.md §5.3）と、終わりの状態では終わり方（`end_reason`。§4.3）。状態の更新と同じtransactionで記録し、画面の `run.status`（realtime.md）はここから作る | 入れない |
 
-読めない種類（新しい版で増えた種類）のRunEventに出会ったら、その種類が「無視してよい」印を持たない限り、要求を組み立てずに止める（DeepSeek Harnessの規則）。黙って捨てると、モデルが見るべき情報が欠けたまま進むため。
+読めない種類（新しい版で増えた種類）のRunEventに出会ったら、その種類が「無視してよい」印を持たない限り、要求を組み立てずに止める（DeepSeek Harnessの規則）。黙って捨てると、モデルが見るべき情報が欠けたまま進むため（初期の実装は、知らない種類を読み飛ばす。今はすべての種類が既知）。
 
 ### 5.3 prompt cacheを保つ並べ方
 
 - system promptとToolの定義は、Runの中で変えない（§7.5）。
-- 日時・予算の残り・cwdなど変わるものは、system promptではなく `context.snapshot` として履歴の後ろへ追記する。変わったときだけ追記する（Codexの差分の断片、DeepSeek Harnessのruntime context）。
+- 日時・予算の残りなど変わるものは、system promptではなく `context.snapshot` として履歴の後ろへ追記する。変わったときだけ追記する（Codexの差分の断片、DeepSeek Harnessのruntime context）。
 - prompt cachingに対応したモデル（ModelProfileの能力）では、Provider Adapterがcacheの区切りを付ける。Anthropicでは、system prompt・Toolの定義の後と、最後の2つのメッセージに付ける。
 - 圧縮は履歴の途中を置き換えるのでcacheが効かなくなる。頻繁に起こさないよう、余裕を持った閾値で行う（§9）。
 
@@ -224,34 +224,33 @@ Anthropicのthinkingブロック（署名付き）、OpenAIのreasoning（暗号
 
 ### 6.1 system promptの構成
 
-system promptはリポジトリの `harness/prompts/` に置き、DBでは編集しない（業務の手順はSkillで与える）。版（内容のhash）をManifestに記録する。Runが初めて使うsystem promptとToolの定義の一覧は、内容のhashをキーにした不変の行としてDBに保存し、`request.header` はそれを参照する。デプロイでファイルが変わっても、再開するRunは保存した中身から同じ要求を組み立てる。参照した中身が見つからなければ、要求を組み立てずに止める。モデル向けの文（system prompt、Toolの説明）は英語で書き、利用者への応答は利用者の言語（既定は日本語）で書かせる。参考のハーネスがいずれも英語で調整されていることと、ローカルLLMの多くが英語の指示のほうが安定するため。
+system promptはリポジトリの `harness/prompts/` に置き、DBでは編集しない（業務の手順はSkillで与える）。Runが使うsystem promptとToolの定義の一覧は、内容のhashをキーにした不変の行（RunPrompt）としてDBに保存し、`request.header` はそのhashを記録する（どの要求に何を送ったかを後から確かめるため）。要求は毎ステップ今のコードから組み立てるので、デプロイでファイルが変わると、再開したRunは新しいsystem promptで続け、`request.header` が書き足される（保存した中身から同じ要求を組み立て直すことは、後で必要になったら加える）。モデル向けの文（system prompt、Toolの説明）は英語で書き、利用者への応答は利用者の言語（既定は日本語）で書かせる。参考のハーネスがいずれも英語で調整されていることと、ローカルLLMの多くが英語の指示のほうが安定するため。
 
 | 順 | 節 | 内容 |
 |---|---|---|
 | 1 | 役割 | Yorikiの業務エージェントであること。人間が目的と業務の判断を決め、エージェントが方法と実作業を担う（design.md §11.1） |
 | 2 | 進め方 | 依頼を分解し、確かめながら進める。結果を検算する（件数・合計・必須項目）。通常のエラーは自分で直す。業務の判断が要るときだけ `ask_user` で聞き、推測で決めない。「今回だけ」と「今後も」を区別する |
 | 3 | 信頼の境界 | §6.3 |
-| 4 | Toolの使い方 | 使えるToolの節だけを入れる（Toolがない節は出さない）。専用のToolをshellより優先する。独立した読取りは並列に呼ぶ。編集の前に読む |
-| 5 | Sandbox | Sandboxを使うRunだけ。ディレクトリの役割（design.md §7.1）、ネットワークがないこと、Pythonのライブラリは `install_python_packages` で足すこと、コマンドごとに新しいshellで動くこと |
-| 6 | 成果物と最後の応答 | 成果物は `/workspace/output` に置き `present_files` で示す。最後の応答には、したこと・結果・確かめられなかったこと・利用者に判断してほしいことを短く書く。内部のRun ID・コマンド列を利用者に求めない |
-| 7 | Skill | Skillの使い方の規則（§10.1）。一覧そのものは `context.snapshot` に置く |
+| 4 | 作業中のメッセージ | 追加の指示と `<runtime_context>` の扱い（新しい指示に従う。§10.4） |
+| 5 | Toolの使い方 | 使えるToolの節だけを入れる（Toolがない節は出さない）。専用のToolをshellより優先する。独立した読取りは並列に呼ぶ。編集の前に読む。Sandboxのディレクトリの役割（design.md §7.1）とネットワークがないこと、コマンドごとに新しいshellで動くことは、`shell`・`write` の項に書く |
+| 6 | Skill | Skillの使い方の規則（§10.1）。一覧そのものは `context.snapshot` に置く。Skillがなくても出す |
+| 7 | 最後の応答 | 成果物は `/workspace/output` に置く。最後の応答には、したこと・結果・確かめられなかったこと・利用者に判断してほしいことを短く書く。内部のRun ID・コマンド列を利用者に求めない（`present_files` は未実装） |
 
 ### 6.2 実行時の文脈
 
-`context.snapshot` は、変わったときだけ追記する。Run開始時の最初のものは、最初の `message.user` の前に置く。
+`context.snapshot` は、変わったときだけ追記する。Run開始時の最初のものは、Attemptを始めるときに、最初の `message.user`（受付のときに記録する）の後、最初のモデルの呼出しの前に置く。
 
 ```
 <runtime_context>
-  <now>2026-10-21T10:15:00+09:00</now>
-  <user name="..." />                       # 表示名だけ。メールアドレス等は入れない
+  <now>2026-10-21 10:15 JST</now>            # 分の単位
+  <user name="..." />                       # 表示名（空ならメールアドレス）
   <mode>conversation | task</mode>          # taskでは、確認の相手がいるかも示す
   <model profile="..." effort="..." />
-  <sandbox available="true" cwd="/workspace/work" />
+  <sandbox available="true" workdir="/workspace/work" />
   <budget remaining_ratio="0.8" />          # 残りが少ないときに強調する
   <confidential>false</confidential>
   <skills>…一覧（§10.1）…</skills>
   <connectors>…使えるConnectorの名前と説明…</connectors>
-  <jobs>…終わったジョブ…</jobs>
 </runtime_context>
 ```
 
@@ -279,20 +278,20 @@ class Tool:
     description: str               # モデル向けの説明（英語）
     parameters: dict               # JSON Schema（§7.3の範囲）
     # ここから下はモデルに送らない
+    execute: Callable[[dict, ToolContext], ToolResult]  # 引数とRunの文脈を受け取る
     effect: Effect                 # READ（読むだけ）、WRITE_SANDBOX（Sandboxの中だけ変える）、WRITE_EXTERNAL（外部の確定した変更）、INTERACT（利用者とのやり取り）
     concurrent: Callable[[dict], bool]  # この引数なら並列に実行してよいか。既定はFalse
     replay_safe: bool              # 障害の後に同じ引数で自動でやり直してよいか（§11.1）
+    alone: bool                    # 同じ応答の中で、ほかのToolと一緒に呼ばせない（§7.6）
     needs_sandbox: bool            # 呼ばれた時点でSandboxを起動する
-    timeout_seconds: int
-    execute: Callable[[ToolCall, RunContext], ToolResult]
 
 @dataclass(frozen=True)
 class ToolResult:
-    content: list[Part]            # モデルに見せる内容（テキスト・画像等。§12）
+    content: tuple[Part, ...]      # モデルに見せる内容（テキスト・画像等。§12）
     is_error: bool = False
-    value: dict | None = None      # 型のある値。ToolInvocationに保存し、画面と業務結果に使う
-    meta: dict | None = None       # 画面用の情報（表示名、件数、ファイルの場所等）
-    spilled: SpillRef | None = None  # 退避した全体の場所（§7.7）
+    value: Any = None              # 型のある値。ToolInvocationに保存し、画面と業務結果に使う
+    meta: dict = {}                # 画面用の情報（表示名、件数、退避したファイルの場所等。§7.7）
+    waits_for_user: bool = False   # 利用者の回答を待つ（ask_user。§10.3）
 ```
 
 ### 7.2 説明文の書き方
@@ -306,10 +305,10 @@ class ToolResult:
 
 ### 7.3 引数のSchema
 
-引数のSchemaは、全プロバイダで通る範囲に絞る。範囲の外の書き方は、Toolの登録時にエラーにする（DeepSeek Harnessの方式。黙って変換しない）。
+引数のSchemaは、全プロバイダで通る範囲に絞る。範囲の外の書き方はエラーにする（DeepSeek Harnessの方式。黙って変換しない）。初期の実装で確かめるのは、Skill・タスクの業務結果のSchemaを保存するとき（`submit_result` の引数になるため）で、組込みのToolの定義はテストで守る。
 
 - ルートは `type: object`。`properties`、`required`、`additionalProperties: false`。
-- 値は `string`・`integer`・`number`・`boolean`・`array`（`items`）・`object`。`enum` は `type` と一緒に書く。文字列の長さと配列の数の制約（`minLength`・`maxLength`・`minItems`・`maxItems`）は使ってよい。
+- 値は `string`・`integer`・`number`・`boolean`・`array`（`items`）・`object`。`enum` は `type` と一緒に書く。文字列の長さと配列の数の制約（`minLength`・`maxLength`・`minItems`・`maxItems`）と、数の範囲（`minimum`・`maximum`）は使ってよい。
 - `$ref`、`oneOf`・`anyOf`・`allOf`、tupleの `items`、再帰は使わない。
 - OpenAIのstrict modeは、初期には使わない（全プロバイダで同じ検証をRunnerが行う）。
 - 各社の細かい違い（Geminiの `required` の扱い等）は、Provider Adapterの境界で変換する。
@@ -324,11 +323,11 @@ class ToolResult:
 |---|---|---|---|---|
 | `read` | `path`、`offset`・`limit`（行）、`pages`（PDF）、`sheet`・`range`（Excel） | 形式に合わせて読む（§7.8） | READ | 可 |
 | `write` | `path`、`content` | テキストのファイルを作る・置き換える | WRITE_SANDBOX | 不可 |
-| `edit` | `path`、`old_string`、`new_string`、`replace_all` | テキストのファイルの一部を置き換える | WRITE_SANDBOX | 別のファイルなら可 |
+| `edit` | `path`、`old_string`、`new_string`、`replace_all` | テキストのファイルの一部を置き換える | WRITE_SANDBOX | 不可（初期は順に実行する） |
 | `glob` | `pattern`、`path` | パターンに合うファイルを、更新の新しい順に返す（100件まで） | READ | 可 |
 | `grep` | `pattern`、`path`、`include`、`output`（`files`・`lines`・`count`） | 内容を正規表現で探す（ripgrep。250件まで） | READ | 可 |
 | `shell` | `description`、`command`、`workdir`、`timeout_seconds`、`background` | コマンドを実行する（§8） | WRITE_SANDBOX | 不可 |
-| `job_output` | `job_id`、`wait` | バックグラウンドのジョブの出力（前回の続き）と状態 | READ | 可 |
+| `job_output` | `job_id`、`wait` | バックグラウンドのジョブの出力（前回の続き）と状態 | READ | 不可 |
 | `job_kill` | `job_id` | ジョブを止める | WRITE_SANDBOX | 不可 |
 | `todo_write` | `todos`（`content`・`status` の並び。全体を置き換える） | 作業の計画と進み具合。画面の「現在の作業」に出す（design.md §11.2） | READ | 不可 |
 
@@ -346,8 +345,8 @@ class ToolResult:
 | `request_skill_edit` | `skill`（編集するSkillの名前。新しく作るなら空）、`summary`（変更の要約） | Skillの編集を提案し、利用者の確認を待つ（§10.9）。答える人がいる業務のRunだけに出す（修正チャットのタスクのRunには出さない） | INTERACT | 不可（単独で呼ぶ） |
 | `request_task_edit` | `summary`（変更の要約） | タスクの定義の変更を提案し、利用者の確認を待つ（§10.10）。修正チャットのタスクのRunだけに出す | INTERACT | 不可（単独で呼ぶ） |
 | `prepare_notification` | `message`（通知の文章）、`files`（渡すファイル。任意） | 完了の通知の文章と、出口へ渡す業務結果のファイルの絞り込みを決める（design.md §4.3）。通知の書き方のあるタスクのRunだけに出す。業務結果のSchemaがあれば `submit_result` の後だけ受け付ける | READ | 不可 |
-| Skill管理のTool | §10.9 | Skillの編集のRun（関連Run）だけに出す（design.md §3.6） | WRITE_EXTERNAL | 不可 |
-| タスク管理のTool | §10.10 | タスクの編集のRun（関連Run）だけに出す | WRITE_EXTERNAL | 不可 |
+| Skill管理のTool | §10.9 | Skillの編集のRun（関連Run）だけに出す（design.md §3.6） | 主にWRITE_EXTERNAL（`get_skill` はREAD、`test_skill_draft` はINTERACT） | 不可 |
+| タスク管理のTool | §10.10 | タスクの編集のRun（関連Run）だけに出す | 主にWRITE_EXTERNAL（`get_task` はREAD） | 不可 |
 
 用意しないTool：
 
@@ -377,7 +376,7 @@ class ToolResult:
 **モデルの選び方を導く文**（system promptとToolの説明に入れる）：
 
 - ファイルを読む・探す・直すときは `read`・`grep`・`glob`・`edit` を使い、shellの `cat`・`grep`・`sed` を使わない。
-- 互いに依存しない読取り（複数のファイルの `read`、複数の `grep`、Connectorの `describe`）は、1回の応答でまとめて呼ぶ。
+- 互いに依存しない読取り（複数のファイルの `read`、複数の `grep`）は、1回の応答でまとめて呼ぶ。
 - 依頼が使えるSkillの説明に合うときは、作業の前に `skill` で読み込む（§10.1）。
 - Connectorは、表を `datasource_describe` で確かめてから `datasource_query` を呼ぶ。
 - 長いコマンド（数分以上）は `background` で始め、待つ間に別の作業を進める。終わったら知らされるので、繰り返し様子を見に行かない。
@@ -403,7 +402,7 @@ Fix the arguments and call the tool again.
 
 - 引数のJSONが壊れている（今のAdapterの `{"_raw": ...}`）ときも同じ形で返す。
 - 知らないToolの名前には、近い名前の候補を添えて返す（「`grep_search` というToolはありません。`grep` のことですか」）。
-- 形が明らかな直し（数字の文字列を数へ、JSONの文字列をオブジェクトへ）は、Schemaから一意に決まる場合だけRunnerが直して実行する（OpenCodeの方式）。
+- 形が明らかな直し（数字の文字列を数へ、JSONの文字列をオブジェクトへ）は、Schemaから一意に決まる場合だけRunnerが直して実行する（OpenCodeの方式。初期の実装は直さずにエラーで返す）。
 
 **エラーの分け方**：
 
@@ -415,7 +414,7 @@ Fix the arguments and call the tool again.
 
 **ToolInvocationの状態**：`requested`（`tool.call` を記録した）→ `running` → `succeeded`・`failed`・`cancelled`・`unknown`（障害で結果が分からない）。ToolInvocationには、引数、実行時の権限、operation key（外部の確定した変更を伴うToolだけ）、結果の参照を記録する（design.md §5.1）。
 
-**`ask_user` と `submit_result` は単独で呼ぶ**：同じ応答の中にほかのTool呼出しがあれば、それより前の呼出しは実行し、後ろの呼出しは「確認待ちのため実行しませんでした」という結果で閉じる。
+**単独で呼ぶTool**（`ask_user`・`submit_result`・`request_skill_edit`・`request_task_edit`・`test_skill_draft`。`alone`）：同じ応答の中にほかのTool呼出しがあれば、それより前の呼出しは実行し、後ろの呼出しは、確認待ちになるToolの後ろなら「回答を待つため実行しませんでした」、`submit_result` の後ろなら「このToolは単独で呼んでください」という結果で閉じる。
 
 ### 7.7 出力の上限と退避
 
@@ -428,12 +427,12 @@ Fix the arguments and call the tool again.
 | `read` | 2000行、1行2000文字、同上のtoken | 先頭。続きの `offset` を示す |
 | `grep`・`glob` | 250件・100件 | 先頭。全体の件数と退避先を示す |
 
-- tokenの数は、直前の要求の実際の入力token数で補正しながら、文字数から保守的に見積もる。日本語は1文字を1 tokenとして数える。
-- 退避先は、SandboxのあるRunでは `/workspace/work/.yoriki/outputs/{invocation_id}.txt`（`read`・`grep` で読める）、SandboxのないRunではArtifact（Toolログの種別）とする。
+- tokenの数は、文字数から保守的に見積もる。日本語は1文字を1 tokenとして数える（直前の要求の実際の入力token数での補正は、圧縮の判定（§9.2）だけで行う）。
+- 退避先は、SandboxのあるRunでは `/workspace/work/.yoriki/outputs/{invocation_id}.txt`（`read`・`grep` で読める）、SandboxのないRunではArtifact（Toolログの種別）とする（初期の実装は、SandboxのないRunでは切るだけで退避しない）。
 - 退避したことは、結果の末尾に、信頼しない内容の囲み（§6.3）の外に書く。囲みの外の見出し（`read` のファイルの情報等。CSVの列名は500文字まで）も上限に含める。囲みの印と切ったことの案内は上限に数えない。
 
 ```
-[output truncated: showing the first 1,600 and last 6,400 of 48,210 tokens]
+[output truncated: showing the first 1,600 and last 6,400 of about 48,210 tokens]
 [full output: /workspace/work/.yoriki/outputs/9f2k.txt — use read with offset/limit, or grep, to look inside]
 ```
 
@@ -443,7 +442,7 @@ Fix the arguments and call the tool again.
 
 **`shell`**
 
-- 引数：`description`（画面に出す5〜10語の説明。最初に書かせる）、`command`、`workdir`（既定はRunのcwd。§8.2）、`timeout_seconds`（既定120、最大600）、`background`（既定false）。
+- 引数：`description`（画面に出す5〜10語の説明。最初に書かせる）、`command`、`workdir`（既定は `/workspace/work`。§8.2）、`timeout_seconds`（既定120、最大600）、`background`（既定false）。
 - 結果の形（Codexの見出しに合わせる）：
 
 ```
@@ -480,7 +479,7 @@ Traceback (most recent call last):
 - **読んでから書く**：Runnerは、`read`・`write`・`edit` で見たファイルの版（内容のSHA-256）を、その `tool.result` に記録する（今の版の一覧はRunEventから求める。§11.1でWorkspaceを戻したら、戻した時点より後の記録は使わない）。既存のファイルへの `write`・`edit` は、記録した版と今の版が一致するときだけ行う。読んでいないなら「まだ読んでいません」、読んだ後に変わっていれば（shellで変えた等）「読んだ後に変わりました。読み直してください」と返す（DeepSeek Harnessの方式）。
 - `edit` の一致：完全一致 → 行末の空白の違いを無視、の2段まで。1か所に決まらなければ、一致した行番号を添えて「前後の文脈を足すか、`replace_all` を使う」と返す。あいまいな一致（Levenshtein等）はしない。
 - 改行（LF・CRLF）・BOM・encoding（UTF-8・Shift_JIS）は元のファイルに合わせて保つ。
-- 成功したら、変えた箇所の前後数行を返す。
+- 成功したら、`edit` は変えた箇所の前後数行を、`write` は行数とencodingを返す。
 - `write`・`edit` は `/workspace/work` と `/workspace/output` の中だけ。`input`・`master` は読取り専用（design.md §7.1）。
 
 **`glob` と `grep`**
@@ -498,7 +497,7 @@ Traceback (most recent call last):
 
 - 終わりの判定が確実になる（プロセスの終了を待つだけ。常駐シェルのようにプロンプトの印を読まない）。
 - 時間切れ・取消では、そのコマンドのプロセスグループだけを止めればよく、壊れたシェルを作り直す処理が要らない。
-- Attemptが変わってもシェルの状態を引き継ぐ必要がない。Workspaceはsnapshotから戻し、cwdはRunの状態から戻す（design.md §7.5「セッションとprocessはAttemptに属し、別Workerへの再開で引き継がない」）。
+- Attemptが変わってもシェルの状態を引き継ぐ必要がない。Workspaceはsnapshotから戻し、作業ディレクトリは呼出しごとの `workdir` で指定する（design.md §7.5「セッションとprocessはAttemptに属し、別Workerへの再開で引き継がない」）。
 
 Docker操作はLauncher（design.md §7.3、`runtime/launcher.py`）にまとめ、Runnerは決まった操作だけを呼ぶ。
 
@@ -535,7 +534,7 @@ Docker操作はLauncher（design.md §7.3、`runtime/launcher.py`）にまとめ
 Runnerは、shell以外のToolの処理もSandboxの中で行う。ファイルの解析を、DBの資格情報を持つWorkerのプロセスで行わないため（壊れたPDF等による不具合の影響をSandboxに閉じ込める）。
 
 - イメージの `/opt/yoriki/bin/yoriki-sandbox` に入れる（rootfsは読取り専用）。Python製で、イメージのPython（頻出ライブラリのpypdf・pdfplumber・pypdfium2・openpyxl・python-docx・python-pptx等が入っている）を `-I` で動かす。エージェントが変えられる `/workspace/env` の追加のpackageや環境変数の影響を受けない。
-- サブコマンド：`init`（コンテナのPID 1）、`exec`（プロセスグループを作ってコマンドを始める）、`kill`（そのグループか、PID 1以外のすべてへsignalを送る）、`read`、`write`、`edit`、`glob`、`grep`、`stat`、`init-env`（`/workspace/env` をイメージのPythonの上の薄い環境として作る）、`version`。
+- サブコマンド：`init`（コンテナのPID 1）、`exec`（プロセスグループを作ってコマンドを始める）、`kill`（そのグループか、PID 1以外のすべてへsignalを送る）、`read`、`write`、`edit`、`glob`、`grep`、`stat`、`init-env`（`/workspace/env` をイメージのPythonの上の薄い環境として作る）、`relay`（Skillのスクリプトからの要求をRunnerへ中継する。CONTRACT.md §4.9、§10.2）、`version`。
 - 補助コマンドの結果も、Sandboxの中で作られるものなので、権限や実行状態の正本にしない（design.md §7.1）。ファイルの中身の表示として扱う。
 - Runnerからの引数は、標準入力のJSONで渡す（shellの解釈を通さない）。結果は標準出力のJSONで返す。
 - 契約番号はイメージのラベル `org.yoriki.sandbox-contract` に記録する（design.md §13）。サブコマンドと入出力の形は `sandbox/CONTRACT.md` で定め、契約テストで確かめる。
@@ -567,10 +566,10 @@ Runnerは、shell以外のToolの処理もSandboxの中で行う。ファイル�
 
 ### 9.2 閾値と残す範囲
 
-- 閾値：`min(W × 0.75, W − 最大出力token − 16,000)`（Wはモデル設定の最大入力token）。各ステップの文脈の組立の前に確かめる。
+- 閾値：`max(W × 0.5, min(W × 0.75, W − 最大出力token − min(16,000, W × 0.1)))`（Wはモデル設定の最大入力token。文脈の小さいモデルでも半分までは使う）。各ステップの文脈の組立の前に確かめる。
 - 残す範囲：新しい側の約2割はそのまま残す。Tool呼出しとその結果の間では切らない。
-- 利用者の発言（依頼・追加指示・確認への回答）は、要約せずに残す（合計約20,000 tokenまで。Codexの方式）。業務の条件は利用者の言葉そのものが大事なため。
-- 読み込んだSkillの本文は、要約の後に読み込み直した形で残す（Manifestに追記した版を使う）。
+- 利用者の発言（依頼・追加指示・確認への回答）は、要約せずに残す（合計約2万文字まで。Codexの方式）。業務の条件は利用者の言葉そのものが大事なため。
+- 読み込んだSkillの本文は、要約の後に読み込み直した形で残す（Manifestに追記した版を使う。初期の実装は読み込み直さず、要約に版を書かせるだけ）。
 - プロバイダが文脈の超過を返したら、1回だけ圧縮してやり直す。それでも超えたら `context` で終える。
 
 ### 9.3 要約の指示
@@ -594,7 +593,7 @@ Runnerは、shell以外のToolの処理もSandboxの中で行う。ファイル�
 
 ### 9.4 失敗したとき
 
-- 要約が空、または元より大きいときは採用しない。そのRunでは以後、段階2までにする（Gemini CLIの方式）。
+- 要約が空、または元より大きいときは採用しない。そのRunでは以後、段階2までにする（Gemini CLIの方式。初期の実装は段階2がないので、要約が空なら `context` で終える）。
 - 要約の利用量は、UsageLedgerに要約の分として記録する。
 
 ---
@@ -673,7 +672,7 @@ Runが使うSkill（`/` で指定したものと、読み込んだもの）が�
 
 Codexの非同期の質問と、Gemini CLIの「承認待ちのTool呼出し」を合わせた形にする。
 
-1. モデルが `ask_user` を呼ぶ。引数は1〜3個の質問で、各質問は `header`（12文字まで）、`question`、`options`（2〜4。`label`・`description`。推奨を先頭にして「（推奨）」を付ける）、`multi_select`。自由記述の答えはいつもできるので、「その他」を選択肢に入れさせない。
+1. モデルが `ask_user` を呼ぶ。引数は1〜3個の質問で、各質問は `header`（12文字まで）、`question`、`options`（2〜4。`label`・`description`。推奨を先頭にして「 (Recommended)」を付ける）、`multi_select`。自由記述の答えはいつもできるので、「その他」を選択肢に入れさせない。
 2. Runnerは、ClarificationRequestを作り、WAITING_USER、Checkpoint、質問の配信Outboxを同じDB transactionで確定する（design.md §4.7）。Tool呼出しの結果はまだ記録しない。Attemptを終え、Workerを手放す。
 3. 回答がWeb画面か外部スレッドから届いたら、`clarification.answered` と、その `ask_user` 呼出しへの `tool.result`（質問ごとの答えと、回答者の表示名）を記録し、Runを再キューする。
 4. 新しいAttemptは、RunEventから文脈を組み立て直して続ける。Tool呼出しの直後にその結果がある形になるので、どのプロバイダでも続けられる。
@@ -686,7 +685,7 @@ Codexの非同期の質問と、Gemini CLIの「承認待ちのTool呼出し」�
 
 design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と「後で処理する」）。
 
-- **現在の作業への指示**：ステップの区切り（§4.2の1）で、まだ取り込んでいないUserInstructionを受付順に `message.user` として追記し、`APPLIED` にする（同じtransaction）。本文は「実行中に届いた追加の指示です。今の作業に反映してください」で始める。新しい指示が前の指示と食い違うときは、新しいほうに従わせる（Codexの方式）。
+- **現在の作業への指示**：ステップの区切り（§4.2の1）で、まだ取り込んでいないUserInstructionを受付順に `message.user` として追記し、`APPLIED` にする（同じtransaction）。本文は `[Additional instruction during the work]` で始める（system promptの「作業中のメッセージ」の節で、今の作業に反映させる）。新しい指示が前の指示と食い違うときは、新しいほうに従わせる（Codexの方式）。
 - **次の依頼**：今のRunには入れず、待機中の依頼として残す。
 - 実行中のコマンドは、追加指示では止めない。止めるのは取消の経路だけ。
 
@@ -717,8 +716,8 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 
 - Run開始時にモデル設定の版とeffortをManifestに固定する（design.md §4.8）。利用者が切り替えを頼んだら、条件（機密・能力・許可・予算）を確かめて `model.switched` を記録し、次のステップから使う。履歴はProvider Adapterの共通の形で引き継ぎ、推論の途中経過は戻さない（§5.5）。
 - 自動で変えるのはeffortだけで、初期は利用者の明示とSkillの指定だけにする（design.md §4.8）。タスクに固定したeffortを、モデル設定の今の版が受け付けなくなっていたら、受付時にその版の既定のeffortで動かす（会話と同じ。断らない）。
-- プロバイダの障害（接続・timeout・rate limit・再試行できる5xx）は、同じモデルで間をおいて再試行する。最大5回、1秒から倍にして最大30秒、ばらつき1割、`Retry-After` を守る。各再試行は待つ前に `llm.retry` として記録する（DeepSeek Harnessの方式）。
-- 再試行しても続かなければ、会話では「このモデルにつながりません。別のモデルで続けますか」というClarificationRequest（候補は条件を満たすモデル設定だけ。候補がなければ「もう一度試しますか」と尋ね、選択肢は「同じモデルでもう一度試す」だけ）でWAITING_USERにする。タスクでは `provider` で終え、通知設定でエラーを通知する（design.md §4.8）。修正チャットのタスクのRunは答える人がいるので、会話と同じく確認で待つが、タスクのモデル設定のまま動かすので、候補は「同じモデルでもう一度試す」だけにする。
+- プロバイダの障害（接続・timeout・rate limit・再試行できる5xx）は、同じモデルで間をおいて再試行する。1・2・4・8・16秒の間をおいて最大5回（ばらつきと `Retry-After` の扱いは後で加える）。各再試行は待つ前に `llm.retry` として記録する（DeepSeek Harnessの方式）。
+- 再試行しても続かなければ、会話では「このモデルにつながりません。別のモデルで続けますか」というClarificationRequest（候補は条件を満たすモデル設定と「同じモデルでもう一度試す」。候補のモデルがなければ「もう一度試しますか」と尋ねる）でWAITING_USERにする。タスクでは `provider` で終え、通知設定でエラーを通知する（design.md §4.8）。修正チャットのタスクのRunは答える人がいるので、会話と同じく確認で待つが、タスクのモデル設定のまま動かすので、候補は「同じモデルでもう一度試す」だけにする。
 - 入力が長すぎる等、要求の内容による失敗は再試行しない（文脈の超過は§9.2）。
 
 
@@ -734,13 +733,13 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 
 **対象**：編集のRunはManifestの `fixed.skill_edit` に対象のSkill（新規なら空）を固定する。新規のときは `create_skill` で1つだけ作り、作ったSkillを `skill_edit` としてManifestへ追記する。Skill管理のToolは引数にSkillを取らず、対象のSkillにだけ働く。
 
-**Tool**：Sandboxの土台のTool、`ask_user`、`todo_write` と、次のSkill管理のTool。`skill`・`submit_result`・`request_skill_edit` は出さない。
+**Tool**：Sandboxの土台のTool、`ask_user`、`todo_write`、使えるConnectorがあれば `datasource_*`（宣言を確かめるため）と、次のSkill管理のTool。`skill`・`submit_result`・`request_skill_edit` は出さない。
 
 | Tool | 引数 | 内容 |
 |---|---|---|
 | `get_skill` | なし | 公開中の版とDraft（あれば）の中身・revision・資料を返し、資料を `/workspace/master` に置く（公開中の版は `skills/{skill_id}/{key}/{ファイル名}`、Draftは `drafts/{skill_id}/r{revision}/{key}/{ファイル名}`） |
 | `create_skill` | `name`、`scope`（`personal`・`department`・`company`）、`department`、`description`、`instructions` | 新しいSkillとDraftを作る（新規の依頼のときだけ） |
-| `update_skill_draft` | `expected_revision`、`change_summary`、変える項目（`description`・`instructions`・`requires`・`input_schema`・`output_schema`・`tools`・`connectors`（宣言するConnectorの名前・操作・表。このRunの `<connectors>` にあるものだけ）・`is_sensitive`（機密のフラグ。付けることだけでき、付けられるのは機密の会話の編集のRunだけ）） | Draftを変える。Draftがなければ公開中の版から開く（`expected_revision` は0） |
+| `update_skill_draft` | `expected_revision`、変える項目（`description`・`instructions`・`requires`・`input_schema`・`output_schema`・`tools`・`connectors`（宣言するConnectorの名前・操作・表。このRunの `<connectors>` にあるものだけ）・`is_sensitive`（機密のフラグ。付けることだけでき、付けられるのは機密の会話の編集のRunだけ）） | Draftを変える。Draftがなければ公開中の版から開く（`expected_revision` は0） |
 | `stage_skill_asset` | `expected_revision`、`key`、`path`（Sandboxの中のファイル）、`role`、`description`、`checks`（CSVの検証の条件。変えるのは公開の権限を持つ人だけ） | Sandboxのファイルを、Draftの資料として追加・置換する（原本のbytesのまま。添付の `/workspace/input` のファイルもそのまま置換に使える）。形式ごとに検証し、結果に誤りと公開中の版との差分（MDの本文、CSVの行、PPTXのスライドごとのテキストと構造）を返す（design.md §3.9）。`/workspace/input` 以外のファイルは、エージェントが編集した候補として検証する |
 | `remove_skill_asset` | `expected_revision`、`key` | Draftから資料を外す |
 | `publish_skill_draft` | `expected_revision`、`change_reason` | Draftを公開する。公開の権限がなければ公開せず「変更案を保存」と返す |
@@ -792,7 +791,7 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 ### 11.1 記録の順序とやり直し
 
 - モデルの呼出しの前に、要求の組立に使ったRunEventがすべて確定していることを確かめる。Toolの実行の前に `tool.call` を確定する（DeepSeek Harness・OpenHandsの方式）。すべての書込みでleaseとfencing tokenを照合する（design.md §6.3）。
-- 新しいAttemptでは、RunEventの最新の `compaction` とその後のイベントから文脈を組み立てる（Codexの方式）。WorkspaceはCheckpointのsnapshotから、cwdはRunの状態から戻す。
+- 新しいAttemptでは、RunEventの最新の `compaction` とその後のイベントから文脈を組み立てる（Codexの方式）。WorkspaceはCheckpointのsnapshotから戻す（作業ディレクトリは持ち越さない）。
 - **Workspaceと記録の食い違い**：CheckpointにはWorkspace snapshotと、その時点のRunEventのsequenceを一緒に記録する（design.md §5.4）。CheckpointはSandboxのファイルを変えたToolを実行したステップの区切りで確定する（大きさの上限の中で。design.md §7.9）。初期は、Attemptを終えるとき（確認待ち・完了・停止・失敗）だけ確定する（§8.1）。障害で最後のCheckpointより後のRunEventが残っているときは、記録を消さずに、次の内容の `context.snapshot` を追記してから続ける。
   - 作業ファイルを、sequence Nの時点（最後に保存した区切り）に戻したこと。
   - それより後にSandboxのファイルを変えたTool呼出し（`shell`・`write`・`edit`・`install_python_packages` 等）の一覧と、その結果は今のファイルに反映されていないこと。必要なら確かめてやり直すこと。
@@ -802,8 +801,8 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 
 | 状態 | 扱い |
 |---|---|
-| `replay_safe` のTool（`read`、`glob`、`grep`、`datasource_describe`、`skill`） | Runnerが同じ引数で実行し直す |
-| operation keyを持つサーバー側の操作（Skillの公開等） | 同じoperation keyで呼び直す。済んでいれば前の結果が返る（design.md §5.4） |
+| `replay_safe` のTool（`read`、`glob`、`grep`、`datasource_describe`、`datasource_query`、`skill`、`submit_result`、`get_skill`、`get_task`、`prepare_notification`） | Runnerが同じ引数で実行し直す |
+| operation keyを持つサーバー側の操作（Skillの公開等） | 同じoperation keyで呼び直す。済んでいれば前の結果が返る（design.md §5.4）。初期の実装は呼び直さず `unknown` で閉じ、モデルに今の状態を確かめさせる（operation keyは重複を防ぐだけ） |
 | それ以外（`shell`、`write`、`edit`、Connectorの書込み） | やり直さず、次の結果を記録する |
 
 ```
@@ -819,9 +818,9 @@ If it may have changed files or external systems, check the current state first.
 | 異常 | 扱い |
 |---|---|
 | 応答が途中で切れた（終わりの合図がない） | 失敗の試み（`message.assistant_attempt`）として記録し、同じステップをやり直す（§10.8の再試行に含める） |
-| 最大出力tokenで切れた | 途中までを記録し、「出力が長すぎて切れました。短く分けて続けてください」と伝える。3回続いたら `repeated_errors` |
-| 空の応答（本文もTool呼出しもない） | 1回だけ「Toolを呼ぶか、利用者への応答を書いてください」と促す。続けば `repeated_errors` |
-| Tool呼出しの形の誤り（壊れたJSON、知らないTool） | §7.6のエラーで返す。3回続いたら `repeated_errors` |
+| 最大出力tokenで切れた | 途中までを記録し、「出力が長すぎて切れました。短く分けて続けてください」と伝える |
+| 空の応答（本文もTool呼出しもない） | 「Toolを呼ぶか、利用者への応答を書いてください」と促す。最大出力tokenで切れたときと合わせて、Runの中で3回まで促し、4回目で `repeated_errors` |
+| Tool呼出しの形の誤り（壊れたJSON、知らないTool） | §7.6のエラーで返す。引数の誤りは§11.3の同じエラーの検出で数える（3回で注意、5回で `repeated_errors`）。知らないToolの呼出しは、今は数えない |
 
 ### 11.3 繰返しの検出
 
@@ -833,7 +832,7 @@ If it may have changed files or external systems, check the current state first.
 
 ## 12 Provider Adapterへの追加
 
-ハーネスの実装と同じPull Requestで、`llm/providers/` に次を加える。
+ハーネスの実装と同じPull Requestで、`llm/providers/` に次を加えた（`tool_choice` の名前の指定を除く）。
 
 **メッセージの部品**：`Message.content` を文字列から部品の並びにする。Tool結果も部品の並びにする。
 
@@ -845,7 +844,7 @@ If it may have changed files or external systems, check the current state first.
 | 音声 | MIMEとbytes | 音声入力 |
 | 動画 | MIMEとbytes | 動画入力 |
 
-- ModelProfileの能力を、入力の種類ごとに持つ（今は「画像入力」だけ）。大きさ・ページ数・解像度の上限も、モデル設定の値として持つ。
+- ModelProfileの能力を、入力の種類ごとに持つ（画像・文書・音声・動画）。大きさ・ページ数・解像度の上限も、モデル設定の値として持つ。
 - Runnerは、送る前に能力と上限を確かめる。能力がなければ送らず、代わりの手順を使う（PDFはテキストを取り出し、要るページだけを画像にする。それもできなければ理由をTool結果で返す）。黙って捨てない。
 - bytesはbase64でその場で送る。各社のFiles API（プロバイダ側に保存する仕組み）は初期には使わない（保存したファイルの削除の管理が要るため）。
 - モデルへ送るファイルは、Sandboxか添付・資料の固定版から、Runnerを通して渡す。どのファイルのどの版を送ったかをTool結果のRunEventに残す。
@@ -857,15 +856,15 @@ If it may have changed files or external systems, check the current state first.
 | | 利用者の発言 | Tool結果 | 推論の途中経過 | effort |
 |---|---|---|---|---|
 | Anthropic | 画像、文書（PDF・テキスト） | 画像、文書 | thinkingブロック（署名付き）を戻す | effort・thinkingの予算 |
-| OpenAI（公式。Responses APIへ移す） | 画像、ファイル（PDF） | 画像、ファイル（`function_call_output`） | 暗号化されたreasoningを戻す（`store: false`、`include: ["reasoning.encrypted_content"]`） | `reasoning.effort` |
+| OpenAI（公式。Responses API） | 画像、ファイル（PDF） | 画像、ファイル（`function_call_output`） | 暗号化されたreasoningを戻す（`store: false`、`include: ["reasoning.encrypted_content"]`） | `reasoning.effort` |
 | Gemini | 画像、PDF、音声、動画、テキスト | 画像等のメディア（`FunctionResponse` の部品）。文と順を混ぜられないので、本文の画像の位置に添えたことを書き、画像に付く文（囲みの印・見出し・画像の代わりの断り）は本文に残し、「添えたものはデータ」と書く | thought signatureを戻す | thinkingの予算・水準 |
 | ローカルLLM（Chat Completionsのまま） | 画像（対応するモデルだけ） | テキストだけ。画像は、画像に付く文（囲みの印・見出し）と一緒に、Tool結果の直後に別の発言として順を保って添え、先頭に「利用者の発言ではなく、Tool呼出しが返したデータ」と書く（§6.3） | なし | モデルが受け付けるとき `reasoning_effort` |
 
-OpenAIの公式APIをResponses APIへ移すのは、Tool結果に画像・ファイルを入れられるのと、推論の途中経過を次の要求へ戻せるのが、Responses APIだけのため。ローカルLLMは、OpenAI互換のサーバーの多くがChat Completionsだけに対応するので、そのままにする。
+OpenAIの公式APIにResponses APIを使うのは、Tool結果に画像・ファイルを入れられるのと、推論の途中経過を次の要求へ戻せるのが、Responses APIだけのため。ローカルLLMは、OpenAI互換のサーバーの多くがChat Completionsだけに対応するので、そのままにする。
 
 **そのほか**：
 
-- `ChatRequest` に、effort、`tool_choice`（`auto`・`none`・`required`・名前を指定）、並列のTool呼出しの可否、cacheの区切りを加える。
+- `ChatRequest` に、effort、`tool_choice`（`auto`・`none`・`required`。名前の指定はまだない）、並列のTool呼出しの可否、cacheの区切りを加える。
 - 応答に、推論の途中経過（プロバイダ固有の部分）を加える。
 - `Usage` に、推論のtoken、cacheへの書込みのtokenを分けて加える（UsageLedgerで分けて記録する。design.md §4.8）。
 - Toolの引数のSchemaを、各社の制約に合わせて変換する（§7.3）。
@@ -899,7 +898,7 @@ Skill「請求書の照合」：手順（明細の読取り → 取引先・品�
 
 ### 13.2 契約書レビューの自動実行（タスク）
 
-Task Definition「契約書レビュー」：起動はWebhook（Zapier）、使うSkillは「契約書レビュー」、モデル設定とeffortは固定、対話Bindingなし、結果通知はZapier。Skill：手順、資料（レビュー基準 `review-criteria.md`、社内規程 `contract-policy.md`）、Tool（`read`、`grep`、`todo_write`、`submit_result`）、出力のSchema（判定：OK・差し戻し、理由の一覧、指摘箇所の一覧）。
+Task Definition「契約書レビュー」：起動はWebhook（Zapier）、使うSkillは「契約書レビュー」、モデル設定とeffortは固定、対話Bindingなし、結果通知はZapier。Skill：手順、資料（レビュー基準 `review-criteria.md`、社内規程 `contract-policy.md`）、Tool（`read`、`grep`、`todo_write`。出力のSchemaがあるので `submit_result` が加わる）、出力のSchema（判定：OK・差し戻し、理由の一覧、指摘箇所の一覧）。
 
 1. Webhookを受けたら、payloadを `/workspace/input/webhook_payload.json`、契約書（docx）を `/workspace/input/` に置く（design.md §4.2）。Skillを解決してManifestに固定し、本文と資料の一覧を最初の `message.user` に入れる。
 2. 答える人がいないので、`ask_user` は出さない。Toolの一覧はSkillの `tools` に限る（`shell` もない）。
@@ -918,7 +917,7 @@ Task Definition「契約書レビュー」：起動はWebhook（Zapier）、使�
 
 - §4.8：土台を「常駐のシェル」から「コマンドごとの実行とバックグラウンドのジョブ」に改めた。
 - §5.1：RunEventに、モデル用の内容とモデルの履歴への効き方を加えた。
-- §7.5：コマンドの実行の方式（コマンドごとの `docker exec`、cwdをRunの状態に持つ、時間切れでジョブに移す）を本書に合わせ、Toolの一覧を本書へ参照させた。
+- §7.5：コマンドの実行の方式（コマンドごとの `docker exec`、作業ディレクトリは呼出しごとの `workdir`、時間切れでジョブに移す）を本書に合わせ、Toolの一覧を本書へ参照させた。
 
 残る課題：
 
@@ -927,5 +926,4 @@ Task Definition「契約書レビュー」：起動はWebhook（Zapier）、使�
 - MCPのConnectorでToolが増えたときの、Toolの定義を後から読み込む仕組み（§7.5）。
 - Web検索・Web取得のConnectorと、プロバイダ組込みのWeb検索の許可（§7.4）。検索の先（検索API）を差し替えられる形にし、結果はURL・タイトル・抜粋・日付の共通の形にそろえる。
 - 子のRunによる並列の調査（サブエージェント）。
-- `sandbox/CONTRACT.md` の `yoriki-sandbox` の入出力の形と契約テスト（Sandboxの段階で書く。status.md §4の3）。
 - 日本語の文章のtoken数の見積もりの精度（§7.7）。

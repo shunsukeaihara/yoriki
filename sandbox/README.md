@@ -6,6 +6,7 @@
 sandbox/
 ├── CONTRACT.md              # Runnerとイメージの取り決め（契約番号つき）
 ├── helper/                  # Sandboxの中の補助コマンド yoriki-sandbox（すべてのイメージで共通）
+├── python/                  # Skillのスクリプトが使うライブラリ（yoriki_connector。/opt/yoriki/python。すべてのイメージで共通）
 ├── images/<profile>/        # 用途別のイメージ（今は docs だけ）
 │   ├── Dockerfile
 │   ├── requirements.in      # 入れるPythonのライブラリ
@@ -16,7 +17,7 @@ sandbox/
 
 ## ビルドと契約テスト
 
-ビルドのcontextは `sandbox/`（共通の `helper/` を使うため）。
+ビルドのcontextは `sandbox/`（共通の `helper/`・`python/` を使うため）。
 
 ```bash
 docker build -f sandbox/images/docs/Dockerfile -t yoriki-sandbox-docs:dev sandbox
@@ -24,7 +25,7 @@ cd sandbox && uv sync && uv run pytest
 ```
 
 - 契約テストは `YORIKI_SANDBOX_TEST_IMAGE`（既定 `yoriki-sandbox-docs:dev`）のイメージを使う。
-- 本体で手元のイメージを使うときは、`YORIKI_SANDBOX_IMAGE_OVERRIDE=yoriki-sandbox-docs:dev` を設定する（deployment.md の開発時の手順）。
+- 本体で手元のイメージを使うときは、`YORIKI_SANDBOX_IMAGE_OVERRIDE=yoriki-sandbox-docs:dev` を設定する（`DEBUG` のときだけ効く。Runtime Profileのイメージの代わりに使う）。手元のレジストリに入れてRuntime Profileとして登録する方法は docs/status.md §5。
 
 ## gVisor
 

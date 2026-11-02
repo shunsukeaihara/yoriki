@@ -41,6 +41,11 @@ def launcher(run: Run) -> User | None:
     return User.objects.filter(pk=run.owner_id).first()
 
 
+def fixer(run: Run) -> User | None:
+    """修正チャットのRunを動かした人（権限の判定のため、毎回DBから読む）"""
+    return User.objects.filter(pk=run.owner_id).first()
+
+
 def revoked_task(run: Run) -> str:
     """タスクのRunを続けられなくなった理由（タスクの停止・削除、個人のタスクの持ち主・チャットから起動した人の
     無効化、起動した人が起動できる部門から外れた、修正チャットの持ち主がタスクを管理できなくなった）。なければ空文字"""
@@ -51,7 +56,7 @@ def revoked_task(run: Run) -> str:
     if not reason and run.launch == RunLaunch.CHAT:
         reason = checks.launcher_scope_problem(launcher(run), run)
     if not reason and run.is_task_fix:
-        reason = checks.fixer_problem(User.objects.filter(pk=run.owner_id).first(), task)
+        reason = checks.fixer_problem(fixer(run), task)
     if reason:
         return _("タスクを続けられなくなったので、作業を止めました（%(reason)s）。") % {"reason": reason}
     return ""
@@ -73,6 +78,8 @@ def skill_problem(run: Run, skill, version) -> str:
     if run.launch == RunLaunch.CHAT:
         user = launcher(run)
         return checks.launcher_inactive(user) or checks.launcher_skill_problem(user, skill)
+    if run.is_task_fix:
+        return checks.fixer_problem(fixer(run), task)
     return ""
 
 
@@ -86,6 +93,9 @@ def connector_permitted(run: Run, connector) -> bool:
     if run.launch == RunLaunch.CHAT:
         user = launcher(run)
         return user is not None and checks.launcher_connector_permitted(user, connector)
+    if run.is_task_fix:
+        # 修正チャットの持ち主が、今もタスクを管理できるか（操作のたびに。authorization.md §6）
+        return not checks.fixer_problem(fixer(run), task)
     return True
 
 

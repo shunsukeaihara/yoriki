@@ -309,6 +309,9 @@ def test_suspended_task_uses_its_connectors_in_the_fix_chat(api_client, manager)
     assert res.status_code == 201, res.json()
     run = Run.objects.get(uid=res.json()["id"])
     assert tasks.connector_permitted(run, connector)
+    # 持ち主が管理できなくなったら、次の区切りを待たずにConnectorの操作から断る
+    manager.user_permissions.clear()
+    assert not tasks.connector_permitted(run, connector)
 
 
 def test_only_the_owner_answers_the_fix_run(api_client, manager):

@@ -3,8 +3,10 @@
  * 会話のモデルと effort を切り替える。実行中の Run にも、次のステップから反映される（design.md §4.8）。
  * 個人情報・機密情報を扱う会話では、ローカルLLMのモデルだけを選べる（サーバーでも確かめる）。
  * 途中から機密の会話にできるが、扱わない会話には戻せない。機密の Connector は、次の依頼から使える。
+ * タスクの修正チャット（`fixChat`）では、機密の区分はタスクで決まるので変えさせない。選んだモデルはタスクを直す依頼で
+ * 使い、タスクの Run はタスクのモデル設定のまま動く（design.md §11.11）。
  */
-const props = defineProps<{ conversation: Conversation; models: AppModelProfile[] }>()
+const props = defineProps<{ conversation: Conversation; models: AppModelProfile[]; fixChat?: boolean }>()
 const emit = defineEmits<{ updated: [value: Conversation] }>()
 const api = useAPI()
 const toast = useToast()
@@ -34,15 +36,17 @@ const effortItems = computed(() => [
 ])
 
 const saving = ref(false)
+const switchedMessage = () => {
+  const run = props.conversation.activeRun
+  if (props.fixChat && (!run || run.taskInfo)) return t('切り替えました。タスクを直す依頼で使います')
+  return run ? t('切り替えました。次のステップから使います') : t('切り替えました')
+}
 const save = async (data: Partial<ConversationWrite>) => {
   saving.value = true
   try {
     const result = await api.conversations(props.conversation.id).patch(data)
     emit('updated', result)
-    toast.add({
-      title: props.conversation.activeRun ? t('切り替えました。次のステップから使います') : t('切り替えました'),
-      color: 'success',
-    })
+    toast.add({ title: switchedMessage(), color: 'success' })
   } catch (err) {
     toast.add({ title: t('エラー'), description: makeErrorMsg(err), color: 'error' })
   } finally {
@@ -85,7 +89,7 @@ const onEffort = (value: unknown) => {
       {{ $t('機密') }}
     </UBadge>
     <DBtn
-      v-else-if="canMakeSensitive"
+      v-else-if="canMakeSensitive && !fixChat"
       icon="i-lucide-shield"
       variant="ghost"
       color="neutral"

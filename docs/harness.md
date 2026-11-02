@@ -340,10 +340,10 @@ class ToolResult:
 | `datasource_describe` | `connector`（Run開始時に固定した一覧の名前のenum） | 公開している表・列の説明（design.md §4.9.2） | READ | 不可（同時実行の枠と記録をDBで扱うので、1つずつ実行する） |
 | `datasource_query` | `connector`、`sql`、`params`（文字列の並び） | SELECT文（引数の場所は `?`）を実行し、結果をCSVで `/workspace/input/connectors/{invocation_id}/` に置く | READ | 不可（同上。接続の同時実行数の上限の中で） |
 | `request_skill_edit` | `skill`（編集するSkillの名前。新しく作るなら空）、`summary`（変更の要約） | Skillの編集を提案し、利用者の確認を待つ（§10.9）。答える人がいる業務のRunだけに出す（修正チャットのタスクのRunには出さない） | INTERACT | 不可（単独で呼ぶ） |
-| `request_task_edit` | `summary`（変更の要約） | タスクの定義の変更を提案し、利用者の確認を待つ（§10.10）。修正チャットのタスクのRunだけに出す（⑦d-2bで作る。まだない） | INTERACT | 不可（単独で呼ぶ） |
+| `request_task_edit` | `summary`（変更の要約） | タスクの定義の変更を提案し、利用者の確認を待つ（§10.10）。修正チャットのタスクのRunだけに出す | INTERACT | 不可（単独で呼ぶ） |
 | `prepare_notification` | `message`（通知の文章）、`files`（渡すファイル。任意） | 完了の通知の文章と、出口へ渡す業務結果のファイルの絞り込みを決める（design.md §4.3）。通知の書き方のあるタスクのRunだけに出す。業務結果のSchemaがあれば `submit_result` の後だけ受け付ける | READ | 不可 |
 | Skill管理のTool | §10.9 | Skillの編集のRun（関連Run）だけに出す（design.md §3.6） | WRITE_EXTERNAL | 不可 |
-| タスク管理のTool | §10.10 | タスクの編集のRun（関連Run）だけに出す（⑦d-2bで作る。まだない） | WRITE_EXTERNAL | 不可 |
+| タスク管理のTool | §10.10 | タスクの編集のRun（関連Run）だけに出す | WRITE_EXTERNAL | 不可 |
 
 用意しないTool：
 
@@ -363,7 +363,7 @@ class ToolResult:
 2. Skill：`/` かTask DefinitionでSkillを指定したRunでは、そのSkillの `tools` に限り（タスクのRunでは、固定したSkillの `tools` を合わせたもの。どれにも書いていなければToolなし。引数の制限もタスクの定義に従う。authorization.md §5.4）、業務結果のSchemaがあれば `submit_result` を加える（`skill` は出さない）。タスクに通知の書き方があれば `prepare_notification` も加える（design.md §4.3）。答える人がいる業務のRunには、Skillの指定にかかわらず `request_skill_edit` を加える（編集を提案するだけで、作業の権限を増やさないため）。指定がなく、エージェントが探して使う会話では、利用者が使えるToolの全体と `skill` を出す。
 3. 実行許可（authorization.md §6）：会話では、依頼した人が使えるConnector（本人の個人、使える部門の部門、全社）だけ。タスクのRunでは、タスクに固定したConnectorだけで、エージェントが探して使うことはしない（チャットから起動したRunは、それをさらに起動した人の今の権限で絞る）。システムのConnector・Skillは、システムタスクのRunにだけ出す。
 4. モデルの能力：Tool呼出しに対応しないモデルでは、Toolを出さない（Skillも、Toolが要るものは候補にしない。design.md §4.8）。
-5. 確認の相手：`ask_user` は、答える人がいるRun（会話、修正チャットのタスクのRun、または対話Bindingのあるタスク）だけに出す。修正チャットのタスクのRunでは、固定したSkillの `tools` に書いていなくても `ask_user` を出し、`request_task_edit` も加える（どちらも作業の権限を増やさないため。`request_task_edit` は⑦d-2bで作り、今は `ask_user` だけ）。
+5. 確認の相手：`ask_user` は、答える人がいるRun（会話、修正チャットのタスクのRun、または対話Bindingのあるタスク）だけに出す。修正チャットのタスクのRunでは、固定したSkillの `tools` に書いていなくても `ask_user` を出し、`request_task_edit` も加える（どちらも作業の権限を増やさないため）。
 6. Sandbox：SkillかTask DefinitionがSandboxを使うToolを許さないコマンド不要のRun（design.md §3.4）では、Sandboxを使うToolを出さない。Runtime ProfileはRunの単位で決まり、既定がなければRunを始めない（design.md §7.3）。Sandboxを使うToolがあるRunでも、Sandboxは最初に呼ばれた時点で起動する（design.md §4）。
 
 途中で読み込んだSkillが、このRunに出していないToolやConnectorを要するときは、Toolの一覧を変えずに、`skill` の結果で「このSkillはこのRunでは使えないToolを要する」と返す。利用者には、そのSkillを明示した新しい依頼を案内させる。
@@ -751,15 +751,16 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 **タスクのRun**（起動のしかた「修正チャット」）：
 
 - 手動実行と同じく、受付時のタスクの版に固定し、タスクに固定したものの範囲で動く。要求のID（`client_request_id`。最初の依頼の `client_message_id`）で、同じ人のそのタスクの修正チャットの再送には前のRunを返す（タスクの行のロックの中で確かめる）。`parent` を持たず（会話の文脈を引き継がない）、`/workspace/input`（添付・Connectorの結果）・成果物の回収・Checkpointは、会話ではなくそのRunのものだけを使う（同じ会話の前の実行の作業ファイルを見せない）。実行中の追加指示に付けた添付は、そのRunの入力として置く。
-- 答える人がいるRunとして、`ask_user` と `request_task_edit`（⑦d-2bで作る）を出し、追加指示を取り込む（§10.3・§10.4）。`request_skill_edit` は出さない。
+- 答える人がいるRunとして、`ask_user` と `request_task_edit` を出し、追加指示を取り込む（§10.3・§10.4）。`request_skill_edit` は出さない。
 - 結果の通知先は固定せず（配信を作らない）、`prepare_notification` で作った通知の候補を、送るはずだった内容として画面に出す。
 - 区切りのたびに、タスクが削除されていないことと、動かした人（`Run.owner`）が今もタスクを管理できることを確かめ、外れていれば止める（停止中かは見ない。停止したときは、ほかのRunと同じく停止を依頼する）。
 
-以下のタスクの編集のRunと、`request_task_edit`・タスク管理のToolは⑦d-2bで作る（status.md）。今は、修正チャットでタスクのRunが動いていないときのメッセージと次の依頼を断る。
+**始め方（編集のRun）**：修正チャットで、Runが動いていないときに送ったメッセージ（次の依頼を含む）は、タスクの編集のRunになる（`Run.kind`）。タスクのRunを始めるのは「もう一度動かす」のAPIだけ。タスクのRunの `request_task_edit` を利用者が確認で承認すると、要約を本文とするメッセージを次の依頼として受け付ける（`request_skill_edit` と同じ。確認の種類「タスクの編集」、選択肢は「タスクを直す」「今回だけにする」）。`request_task_edit` は、利用者が今後の反映（「今後は」「タスクも直して」）を頼んだときだけ呼ばせる。確認待ちの間に送ったメッセージは、ほかの確認と同じく自由記述の回答にし、承認としては扱わない。タスクのRunが終わる直前に届いて取り込めなかった追加の指示も、次の依頼としてタスクの編集のRunになる（動かし直すのは「もう一度動かす」）。
 
-**始め方（編集のRun）**：修正チャットで、Runが動いていないときに送ったメッセージ（次の依頼を含む）は、タスクの編集のRunになる（`Run.kind`）。タスクのRunを始めるのは「もう一度動かす」のAPIだけ。タスクのRunの `request_task_edit` を利用者が確認で承認すると、要約を本文とするメッセージを次の依頼として受け付ける（`request_skill_edit` と同じ。確認の種類「タスクの編集」、選択肢は「タスクを直す」「今回だけにする」）。`request_task_edit` は、利用者が今後の反映（「今後は」「タスクも直して」）を頼んだときだけ呼ばせる。
+- 始めるときに、依頼した人が今もタスクを管理できるか、タスクに版があるか、モデルがToolを使えるかを確かめる。機密でない修正チャットで、タスクの今の版が機密なら始めない（機密のタスクの定義を、クラウドのモデルへ送らない。新しい修正チャットを始める）。始められない次の依頼は、ほかの次の依頼と同じく、理由を会話のシステムのメッセージに残して取り消す。
+- 区切りのたびに同じことを確かめ（依頼した人がタスクを管理できなくなった・タスクが削除された・機密でない修正チャットでタスクが機密になった）、外れていれば止める（終わり方は「タスクを続けられない」）。
 
-**文脈**：編集のRunは、同じ会話の1つ前のRunを親にして文脈を引き継ぐ。タスクのRunは親を持たないので、編集の文脈は直前のタスクのRunから始まる。Workspaceは会話の最後のCheckpoint（直前のタスクのRunのものを含む）から戻す。Manifestの `fixed.task_edit` に対象のタスクを固定し、`<runtime_context>` に `<task_edit task="..." version="..." />` を置く。
+**文脈**：編集のRunは、同じ会話の1つ前のRunを親にして文脈を引き継ぐ。タスクのRunは親を持たないので、編集の文脈は直前のタスクのRunから始まる。Workspaceは会話の最後のCheckpoint（直前のタスクのRunのものを含む）から戻す。`/workspace/input` には、直前のタスクのRunから後のRun（そのタスクのRunと、その後の編集のRun）の添付とConnectorの結果だけを置き、最初の発言に添える前の添付の一覧も同じ範囲にする（タスクのRunごとに入力の名前が重なりうるため。`Run.fix_chat_runs()`）。編集のRunへの添付の名前は、会話の添付の中で重ならないように決める。Manifestの `fixed.task_edit` に対象のタスクを固定し、`<runtime_context>` に `<task_edit task="..." version="..." />` を置く。モデルは修正チャットのモデル設定（始めたときはタスクのモデル設定。会話の画面で切り替えられる）を使う。
 
 **Tool**：Sandboxの土台のTool、`ask_user`、`todo_write` と、次のタスク管理のTool。Skill・Connectorは使わない（`skill`・`submit_result`・`request_*` も出さない）。
 
@@ -770,7 +771,9 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 
 - 権限は画面のAPIと同じ判定（`TaskDefinition.can(user, MANAGE)`。authorization.md §5.3）を、依頼した人の権限で呼ぶたびにサーバーで確かめる。編集のRunを始めるときも確かめる。
 - 結果の `value` に、タスクの名前・版・変えた項目の変更の前後を持たせ、画面はそれを会話に表示し、タスクの画面へのリンクを置く。
-- 同じ内容の再試行で版を重ねないよう、中身が今の版と同じなら版を作らない（`TaskDefinition.revise()`）。
+- 同じ内容の再試行で版を重ねないよう、中身が今の版と同じなら版を作らない（`TaskDefinition.revise()`）。`update_task` は自動ではやり直さない（§11.1）。途中で止まったときは結果が分からないと返し、`get_task` で読み直させる。
+- 画面の更新のAPIと同じSerializer（`TaskDefinitionUpdateSerializer`）に、送る項目だけを渡して保存する。入力の項目は、説明だけを差し替えた今の版の項目の一覧を送る（項目の追加・削除・型の変更はできない。知らない名前は断る）。保存した人は依頼した人にする。
+- Runの `task_changes` に、保存したタスクの版（何度か保存したら最後の版。項目ごとに最初の変更前と最後の変更後）を出す。
 
 ---
 

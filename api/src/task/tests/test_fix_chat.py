@@ -295,10 +295,17 @@ def test_messages_are_instructions_to_the_running_task(api_client, manager):
     assert res.status_code == 201, res.json()
     attachment.refresh_from_db()
     assert attachment.run == run
-    # 次の依頼は受け付けない（タスクの編集の依頼は⑦d-2bで足す）
-    assert _post(api_client, run.conversation, mode="next").status_code == 400
-    _finish(run)
-    assert _post(api_client, run.conversation).status_code == 400
+    # 次の依頼は、タスクのRunが終わった後のタスクの編集の依頼になる
+    res = _post(api_client, run.conversation, "今後もインボイス番号を確かめるようにして", mode="next")
+    assert res.status_code == 201, res.json()
+    instruction = UserInstruction.objects.get(message__uid=res.json()["id"])
+    assert (instruction.kind, instruction.state) == (InstructionKind.NEXT, InstructionState.RECEIVED)
+    # 追加の指示はRunnerが取り込んだものとする
+    UserInstruction.objects.filter(kind=InstructionKind.CURRENT).update(state=InstructionState.APPLIED)
+    run.set_status(RunStatus.CANCELLED)
+    instruction.refresh_from_db()
+    assert instruction.state == InstructionState.STARTED
+    assert (instruction.run.kind, instruction.run.parent) == (RunKind.TASK_EDIT, run)
 
 
 def test_records_stay_visible_to_managers_after_the_task_is_deleted(api_client, manager):
@@ -314,17 +321,17 @@ def test_records_stay_visible_to_managers_after_the_task_is_deleted(api_client, 
     assert _post(api_client, run.conversation).status_code == 400
 
 
-def test_instruction_left_when_the_run_ends_is_reported(api_client, manager):
-    """終わる直前に届いて取り込めなかった追加の指示は、反映していないことを会話に残す"""
+def test_instruction_left_when_the_run_ends_becomes_an_edit_request(api_client, manager):
+    """終わる直前に届いて取り込めなかった追加の指示は、タスクの編集の依頼として始まる（動かし直すのは「もう一度動かす」）"""
     task = _task(manager)
     run = Run.objects.get(uid=_fix(api_client, manager, task).json()["id"])
     res = _post(api_client, run.conversation)
     assert res.status_code == 201, res.json()
     run.set_status(RunStatus.CANCELLED)
     instruction = UserInstruction.objects.get(message__uid=res.json()["id"])
-    assert instruction.state == InstructionState.DISCARDED
-    notice = run.conversation.messages.get(role=MessageRole.SYSTEM)
-    assert "反映していません" in notice.body
+    assert instruction.state == InstructionState.STARTED
+    assert instruction.run.kind == RunKind.TASK_EDIT
+    assert not run.conversation.messages.filter(role=MessageRole.SYSTEM).exists()
 
 
 def test_messages_need_a_manager(api_client, manager):

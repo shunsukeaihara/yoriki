@@ -28,7 +28,7 @@ from nanoid import generate
 
 from artifact.models import CONNECTOR_RESULTS_DIR, Artifact, ArtifactKind, BlobObject
 from artifact.storage import StorageBackend, StorageError, StoredObject, get_storage
-from run.models import Checkpoint, ExecutionAttempt, Run
+from run.models import Checkpoint, ExecutionAttempt, Run, RunKind
 from runtime.launcher import (
     ATTEMPT_LABEL,
     MASTER_DIR,
@@ -348,6 +348,12 @@ class SandboxSession:
             # 前の実行のものを置かない。harness.md §10.10）
             sent = sent.filter(pk__in=Artifact.objects.filter(messages__run=self.run).values("pk"))
             results = results.filter(run=self.run)
+        elif self.run.kind == RunKind.TASK_EDIT:
+            # 修正チャットのタスクの編集のRunは、直前のタスクのRunから後のものだけ（タスクのRunごとに名前が重なり
+            # うるため。harness.md §10.10）
+            runs = self.run.fix_chat_runs()
+            sent = sent.filter(pk__in=Artifact.objects.filter(messages__run__in=runs).values("pk"))
+            results = results.filter(run__in=runs)
         inputs = (sent | results).exclude(pk__in=self.inputs).select_related("blob").order_by("pk")
         self.input_dir.mkdir(parents=True, exist_ok=True)
         # userns-remap・gVisorのSandboxの利用者からも読めるようにする（書けるのはWorkerだけ）

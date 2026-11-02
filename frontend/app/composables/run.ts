@@ -15,6 +15,8 @@ export const RunKind = {
   WORK: 1,
   SKILL_EDIT: 2,
   EVALUATION: 3,
+  // 修正チャットのタスクの編集（design.md §11.11）
+  TASK_EDIT: 4,
 } as const satisfies Record<string, RunKindEnum>
 
 // バックエンドの run.models.RunTrigger と同じ値
@@ -48,6 +50,7 @@ export const hasWorkToShow = (run: Run) =>
   run.skills.length > 0 ||
   run.result != null ||
   run.kind === RunKind.SKILL_EDIT ||
+  run.kind === RunKind.TASK_EDIT ||
   run.taskInfo != null
 
 export const runStatusColor = (status: RunStatusEnum) => {
@@ -93,6 +96,8 @@ export const ClarificationKind = {
   SKILL_EDIT: 3,
   // test_skill_draft で評価の完了を待つ。利用者は答えない（評価が終わるとサーバーが返す）
   EVALUATION: 4,
+  // request_task_edit で、修正チャットのタスクの定義を直すかを確かめる
+  TASK_EDIT: 5,
 } as const satisfies Record<string, ClarificationKindEnum>
 
 export const ClarificationStatus = {
@@ -168,6 +173,12 @@ export const toolLabel = (
       return t('Skillを切り戻す')
     case 'test_skill_draft':
       return t('SkillのDraftを評価')
+    case 'request_task_edit':
+      return t('タスクの修正を提案')
+    case 'get_task':
+      return t('タスクの定義を読む')
+    case 'update_task':
+      return t('タスクの新しい版を保存')
     default:
       return call.name
   }

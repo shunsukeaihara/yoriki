@@ -290,7 +290,7 @@ class ToolResult:
     content: tuple[Part, ...]      # モデルに見せる内容（テキスト・画像等。§12）
     is_error: bool = False
     value: Any = None              # 型のある値。ToolInvocationに保存し、画面と業務結果に使う
-    meta: dict = {}                # 画面用の情報（表示名、件数、退避したファイルの場所等。§7.7）
+    meta: dict = field(default_factory=dict)  # 画面用の情報（表示名、件数、退避したファイルの場所等。§7.7）
     waits_for_user: bool = False   # 利用者の回答を待つ（ask_user。§10.3）
 ```
 

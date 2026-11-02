@@ -207,7 +207,10 @@ class AppDestinationViewSet(mixins.ListModelMixin, GenericViewSet):
 
 
 @extend_schema(
-    description="タスクのRunの配信の履歴と送り直し（Runを指定した一覧・詳細・送り直しはRunの結果を見られる人、Runを指定しない一覧はタスクを今管理できる人。authorization.md §7.1）",
+    description=(
+        "タスクのRunの配信の履歴と送り直し（Runを指定した一覧・詳細・送り直しはRunのログを見られる人、"
+        "Runを指定しない一覧はタスクを今管理できる人。authorization.md §7.1）"
+    ),
     tags=["app/task/delivery"],
     parameters=[OpenApiParameter("run", str, description="RunのID")],
 )
@@ -223,7 +226,7 @@ class AppTaskDeliveryViewSet(TaskMixin, ReadOnlyModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset().filter(run__in=Run.objects.visible_to(self.request.user).values("pk"))
-        # 1つのRunの配信と、配信1件（詳細・送り直し）は、Runの結果を見られる人（実行したときの範囲で判定する。
+        # 1つのRunの配信と、配信1件（詳細・送り直し）は、Runのログを見られる人（実行したときの範囲で判定する。
         # タスクを移した・消した後も）。Runを指定しない一覧は、タスクを今管理できる人
         if run := self.request.query_params.get("run"):
             return qs.filter(run__uid=run, run__task__uid=self.kwargs["task"])
@@ -281,8 +284,9 @@ class FileAPIView(APIView):
 
 def visible_notifications(user):
     """本人の通知のうち、今もそのRunの結果を見られるもの（Runを実行したときのタスクの範囲と部門で判定する。
-    authorization.md §7.1）。送った後に権限を失ったら見せない"""
-    return Notification.objects.filter(user=user, run__in=Run.objects.visible_to(user).values("pk"))
+    チャットから起動した人は、自分が起動したRunの結果を見られる。authorization.md §7.1）。送った後に権限を失ったら
+    見せない"""
+    return Notification.objects.filter(user=user, run__in=Run.objects.results_visible_to(user).values("pk"))
 
 
 @extend_schema(description="本人の画面の通知（通知欄）の一覧と既読", tags=["app/notification"])

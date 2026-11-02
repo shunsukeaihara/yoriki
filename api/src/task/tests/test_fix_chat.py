@@ -234,6 +234,12 @@ def test_messages_need_a_manager(api_client, manager):
     res = _post(api_client, run.conversation)
     assert res.status_code == 400
     assert "管理できなくなりました" in str(res.json())
+    # タスクのRunのメッセージ（依頼文から作った最初の依頼）と、実行中のタスクのRunは見せない（会話は開ける）
+    conversation = api_client.get(f"/api/app/v1/conversations/{run.conversation.uid}/")
+    assert conversation.status_code == 200
+    assert conversation.json()["active_run"] is None
+    messages = api_client.get(f"/api/app/v1/conversations/{run.conversation.uid}/messages/").json()["results"]
+    assert messages == []
 
 
 # --- 実行 ---

@@ -78,17 +78,14 @@ class ConversationSerializer(serializers.ModelSerializer):
         run = obj.runs.filter(status__in=ACTIVE_STATUSES).select_related("model_version__profile").first()
         if run is None:
             return None
-        data = RunSerializer(run, context=self.context).data
         request = self.context.get("request")
         if run.trigger == RunTrigger.TASK and (
             request is None or not Run.objects.visible_to(request.user).filter(pk=run.pk).exists()
         ):
-            # 修正チャットの持ち主がタスクを管理できなくなったら、タスクのRunのログ（作業の計画等）は見せない
-            # （authorization.md §7.1）。状態だけを残す
-            data.update(todos=[], skills=[], result=None, error="")
-            if data.get("task_info"):
-                data["task_info"] = {**data["task_info"], "notification": None}
-        return data
+            # 修正チャットの持ち主がタスクを管理できなくなったら、タスクのRunは見せない（authorization.md §7.1）。
+            # その間は送れず（post_message() が断る）、Runも次の区切りで止まる
+            return None
+        return RunSerializer(run, context=self.context).data
 
     def validate(self, attrs):
         profile = attrs.get("model_profile") or getattr(self.instance, "model_profile", None)

@@ -7,7 +7,8 @@ from rest_framework.mixins import CreateModelMixin, ListModelMixin
 from rest_framework.viewsets import GenericViewSet, ModelViewSet
 
 from artifact.models import Artifact
-from run.models import CANCELLABLE_STATUSES, Run
+from run.models import CANCELLABLE_STATUSES, Run, RunTrigger
+from task.checks import fixer_problem
 from utils.permissions import AppUser
 from utils.views import SoftDeleteMixin
 
@@ -73,6 +74,15 @@ class AppConversationMessageViewSet(MyConversationMixin, ListModelMixin, CreateM
     )
     serializer_class = MessageSerializer
     ordering = "-pk"
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        conversation = self.conversation
+        if conversation.is_task_fix and fixer_problem(self.request.user, conversation.task):
+            # 修正チャットの持ち主がタスクを管理できなくなったら、タスクのRunのメッセージ（最初の依頼、追加の指示、
+            # 応答）は見せない（authorization.md §7.1。ログとして扱う）
+            qs = qs.exclude(run__trigger=RunTrigger.TASK)
+        return qs
 
     def perform_create(self, serializer):
         # 受付の処理（Runの開始、追加指示、回答）は post_message() の transaction で行う

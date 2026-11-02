@@ -301,6 +301,19 @@ def test_messages_are_instructions_to_the_running_task(api_client, manager):
     assert _post(api_client, run.conversation).status_code == 400
 
 
+def test_records_stay_visible_to_managers_after_the_task_is_deleted(api_client, manager):
+    """タスクを削除しても、実行したときの範囲を管理できる人には、修正チャットの記録をRunの画面と同じく見せる"""
+    task = _task(manager)
+    run = Run.objects.get(uid=_fix(api_client, manager, task).json()["id"])
+    task.soft_delete(actor=manager)
+    conversation = api_client.get(f"/api/app/v1/conversations/{run.conversation.uid}/").json()
+    assert conversation["task"]["deleted"]
+    messages = api_client.get(f"/api/app/v1/conversations/{run.conversation.uid}/messages/").json()["results"]
+    assert [m["run"] for m in messages] == [run.uid]
+    # 動かすことと指示は断る
+    assert _post(api_client, run.conversation).status_code == 400
+
+
 def test_messages_need_a_manager(api_client, manager):
     task = _task(manager)
     run = Run.objects.get(uid=_fix(api_client, manager, task).json()["id"])

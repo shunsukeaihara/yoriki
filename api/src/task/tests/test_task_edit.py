@@ -389,3 +389,27 @@ def test_update_task_is_not_saved_when_the_manager_is_revoked_meanwhile(api_clie
     assert "not saved" in result["content"][0]["text"]
     task.refresh_from_db()
     assert task.version_number == 1
+
+
+def test_fix_chat_model_needs_tools(api_client, manager):
+    task = _task(manager)
+    run = _finished_fix(api_client, manager, task)
+    other = ModelProfileFactory.create(version__supports_tools=False)
+    res = api_client.patch(
+        f"/api/app/v1/conversations/{run.conversation.uid}/", {"model_profile": other.uid}, format="json"
+    )
+    assert res.status_code == 400
+    assert "Tool" in str(res.json())
+
+
+def test_attachments_of_the_next_request_are_not_the_task_runs(api_client, manager):
+    """タスクのRunの実行中に送った次の依頼（タスクの編集の依頼）の添付は、タスクのRunの添付にしない"""
+    from artifact.factories import ArtifactFactory  # noqa: PLC0415
+
+    task = _task(manager)
+    run = _fix(api_client, manager, task)
+    attachment = ArtifactFactory.create(owner=manager, conversation=run.conversation, kind=ArtifactKind.ATTACHMENT)
+    res = _post(api_client, run.conversation, "この表の形に合わせて直して", mode="next", attachments=[attachment.uid])
+    assert res.status_code == 201, res.json()
+    attachment.refresh_from_db()
+    assert attachment.run is None

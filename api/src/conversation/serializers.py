@@ -116,6 +116,11 @@ class ConversationSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"model_profile": _("個人情報や機密情報を扱う会話では、ローカルLLMのモデルを選んでください")}
             )
+        if self.instance is not None and self.instance.is_task_fix and not version.supports_tools:
+            # 修正チャットのモデルはタスクの編集のRunで使い、タスク管理のToolが要る（実行中の編集のRunも切り替わる）
+            raise serializers.ValidationError(
+                {"model_profile": _("修正チャットでは、Toolを使えるモデルを選んでください")}
+            )
         effort = attrs.get("effort", getattr(self.instance, "effort", ""))
         if "model_profile" in attrs and "effort" not in attrs:
             effort = attrs["effort"] = ""  # モデルを変えたら、そのモデルの既定から始める

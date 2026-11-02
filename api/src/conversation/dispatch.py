@@ -163,10 +163,10 @@ def post_message(
         )
         if len(unsent) != len(attachments):
             raise CannotStart(_("送信済みの添付が含まれています。添付し直してください。"))
-        fix_run = active_run(conversation) if conversation.is_task_fix else None
-        # 修正チャットでは、動いているタスクのRunの添付の中で名前を決める（Runごとに /workspace/input を分けるため）。
-        # タスクの編集のRunへの添付は、会話の添付の中で決める（直前のタスクのRunのものと重ねない）
-        Artifact.attach(conversation, unsent, run=fix_run if fix_run and fix_run.isolated_workspace else None)
+        # 修正チャットで、動いているタスクのRunへの追加の指示・回答の添付は、そのRunの添付の中で名前を決める（Runごとに
+        # /workspace/input を分けるため）。タスクの編集の依頼（次の依頼を含む）への添付は、会話の添付の中で決める
+        # （直前のタスクのRunのものと重ねない）
+        Artifact.attach(conversation, unsent, run=_task_run_instructed(conversation, mode))
         message.attachments.set(unsent)
     conversation.last_posted = timezone.now()
     fields = ["last_posted", "updated"]
@@ -182,7 +182,7 @@ def post_message(
         return message
     message.run = run
     message.save(update_fields=["run"])
-    if run.isolated_workspace and attachments:
+    if attachments and _task_run_instructed(conversation, mode) is not None:
         # 修正チャットでは、追加の指示・回答の添付もタスクのRunの添付にする（Runの画面で、タスクを管理できる人が取得
         # できるように。/workspace/input にはこのRunのものだけを置く。harness.md §10.10）
         Artifact.objects.filter(pk__in=[a.pk for a in attachments]).update(run=run)
@@ -210,6 +210,17 @@ def post_message(
         conversation=conversation, message=message, run=run if kind == InstructionKind.CURRENT else None, kind=kind
     )
     return message
+
+
+def _task_run_instructed(conversation: Conversation, mode: str) -> Run | None:
+    """修正チャットのメッセージが、動いているタスクのRunへの追加の指示か回答になるなら、そのRun（会話の行ロックの
+    中で呼ぶ）。次の依頼と、タスクの編集のRunへのメッセージではNone"""
+    if not conversation.is_task_fix or mode == MessageMode.NEXT:
+        return None
+    run = active_run(conversation)
+    if run is None or not run.isolated_workspace or run.status == RunStatus.CANCELLING:
+        return None
+    return run
 
 
 def _check_fix_message(conversation: Conversation, *, separate: bool) -> None:

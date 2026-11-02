@@ -16,6 +16,8 @@ const { t } = useI18n()
 const modelItems = computed(() => {
   const items = props.models
     .filter((m) => !props.conversation.handlesSensitiveData || m.isLocal)
+    // 修正チャットのモデルはタスクを直す依頼で使い、タスク管理の Tool が要る（サーバーでも確かめる）
+    .filter((m) => !props.fixChat || m.supportsTools)
     .map((m) => ({ value: m.id, title: m.name, description: m.isLocal ? t('ローカルLLM') : undefined }))
   // 今のモデルが選べなくなっていても（無効にされた等）、表示は残す
   const current = props.conversation.modelProfileInfo

@@ -165,15 +165,16 @@ class ArtifactQuerySet(models.QuerySet):
             .exclude(messages__instruction__state__in=pending)
         )
 
-    def latest_output(self, conversation_id: int, path: str) -> "Artifact | None":
+    def latest_output(self, conversation_id: int, path: str, *, run=None) -> "Artifact | None":
         """会話の成果物のうち、`/workspace/output` のそのパスの最新のもの（変わっていないファイルは回収し直さないので、
-        同じ会話の前のRunのものもある）"""
-        latest = (
-            self.select_related("blob")
-            .filter(conversation_id=conversation_id, kind=ArtifactKind.OUTPUT, path=path, deleted=False)
-            .order_by("-created", "-pk")
-            .first()
+        同じ会話の前のRunのものもある）。`run` を渡すと、そのRunの成果物だけから探す（Workspaceを引き継がないタスクの
+        Runで、修正チャットの前の実行のものを使わない）"""
+        outputs = self.select_related("blob").filter(
+            conversation_id=conversation_id, kind=ArtifactKind.OUTPUT, path=path, deleted=False
         )
+        if run is not None:
+            outputs = outputs.filter(run=run)
+        latest = outputs.order_by("-created", "-pk").first()
         return cast("Artifact | None", latest)
 
     def connector_results(self, conversation_id: int) -> Self:

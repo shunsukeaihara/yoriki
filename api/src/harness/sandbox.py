@@ -342,12 +342,13 @@ class SandboxSession:
         conversation_id = self.run.conversation_id
         # 保持期限の切れたConnectorの結果は置かない（会話で照会を重ねても、置くものが増え続けないように）
         results = Artifact.objects.connector_results(conversation_id).filter(expires__gt=timezone.now())
-        inputs = (
-            (Artifact.objects.sent_inputs(conversation_id) | results)
-            .exclude(pk__in=self.inputs)
-            .select_related("blob")
-            .order_by("pk")
-        )
+        sent = Artifact.objects.sent_inputs(conversation_id)
+        if self.run.isolated_workspace:
+            # タスクのRunは、このRunの添付（最初の発言と追加指示のもの）とConnectorの結果だけ（修正チャットの
+            # 前の実行のものを置かない。harness.md §10.10）
+            sent = sent.filter(pk__in=Artifact.objects.filter(messages__run=self.run).values("pk"))
+            results = results.filter(run=self.run)
+        inputs = (sent | results).exclude(pk__in=self.inputs).select_related("blob").order_by("pk")
         self.input_dir.mkdir(parents=True, exist_ok=True)
         # userns-remap・gVisorのSandboxの利用者からも読めるようにする（書けるのはWorkerだけ）
         self.input_dir.chmod(0o755)
@@ -580,12 +581,15 @@ class SandboxSession:
     def _known_outputs(self) -> dict[str, str]:
         """会話の成果物の、パスごとの最新の中身（SHA-256）。変わっていないファイルは回収し直さない"""
         known = {}
-        rows = (
-            # 削除した成果物は既知にしない（同じ中身のファイルを回収し直す。業務結果のファイルの確認で見つかるように）
-            Artifact.objects.filter(conversation_id=self.run.conversation_id, kind=ArtifactKind.OUTPUT, deleted=False)
-            .order_by("created", "pk")
-            .values_list("path", "blob__sha256")
+        # 削除した成果物は既知にしない（同じ中身のファイルを回収し直す。業務結果のファイルの確認で見つかるように）
+        outputs = Artifact.objects.filter(
+            conversation_id=self.run.conversation_id, kind=ArtifactKind.OUTPUT, deleted=False
         )
+        if self.run.isolated_workspace:
+            # タスクのRunは空のWorkspaceから始めるので、このRunの成果物だけを既知にする（修正チャットの前の実行と
+            # 同じ中身のファイルも、このRunの成果物として回収する）
+            outputs = outputs.filter(run=self.run)
+        rows = outputs.order_by("created", "pk").values_list("path", "blob__sha256")
         for path, sha256 in rows:
             known[path] = sha256
         return known

@@ -26,11 +26,17 @@ class ConversationPurpose(models.IntegerChoices):
     EVALUATION = 2, _("Skillの評価")
     # タスクのRunごとに作る会話（design.md §5.1）。会話の一覧には出さない
     TASK = 3, _("タスク")
+    # タスクの修正チャット（design.md §11.11）。1つのタスクに結び付き、会話の一覧にも出る
+    TASK_FIX = 4, _("タスクの修正")
+
+
+# 利用者が会話の画面で開く会話の用途
+OWNED_PURPOSES = (ConversationPurpose.CHAT, ConversationPurpose.TASK_FIX)
 
 
 class ConversationQuerySet(models.QuerySet):
     def owned_by(self, user) -> Self:
-        return self.filter(owner=user, deleted=False, purpose=ConversationPurpose.CHAT)
+        return self.filter(owner=user, deleted=False, purpose__in=OWNED_PURPOSES)
 
 
 class Conversation(models.Model):
@@ -49,6 +55,15 @@ class Conversation(models.Model):
     purpose = models.PositiveSmallIntegerField(
         _("用途"), choices=ConversationPurpose.choices, default=ConversationPurpose.CHAT
     )
+    # 修正チャットで直すタスク（用途が「タスクの修正」の会話だけ。design.md §11.11）
+    task = models.ForeignKey(
+        "task.TaskDefinition",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="fix_chats",
+        verbose_name=_("修正するタスク"),
+    )
     last_posted = models.DateTimeField(_("最終投稿日時"), null=True, blank=True)
 
     created = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -61,9 +76,20 @@ class Conversation(models.Model):
         verbose_name = _("会話")
         verbose_name_plural = verbose_name
         indexes = [models.Index(fields=["owner", "-last_posted"])]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(purpose=ConversationPurpose.TASK_FIX, task__isnull=False)
+                | (~models.Q(purpose=ConversationPurpose.TASK_FIX) & models.Q(task__isnull=True)),
+                name="conversation_fix_task",
+            ),
+        ]
 
     def __str__(self):
         return self.title or self.uid
+
+    @property
+    def is_task_fix(self) -> bool:
+        return self.purpose == ConversationPurpose.TASK_FIX
 
 
 class ConversationMessage(models.Model):

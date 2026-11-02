@@ -5,6 +5,8 @@ Skillの版と、固定したConnectorだけで、`skill` で探して読み込�
 Toolは、Skillの「使ってよいTool」とタスクのToolの一覧の両方に入っているものだけ。使えるかは、起動した人ではなく
 タスクの範囲で、区切りと操作のたびに確かめ直す（task/checks.py）。チャットから起動したRunは、それに加えて起動した人
 （`Run.owner`）の今の権限でも確かめる（タスクの版の一覧 ∩ 起動した人の今の権限。authorization.md §6）。
+修正チャットのRunは、タスクに固定したものの範囲で動き、動かした人（`Run.owner`）が今もタスクを管理できるかを確かめる
+（停止中かは見ない。design.md §11.11）。
 """
 
 from typing import Any
@@ -41,12 +43,15 @@ def launcher(run: Run) -> User | None:
 
 def revoked_task(run: Run) -> str:
     """タスクのRunを続けられなくなった理由（タスクの停止・削除、個人のタスクの持ち主・チャットから起動した人の
-    無効化、起動した人が起動できる部門から外れた）。なければ空文字"""
+    無効化、起動した人が起動できる部門から外れた、修正チャットの持ち主がタスクを管理できなくなった）。なければ空文字"""
     if not is_task_run(run):
         return ""
-    reason = checks.task_problem(load_task(run))
+    task = load_task(run)
+    reason = checks.task_problem(task, allow_suspended=run.is_task_fix)
     if not reason and run.launch == RunLaunch.CHAT:
         reason = checks.launcher_scope_problem(launcher(run), run)
+    if not reason and run.is_task_fix:
+        reason = checks.fixer_problem(User.objects.filter(pk=run.owner_id).first(), task)
     if reason:
         return _("タスクを続けられなくなったので、作業を止めました（%(reason)s）。") % {"reason": reason}
     return ""

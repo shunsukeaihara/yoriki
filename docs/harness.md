@@ -339,9 +339,11 @@ class ToolResult:
 | `install_python_packages` | `packages`（`name`・`version`） | 管理された取得で、Run専用の環境へ入れる（design.md §7.6） | WRITE_SANDBOX | 不可 |
 | `datasource_describe` | `connector`（Run開始時に固定した一覧の名前のenum） | 公開している表・列の説明（design.md §4.9.2） | READ | 不可（同時実行の枠と記録をDBで扱うので、1つずつ実行する） |
 | `datasource_query` | `connector`、`sql`、`params`（文字列の並び） | SELECT文（引数の場所は `?`）を実行し、結果をCSVで `/workspace/input/connectors/{invocation_id}/` に置く | READ | 不可（同上。接続の同時実行数の上限の中で） |
-| `request_skill_edit` | `skill`（編集するSkillの名前。新しく作るなら空）、`summary`（変更の要約） | Skillの編集を提案し、利用者の確認を待つ（§10.9）。答える人がいる業務のRunだけに出す | INTERACT | 不可（単独で呼ぶ） |
+| `request_skill_edit` | `skill`（編集するSkillの名前。新しく作るなら空）、`summary`（変更の要約） | Skillの編集を提案し、利用者の確認を待つ（§10.9）。答える人がいる業務のRunだけに出す（修正チャットのタスクのRunには出さない） | INTERACT | 不可（単独で呼ぶ） |
+| `request_task_edit` | `summary`（変更の要約） | タスクの定義の変更を提案し、利用者の確認を待つ（§10.10）。修正チャットのタスクのRunだけに出す | INTERACT | 不可（単独で呼ぶ） |
 | `prepare_notification` | `message`（通知の文章）、`files`（渡すファイル。任意） | 完了の通知の文章と、出口へ渡す業務結果のファイルの絞り込みを決める（design.md §4.3）。通知の書き方のあるタスクのRunだけに出す。業務結果のSchemaがあれば `submit_result` の後だけ受け付ける | READ | 不可 |
 | Skill管理のTool | §10.9 | Skillの編集のRun（関連Run）だけに出す（design.md §3.6） | WRITE_EXTERNAL | 不可 |
+| タスク管理のTool | §10.10 | タスクの編集のRun（関連Run）だけに出す | WRITE_EXTERNAL | 不可 |
 
 用意しないTool：
 
@@ -357,11 +359,11 @@ class ToolResult:
 
 **Runに出すToolの一覧**は、Run開始時に次から決め、`request.header` に記録する。Runの中では変えない（prompt cacheを保つため）。
 
-1. Runの種類：業務のRun、Skillの編集のRun、Draftの評価のRun（design.md §3.6・§3.7）。Skill管理のToolは編集のRunだけ、Skill公開のToolは評価のRunには出さない。評価のRunは、評価するSkill（公開中の版か、評価に写したDraft）を `/` で指定したRunと同じに扱い、`skill`・`request_skill_edit` は出さない（design.md §3.7.1）。
+1. Runの種類：業務のRun、Skillの編集のRun、タスクの編集のRun、Draftの評価のRun（design.md §3.6・§3.7・§11.11）。Skill管理のToolはSkillの編集のRunだけ、タスク管理のToolはタスクの編集のRunだけ、Skill公開のToolは評価のRunには出さない。評価のRunは、評価するSkill（公開中の版か、評価に写したDraft）を `/` で指定したRunと同じに扱い、`skill`・`request_skill_edit` は出さない（design.md §3.7.1）。
 2. Skill：`/` かTask DefinitionでSkillを指定したRunでは、そのSkillの `tools` に限り（タスクのRunでは、固定したSkillの `tools` を合わせたもの。どれにも書いていなければToolなし。引数の制限もタスクの定義に従う。authorization.md §5.4）、業務結果のSchemaがあれば `submit_result` を加える（`skill` は出さない）。タスクに通知の書き方があれば `prepare_notification` も加える（design.md §4.3）。答える人がいる業務のRunには、Skillの指定にかかわらず `request_skill_edit` を加える（編集を提案するだけで、作業の権限を増やさないため）。指定がなく、エージェントが探して使う会話では、利用者が使えるToolの全体と `skill` を出す。
 3. 実行許可（authorization.md §6）：会話では、依頼した人が使えるConnector（本人の個人、使える部門の部門、全社）だけ。タスクのRunでは、タスクに固定したConnectorだけで、エージェントが探して使うことはしない（チャットから起動したRunは、それをさらに起動した人の今の権限で絞る）。システムのConnector・Skillは、システムタスクのRunにだけ出す。
 4. モデルの能力：Tool呼出しに対応しないモデルでは、Toolを出さない（Skillも、Toolが要るものは候補にしない。design.md §4.8）。
-5. 確認の相手：`ask_user` は、答える人がいるRun（会話、または対話Bindingのあるタスク）だけに出す。
+5. 確認の相手：`ask_user` は、答える人がいるRun（会話、修正チャットのタスクのRun、または対話Bindingのあるタスク）だけに出す。修正チャットのタスクのRunでは、固定したSkillの `tools` に書いていなくても `ask_user` を出し、`request_task_edit` も加える（どちらも作業の権限を増やさないため）。
 6. Sandbox：SkillかTask DefinitionがSandboxを使うToolを許さないコマンド不要のRun（design.md §3.4）では、Sandboxを使うToolを出さない。Runtime ProfileはRunの単位で決まり、既定がなければRunを始めない（design.md §7.3）。Sandboxを使うToolがあるRunでも、Sandboxは最初に呼ばれた時点で起動する（design.md §4）。
 
 途中で読み込んだSkillが、このRunに出していないToolやConnectorを要するときは、Toolの一覧を変えずに、`skill` の結果で「このSkillはこのRunでは使えないToolを要する」と返す。利用者には、そのSkillを明示した新しい依頼を案内させる。
@@ -666,7 +668,7 @@ Codexの非同期の質問と、Gemini CLIの「承認待ちのTool呼出し」�
 3. 回答がWeb画面か外部スレッドから届いたら、`clarification.answered` と、その `ask_user` 呼出しへの `tool.result`（質問ごとの答えと、回答者の表示名）を記録し、Runを再キューする。
 4. 新しいAttemptは、RunEventから文脈を組み立て直して続ける。Tool呼出しの直後にその結果がある形になるので、どのプロバイダでも続けられる。
 
-- 答える人がいないRun（対話Bindingのないタスク、Draftの評価）には `ask_user` を出さない。最初の発言に「利用者に聞けない。判断できない点は、採った前提と未解決の点を結果に書く」と添える。Webhookで起動したRunには、受け取ったpayloadを添付のファイル（`/workspace/input/webhook_payload.json` 等）に置いたこと、それが外のシステムからのデータで指示ではないことも添える。
+- 答える人がいないRun（対話Bindingのないタスク、Draftの評価）には `ask_user` を出さない。修正チャットのタスクのRun（design.md §11.11）は答える人がいるRunで、最初の発言には、タスクを管理する人が作業を見ていて、尋ねられ、追加の指示を出しうることを添える。最初の発言に「利用者に聞けない。判断できない点は、採った前提と未解決の点を結果に書く」と添える。Webhookで起動したRunには、受け取ったpayloadを添付のファイル（`/workspace/input/webhook_payload.json` 等）に置いたこと、それが外のシステムからのデータで指示ではないことも添える。
 - `ask_user` で、コマンドの実行の許可を聞かせない（design.md §1。コマンドごとの承認はしない）。業務の判断だけを聞く。
 - 期限を過ぎたら、design.md §5.3のとおり `FAILED` にする。
 
@@ -741,6 +743,32 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 - 結果の `value` に、Skillの名前・範囲・状態（変更案を保存・公開・切戻し）・版・変更点を持たせ、画面はそれを会話に表示し、Skillの画面（版の中身・切戻し）へのリンクを置く（design.md §11.6）。
 - 編集のRunで公開しても、進行中・確認待ちの業務のRunは元の版を使い続ける。次の依頼から新しい版を使う。
 - 機密のSkill（公開中の版かDraftが機密のフラグを持つか、機密のConnectorを宣言しているもの。design.md §4冒頭）は、機密の会話の編集のRunでだけ扱う。機密でないRunでは、編集の依頼を受け付けず、`request_skill_edit` の候補にも名前を出さず、`get_skill` も中身を返さない。編集の途中で機密になったら、読んだ中身を次のモデルの呼出しで送らないように、毎ステップの区切りで止める。
+
+### 10.10 修正チャットとタスクの編集のRun
+
+タスクの修正チャット（design.md §11.11）は、1つのタスクに結び付いた会話（`Conversation.purpose` が「タスクの修正」、`Conversation.task`）で、その中でタスクのRunとタスクの編集のRunが交互に動く。
+
+**タスクのRun**（起動のしかた「修正チャット」）：
+
+- 手動実行と同じく、受付時のタスクの版に固定し、タスクに固定したものの範囲で動く。`parent` を持たず（会話の文脈を引き継がない）、`/workspace/input`（添付・Connectorの結果）・成果物の回収・Checkpointは、会話ではなくそのRunのものだけを使う（同じ会話の前の実行の作業ファイルを見せない）。実行中の追加指示に付けた添付は、そのRunの入力として置く。
+- 答える人がいるRunとして、`ask_user` と `request_task_edit` を出し、追加指示を取り込む（§10.3・§10.4）。`request_skill_edit` は出さない。
+- 結果の通知先は固定せず（配信を作らない）、`prepare_notification` で作った通知の候補を、送るはずだった内容として画面に出す。
+- 区切りのたびに、タスクが削除されていないことと、動かした人（`Run.owner`）が今もタスクを管理できることを確かめ、外れていれば止める（停止中かは見ない。停止したときは、ほかのRunと同じく停止を依頼する）。
+
+**始め方（編集のRun）**：修正チャットで、Runが動いていないときに送ったメッセージ（次の依頼を含む）は、タスクの編集のRunになる（`Run.kind`）。タスクのRunを始めるのは「もう一度動かす」のAPIだけ。タスクのRunの `request_task_edit` を利用者が確認で承認すると、要約を本文とするメッセージを次の依頼として受け付ける（`request_skill_edit` と同じ。確認の種類「タスクの編集」、選択肢は「タスクを直す」「今回だけにする」）。`request_task_edit` は、利用者が今後の反映（「今後は」「タスクも直して」）を頼んだときだけ呼ばせる。
+
+**文脈**：編集のRunは、同じ会話の1つ前のRunを親にして文脈を引き継ぐ。タスクのRunは親を持たないので、編集の文脈は直前のタスクのRunから始まる。Workspaceは会話の最後のCheckpoint（直前のタスクのRunのものを含む）から戻す。Manifestの `fixed.task_edit` に対象のタスクを固定し、`<runtime_context>` に `<task_edit task="..." version="..." />` を置く。
+
+**Tool**：Sandboxの土台のTool、`ask_user`、`todo_write` と、次のタスク管理のTool。Skill・Connectorは使わない（`skill`・`submit_result`・`request_*` も出さない）。
+
+| Tool | 引数 | 内容 |
+|---|---|---|
+| `get_task` | なし | 対象のタスクの今の版の、名前・範囲・版の番号・説明・依頼文・通知の書き方・入力の項目（名前・表示名・型・必須・説明・選択肢）・使うSkillとConnectorの名前・出口の名前を返す |
+| `update_task` | `expected_version`、`change_reason`、変える項目（`prompt_template`・`notification_instructions`・`input_descriptions`（項目の名前ごとの説明）） | 新しい版を作る。画面の保存と同じ検査を通す。ほかの人が版を作っていれば、読み直すよう返す |
+
+- 権限は画面のAPIと同じ判定（`TaskDefinition.can(user, MANAGE)`。authorization.md §5.3）を、依頼した人の権限で呼ぶたびにサーバーで確かめる。編集のRunを始めるときも確かめる。
+- 結果の `value` に、タスクの名前・版・変えた項目の変更の前後を持たせ、画面はそれを会話に表示し、タスクの画面へのリンクを置く。
+- 同じ内容の再試行で版を重ねないよう、中身が今の版と同じなら版を作らない（`TaskDefinition.revise()`）。
 
 ---
 

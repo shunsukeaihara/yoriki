@@ -134,6 +134,8 @@ def post_message(
         ).first()
         if sent is not None:
             return sent  # 再送。二重に受け付けない
+    if conversation.is_task_fix:
+        _check_fix_message(conversation, actor, mode=mode, separate=bool(skills or connectors or skill_edit))
     message = ConversationMessage.objects.create(
         conversation=conversation,
         sender=actor,
@@ -171,6 +173,10 @@ def post_message(
         return message
     message.run = run
     message.save(update_fields=["run"])
+    if conversation.is_task_fix and attachments:
+        # 修正チャットでは、追加の指示・回答の添付もタスクのRunの添付にする（Runの画面で、タスクを管理できる人が取得
+        # できるように。/workspace/input にはこのRunのものだけを置く。harness.md §10.10）
+        Artifact.objects.filter(pk__in=[a.pk for a in attachments]).update(run=run)
     separate = bool(skills) or bool(connectors) or bool(skill_edit)  # 別のRunとして始める依頼
     question = ClarificationRequest.objects.filter(
         run=run, status=ClarificationStatus.OPEN, kind__in=(ClarificationKind.QUESTION, ClarificationKind.SKILL_EDIT)
@@ -193,6 +199,20 @@ def post_message(
         conversation=conversation, message=message, run=run if kind == InstructionKind.CURRENT else None, kind=kind
     )
     return message
+
+
+def _check_fix_message(conversation: Conversation, actor, *, mode: str, separate: bool) -> None:
+    """修正チャット（design.md §11.11）で受け付けるのは、タスクを今も管理できる人からの、動いているタスクのRunへの
+    追加の指示と確認への回答だけ。Skill・Connectorの指定と、Skillの編集の依頼は受け付けない"""
+    from task.checks import fixer_problem  # noqa: PLC0415  taskがconversationをimportするため
+
+    if reason := fixer_problem(actor, conversation.task):
+        raise CannotStart(reason)
+    if separate:
+        raise CannotStart(_("修正チャットでは、SkillやConnectorを指定できません。"))
+    run = active_run(conversation)
+    if run is None or mode == MessageMode.NEXT or run.status == RunStatus.CANCELLING:
+        raise CannotStart(_("修正チャットでは、動いているタスクへの指示と回答だけを送れます。"))
 
 
 def accept_skill_edit(clarification: ClarificationRequest, actor) -> None:
@@ -275,6 +295,9 @@ def resolve_connectors(
 
 def start_run(conversation: Conversation, message: ConversationMessage, actor, *, parent: Run | None = None) -> Run:
     """呼び出し側のtransactionの中で呼ぶ。モデル設定の版とeffortを固定し、最初の発言を記録して実行を依頼する"""
+    if conversation.is_task_fix:
+        # 修正チャットのタスクのRunは task.dispatch.start_task_run() で始める
+        raise CannotStart(_("修正チャットでは、動いているタスクへの指示と回答だけを送れます。"))
     profile = conversation.model_profile
     version = profile.current_version
     if version is None or not profile.is_active or profile.deleted:

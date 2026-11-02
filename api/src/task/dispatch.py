@@ -25,7 +25,7 @@ from harness.skills import manifest_entry
 from harness.untrusted import untrusted
 from llm.models import ModelProfileVersion
 from run.dispatch import enqueue_run
-from run.models import Run, RunEvent, RunEventKind, RunKind, RunLaunch, RunStatus, RunTrigger
+from run.models import ACTIVE_STATUSES, Run, RunEvent, RunEventKind, RunKind, RunLaunch, RunStatus, RunTrigger
 from runtime.models import RuntimeProfile, RuntimeProfileVersion
 from user.models import system_user
 
@@ -57,6 +57,12 @@ NOTIFICATION_NOTE = (
     "[When the work is done, write the completion notification of this task by following the instructions below, "
     "and call prepare_notification. The notification is sent when the work completes.]\n"
     "<notification_instructions>\n{instructions}\n</notification_instructions>"
+)
+
+# 修正チャットで動かしたRunの最初の発言に添える（design.md §11.11）。答える人がいるので、尋ねてよい
+FIX_NOTE = (
+    "[This is a run of the task in its fix chat. The person who manages this task watches the work: they may give "
+    "additional instructions during the work, and you can ask them with ask_user when something is unclear.]"
 )
 
 # Webhookで起動したRunの最初の発言に添える。payloadの全体はファイルとして置き、データとして読ませる（harness.md §6.3）
@@ -92,7 +98,11 @@ def start_task_run(
 
     チャットからの起動では、`conversation`（起動した会話）にRunを指すカードを足す。タスクのRunは会話の文脈を引き継がない。
     `client_request_id` はカードの `client_message_id` にする（同じ要求の再送は、会話ごとの一意の制約で
-    IntegrityError）"""
+    IntegrityError）。
+
+    修正チャット（`RunLaunch.FIX`）では、`conversation`（そのタスクの修正チャット）の中でRunを動かす。省けば新しい
+    修正チャットを作る（Runの `conversation` で返す）。動かせるのはタスクを管理できる人で、停止中のタスクも動かせる。
+    出口へは送らない（design.md §11.11）"""
     # 保存先への書き込みは、タスクの行をロックする前に行う（保存先が遅くても、同じタスクの受付や更新を待たせない）
     sent = inputs.values() if isinstance(inputs, dict) else ()
     written = store_files([*files, *(v for v in sent if isinstance(v, InputFile))])
@@ -111,10 +121,12 @@ def start_task_run(
                 raise CannotRun(_("このタスクを実行する権限がないか、タスクが停止中です"))
             if launch == RunLaunch.CHAT and not task.can(actor, TaskAction.LAUNCH):
                 raise CannotRun(_("このタスクをチャットから起動する権限がないか、タスクが停止中です"))
+            if launch == RunLaunch.FIX and (not task.can(actor, TaskAction.MANAGE) or task.current_revision is None):
+                raise CannotRun(_("このタスクを管理する権限がないか、タスクに版がありません"))
             # 入口からの起動は、タスクに固定したものの範囲で動く（authorization.md §6。個人のタスクはスケジュールだけ）
             if launch == RunLaunch.WEBHOOK and (not task.in_service() or task.scope == TaskScope.PERSONAL):
                 raise CannotRun(_("タスクが停止中か、削除されています"))
-            if reason := checks.task_problem(task):
+            if reason := checks.task_problem(task, allow_suspended=launch == RunLaunch.FIX):
                 raise CannotRun(reason)
             revision = task.current_revision
             assert revision is not None  # can()・in_service() が確かめた
@@ -125,6 +137,9 @@ def start_task_run(
             cleaned, errors = clean_inputs(revision.inputs, values)
             if errors:
                 raise InvalidInputs(errors)
+            if launch == RunLaunch.FIX:
+                fix_chat = _fix_chat(task, revision, actor=actor, conversation=conversation)
+                return _start(task, revision, cleaned, actor=actor, launch=launch, files=files, conversation=fix_chat)
             run = _start(task, revision, cleaned, actor=actor, launch=launch, files=files)
             if conversation is not None:
                 _add_launch_card(conversation, run, actor=actor, client_request_id=client_request_id)
@@ -148,11 +163,14 @@ class RunPlan:
     destination_revision: DestinationRevision | None
 
 
-def plan_run(task: TaskDefinition, revision: TaskDefinitionRevision, *, lock: bool = True) -> RunPlan:
+def plan_run(
+    task: TaskDefinition, revision: TaskDefinitionRevision, *, lock: bool = True, deliver: bool = True
+) -> RunPlan:
     """タスクの今の版でRunを始められるかを確かめ、Runに固定するものを決める。始められなければ CannotRun。
 
     何も作らない。受付（_start()）は `lock` で通知先の行をロックする（transactionの中で呼ぶ）。入口の画面でサンプルを
-    試すとき（受付と同じ判定を見せる）は `lock=False` で読むだけにし、受付を待たせない"""
+    試すとき（受付と同じ判定を見せる）は `lock=False` で読むだけにし、受付を待たせない。`deliver` が偽（修正チャット）
+    なら通知先を固定せず、使えるかも確かめない（出口へ送らない）"""
     profile = revision.model_profile
     version = profile.current_version
     if version is None or not profile.is_active or profile.deleted:
@@ -196,7 +214,7 @@ def plan_run(task: TaskDefinition, revision: TaskDefinitionRevision, *, lock: bo
         output_schema=output_schema,
         notification=notification,
         connector_catalog=connector_catalog,
-        destination_revision=_destination_revision(task, revision, lock=lock),
+        destination_revision=_destination_revision(task, revision, lock=lock) if deliver else None,
     )
 
 
@@ -208,18 +226,24 @@ def _start(
     actor,
     launch,
     files: Sequence[InputFile],
+    conversation: Conversation | None = None,
 ) -> Run:
-    plan = plan_run(task, revision)
+    """Runを作る。`conversation` は修正チャット（なければRunごとの会話を作る）"""
+    fixing = launch == RunLaunch.FIX
+    plan = plan_run(task, revision, deliver=not fixing)
     sensitive = revision.handles_sensitive_data
-    conversation = Conversation.objects.create(
-        owner=actor,
-        model_profile=revision.model_profile,
-        effort=revision.effort,
-        purpose=ConversationPurpose.TASK,
-        handles_sensitive_data=sensitive,
-        title=task.name[:200],
-        last_posted=timezone.now(),
-    )
+    if conversation is None:
+        conversation = Conversation.objects.create(
+            owner=actor,
+            model_profile=revision.model_profile,
+            effort=revision.effort,
+            purpose=ConversationPurpose.TASK,
+            handles_sensitive_data=sensitive,
+            title=task.name[:200],
+            last_posted=timezone.now(),
+        )
+    else:
+        Conversation.objects.filter(pk=conversation.pk).update(last_posted=timezone.now())
     attachments, inputs = _place_files(conversation, files, inputs, actor=actor)
     text = render(revision.prompt_template, inputs)
     message = ConversationMessage.objects.create(
@@ -305,6 +329,42 @@ def launched_run(conversation: Conversation, client_request_id: str, task_uid: s
     return run
 
 
+def _fix_chat(
+    task: TaskDefinition, revision: TaskDefinitionRevision, *, actor, conversation: Conversation | None
+) -> Conversation:
+    """修正チャットの会話。`conversation` がなければ新しく作る。あれば、行をロックして、このタスクの、動かす人の
+    修正チャットで、動いているRunがなく、タスクの今の版の機密の区分で動かせるかを確かめる（タスクの行の後に取る）"""
+    if conversation is None:
+        return Conversation.objects.create(
+            owner=actor,
+            model_profile=revision.model_profile,
+            effort=revision.effort,
+            purpose=ConversationPurpose.TASK_FIX,
+            task=task,
+            handles_sensitive_data=revision.handles_sensitive_data,
+            title=task.name[:200],
+            last_posted=timezone.now(),
+        )
+    conversation = Conversation.objects.select_for_update().get(pk=conversation.pk)
+    if (
+        conversation.deleted
+        or conversation.purpose != ConversationPurpose.TASK_FIX
+        or conversation.task_id != task.pk
+        or conversation.owner_id != actor.pk
+    ):
+        raise CannotRun(_("このタスクの修正チャットではありません"))
+    if Run.objects.filter(conversation=conversation, status__in=ACTIVE_STATUSES).exists():
+        raise CannotRun(_("修正チャットで作業が動いています。終わってから動かしてください"))
+    if revision.handles_sensitive_data and not conversation.handles_sensitive_data:
+        # 機密のタスクの記録を、機密でない会話（クラウドのモデルを使う編集の依頼）に入れない
+        raise CannotRun(
+            _(
+                "このタスクは個人情報・機密情報を扱うようになりました。タスクの画面から新しい修正チャットを始めてください"
+            )
+        )
+    return conversation
+
+
 def _add_launch_card(conversation: Conversation, run: Run, *, actor, client_request_id: str = "") -> None:
     """起動した会話に、起動したタスクのRunを指すカードを足す。会話のRunの文脈には入らない（文脈はRunEventから
     組み立てる）ので、タスクの結果が会話のモデルへ渡ることはない"""
@@ -361,7 +421,8 @@ def _destination_revision(
 
 
 def _first_message(text: str, inputs: dict[str, Any], launch: RunLaunch, *, notification: str = "") -> str:
-    """モデルに渡す最初の発言。テンプレートを埋めた依頼文に、入力の値と、通知の書き方と、答える人がいないことを添える"""
+    """モデルに渡す最初の発言。テンプレートを埋めた依頼文に、入力の値と、通知の書き方と、答える人がいないこと
+    （修正チャットでは、答える人がいること）を添える"""
     parts = [text.strip()]
     if inputs:
         # 入力の値は利用者の指示ではないデータとして囲む（harness.md §6.3）
@@ -370,7 +431,7 @@ def _first_message(text: str, inputs: dict[str, Any], launch: RunLaunch, *, noti
         parts.append(NOTIFICATION_NOTE.format(instructions=notification))
     if launch == RunLaunch.WEBHOOK:
         parts.append(WEBHOOK_NOTE)
-    parts.append(NO_RESPONDER_NOTE)
+    parts.append(FIX_NOTE if launch == RunLaunch.FIX else NO_RESPONDER_NOTE)
     return "\n\n".join(parts)
 
 

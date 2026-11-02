@@ -4,7 +4,8 @@ import { AxiosError } from 'axios'
 /**
  * タスクの手動実行とチャットからの起動（authorization.md §6）。タスクの今の版で、決めた入力の項目の値だけを渡す（自由な
  * 依頼文は受けない）。手動実行では部門・全社・システムのタスクは起動した人ではなくタスクの範囲で動き、チャットからの
- * 起動（`conversationId` を渡す）では起動した人の権限で動く。型と必須はサーバーが確かめ、項目ごとに返す
+ * 起動（`conversationId` を渡す）では起動した人の権限で動く。修正チャット（`fix`。design.md §11.11）では、タスクの範囲で
+ * 動かし、出口へは送らない。型と必須はサーバーが確かめ、項目ごとに返す
  */
 const props = defineProps<{
   task: TaskDetail | LaunchableTask
@@ -12,8 +13,12 @@ const props = defineProps<{
   conversationId?: string
   /** チャットからの起動のID。同じIDの再送には前に起動したRunが返る（二重に起動しない） */
   clientRequestId?: string
-  /** 入力の初期値（受け付けたかが分からなかった起動を、同じ入力で送り直すとき） */
+  /** 入力の初期値（受け付けたかが分からなかった起動を、同じ入力で送り直すとき・修正チャットで動かし直すとき） */
   initialValues?: TaskRunInputs
+  /** 修正チャットで動かす */
+  fix?: boolean
+  /** 動かし直す修正チャット（省くと新しい修正チャットを作る） */
+  fixConversationId?: string
 }>()
 const api = useAPI()
 const toast = useToast()
@@ -62,14 +67,23 @@ const { onSubmit, loading, errors } = createSubmit({
   form,
   // 画面で確かめた版を送る。別の版ができていれば409になり、確かめていない定義では実行しない
   fn: (data): Promise<Run | TaskRun> =>
-    props.conversationId
-      ? api
-          .launchableTasks(props.task.id)
-          .run(props.conversationId, props.task.version ?? 0, props.clientRequestId ?? crypto.randomUUID(), data)
-      : api.tasks(props.task.id).run(props.task.version ?? 0, data),
+    props.fix
+      ? api.tasks(props.task.id).fixChat(props.task.version ?? 0, data, props.fixConversationId)
+      : props.conversationId
+        ? api
+            .launchableTasks(props.task.id)
+            .run(props.conversationId, props.task.version ?? 0, props.clientRequestId ?? crypto.randomUUID(), data)
+        : api.tasks(props.task.id).run(props.task.version ?? 0, data),
   onSuccess: (run) => {
     emit('started', run)
-    toast.add({ title: props.conversationId ? t('タスクを起動しました') : t('実行を始めました'), color: 'success' })
+    toast.add({
+      title: props.fix
+        ? t('修正チャットで動かしました')
+        : props.conversationId
+          ? t('タスクを起動しました')
+          : t('実行を始めました'),
+      color: 'success',
+    })
   },
   onError: (err) => {
     emit('failed', err)
@@ -82,11 +96,15 @@ const { onSubmit, loading, errors } = createSubmit({
       emit('unknown', { ...form.value })
       toast.add({
         title: t('受け付けたかを確かめられませんでした'),
-        description: props.conversationId
+        description: props.fix
           ? t(
-              '会話にタスクのカードが出ていれば受け付けています。出ていなければ、もう一度起動してください（同じ起動は二重になりません）',
+              '会話の一覧か修正チャットにタスクの作業が出ていれば受け付けています。出ていなければ、もう一度動かしてください',
             )
-          : t('実行の履歴に出ていれば受け付けています。出ていなければ、もう一度実行してください'),
+          : props.conversationId
+            ? t(
+                '会話にタスクのカードが出ていれば受け付けています。出ていなければ、もう一度起動してください（同じ起動は二重になりません）',
+              )
+            : t('実行の履歴に出ていれば受け付けています。出ていなければ、もう一度実行してください'),
         color: 'warning',
       })
     } else {
@@ -107,7 +125,11 @@ const generalErrors = computed(() => ({
 }))
 
 // 起動の候補は起動できるタスクだけなので、チャットからの起動ではいつも送れる（断る理由はサーバーが返す）
-const canPost = computed(() => ('canRun' in props.task ? Boolean(props.task.canRun) : true))
+// 修正チャットでは停止中のタスクも動かせる（版があれば）
+const canPost = computed(() => {
+  if (props.fix) return (props.task.version ?? 0) > 0
+  return 'canRun' in props.task ? Boolean(props.task.canRun) : true
+})
 
 defineExpose({ onSubmit, loading, canPost })
 </script>

@@ -43,6 +43,13 @@ const pendingReply = computed(() => {
 const streamingText = computed(() => props.delta || pendingReply.value)
 
 const formattedResult = computed(() => (props.run.result == null ? '' : JSON.stringify(props.run.result, null, 2)))
+
+// 出口へ送らないタスクの Run（修正チャット）で、送るはずだった通知（design.md §11.11）。終わった後に出す
+const unsentNotice = computed(() => {
+  const info = props.run.taskInfo
+  if (!info || info.delivers || !info.destinationName || active.value) return null
+  return { destination: info.destinationName, notification: info.notification }
+})
 </script>
 
 <template>
@@ -51,6 +58,9 @@ const formattedResult = computed(() => (props.run.result == null ? '' : JSON.str
       <RunStatusBadge :run="run" />
       <UBadge v-if="run.kind === RunKind.SKILL_EDIT" color="warning" variant="subtle" icon="i-lucide-pencil">
         {{ $t('Skillの編集') }}
+      </UBadge>
+      <UBadge v-if="run.taskInfo" color="info" variant="subtle" icon="i-lucide-workflow">
+        {{ $t('タスク「{name}」・版 {number}', { name: run.taskInfo.name, number: run.taskInfo.number }) }}
       </UBadge>
       <UChatShimmer v-if="run.status === RunStatus.RUNNING && !streamingText" :text="$t('作業しています')" />
       <span class="text-xs text-dimmed"
@@ -116,6 +126,23 @@ const formattedResult = computed(() => (props.run.result == null ? '' : JSON.str
         }}</pre>
       </template>
     </UCollapsible>
+
+    <div v-if="unsentNotice" class="grid gap-2 rounded-md border border-dashed border-default p-3 text-sm">
+      <p class="flex items-center gap-2 text-muted">
+        <UIcon name="i-lucide-send" class="size-4 shrink-0" />
+        {{ $t('通知先「{name}」には送っていません（修正チャット）', { name: unsentNotice.destination }) }}
+      </p>
+      <template v-if="unsentNotice.notification">
+        <p class="font-medium">{{ $t('送るはずだった通知の文章') }}</p>
+        <p class="whitespace-pre-wrap">{{ unsentNotice.notification.message }}</p>
+        <p v-if="unsentNotice.notification.files?.length" class="text-xs text-muted">
+          {{ $t('渡すファイル：{files}', { files: unsentNotice.notification.files.join('、') }) }}
+        </p>
+      </template>
+      <p v-else class="text-xs text-muted">
+        {{ $t('通知の文章は作られていません（送るときは、決まった形の通知になります）') }}
+      </p>
+    </div>
 
     <template v-for="clarification in clarifications" :key="clarification.id">
       <!-- test_skill_draft の評価を待っている。利用者は答えず、評価が終わると作業が再開する（design.md §3.7.1） -->

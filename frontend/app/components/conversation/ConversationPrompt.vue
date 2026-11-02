@@ -10,6 +10,8 @@
  * 使う Connector は、ボタンか、行の始めか空白の後で `@` を打つと開く一覧から選ぶ（harness.md §10.2）。使える
  * Connector の一覧も依頼を始めるときに決めるので、実行中なら今の作業の後に始める。
  * `/` の一覧でタスクを選ぶと、呼び出し側が入力のダイアログを開いて起動する（入力欄の本文は送らない）。
+ * タスクの修正チャット（`fixChat`。design.md §11.11）では、動いているタスクへの追加の指示と回答だけを送る
+ * （Skill・Connector・タスクの一覧と、次の依頼は出さない）。
  */
 const props = defineProps<{
   activeRun?: Run | null
@@ -29,6 +31,8 @@ const props = defineProps<{
   sending?: boolean
   stopping?: boolean
   disabled?: boolean
+  /** タスクの修正チャット */
+  fixChat?: boolean
 }>()
 const text = defineModel<string>({ required: true })
 const mode = defineModel<string>('mode', { default: MessageMode.AUTO })
@@ -61,7 +65,7 @@ const connectorPickerOpen = ref(false)
 const connectorSearch = ref('')
 // 行の始めか空白の後に `/`・`@` を打ったら、その文字を消して Skill・Connector の一覧を開く
 watch(text, (value, old) => {
-  if (props.disabled || value.length !== (old?.length ?? 0) + 1) return
+  if (props.disabled || props.fixChat || value.length !== (old?.length ?? 0) + 1) return
   const trigger = /(^|\s)([/@])$/.exec(value)?.[2]
   if (!trigger) return
   text.value = value.slice(0, -1)
@@ -115,6 +119,8 @@ const placeholder = computed(() => {
     return t('今の作業が終わった後に、Skillを使って始める依頼を入力してください')
   if (props.activeRun && selectedConnectors.value.length)
     return t('今の作業が終わった後に、Connectorを使って始める依頼を入力してください')
+  if (props.fixChat && !props.activeRun)
+    return t('タスクが動いていないときは送れません。「もう一度動かす」から動かしてください')
   // `@` は vue-i18n のリンクの記法なので、文字として出すには {'@'} と書く
   if (!props.activeRun) return t("依頼を入力してください（/ でSkill・タスク、{'@'} でConnectorを指定）")
   if (mode.value === MessageMode.NEXT) return t('今の作業が終わった後に始める依頼を入力してください')
@@ -219,6 +225,7 @@ const onSubmit = () => {
           @click="picker.open()"
         />
         <ConversationSkillPicker
+          v-if="!fixChat"
           v-model:open="skillPickerOpen"
           v-model:search-term="skillSearch"
           :skills="skills ?? []"
@@ -234,6 +241,7 @@ const onSubmit = () => {
           @launch="emit('launch', $event)"
         />
         <ConversationConnectorPicker
+          v-if="!fixChat"
           v-model:open="connectorPickerOpen"
           v-model:search-term="connectorSearch"
           :connectors="connectors ?? []"
@@ -244,7 +252,7 @@ const onSubmit = () => {
           @select="selectConnector"
         />
         <DSelectButton
-          v-if="activeRun && !separateRequest"
+          v-if="activeRun && !separateRequest && !fixChat"
           v-model="mode"
           :label="$t('送り方')"
           :show-label="false"

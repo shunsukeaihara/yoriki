@@ -68,6 +68,8 @@ class RunLaunch(models.IntegerChoices):
     MANUAL = 1, _("タスクの画面からの手動実行")
     WEBHOOK = 2, _("Webhook")
     CHAT = 3, _("チャットからの起動")
+    # タスクの修正チャット（design.md §11.11）。タスクを管理できる人が、会話の中で動かす。出口へは送らない
+    FIX = 4, _("修正チャット")
 
 
 class RunKind(models.IntegerChoices):
@@ -240,8 +242,20 @@ class Run(models.Model):
 
     @property
     def is_interactive(self) -> bool:
-        """答える人がいる（会話のRun）。タスクのRunは、対話Bindingがある場合だけ（後で加える）"""
-        return self.trigger == RunTrigger.CONVERSATION
+        """答える人がいる（会話のRunと、修正チャットのタスクのRun）。ほかのタスクのRunは、対話Bindingがある場合だけ
+        （後で加える）"""
+        return self.trigger == RunTrigger.CONVERSATION or self.is_task_fix
+
+    @property
+    def is_task_fix(self) -> bool:
+        """修正チャットのタスクのRun（design.md §11.11）"""
+        return self.trigger == RunTrigger.TASK and self.launch == RunLaunch.FIX
+
+    @property
+    def isolated_workspace(self) -> bool:
+        """/workspace/input・成果物の回収・Checkpointを、会話ではなくこのRunの単位にする。タスクのRunは会話の文脈も
+        Workspaceも引き継がない（修正チャットでは、同じ会話の前の実行のものを見せない。harness.md §10.10）"""
+        return self.trigger == RunTrigger.TASK
 
     @classmethod
     def locked(cls, pk: int) -> "Run":
@@ -640,6 +654,9 @@ class Checkpoint(models.Model):
         """Runの最後のCheckpoint。なければ同じ会話の前の依頼（親をたどったRun）の最後のもの。
         Sandboxを使わなかった依頼にはCheckpointがないので、さらに前の依頼のものを使う。
         親は同じ会話の1つ前のRunなので、会話の中でこのRunまでのRunを新しい順に探す"""
+        if run.isolated_workspace:
+            # タスクのRunは、ほかのRunのWorkspaceを引き継がない（修正チャットの前の実行のものも）
+            return cls.objects.filter(run=run).order_by("-sequence", "-pk").first()
         return (
             cls.objects.filter(run__conversation_id=run.conversation_id, run_id__lte=run.pk)
             .order_by("-run_id", "-sequence", "-pk")

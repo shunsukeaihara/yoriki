@@ -53,7 +53,7 @@ class RunFilter(filters.FilterSet):
 class AppRunViewSet(ReadOnlyModelViewSet):
     permission_classes = [AppUser]
     lookup_field = "uid"
-    queryset = Run.objects.select_related("conversation", "model_version__profile")
+    queryset = Run.objects.select_related("conversation", "model_version__profile", "task_revision__destination")
     serializer_class = RunSerializer
     filterset_class = RunFilter
     ordering = ("-created", "-pk")

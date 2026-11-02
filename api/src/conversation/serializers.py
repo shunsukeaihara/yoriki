@@ -13,13 +13,23 @@ from harness.connectors import MAX_EXPLICIT_CONNECTORS
 from harness.skills import MAX_EXPLICIT_SKILLS, unsupported_skills
 from llm.models import ModelProfile
 from llm.serializers import AppModelProfileSerializer
-from run.models import ACTIVE_STATUSES, Run, RunEndReason, RunStatus
+from run.models import ACTIVE_STATUSES, Run, RunEndReason, RunStatus, RunTrigger
 from run.serializers import RunSerializer
 from skill.models import Skill, SkillAction
 from utils.fields import NormalizedTextField
 
 from .dispatch import CannotStart, MessageMode, post_message
 from .models import Conversation, ConversationMessage, InstructionKind, InstructionState, MessageRole
+
+
+class ConversationTaskSerializer(serializers.Serializer):
+    """修正チャットで直すタスク（今の名前と範囲。design.md §11.11）"""
+
+    id = serializers.CharField(source="uid", read_only=True)
+    name = serializers.CharField(read_only=True)
+    scope = serializers.IntegerField(read_only=True)
+    scope_display = serializers.CharField(source="get_scope_display", read_only=True)
+    deleted = serializers.BooleanField(read_only=True)
 
 
 class ConversationSerializer(serializers.ModelSerializer):
@@ -38,6 +48,9 @@ class ConversationSerializer(serializers.ModelSerializer):
         max_length=50, required=False, allow_blank=True, help_text=_("空ならモデルの既定。値を入れると固定する")
     )
     active_run = serializers.SerializerMethodField()
+    task = ConversationTaskSerializer(
+        read_only=True, allow_null=True, help_text=_("修正チャットで直すタスク（ふつうの会話では空）")
+    )
 
     class Meta:
         model = Conversation
@@ -50,6 +63,7 @@ class ConversationSerializer(serializers.ModelSerializer):
             "title",
             "last_posted",
             "active_run",
+            "task",
             "created",
             "updated",
         ]
@@ -62,7 +76,19 @@ class ConversationSerializer(serializers.ModelSerializer):
     @extend_schema_field(RunSerializer(allow_null=True))
     def get_active_run(self, obj: Conversation) -> dict[str, Any] | None:
         run = obj.runs.filter(status__in=ACTIVE_STATUSES).select_related("model_version__profile").first()
-        return RunSerializer(run, context=self.context).data if run else None
+        if run is None:
+            return None
+        data = RunSerializer(run, context=self.context).data
+        request = self.context.get("request")
+        if run.trigger == RunTrigger.TASK and (
+            request is None or not Run.objects.visible_to(request.user).filter(pk=run.pk).exists()
+        ):
+            # 修正チャットの持ち主がタスクを管理できなくなったら、タスクのRunのログ（作業の計画等）は見せない
+            # （authorization.md §7.1）。状態だけを残す
+            data.update(todos=[], skills=[], result=None, error="")
+            if data.get("task_info"):
+                data["task_info"] = {**data["task_info"], "notification": None}
+        return data
 
     def validate(self, attrs):
         profile = attrs.get("model_profile") or getattr(self.instance, "model_profile", None)
@@ -89,8 +115,9 @@ class ConversationSerializer(serializers.ModelSerializer):
         if effort and effort not in version.effort_values:
             raise serializers.ValidationError({"effort": _("このモデルが受け付けるeffortの値から選んでください")})
         if self.instance is not None and "model_profile" in attrs:
-            # 実行中のRunも切り替わるので、そのRunが使うSkillの必要な能力を持つモデルに限る（design.md §4.8）
-            run = self.instance.runs.filter(status__in=ACTIVE_STATUSES).first()
+            # 実行中のRunも切り替わるので、そのRunが使うSkillの必要な能力を持つモデルに限る（design.md §4.8）。
+            # タスクのRun（修正チャット）はタスクのモデル設定のまま動かすので切り替えない
+            run = self.instance.runs.filter(status__in=ACTIVE_STATUSES).exclude(trigger=RunTrigger.TASK).first()
             if run is not None and (names := unsupported_skills(run, version)):
                 raise serializers.ValidationError(
                     {
@@ -136,9 +163,9 @@ class ConversationSerializer(serializers.ModelSerializer):
             if becomes_sensitive:
                 # 実行中のRunも、モデルの切り替えの候補をローカルLLMだけにする。機密のConnector・Skillの一覧は
                 # Run開始時に決めるので、次の依頼から出る
-                Run.objects.filter(conversation=instance, status__in=ACTIVE_STATUSES).update(
-                    handles_sensitive_data=True
-                )
+                Run.objects.filter(conversation=instance, status__in=ACTIVE_STATUSES).exclude(
+                    trigger=RunTrigger.TASK
+                ).update(handles_sensitive_data=True)
         return instance
 
     @staticmethod
@@ -146,7 +173,12 @@ class ConversationSerializer(serializers.ModelSerializer):
         """実行中のRunにも、利用者の明示した切り替えとして反映する（design.md §4.8）"""
         from .dispatch import resolve_effort  # noqa: PLC0415  ここでだけ使う
 
-        run = Run.objects.select_for_update().filter(conversation=conversation, status__in=ACTIVE_STATUSES).first()
+        run = (
+            Run.objects.select_for_update()
+            .filter(conversation=conversation, status__in=ACTIVE_STATUSES)
+            .exclude(trigger=RunTrigger.TASK)  # 修正チャットのタスクのRunは、タスクのモデル設定のまま動かす
+            .first()
+        )
         if run is None:
             return
         version = conversation.model_profile.current_version

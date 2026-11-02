@@ -19,7 +19,9 @@ from .models import (
     RunEvent,
     RunEventKind,
     RunKind,
+    RunLaunch,
     RunStatus,
+    RunTrigger,
 )
 
 
@@ -125,6 +127,48 @@ def skill_changes(run: Run) -> list[dict[str, Any]]:
     return list(changes.values())
 
 
+class RunNotificationSerializer(serializers.Serializer):
+    """通知の候補（prepare_notification で決めたもの）"""
+
+    message = serializers.CharField(read_only=True)
+    files = serializers.ListField(child=serializers.CharField(), read_only=True, required=False, allow_null=True)
+
+
+class RunTaskInfoSerializer(serializers.Serializer):
+    """タスクのRunの、受付時のタスクと版、起動のしかた、通知（Manifestに固定したもの）"""
+
+    id = serializers.CharField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    number = serializers.IntegerField(read_only=True, help_text=_("受付時のタスクの版"))
+    launch = serializers.ChoiceField(choices=RunLaunch.choices, read_only=True, allow_null=True)
+    launch_display = serializers.CharField(read_only=True)
+    delivers = serializers.BooleanField(read_only=True, help_text=_("出口へ送るか（修正チャットのRunは送らない）"))
+    destination_name = serializers.CharField(
+        read_only=True, help_text=_("タスクの版の結果の通知先の名前（なければ空）")
+    )
+    notification = RunNotificationSerializer(
+        read_only=True, allow_null=True, help_text=_("通知の候補（修正チャットでは、送るはずだった内容）")
+    )
+
+
+def task_info(run: Run) -> dict[str, Any] | None:
+    if run.trigger != RunTrigger.TASK:
+        return None
+    fixed = ((run.manifest or {}).get("fixed") or {}).get("task") or {}
+    revision = run.task_revision
+    destination = revision.destination if revision is not None else None
+    return {
+        "id": fixed.get("task", ""),
+        "name": fixed.get("name", ""),
+        "number": fixed.get("number", 0),
+        "launch": run.launch,
+        "launch_display": run.get_launch_display() if run.launch else "",
+        "delivers": run.destination_revision_id is not None,
+        "destination_name": destination.name if destination is not None else "",
+        "notification": run.notification if isinstance(run.notification, dict) else None,
+    }
+
+
 class RunSerializer(serializers.ModelSerializer):
     id = serializers.CharField(source="uid", read_only=True)
     conversation: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(slug_field="uid", read_only=True)
@@ -138,6 +182,8 @@ class RunSerializer(serializers.ModelSerializer):
     skills = serializers.SerializerMethodField(help_text=_("使っているSkillと版"))
     result = serializers.JSONField(read_only=True, allow_null=True, help_text=_("業務結果（submit_result の内容）"))
     skill_changes = serializers.SerializerMethodField(help_text=_("Skillの編集のRunで変えたSkill"))
+    trigger = serializers.ChoiceField(choices=RunTrigger.choices, read_only=True)
+    task_info = serializers.SerializerMethodField(help_text=_("タスクのRunの、受付時のタスクと版（ほかのRunでは空）"))
 
     class Meta:
         model = Run
@@ -145,6 +191,8 @@ class RunSerializer(serializers.ModelSerializer):
             "id",
             "conversation",
             "kind",
+            "trigger",
+            "task_info",
             "status",
             "status_display",
             "end_reason",
@@ -179,6 +227,11 @@ class RunSerializer(serializers.ModelSerializer):
         chosen = [{**e, "chosen": True} for e in (manifest.get("fixed") or {}).get("skills") or []]
         loaded = [{**e, "chosen": False} for e in manifest.get("appended", []) if e.get("kind") == "skill"]
         return list(RunSkillSerializer([*chosen, *loaded], many=True).data)
+
+    @extend_schema_field(RunTaskInfoSerializer(allow_null=True))
+    def get_task_info(self, obj: Run) -> dict[str, Any] | None:
+        info = task_info(obj)
+        return dict(RunTaskInfoSerializer(info).data) if info is not None else None
 
     @extend_schema_field(RunSkillChangeSerializer(many=True))
     def get_skill_changes(self, obj: Run) -> list[dict[str, Any]]:

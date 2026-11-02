@@ -1154,6 +1154,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/app/v1/tasks/{uid}/fix_chat/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 修正チャット（design.md §11.11）でタスクを動かす（タスクを管理できる人。停止中でも動かせる）。`conversation` を省くと、新しい修正チャットを作る。タスクに固定したものの範囲で動き、実行中の追加の指示と確認への回答を受け付け、出口へは送らない。入力は手動実行と同じ */
+        post: operations["app_v1_tasks_fix_chat_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/app/v1/tasks/{uid}/resume/": {
         parameters: {
             query?: never;
@@ -2952,6 +2969,8 @@ export interface components {
              */
             readonly last_posted: string | null;
             readonly active_run: components["schemas"]["Run"] | null;
+            /** @description 修正チャットで直すタスク（ふつうの会話では空） */
+            readonly task: components["schemas"]["ConversationTask"] | null;
             /** Format: date-time */
             readonly created: string;
             /** Format: date-time */
@@ -2966,6 +2985,14 @@ export interface components {
             handles_sensitive_data?: boolean;
             /** タイトル */
             title?: string;
+        };
+        /** @description 修正チャットで直すタスク（今の名前と範囲。design.md §11.11） */
+        ConversationTask: {
+            readonly id: string;
+            readonly name: string;
+            readonly scope: number;
+            readonly scope_display: string;
+            readonly deleted: boolean;
         };
         /**
          * @description * `string` - string
@@ -4967,6 +4994,9 @@ export interface components {
             readonly id: string;
             readonly conversation: string;
             readonly kind: components["schemas"]["RunKindEnum"];
+            readonly trigger: components["schemas"]["RunTriggerEnum"];
+            /** @description タスクのRunの、受付時のタスクと版（ほかのRunでは空） */
+            readonly task_info: components["schemas"]["RunTaskInfo"] | null;
             readonly status: components["schemas"]["RunStatusEnum"];
             readonly status_display: string;
             readonly end_reason: (components["schemas"]["RunEndReasonEnum"] | components["schemas"]["NullEnum"]) | null;
@@ -5057,9 +5087,10 @@ export interface components {
          * @description * `1` - タスクの画面からの手動実行
          *     * `2` - Webhook
          *     * `3` - チャットからの起動
+         *     * `4` - 修正チャット
          * @enum {integer}
          */
-        RunLaunchEnum: 1 | 2 | 3;
+        RunLaunchEnum: 1 | 2 | 3 | 4;
         /** @description 確定したメッセージとTool実行（利用者の発言、エージェントの応答、Toolの結果） */
         RunMessageEvent: {
             /**
@@ -5075,6 +5106,11 @@ export interface components {
             readonly text: string;
             readonly tool_calls: components["schemas"]["ToolCallInfo"][];
             readonly tool_result: components["schemas"]["ToolResultInfo"] | null;
+        };
+        /** @description 通知の候補（prepare_notification で決めたもの） */
+        RunNotification: {
+            readonly message: string;
+            readonly files: string[] | null;
         };
         /** @description そのほかの記録（モデルの切り替え、再試行、圧縮等）。詳細のログに出す */
         RunOtherEvent: {
@@ -5162,6 +5198,28 @@ export interface components {
             readonly comment: string;
         };
         RunStreamEvent: components["schemas"]["RunStatusEvent"] | components["schemas"]["RunMessageEvent"] | components["schemas"]["ClarificationEvent"] | components["schemas"]["RunOtherEvent"] | components["schemas"]["RunDeltaEvent"];
+        /** @description タスクのRunの、受付時のタスクと版、起動のしかた、通知（Manifestに固定したもの） */
+        RunTaskInfo: {
+            readonly id: string;
+            readonly name: string;
+            /** @description 受付時のタスクの版 */
+            readonly number: number;
+            readonly launch: (components["schemas"]["RunLaunchEnum"] | components["schemas"]["NullEnum"]) | null;
+            readonly launch_display: string;
+            /** @description 出口へ送るか（修正チャットのRunは送らない） */
+            readonly delivers: boolean;
+            /** @description タスクの版の結果の通知先の名前（なければ空） */
+            readonly destination_name: string;
+            /** @description 通知の候補（修正チャットでは、送るはずだった内容） */
+            readonly notification: components["schemas"]["RunNotification"] | null;
+        };
+        /**
+         * @description * `1` - 会話
+         *     * `2` - タスク
+         *     * `3` - Skillの評価
+         * @enum {integer}
+         */
+        RunTriggerEnum: 1 | 2 | 3;
         /**
          * @description Runtime Profile。中身（イメージ、資源の上限）は現在の版の値を平らに出す。
          *
@@ -6067,6 +6125,9 @@ export interface components {
             readonly id: string;
             readonly conversation: string;
             readonly kind: components["schemas"]["RunKindEnum"];
+            readonly trigger: components["schemas"]["RunTriggerEnum"];
+            /** @description タスクのRunの、受付時のタスクと版（ほかのRunでは空） */
+            readonly task_info: components["schemas"]["RunTaskInfo"] | null;
             readonly status: components["schemas"]["RunStatusEnum"];
             readonly status_display: string;
             readonly end_reason: (components["schemas"]["RunEndReasonEnum"] | components["schemas"]["NullEnum"]) | null;
@@ -8911,8 +8972,9 @@ export interface operations {
                  * @description * `1` - タスクの画面からの手動実行
                  *     * `2` - Webhook
                  *     * `3` - チャットからの起動
+                 *     * `4` - 修正チャット
                  */
-                launch?: 1 | 2 | 3 | null;
+                launch?: 1 | 2 | 3 | 4 | null;
                 /** @description Which field to use when ordering the results. */
                 ordering?: string;
                 /** @description Number of results to return per page. */
@@ -9170,6 +9232,49 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TaskDefinitionDetail"];
                 };
+            };
+        };
+    };
+    app_v1_tasks_fix_chat_create: {
+        parameters: {
+            query?: {
+                /** @description 動かし直す修正チャットのID（このタスクの、自分の修正チャット） */
+                conversation?: string;
+                /** @description 画面で確かめた版（任意）。今の版と違えば409にし、確かめていない定義では動かさない */
+                version?: number;
+            };
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["TaskRunCreateRequest"];
+                "multipart/form-data": {
+                    /** @description ファイル以外の入力の項目の名前と値（JSONのオブジェクトの文字列） */
+                    inputs?: string;
+                } & {
+                    [key: string]: string;
+                };
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Run"];
+                };
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、他の人が版を作った） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -34,6 +34,59 @@ watch(open, (value) => {
 })
 const events = computed(() => props.events ?? loadedEvents.value)
 
+// Skill のスクリプトからの Connector の呼出し。モデルの文脈（イベント）に入らないので、別に読む。実行中は、
+// 呼出しを処理しうる間（shell・job_output の終わりを待つ間）に読み直し、Tool の結果が届いたら最後に読む
+const {
+  items: scriptCalls,
+  loading: loadingScriptCalls,
+  fetchAll: fetchScriptCalls,
+} = useFetchAll(() => api.runs(props.run.id).scriptCalls().list({ pageSize: 200 }))
+// 読んでいる間に求められたら、読み終えてからもう一度読む（Run の終わりの後の呼出しを取りこぼさない）
+let refreshAgain = false
+const refreshScriptCalls = async () => {
+  if (!props.showLog) return
+  if (loadingScriptCalls.value) {
+    refreshAgain = true
+    return
+  }
+  do {
+    refreshAgain = false
+    await fetchScriptCalls()
+  } while (refreshAgain)
+}
+const waitingTools = computed(() => {
+  const results = new Set<string>()
+  const calls: string[] = []
+  for (const e of events.value) {
+    if (e.type !== 'run.message') continue
+    if (e.toolResult) results.add(e.toolResult.callId)
+    for (const call of e.toolCalls) if (SCRIPT_WAITING_TOOLS.includes(call.name)) calls.push(call.id)
+  }
+  return calls.filter((id) => !results.has(id))
+})
+const scriptToolResults = computed(
+  () =>
+    events.value.filter(
+      (e) => e.type === 'run.message' && e.toolResult && SCRIPT_WAITING_TOOLS.includes(e.toolResult.name),
+    ).length,
+)
+watch(open, (value) => {
+  if (value) refreshScriptCalls()
+})
+watch([active, scriptToolResults], ([value], [before]) => {
+  // 実行中は記録を開いているので、Tool の結果が届くたびと、Run が終わったときに読み直す
+  if (value || before) refreshScriptCalls()
+})
+const { pause, resume } = useIntervalFn(refreshScriptCalls, 5000, { immediate: false })
+watch(
+  () => active.value && waitingTools.value.length > 0,
+  (waiting) => (waiting ? resume() : pause()),
+  { immediate: true },
+)
+onMounted(() => {
+  if (active.value) refreshScriptCalls()
+})
+
 // 最後の応答は、Run が終わって会話のメッセージになるまでここに出す
 const pendingReply = computed(() => {
   if (!active.value) return ''
@@ -99,7 +152,7 @@ const unsentNotice = computed(() => {
     <RunTodoList v-if="run.todos.length" :todos="run.todos" />
 
     <template v-if="showLog">
-      <RunEventLog v-if="active" :events="events" active />
+      <RunEventLog v-if="active" :events="events" :script-calls="scriptCalls" active />
       <UCollapsible v-else v-model:open="open">
         <DBtn
           variant="link"
@@ -113,7 +166,7 @@ const unsentNotice = computed(() => {
         <template #content>
           <div class="mt-2 border-l-2 border-default pl-3">
             <USkeleton v-if="loading && !events.length" class="h-6 w-48" />
-            <RunEventLog v-else :events="events" />
+            <RunEventLog v-else :events="events" :script-calls="scriptCalls" />
           </div>
         </template>
       </UCollapsible>

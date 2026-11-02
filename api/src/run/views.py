@@ -12,12 +12,13 @@ from rest_framework.viewsets import GenericViewSet, ReadOnlyModelViewSet
 from stream.serializers import RunEventSchema, RunEventSerializer
 from utils.permissions import AppUser
 
-from .models import ClarificationRequest, Run, RunEvent
+from .models import SCRIPT_CALL_PREFIX, ClarificationRequest, Run, RunEvent, ToolInvocation
 from .serializers import (
     ClarificationAnswerSerializer,
     ClarificationRequestSerializer,
     RunCancelSerializer,
     RunSerializer,
+    ScriptCallSerializer,
 )
 
 CONFLICT = OpenApiResponse(description="他の処理と競合した")
@@ -85,6 +86,17 @@ class AppRunEventViewSet(MyRunMixin, ListModelMixin, GenericViewSet):
 
     def get_serializer_context(self):
         return {**super().get_serializer_context(), "run_uid": self.run.uid}
+
+
+@extend_schema(description="Skillのスクリプトからの呼出し（Connector）の記録", tags=["app/run/script_call"])
+class AppScriptCallViewSet(MyRunMixin, ListModelMixin, GenericViewSet):
+    """作業の記録と同じく、Runの結果とログを見られる人だけ（チャットから起動した人には出さない。
+    authorization.md §7.1）。呼出しはモデルの文脈（RunEvent）に入れないので、作業の記録のAPIとは別に返す"""
+
+    permission_classes = [AppUser]
+    queryset = ToolInvocation.objects.filter(call_id__startswith=SCRIPT_CALL_PREFIX)
+    serializer_class = ScriptCallSerializer
+    ordering = ("created", "pk")
 
 
 @extend_schema(description="エージェントからの確認", tags=["app/run/clarification"])

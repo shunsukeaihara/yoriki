@@ -538,6 +538,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/app/v1/runs/{run}/script_calls/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Skillのスクリプトからの呼出し（Connector）の記録 */
+        get: operations["app_v1_runs_script_calls_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/app/v1/runs/{uid}/": {
         parameters: {
             query?: never;
@@ -2371,7 +2388,7 @@ export interface components {
             readonly scope: components["schemas"]["ConnectorScopeEnum"];
             readonly scope_display: string;
             readonly department_info: components["schemas"]["MinimumDepartment"] | null;
-            readonly operations: components["schemas"]["OperationsEnum"][];
+            readonly operations: components["schemas"]["ConnectorOperationEnum"][];
             readonly tables: components["schemas"]["AppConnectorTable"][];
         };
         AppConnectorTable: {
@@ -2749,7 +2766,7 @@ export interface components {
         ConnectorDeclaration: {
             /** @description ConnectorのID */
             connector: string;
-            operations: components["schemas"]["OperationsEnum"][];
+            operations: components["schemas"]["ConnectorOperationEnum"][];
             /** @description 使う表（`スキーマ.表`）。空ならConnectorの公開する表のどれでも */
             tables?: string[];
         };
@@ -2757,7 +2774,7 @@ export interface components {
         ConnectorDeclarationRequest: {
             /** @description ConnectorのID */
             connector: string;
-            operations: components["schemas"]["OperationsEnum"][];
+            operations: components["schemas"]["ConnectorOperationEnum"][];
             /** @description 使う表（`スキーマ.表`）。空ならConnectorの公開する表のどれでも */
             tables?: string[];
         };
@@ -2768,6 +2785,12 @@ export interface components {
          * @enum {integer}
          */
         ConnectorKindEnum: 1 | 2 | 3;
+        /**
+         * @description * `datasource_describe` - 表・列の説明を見る
+         *     * `datasource_query` - SELECT文で読み取る
+         * @enum {string}
+         */
+        ConnectorOperationEnum: "datasource_describe" | "datasource_query";
         /** @description SELECT文の試し実行（管理画面）。エージェントと同じ検査・上限を通る */
         ConnectorQueryRequest: {
             /** @description SELECT文。引数の場所は ? で書く */
@@ -4152,12 +4175,6 @@ export interface components {
         NotifyEventEnum: "run.completed" | "run.failed" | "run.cancelled";
         /** @enum {unknown} */
         NullEnum: null;
-        /**
-         * @description * `datasource_describe` - 表・列の説明を見る
-         *     * `datasource_query` - SELECT文で読み取る
-         * @enum {string}
-         */
-        OperationsEnum: "datasource_describe" | "datasource_query";
         PaginatedAppConnectorList: {
             /**
              * Format: uri
@@ -4534,6 +4551,19 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["SSOProvider"][];
+        };
+        PaginatedScriptCallList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["ScriptCall"][];
         };
         PaginatedSkillChangeList: {
             /**
@@ -5419,6 +5449,38 @@ export interface components {
             allowed_email_domains: string[];
             /** 有効 */
             is_active?: boolean;
+        };
+        /**
+         * @description Skillのスクリプトからの呼出し（design.md §4.9.6）。作業の記録で、そのときに実行していたToolの呼出し（`during`）の
+         *     下に出す
+         */
+        ScriptCall: {
+            readonly id: string;
+            /** @description そのときに実行していたToolの呼出しのID（なければ空） */
+            readonly during: string;
+            readonly operation: components["schemas"]["ConnectorOperationEnum"];
+            /** @description Connectorの名前（スクリプトが指定したもの） */
+            readonly connector: string;
+            readonly sql: string;
+            readonly params: string[];
+            readonly status: components["schemas"]["ToolStatusEnum"];
+            readonly status_display: string;
+            /** @description 読んだ行の数（query） */
+            readonly rows: number | null;
+            /** @description 上限で打ち切ったか（query） */
+            readonly truncated: boolean;
+            /** @description 表の数（describe） */
+            readonly tables: number | null;
+            readonly error_code: string;
+            /** エラー */
+            readonly error: string;
+            /** Format: date-time */
+            readonly created: string;
+            /**
+             * 終了日時
+             * Format: date-time
+             */
+            readonly ended: string | null;
         };
         Session: {
             readonly is_authenticated: boolean;
@@ -6321,6 +6383,16 @@ export interface components {
             readonly is_error: boolean;
             readonly text: string;
         };
+        /**
+         * @description * `1` - 要求
+         *     * `2` - 実行中
+         *     * `10` - 成功
+         *     * `20` - 失敗
+         *     * `30` - 実行せず
+         *     * `40` - 結果不明
+         * @enum {integer}
+         */
+        ToolStatusEnum: 1 | 2 | 10 | 20 | 30 | 40;
         /**
          * @description * `read` - read
          *     * `write` - write
@@ -7657,6 +7729,36 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaginatedRunStreamEventList"];
+                };
+            };
+        };
+    };
+    app_v1_runs_script_calls_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                run: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedScriptCallList"];
                 };
             };
         };

@@ -6,6 +6,7 @@ from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
+from connector.models import Operation
 from skill.serializers import AssetDiffCountSerializer, asset_diff_items
 from utils.exceptions import Conflict
 
@@ -22,6 +23,8 @@ from .models import (
     RunLaunch,
     RunStatus,
     RunTrigger,
+    ToolInvocation,
+    ToolStatus,
 )
 
 
@@ -291,6 +294,84 @@ class RunSerializer(serializers.ModelSerializer):
         if obj.kind != RunKind.TASK_EDIT:
             return []
         return list(RunTaskChangeSerializer(task_changes(obj), many=True).data)
+
+
+class ScriptCallSerializer(serializers.ModelSerializer):
+    """Skillのスクリプトからの呼出し（design.md §4.9.6）。作業の記録で、そのときに実行していたToolの呼出し（`during`）の
+    下に出す"""
+
+    id = serializers.CharField(source="uid", read_only=True)
+    during = serializers.SerializerMethodField(help_text="そのときに実行していたToolの呼出しのID（なければ空）")
+    operation = serializers.ChoiceField(source="name", choices=Operation.choices, read_only=True)
+    connector = serializers.SerializerMethodField(help_text="Connectorの名前（スクリプトが指定したもの）")
+    sql = serializers.SerializerMethodField()
+    params = serializers.SerializerMethodField()
+    status = serializers.ChoiceField(choices=ToolStatus.choices, read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    rows = serializers.SerializerMethodField(help_text="読んだ行の数（query）")
+    truncated = serializers.SerializerMethodField(help_text="上限で打ち切ったか（query）")
+    tables = serializers.SerializerMethodField(help_text="表の数（describe）")
+    error_code = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ToolInvocation
+        fields = [
+            "id",
+            "during",
+            "operation",
+            "connector",
+            "sql",
+            "params",
+            "status",
+            "status_display",
+            "rows",
+            "truncated",
+            "tables",
+            "error_code",
+            "error",
+            "created",
+            "ended",
+        ]
+        read_only_fields = fields
+
+    @staticmethod
+    def _value(obj: ToolInvocation) -> dict[str, Any]:
+        return obj.value if isinstance(obj.value, dict) else {}
+
+    @staticmethod
+    def _argument(obj: ToolInvocation, name: str) -> Any:
+        return obj.arguments.get(name) if isinstance(obj.arguments, dict) else None
+
+    def get_during(self, obj: ToolInvocation) -> str:
+        return str(self._value(obj).get("during") or "")
+
+    def get_connector(self, obj: ToolInvocation) -> str:
+        return str(self._argument(obj, "connector") or "")
+
+    def get_sql(self, obj: ToolInvocation) -> str:
+        return str(self._argument(obj, "sql") or "")
+
+    @extend_schema_field(serializers.ListField(child=serializers.CharField()))
+    def get_params(self, obj: ToolInvocation) -> list[str]:
+        params = self._argument(obj, "params")
+        return [str(p) for p in params] if isinstance(params, list) else []
+
+    @extend_schema_field(serializers.IntegerField(allow_null=True))
+    def get_rows(self, obj: ToolInvocation) -> int | None:
+        rows = self._value(obj).get("rows")
+        return rows if isinstance(rows, int) else None
+
+    def get_truncated(self, obj: ToolInvocation) -> bool:
+        return bool(self._value(obj).get("truncated"))
+
+    @extend_schema_field(serializers.IntegerField(allow_null=True))
+    def get_tables(self, obj: ToolInvocation) -> int | None:
+        tables = self._value(obj).get("tables")
+        # queryの `tables` は使った表の名前の一覧なので、describeの数だけを返す
+        return tables if isinstance(tables, int) and not isinstance(tables, bool) else None
+
+    def get_error_code(self, obj: ToolInvocation) -> str:
+        return str(self._value(obj).get("error") or "")
 
 
 class RunCancelSerializer(serializers.Serializer):

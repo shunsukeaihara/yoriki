@@ -2,21 +2,42 @@
 /**
  * Run の作業の記録（Tool の呼出しと結果、途中の説明、モデルの切り替え等）。
  * 利用者の最初の依頼とエージェントの最後の応答は会話に出るので、ここには出さない。
+ * Skill のスクリプトからの Connector の呼出し（scriptCalls）は、そのときに実行していた Tool の呼出し（shell・
+ * job_output）の下に出す。Tool の呼出しの間（ステップの区切り）に処理したものは、時刻の順で間に出す。
  */
-const props = defineProps<{ events: RunStreamEvent[]; active?: boolean }>()
+const props = withDefaults(defineProps<{ events: RunStreamEvent[]; scriptCalls?: ScriptCall[]; active?: boolean }>(), {
+  scriptCalls: () => [],
+  active: false,
+})
 const { t } = useI18n()
 
 type LogEntry =
   | { kind: 'text'; key: string; text: string }
-  | { kind: 'tool'; key: string; call: ToolCallInfo; result: ToolResultInfo | null }
+  | { kind: 'tool'; key: string; call: ToolCallInfo; result: ToolResultInfo | null; scripts: ScriptCall[] }
+  | { kind: 'scripts'; key: string; scripts: ScriptCall[] }
   | { kind: 'note'; key: string; icon: string; text: string; count: number }
 
 const entries = computed<LogEntry[]>(() => {
   const results = new Map<string, ToolResultInfo>()
+  const callIds = new Set<string>()
   for (const e of props.events) {
     if (e.type === 'run.message' && e.toolResult) results.set(e.toolResult.callId, e.toolResult)
+    if (e.type === 'run.message') for (const call of e.toolCalls) callIds.add(call.id)
+  }
+  const during = new Map<string, ScriptCall[]>()
+  const between: ScriptCall[] = []
+  for (const call of props.scriptCalls) {
+    if (call.during && callIds.has(call.during)) during.set(call.during, [...(during.get(call.during) ?? []), call])
+    else between.push(call)
   }
   const list: LogEntry[] = []
+  // ステップの区切りで処理した呼出しを、その時刻より後の記録の前に出す（API の一覧は時刻の順）
+  let next = 0
+  const flushBetween = (before?: string) => {
+    const start = next
+    while (next < between.length && (before === undefined || between[next]!.created < before)) next += 1
+    if (next > start) list.push({ kind: 'scripts', key: `scripts-${start}`, scripts: between.slice(start, next) })
+  }
   // 同じ記録が続いたら（再試行等）、1行にまとめて回数を出す
   const note = (key: string, icon: string, text: string) => {
     const last = list.at(-1)
@@ -25,7 +46,9 @@ const entries = computed<LogEntry[]>(() => {
   }
   let requests = 0
   for (const e of props.events) {
-    const key = String(e.type === 'run.delta' ? '' : e.sequence)
+    if (e.type === 'run.delta') continue
+    flushBetween(e.created)
+    const key = String(e.sequence)
     switch (e.type) {
       case 'run.message':
         if (e.kind === RunEventKind.USER_MESSAGE) {
@@ -34,7 +57,13 @@ const entries = computed<LogEntry[]>(() => {
         } else if (e.kind === RunEventKind.ASSISTANT_MESSAGE && e.toolCalls.length > 0) {
           if (e.text.trim()) list.push({ kind: 'text', key, text: e.text })
           for (const call of e.toolCalls)
-            list.push({ kind: 'tool', key: `${key}-${call.id}`, call, result: results.get(call.id) ?? null })
+            list.push({
+              kind: 'tool',
+              key: `${key}-${call.id}`,
+              call,
+              result: results.get(call.id) ?? null,
+              scripts: during.get(call.id) ?? [],
+            })
         }
         break
       case 'run.event':
@@ -50,6 +79,7 @@ const entries = computed<LogEntry[]>(() => {
         break
     }
   }
+  flushBetween()
   return list
 })
 
@@ -60,23 +90,26 @@ const formatArguments = (call: ToolCallInfo) => JSON.stringify(call.arguments, n
   <div class="grid gap-2">
     <template v-for="entry in entries" :key="entry.key">
       <MarkdownContent v-if="entry.kind === 'text'" :text="entry.text" class="text-sm text-muted" />
-      <UChatTool
-        v-else-if="entry.kind === 'tool'"
-        :text="toolLabel(entry.call, t)"
-        :icon="entry.result?.isError ? 'i-lucide-triangle-alert' : 'i-lucide-wrench'"
-        :suffix="entry.result?.isError ? $t('エラー') : undefined"
-        :loading="active && !entry.result"
-        :streaming="active && !entry.result"
-      >
-        <div class="grid gap-2 text-xs">
-          <pre class="overflow-x-auto rounded-md bg-muted p-2 whitespace-pre-wrap">{{
-            formatArguments(entry.call)
-          }}</pre>
-          <pre v-if="entry.result?.text" class="max-h-80 overflow-auto rounded-md bg-muted p-2 whitespace-pre-wrap">{{
-            entry.result.text
-          }}</pre>
-        </div>
-      </UChatTool>
+      <div v-else-if="entry.kind === 'tool'" class="grid gap-1">
+        <UChatTool
+          :text="toolLabel(entry.call, t)"
+          :icon="entry.result?.isError ? 'i-lucide-triangle-alert' : 'i-lucide-wrench'"
+          :suffix="entry.result?.isError ? $t('エラー') : undefined"
+          :loading="active && !entry.result"
+          :streaming="active && !entry.result"
+        >
+          <div class="grid gap-2 text-xs">
+            <pre class="overflow-x-auto rounded-md bg-muted p-2 whitespace-pre-wrap">{{
+              formatArguments(entry.call)
+            }}</pre>
+            <pre v-if="entry.result?.text" class="max-h-80 overflow-auto rounded-md bg-muted p-2 whitespace-pre-wrap">{{
+              entry.result.text
+            }}</pre>
+          </div>
+        </UChatTool>
+        <RunScriptCalls v-if="entry.scripts.length" :calls="entry.scripts" class="ml-6" />
+      </div>
+      <RunScriptCalls v-else-if="entry.kind === 'scripts'" :calls="entry.scripts" />
       <p v-else class="flex items-start gap-2 text-sm text-muted">
         <UIcon :name="entry.icon" class="mt-1 size-4 shrink-0" />
         <span class="whitespace-pre-wrap">

@@ -243,6 +243,11 @@ const createAPI = () => {
         list: (params?: ListParams) =>
           http.get<Paginated<RunStreamEvent>, Paginated<RunStreamEvent>>(`app/v1/runs/${id}/events/`, { params }),
       }),
+      // AppScriptCallViewSet は list だけ
+      scriptCalls: () => ({
+        list: (params?: ListParams) =>
+          http.get<Paginated<ScriptCall>, Paginated<ScriptCall>>(`app/v1/runs/${id}/script_calls/`, { params }),
+      }),
       // Runの添付と成果物（タスクのRunのファイルは、会話のAPIではなくここで取得する）
       artifacts: (aid?: string) => ({
         ...readOnlyResource<Artifact, ArtifactListParams>(http, `app/v1/runs/${id}/artifacts`, aid),

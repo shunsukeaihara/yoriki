@@ -1251,6 +1251,52 @@ paths:
               schema:
                 $ref: '#/components/schemas/PaginatedRunStreamEventList'
           description: ''
+  /api/app/v1/runs/{run}/script_calls/:
+    get:
+      operationId: app_v1_runs_script_calls_list
+      description: Skillのスクリプトからの呼出し（Connector）の記録
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: path
+        name: run
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - app/run/script_call
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedScriptCallList'
+          description: ''
   /api/app/v1/runs/{uid}/:
     get:
       operationId: app_v1_runs_retrieve
@@ -6813,7 +6859,7 @@ components:
         operations:
           type: array
           items:
-            $ref: '#/components/schemas/OperationsEnum'
+            $ref: '#/components/schemas/ConnectorOperationEnum'
           readOnly: true
         tables:
           type: array
@@ -7630,7 +7676,7 @@ components:
         operations:
           type: array
           items:
-            $ref: '#/components/schemas/OperationsEnum'
+            $ref: '#/components/schemas/ConnectorOperationEnum'
           maxItems: 2
         tables:
           type: array
@@ -7654,7 +7700,7 @@ components:
         operations:
           type: array
           items:
-            $ref: '#/components/schemas/OperationsEnum'
+            $ref: '#/components/schemas/ConnectorOperationEnum'
           maxItems: 2
         tables:
           type: array
@@ -7677,6 +7723,14 @@ components:
         * `1` - PostgreSQL
         * `2` - MySQL
         * `3` - SQL Server
+    ConnectorOperationEnum:
+      enum:
+      - datasource_describe
+      - datasource_query
+      type: string
+      description: |-
+        * `datasource_describe` - 表・列の説明を見る
+        * `datasource_query` - SELECT文で読み取る
     ConnectorQueryRequest:
       type: object
       description: SELECT文の試し実行（管理画面）。エージェントと同じ検査・上限を通る
@@ -10799,14 +10853,6 @@ components:
     NullEnum:
       enum:
       - null
-    OperationsEnum:
-      enum:
-      - datasource_describe
-      - datasource_query
-      type: string
-      description: |-
-        * `datasource_describe` - 表・列の説明を見る
-        * `datasource_query` - SELECT文で読み取る
     PaginatedAppConnectorList:
       type: object
       required:
@@ -11358,6 +11404,25 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SSOProvider'
+    PaginatedScriptCallList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ScriptCall'
     PaginatedSkillChangeList:
       type: object
       required:
@@ -13305,6 +13370,89 @@ components:
       required:
       - allowed_email_domains
       - client_id
+    ScriptCall:
+      type: object
+      description: |-
+        Skillのスクリプトからの呼出し（design.md §4.9.6）。作業の記録で、そのときに実行していたToolの呼出し（`during`）の
+        下に出す
+      properties:
+        id:
+          type: string
+          readOnly: true
+        during:
+          type: string
+          readOnly: true
+          description: そのときに実行していたToolの呼出しのID（なければ空）
+        operation:
+          allOf:
+          - $ref: '#/components/schemas/ConnectorOperationEnum'
+          readOnly: true
+        connector:
+          type: string
+          readOnly: true
+          description: Connectorの名前（スクリプトが指定したもの）
+        sql:
+          type: string
+          readOnly: true
+        params:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/ToolStatusEnum'
+          readOnly: true
+        status_display:
+          type: string
+          readOnly: true
+        rows:
+          type: integer
+          nullable: true
+          readOnly: true
+          description: 読んだ行の数（query）
+        truncated:
+          type: boolean
+          readOnly: true
+          description: 上限で打ち切ったか（query）
+        tables:
+          type: integer
+          nullable: true
+          readOnly: true
+          description: 表の数（describe）
+        error_code:
+          type: string
+          readOnly: true
+        error:
+          type: string
+          readOnly: true
+          title: エラー
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        ended:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 終了日時
+      required:
+      - connector
+      - created
+      - during
+      - ended
+      - error
+      - error_code
+      - id
+      - operation
+      - params
+      - rows
+      - sql
+      - status
+      - status_display
+      - tables
+      - truncated
     Session:
       type: object
       properties:
@@ -15546,6 +15694,22 @@ components:
       - is_error
       - name
       - text
+    ToolStatusEnum:
+      enum:
+      - 1
+      - 2
+      - 10
+      - 20
+      - 30
+      - 40
+      type: integer
+      description: |-
+        * `1` - 要求
+        * `2` - 実行中
+        * `10` - 成功
+        * `20` - 失敗
+        * `30` - 実行せず
+        * `40` - 結果不明
     ToolsEnum:
       enum:
       - read

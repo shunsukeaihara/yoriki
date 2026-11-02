@@ -25,7 +25,7 @@ from nanoid import generate
 
 from llm.providers.base import TextPart, ToolCall
 from run.errors import LeaseLost
-from run.models import ExecutionAttempt, Run, ToolInvocation, ToolStatus
+from run.models import SCRIPT_CALL_PREFIX, ExecutionAttempt, Run, ToolInvocation, ToolStatus
 from runtime.launcher import RELAY_MAX_RESPONSE, SandboxUnavailable
 
 from .connectors import DATASOURCE_TOOL_NAMES, catalog_names
@@ -36,8 +36,6 @@ logger = logging.getLogger(__name__)
 
 DESCRIBE_NAME, QUERY_NAME = DATASOURCE_TOOL_NAMES
 OPERATIONS = {"describe": DESCRIBE_NAME, "query": QUERY_NAME}
-# スクリプトからの呼出しのToolInvocationの `call_id` の始まり
-SCRIPT_CALL_PREFIX = "script-"
 # 1つのRunでスクリプトから呼べる回数（Attemptをまたいで数える）と、1分あたりの回数
 MAX_CALLS_PER_RUN = 1000
 MAX_CALLS_PER_MINUTE = 120
@@ -173,9 +171,11 @@ class ScriptConnectors:
         except Exception:
             logger.exception("run %s: a connector call from a script failed", self.run.uid)
             outcome = ToolResult.text("The request failed.", is_error=True, value={"error": "internal"})
+        error = ""
         if isinstance(outcome, ToolResult):
             value = origin | (outcome.value or {})
-            response = _error(str(value.get("error") or "unavailable"), _text(outcome))
+            error = _text(outcome)
+            response = _error(str(value.get("error") or "unavailable"), error)
             status = ToolStatus.FAILED
         else:
             value = origin | outcome.value()
@@ -183,14 +183,15 @@ class ScriptConnectors:
             status = ToolStatus.SUCCEEDED
             if len(json.dumps(response, ensure_ascii=False).encode()) > MAX_RESPONSE_BYTES:
                 # 中継で返せる大きさを超える（表・列の多いdescribe）。記録も失敗にする
-                response = _error(
-                    "too_large",
-                    "The result is too large to return to the script. Use datasource_describe as a tool instead.",
-                )
+                error = "The result is too large to return to the script. Use datasource_describe as a tool instead."
+                response = _error("too_large", error)
                 value["error"] = "too_large"
                 status = ToolStatus.FAILED
         with self.run.fenced(self.attempt):
-            ToolInvocation.objects.filter(pk=invocation.pk).update(status=status, value=value, ended=timezone.now())
+            # 失敗の理由（スクリプトへ返した説明）は、画面の作業の記録に出す
+            ToolInvocation.objects.filter(pk=invocation.pk).update(
+                status=status, value=value, error=error, ended=timezone.now()
+            )
         return response
 
 

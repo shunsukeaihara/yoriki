@@ -3,17 +3,21 @@ ToolInvocationに記録して、結果はスクリプトへ返す。回数・頻
 
 import queue
 import time
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from rest_framework.test import APIClient
 
 from artifact.models import Artifact, ArtifactKind
 from connector.errors import ConnectorError, ConnectorErrorKind
 from connector.factories import ConnectorFactory
 from harness import script_connectors
 from harness.connectors import DATASOURCE_TOOL_NAMES
+from harness.prompts import system_prompt
 from harness.sandbox import SCRIPT_REQUESTS_BUSY, SCRIPT_REQUESTS_PER_CALL, SandboxSession
 from harness.script_connectors import ScriptConnectors
+from harness.tools.base import Tool
 from run.models import RunEvent, RunEventKind, ToolInvocation, ToolStatus
 from run.tasks import claim_run
 
@@ -167,7 +171,10 @@ def test_query_errors_are_returned_with_their_kind(attempt, fake_datasource):
 
     assert response["error"]["code"] == "rejected"
     assert "公開していない表です" in response["error"]["message"]
-    assert (ToolInvocation.objects.get(run=attempt.run).value or {})["error"] == "rejected"
+    invocation = ToolInvocation.objects.get(run=attempt.run)
+    assert (invocation.value or {})["error"] == "rejected"
+    # 失敗の理由は、画面の作業の記録に出すので記録に残す
+    assert "公開していない表です" in invocation.error
 
 
 def test_calls_per_minute_are_limited(attempt, monkeypatch):
@@ -408,3 +415,54 @@ def test_resuming_closes_script_calls_left_running_by_a_previous_attempt(attempt
     assert left.status == ToolStatus.UNKNOWN
     assert left.ended is not None
     runner.session.close()
+
+
+def test_script_calls_are_listed_for_the_work_log(attempt, fake_datasource, app_user, other_user):
+    """作業の記録で、そのときに実行していたToolの呼出しの下に出す。エージェントのToolの呼出しは含めない"""
+    handler = make(attempt)
+    handler.handle(QUERY)
+    handler.handle({"op": "describe", "connector": "販売管理"})
+    fake_datasource.error = ConnectorError(ConnectorErrorKind.REJECTED, "公開していない表です：secrets")
+    handler.handle(QUERY)
+    ToolInvocation.objects.create(
+        run=attempt.run, attempt=attempt, call_id="call-1", name="datasource_query", arguments={}
+    )
+    client = APIClient()
+    client.force_authenticate(app_user)
+
+    res = client.get(f"/api/app/v1/runs/{attempt.run.uid}/script_calls/")
+
+    assert res.status_code == 200
+    calls = res.json()["results"]
+    assert [
+        (c["during"], c["operation"], c["connector"], c["status"], c["rows"], c["tables"], c["error_code"])
+        for c in calls
+    ] == [
+        ("call-shell-1", "datasource_query", "販売管理", ToolStatus.SUCCEEDED, 30, None, ""),
+        ("call-shell-1", "datasource_describe", "販売管理", ToolStatus.SUCCEEDED, None, 1, ""),
+        ("call-shell-1", "datasource_query", "販売管理", ToolStatus.FAILED, None, None, "rejected"),
+    ]
+    assert (calls[0]["sql"], calls[0]["params"], calls[0]["truncated"]) == (QUERY["sql"], ["001"], False)
+    assert "公開していない表です" in calls[2]["error"]
+    # Runのログを見られない人には出さない
+    client.force_authenticate(other_user)
+    assert client.get(f"/api/app/v1/runs/{attempt.run.uid}/script_calls/").status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("names", "guided"),
+    [
+        (("shell", "datasource_describe", "datasource_query"), True),
+        (("datasource_describe", "datasource_query"), False),
+        (("shell", "datasource_describe"), False),
+    ],
+)
+def test_system_prompt_explains_script_connectors_only_with_shell_and_query(names, guided):
+    tools = cast(tuple[Tool, ...], tuple(SimpleNamespace(name=name) for name in names))
+
+    text = system_prompt(tools)
+
+    assert ("yoriki_connector" in text) is guided
+    if guided:
+        # 前面で動かすか job_output で待つこと、行ごとに照会しないこと
+        assert "job_output" in text and "IN (...)" in text

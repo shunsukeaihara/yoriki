@@ -271,6 +271,10 @@ def test_provider_failure_asks_to_switch_models(conversation):
     clarification = ClarificationRequest.objects.get(run=run)
     assert clarification.kind == ClarificationKind.MODEL_SWITCH
     assert kinds(run).count(RunEventKind.LLM_RETRY) == 5
+    # ほかに使えるモデルがなければ、別のモデルを尋ねず、もう一度試すかだけを尋ねる
+    question = clarification.questions[0]
+    assert [o["label"] for o in question["options"]] == ["同じモデルでもう一度試す"]
+    assert question["question"].endswith("もう一度試しますか。")
 
 
 @pytest.mark.django_db

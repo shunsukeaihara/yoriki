@@ -988,7 +988,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description タスクのRunの配信の履歴と送り直し（タスクを管理できる人。authorization.md §7.1） */
+        /** @description タスクのRunの配信の履歴と送り直し（Runを指定した一覧・詳細・送り直しはRunの結果を見られる人、Runを指定しない一覧はタスクを今管理できる人。authorization.md §7.1） */
         get: operations["app_v1_tasks_deliveries_list"];
         put?: never;
         post?: never;
@@ -1005,7 +1005,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description タスクのRunの配信の履歴と送り直し（タスクを管理できる人。authorization.md §7.1） */
+        /** @description タスクのRunの配信の履歴と送り直し（Runを指定した一覧・詳細・送り直しはRunの結果を見られる人、Runを指定しない一覧はタスクを今管理できる人。authorization.md §7.1） */
         get: operations["app_v1_tasks_deliveries_retrieve"];
         put?: never;
         post?: never;

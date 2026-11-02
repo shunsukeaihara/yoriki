@@ -207,7 +207,7 @@ class AppDestinationViewSet(mixins.ListModelMixin, GenericViewSet):
 
 
 @extend_schema(
-    description="タスクのRunの配信の履歴と送り直し（タスクを管理できる人。authorization.md §7.1）",
+    description="タスクのRunの配信の履歴と送り直し（Runを指定した一覧・詳細・送り直しはRunの結果を見られる人、Runを指定しない一覧はタスクを今管理できる人。authorization.md §7.1）",
     tags=["app/task/delivery"],
     parameters=[OpenApiParameter("run", str, description="RunのID")],
 )

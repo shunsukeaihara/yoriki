@@ -2770,7 +2770,8 @@ paths:
   /api/app/v1/tasks/{task}/deliveries/:
     get:
       operationId: app_v1_tasks_deliveries_list
-      description: タスクのRunの配信の履歴と送り直し（タスクを管理できる人。authorization.md §7.1）
+      description: タスクのRunの配信の履歴と送り直し（Runを指定した一覧・詳細・送り直しはRunの結果を見られる人、Runを指定しない一覧はタスクを今管理できる人。authorization.md
+        §7.1）
       parameters:
       - name: cursor
         required: false
@@ -2855,7 +2856,8 @@ paths:
   /api/app/v1/tasks/{task}/deliveries/{uid}/:
     get:
       operationId: app_v1_tasks_deliveries_retrieve
-      description: タスクのRunの配信の履歴と送り直し（タスクを管理できる人。authorization.md §7.1）
+      description: タスクのRunの配信の履歴と送り直し（Runを指定した一覧・詳細・送り直しはRunの結果を見られる人、Runを指定しない一覧はタスクを今管理できる人。authorization.md
+        §7.1）
       parameters:
       - in: query
         name: run

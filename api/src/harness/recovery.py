@@ -39,8 +39,10 @@ def request_model_switch(run: Run, detail: str) -> ClarificationRequest:
     options = [
         {"label": p.name, "description": _("このモデルで続けます"), "value": p.uid} for p in switch_candidates(run)
     ]
+    # 候補がない（修正チャットのタスクのRun等）ときは、別のモデルを尋ねない
+    ask = _("別のモデルで続けますか。") if options else _("もう一度試しますか。")
     options.append({"label": _("同じモデルでもう一度試す"), "description": "", "value": RETRY_VALUE})
-    question = _("このモデルにつながりません（%(detail)s）。別のモデルで続けますか。") % {"detail": detail}
+    question = _("このモデルにつながりません（%(detail)s）。") % {"detail": detail} + ask
     clarification = ClarificationRequest.objects.create(
         run=run,
         kind=ClarificationKind.MODEL_SWITCH,

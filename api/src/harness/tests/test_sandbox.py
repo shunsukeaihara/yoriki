@@ -553,3 +553,39 @@ def test_skill_files_are_readable_under_master(conversation, app_user):
     assert not r["c4"]["is_error"], r["c4"]
     assert path in text(r["c4"])
     assert "loaded" in text(r["c5"])
+
+
+def test_script_queries_a_connector_through_the_runner(conversation, monkeypatch):
+    """Skillのスクリプトから `yoriki_connector` で問い合わせる（design.md §4.9.6）。Runnerが `shell` の終わりを待つ
+    間に要求を処理し、結果のCSVを /workspace/input に置いて、スクリプトが読む"""
+    from connector.factories import ConnectorFactory  # noqa: PLC0415
+    from harness.tools import datasource as datasource_module  # noqa: PLC0415
+    from run.models import ToolInvocation  # noqa: PLC0415
+
+    from .test_connectors import TABLES, FakeDatasource  # noqa: PLC0415
+
+    FakeDatasource.calls, FakeDatasource.error = [], None
+    monkeypatch.setattr(datasource_module, "get_adapter", FakeDatasource)
+    ConnectorFactory.create(name="販売管理", version__tables=TABLES)
+    script = (
+        "import yoriki_connector as c\n"
+        "for code in ['001', '002']:\n"
+        "    r = c.query('販売管理', 'SELECT code, name FROM vendors WHERE code = ?', [code])\n"
+        "    print(r.row_count, r.rows[0]['name'], r.path.startswith('/workspace/input/connectors/'))\n"
+        "try:\n    c.query('ほかのDB', 'SELECT 1')\nexcept c.ConnectorError as e:\n    print(e.code)\n"
+    )
+    run = post(conversation)
+    adapter = FakeAdapter([calls(("c1", "shell", shell(f"python - <<'PY'\n{script}PY"))), reply("照合しました。")])
+    run = execute(run, adapter)
+
+    assert run.status == RunStatus.COMPLETED
+    output = text(results(run)["c1"])
+    assert output.startswith("Exit code: 0")
+    assert "30 取引先1 True\n30 取引先1 True\ninvalid_argument" in output
+    invocations = ToolInvocation.objects.filter(run=run, call_id__startswith="script-").order_by("pk")
+    assert [(i.name, (i.value or {})["during"], i.arguments["params"]) for i in invocations] == [
+        ("datasource_query", "c1", ["001"]),
+        ("datasource_query", "c1", ["002"]),
+    ]
+    assert Artifact.objects.filter(run=run, kind=ArtifactKind.CONNECTOR_RESULT).count() == 2
+    assert containers(run) == []

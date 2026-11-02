@@ -10,6 +10,7 @@ import hashlib
 import logging
 import os
 import posixpath
+import queue
 import shutil
 import tarfile
 import tempfile
@@ -20,7 +21,7 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import IO, Any, TypeVar
+from typing import IO, Any, Protocol, TypeVar
 
 from django.conf import settings
 from django.utils import timezone
@@ -28,6 +29,7 @@ from nanoid import generate
 
 from artifact.models import CONNECTOR_RESULTS_DIR, Artifact, ArtifactKind, BlobObject
 from artifact.storage import StorageBackend, StorageError, StoredObject, get_storage
+from run.errors import LeaseLost
 from run.models import Checkpoint, ExecutionAttempt, Run, RunKind
 from runtime.launcher import (
     ATTEMPT_LABEL,
@@ -36,6 +38,7 @@ from runtime.launcher import (
     WORK_DIR,
     Exec,
     Launcher,
+    Relay,
     Sandbox,
     SandboxSpec,
     SandboxUnavailable,
@@ -177,6 +180,14 @@ class Job:
         return data.decode(errors="replace")
 
 
+class ScriptHandler(Protocol):
+    """Skillのスクリプトからの要求を処理するもの（harness/script_connectors.py）"""
+
+    def available(self) -> bool: ...
+
+    def handle(self, request: dict[str, Any]) -> dict[str, Any]: ...
+
+
 class SandboxSession:
     def __init__(
         self,
@@ -205,6 +216,12 @@ class SandboxSession:
         self.notice = ""
         # DBに触ってよいスレッド（Runner）
         self.owner_thread = threading.get_ident()
+        # Skillのスクリプトからの要求（design.md §4.9.6）。中継から届いた要求を積み、Runnerのスレッドで処理する
+        self.script_handler: ScriptHandler | None = None
+        self.relay: Relay | None = None
+        # 中継を始められなかった。このAttemptでは始め直さない（コマンドを始めるたびに待たないように）
+        self.relay_failed = False
+        self.script_requests: queue.Queue[tuple[Relay, int, dict[str, Any]]] = queue.Queue()
 
     @property
     def started(self) -> bool:
@@ -238,6 +255,7 @@ class SandboxSession:
         # イメージのpullで、Attemptのleaseより長くかかることがある
         self.sandbox = self._keep_lease(lambda: launcher.start(spec, name), on_abandon=Sandbox.remove)
         self._restore(self.sandbox)
+        self._start_relay()
         return self.sandbox
 
     @property
@@ -412,6 +430,54 @@ class SandboxSession:
         notice, self.notice = self.notice, ""
         return notice
 
+    # --- Skillのスクリプトからの要求（design.md §4.9.6） ---
+
+    def _start_relay(self) -> None:
+        """スクリプトからConnectorを呼べるRunなら、Sandboxの中の中継を始める（止まっていれば始め直す）。始められ
+        なければ、このAttemptではスクリプトからは呼べないまま続ける（スクリプトには「使えない」と返る）"""
+        handler = self.script_handler
+        if self.sandbox is None or self.relay_failed or handler is None or not handler.available():
+            return
+        if self.relay is not None and not self.relay.done.is_set():
+            return
+        requests = self.script_requests
+        try:
+            self.relay = self.sandbox.start_relay(
+                lambda relay, request_id, request: requests.put((relay, request_id, request))
+            )
+        except SandboxUnavailable as exc:
+            logger.warning("run %s: cannot start the connector relay: %s", self.run.uid, exc)
+            self.relay = None
+            self.relay_failed = True
+
+    def serve_script_requests(self, timeout: float = 0) -> None:
+        """届いている要求を処理する。`timeout` 秒まで、最初の要求を待つ。Runnerのスレッドから呼ぶ"""
+        while True:
+            try:
+                relay, request_id, request = (
+                    self.script_requests.get(timeout=timeout) if timeout else self.script_requests.get_nowait()
+                )
+            except queue.Empty:
+                return
+            timeout = 0
+            handler = self.script_handler
+            if handler is None:
+                response = {"ok": False, "error": {"code": "unavailable", "message": "Connectors are not available."}}
+            else:
+                try:
+                    response = handler.handle(request)
+                except (LeaseLost, SandboxUnavailable):
+                    raise
+                except Exception:
+                    logger.exception("run %s: a connector request from a script failed", self.run.uid)
+                    response = {"ok": False, "error": {"code": "internal", "message": "The request failed."}}
+            relay.respond(request_id, response)
+
+    def _stop_relay(self) -> None:
+        if self.relay is not None:
+            self.relay.close()
+            self.relay = None
+
     # --- コマンド ---
 
     def running_jobs(self, *, refresh: bool = False) -> list[Job]:
@@ -446,6 +512,8 @@ class SandboxSession:
     def start_job(self, command: str, workdir: str, description: str) -> Job:
         """呼び出し側で、動いているジョブの数を確かめておくこと"""
         sandbox = self.ensure()
+        # 中継が止まっていれば（Sandboxの中のコマンドで止められた等）、始め直す
+        self._start_relay()
         job_id = new_job_id()
         path = self.dir / "jobs" / f"{job_id}.log"
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -477,7 +545,11 @@ class SandboxSession:
             remaining = deadline - time.monotonic()
             if remaining <= 0 or interrupted():
                 return False
-            job.execution.done.wait(min(remaining, 1.0))
+            if self.relay is not None:
+                # 待つ間に、ジョブのスクリプトからの要求を処理する（要求が届けばすぐ処理する）
+                self.serve_script_requests(timeout=min(remaining, 0.2))
+            else:
+                job.execution.done.wait(min(remaining, 1.0))
             if time.monotonic() - last_beat >= 15:
                 self.heartbeat()
                 last_beat = time.monotonic()
@@ -553,6 +625,8 @@ class SandboxSession:
         """
         if self.sandbox is None:
             return None
+        # スクリプトからの要求はもう受けない（待っているスクリプトには応答が返らず、接続が閉じる）
+        self._stop_relay()
         # 直前に終わったジョブを、止めたジョブとして記録しない
         running = self.running_jobs(refresh=True)
         for job in running:
@@ -624,6 +698,7 @@ class SandboxSession:
 
     def close(self) -> None:
         """Sandboxを消し、Attemptの作業領域を消す。どの終わり方でも呼ぶ"""
+        self._stop_relay()
         if self.sandbox is not None:
             self.sandbox.remove()
             self.sandbox = None

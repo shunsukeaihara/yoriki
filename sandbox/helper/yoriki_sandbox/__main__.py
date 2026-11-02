@@ -7,6 +7,7 @@ from typing import Any
 from .common import ToolError, read_request, respond
 from .execute import run_exec, run_init, run_kill
 from .read import run_read
+from .relay import run_relay
 from .search import run_glob, run_grep
 from .text import run_edit, run_write
 from .workspace import run_init_env, run_stat, run_version
@@ -24,13 +25,14 @@ COMMANDS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
 
 
 def main(argv: list[str]) -> int:
-    names = (*COMMANDS, "exec", "kill", "init")
+    names = (*COMMANDS, "exec", "kill", "init", "relay")
     if len(argv) != 1 or argv[0] not in names:
         sys.stderr.write(f"usage: yoriki-sandbox {{{','.join(names)}}} < request.json\n")
         return 2
     command = argv[0]
-    if command == "init":
-        return run_init()
+    if command in ("init", "relay"):
+        # 引数のJSONは読まない（relay は標準入力をRunnerからの応答に使い続ける）
+        return run_init() if command == "init" else run_relay()
     try:
         # exec はコマンドの終了コードで終わり、結果のJSONは返さない（出力はコマンドのもの）
         if command == "exec":

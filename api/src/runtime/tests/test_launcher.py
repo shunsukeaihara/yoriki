@@ -191,7 +191,29 @@ class TestSandbox:
         info = sandbox.api.inspect_container(sandbox.container_id)
         s = spec(image=info["Config"]["Image"], runtime=settings.YORIKI_SANDBOX_RUNTIME)
         assert verify_container(info, s) == []
-        assert sandbox.helper("version", {}) | {"python": ""} == {"ok": True, "contract": 1, "python": ""}
+        assert sandbox.helper("version", {}) | {"python": ""} == {"ok": True, "contract": 2, "python": ""}
+
+    def test_relay_passes_requests_from_scripts_and_returns_responses(self, sandbox, tmp_path):
+        received = []
+
+        def on_request(relay, request_id, request):
+            received.append(request)
+            relay.respond(request_id, {"ok": False, "error": {"code": "unavailable", "message": "応答です"}})
+
+        relay = sandbox.start_relay(on_request)
+        script = (
+            "import yoriki_connector as c\n"
+            "try:\n    c.describe('販売DB')\nexcept c.ConnectorError as e:\n    print(e.code, e.message)\n"
+        )
+        path = tmp_path / "out.log"
+        request = {"command": f'python -c "{script}"', "cwd": "/workspace/work", "env": {"PATH": "/usr/local/bin:/bin"}}
+        execution = sandbox.start_exec(request, path.open("wb"), output_limit=4096)
+        assert execution.done.wait(timeout=60)
+        assert path.read_text() == "unavailable 応答です\n"
+        assert received == [{"op": "describe", "connector": "販売DB"}]
+        relay.close()
+        assert relay.done.wait(timeout=30)
+        assert not relay.respond(1, {"ok": True})
 
     def test_exec_writes_the_output_and_reports_the_exit_code(self, sandbox, tmp_path):
         path = tmp_path / "out.log"

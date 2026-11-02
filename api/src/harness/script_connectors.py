@@ -1,0 +1,189 @@
+"""SkillのスクリプトからConnectorを使う（design.md §4.9.6、harness.md §10.2）。
+
+スクリプトは `yoriki_connector`（Sandboxのイメージのライブラリ）で要求を送り、Sandboxの中の中継
+（`yoriki-sandbox relay`）と `docker exec` の通信路を通ってRunnerに届く。要求は、エージェントのTool
+（`datasource_query`・`datasource_describe`）と同じ処理（harness/tools/datasource.py）で実行する。Runに固定した
+Connectorの一覧、操作のたびの権限の確かめ直し（依頼した人が今も使えるか、タスクのRunならタスクに固定したもので
+範囲の中か、機密ならローカルLLMか）、読取り専用の強制、行数・大きさ・時間の上限はToolと同じで、スクリプトからの
+呼出しだからといって範囲を広げない。呼べるのは、そのRunでエージェントにそのToolを出しているときだけ。
+
+要求はRunnerのスレッドで1つずつ処理する（記録と接続の枠をDBで扱うため。Toolと同じ）。呼出しはToolInvocationに
+記録し（`call_id` は `script-` で始まる）、モデルの文脈（RunEvent）には入れない。結果はモデルではなくスクリプトに
+返す。スクリプトの不具合で社内DBに大量の問い合わせが流れないよう、1つのRunの回数と、1分あたりの頻度に上限を置く。
+"""
+
+import logging
+import time
+from collections import deque
+from collections.abc import Callable
+from typing import Any
+
+from django.utils import timezone
+from nanoid import generate
+
+from llm.providers.base import TextPart, ToolCall
+from run.models import ExecutionAttempt, Run, ToolInvocation, ToolStatus
+
+from .connectors import DATASOURCE_TOOL_NAMES, catalog_names
+from .tools.base import ToolContext, ToolResult
+from .tools.datasource import Described, Queried, describe_tables, make_datasource_tools, run_query
+
+logger = logging.getLogger(__name__)
+
+DESCRIBE_NAME, QUERY_NAME = DATASOURCE_TOOL_NAMES
+OPERATIONS = {"describe": DESCRIBE_NAME, "query": QUERY_NAME}
+# スクリプトからの呼出しのToolInvocationの `call_id` の始まり
+SCRIPT_CALL_PREFIX = "script-"
+# 1つのRunでスクリプトから呼べる回数（Attemptをまたいで数える）と、1分あたりの回数
+MAX_CALLS_PER_RUN = 1000
+MAX_CALLS_PER_MINUTE = 120
+
+
+class ScriptConnectors:
+    """1つのAttemptで、スクリプトからの要求を処理する。Runnerのスレッドからだけ呼ぶ"""
+
+    def __init__(
+        self,
+        run: Run,
+        attempt: ExecutionAttempt,
+        *,
+        session,
+        exposed: Callable[[], frozenset[str]],
+        current_call: Callable[[], str],
+        clock: Callable[[], float] = time.monotonic,
+    ):
+        self.run = run
+        self.attempt = attempt
+        self.session = session
+        # このRunに今出しているToolの名前と、今実行しているToolの呼出しのID（あれば）
+        self.exposed = exposed
+        self.current_call = current_call
+        self.clock = clock
+        self.recent: deque[float] = deque()
+        self.count: int | None = None
+
+    def available(self) -> bool:
+        """このRunでスクリプトからConnectorを呼べるか（中継を始めるかの判断）"""
+        return bool(catalog_names(self.run)) and bool(set(DATASOURCE_TOOL_NAMES) & self.exposed())
+
+    def handle(self, request: dict[str, Any]) -> dict[str, Any]:
+        """要求を処理して、スクリプトへ返す応答を作る"""
+        operation = request.get("op")
+        name = OPERATIONS.get(operation) if isinstance(operation, str) else None
+        if name is None:
+            return _error("invalid_argument", 'op must be "query" or "describe".')
+        exposed = self.exposed()
+        names = catalog_names(self.run)
+        if name not in exposed or not names:
+            return _error(
+                "unavailable",
+                f"Connectors cannot be used with {operation}() in this work: the {name} tool is not available.",
+            )
+        # 引数はToolと同じSchemaで確かめる（知らない項目も断る）
+        arguments = {key: value for key, value in request.items() if key != "op"}
+        tool = next(t for t in make_datasource_tools(names) if t.name == name)
+        if problem := tool.validate(arguments):
+            return _error("invalid_argument", problem)
+        if limited := self._limit():
+            return limited
+        return self._execute(name, arguments)
+
+    def _limit(self) -> dict[str, Any] | None:
+        now = self.clock()
+        while self.recent and now - self.recent[0] >= 60:
+            self.recent.popleft()
+        if len(self.recent) >= MAX_CALLS_PER_MINUTE:
+            retry_after = max(60 - (now - self.recent[0]), 0.1)
+            return _error(
+                "rate_limited",
+                f"Too many connector calls from scripts (up to {MAX_CALLS_PER_MINUTE} per minute).",
+                retry_after=round(retry_after, 1),
+            )
+        if self.count is None:
+            self.count = ToolInvocation.objects.filter(run=self.run, call_id__startswith=SCRIPT_CALL_PREFIX).count()
+        if self.count >= MAX_CALLS_PER_RUN:
+            return _error(
+                "limit_exceeded",
+                f"This work has reached the limit of {MAX_CALLS_PER_RUN} connector calls from scripts. Fetch "
+                "the rows you need with fewer queries (for example WHERE ... IN (...) or one query for the whole "
+                "table), then join them in the script.",
+            )
+        self.recent.append(now)
+        self.count += 1
+        return None
+
+    def _execute(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        call = ToolCall(f"{SCRIPT_CALL_PREFIX}{generate(size=16)}", name, arguments)
+        origin = {"via": "script", "during": self.current_call()}
+        with self.run.fenced(self.attempt) as run:
+            invocation = ToolInvocation.objects.create(
+                run=run,
+                attempt=self.attempt,
+                call_id=call.id,
+                name=name,
+                arguments=arguments,
+                status=ToolStatus.RUNNING,
+                value=origin,
+            )
+        context = ToolContext(
+            self.run, self.attempt, call, invocation=invocation.uid, session=self.session, exposed=self.exposed()
+        )
+        outcome: Described | Queried | ToolResult
+        if name == DESCRIBE_NAME:
+            outcome = describe_tables(arguments, context)
+        else:
+            # 行はファイルで渡すので、メモリには残さない
+            outcome = run_query(arguments, context, keep=0)
+        if isinstance(outcome, ToolResult):
+            value = origin | (outcome.value or {})
+            response = _error(str(value.get("error") or "unavailable"), _text(outcome))
+            status = ToolStatus.FAILED
+        else:
+            value = origin | outcome.value()
+            response = _described(outcome) if isinstance(outcome, Described) else _queried(outcome)
+            status = ToolStatus.SUCCEEDED
+        with self.run.fenced(self.attempt):
+            ToolInvocation.objects.filter(pk=invocation.pk).update(status=status, value=value, ended=timezone.now())
+        return response
+
+
+def _described(described: Described) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "connector": described.connector.name,
+        "version": described.version.number,
+        "tables": [
+            {
+                "schema": table.schema,
+                "name": table.name,
+                "kind": table.kind,
+                "description": table.description,
+                "columns": [
+                    {"name": column.name, "type": column.type, "description": column.description}
+                    for column in table.columns
+                ],
+            }
+            for table in described.tables
+        ],
+    }
+
+
+def _queried(queried: Queried) -> dict[str, Any]:
+    result = queried.result
+    return {
+        "ok": True,
+        "connector": queried.connector.name,
+        "version": queried.version.number,
+        "path": queried.path,
+        "columns": list(result.columns),
+        "row_count": result.row_count,
+        "truncated": result.truncated,
+    }
+
+
+def _text(result: ToolResult) -> str:
+    return "".join(part.text for part in result.content if isinstance(part, TextPart))
+
+
+def _error(code: str, message: str, **detail: Any) -> dict[str, Any]:
+    return {"ok": False, "error": {"code": code, "message": message, **detail}}

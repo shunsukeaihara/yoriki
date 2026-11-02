@@ -12,6 +12,7 @@
 import io
 import tempfile
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from artifact.models import CONNECTOR_RESULTS_DIR, Artifact, BlobObject
@@ -186,7 +187,18 @@ def _escape(value: str) -> str:
 # --- datasource_describe ---
 
 
-def describe(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+@dataclass(frozen=True)
+class Described:
+    connector: Connector
+    version: ConnectorVersion
+    tables: list[TableInfo]
+
+    def value(self) -> dict[str, Any]:
+        return {"connector": self.connector.uid, "version": self.version.number, "tables": len(self.tables)}
+
+
+def describe_tables(arguments: dict[str, Any], context: ToolContext) -> Described | ToolResult:
+    """表の一覧を読む。Toolとスクリプトからの呼出し（harness/script_connectors.py）で同じものを使う"""
     resolved = _resolve(arguments, context)
     if isinstance(resolved, ToolResult):
         return resolved
@@ -201,6 +213,14 @@ def describe(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
             tables = _keep_alive(context, get_adapter(connector, version).describe, renew)
     except ConnectorError as exc:
         return _failed(exc, connector, version)
+    return Described(connector, version, tables)
+
+
+def describe(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+    described = describe_tables(arguments, context)
+    if isinstance(described, ToolResult):
+        return described
+    connector, version, tables = described.connector, described.version, described.tables
     text = render_tables(connector, version, tables)
     if _can_read_files(context):
         text = limited(context, text, head_ratio=1)
@@ -209,7 +229,7 @@ def describe(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         text = close_cut(clipped.text) + ("\n[output truncated]" if clipped.truncated else "")
     return ToolResult.text(
         text,
-        value={"connector": connector.uid, "version": version.number, "tables": len(tables)},
+        value=described.value(),
         meta={"connector": connector.name, "version": version.number},
     )
 
@@ -240,13 +260,62 @@ def render_tables(connector: Connector, version: ConnectorVersion, tables: list[
 # --- datasource_query ---
 
 
+@dataclass(frozen=True)
+class Queried:
+    connector: Connector
+    version: ConnectorVersion
+    result: QueryResult
+    artifact: Artifact
+    # Sandboxの中の結果のCSV
+    path: str
+
+    def value(self) -> dict[str, Any]:
+        return {
+            "connector": self.connector.uid,
+            "version": self.version.number,
+            "rows": self.result.row_count,
+            "truncated": self.result.truncated,
+            "bytes": self.result.csv_bytes,
+            "elapsed_ms": self.result.elapsed_ms,
+            "tables": list(self.result.tables),
+            "sql": self.result.sql,
+            "artifact": self.artifact.uid,
+            "path": self.path,
+        }
+
+
 def query(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
+    queried = run_query(arguments, context, keep=PREVIEW_ROWS if _can_read_files(context) else INLINE_ROWS)
+    if isinstance(queried, ToolResult):
+        return queried
+    connector, version, result = queried.connector, queried.version, queried.result
+    if _can_read_files(context):
+        text = _render_result(connector, version, result, queried.path, _limit_name(result, version))
+    else:
+        # ファイルを読めないRunでは、上限の中の結果を表として見せる（harness.md §10.2）
+        clipped = clip(
+            _render_result(connector, version, result, "", _limit_name(result, version)),
+            limit_for(context),
+            head_ratio=1,
+        )
+        text = close_cut(clipped.text) + (
+            "\n[output truncated: select fewer rows or columns]" if clipped.truncated else ""
+        )
+    return ToolResult.text(
+        text,
+        value=queried.value(),
+        meta={"connector": connector.name, "version": version.number, "rows": result.row_count},
+    )
+
+
+def run_query(arguments: dict[str, Any], context: ToolContext, *, keep: int) -> Queried | ToolResult:
+    """問い合わせを実行し、結果をCSVのArtifactにしてSandboxの /workspace/input に置く。メモリには先頭の `keep` 行
+    だけを残す。Toolとスクリプトからの呼出し（harness/script_connectors.py）で同じものを使う"""
     resolved = _resolve(arguments, context)
     if isinstance(resolved, ToolResult):
         return resolved
     connector, version = resolved
     sql, params = arguments["sql"], list(arguments.get("params") or [])
-    keep = PREVIEW_ROWS if _can_read_files(context) else INLINE_ROWS
     with tempfile.TemporaryFile() as raw:
         # 行は読むたびにCSVで書き、メモリには見せる行だけを残す
         out = io.TextIOWrapper(raw, encoding="utf-8", newline="")
@@ -271,35 +340,7 @@ def query(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     if context.session is not None and context.session.started:
         # 動いているSandboxの /workspace/input にも置く（bind mountなので、そのまま見える）
         context.session.sync_inputs()
-    sandbox_path = f"/workspace/input/{path}"
-    if _can_read_files(context):
-        text = _render_result(connector, version, result, sandbox_path, _limit_name(result, version))
-    else:
-        # ファイルを読めないRunでは、上限の中の結果を表として見せる（harness.md §10.2）
-        clipped = clip(
-            _render_result(connector, version, result, "", _limit_name(result, version)),
-            limit_for(context),
-            head_ratio=1,
-        )
-        text = close_cut(clipped.text) + (
-            "\n[output truncated: select fewer rows or columns]" if clipped.truncated else ""
-        )
-    return ToolResult.text(
-        text,
-        value={
-            "connector": connector.uid,
-            "version": version.number,
-            "rows": result.row_count,
-            "truncated": result.truncated,
-            "bytes": result.csv_bytes,
-            "elapsed_ms": result.elapsed_ms,
-            "tables": list(result.tables),
-            "sql": result.sql,
-            "artifact": artifact.uid,
-            "path": sandbox_path,
-        },
-        meta={"connector": connector.name, "version": version.number, "rows": result.row_count},
-    )
+    return Queried(connector, version, result, artifact, f"/workspace/input/{path}")
 
 
 def _limit_name(result: QueryResult, version: ConnectorVersion) -> str:

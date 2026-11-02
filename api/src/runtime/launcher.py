@@ -222,6 +222,74 @@ class Exec:
         return next((e["pgid"] for e in self.events if e.get("event") == "started"), None)
 
 
+class Relay:
+    """Sandboxの中の `yoriki-sandbox relay`（CONTRACT.md §4.9）との通信路。Skillのスクリプトからの要求を、
+    受け取るたびに `on_request` へ渡す（受け取るスレッドで呼ぶので、`on_request` はDBに触らず、列に積むだけにする）。
+    応答は `respond` で返す。要求の中身はSandboxの中で作られたものなので、確かめるのは受け取った側"""
+
+    def __init__(self, exec_id: str, on_request: Callable[["Relay", int, dict[str, Any]], None]):
+        self.exec_id = exec_id
+        self.on_request = on_request
+        self.ready = threading.Event()
+        self.done = threading.Event()
+        self.error = ""
+        self._raw: socket.socket | None = None
+        self._lock = threading.Lock()
+
+    def respond(self, request_id: int, response: dict[str, Any]) -> bool:
+        """応答を返す。通信路が閉じていて返せなければFalse"""
+        line = json.dumps({"id": request_id, "response": response}, ensure_ascii=False).encode() + b"\n"
+        with self._lock:
+            if self._raw is None or self.done.is_set():
+                return False
+            try:
+                self._raw.sendall(line)
+            except OSError:
+                return False
+        return True
+
+    def close(self) -> None:
+        """標準入力を閉じる（中継のプロセスは終わる）。待っている要求には応答しない"""
+        with self._lock:
+            if self._raw is not None:
+                with contextlib.suppress(OSError):
+                    self._raw.shutdown(socket.SHUT_WR)
+                self._raw = None
+
+    def _pump(self, attached: "_Attached") -> None:
+        pending_out = pending_err = b""
+        try:
+            with attached as frames:
+                with self._lock:
+                    self._raw = attached.raw
+                for stream, chunk in frames:
+                    if stream == STDOUT:
+                        lines, _sep, pending_out = (pending_out + chunk).rpartition(b"\n")
+                        for line in lines.splitlines():
+                            self._dispatch(line)
+                    elif stream == STDERR:
+                        lines, _sep, pending_err = (pending_err + chunk).rpartition(b"\n")
+                        if any(e.get("event") == "ready" for e in _events(lines)):
+                            self.ready.set()
+        except (OSError, DockerException) as exc:
+            self.error = str(exc)
+        finally:
+            with self._lock:
+                self._raw = None
+            self.done.set()
+            self.ready.set()
+
+    def _dispatch(self, line: bytes) -> None:
+        try:
+            message = json.loads(line)
+            request_id, request = message["id"], message["request"]
+        except (ValueError, KeyError, TypeError):
+            logger.warning("relay %s: ignoring a malformed line", self.exec_id[:12])
+            return
+        if isinstance(request_id, int) and not isinstance(request_id, bool) and isinstance(request, dict):
+            self.on_request(self, request_id, request)
+
+
 class Sandbox:
     def __init__(self, client: docker.DockerClient, container_id: str, name: str):
         self.client = client
@@ -285,6 +353,18 @@ class Sandbox:
 
         threading.Thread(target=pump, name=f"sandbox-exec-{exec_id[:12]}", daemon=True).start()
         return execution
+
+    def start_relay(self, on_request: Callable[[Relay, int, dict[str, Any]], None], *, timeout: int = 10) -> Relay:
+        """`yoriki-sandbox relay` を始め、ソケットを開いたことを確かめて通信路を返す（CONTRACT.md §4.9）"""
+        relay = Relay(self._create_exec([HELPER, "relay"]), on_request)
+        attached = _Attached(self.api, relay.exec_id, None, None)
+        threading.Thread(
+            target=relay._pump, args=(attached,), name=f"sandbox-relay-{relay.exec_id[:12]}", daemon=True
+        ).start()
+        if not relay.ready.wait(timeout) or relay.done.is_set():
+            relay.close()
+            raise SandboxUnavailable(f"the relay did not start: {relay.error or 'no ready event'}")
+        return relay
 
     def exec_state(self, exec_id: str) -> tuple[bool, int | None]:
         """（実行中か、終了コード）。終了と終了コードの正本はDockerのexecの状態（CONTRACT.md §4.1）"""
@@ -395,12 +475,14 @@ class _Attached:
     """execの接続（hijackしたソケット）。docker-pyの `exec_start(socket=True)` は応答のオブジェクトを返さず、
     閉じた後のGCで警告が出るので、同じ手順を内部のメソッドで行い、応答ごと閉じる"""
 
-    def __init__(self, api, exec_id: str, stdin: bytes | IO[bytes], timeout: int | None):
+    def __init__(self, api, exec_id: str, stdin: bytes | IO[bytes] | None, timeout: int | None):
         self.api = api
         self.exec_id = exec_id
+        # Noneなら標準入力を開いたままにする（`raw` へ書く。中継の通信路）
         self.stdin = stdin
         self.timeout = timeout
         self.response: Any = None
+        self.raw: socket.socket | None = None
 
     def __enter__(self) -> Iterator[tuple[int, bytes]]:
         self.response = self.api._post_json(
@@ -413,6 +495,9 @@ class _Attached:
         sock = self.api._get_raw_response_socket(self.response)
         raw = getattr(sock, "_sock", sock)
         raw.settimeout(self.timeout)
+        self.raw = raw
+        if self.stdin is None:
+            return frames_iter(sock, tty=False)
         if isinstance(self.stdin, bytes):
             raw.sendall(self.stdin)
         else:

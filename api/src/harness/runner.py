@@ -7,6 +7,7 @@
 import contextlib
 import json
 import logging
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, wait
@@ -87,6 +88,7 @@ from .prompts import system_prompt
 from .recovery import request_model_switch
 from .result_files import missing_files
 from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, SandboxSession
+from .script_connectors import ScriptConnectors
 from .skill_edit import revoked_edit
 from .skills import SkillContentSource, explicit_versions, revoked_skill
 from .task_edit import revoked_task_edit
@@ -199,6 +201,17 @@ class Runner:
         self.adapter_factory = adapter_factory
         self.sleep = sleep
         self.session = session_factory(self.run_obj, attempt, heartbeat=attempt.heartbeat)
+        # 今実行しているToolの呼出しのID（Runnerのスレッドのもの）。スクリプトからの呼出しの記録に添える
+        self.current_call_id = ""
+        self.owner_thread = threading.get_ident()
+        # Skillのスクリプトからの要求（design.md §4.9.6）。このRunに今出しているToolで、呼べるかを決める
+        self.session.script_handler = ScriptConnectors(
+            self.run_obj,
+            attempt,
+            session=self.session,
+            exposed=lambda: frozenset(t.name for t in self.tools),
+            current_call=lambda: self.current_call_id,
+        )
         # このAttemptを始めたときのRunEventの最後のsequence。読んだファイルの版の記録を選ぶのに使う
         self.start_sequence = 0
         self.warned_running_jobs = False
@@ -474,6 +487,8 @@ class Runner:
         """終わったバックグラウンドのジョブを job.finished として記録し、モデルに知らせる（harness.md §8.3）"""
         if not self.session.started:
             return
+        # バックグラウンドのジョブのスクリプトからの要求で、待っているものを処理する
+        self.session.serve_script_requests()
         for job in self.session.finished_unreported():
             job.reported = True
             if job.stopped == "timeout":
@@ -1054,6 +1069,9 @@ class Runner:
             interrupted=self._interrupted,
             exposed=frozenset(t.name for t in self.tools),
         )
+        owner = threading.get_ident() == self.owner_thread
+        if owner:
+            self.current_call_id = call.id
         try:
             result = tool.execute(call.arguments, context)
             if context.spilled:
@@ -1064,6 +1082,9 @@ class Runner:
         except Exception as exc:
             logger.exception("run %s: tool %s failed", self.run_obj.uid, call.name)
             return ToolResult.error(f"The tool failed: {type(exc).__name__}. Try a different approach.")
+        finally:
+            if owner:
+                self.current_call_id = ""
 
     def _finish_tool(self, tool: Tool, call: ToolCall, invocation: ToolInvocation, result: ToolResult) -> ToolResult:
         if result.waits_for_user:

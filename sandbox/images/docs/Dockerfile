@@ -45,7 +45,11 @@ RUN pip download --no-cache-dir --disable-pip-version-check --no-deps --only-bin
 
 COPY helper/yoriki_sandbox /opt/yoriki/lib/yoriki_sandbox
 COPY helper/bin/yoriki-sandbox /opt/yoriki/bin/yoriki-sandbox
-RUN python -m compileall -q /opt/yoriki/lib \
+# Skillのスクリプトが使うライブラリ（yoriki_connector。CONTRACT.md §1）。イメージのPythonから読めるようにする
+# （/workspace/env の仮想環境も --system-site-packages なので読める）
+COPY python /opt/yoriki/python
+RUN python -m compileall -q /opt/yoriki/lib /opt/yoriki/python \
+    && echo /opt/yoriki/python > "$(python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/yoriki.pth" \
     # Sandboxの利用者（design.md §7.2）。HOMEはRunnerが /workspace/work/.home にする
     && groupadd --gid 10001 sandbox \
     && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /workspace/work/.home --shell /bin/bash sandbox \
@@ -56,7 +60,7 @@ RUN python -m compileall -q /opt/yoriki/lib \
 ENV LANG=C.UTF-8 \
     PATH=/workspace/env/bin:/opt/yoriki/bin:/usr/local/bin:/usr/bin:/bin
 
-LABEL org.yoriki.sandbox-contract="1" \
+LABEL org.yoriki.sandbox-contract="2" \
       org.yoriki.sandbox-profile="docs" \
       org.opencontainers.image.title="yoriki-sandbox-docs" \
       org.opencontainers.image.description="Yoriki sandbox for document processing (Python, PDF, Office)" \

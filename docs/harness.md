@@ -660,9 +660,9 @@ Runが使うSkill（`/` で指定したものと、読み込んだもの）が�
 - Skillのスクリプトからの呼出し（design.md §4.9.6。`harness/script_connectors.py`）も、同じConnectorの処理とToolInvocationの記録を通す。
   - Sandboxを起動したとき、このRunに `datasource_query`・`datasource_describe` を出していて、Connectorの一覧があれば、Sandboxの中の中継（`yoriki-sandbox relay`。sandbox/CONTRACT.md §4.9）を `docker exec` で始める。中継が止まっていれば、次にコマンドを始めるときに始め直す。始められなければ、スクリプトからは呼べないまま続ける（ライブラリが `unavailable` を返す）。
   - 中継から届いた要求は、受け取るスレッドで列に積むだけにし（32件まで。あふれたら `busy`。中継はSandboxの中のもので置き換えられうるので、受け取る1行も2MiBまでにし、超えたら通信路を閉じる）、Runnerのスレッドで1つずつ処理する（1回に8件まで。残りは次に処理する）。応答は書込みのスレッドが書き、Runnerのスレッドは待たない（中継が読まずに書く前の応答が64件か16MiBを超えたら閉じる）。応答1件は4MiBまでで、超える結果（表・列の多い `describe`）は `too_large` で返し、失敗として記録する。処理するのは、ジョブの終わりを待つ間（`shell`・`job_output`。要求が届けばすぐ、1件ずつ処理し、間で待つ時間の期限と取消を確かめる。処理中の1件は止められないので、その分は `timeout_seconds` を過ぎうる）と、ステップの区切り（終わったジョブを知らせる前）。モデルの応答を待つ間は処理しないので、スクリプトは待つ。
-  - 引数は、Toolと同じSchema（`connector` は一覧の名前のenum、知らない項目は断る）で確かめる。操作のToolをこのRunに今出していなければ断る（Skillの「使ってよいTool」で外したRunでは、スクリプトからも呼べない）。
+  - 引数は、Toolと同じSchema（`connector` は一覧の名前のenum、知らない項目は断る）で確かめ、全体で64KiBまで（記録に残すため）。前のAttemptで閉じられなかった呼出し（leaseを失った等）は、再開のときに結果不明で閉じる。操作のToolをこのRunに今出していなければ断る（Skillの「使ってよいTool」で外したRunでは、スクリプトからも呼べない）。
   - 呼出しはToolInvocation（`call_id` は `script-` で始まる。`value` に `via: "script"` と、そのときに実行していたToolの呼出しのID `during`）に記録し、RunEventには入れない（モデルの文脈に結果を入れない）。結果のCSVはToolと同じくArtifactにして `/workspace/input/connectors/{invocation_id}/result.csv` に置き、スクリプトには場所・列・行数・打ち切ったかを返す（行はライブラリがファイルから読む）。
-  - 上限：1つのRunで1,000回（Attemptをまたいで、記録した呼出しを数える）、1分に120回（Attemptの中で、断る要求も含めて数える。超えたら `rate_limited` と待つ秒数を返し、ライブラリが待ってやり直す）。
+  - 上限：1つのRunで1,000回（Attemptをまたいで、記録した呼出しを数える）、1分に120回（Attemptの中では断る要求も含めて数え、前のAttemptの直近1分の記録した呼出しも数える。超えたら `rate_limited` と待つ秒数を返し、ライブラリが待ってやり直す）。
 
 ### 10.3 確認待ち（`ask_user`）
 

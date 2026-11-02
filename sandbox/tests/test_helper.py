@@ -458,6 +458,21 @@ class TestRelay:
             proc.stdin.close()
             assert proc.wait(timeout=30) == 0
 
+    def test_columns_with_the_same_name_are_kept(self, sandbox):
+        sandbox.sh("printf 'id,id,id\\r\\n1,2,3\\r\\n' > /workspace/work/dup.csv")
+        proc = self._start(sandbox)
+        try:
+            code = (
+                "import yoriki_connector as c\nr = c.query('db', 'SELECT a.id, b.id, c.id')\nprint(r.columns, r.rows)"
+            )
+            thread, box = self._script(sandbox, code)
+            self._answer(proc, {"ok": True, "path": "/workspace/work/dup.csv", "row_count": 1})
+            thread.join(timeout=60)
+            assert box["result"].output.strip() == "['id', 'id', 'id'] [{'id': '1', 'id_2': '2', 'id_3': '3'}]"
+        finally:
+            proc.stdin.close()
+            proc.wait(timeout=30)
+
     def test_rate_limited_requests_are_retried(self, sandbox):
         sandbox.sh("printf 'n\\r\\n1\\r\\n' > /workspace/work/one.csv")
         proc = self._start(sandbox)

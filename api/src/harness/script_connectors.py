@@ -17,6 +17,7 @@ import logging
 import time
 from collections import deque
 from collections.abc import Callable
+from datetime import timedelta
 from typing import Any
 
 from django.utils import timezone
@@ -40,6 +41,8 @@ SCRIPT_CALL_PREFIX = "script-"
 # 1つのRunでスクリプトから呼べる回数（Attemptをまたいで数える）と、1分あたりの回数
 MAX_CALLS_PER_RUN = 1000
 MAX_CALLS_PER_MINUTE = 120
+# 引数（SQLと値）の大きさの上限（バイト）。ToolInvocationに記録するので、1つのRunの記録が1,000回×これまでに収まる
+MAX_ARGUMENT_BYTES = 64 * 1024
 # スクリプトへ返す応答の大きさの上限（バイト）。中継で返せる大きさ（包む分を除く）
 MAX_RESPONSE_BYTES = RELAY_MAX_RESPONSE - 1024
 
@@ -76,28 +79,47 @@ class ScriptConnectors:
         中のもので、不正な要求を流し続けられるため）"""
         if limited := self._rate_limit():
             return limited
+        checked = self._check(request)
+        if isinstance(checked, dict):
+            return checked
+        if limited := self._run_limit():
+            return limited
+        return self._execute(*checked)
+
+    def _check(self, request: dict[str, Any]) -> tuple[str, dict[str, Any]] | dict[str, Any]:
+        """（Toolの名前、引数）か、断る応答"""
         operation = request.get("op")
         name = OPERATIONS.get(operation) if isinstance(operation, str) else None
         if name is None:
             return _error("invalid_argument", 'op must be "query" or "describe".')
-        exposed = self.exposed()
         names = catalog_names(self.run)
-        if name not in exposed or not names:
+        if name not in self.exposed() or not names:
             return _error(
                 "unavailable",
                 f"Connectors cannot be used with {operation}() in this work: the {name} tool is not available.",
             )
         # 引数はToolと同じSchemaで確かめる（知らない項目も断る）
         arguments = {key: value for key, value in request.items() if key != "op"}
+        if len(json.dumps(arguments, ensure_ascii=False).encode()) > MAX_ARGUMENT_BYTES:
+            # 引数は記録に残すので、Sandboxから大きな引数を送られても記録を大きくしない
+            return _error("invalid_argument", f"The SQL and parameters must be at most {MAX_ARGUMENT_BYTES} bytes.")
         tool = next(t for t in make_datasource_tools(names) if t.name == name)
         if problem := tool.validate(arguments):
             return _error("invalid_argument", problem)
-        if limited := self._run_limit():
-            return limited
-        return self._execute(name, arguments)
+        return name, arguments
 
     def _rate_limit(self) -> dict[str, Any] | None:
         now = self.clock()
+        if self.count is None:
+            # 前のAttemptの直近1分の呼出し（記録したもの）も数える（Attemptをやり直しても数え直さない）
+            since = timezone.now() - timedelta(seconds=60)
+            for created in (
+                ToolInvocation.objects.filter(run=self.run, call_id__startswith=SCRIPT_CALL_PREFIX, created__gt=since)
+                .values_list("created", flat=True)
+                .order_by("created")
+            ):
+                self.recent.append(now - (timezone.now() - created).total_seconds())
+            self.count = ToolInvocation.objects.filter(run=self.run, call_id__startswith=SCRIPT_CALL_PREFIX).count()
         while self.recent and now - self.recent[0] >= 60:
             self.recent.popleft()
         if len(self.recent) >= MAX_CALLS_PER_MINUTE:
@@ -111,8 +133,7 @@ class ScriptConnectors:
         return None
 
     def _run_limit(self) -> dict[str, Any] | None:
-        if self.count is None:
-            self.count = ToolInvocation.objects.filter(run=self.run, call_id__startswith=SCRIPT_CALL_PREFIX).count()
+        assert self.count is not None  # _rate_limit() で読んだ
         if self.count >= MAX_CALLS_PER_RUN:
             return _error(
                 "limit_exceeded",

@@ -88,7 +88,7 @@ from .prompts import system_prompt
 from .recovery import request_model_switch
 from .result_files import missing_files
 from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, SandboxSession
-from .script_connectors import ScriptConnectors
+from .script_connectors import SCRIPT_CALL_PREFIX, ScriptConnectors
 from .skill_edit import revoked_edit
 from .skills import SkillContentSource, explicit_versions, revoked_skill
 from .task_edit import revoked_task_edit
@@ -288,6 +288,12 @@ class Runner:
         self.inherited = inherited_items(self.run_obj)
         self.tools = self._exposed_tools()
         tools = {t.name: t for t in self.tools}
+        # 前のAttemptで、Skillのスクリプトからの呼出しの途中で止まったもの（leaseを失った側は記録を閉じられない）。
+        # スクリプトはもうないので、結果不明として閉じる
+        with self.run_obj.fenced(self.attempt) as run:
+            ToolInvocation.objects.filter(
+                run=run, call_id__startswith=SCRIPT_CALL_PREFIX, status__in=(ToolStatus.REQUESTED, ToolStatus.RUNNING)
+            ).exclude(attempt=self.attempt).update(status=ToolStatus.UNKNOWN, ended=timezone.now())
         # 実行中のRunに回答待ちの確認が残っていれば、前のAttemptが待ちに移る前に止まったもの。答えられないので閉じる
         ClarificationRequest.objects.filter(
             run=self.run_obj, kind__in=TOOL_CLARIFICATIONS, status=ClarificationStatus.OPEN

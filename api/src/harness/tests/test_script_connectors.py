@@ -372,3 +372,39 @@ def test_a_result_too_large_for_the_relay_is_refused_and_recorded(attempt, monke
     invocation = ToolInvocation.objects.get(run=attempt.run)
     assert invocation.status == ToolStatus.FAILED
     assert (invocation.value or {})["error"] == "too_large"
+
+
+def test_large_arguments_are_refused_before_recording(attempt):
+    response = make(attempt).handle(QUERY | {"params": ["x" * 70_000]})
+
+    assert response["error"]["code"] == "invalid_argument"
+    assert not ToolInvocation.objects.exists()
+
+
+def test_rate_limit_counts_calls_of_the_previous_attempt(attempt, monkeypatch):
+    monkeypatch.setattr(script_connectors, "MAX_CALLS_PER_MINUTE", 2)
+    first = make(attempt)
+    assert first.handle(QUERY)["ok"]
+    assert first.handle(QUERY)["ok"]
+
+    assert make(attempt).handle(QUERY)["error"]["code"] == "rate_limited"
+
+
+def test_resuming_closes_script_calls_left_running_by_a_previous_attempt(attempt):
+    from harness.runner import Runner  # noqa: PLC0415
+    from run.models import Run, RunStatus  # noqa: PLC0415
+
+    left = ToolInvocation.objects.create(
+        run=attempt.run, attempt=attempt, call_id="script-left", name="datasource_query", status=ToolStatus.RUNNING
+    )
+    attempt.end()
+    Run.objects.filter(pk=attempt.run_id).update(status=RunStatus.QUEUED)
+    following = claim_run(attempt.run_id)
+    assert following is not None and following.pk != attempt.pk
+    runner = Runner(following)
+    runner._resume()
+
+    left.refresh_from_db()
+    assert left.status == ToolStatus.UNKNOWN
+    assert left.ended is not None
+    runner.session.close()

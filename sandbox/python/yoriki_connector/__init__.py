@@ -45,7 +45,9 @@ class ConnectorError(Exception):
 
 @dataclass(frozen=True)
 class QueryResult:
+    # 結果の列の名前（SQLのとおり。重なることがある）
     columns: list[str]
+    # 行。キーは列の名前で、同じ名前の列は2つめから `名前_2`・`名前_3`
     rows: list[dict[str, str]] = field(repr=False)
     # 読んだ行の数。上限で打ち切ったときは truncated が True（残りの行は読んでいない）
     row_count: int
@@ -65,7 +67,8 @@ def query(
     with open(path, encoding="utf-8", newline="") as f:
         reader = csv.reader(f)
         columns = next(reader, [])
-        rows = [dict(zip(columns, values, strict=False)) for values in reader]
+        keys = _unique(columns)
+        rows = [dict(zip(keys, values, strict=False)) for values in reader]
     return QueryResult(
         columns=columns,
         rows=rows,
@@ -73,6 +76,18 @@ def query(
         truncated=bool(response.get("truncated")),
         path=path,
     )
+
+
+def _unique(columns: list[str]) -> list[str]:
+    """`rows` のキー。同じ名前の列（`SELECT a.id, b.id` 等）は、2つめから `id_2`・`id_3` とする"""
+    keys: list[str] = []
+    for name in columns:
+        key, n = name, 1
+        while key in keys:
+            n += 1
+            key = f"{name}_{n}"
+        keys.append(key)
+    return keys
 
 
 def describe(connector: str, *, timeout: float | None = None) -> list[dict[str, Any]]:

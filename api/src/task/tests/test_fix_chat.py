@@ -424,7 +424,8 @@ def test_fix_run_keeps_the_task_model(api_client, manager):
     assert switch_candidates(run) == []
 
 
-def test_runs_of_a_fix_chat_do_not_share_the_workspace(api_client, manager):
+def test_runs_of_a_fix_chat_do_not_share_the_workspace(api_client, manager, settings, tmp_path):
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path / "workspaces")
     task = _task(manager)
     first = Run.objects.get(uid=_fix(api_client, manager, task).json()["id"])
     attempt = claim_run(first.pk)

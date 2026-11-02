@@ -349,9 +349,14 @@ def declaration_problem(task, version: Any, *, connectors: list[str], sensitive:
     return ""
 
 
-def connector_permitted(task, connector: Connector, *, connectors: list[str]) -> bool:
-    """タスクのRunがこのConnectorを今使えるか：タスクに固定したもので、今も有効で範囲の中にある"""
-    return connector.uid in connectors and task_problem(task) == "" and connector_allowed(task, connector)
+def connector_permitted(task, connector: Connector, *, connectors: list[str], allow_suspended: bool = False) -> bool:
+    """タスクのRunがこのConnectorを今使えるか：タスクに固定したもので、今も有効で範囲の中にある。修正チャットのRunは
+    停止中かを見ない（`allow_suspended`。task_problem() と同じ）"""
+    return (
+        connector.uid in connectors
+        and task_problem(task, allow_suspended=allow_suspended) == ""
+        and connector_allowed(task, connector)
+    )
 
 
 # --- チャットから起動したRun（authorization.md §6） ---

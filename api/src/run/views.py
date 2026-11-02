@@ -3,6 +3,7 @@ from django.utils.translation import gettext_lazy as _
 from django_filters import rest_framework as filters
 from drf_spectacular.utils import OpenApiResponse, extend_schema, extend_schema_view
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.generics import get_object_or_404
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
 from rest_framework.response import Response
@@ -102,6 +103,14 @@ class AppClarificationViewSet(MyRunMixin, ListModelMixin, RetrieveModelMixin, Ge
     )
     @action(detail=True, methods=["post"], serializer_class=ClarificationAnswerSerializer)
     def answer(self, request, *args, **kwargs):
+        run = self.run
+        if run.is_task_fix:
+            # 修正チャットの確認に答えるのは、修正チャットの持ち主で、今もタスクを管理できる人だけ（回答の自由記述は
+            # 指示になるため。design.md §11.11）。ほかのタスクの管理者は、停止はできるが答えない
+            from task.checks import fixer_problem  # noqa: PLC0415  taskのModelがrunを参照するため
+
+            if run.conversation.owner_id != request.user.pk or fixer_problem(request.user, run.task):
+                raise PermissionDenied(_("修正チャットの確認に答えられるのは、修正チャットを始めた人だけです"))
         serializer = self.get_serializer(instance=self.get_object(), data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.save(actor=request.user)

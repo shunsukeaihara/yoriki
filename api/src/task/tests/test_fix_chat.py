@@ -8,6 +8,7 @@ import pytest
 
 from artifact.factories import ArtifactFactory
 from artifact.models import Artifact, ArtifactKind, BlobObject
+from connector.factories import ConnectorFactory
 from conversation.factories import ConversationFactory
 from conversation.models import ConversationPurpose, InstructionKind, UserInstruction
 from delivery.factories import DestinationFactory
@@ -19,7 +20,17 @@ from harness.tests.fakes import FakeAdapter, reply
 from harness.tests.test_connectors import execute
 from llm.factories import LLMConnectionFactory, ModelProfileFactory
 from llm.models import ProviderKind
-from run.models import Checkpoint, Run, RunEndReason, RunKind, RunLaunch, RunStatus, RunTrigger
+from run.models import (
+    Checkpoint,
+    ClarificationKind,
+    ClarificationRequest,
+    Run,
+    RunEndReason,
+    RunKind,
+    RunLaunch,
+    RunStatus,
+    RunTrigger,
+)
 from run.tasks import claim_run
 from task.dispatch import FIX_NOTE, NO_RESPONDER_NOTE
 from task.factories import TaskDefinitionFactory
@@ -254,7 +265,12 @@ def test_messages_are_instructions_to_the_running_task(api_client, manager):
 def test_messages_need_a_manager(api_client, manager):
     task = _task(manager)
     run = Run.objects.get(uid=_fix(api_client, manager, task).json()["id"])
+    sent = _post(api_client, run.conversation, client_message_id="msg-1")
+    assert sent.status_code == 201, sent.json()
     manager.user_permissions.clear()
+    # 再送でも、前のメッセージを返す前に確かめる
+    resent = _post(api_client, run.conversation, client_message_id="msg-1")
+    assert resent.status_code == 400
     res = _post(api_client, run.conversation)
     assert res.status_code == 400
     assert "管理できなくなりました" in str(res.json())
@@ -283,6 +299,37 @@ def test_fix_run_can_ask_the_manager(api_client, manager):
     assert '<mode responder="true">task</mode>' in context
     # 出口へは送らない
     assert not Delivery.objects.filter(run=run).exists()
+
+
+def test_suspended_task_uses_its_connectors_in_the_fix_chat(api_client, manager):
+    connector = ConnectorFactory.create(name="販売管理")
+    task = _task(manager, connectors=[connector.uid])
+    task.set_suspended(True)
+    res = _fix(api_client, manager, task)
+    assert res.status_code == 201, res.json()
+    run = Run.objects.get(uid=res.json()["id"])
+    assert tasks.connector_permitted(run, connector)
+
+
+def test_only_the_owner_answers_the_fix_run(api_client, manager):
+    task = _task(manager)
+    run = Run.objects.get(uid=_fix(api_client, manager, task).json()["id"])
+    clarification = ClarificationRequest.objects.create(
+        run=run,
+        kind=ClarificationKind.QUESTION,
+        tool_call_id="c1",
+        questions=[{"header": "基準", "question": "一致としますか", "options": [], "multi_select": False}],
+    )
+    Run.objects.filter(pk=run.pk).update(status=RunStatus.WAITING_USER)
+    url = f"/api/app/v1/runs/{run.uid}/clarifications/{clarification.uid}/answer/"
+    answer = {"answers": [{"selected": [], "text": "一致とする"}]}
+    # 同じタスクを管理する別の人は答えられない（停止はできる）
+    colleague = grant(UserFactory.create(), AppPermission.MANAGE_COMPANY_TASKS)
+    api_client.force_login(colleague)
+    assert api_client.post(url, answer, format="json").status_code == 403
+    api_client.force_login(manager)
+    res = api_client.post(url, answer, format="json")
+    assert res.status_code == 200, res.json()
 
 
 def test_fix_run_stops_when_the_manager_loses_the_task(api_client, manager):

@@ -79,7 +79,9 @@ def skill_problem(run: Run, skill, version) -> str:
 def connector_permitted(run: Run, connector) -> bool:
     task = load_task(run)
     connectors = task_entry(run).get("connectors", [])
-    if task is None or not checks.connector_permitted(task, connector, connectors=connectors):
+    if task is None or not checks.connector_permitted(
+        task, connector, connectors=connectors, allow_suspended=run.is_task_fix
+    ):
         return False
     if run.launch == RunLaunch.CHAT:
         user = launcher(run)

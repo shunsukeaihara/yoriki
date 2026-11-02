@@ -128,6 +128,13 @@ def post_message(
     同じく次の依頼にする
     """
     conversation = Conversation.objects.select_for_update().get(pk=conversation.pk)
+    if conversation.is_task_fix:
+        # 再送を返す前にも確かめる（管理できなくなった持ち主に、タスクのRunのメッセージを返さない。
+        # authorization.md §7.1）
+        from task.checks import fixer_problem  # noqa: PLC0415  taskがconversationをimportするため
+
+        if reason := fixer_problem(actor, conversation.task):
+            raise CannotStart(reason)
     if client_message_id:
         sent = ConversationMessage.objects.filter(
             conversation=conversation, client_message_id=client_message_id
@@ -135,7 +142,7 @@ def post_message(
         if sent is not None:
             return sent  # 再送。二重に受け付けない
     if conversation.is_task_fix:
-        _check_fix_message(conversation, actor, mode=mode, separate=bool(skills or connectors or skill_edit))
+        _check_fix_message(conversation, mode=mode, separate=bool(skills or connectors or skill_edit))
     message = ConversationMessage.objects.create(
         conversation=conversation,
         sender=actor,
@@ -201,13 +208,10 @@ def post_message(
     return message
 
 
-def _check_fix_message(conversation: Conversation, actor, *, mode: str, separate: bool) -> None:
-    """修正チャット（design.md §11.11）で受け付けるのは、タスクを今も管理できる人からの、動いているタスクのRunへの
-    追加の指示と確認への回答だけ。Skill・Connectorの指定と、Skillの編集の依頼は受け付けない"""
-    from task.checks import fixer_problem  # noqa: PLC0415  taskがconversationをimportするため
-
-    if reason := fixer_problem(actor, conversation.task):
-        raise CannotStart(reason)
+def _check_fix_message(conversation: Conversation, *, mode: str, separate: bool) -> None:
+    """修正チャット（design.md §11.11）で受け付けるのは、動いているタスクのRunへの追加の指示と確認への回答だけ
+    （タスクを今も管理できるかは post_message() が先に確かめる）。Skill・Connectorの指定と、Skillの編集の依頼は
+    受け付けない"""
     if separate:
         raise CannotStart(_("修正チャットでは、SkillやConnectorを指定できません。"))
     run = active_run(conversation)

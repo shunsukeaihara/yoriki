@@ -194,7 +194,7 @@ def plan_run(
 
     何も作らない。受付（_start()）は `lock` で通知先の行をロックする（transactionの中で呼ぶ）。入口の画面でサンプルを
     試すとき（受付と同じ判定を見せる）は `lock=False` で読むだけにし、受付を待たせない。`deliver` が偽（修正チャット）
-    なら通知先を固定せず、使えるかも確かめない（出口へ送らない）"""
+    なら通知先を固定せず、使えるかも確かめない（出口へ送らない）。Connectorは停止中のタスクでも使えるとする"""
     profile = revision.model_profile
     version = profile.current_version
     if version is None or not profile.is_active or profile.deleted:
@@ -217,7 +217,10 @@ def plan_run(
     fixed_connectors = []
     for uid in revision.connectors:
         connector = connectors.get(uid)
-        if connector is None or not checks.connector_permitted(task, connector, connectors=revision.connectors):
+        # 修正チャット（出口へ送らないRun）は、停止中のタスクでも動かす
+        if connector is None or not checks.connector_permitted(
+            task, connector, connectors=revision.connectors, allow_suspended=not deliver
+        ):
             name = connector.name if connector else uid
             raise CannotRun(_("Connector「%(name)s」を使えません。タスクの定義を確かめてください。") % {"name": name})
         assert connector.current_version is not None  # connector_permitted() が確かめた

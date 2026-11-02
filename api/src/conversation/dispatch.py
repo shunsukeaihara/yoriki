@@ -302,8 +302,13 @@ def resolve_connectors(
 def start_run(conversation: Conversation, message: ConversationMessage, actor, *, parent: Run | None = None) -> Run:
     """呼び出し側のtransactionの中で呼ぶ。モデル設定の版とeffortを固定し、最初の発言を記録して実行を依頼する"""
     if conversation.is_task_fix:
-        # 修正チャットのタスクのRunは task.dispatch.start_task_run() で始める
-        raise CannotStart(_("修正チャットでは、動いているタスクへの指示と回答だけを送れます。"))
+        # 修正チャットのタスクのRunは task.dispatch.start_task_run() で始める。ここに来るのは、タスクのRunが終わる直前に
+        # 届いて取り込めなかった追加の指示（次の依頼に回したもの。start_next_request() が理由を会話に残す）
+        raise CannotStart(
+            _(
+                "タスクの作業が終わる前に取り込めなかったので、反映していません。「もう一度動かす」から動かし直してください。"
+            )
+        )
     profile = conversation.model_profile
     version = profile.current_version
     if version is None or not profile.is_active or profile.deleted:

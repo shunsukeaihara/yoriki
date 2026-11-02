@@ -12,7 +12,7 @@ from artifact.factories import ArtifactFactory
 from artifact.models import Artifact, ArtifactKind, BlobObject
 from connector.factories import ConnectorFactory
 from conversation.factories import ConversationFactory
-from conversation.models import ConversationPurpose, InstructionKind, UserInstruction
+from conversation.models import ConversationPurpose, InstructionKind, InstructionState, MessageRole, UserInstruction
 from delivery.factories import DestinationFactory
 from delivery.models import Delivery
 from harness import tasks
@@ -312,6 +312,19 @@ def test_records_stay_visible_to_managers_after_the_task_is_deleted(api_client, 
     assert [m["run"] for m in messages] == [run.uid]
     # 動かすことと指示は断る
     assert _post(api_client, run.conversation).status_code == 400
+
+
+def test_instruction_left_when_the_run_ends_is_reported(api_client, manager):
+    """終わる直前に届いて取り込めなかった追加の指示は、反映していないことを会話に残す"""
+    task = _task(manager)
+    run = Run.objects.get(uid=_fix(api_client, manager, task).json()["id"])
+    res = _post(api_client, run.conversation)
+    assert res.status_code == 201, res.json()
+    run.set_status(RunStatus.CANCELLED)
+    instruction = UserInstruction.objects.get(message__uid=res.json()["id"])
+    assert instruction.state == InstructionState.DISCARDED
+    notice = run.conversation.messages.get(role=MessageRole.SYSTEM)
+    assert "反映していません" in notice.body
 
 
 def test_messages_need_a_manager(api_client, manager):

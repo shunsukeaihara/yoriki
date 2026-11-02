@@ -5,6 +5,7 @@ import io
 import uuid
 
 import pytest
+from django.utils import timezone
 
 from artifact.models import Artifact, ArtifactKind, BlobObject
 from conversation.models import ConversationMessage, InstructionKind, InstructionState, MessageRole, UserInstruction
@@ -413,3 +414,23 @@ def test_attachments_of_the_next_request_are_not_the_task_runs(api_client, manag
     assert res.status_code == 201, res.json()
     attachment.refresh_from_db()
     assert attachment.run is None
+
+
+def test_update_task_is_not_saved_by_an_attempt_that_lost_the_lease(api_client, manager):
+    from harness.tools.base import ToolContext  # noqa: PLC0415
+    from harness.tools.task_admin import UPDATE_TASK  # noqa: PLC0415
+    from llm.providers.base import ToolCall  # noqa: PLC0415
+    from run.errors import LeaseLost  # noqa: PLC0415
+    from run.models import ExecutionAttempt  # noqa: PLC0415
+
+    task = _task(manager)
+    run = _edit(api_client, manager, task)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    # 別のAttemptが引き継いだ（このAttemptは終わった）
+    ExecutionAttempt.objects.filter(pk=attempt.pk).update(ended=timezone.now())
+    arguments = {"expected_version": 1, "change_reason": "x", "prompt_template": PROMPT + "。"}
+    with pytest.raises(LeaseLost):
+        UPDATE_TASK.execute(arguments, ToolContext(run, attempt, ToolCall("c1", "update_task", arguments)))
+    task.refresh_from_db()
+    assert task.version_number == 1

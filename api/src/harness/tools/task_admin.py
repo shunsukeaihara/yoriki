@@ -12,6 +12,8 @@ from typing import Any
 from django.db import transaction
 from rest_framework import exceptions as drf_exceptions
 
+from run.errors import LeaseLost
+from run.models import Run
 from skill.models import Skill
 from task import checks
 from task.models import TaskDefinition, TaskDefinitionRevision
@@ -221,6 +223,10 @@ def _save(context: ToolContext, task: TaskDefinition, data: dict[str, Any]) -> T
             # revise() がロックしている）
             if problem := target_problem(context.run, edit_target(context.run)):
                 raise _Revoked(problem)
+            # 実行の権利を失ったAttemptは書かない（harness.md §11.1）。`Run.fenced()` で包むとロックの順が
+            # 会話 → Run → タスクになり、タスクの停止（タスク → 会話 → Run）と逆になるので、保存の後に確かめて戻す
+            if not context.attempt.holds(Run.objects.get(pk=context.run.pk)):
+                raise LeaseLost(f"run={context.run.uid} attempt={context.attempt.number}")
     except _Revoked as exc:
         return ToolResult.error(f"{exc}. The change was not saved. Stop and tell the user.")
     except Conflict:

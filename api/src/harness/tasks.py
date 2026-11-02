@@ -5,6 +5,8 @@ Skillの版と、固定したConnectorだけで、`skill` で探して読み込�
 Toolは、Skillの「使ってよいTool」とタスクのToolの一覧の両方に入っているものだけ。使えるかは、起動した人ではなく
 タスクの範囲で、区切りと操作のたびに確かめ直す（task/checks.py）。チャットから起動したRunは、それに加えて起動した人
 （`Run.owner`）の今の権限でも確かめる（タスクの版の一覧 ∩ 起動した人の今の権限。authorization.md §6）。
+修正チャットのRunは、タスクに固定したものの範囲で動き、動かした人（`Run.owner`）が今もタスクを管理できるかを確かめる
+（停止中かは見ない。design.md §11.11）。
 """
 
 from typing import Any
@@ -39,14 +41,22 @@ def launcher(run: Run) -> User | None:
     return User.objects.filter(pk=run.owner_id).first()
 
 
+def fixer(run: Run) -> User | None:
+    """修正チャットのRunを動かした人（権限の判定のため、毎回DBから読む）"""
+    return User.objects.filter(pk=run.owner_id).first()
+
+
 def revoked_task(run: Run) -> str:
     """タスクのRunを続けられなくなった理由（タスクの停止・削除、個人のタスクの持ち主・チャットから起動した人の
-    無効化、起動した人が起動できる部門から外れた）。なければ空文字"""
+    無効化、起動した人が起動できる部門から外れた、修正チャットの持ち主がタスクを管理できなくなった）。なければ空文字"""
     if not is_task_run(run):
         return ""
-    reason = checks.task_problem(load_task(run))
+    task = load_task(run)
+    reason = checks.task_problem(task, allow_suspended=run.is_task_fix)
     if not reason and run.launch == RunLaunch.CHAT:
         reason = checks.launcher_scope_problem(launcher(run), run)
+    if not reason and run.is_task_fix:
+        reason = checks.fixer_problem(fixer(run), task)
     if reason:
         return _("タスクを続けられなくなったので、作業を止めました（%(reason)s）。") % {"reason": reason}
     return ""
@@ -68,17 +78,24 @@ def skill_problem(run: Run, skill, version) -> str:
     if run.launch == RunLaunch.CHAT:
         user = launcher(run)
         return checks.launcher_inactive(user) or checks.launcher_skill_problem(user, skill)
+    if run.is_task_fix:
+        return checks.fixer_problem(fixer(run), task)
     return ""
 
 
 def connector_permitted(run: Run, connector) -> bool:
     task = load_task(run)
     connectors = task_entry(run).get("connectors", [])
-    if task is None or not checks.connector_permitted(task, connector, connectors=connectors):
+    if task is None or not checks.connector_permitted(
+        task, connector, connectors=connectors, allow_suspended=run.is_task_fix
+    ):
         return False
     if run.launch == RunLaunch.CHAT:
         user = launcher(run)
         return user is not None and checks.launcher_connector_permitted(user, connector)
+    if run.is_task_fix:
+        # 修正チャットの持ち主が、今もタスクを管理できるか（操作のたびに。authorization.md §6）
+        return not checks.fixer_problem(fixer(run), task)
     return True
 
 

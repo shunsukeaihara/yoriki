@@ -1,5 +1,5 @@
 from django.db import transaction
-from django.db.models import Prefetch
+from django.db.models import Prefetch, Q
 from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema
 from rest_framework.generics import get_object_or_404
@@ -7,11 +7,11 @@ from rest_framework.mixins import CreateModelMixin, ListModelMixin
 from rest_framework.viewsets import GenericViewSet, ModelViewSet
 
 from artifact.models import Artifact
-from run.models import CANCELLABLE_STATUSES, Run
+from run.models import CANCELLABLE_STATUSES, Run, RunTrigger
 from utils.permissions import AppUser
 from utils.views import SoftDeleteMixin
 
-from .models import Conversation, ConversationMessage, ConversationPurpose
+from .models import OWNED_PURPOSES, Conversation, ConversationMessage
 from .serializers import ConversationSerializer, MessageSerializer
 
 
@@ -37,14 +37,16 @@ class MyConversationMixin:
 class AppConversationViewSet(SoftDeleteMixin, ModelViewSet):
     permission_classes = [AppUser]
     lookup_field = "uid"
-    queryset = Conversation.objects.filter(deleted=False).select_related("model_profile__current_version__connection")
+    queryset = Conversation.objects.filter(deleted=False).select_related(
+        "model_profile__current_version__connection", "task__department"
+    )
     serializer_class = ConversationSerializer
     search_fields = ["title"]
     ordering = ("-last_posted", "-pk")
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]  # PUTは使わない
 
     def get_queryset(self):
-        return super().get_queryset().filter(owner=self.request.user, purpose=ConversationPurpose.CHAT)
+        return super().get_queryset().filter(owner=self.request.user, purpose__in=OWNED_PURPOSES)
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
@@ -71,6 +73,15 @@ class AppConversationMessageViewSet(MyConversationMixin, ListModelMixin, CreateM
     )
     serializer_class = MessageSerializer
     ordering = "-pk"
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if self.conversation.is_task_fix:
+            # 修正チャットのタスクのRunのメッセージ（最初の依頼、追加の指示、応答）は、そのRunのログを見られる人
+            # （実行したときの範囲を管理できる人。authorization.md §7.1）にだけ見せる。Runの画面と同じ判定
+            visible = Run.objects.visible_to(self.request.user).values("pk")
+            qs = qs.filter(Q(run__isnull=True) | ~Q(run__trigger=RunTrigger.TASK) | Q(run__in=visible))
+        return qs
 
     def perform_create(self, serializer):
         # 受付の処理（Runの開始、追加指示、回答）は post_message() の transaction で行う

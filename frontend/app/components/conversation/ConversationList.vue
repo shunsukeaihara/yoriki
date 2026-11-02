@@ -37,6 +37,12 @@ const currentId = computed(() => route.params.conversationId as string | undefin
         conversation.id === currentId ? 'bg-elevated font-medium text-highlighted' : 'text-default',
       ]"
     >
+      <UIcon
+        v-if="conversation.task"
+        name="i-lucide-messages-square"
+        class="size-3.5 shrink-0 text-muted"
+        :aria-label="$t('修正チャット')"
+      />
       <span class="flex-1 truncate">{{ conversation.title || $t('新しい会話') }}</span>
       <UIcon
         v-if="conversation.handlesSensitiveData"

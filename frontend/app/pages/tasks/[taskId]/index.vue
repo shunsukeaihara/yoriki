@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
  * タスクの詳細（design.md §11.9）。中身の編集（保存のたびに版ができる）、手動実行、実行の履歴、版の履歴、停止・再開・
- * 削除。タスクの定義は管理できる人だけが見られ（authorization.md §5.3）、見られる人はすべての操作ができる。
+ * 削除、修正チャット（design.md §11.11）。タスクの定義は管理できる人だけが見られ（authorization.md §5.3）、見られる人は
+ * すべての操作ができる。
  * 入口（Webhook）と通知先の登録は連携の管理者が管理画面で行い、ここでは見るだけ・選ぶだけ
  */
 import { AxiosError } from 'axios'
@@ -78,6 +79,13 @@ const onRunConflicted = async () => {
 const onStarted = () => {
   tab.value = 'runs'
   runsReloadKey.value = Date.now()
+}
+
+// 修正チャットを始めたら、その会話を開く
+const listStore = useConversationListStore()
+const onFixStarted = async (run: Run) => {
+  listStore.reload().catch(() => {})
+  await navigateTo(`/conversations/${run.conversation}`)
 }
 
 const changing = ref(false)
@@ -174,6 +182,21 @@ const onDelete = async () => {
                 </DBtn>
               </template>
             </TaskRunDialog>
+            <TaskFixChatDialog :task="task" @started="onFixStarted" @conflicted="onRunConflicted">
+              <template #trigger="{ on }">
+                <UTooltip :text="$t('会話の中でタスクを動かし、作業を見ながら直します（結果は通知先に送りません）')">
+                  <DBtn
+                    icon="i-lucide-messages-square"
+                    variant="outline"
+                    :disabled="!task.version || formRef?.dirty || conflicted"
+                    :aria-label="$t('修正チャット')"
+                    v-on="on"
+                  >
+                    <span class="hidden sm:inline">{{ $t('修正チャット') }}</span>
+                  </DBtn>
+                </UTooltip>
+              </template>
+            </TaskFixChatDialog>
             <DBtn
               :color="task.suspended ? 'primary' : 'error'"
               variant="ghost"

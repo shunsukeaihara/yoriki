@@ -1251,6 +1251,9 @@ class TaskRunSerializer(RunSerializer):
             data.update(
                 todos=[], skills=[], deliveries_info=[], error="", step_count=0, model_profile_name="", effort=""
             )
+            if data.get("task_info"):
+                # 通知の候補と送り先（タスクの定義）も、配信と同じくログとして扱う
+                data["task_info"] = {**data["task_info"], "notification": None, "destination_name": ""}
         return data
 
     def get_task_name(self, obj: Run) -> str:

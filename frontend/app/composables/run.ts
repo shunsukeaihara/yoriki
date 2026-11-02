@@ -17,11 +17,19 @@ export const RunKind = {
   EVALUATION: 3,
 } as const satisfies Record<string, RunKindEnum>
 
+// バックエンドの run.models.RunTrigger と同じ値
+export const RunTrigger = {
+  CONVERSATION: 1,
+  TASK: 2,
+  EVALUATION: 3,
+} as const satisfies Record<string, RunTriggerEnum>
+
 // バックエンドの run.models.RunLaunch と同じ値（タスクのRunの起動のしかた）。表示はサーバーの launchDisplay を使う
 export const RunLaunch = {
   MANUAL: 1,
   WEBHOOK: 2,
   CHAT: 3,
+  FIX: 4,
 } as const satisfies Record<string, RunLaunchEnum>
 
 // バックエンドの CANCELLABLE_STATUSES・ACTIVE_STATUSES と同じ
@@ -39,7 +47,8 @@ export const hasWorkToShow = (run: Run) =>
   run.todos.length > 0 ||
   run.skills.length > 0 ||
   run.result != null ||
-  run.kind === RunKind.SKILL_EDIT
+  run.kind === RunKind.SKILL_EDIT ||
+  run.taskInfo != null
 
 export const runStatusColor = (status: RunStatusEnum) => {
   switch (status) {

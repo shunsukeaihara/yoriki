@@ -17,7 +17,7 @@ from rest_framework.viewsets import GenericViewSet, ModelViewSet, ReadOnlyModelV
 
 from artifact.models import Artifact
 from connector.serializers import AppConnectorSerializer
-from conversation.models import Conversation, ConversationMessage, MessageRole
+from conversation.models import Conversation, ConversationMessage, ConversationPurpose, MessageRole
 from conversation.serializers import MessageSerializer
 from delivery.models import Delivery
 from run.models import Run, RunLaunch, RunQuerySet, logs_visible
@@ -30,7 +30,15 @@ from utils.views import SoftDeleteMixin
 
 from . import checks
 from .authentication import WebhookKeyAuthentication, WebhookTaskPermission
-from .dispatch import InvalidInputs, LaunchIdConflict, launched_run, receive_webhook, start_task_run
+from .dispatch import (
+    AlreadyStarted,
+    InvalidInputs,
+    LaunchIdConflict,
+    fix_started_run,
+    launched_run,
+    receive_webhook,
+    start_task_run,
+)
 from .errors import CannotRun, VersionConflict
 from .models import (
     BUSINESS_SCOPES,
@@ -234,6 +242,78 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
             raise ValidationError({"non_field_errors": [str(exc)]}) from exc
         return Response(RunSerializer(run, context=self.get_serializer_context()).data, status=status.HTTP_201_CREATED)
 
+    @extend_schema(
+        description="修正チャット（design.md §11.11）でタスクを動かす（タスクを管理できる人。停止中でも動かせる）。"
+        "`conversation` を省くと、新しい修正チャットを作る。タスクに固定したものの範囲で動き、実行中の追加の指示と"
+        "確認への回答を受け付け、出口へは送らない。入力は手動実行と同じ",
+        request={"application/json": TaskRunCreateSerializer, "multipart/form-data": TASK_RUN_MULTIPART},
+        parameters=[
+            OpenApiParameter(
+                "conversation", str, description="動かし直す修正チャットのID（このタスクの、自分の修正チャット）"
+            ),
+            OpenApiParameter(
+                "client_request_id",
+                str,
+                required=True,
+                description="画面が要求ごとに作るID（64文字まで）。このタスクの自分の修正チャットで同じIDの要求を"
+                "受け付け済みなら、そのRunを返す（応答が失われた後の再送で、二重に動かさない）",
+            ),
+            OpenApiParameter(
+                "version",
+                int,
+                description="画面で確かめた版（任意）。今の版と違えば409にし、確かめていない定義では動かさない",
+            ),
+        ],
+        responses={201: RunSerializer, 200: RunSerializer, 409: CONFLICT},
+    )
+    @action(detail=True, methods=["post"], url_path="fix_chat", serializer_class=TaskRunCreateSerializer)
+    def fix_chat(self, request, *args, **kwargs):
+        task = self.get_object()
+        client_request_id = request.query_params.get("client_request_id", "")
+        if not client_request_id or len(client_request_id) > 64:
+            raise ValidationError({"client_request_id": [_("要求のID（64文字まで）を指定してください")]})
+        # 同じ要求の再送には、前に動かしたRunを返す（入力や版を確かめ直さない）
+        try:
+            existing = fix_started_run(task, request.user, client_request_id)
+        except LaunchIdConflict as exc:
+            raise Conflict(str(exc)) from exc
+        if existing is not None:
+            return Response(RunSerializer(existing, context=self.get_serializer_context()).data)
+        conversation = None
+        if uid := request.query_params.get("conversation"):
+            conversation = get_object_or_404(Conversation.objects.owned_by(request.user).filter(task=task), uid=uid)
+        version = request.query_params.get("version")
+        if version is not None and not version.isdigit():
+            raise ValidationError({"version": [_("版の番号を指定してください")]})
+        if version is not None and int(version) != task.version_number:
+            raise Conflict(VERSION_CHANGED)
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            run = start_task_run(
+                task,
+                inputs=serializer.validated_data["inputs"],
+                actor=request.user,
+                launch=RunLaunch.FIX,
+                expected_version=int(version) if version is not None else None,
+                conversation=conversation,
+                client_request_id=client_request_id,
+            )
+        except AlreadyStarted as exc:
+            return Response(RunSerializer(exc.run, context=self.get_serializer_context()).data)
+        except LaunchIdConflict as exc:
+            raise Conflict(str(exc)) from exc
+        except IntegrityError as exc:
+            # 同じ修正チャットで、別のメッセージがこのIDを使っている
+            raise Conflict(_("この要求のIDは、別の要求で使われています")) from exc
+        except VersionConflict as exc:
+            raise Conflict(VERSION_CHANGED) from exc
+        except InvalidInputs as exc:
+            raise ValidationError({"inputs": exc.errors}) from exc
+        except CannotRun as exc:
+            raise ValidationError({"non_field_errors": [str(exc)]}) from exc
+        return Response(RunSerializer(run, context=self.get_serializer_context()).data, status=status.HTTP_201_CREATED)
+
     def _choice_task(self) -> TaskDefinition:
         """候補を求める範囲（クエリの scope・department）の、保存していないタスク。その範囲のタスクを管理できなければ
         403（作成の画面と、管理できるタスクの編集の画面だけで使う）"""
@@ -334,8 +414,10 @@ class AppLaunchableTaskViewSet(ReadOnlyModelViewSet):
     )
     @action(detail=True, methods=["post"], serializer_class=TaskRunCreateSerializer)
     def run(self, request, *args, **kwargs):
+        # 修正チャットからは起動しない（修正チャットはそのタスクだけを動かす。design.md §11.11）
         conversation = get_object_or_404(
-            Conversation.objects.owned_by(request.user), uid=request.query_params.get("conversation", "")
+            Conversation.objects.owned_by(request.user).filter(purpose=ConversationPurpose.CHAT),
+            uid=request.query_params.get("conversation", ""),
         )
         client_request_id = request.query_params.get("client_request_id", "")
         if not client_request_id or len(client_request_id) > 64:
@@ -429,7 +511,7 @@ class AppTaskRunViewSet(TaskMixin, ReadOnlyModelViewSet):
         "task",
         "conversation",
         "model_version__profile",
-        "task_revision",
+        "task_revision__destination",
         "owner",
         "trigger_receipt__binding",
         "trigger_receipt__binding_revision",
@@ -482,8 +564,7 @@ class AppTaskRunMessageViewSet(mixins.ListModelMixin, GenericViewSet):
 
     @cached_property
     def run(self) -> Run:
-        """URLのRun（Runの結果を見られる人だけ。タスクを移した・消した後も読める。タスクのRunの会話は1つのRunだけを
-        持つ）"""
+        """URLのRun（Runの結果を見られる人だけ。タスクを移した・消した後も読める）"""
         user = self.request.user
         runs = (
             Run.objects.results_visible_to(user)
@@ -498,7 +579,8 @@ class AppTaskRunMessageViewSet(mixins.ListModelMixin, GenericViewSet):
         return self.run.conversation
 
     def get_queryset(self):
-        qs = super().get_queryset().filter(conversation=self.conversation)
+        # 修正チャットの会話には、ほかのRunのメッセージもあるので、このRunのものだけにする
+        qs = super().get_queryset().filter(conversation=self.conversation, run=self.run)
         return qs if logs_visible(self.run) else qs.filter(role=MessageRole.AGENT)
 
 

@@ -89,7 +89,7 @@ from .result_files import missing_files
 from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, SandboxSession
 from .skill_edit import revoked_edit
 from .skills import explicit_versions, revoked_skill
-from .tools import ALL_TOOLS, SANDBOX_TOOLS, WORKSPACE_WRITING_TOOLS
+from .tools import ALL_TOOLS, ASK_USER, SANDBOX_TOOLS, WORKSPACE_WRITING_TOOLS
 from .tools.base import Effect, Tool, ToolContext, ToolResult
 from .tools.datasource import make_datasource_tools
 from .tools.prepare_notification import PREPARE_NOTIFICATION
@@ -564,6 +564,9 @@ class Runner:
                 tools += (make_submit_result_tool(schema, notification=notification),)
             if notification:
                 tools += (PREPARE_NOTIFICATION,)
+            if self.run_obj.is_task_fix and ASK_USER not in tools:
+                # 修正チャットでは、タスクを管理する人が答える。尋ねても作業の権限は増えない（harness.md §7.5の5）
+                tools += (ASK_USER,)
         elif explicit:
             allowed = {name for version in explicit for name in version.tools}
             tools = tuple(t for t in (*ALL_TOOLS, *datasource) if t.name in allowed)
@@ -777,7 +780,9 @@ class Runner:
             return []
 
         def collected(path: str) -> str | None:
-            artifact = Artifact.objects.latest_output(run.conversation_id, path)
+            artifact = Artifact.objects.latest_output(
+                run.conversation_id, path, run=run if run.isolated_workspace else None
+            )
             return artifact.sha256 if artifact else None
 
         return missing_files(original_schema(tool), run.result, self.workspace_outputs, collected)

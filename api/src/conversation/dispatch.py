@@ -128,12 +128,21 @@ def post_message(
     同じく次の依頼にする
     """
     conversation = Conversation.objects.select_for_update().get(pk=conversation.pk)
+    if conversation.is_task_fix:
+        # 再送を返す前にも確かめる（管理できなくなった持ち主に、タスクのRunのメッセージを返さない。
+        # authorization.md §7.1）
+        from task.checks import fixer_problem  # noqa: PLC0415  taskがconversationをimportするため
+
+        if reason := fixer_problem(actor, conversation.task):
+            raise CannotStart(reason)
     if client_message_id:
         sent = ConversationMessage.objects.filter(
             conversation=conversation, client_message_id=client_message_id
         ).first()
         if sent is not None:
             return sent  # 再送。二重に受け付けない
+    if conversation.is_task_fix:
+        _check_fix_message(conversation, mode=mode, separate=bool(skills or connectors or skill_edit))
     message = ConversationMessage.objects.create(
         conversation=conversation,
         sender=actor,
@@ -155,7 +164,9 @@ def post_message(
         )
         if len(unsent) != len(attachments):
             raise CannotStart(_("送信済みの添付が含まれています。添付し直してください。"))
-        Artifact.attach(conversation, unsent)
+        fix_run = active_run(conversation) if conversation.is_task_fix else None
+        # 修正チャットでは、動いているタスクのRunの添付の中で名前を決める（Runごとに /workspace/input を分けるため）
+        Artifact.attach(conversation, unsent, run=fix_run)
         message.attachments.set(unsent)
     conversation.last_posted = timezone.now()
     fields = ["last_posted", "updated"]
@@ -171,6 +182,10 @@ def post_message(
         return message
     message.run = run
     message.save(update_fields=["run"])
+    if conversation.is_task_fix and attachments:
+        # 修正チャットでは、追加の指示・回答の添付もタスクのRunの添付にする（Runの画面で、タスクを管理できる人が取得
+        # できるように。/workspace/input にはこのRunのものだけを置く。harness.md §10.10）
+        Artifact.objects.filter(pk__in=[a.pk for a in attachments]).update(run=run)
     separate = bool(skills) or bool(connectors) or bool(skill_edit)  # 別のRunとして始める依頼
     question = ClarificationRequest.objects.filter(
         run=run, status=ClarificationStatus.OPEN, kind__in=(ClarificationKind.QUESTION, ClarificationKind.SKILL_EDIT)
@@ -193,6 +208,17 @@ def post_message(
         conversation=conversation, message=message, run=run if kind == InstructionKind.CURRENT else None, kind=kind
     )
     return message
+
+
+def _check_fix_message(conversation: Conversation, *, mode: str, separate: bool) -> None:
+    """修正チャット（design.md §11.11）で受け付けるのは、動いているタスクのRunへの追加の指示と確認への回答だけ
+    （タスクを今も管理できるかは post_message() が先に確かめる）。Skill・Connectorの指定と、Skillの編集の依頼は
+    受け付けない"""
+    if separate:
+        raise CannotStart(_("修正チャットでは、SkillやConnectorを指定できません。"))
+    run = active_run(conversation)
+    if run is None or mode == MessageMode.NEXT or run.status == RunStatus.CANCELLING:
+        raise CannotStart(_("修正チャットでは、動いているタスクへの指示と回答だけを送れます。"))
 
 
 def accept_skill_edit(clarification: ClarificationRequest, actor) -> None:
@@ -275,6 +301,14 @@ def resolve_connectors(
 
 def start_run(conversation: Conversation, message: ConversationMessage, actor, *, parent: Run | None = None) -> Run:
     """呼び出し側のtransactionの中で呼ぶ。モデル設定の版とeffortを固定し、最初の発言を記録して実行を依頼する"""
+    if conversation.is_task_fix:
+        # 修正チャットのタスクのRunは task.dispatch.start_task_run() で始める。ここに来るのは、タスクのRunが終わる直前に
+        # 届いて取り込めなかった追加の指示（次の依頼に回したもの。start_next_request() が理由を会話に残す）
+        raise CannotStart(
+            _(
+                "タスクの作業が終わる前に取り込めなかったので、反映していません。「もう一度動かす」から動かし直してください。"
+            )
+        )
     profile = conversation.model_profile
     version = profile.current_version
     if version is None or not profile.is_active or profile.deleted:

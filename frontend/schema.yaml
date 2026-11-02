@@ -2962,10 +2962,12 @@ paths:
           - 1
           - 2
           - 3
+          - 4
         description: |-
           * `1` - タスクの画面からの手動実行
           * `2` - Webhook
           * `3` - チャットからの起動
+          * `4` - 修正チャット
       - name: ordering
         required: false
         in: query
@@ -3280,6 +3282,68 @@ paths:
               schema:
                 $ref: '#/components/schemas/TaskDefinitionDetail'
           description: ''
+  /api/app/v1/tasks/{uid}/fix_chat/:
+    post:
+      operationId: app_v1_tasks_fix_chat_create
+      description: 修正チャット（design.md §11.11）でタスクを動かす（タスクを管理できる人。停止中でも動かせる）。`conversation`
+        を省くと、新しい修正チャットを作る。タスクに固定したものの範囲で動き、実行中の追加の指示と確認への回答を受け付け、出口へは送らない。入力は手動実行と同じ
+      parameters:
+      - in: query
+        name: client_request_id
+        schema:
+          type: string
+        description: 画面が要求ごとに作るID（64文字まで）。このタスクの自分の修正チャットで同じIDの要求を受け付け済みなら、そのRunを返す（応答が失われた後の再送で、二重に動かさない）
+        required: true
+      - in: query
+        name: conversation
+        schema:
+          type: string
+        description: 動かし直す修正チャットのID（このタスクの、自分の修正チャット）
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      - in: query
+        name: version
+        schema:
+          type: integer
+        description: 画面で確かめた版（任意）。今の版と違えば409にし、確かめていない定義では動かさない
+      tags:
+      - app/task
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TaskRunCreateRequest'
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                inputs:
+                  type: string
+                  description: ファイル以外の入力の項目の名前と値（JSONのオブジェクトの文字列）
+              additionalProperties:
+                type: string
+                format: binary
+                description: 型がファイルの項目。フィールドの名前は項目の名前
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Run'
+          description: ''
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Run'
+          description: ''
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、他の人が版を作った）
   /api/app/v1/tasks/{uid}/resume/:
     post:
       operationId: app_v1_tasks_resume_create
@@ -8037,6 +8101,12 @@ components:
           - $ref: '#/components/schemas/Run'
           nullable: true
           readOnly: true
+        task:
+          allOf:
+          - $ref: '#/components/schemas/ConversationTask'
+          readOnly: true
+          nullable: true
+          description: 修正チャットで直すタスク（ふつうの会話では空）
         created:
           type: string
           format: date-time
@@ -8051,6 +8121,7 @@ components:
       - id
       - last_posted
       - model_profile_info
+      - task
       - updated
     ConversationRequest:
       type: object
@@ -8070,6 +8141,31 @@ components:
           type: string
           title: タイトル
           maxLength: 200
+    ConversationTask:
+      type: object
+      description: 修正チャットで直すタスク（今の名前と範囲。design.md §11.11）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        scope:
+          type: integer
+          readOnly: true
+        scope_display:
+          type: string
+          readOnly: true
+        deleted:
+          type: boolean
+          readOnly: true
+      required:
+      - deleted
+      - id
+      - name
+      - scope
+      - scope_display
     CsvColumnTypeEnum:
       enum:
       - string
@@ -12143,6 +12239,16 @@ components:
           allOf:
           - $ref: '#/components/schemas/RunKindEnum'
           readOnly: true
+        trigger:
+          allOf:
+          - $ref: '#/components/schemas/RunTriggerEnum'
+          readOnly: true
+        task_info:
+          allOf:
+          - $ref: '#/components/schemas/RunTaskInfo'
+          nullable: true
+          readOnly: true
+          description: タスクのRunの、受付時のタスクと版（ほかのRunでは空）
         status:
           allOf:
           - $ref: '#/components/schemas/RunStatusEnum'
@@ -12227,7 +12333,9 @@ components:
       - status
       - status_display
       - step_count
+      - task_info
       - todos
+      - trigger
       - updated
     RunCancelRequest:
       type: object
@@ -12337,11 +12445,13 @@ components:
       - 1
       - 2
       - 3
+      - 4
       type: integer
       description: |-
         * `1` - タスクの画面からの手動実行
         * `2` - Webhook
         * `3` - チャットからの起動
+        * `4` - 修正チャット
     RunMessageEvent:
       type: object
       description: 確定したメッセージとTool実行（利用者の発言、エージェントの応答、Toolの結果）
@@ -12385,6 +12495,22 @@ components:
       - tool_calls
       - tool_result
       - type
+    RunNotification:
+      type: object
+      description: 通知の候補（prepare_notification で決めたもの）
+      properties:
+        message:
+          type: string
+          readOnly: true
+        files:
+          type: array
+          items:
+            type: string
+          readOnly: true
+          nullable: true
+      required:
+      - files
+      - message
     RunOtherEvent:
       type: object
       description: そのほかの記録（モデルの切り替え、再試行、圧縮等）。詳細のログに出す
@@ -12618,6 +12744,62 @@ components:
           clarification.requested: '#/components/schemas/ClarificationEvent'
           run.event: '#/components/schemas/RunOtherEvent'
           run.delta: '#/components/schemas/RunDeltaEvent'
+    RunTaskInfo:
+      type: object
+      description: タスクのRunの、受付時のタスクと版、起動のしかた、通知（Manifestに固定したもの）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        number:
+          type: integer
+          readOnly: true
+          description: 受付時のタスクの版
+        launch:
+          readOnly: true
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/RunLaunchEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        launch_display:
+          type: string
+          readOnly: true
+        delivers:
+          type: boolean
+          readOnly: true
+          description: 出口へ送るか（修正チャットのRunは送らない）
+        destination_name:
+          type: string
+          readOnly: true
+          description: タスクの版の結果の通知先の名前（なければ空）
+        notification:
+          allOf:
+          - $ref: '#/components/schemas/RunNotification'
+          readOnly: true
+          nullable: true
+          description: 通知の候補（修正チャットでは、送るはずだった内容）
+      required:
+      - delivers
+      - destination_name
+      - id
+      - launch
+      - launch_display
+      - name
+      - notification
+      - number
+    RunTriggerEnum:
+      enum:
+      - 1
+      - 2
+      - 3
+      type: integer
+      description: |-
+        * `1` - 会話
+        * `2` - タスク
+        * `3` - Skillの評価
     RuntimeProfile:
       type: object
       description: |-
@@ -14834,6 +15016,16 @@ components:
           allOf:
           - $ref: '#/components/schemas/RunKindEnum'
           readOnly: true
+        trigger:
+          allOf:
+          - $ref: '#/components/schemas/RunTriggerEnum'
+          readOnly: true
+        task_info:
+          allOf:
+          - $ref: '#/components/schemas/RunTaskInfo'
+          nullable: true
+          readOnly: true
+          description: タスクのRunの、受付時のタスクと版（ほかのRunでは空）
         status:
           allOf:
           - $ref: '#/components/schemas/RunStatusEnum'
@@ -14971,9 +15163,11 @@ components:
       - status_display
       - step_count
       - task
+      - task_info
       - task_name
       - task_version
       - todos
+      - trigger
       - updated
     TaskRunCreateRequest:
       type: object

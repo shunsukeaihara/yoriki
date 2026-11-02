@@ -3,7 +3,7 @@
 from django.utils.translation import gettext as _
 
 from llm.models import ModelProfile, ProviderKind
-from run.models import ClarificationKind, ClarificationRequest, Run, RunEvent, RunEventKind
+from run.models import ClarificationKind, ClarificationRequest, Run, RunEvent, RunEventKind, RunTrigger
 
 from .skills import unsupported_skills
 
@@ -12,7 +12,10 @@ RETRY_VALUE = "retry"
 
 def switch_candidates(run: Run) -> list[ModelProfile]:
     """切り替えてよいモデル設定。機密の会話はローカルLLMだけ。Toolを使うのでTool呼出しに対応するものだけ。
-    使っているSkillの必要な能力を持つものだけ"""
+    使っているSkillの必要な能力を持つものだけ。タスクのRun（修正チャット）は、タスクに固定したモデル設定のまま
+    動かすので候補を出さない（同じモデルでもう一度試すだけ）"""
+    if run.trigger == RunTrigger.TASK:
+        return []
     profiles = (
         ModelProfile.objects.filter(
             deleted=False,

@@ -2,6 +2,7 @@
 /**
  * 会話の画面（design.md §11）。表示は REST API で取得し、実行中の Run のストリームと、ログインユーザー宛ての通知を
  * 受けたら取得し直す（realtime.md §5）。画面を閉じても Run は続き、開き直せば同じ表示に戻る。
+ * タスクの修正チャット（design.md §11.11）では、その中でタスクを動かし、動いている間の追加の指示と回答を送る。
  */
 const route = useRoute()
 const api = useAPI()
@@ -130,6 +131,38 @@ const openLaunch = (task: LaunchableTask) => {
 // 版が変わったときは、候補（入力の項目）を読み直す。起動した・受け付けたかが分からないときは、カードを読み直す
 const onLaunchConflicted = () => fetchLaunchableTasks()
 
+// --- タスクの修正チャット（design.md §11.11） ---
+
+const fixTask = computed(() => conversation.value?.task ?? null)
+const fixOpen = ref(false)
+const fixTaskDetail = ref<TaskDetail | null>(null)
+const fixInitialValues = ref<TaskRunInputs | undefined>()
+const openingFix = ref(false)
+// タスクの今の定義（入力の項目）を読み、前の実行の入力を初期値にしてダイアログを開く（ファイルの項目は選び直す）
+const openFix = async () => {
+  if (!fixTask.value) return
+  openingFix.value = true
+  try {
+    const detail = await api.tasks(fixTask.value.id).get()
+    const last = runs.value.find((r) => r.taskInfo)
+    let values: TaskRunInputs | undefined
+    if (last) {
+      const taskRun = await api.tasks(detail.id).runs(last.id).get()
+      const kept = new Set((detail.inputs ?? []).filter((i) => i.type !== TaskInputType.FILE).map((i) => i.name))
+      values = Object.fromEntries(
+        taskRun.inputs.filter((i) => kept.has(i.name)).map((i) => [i.name, i.value as TaskRunInputs[string]]),
+      )
+    }
+    fixTaskDetail.value = detail
+    fixInitialValues.value = values
+    fixOpen.value = true
+  } catch (err) {
+    toast.add({ title: t('タスクを読めませんでした'), description: makeErrorMsg(err), color: 'error' })
+  } finally {
+    openingFix.value = false
+  }
+}
+
 // --- 表示 ---
 
 const runById = computed(() => {
@@ -160,6 +193,12 @@ const chatStatus = computed(() => {
   if (sending.value) return 'submitted'
   return activeRun.value ? 'streaming' : 'ready'
 })
+
+// 修正チャットで動かしたタスクの Run の、最初の依頼（タスクの依頼文と入力から作ったもの）
+const taskRunOf = (message: Message) => {
+  if (message.role !== MessageRole.USER || message.instruction || !message.run) return null
+  return runById.value.get(message.run)?.taskInfo ?? null
+}
 
 const instructionLabel = (message: Message) => {
   const instruction = message.instruction
@@ -278,7 +317,7 @@ const menuItems = computed(() => [
         <UDashboardNavbar :title="conversation?.title || $t('新しい会話')">
           <template #right>
             <ConversationModelSettings
-              v-if="conversation"
+              v-if="conversation && !fixTask"
               :conversation="conversation"
               :models="models"
               class="hidden sm:flex"
@@ -297,8 +336,29 @@ const menuItems = computed(() => [
           </template>
         </UDashboardNavbar>
         <!-- 狭い画面では、モデルの切り替えを見出しの下の行に出す -->
-        <UDashboardToolbar v-if="conversation" class="sm:hidden">
+        <UDashboardToolbar v-if="conversation && !fixTask" class="sm:hidden">
           <ConversationModelSettings :conversation="conversation" :models="models" @updated="onUpdated" />
+        </UDashboardToolbar>
+        <!-- 修正チャット：直すタスクと、もう一度動かす操作 -->
+        <UDashboardToolbar v-if="fixTask">
+          <div class="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-sm">
+            <UIcon name="i-lucide-messages-square" class="size-4 shrink-0 text-muted" />
+            <span class="text-muted">{{ $t('修正チャット') }}</span>
+            <NuxtLink v-if="!fixTask.deleted" :to="`/tasks/${fixTask.id}`" class="min-w-0 truncate text-primary">
+              {{ fixTask.name }}
+            </NuxtLink>
+            <span v-else class="min-w-0 truncate">{{ $t('{name}（削除済み）', { name: fixTask.name }) }}</span>
+            <UBadge color="neutral" variant="subtle" size="sm">{{ fixTask.scopeDisplay }}</UBadge>
+          </div>
+          <DBtn
+            icon="i-lucide-play"
+            size="sm"
+            :disabled="Boolean(activeRun) || fixTask.deleted"
+            :loading="openingFix"
+            @click="openFix"
+          >
+            {{ $t('もう一度動かす') }}
+          </DBtn>
         </UDashboardToolbar>
       </template>
 
@@ -342,6 +402,16 @@ const menuItems = computed(() => [
                   </p>
                   <template v-else>
                     <UBadge
+                      v-if="taskRunOf(item.message)"
+                      color="info"
+                      variant="subtle"
+                      size="sm"
+                      icon="i-lucide-workflow"
+                      class="mb-1"
+                    >
+                      {{ $t('タスクを動かしました（版 {number}）', { number: taskRunOf(item.message)?.number }) }}
+                    </UBadge>
+                    <UBadge
                       v-if="item.message.skillEdit"
                       color="warning"
                       variant="subtle"
@@ -369,7 +439,11 @@ const menuItems = computed(() => [
                         </UBadge>
                       </li>
                     </ul>
-                    <p v-if="item.message.body" class="whitespace-pre-wrap">{{ item.message.body }}</p>
+                    <!-- タスクの最初の依頼は、埋め込んだ入力の値を目立たせて出す -->
+                    <p v-if="item.message.body && taskRunOf(item.message)">
+                      <TaskPromptText :text="item.message.body" />
+                    </p>
+                    <p v-else-if="item.message.body" class="whitespace-pre-wrap">{{ item.message.body }}</p>
                   </template>
                   <ul v-if="item.message.attachmentsInfo.length" class="mt-1 grid gap-0.5">
                     <li v-for="artifact in item.message.attachmentsInfo" :key="artifact.id">
@@ -406,6 +480,8 @@ const menuItems = computed(() => [
             :attachments="attachments.items.value"
             :sending="sending"
             :stopping="stopping"
+            :fix-chat="Boolean(fixTask)"
+            :disabled="Boolean(fixTask) && !activeRun"
             class="sticky bottom-0 z-10 rounded-b-none"
             @submit="send"
             @stop="stop"
@@ -421,6 +497,16 @@ const menuItems = computed(() => [
             @started="syncNow"
             @unknown="syncNow"
             @conflicted="onLaunchConflicted"
+          />
+          <TaskFixChatDialog
+            v-if="fixTask"
+            v-model:open="fixOpen"
+            :task="fixTaskDetail"
+            :conversation-id="conversationId"
+            :initial-values="fixInitialValues"
+            @started="syncNow"
+            @unknown="syncNow"
+            @conflicted="syncNow"
           />
         </UContainer>
       </template>

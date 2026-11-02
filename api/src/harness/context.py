@@ -285,7 +285,7 @@ def runtime_context(run: Run, *, user_name: str) -> str:
         RUNTIME_CONTEXT_TAG,
         f"  <now>{now}</now>",
         f'  <user name="{_escape(user_name)}" />',
-        f"  <mode>{'conversation' if run.is_interactive else 'task'}</mode>",
+        _mode(run),
         f'  <model profile="{_escape(version.profile.name)}" effort="{_escape(run.effort)}" />',
         (
             f'  <sandbox available="true" workdir="{WORK_DIR}" />'
@@ -307,6 +307,13 @@ def runtime_context(run: Run, *, user_name: str) -> str:
         lines.append(edit)
     lines.append("</runtime_context>")
     return "\n".join(lines)
+
+
+def _mode(run: Run) -> str:
+    """会話か、タスクか。タスクでは答える人がいるか（修正チャット）も示す（harness.md §6.2）"""
+    if run.is_task_fix:
+        return '  <mode responder="true">task</mode>'
+    return f"  <mode>{'conversation' if run.is_interactive else 'task'}</mode>"
 
 
 def _escape(value: str) -> str:

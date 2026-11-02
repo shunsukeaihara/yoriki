@@ -210,6 +210,7 @@ export type TaskChoiceParams = ListParams & { scope: SkillScopeEnum; department?
 export type TaskRunListParams = ListParams & { status?: RunStatusEnum; launch?: RunLaunchEnum }
 // タスクのRun（起動のしかた、受付時の版と入力、配信の状態を足したもの）と、配信の履歴（タスクを管理できる人）
 export type RunLaunchEnum = Schemas['RunLaunchEnum']
+export type RunTriggerEnum = Schemas['RunTriggerEnum']
 export type TaskRun = Api<'TaskRun'>
 export type TaskRunReceipt = Api<'TaskRunReceipt'>
 export type TaskRunDeliveryState = Api<'TaskRunDeliveryState'>

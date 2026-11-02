@@ -21,7 +21,7 @@ from skill import connectors as skill_connectors
 from skill.models import Skill, SkillAction, SkillScope, SkillVersion
 from user.models import Department, manageable_department_ids
 
-from .models import TaskScope
+from .models import TaskAction, TaskScope
 
 # 1つのタスクに登録できるSkill・Connector・入力の項目の数
 MAX_TASK_SKILLS = 5
@@ -308,11 +308,12 @@ def _check_model(content: dict[str, Any], skills: dict[str, tuple[Skill, SkillVe
 # --- 実行するとき ---
 
 
-def task_problem(task) -> str:
-    """タスクのRunを続けられない理由（停止・削除）。なければ空文字"""
+def task_problem(task, *, allow_suspended: bool = False) -> str:
+    """タスクのRunを続けられない理由（停止・削除）。なければ空文字。修正チャットのRunは停止中かを見ない
+    （`allow_suspended`。出口へ送らないので、本番の受付を止めたまま直せる。design.md §11.11）"""
     if task is None or task.deleted:
         return _("タスクが削除されました")
-    if task.suspended:
+    if task.suspended and not allow_suspended:
         return _("タスクが停止されました")
     if task.scope == TaskScope.DEPARTMENT and (task.department is None or task.department.deleted):
         return _("タスクの部門が無効にされました")  # 無効にした部門のタスクは起動しない（authorization.md §9）
@@ -348,9 +349,14 @@ def declaration_problem(task, version: Any, *, connectors: list[str], sensitive:
     return ""
 
 
-def connector_permitted(task, connector: Connector, *, connectors: list[str]) -> bool:
-    """タスクのRunがこのConnectorを今使えるか：タスクに固定したもので、今も有効で範囲の中にある"""
-    return connector.uid in connectors and task_problem(task) == "" and connector_allowed(task, connector)
+def connector_permitted(task, connector: Connector, *, connectors: list[str], allow_suspended: bool = False) -> bool:
+    """タスクのRunがこのConnectorを今使えるか：タスクに固定したもので、今も有効で範囲の中にある。修正チャットのRunは
+    停止中かを見ない（`allow_suspended`。task_problem() と同じ）"""
+    return (
+        connector.uid in connectors
+        and task_problem(task, allow_suspended=allow_suspended) == ""
+        and connector_allowed(task, connector)
+    )
 
 
 # --- チャットから起動したRun（authorization.md §6） ---
@@ -375,6 +381,16 @@ def launcher_scope_problem(user, run: Any) -> str:
     else:
         allowed = run.task_scope == TaskScope.COMPANY
     return "" if allowed else _("起動した人がこのタスクを起動できる部門から外れました")
+
+
+def fixer_problem(user, task) -> str:
+    """修正チャットでタスクを動かす・直す人が、今もそのタスクを管理できるか（authorization.md §6）。Workerでは、
+    確かめ直すたびにDBから読んだユーザーとタスクを渡す。できなければ理由"""
+    if user is None or not user.is_active:
+        return _("修正チャットの持ち主のアカウントが無効です")
+    if task is None or not task.can(user, TaskAction.MANAGE):
+        return _("修正チャットの持ち主がこのタスクを管理できなくなりました")
+    return ""
 
 
 def launcher_skill_problem(user, skill: Skill) -> str:

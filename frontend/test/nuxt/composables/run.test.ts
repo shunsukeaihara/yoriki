@@ -4,6 +4,8 @@ const run = (overrides: Partial<Run>): Run => ({
   id: 'r1',
   conversation: 'c1',
   kind: RunKind.WORK,
+  trigger: RunTrigger.CONVERSATION,
+  taskInfo: null,
   status: RunStatus.COMPLETED,
   statusDisplay: '完了',
   endReason: null,
@@ -39,6 +41,18 @@ describe('run', () => {
     expect(hasWorkToShow(run({ todos: [{ content: '読む', status: TodoStatus.COMPLETED }] }))).toBe(true)
     // Skill の編集の Run は、1回の応答で終わっても編集の Run であることを出す
     expect(hasWorkToShow(run({ kind: RunKind.SKILL_EDIT }))).toBe(true)
+    // 修正チャットのタスクの Run は、1回の応答で終わってもタスクと送るはずだった通知を出す
+    const taskInfo = {
+      id: 't1',
+      name: '請求書チェック',
+      number: 2,
+      launch: RunLaunch.FIX,
+      launchDisplay: '修正チャット',
+      delivers: false,
+      destinationName: '',
+      notification: null,
+    }
+    expect(hasWorkToShow(run({ trigger: RunTrigger.TASK, taskInfo }))).toBe(true)
   })
 })
 

@@ -231,6 +231,7 @@ SPECTACULAR_SETTINGS = {
         "RunEventKindEnum": "run.models.RunEventKind",
         "RunKindEnum": "run.models.RunKind",
         "RunLaunchEnum": "run.models.RunLaunch",
+        "RunTriggerEnum": "run.models.RunTrigger",
         "ClarificationKindEnum": "run.models.ClarificationKind",
         "ClarificationStatusEnum": "run.models.ClarificationStatus",
         "InstructionKindEnum": "conversation.models.InstructionKind",

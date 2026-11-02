@@ -100,7 +100,9 @@ def result_artifacts(run: Run, *, only: list[str] | None = None) -> list[dict[st
     for field, path in result_files(output_schema(run), run.result):
         if only is not None and path not in only:
             continue
-        artifact = Artifact.objects.latest_output(run.conversation_id, path)
+        artifact = Artifact.objects.latest_output(
+            run.conversation_id, path, run=run if run.isolated_workspace else None
+        )
         if artifact is None:  # 完了の前に確かめている（harness/runner.py）ので、保持期限で消えたもの等
             logger.warning("run %s: the result file %s (%s) was not collected", run.uid, path, field)
             continue

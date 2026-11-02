@@ -192,6 +192,7 @@ def test_launcher_sees_only_the_results(api_client, app_user):
     assert [a["id"] for a in artifacts] == [output.uid]
     # ログ（イベント・ストリーム）と一覧は見られない
     assert api_client.get(f"/api/app/v1/runs/{run.uid}/events/").status_code == 404
+    assert api_client.get(f"/api/app/v1/runs/{run.uid}/script_calls/").status_code == 404
     assert api_client.get(f"/api/app/v1/runs/{run.uid}/").status_code == 404
     assert api_client.get(f"/api/app/v1/tasks/{task.uid}/runs/").status_code == 404
     # 自分が起動したRunは止められる

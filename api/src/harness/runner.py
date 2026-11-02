@@ -50,6 +50,7 @@ from run.dispatch import enqueue_run
 from run.errors import LeaseLost
 from run.models import (
     MAX_ATTEMPTS,
+    SCRIPT_CALL_PREFIX,
     Checkpoint,
     ClarificationKind,
     ClarificationRequest,
@@ -88,7 +89,7 @@ from .prompts import system_prompt
 from .recovery import request_model_switch
 from .result_files import missing_files
 from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, SandboxSession
-from .script_connectors import SCRIPT_CALL_PREFIX, ScriptConnectors
+from .script_connectors import ScriptConnectors
 from .skill_edit import revoked_edit
 from .skills import SkillContentSource, explicit_versions, revoked_skill
 from .task_edit import revoked_task_edit

@@ -251,6 +251,8 @@ SPECTACULAR_SETTINGS = {
         "CsvDelimiterEnum": "resources.formats.CSV_DELIMITER_CHOICES",
         "CsvColumnTypeEnum": "resources.formats.COLUMN_TYPES",
         "ConnectorKindEnum": "connector.models.ConnectorKind",
+        "ConnectorOperationEnum": "connector.models.Operation",
+        "ToolStatusEnum": "run.models.ToolStatus",
         "TriggerKindEnum": "task.models.TriggerKind",
         "TaskInputTypeEnum": "task.models.TaskInputType",
         "DestinationKindEnum": "delivery.models.DestinationKind",

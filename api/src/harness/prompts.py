@@ -97,10 +97,27 @@ SUBMIT_RESULT_WITH_NOTIFICATION = (
 )
 
 
+# `shell` と `datasource_query` を出しているRunで、Skillのスクリプトからも同じConnectorを読めること
+# （design.md §4.9.6）。Runnerはジョブの終わりを待つ間に要求を処理するので、スクリプトは前面で動かすか
+# `job_output` で待たせる
+SCRIPT_CONNECTORS = (
+    "- Python scripts in the sandbox can read the same connectors with the `yoriki_connector` library: "
+    "`yoriki_connector.query(connector, sql, params)` returns `columns`, `rows` (dicts of strings; NULL is an empty "
+    "string), `row_count`, `truncated` and `path` (the full CSV), and `yoriki_connector.describe(connector)` returns "
+    "the tables. Use it when a skill's script calls it or when each query depends on the previous result; "
+    "otherwise use `datasource_query`. Fetch the rows you need with one query (`WHERE ... IN (...)` or the whole "
+    "table) and join them in the script, instead of one query per row. Run such a script in the foreground or wait "
+    "for it with `job_output`: its requests are answered only while you wait for a command."
+)
+
+
 def system_prompt(tools: tuple[Tool, ...]) -> str:
     sections = dict(TOOL_GUIDANCE)
-    if any(t.name == "prepare_notification" for t in tools):
+    names = {t.name for t in tools}
+    if "prepare_notification" in names:
         sections["submit_result"] = SUBMIT_RESULT_WITH_NOTIFICATION
+    if {"shell", "datasource_query"} <= names:
+        sections["datasource_query"] += "\n" + SCRIPT_CONNECTORS
     lines = [sections[t.name] for t in tools if t.name in sections]
     guidance = ("# Tools\n- Call independent tools together in one response.\n" + "\n".join(lines)) if lines else ""
     template = (PROMPT_DIR / "system.md").read_text()

@@ -616,6 +616,10 @@ class ToolStatus(models.IntegerChoices):
     UNKNOWN = 40, _("結果不明")
 
 
+# Skillのスクリプトからの呼出し（harness/script_connectors.py）のToolInvocationの `call_id` の始まり
+SCRIPT_CALL_PREFIX = "script-"
+
+
 class ToolInvocation(models.Model):
     """Toolの呼出し。実行の前に作り（harness.md §7.6）、結果の記録で終える"""
 

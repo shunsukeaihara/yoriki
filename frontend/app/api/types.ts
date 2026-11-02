@@ -167,6 +167,9 @@ export type ClarificationKindEnum = Schemas['ClarificationKindEnum']
 export type ClarificationStatusEnum = Schemas['ClarificationStatusEnum']
 export type ClarificationAnswer = Api<'ClarificationAnswerRequest'>
 export type ClarificationAnswerItem = Api<'ClarificationAnswerItemRequest'>
+// Skill のスクリプトからの Connector の呼出し（作業の記録で、そのときの shell・job_output の下に出す）
+export type ScriptCall = Api<'ScriptCall'>
+export type ToolStatusEnum = Schemas['ToolStatusEnum']
 
 // SSE のイベント（realtime.md §3）。type で判別できる union 型
 export type RunStreamEvent = Api<'RunStreamEvent'>

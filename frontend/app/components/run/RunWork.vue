@@ -34,6 +34,77 @@ watch(open, (value) => {
 })
 const events = computed(() => props.events ?? loadedEvents.value)
 
+// Skill のスクリプトからの Connector の呼出し。モデルの文脈（イベント）に入らないので、別に読む。Run が動いて
+// いる間は5秒ごとと、shell・job_output の結果が届いたときと、Run が終わったときに読み直す。
+// 読み直すのは、まだ終わっていない呼出し（なければ最後の呼出し）から後だけ（1 Run で 1,000 回まで呼べるため）
+const scriptCalls = ref<ScriptCall[]>([])
+const UNFINISHED: ToolStatusEnum[] = [ToolStatus.REQUESTED, ToolStatus.RUNNING]
+const fetchScriptCalls = async () => {
+  const known = scriptCalls.value
+  const since = (known.find((c) => UNFINISHED.includes(c.status)) ?? known.at(-1))?.created
+  let page = await api
+    .runs(props.run.id)
+    .scriptCalls()
+    .list({ pageSize: 200, ...(since ? { since } : {}) })
+  let fresh = page.results
+  while (page.next) {
+    page = await api.http.get<Paginated<ScriptCall>, Paginated<ScriptCall>>(page.next)
+    fresh = fresh.concat(page.results)
+  }
+  // since 以後のものはすべて読み直したので、手元のものは読み直さなかった分（since より前）だけを残す。
+  // 時刻はミリ秒より細かいので、比べずに ID で除く
+  const ids = new Set(fresh.map((c) => c.id))
+  scriptCalls.value = since ? [...known.filter((c) => !ids.has(c.id)), ...fresh] : fresh
+}
+// 読んでいる間に求められたら、読み終えてからもう一度読む（Run の終わりの後の呼出しを取りこぼさない）
+let loadingScriptCalls = false
+let refreshAgain = false
+// 読めなかったら、記録の中に「読み直す」を出す（Run が終わった後は、ほかに読み直す機会がない）
+const scriptCallsFailed = ref(false)
+const refreshScriptCalls = async () => {
+  if (!props.showLog) return
+  if (loadingScriptCalls) {
+    refreshAgain = true
+    return
+  }
+  loadingScriptCalls = true
+  try {
+    do {
+      refreshAgain = false
+      await fetchScriptCalls()
+    } while (refreshAgain)
+    scriptCallsFailed.value = false
+  } catch {
+    scriptCallsFailed.value = true
+  } finally {
+    loadingScriptCalls = false
+  }
+}
+const scriptToolResults = computed(
+  () =>
+    events.value.filter(
+      (e) => e.type === 'run.message' && e.toolResult && SCRIPT_WAITING_TOOLS.includes(e.toolResult.name),
+    ).length,
+)
+watch(open, (value) => {
+  if (value) refreshScriptCalls()
+})
+watch([active, scriptToolResults], ([value], [before]) => {
+  // 実行中は記録を開いているので、Tool の結果が届くたびと、Run が終わったときに読み直す
+  if (value || before) refreshScriptCalls()
+})
+// 要求はコマンドを待つ間のほか、ステップの区切りでも処理されるので、動いている間はいつも読み直す
+// （読むのは差分だけ）
+const { pause, resume } = useIntervalFn(refreshScriptCalls, 5000, { immediate: false })
+watch(
+  () => props.run.status === RunStatus.RUNNING,
+  (running) => (running ? resume() : pause()),
+  { immediate: true },
+)
+onMounted(() => {
+  if (active.value) refreshScriptCalls()
+})
+
 // 最後の応答は、Run が終わって会話のメッセージになるまでここに出す
 const pendingReply = computed(() => {
   if (!active.value) return ''
@@ -99,7 +170,20 @@ const unsentNotice = computed(() => {
     <RunTodoList v-if="run.todos.length" :todos="run.todos" />
 
     <template v-if="showLog">
-      <RunEventLog v-if="active" :events="events" active />
+      <template v-if="active">
+        <RunEventLog :events="events" :script-calls="scriptCalls" active />
+        <DBtn
+          v-if="scriptCallsFailed"
+          variant="link"
+          color="warning"
+          size="xs"
+          class="px-0"
+          icon="i-lucide-refresh-cw"
+          @click="refreshScriptCalls"
+        >
+          {{ $t('スクリプトからの照会の記録を読めませんでした。読み直す') }}
+        </DBtn>
+      </template>
       <UCollapsible v-else v-model:open="open">
         <DBtn
           variant="link"
@@ -113,7 +197,20 @@ const unsentNotice = computed(() => {
         <template #content>
           <div class="mt-2 border-l-2 border-default pl-3">
             <USkeleton v-if="loading && !events.length" class="h-6 w-48" />
-            <RunEventLog v-else :events="events" />
+            <template v-else>
+              <RunEventLog :events="events" :script-calls="scriptCalls" />
+              <DBtn
+                v-if="scriptCallsFailed"
+                variant="link"
+                color="warning"
+                size="xs"
+                class="px-0"
+                icon="i-lucide-refresh-cw"
+                @click="refreshScriptCalls"
+              >
+                {{ $t('スクリプトからの照会の記録を読めませんでした。読み直す') }}
+              </DBtn>
+            </template>
           </div>
         </template>
       </UCollapsible>

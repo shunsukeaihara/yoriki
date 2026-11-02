@@ -7,6 +7,7 @@ import {
   ConversationPrompt,
   ConversationStartForm,
   RunClarificationForm,
+  RunEventLog,
 } from '#components'
 
 const { createConversation, createMessage, answer } = vi.hoisted(() => ({
@@ -207,5 +208,73 @@ describe('ConversationPrompt', () => {
     })
     expect((wrapper.vm as unknown as { separateRequest: boolean }).separateRequest).toBe(true)
     expect(wrapper.text()).toContain('sales')
+  })
+})
+
+describe('RunEventLog', () => {
+  const message = (sequence: number, created: string, toolCalls: ToolCallInfo[]): RunStreamEvent => ({
+    type: 'run.message',
+    run: 'r1',
+    sequence,
+    created,
+    kind: RunEventKind.ASSISTANT_MESSAGE,
+    text: '',
+    toolCalls,
+    toolResult: null,
+  })
+  const scriptCall = (id: string, during: string, created: string, status: ToolStatusEnum = ToolStatus.SUCCEEDED) =>
+    ({
+      id,
+      during,
+      operation: 'datasource_query',
+      connector: '販売管理',
+      sql: 'SELECT code FROM vendors',
+      params: [],
+      status,
+      statusDisplay: '',
+      rows: 30,
+      truncated: false,
+      tables: null,
+      errorCode: status === ToolStatus.FAILED ? 'rejected' : '',
+      error: '',
+      created,
+      ended: created,
+    }) as ScriptCall
+
+  it('スクリプトからの照会を、そのときに実行していた呼出しの下と、ステップの区切りの時刻の位置に出す', async () => {
+    const wrapper = await mountSuspended(RunEventLog, {
+      props: {
+        events: [
+          message(1, '2026-11-02T00:00:00Z', [{ id: 'c1', name: 'shell', arguments: { description: '突合する' } }]),
+          message(2, '2026-11-02T00:02:00Z', [{ id: 'c2', name: 'read', arguments: { path: 'a.csv' } }]),
+        ],
+        scriptCalls: [
+          scriptCall('s1', 'c1', '2026-11-02T00:00:10Z'),
+          scriptCall('s2', 'c1', '2026-11-02T00:00:20Z', ToolStatus.FAILED),
+          scriptCall('s3', '', '2026-11-02T00:01:00Z'),
+        ],
+      },
+    })
+    const entries = (wrapper.vm as unknown as { entries: { kind: string; scripts?: ScriptCall[] }[] }).entries
+    expect(entries.map((e) => [e.kind, (e.scripts ?? []).map((c) => c.id)])).toEqual([
+      ['tool', ['s1', 's2']],
+      ['scripts', ['s3']],
+      ['tool', []],
+    ])
+    expect(wrapper.text()).toContain('この間に処理したスクリプトからの照会（2件、失敗 1件）')
+    expect(wrapper.text()).toContain('スクリプトからの照会（1件）')
+  })
+
+  it('同じミリ秒の中でも、イベントより前に処理した呼出しはその前に出す', async () => {
+    const wrapper = await mountSuspended(RunEventLog, {
+      props: {
+        events: [
+          message(1, '2026-11-02T09:00:00.123900+09:00', [{ id: 'c1', name: 'read', arguments: { path: 'a' } }]),
+        ],
+        scriptCalls: [scriptCall('s1', '', '2026-11-02T09:00:00.123400+09:00')],
+      },
+    })
+    const entries = (wrapper.vm as unknown as { entries: { kind: string }[] }).entries
+    expect(entries.map((e) => e.kind)).toEqual(['scripts', 'tool'])
   })
 })

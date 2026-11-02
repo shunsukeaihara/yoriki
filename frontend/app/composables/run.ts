@@ -107,6 +107,20 @@ export const ClarificationStatus = {
   CANCELLED: 4,
 } as const satisfies Record<string, ClarificationStatusEnum>
 
+// バックエンドの run.models.ToolStatus と同じ値。表示はサーバーの statusDisplay を使う
+export const ToolStatus = {
+  REQUESTED: 1,
+  RUNNING: 2,
+  SUCCEEDED: 10,
+  FAILED: 20,
+  CANCELLED: 30,
+  UNKNOWN: 40,
+} as const satisfies Record<string, ToolStatusEnum>
+
+// Skill のスクリプトから Connector を呼べる Tool。Runner はこれらの終わりを待つ間に要求を処理する
+// （harness.md §10.2）
+export const SCRIPT_WAITING_TOOLS = ['shell', 'job_output']
+
 // 作業の計画（todo_write）の項目の状態
 export const TodoStatus = {
   PENDING: 'pending',

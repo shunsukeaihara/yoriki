@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-11-03（文書の整理の残り：design.md・harness.md・README・AGENTS.md・sandbox/README.md を今の実装と突き合わせて直した（#75）。マージを確かめてから、§4 の「次の作業」の1から始める）
+- 最終更新：2026-11-03（テストの高速化：バックエンドのテストを pytest-xdist で並列にした（#76）。マージを確かめてから、§4 の「次の作業」の1から始める）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -35,6 +35,8 @@
 | #58・#59・#68 | タスクの画面（design.md §11.9）、出口・入口の管理画面、タスクのRunの画面と配信の状態・通知の再試行 |
 | #69〜#71 | チャットからのタスクの起動、タスクの修正チャット（design.md §11.11、harness.md §10.10） |
 | #72・#73 | Skillのスクリプトからの呼出し `yoriki_connector`（design.md §4.9.6、CONTRACT.md 契約2）と作業の記録での表示 |
+| #74・#75 | 文書の整理（status.md の決めたことを設計書へ移し、設計書・README を今の実装と突き合わせた） |
+| #76 | テストの並列化（pytest-xdist。development.md §3.1）、残ったSandboxの掃除を同じDBのものに限る（ラベル `org.yoriki.database`） |
 
 各PRの中身は、Pull Requestの説明と設計書を見る。
 
@@ -98,13 +100,12 @@
 
 ## 4 次の作業
 
-**今の状態（2026-11-03）**：design.md §12の第1段階のうち、Skill（①〜⑤）と、Connector・タスク・配信（①〜⑦、Connectorの④a・④b）は終わった（#72・#73まで）。今は、業務（下の「第1段階の順番」の3）を作る前の整理を、利用者と決めた次の順で進めている。1（文書の整理）は #74 と、その残り（design.md・harness.md の突き合わせ。#75）で行った。#74 では、status.md の終わった段階の「決めたこと・判断した点」を設計書と突き合わせ、設計書になかった今の動きに関わるものを design.md・authorization.md・harness.md・frontend-conventions.md・sandbox/CONTRACT.md へ移してから消した（経過・レビュー・確かめたことは消した。各PRの説明に残っている）。§1 はPRごとの短い一覧にした。
+**今の状態（2026-11-03）**：design.md §12の第1段階のうち、Skill（①〜⑤）と、Connector・タスク・配信（①〜⑦、Connectorの④a・④b）は終わった（#72・#73まで）。今は、業務（下の「第1段階の順番」の3）を作る前の整理を、利用者と決めた次の順で進めている。文書の整理は #74 と、その残り（design.md・harness.md の突き合わせ。#75）で、テストの高速化は #76 で行った（バックエンドのテスト全体は、手元（8コア）で約5分から約35秒に、4並列でも約45秒になった）。#74 では、status.md の終わった段階の「決めたこと・判断した点」を設計書と突き合わせ、設計書になかった今の動きに関わるものを design.md・authorization.md・harness.md・frontend-conventions.md・sandbox/CONTRACT.md へ移してから消した（経過・レビュー・確かめたことは消した。各PRの説明に残っている）。§1 はPRごとの短い一覧にした。
 
 **次の作業**：
-1. **テストの高速化**（PR）：バックエンドのテスト全体（1104件）は手元で約4分半かかる（テスト本体216秒、準備48秒、後片付け8秒。一番遅い1件でも4秒で、時間は全体に広がっている）。`pytest-xdist` で並列にする（プロセスごとのテスト用DB、Sandboxのテストのコンテナ名・作業領域が重ならないか、競合のテスト（`TestMembershipRace` 等。ロックを待って1件2秒ほど）を並列でも安定させる、待つ時間を短くする）。CIの `backend` もあわせて速くする。フロントエンドの、手元のmacOSでcomposablesのテストが「Hook timed out」で止まる問題（§5）も調べる。
-2. **確認用の道具をリポジトリに入れる**（PR）：偽のLLM（OpenAI互換。応答の台本を指定できる）と、確認用のデータ（ユーザー、モデル設定、Runtime Profile、DB接続・Connectorと確認用のスキーマ等）を入れる管理コマンド。今は毎回 `/tmp` にスクリプトを書き直していて、開発用のDBには削除済みの確認用のデータが溜まっている。入れたら §5 の確認の手順を短くする。
-3. **未決の設計の課題に結論を出す**（§3の「入力の変数は、タスクが先か入口が先か」）：コードより先に利用者と話して決める。
-4. **最初の2つの業務**（下の3）：何をSkill・タスク・Connector・出口で用意するか、足りない機能、PRの分け方を利用者と決めてから作る。
+1. **確認用の道具をリポジトリに入れる**（PR）：偽のLLM（OpenAI互換。応答の台本を指定できる）と、確認用のデータ（ユーザー、モデル設定、Runtime Profile、DB接続・Connectorと確認用のスキーマ等）を入れる管理コマンド。今は毎回 `/tmp` にスクリプトを書き直していて、開発用のDBには削除済みの確認用のデータが溜まっている。入れたら §5 の確認の手順を短くする。
+2. **未決の設計の課題に結論を出す**（§3の「入力の変数は、タスクが先か入口が先か」）：コードより先に利用者と話して決める。
+3. **最初の2つの業務**（下の3）：何をSkill・タスク・Connector・出口で用意するか、足りない機能、PRの分け方を利用者と決めてから作る。
 - 後回しにしたもの（利用者と決めた）：公式のスキル（`SKILL.md` の形のフォルダ）の取り込みと、Sandboxへの Node.js（npm）のエコシステムの追加。文書系の公式スキルは Node.js と LibreOffice に頼り、ライセンスで同梱できないものがある（確かめてから決める）。LibreOffice は大きすぎるので入れない（design.md §7.6 の方針のまま）。
 
 **第1段階の順番**（design.md §12。1つの目的ごとに1つのPull Requestにして、上から進める）：
@@ -130,7 +131,7 @@ cd frontend && pnpm install
 - Runを手元で動かすときは、api（`uvicorn app.asgi:application --port 8000`）と `python src/manage.py qcluster` を起動する。macOSでは、qclusterに `OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES` が要る（`.envrc.example`。ないとforkしたworkerがHTTPの接続で落ちる）。
 - LLMのAPI keyがなくても、OpenAI互換の応答を返す小さな偽のサーバーを立て、ローカルLLMの接続として登録すれば、API → Q2 → Runner → SSEを一通り確かめられる（#22で確かめた方法）。開発用のDBには、そのときの確認用のユーザー（`e2e-check@example.co.jp`）と、接続「確認用の偽LLM」・モデル設定「確認用の偽モデル」「確認用の偽モデル（推論）」（effortは low・medium・high）が残っている。モデル設定「社内Qwen」の接続先はつながらないので、再試行の後のモデルの切り替えの確認に使える。偽のサーバーはリポジトリに置いていない。#36 では、`http.server` で `POST /v1/chat/completions` にSSE（`chat.completion.chunk` の並び、最後にusageと `[DONE]`）を返し、要求の `tools` を見て「`skill` があれば一覧の最初を読み込む → 発言・Tool結果に `/workspace/master/...` のパスがあれば `read` → 文で答える」と決める50行ほどのスクリプトを `127.0.0.1:8765` で動かした。開発用のDBの部門のSkill「請求書の照合」（版3）は、資料 `vendor-master.csv` と業務結果のSchema（`{"ok": boolean}`）を持つので、`/` で指定すると `submit_result` が要る。会話からのSkill更新では、同じ偽のサーバーを「要求の `tools` に `get_skill` があれば `get_skill` → `update_skill_draft`（結果の `<draft revision=` を使う）→ `publish_skill_draft`（結果の `now revision` を使う）→ 文で答える。業務のRunで利用者の発言に「Skillも直して」があれば `request_skill_edit`」と決める形にした。部門の「編集」の役割の社員（今は所属とGroup「部門のSkill編集者」） `skill-member@example.co.jp` で確かめたときのDraftが、Skill「請求書の照合」（版5）に残っている。
 - 基盤管理者は `cd api && uv run python src/manage.py createsuperuser` で作る。開発時はDjangoの管理画面（`/api/admin/`）のパスワードログインでセッションを作れる。
-- Sandboxのイメージは `docker build -f sandbox/images/docs/Dockerfile -t yoriki-sandbox-docs:dev sandbox` でビルドし、`cd sandbox && uv sync && uv run pytest` で契約テストを動かす（sandbox/README.md）。apiのLauncher・SandboxのToolのテスト（`pytest -m sandbox`）も、このイメージ（`YORIKI_SANDBOX_TEST_IMAGE`）で動く。イメージがなければ飛ばす。
+- Sandboxのイメージは `docker build -f sandbox/images/docs/Dockerfile -t yoriki-sandbox-docs:dev sandbox` でビルドし、`cd sandbox && uv sync && uv run pytest` で契約テストを動かす（sandbox/README.md）。apiのLauncher・SandboxのToolのテスト（`pytest -m sandbox`）も、このイメージ（`YORIKI_SANDBOX_TEST_IMAGE`）で動く。イメージがなければ飛ばす。バックエンドのテストは既定で並列に動く（`-n auto`）。`--pdb` で1つを調べるときは `-n 0` を付ける。
 - Sandboxは既定でgVisor（runsc）で動かすが、Docker DesktopにはgVisorがないので、手元の `.envrc` には `YORIKI_SANDBOX_RUNTIME=runc` を設定する（`.envrc.example`）。gVisorでの動きはCIで確かめる（PRでは `sandbox-gvisor`・`sandbox-runner` が動く。PRの前に手元のブランチで動かすなら、pushして `gh workflow run sandbox.yml --ref <ブランチ>`・`gh workflow run backend.yml --ref <ブランチ>`）。手元で試すときは sandbox/README.md のdindの方法を使う。
 - Runを手元で動かすと、Workerの作業領域（ジョブの出力、Sandboxに見せる添付）を `YORIKI_WORKSPACES_DIR`（`.envrc.example` ではリポジトリの `.workspaces/`）に作る。添付・成果物・snapshotは `YORIKI_STORAGE_LOCAL_ROOT`（`.envrc.example` ではリポジトリの `.objects/`）に置く。既存の `.envrc` にはこの行を足す（ないと既定の `/var/lib/yoriki/objects` に書けず、アップロードが失敗する）。
 - Runtime Profileを手元で登録するときは、手元のレジストリにイメージをpushする：`docker run -d --name yoriki-dev-registry -p 127.0.0.1:5001:5000 registry:3`、`docker tag yoriki-sandbox-docs:dev localhost:5001/yoriki-sandbox-docs:dev && docker push localhost:5001/yoriki-sandbox-docs:dev`。apiは `YORIKI_SANDBOX_INSECURE_REGISTRIES=localhost:5001` を付けて起動し、管理画面で `localhost:5001/yoriki-sandbox-docs@<pushで表示されたdigest>` を登録する。開発用のDBには、この方法で登録した既定のRuntime Profile「文書処理」（linux/arm64）がある。既定のRuntime Profileがないと、会話のRunは始まらない。
@@ -141,7 +142,7 @@ cd frontend && pnpm install
 - 会話でのConnectorを手元で確かめるとき（#47 で行った方法）：開発用のDB（`yoriki-dev-postgres-1`）の中に確認用のスキーマ（例 `connector_check`）と読取り用のロールを作り（`GRANT USAGE ON SCHEMA`・`GRANT SELECT`）、管理画面か `manage.py shell` でそのロールのPostgreSQLの接続と、範囲が全社のConnector（既定のスキーマを確認用のスキーマに）を登録する。偽のLLMは、要求の `tools` に `datasource_query` があれば `datasource_describe` → `datasource_query`（`params` は文字列）→ 結果の `file:` の行のパスを `read` → 文で答える、と決める70行ほどのOpenAI互換のスクリプトを `127.0.0.1:8765` で動かした（リポジトリには置いていない）。接続のパスワードは今の暗号化の鍵で暗号化されるので、`.envrc` と違う鍵で作った接続は確かめた後に消す（`rotate_secret_encryption` が読めない行で止まらないように）。機密のConnectorを試すときは、会話を機密で始めるか、会話の設定の盾のボタンで機密にする（ローカルLLMのモデルが要る。開発用のDBの「確認用の偽モデル」はローカルLLM）。今の開発用のDBにConnectorと接続は残っていない（どれも削除済み）。 ④bで、確認用のスキーマ `connector_check`（表 `vendors`）・読取り用のロール `connector_check_ro`・DB接続「確認用（④b）」・全社のConnector「確認用DB」を作り直した（それまでのものは削除済みだった）。
 - ConnectorのAdapterのテスト（`connector/tests/test_adapters.py`）は、PostgreSQLの分はいつも動き、MySQL・SQL Serverの分は管理者の接続先（`YORIKI_CONNECTOR_TEST_MYSQL`・`YORIKI_CONNECTOR_TEST_SQLSERVER`。`.envrc.example`）を渡したときだけ動く。#42 では一時のコンテナ（`docker run -d --rm --name yoriki-connector-mysql -p 127.0.0.1:3307:3306 -e MYSQL_ROOT_PASSWORD=... mysql:8.0`、`docker run -d --rm --platform linux/amd64 --name yoriki-connector-mssql -p 127.0.0.1:1434:1433 -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD=... mcr.microsoft.com/mssql/server:2022-latest`）で試した。手元のmacOSのODBC Driver 18（18.7.1.1まで）は `/opt/homebrew/opt/openssl/lib/` のOpenSSL 3以前を探すので、Homebrewの `openssl` が4系だと読み込めない。`export DYLD_LIBRARY_PATH=/opt/homebrew/opt/openssl@3/lib` を付け、`uv run` ではなく `.venv/bin/python -m pytest ...` で動かす（`uv run` を通すと `DYLD_LIBRARY_PATH` がPythonに届かない）。本体のイメージ（`docker build -t yoriki-api:dev api`）の中で、リポジトリを読取り専用でmountして動かしてもよい（`--user root` で `pip install uv`・`UV_PROJECT_ENVIRONMENT=/tmp/venv uv sync --locked`・`uv run --no-sync pytest ...`。DBのホストは `host.docker.internal`）。手元の `mysql@8.4`（Homebrew）は利用者のものなので使わない。
 - 画面をブラウザで確かめるときは、api（上記）と `cd frontend && pnpm dev` を起動し、Playwright（Python）で操作する。手元のブラウザのキャッシュ（chromium-1208）に合う版は `uv run --no-project --with playwright==1.58.0 python <script>`。基盤管理者は `/login?method=password` でログインし、`storage_state` を保存して使い回す。SSOの社員はパスワードでログインできないので、`manage.py shell` でその社員のセッションを作り（`BACKEND_SESSION_KEY` は `utils.backends.PasswordBackend`）、Cookie `sessionid` に入れる。開発用のDBには、#35 で使った基盤管理者 `skill-admin@example.co.jp`（パスワード `check-pass-123`）、社員 `skill-member@example.co.jp`（部門「経理部」の所属とGroup「部門のSkill編集者」。以前の「編集」の役割の代わり）、委任したユーザー管理者 `user-admin@example.co.jp`（Group「ユーザー管理者」。パスワードはないので、セッションを作って使う）、システムのSkill「部門横断の照合（確認用）」（未公開）、部門のSkill「請求書の照合」（版3まで）が残っている。
-- 手元のmacOS（Node.js 26.12.1）では、フロントエンドの単体テストのうちコンポーネントをマウントしないファイル（`test/nuxt/composables/`、`api/client.test.ts` 等）が、Nuxtの環境の準備で止まって「Hook timed out」になる（`main` でも同じ。CIでは通る。原因は未調査）。コンポーネントのテストのファイルと一緒に `pnpm vitest run <ファイル>` で動かすと、同じ実行の中では通ることがある。
+- 手元のmacOS（Node.js 26.12.1）で、フロントエンドの単体テストのうちコンポーネントをマウントしないファイル（`test/nuxt/composables/`、`api/client.test.ts` 等）が、Nuxtの環境の準備で止まって「Hook timed out」になったことがある（#44〜#73のころ）。#76 で調べたときは、依存は同じままで、全体・composablesだけ・新しいworktreeでの最初の実行・バックエンドのテストで負荷をかけた状態のどれでも再現しなかった。また出たら、そのときの状態（Vitestのキャッシュ、`.nuxt`、他に動いているもの）を記録する。
 - 変更前に、AGENTS.md と、触る範囲の規約を読む。作業の進め方（ブランチ、コミット、Pull Request、CI、マージ）は development.md に従う。
 - 作業の区切りでは、本書の §1・§3・§4 を更新する。Pull Requestで進めた作業は、マージの前にそのPull Requestの中で更新する（マージの後に `main` へ別にコミットしない）。マージは人間が指示して行うので、「次の作業」には「マージする」とは書かず、マージされる前提で、マージの後に始める作業を書く。
 - セッションを始めるときは、「次の作業」の前提のPRが実際にマージされたことを確かめてから進める（`gh pr view <番号>` か git の履歴）。マージされていなければ、進めずに利用者に伝える。

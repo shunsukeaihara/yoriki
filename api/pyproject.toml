@@ -39,6 +39,7 @@ dev = [
     "mypy>=2.4.0",
     "pytest>=9.1.1",
     "pytest-django>=4.14.0",
+    "pytest-xdist>=3.8.0",
     "ruff>=0.17.1",
     "types-boto3[s3]>=1.43.111",
     "types-docker>=7.2.0.20261006",
@@ -68,8 +69,9 @@ django_settings_module = "app.settings"
 pythonpath = ["src"]
 testpaths = ["src"]
 python_files = ["tests.py", "test_*.py", "*_test.py"]
-# .envrc の DJANGO_SETTINGS_MODULE より優先させるため、iniではなくコマンドラインの引数で指定する
-addopts = "--ds=app.settings_test --reuse-db"
+# .envrc の DJANGO_SETTINGS_MODULE より優先させるため、iniではなくコマンドラインの引数で指定する。
+# pytest-xdistで並列に動かす（プロセスごとにテスト用のDBを作る。docs/development.md §3.1）
+addopts = "--ds=app.settings_test --reuse-db -n auto --dist worksteal"
 markers = [
     "sandbox: 実際のDockerとSandboxのイメージを使う（イメージがなければ飛ばす。CIでは backend.yml の sandbox-runner で動かす）",
 ]

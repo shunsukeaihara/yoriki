@@ -1,6 +1,5 @@
 import importlib
 import threading
-import time
 
 import pytest
 from allauth.core.exceptions import ImmediateHttpResponse
@@ -10,6 +9,8 @@ from django.db import connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.test import RequestFactory
 from rest_framework.test import APIClient
+
+from utils.testing import wait_for_lock_waiter
 
 from .adapters import SocialAccountAdapter, is_allowed_account
 from .factories import DepartmentFactory, DepartmentMembershipFactory, SSOProviderFactory, UserFactory, grant
@@ -586,7 +587,8 @@ class TestMembershipRace:
                 with transaction.atomic():
                     lock_accounts(target if change == "target_promoted" else manager)
                     locked.set()
-                    time.sleep(2)  # 所属の変更の要求がロックを待つ間に、対象に権限を付ける・操作する人の権限を外す
+                    # 所属の変更の要求がロックを待つ間に、対象に権限を付ける・操作する人の権限を外す
+                    wait_for_lock_waiter()
                     if change == "target_promoted":
                         target.user_permissions.add(Permission.objects.get(codename="can_publish_company_skills"))
                     else:

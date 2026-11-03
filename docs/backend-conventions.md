@@ -772,6 +772,8 @@ class Command(BaseCommand):
 - 複数アプリで使うfixtureはルートの `conftest.py` に置き、`@pytest.fixture(name="xxx")` で名前を付ける。ユーザーのfixtureは役割を表す名前にする（例：`app_user`、`other_user`、`platform_admin`）。権限の判定のテストは、必要なpermissionと所属だけを付けたユーザーで行い、superuser（`platform_admin`）では行わない（存在しないpermissionの名前でも通り、書き間違いを隠すため）。`platform_admin` は、Django管理画面とパスワードでのログインのテストに使う。
 - APIを呼ぶクライアントのfixtureは `api_client` とする。`client` はpytest-djangoの同名のfixtureを隠してしまうので使わない。
 - DBを使うテストには `@pytest.mark.django_db` を付ける。
+- テストは並列に動く（pytest-xdist。development.md §3.1）。プロセスごとにテスト用DBが分かれるので、DBの中のものは衝突しないが、PostgreSQLのロール、Dockerのコンテナ、外部のDBのように、プロセスの間で共有するものは、名前に乱数を付けて重ならないようにする。ファイルは `tmp_path` に書く。
+- 要求がロックを待つ間に変更を挟む競合のテストは、決まった時間を `sleep` せず、`utils.testing.wait_for_lock_waiter` で、相手がロックを待ち始めたことを確かめてから進める。
 - Serializerの検証は、Serializerを直接使ってテストする。
 
 ```python

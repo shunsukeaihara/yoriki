@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import IO, Any, Protocol, TypeVar
 
 from django.conf import settings
+from django.db import connection
 from django.utils import timezone
 from nanoid import generate
 
@@ -33,6 +34,7 @@ from run.errors import LeaseLost
 from run.models import Checkpoint, ExecutionAttempt, Run, RunKind
 from runtime.launcher import (
     ATTEMPT_LABEL,
+    DATABASE_LABEL,
     MASTER_DIR,
     RUN_LABEL,
     WORK_DIR,
@@ -251,7 +253,7 @@ class SandboxSession:
         spec = SandboxSpec.for_version(
             version,
             platform,
-            labels={RUN_LABEL: self.run.uid, ATTEMPT_LABEL: str(self.attempt.pk)},
+            labels={RUN_LABEL: self.run.uid, ATTEMPT_LABEL: str(self.attempt.pk), DATABASE_LABEL: database_label()},
             input_dir=str(self.input_dir),
             master_dir=str(self.master_dir),
         )
@@ -755,12 +757,26 @@ def collect_outputs(
     return collected
 
 
+def database_label() -> str:
+    """Sandboxのラベルに記録する、AttemptのDB（`DATABASE_LABEL`）"""
+    db = connection.settings_dict
+    return f"{db['HOST']}:{db['PORT']}/{db['NAME']}"
+
+
 def remove_stale_sandboxes(launcher: Launcher) -> None:
-    """終わったAttemptのSandboxが残っていれば消す（Workerが落ちた等）。leaseの切れたAttemptのものも消す"""
+    """終わったAttemptのSandboxが残っていれば消す（Workerが落ちた等）。leaseの切れたAttemptのものも消す。
+
+    他のDBのAttemptのものは判定できないので触らない。DBのラベルのないもの（ラベルを付ける前に起動したもの）は、
+    このDBのものとして扱う
+    """
     containers = launcher.containers()
+    database = database_label()
     ids = {}
     for container in containers:
-        value = (container.get("Labels") or {}).get(ATTEMPT_LABEL, "")
+        labels = container.get("Labels") or {}
+        if labels.get(DATABASE_LABEL, database) != database:
+            continue
+        value = labels.get(ATTEMPT_LABEL, "")
         if value.isdigit():
             ids[container["Id"]] = int(value)
     if not ids:

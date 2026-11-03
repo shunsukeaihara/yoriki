@@ -758,23 +758,23 @@ def collect_outputs(
 
 
 def database_label() -> str:
-    """Sandboxのラベルに記録する、AttemptのDB（`DATABASE_LABEL`）"""
-    db = connection.settings_dict
-    return f"{db['HOST']}:{db['PORT']}/{db['NAME']}"
+    """Sandboxのラベルに記録する、AttemptのDBの名前（`DATABASE_LABEL`）。接続先のホストの設定を変えても同じDBと
+    分かるように、名前だけにする"""
+    return str(connection.settings_dict["NAME"])
 
 
 def remove_stale_sandboxes(launcher: Launcher) -> None:
     """終わったAttemptのSandboxが残っていれば消す（Workerが落ちた等）。leaseの切れたAttemptのものも消す。
 
-    他のDBのAttemptのものは判定できないので触らない。DBのラベルのないもの（ラベルを付ける前に起動したもの）は、
-    このDBのものとして扱う
+    他のDBのAttemptのものは判定できないので触らない。DBのラベルのないもの（ラベルを付ける前の版が起動したもの）も、
+    どのDBのものか分からないので触らない（deployment.md §7）
     """
     containers = launcher.containers()
     database = database_label()
     ids = {}
     for container in containers:
         labels = container.get("Labels") or {}
-        if labels.get(DATABASE_LABEL, database) != database:
+        if labels.get(DATABASE_LABEL) != database:
             continue
         value = labels.get(ATTEMPT_LABEL, "")
         if value.isdigit():

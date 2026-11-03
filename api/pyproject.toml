@@ -70,8 +70,9 @@ pythonpath = ["src"]
 testpaths = ["src"]
 python_files = ["tests.py", "test_*.py", "*_test.py"]
 # .envrc の DJANGO_SETTINGS_MODULE より優先させるため、iniではなくコマンドラインの引数で指定する。
-# pytest-xdistで並列に動かす（プロセスごとにテスト用のDBを作る。docs/development.md §3.1）
-addopts = "--ds=app.settings_test --reuse-db -n auto --dist worksteal"
+# pytest-xdistで並列に動かす（プロセスごとにテスト用のDBを作る。docs/development.md §3.1）。プロセスごとに
+# 接続プール（最大10）を持つので、PostgreSQLの接続の上限（既定100）を超えないようにプロセスの数を8までにする
+addopts = "--ds=app.settings_test --reuse-db -n auto --maxprocesses 8 --dist worksteal"
 markers = [
     "sandbox: 実際のDockerとSandboxのイメージを使う（イメージがなければ飛ばす。CIでは backend.yml の sandbox-runner で動かす）",
 ]

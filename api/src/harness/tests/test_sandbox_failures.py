@@ -364,7 +364,7 @@ def test_read_offset_is_kept_when_the_output_cannot_be_saved(conversation, setti
 
 
 def test_stale_sandboxes_of_this_database_are_removed(conversation):
-    """終わったAttemptのSandboxは消し、他のDBのAttemptのものは触らない。DBのラベルのないものはこのDBのものとして扱う"""
+    """終わったAttemptのSandboxは消し、他のDBのAttemptのものと、どのDBのものか分からないものは触らない"""
     run = post(conversation)
     alive = claim_run(run.pk)
     assert alive is not None
@@ -388,8 +388,8 @@ def test_stale_sandboxes_of_this_database_are_removed(conversation):
                 container("alive", alive_pk, database_label()),
                 container("ended", ended.pk, database_label()),
                 container("unlabeled", ended.pk),
-                container("other-db", ended.pk, "localhost:5432/test_yoriki_gw9"),
-                container("other-db-unknown", 10**9, "localhost:5432/test_yoriki_gw9"),
+                container("other-db", ended.pk, "test_yoriki_gw9"),
+                container("other-db-unknown", 10**9, "test_yoriki_gw9"),
             ]
 
         def remove(self, container_id: str) -> None:
@@ -397,4 +397,4 @@ def test_stale_sandboxes_of_this_database_are_removed(conversation):
 
     launcher = Launcher()
     remove_stale_sandboxes(launcher)  # type: ignore[arg-type]
-    assert sorted(launcher.removed) == ["ended", "unlabeled"]
+    assert launcher.removed == ["ended"]

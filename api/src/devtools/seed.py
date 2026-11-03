@@ -22,6 +22,8 @@ from user.models import Department, DepartmentMembership, User
 from utils.permissions import AppPermission, to_perm_str
 
 DEFAULT_PASSWORD = "yoriki-check"
+# seed_dev が作った表・ロールの印（コメント）。印のあるものだけを作り直す・書き換える
+MARK = "yoriki seed_dev"
 DEFAULT_LLM_URL = "http://127.0.0.1:8765/v1"
 # つながらない接続先（discardのポート）。再試行の後のモデルの切り替えを確かめる
 UNREACHABLE_LLM_URL = "http://127.0.0.1:9/v1"
@@ -113,6 +115,10 @@ TABLES = [
 ]
 
 
+class SeedError(Exception):
+    """既存のデータが確認用のものと確かめられず、揃えると壊すおそれがある"""
+
+
 @dataclass
 class Seeder:
     password: str = DEFAULT_PASSWORD
@@ -120,6 +126,7 @@ class Seeder:
     sandbox_image: str = ""
     database: bool = True
     db_role: str = DB_ROLE
+    recreate_tables: bool = False  # 印のない同じ名前の確認用の表も作り直す
     lines: list[str] = field(default_factory=list)
 
     def run(self) -> list[str]:
@@ -157,7 +164,9 @@ class Seeder:
         user.email = f"{username}@example.co.jp"
         user.display_name = label
         user.is_active = True
-        user.set_password(self.password)
+        if not user.check_password(self.password):
+            # 同じパスワードで設定し直すと、作ったセッション（dev_session、ブラウザ）が無効になる
+            user.set_password(self.password)
         user.save()
         user.user_permissions.set([_permission(p) for p in perms])
         user.groups.clear()
@@ -166,16 +175,23 @@ class Seeder:
         return user
 
     def _llm_connection(self, name: str, url: str, actor: User, *, timeout: int) -> LLMConnection:
-        values = {"kind": ProviderKind.LOCAL, "base_url": url, "timeout_seconds": timeout, "is_active": True}
         conn = LLMConnection.objects.filter(name=name, deleted=False).first()
+        if conn is not None and (conn.kind != ProviderKind.LOCAL or conn.base_url != url):
+            # 種別と接続先は作った後に変えない（API keyが別のサーバーへ送られ、過去の版の接続先の意味も変わるため。
+            # llm.models.LLMConnection）。元の接続は名前を変えて残し、新しい接続を作る
+            conn.name = f"{name}（以前の接続先 {conn.base_url or conn.get_kind_display()}）"[:100]
+            conn.save(update_fields=["name", "updated"])
+            self._log("LLMの接続", f"{name}（接続先が違うので、元の接続を「{conn.name}」にしました）")
+            conn = None
         if conn is None:
-            conn = LLMConnection.objects.create(name=name, api_key="", created_by=actor, **values)
+            conn = LLMConnection.objects.create(
+                name=name, kind=ProviderKind.LOCAL, base_url=url, api_key="", timeout_seconds=timeout, created_by=actor
+            )
             self._log("LLMの接続", f"{name}（{url}。作成）")
             return conn
-        # 種別と接続先は画面では変えられない（llm.models.LLMConnection）が、確認用なのでここでは揃える
-        for key, value in values.items():
-            setattr(conn, key, value)
-        conn.save()
+        conn.timeout_seconds = timeout
+        conn.is_active = True
+        conn.save(update_fields=["timeout_seconds", "is_active", "updated"])
         self._log("LLMの接続", f"{name}（{url}。揃えました）")
         return conn
 
@@ -235,34 +251,71 @@ class Seeder:
         self._log("Runtime Profile", f"{RUNTIME_PROFILE}（{inspected.reference.digest[:19]}…。{state}）")
 
     def _check_schema(self) -> None:
-        """Yorikiと同じPostgreSQLに、確認用のスキーマと、読むだけのロールを作る（表は毎回作り直す）"""
+        """Yorikiと同じPostgreSQLに、確認用のスキーマと、読むだけのロールを作る。
+
+        表は毎回作り直す。作り直す・パスワードを設定し直すのは、seed_dev が作った印（コメント）のある表・ロールだけ。
+        印のない同じ名前の表（以前に手で作ったもの）は `recreate_tables` のときだけ消す。印のないロールは、権限の
+        属性がなく、どのロールにも属していなければ、印を付けて使う（ロールはクラスタで共有なので、ほかの用途の
+        ロールを書き換えないため）
+        """
         schema, role = sql.Identifier(SCHEMA), sql.Identifier(self.db_role)
-        statements = [
-            sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(schema),
-            # 以前の確認で作った同じ名前の表は、列が違うことがあるので作り直す
-            sql.SQL("DROP TABLE IF EXISTS {}.vendors, {}.invoices").format(schema, schema),
-            sql.SQL(
-                "CREATE TABLE {}.vendors (code text PRIMARY KEY, name text NOT NULL, invoice_number text NOT NULL)"
-            ).format(schema),
-            sql.SQL(
-                "CREATE TABLE {}.invoices (id integer PRIMARY KEY, vendor_code text NOT NULL, month text NOT NULL, "
-                "amount integer NOT NULL)"
-            ).format(schema),
-        ]
         with connection.cursor() as cursor:
-            for statement in statements:
-                cursor.execute(statement)
+            cursor.execute(sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(schema))
+            for table in ("vendors", "invoices"):
+                cursor.execute("SELECT obj_description(to_regclass(%s), 'pg_class')", [f"{SCHEMA}.{table}"])
+                row = cursor.fetchone()
+                cursor.execute("SELECT to_regclass(%s) IS NOT NULL", [f"{SCHEMA}.{table}"])
+                exists = cursor.fetchone()[0]
+                if exists and (row is None or row[0] != MARK) and not self.recreate_tables:
+                    raise SeedError(
+                        f"{SCHEMA}.{table} は seed_dev が作った表ではありません。消してよければ --recreate-tables を"
+                        "付けてください"
+                    )
+            cursor.execute(sql.SQL("DROP TABLE IF EXISTS {}.vendors, {}.invoices").format(schema, schema))
+            cursor.execute(
+                sql.SQL(
+                    "CREATE TABLE {}.vendors (code text PRIMARY KEY, name text NOT NULL, invoice_number text NOT NULL)"
+                ).format(schema)
+            )
+            cursor.execute(
+                sql.SQL(
+                    "CREATE TABLE {}.invoices (id integer PRIMARY KEY, vendor_code text NOT NULL, "
+                    "month text NOT NULL, amount integer NOT NULL)"
+                ).format(schema)
+            )
+            for table in ("vendors", "invoices"):
+                cursor.execute(
+                    sql.SQL("COMMENT ON TABLE {}.{} IS {}").format(schema, sql.Identifier(table), sql.Literal(MARK))
+                )
             cursor.executemany(f"INSERT INTO {SCHEMA}.vendors VALUES (%s, %s, %s)", VENDORS)
             cursor.executemany(f"INSERT INTO {SCHEMA}.invoices VALUES (%s, %s, %s, %s)", INVOICES)
-            cursor.execute("SELECT 1 FROM pg_roles WHERE rolname = %s", [self.db_role])
-            verb = "ALTER" if cursor.fetchone() else "CREATE"
-            cursor.execute(sql.SQL(verb + " ROLE {} LOGIN PASSWORD {}").format(role, sql.Literal(DB_ROLE_PASSWORD)))
+            self._role(cursor, role)
             cursor.execute(sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(schema, role))
             cursor.execute(sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {}").format(schema, role))
         self._log(
             "確認用のスキーマ",
             f"{SCHEMA}（取引先 {len(VENDORS):,}件、請求 {len(INVOICES):,}件。ロール {self.db_role}）",
         )
+
+    def _role(self, cursor, role: sql.Identifier) -> None:
+        cursor.execute(
+            "SELECT r.rolsuper OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication OR r.rolbypassrls, "
+            "EXISTS (SELECT 1 FROM pg_auth_members m WHERE m.member = r.oid), "
+            "shobj_description(r.oid, 'pg_authid') FROM pg_roles r WHERE r.rolname = %s",
+            [self.db_role],
+        )
+        row = cursor.fetchone()
+        if row is None:
+            cursor.execute(sql.SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(role, sql.Literal(DB_ROLE_PASSWORD)))
+        else:
+            privileged, member, comment = row
+            if comment != MARK and (privileged or member):
+                raise SeedError(
+                    f"ロール {self.db_role} は seed_dev が作ったロールではなく、権限の属性か、ほかのロールへの所属が"
+                    "あります。別の用途のロールなら、名前を変えるか消してください"
+                )
+            cursor.execute(sql.SQL("ALTER ROLE {} LOGIN PASSWORD {}").format(role, sql.Literal(DB_ROLE_PASSWORD)))
+        cursor.execute(sql.SQL("COMMENT ON ROLE {} IS {}").format(role, sql.Literal(MARK)))
 
     def _connector(self, actor: User) -> None:
         settings_dict = connection.settings_dict
@@ -277,11 +330,23 @@ class Seeder:
             "is_active": True,
         }
         connector = Connector.objects.filter(name=CONNECTOR, deleted=False).select_related("connection").first()
+        if connector is not None and (connector.scope != ConnectorScope.COMPANY or connector.department_id):
+            raise SeedError(
+                f"同じ名前のConnector「{CONNECTOR}」が全社の範囲ではありません。名前を変えるか消してください"
+            )
         conn = (
             connector.connection
             if connector
             else DatabaseConnection.objects.filter(name=DB_CONNECTION, deleted=False).first()
         )
+        if conn is not None:
+            # ほかのConnectorも使う接続先は書き換えない（そちらの接続も変わるため）
+            others = Connector.objects.filter(connection=conn, deleted=False).exclude(name=CONNECTOR)
+            if others.exists():
+                raise SeedError(
+                    f"接続先「{conn.name}」は、ほかのConnector（{', '.join(others.values_list('name', flat=True))}）"
+                    "も使っています。確認用DBの接続先を別にしてください"
+                )
         if conn is None:
             conn = DatabaseConnection.objects.create(name=DB_CONNECTION, created_by=actor, **values)
         else:

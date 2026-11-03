@@ -18,7 +18,7 @@ from django.core.management.base import CommandError
 from django.db import DatabaseError, transaction
 
 from devtools.commands import DevCommand
-from devtools.seed import DEFAULT_LLM_URL, DEFAULT_PASSWORD, Seeder
+from devtools.seed import DEFAULT_LLM_URL, DEFAULT_PASSWORD, Seeder, SeedError
 from runtime.errors import RegistryError
 
 
@@ -39,6 +39,11 @@ class Command(DevCommand):
             "--sandbox-image", default="", help="Runtime Profileに登録するイメージ（名前@sha256:digest）"
         )
         parser.add_argument("--skip-database", action="store_true", help="確認用のスキーマとConnectorを作らない")
+        parser.add_argument(
+            "--recreate-tables",
+            action="store_true",
+            help="seed_dev が作ったものでない同じ名前の確認用の表（以前に手で作ったもの）も消して作り直す",
+        )
 
     def handle(self, *args, **options):
         seeder = Seeder(
@@ -46,6 +51,7 @@ class Command(DevCommand):
             llm_url=options["llm_url"],
             sandbox_image=options["sandbox_image"],
             database=not options["skip_database"],
+            recreate_tables=options["recreate_tables"],
         )
         try:
             with transaction.atomic():
@@ -54,6 +60,8 @@ class Command(DevCommand):
                     raise DryRun
         except DryRun:
             pass
+        except SeedError as exc:
+            raise CommandError(str(exc)) from exc
         except RegistryError as exc:
             raise CommandError(f"Sandboxのイメージを確かめられません：{exc}") from exc
         except DatabaseError as exc:

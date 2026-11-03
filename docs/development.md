@@ -168,7 +168,7 @@ docker push localhost:5001/yoriki-sandbox-docs:dev
 
 ### 6.1 確認用のデータ（`seed_dev`）
 
-何度流しても同じ状態になる（名前で探して、なければ作り、あれば揃える）。確認の途中で変えたもの（無効にした、版を変えた、permissionを足した等）も元に戻す。`--dry-run` は、同じ処理を最後に取り消して、何をするかだけを表示する。
+何度流しても同じ状態になる（名前で探して、なければ作り、あれば揃える）。確認の途中で変えたもの（無効にした、版を変えた、permissionを足した等）も元に戻す。ただし、LLMの接続の接続先は変えない（API keyが別のサーバーへ送られないように。backend-conventions.md・`llm.models.LLMConnection`）。同じ名前の接続の接続先が違えば、元の接続を「…（以前の接続先 <URL>）」の名前にして残し、新しい接続を作る。パスワードは違うときだけ設定し直す（作ったセッションが切れないように）。`--dry-run` は、同じ処理を最後に取り消して、何をするかだけを表示する。
 
 | 種類 | 名前 | 内容 |
 |---|---|---|
@@ -182,8 +182,8 @@ docker push localhost:5001/yoriki-sandbox-docs:dev
 | | 確認用の偽モデル（推論） | `fake-reasoning`。effortは low・medium・high |
 | | 確認用のつながらないモデル | つながらない接続を使う |
 | Runtime Profile | 確認用の文書処理 | `--sandbox-image` を指定したときだけ。管理画面と同じくレジストリで確かめる（手元のレジストリは `YORIKI_SANDBOX_INSECURE_REGISTRIES=localhost:5001` が要る）。資源の上限は、管理画面で変えた値を残す。既定のRuntime Profileがなければ既定にする |
-| スキーマ | `connector_check` | YorikiのDBの中に作る。表 `vendors`（取引先3件）・`invoices`（請求3件）は毎回作り直す（以前の確認で作った同じ名前の表も）。読むだけのロール `connector_check_ro` を作る（PostgreSQLのクラスタで共有。DBの利用者にロールを作る権限が要る。`deploy/compose.dev.yaml` のものは持っている） |
-| Connector | 確認用DB | 全社。上のスキーマの2つの表を公開する。`--skip-database` でスキーマと一緒に飛ばす |
+| スキーマ | `connector_check` | YorikiのDBの中に作る。表 `vendors`（取引先3件）・`invoices`（請求3件）は毎回作り直す。読むだけのロール `connector_check_ro` を作る（PostgreSQLのクラスタで共有。DBの利用者にロールを作る権限が要る。`deploy/compose.dev.yaml` のものは持っている）。作り直す・パスワードを設定し直すのは、`seed_dev` の印（コメント `yoriki seed_dev`）のある表・ロールだけ。印のない同じ名前の表があれば止まり、`--recreate-tables` を付けたときだけ消して作り直す。印のない同じ名前のロールは、権限の属性（superuser等）とほかのロールへの所属がなければ印を付けて使い、あれば止まる |
+| Connector | 確認用DB | 全社。上のスキーマの2つの表を公開する。`--skip-database` でスキーマと一緒に飛ばす。同じ名前のConnectorが全社でないとき、その接続先をほかのConnectorも使うときは止まる |
 
 - パスワード（`--password`。既定 `yoriki-check`）は、SSOの設定がない手元では、パスワードでのログインにそのまま使える。
 - API key・DBのパスワードは、そのときの `YORIKI_SECRET_ENCRYPTION_KEYS` で暗号化して保存する。apiと同じ `.envrc` を読み込んで流す。

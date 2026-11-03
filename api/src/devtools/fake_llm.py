@@ -244,7 +244,10 @@ class Responder:
 
     def scenario(self) -> Scenario:
         with self._lock:
-            mtime = self.path.stat().st_mtime
+            try:
+                mtime = self.path.stat().st_mtime
+            except OSError as exc:
+                raise ScenarioError(f"{self.path}: 読めません：{exc}") from exc
             if self._scenario is None or mtime != self._mtime:
                 self._scenario = Scenario.load(self.path)
                 self._mtime = mtime
@@ -365,8 +368,9 @@ class Handler(BaseHTTPRequestHandler):
         try:
             body = json.loads(raw)
             name, turn, reply = self.server.responder.choose(body)
-        except (json.JSONDecodeError, ScenarioError) as exc:
-            self.server.log(f"エラー：{exc}")
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
+            # 台本の誤り（ScenarioError）と、形の崩れた要求
+            self.server.log(f"エラー：{exc!r}")
             return self._json(500, {"error": {"message": str(exc)}})
         number = self.server.next_number()
         self.server.log(

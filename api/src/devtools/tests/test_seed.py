@@ -9,13 +9,15 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connection
 
-from connector.models import Connector
+from connector.factories import ConnectorFactory
+from connector.models import Connector, ConnectorScope
 from devtools import seed
-from devtools.seed import Seeder
+from devtools.seed import Seeder, SeedError
 from llm.factories import ModelProfileFactory
 from llm.models import LLMConnection, ModelProfile
 from runtime.models import RuntimeProfile
 from runtime.registry import ImageReference, InspectedImage
+from user.factories import DepartmentFactory
 from user.models import Department, User
 from utils.permissions import AppPermission
 
@@ -98,7 +100,12 @@ def test_seed_restores_changed_data(seeder):
     profile.refresh_from_db()
     assert profile.is_active
     assert (current(profile).number, current(profile).max_output_tokens) == (3, 8_000)
-    assert LLMConnection.objects.get(name=seed.FAKE_CONNECTION).base_url == "http://127.0.0.1:9999/v1"
+    # 接続先は書き換えず、元の接続の名前を変えて新しい接続を作る
+    new = LLMConnection.objects.get(name=seed.FAKE_CONNECTION)
+    assert new.base_url == "http://127.0.0.1:9999/v1"
+    assert current(profile).connection == new
+    old = LLMConnection.objects.get(name=f"{seed.FAKE_CONNECTION}（以前の接続先 http://127.0.0.1:1/v1）")
+    assert old.base_url == "http://127.0.0.1:1/v1"
     assert not member.user_permissions.exists()
 
 
@@ -169,12 +176,63 @@ def test_dev_session(settings):
         call_command("dev_session", "nobody")
 
 
-def test_seed_replaces_an_older_check_table(seeder):
-    """以前の確認で手で作った、列の違う同じ名前の表を作り直す"""
+def test_seed_replaces_an_older_check_table_only_when_asked(seeder):
+    """以前の確認で手で作った（印のない）同じ名前の表は、--recreate-tables のときだけ作り直す"""
     with connection.cursor() as cursor:
         cursor.execute(f"CREATE SCHEMA IF NOT EXISTS {seed.SCHEMA}")
         cursor.execute(f"CREATE TABLE {seed.SCHEMA}.vendors (code text, name text)")
+    with pytest.raises(SeedError, match="--recreate-tables"):
+        seeder.run()
+    seeder.lines.clear()
+    seeder.recreate_tables = True
     seeder.run()
     with connection.cursor() as cursor:
         cursor.execute(f"SELECT invoice_number FROM {seed.SCHEMA}.vendors WHERE code = 'V001'")
         assert cursor.fetchone() == ("T1000000000001",)
+    # 作り直した表には印があるので、次からは付けなくてよい
+    Seeder(db_role=seeder.db_role).run()
+
+
+def test_seed_does_not_take_over_a_privileged_role(seeder):
+    with connection.cursor() as cursor:
+        cursor.execute(f"CREATE ROLE {seeder.db_role} LOGIN CREATEDB")
+    with pytest.raises(SeedError, match="権限の属性"):
+        seeder.run()
+
+
+def test_seed_marks_a_plain_existing_role(seeder):
+    with connection.cursor() as cursor:
+        cursor.execute(f"CREATE ROLE {seeder.db_role} LOGIN")
+    seeder.run()
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT shobj_description(oid, 'pg_authid') FROM pg_roles WHERE rolname = %s", [seeder.db_role])
+        assert cursor.fetchone() == (seed.MARK,)
+    # 印を付けた後は、権限の属性があっても（seed_dev のものなので）揃える
+    with connection.cursor() as cursor:
+        cursor.execute(f"ALTER ROLE {seeder.db_role} CREATEDB")
+    Seeder(db_role=seeder.db_role).run()
+
+
+def test_seed_does_not_rewrite_a_connector_it_cannot_own(seeder):
+    seeder.run()
+    connector = Connector.objects.get(name=seed.CONNECTOR)
+    # ほかのConnectorも使う接続先は書き換えない
+    other = ConnectorFactory.create(name="別のConnector", connection=connector.connection)
+    with pytest.raises(SeedError, match="別のConnector"):
+        Seeder(db_role=seeder.db_role).run()
+    Connector.objects.filter(pk=other.pk).update(deleted=True)
+    # 全社でない同じ名前のConnector
+    Connector.objects.filter(pk=connector.pk).update(
+        scope=ConnectorScope.DEPARTMENT, department=DepartmentFactory.create()
+    )
+    with pytest.raises(SeedError, match="全社"):
+        Seeder(db_role=seeder.db_role).run()
+
+
+def test_seed_keeps_sessions(seeder, settings):
+    """同じパスワードで流し直しても、作ったセッションは有効なまま"""
+    seeder.database = False
+    seeder.run()
+    before = User.objects.get(username="check-member").get_session_auth_hash()
+    Seeder(database=False).run()
+    assert User.objects.get(username="check-member").get_session_auth_hash() == before

@@ -5,6 +5,7 @@ import os
 import threading
 from pathlib import Path
 
+import httpx
 import pytest
 
 from devtools.fake_llm import DEFAULT_SCENARIO, FakeLLMServer, Responder, Scenario, ScenarioError, Turn
@@ -234,3 +235,22 @@ def test_default_scenario_edits_a_skill():
     name, _turn, reply = responder.choose(body(messages, tools=tools))
     assert name == "編集のRun：公開する"
     assert json.loads(reply["tool_calls"][0]["arguments"]) == {"expected_revision": 4, "change_reason": "偽のLLMの確認"}
+
+
+def test_server_answers_errors_without_dropping(tmp_path):
+    """台本がない・要求の形が崩れているときも、500とエラーの文を返す"""
+    responder = write_scenario(tmp_path, {})
+    server = FakeLLMServer(("127.0.0.1", 0), responder, log=lambda line: None)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    url = f"http://127.0.0.1:{server.server_port}/v1/chat/completions"
+    try:
+        broken = {"model": "fake", "stream": True, "messages": [{"role": "assistant", "tool_calls": [{}]}]}
+        assert httpx.post(url, json=broken).status_code == 500
+        responder.path.unlink()
+        response = httpx.post(url, json={"model": "fake", "stream": True, "messages": []})
+        assert response.status_code == 500
+        assert "読めません" in response.json()["error"]["message"]
+    finally:
+        server.shutdown()
+        server.server_close()

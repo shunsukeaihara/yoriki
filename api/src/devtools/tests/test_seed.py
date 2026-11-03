@@ -306,7 +306,7 @@ def test_seed_does_not_take_over_an_llm_connection_with_a_key(seeder):
     LLMConnection.objects.filter(name=seed.FAKE_CONNECTION).update(deleted=True)
     seeder.lines.clear()
     seeder.run()
-    conn = LLMConnection.objects.get(name=seed.FAKE_CONNECTION)
+    conn = LLMConnection.objects.get(name=seed.FAKE_CONNECTION, deleted=False)
     conn.api_key = "sk-local-0123456789"
     conn.save()
     with pytest.raises(SeedError, match=seed.FAKE_CONNECTION):

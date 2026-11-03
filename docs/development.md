@@ -181,8 +181,9 @@ docker push localhost:5001/yoriki-sandbox-docs:dev
 | モデル設定 | 確認用の偽モデル | `fake`。Tool呼出し・画像入力。既定のモデル設定がなければ既定にする |
 | | 確認用の偽モデル（推論） | `fake-reasoning`。effortは low・medium・high |
 | | 確認用のつながらないモデル | つながらない接続を使う |
-| Runtime Profile | 確認用の文書処理 | `--sandbox-image` を指定したときだけ。管理画面と同じくレジストリで確かめる（手元のレジストリは `YORIKI_SANDBOX_INSECURE_REGISTRIES=localhost:5001` が要る）。資源の上限は、管理画面で変えた値を残す。既定のRuntime Profileがなければ既定にする |
-| スキーマ | `connector_check` | YorikiのDBの中に作る。表 `vendors`（取引先3件）・`invoices`（請求3件）は毎回作り直す。読むだけのロール `connector_check_ro` を作る（PostgreSQLのクラスタで共有。DBの利用者にロールを作る権限が要る。`deploy/compose.dev.yaml` のものは持っている）。作り直す・パスワードを設定し直すのは、`seed_dev` の印（コメント `yoriki seed_dev`）のある表・ロールだけ。印のない同じ名前の表があれば止まり、`--recreate-tables` を付けたときだけ消して作り直す。印のない同じ名前のロールがあれば止まる（ほかの用途のロールのパスワードを変えないため。以前の確認で手で作ったものなら `DROP ROLE` で消す）。ロールが読めるのは確認用の2つの表だけ |
+| | （3つとも） | 同じ名前のモデル設定は、確認用の作成者（`check-admin`）が作ったか、今の版が確認用の接続（名前を変えて残したものを含む）を使うときだけ揃え、ほかは止まる |
+| Runtime Profile | 確認用の文書処理 | `--sandbox-image` を指定したときだけ。管理画面と同じくレジストリで確かめる（手元のレジストリは `YORIKI_SANDBOX_INSECURE_REGISTRIES=localhost:5001` が要る）。資源の上限は、管理画面で変えた値を残す。同じ名前で確認用の作成者のものでなければ止まる。既定のRuntime Profileがなければ既定にする |
+| スキーマ | `connector_check` | YorikiのDBの中に作る。表 `vendors`（取引先3件）・`invoices`（請求3件）は毎回作り直す。読むだけのロール `connector_check_ro` を作る（PostgreSQLのクラスタで共有。DBの利用者にロールを作る権限が要る。`deploy/compose.dev.yaml` のものは持っている）。作り直す・パスワードを設定し直すのは、`seed_dev` の印（コメント `yoriki seed_dev`）のある表・ロールだけ。印のない同じ名前の表があれば止まり、`--recreate-tables` を付けたときだけ消して作り直す。印のない同じ名前のロールがあれば止まる（ほかの用途のロールのパスワードを変えないため。以前の確認で手で作ったものなら `DROP ROLE` で消す）。ロールが読めるのは確認用の2つの表だけで、ほかの権限・持ち物（ほかのDBのものを含む）や属性が付いていても止まる。同じクラスタで別のDBにも流すときは、`--db-role` でDBごとに別のロールにする |
 | Connector | 確認用DB | 全社。上のスキーマの2つの表を公開する。`--skip-database` でスキーマと一緒に飛ばす。同じ名前のConnectorが全社でないとき、その接続先が確認用のロールでこのDBへつなぐもの（ホスト・ポート・DB名・ユーザー名が同じ）でないとき、その接続先をほかのConnectorも使うときは止まる |
 
 - パスワード（`--password`。既定 `yoriki-check`）は、SSOの設定がない手元では、パスワードでのログインにそのまま使える。

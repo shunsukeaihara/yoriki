@@ -18,7 +18,7 @@ from django.core.management.base import CommandError
 from django.db import DatabaseError, transaction
 
 from devtools.commands import DevCommand
-from devtools.seed import DEFAULT_LLM_URL, DEFAULT_PASSWORD, Seeder, SeedError
+from devtools.seed import DB_ROLE, DEFAULT_LLM_URL, DEFAULT_PASSWORD, Seeder, SeedError
 from runtime.errors import RegistryError
 
 
@@ -40,6 +40,11 @@ class Command(DevCommand):
         )
         parser.add_argument("--skip-database", action="store_true", help="確認用のスキーマとConnectorを作らない")
         parser.add_argument(
+            "--db-role",
+            default=DB_ROLE,
+            help=f"確認用のスキーマを読むロール（既定 {DB_ROLE}。クラスタで共有なので、DBごとに別にする）",
+        )
+        parser.add_argument(
             "--recreate-tables",
             action="store_true",
             help="seed_dev が作ったものでない同じ名前の確認用の表（以前に手で作ったもの）も消して作り直す",
@@ -52,6 +57,7 @@ class Command(DevCommand):
             sandbox_image=options["sandbox_image"],
             database=not options["skip_database"],
             recreate_tables=options["recreate_tables"],
+            db_role=options["db_role"],
         )
         try:
             with transaction.atomic():

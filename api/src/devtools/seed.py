@@ -200,7 +200,11 @@ class Seeder:
 
     def _model_profile(self, name: str, conn: LLMConnection, fields: dict[str, Any], actor: User) -> None:
         content = _version_fields(ModelProfileVersion, MODEL_FIELDS, MODEL_COMMON | fields | {"connection": conn})
-        profile = ModelProfile.objects.filter(name=name, deleted=False).select_related("current_version").first()
+        profile = (
+            ModelProfile.objects.filter(name=name, deleted=False).select_related("current_version__connection").first()
+        )
+        if profile is not None and not self._is_check_profile(profile, actor):
+            raise SeedError(f"モデル設定「{name}」は確認用のものではありません。名前を変えるか消してください")
         if profile is None:
             profile = ModelProfile.create_with_version(
                 name=name, actor=actor, change_reason="確認用（seed_dev）", **content
@@ -219,7 +223,22 @@ class Seeder:
             state += "。既定にしました"
         self._log("モデル設定", f"{name}（{state}）")
 
+    @staticmethod
+    def _is_check_profile(profile: ModelProfile, actor: User) -> bool:
+        """確認用の作成者が作ったか、今の版が確認用の接続（名前を変えて残したものを含む）を使う"""
+        if profile.created_by_id == actor.pk:
+            return True
+        conn = profile.current_version.connection if profile.current_version else None
+        names = (FAKE_CONNECTION, UNREACHABLE_CONNECTION)
+        return conn is not None and any(conn.name == n or conn.name.startswith(f"{n}（以前の接続先") for n in names)
+
     def _runtime_profile(self, actor: User) -> None:
+        profile = RuntimeProfile.objects.filter(name=RUNTIME_PROFILE, deleted=False).first()
+        if profile is not None and profile.created_by_id != actor.pk:
+            raise SeedError(
+                f"Runtime Profile「{RUNTIME_PROFILE}」は確認用の作成者のものではありません。"
+                "名前を変えるか消してください"
+            )
         inspected = inspect_image(self.sandbox_image)
         image = {
             "image_repository": inspected.reference.repository,
@@ -230,7 +249,6 @@ class Seeder:
             "python_version": inspected.python_version,
         }
         content = _version_fields(RuntimeProfileVersion, RUNTIME_FIELDS, image)
-        profile = RuntimeProfile.objects.filter(name=RUNTIME_PROFILE, deleted=False).first()
         if profile is None:
             profile = RuntimeProfile.create_with_version(
                 name=RUNTIME_PROFILE, actor=actor, change_reason="確認用（seed_dev）", **content
@@ -306,14 +324,47 @@ class Seeder:
         if row is None:
             cursor.execute(sql.SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(role, sql.Literal(DB_ROLE_PASSWORD)))
         elif row[0] != MARK:
-            # 直接付けた権限や持ち物は、ほかのDBのものまで確かめられないので、印のないロールは引き取らない
+            # 以前に別の用途で作ったロールかもしれないので、印のないロールは引き取らない
             raise SeedError(
                 f"ロール {self.db_role} は seed_dev が作ったロールではありません。別の用途のロールなら名前を変え、"
                 "以前の確認で手で作ったものなら消してください（DROP ROLE）"
             )
         else:
+            if extra := self._extra_privileges(cursor):
+                # 後から付いた権限があれば、固定のパスワードでその権限を使えるようにしない
+                raise SeedError(
+                    f"ロール {self.db_role} に、確認用の2つの表のほかの権限・持ち物・属性があります（{extra}）。"
+                    "外すか、ロールを消してください"
+                )
             cursor.execute(sql.SQL("ALTER ROLE {} LOGIN PASSWORD {}").format(role, sql.Literal(DB_ROLE_PASSWORD)))
         cursor.execute(sql.SQL("COMMENT ON ROLE {} IS {}").format(role, sql.Literal(MARK)))
+
+    def _extra_privileges(self, cursor) -> str:
+        """ロールの、確認用の範囲（このDBの確認用のスキーマのUSAGEと2つの表のSELECT）の外の権限・持ち物・属性。
+
+        表を作り直した後に呼ぶ（前の表に付いていた権限は、表と一緒に消えている）。ほかのDBの権限と持ち物も
+        pg_shdepend で分かる
+        """
+        cursor.execute(
+            "SELECT r.oid, r.rolsuper OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication OR r.rolbypassrls, "
+            "EXISTS (SELECT 1 FROM pg_auth_members m WHERE m.member = r.oid OR m.roleid = r.oid) "
+            "FROM pg_roles r WHERE r.rolname = %s",
+            [self.db_role],
+        )
+        oid, privileged, member = cursor.fetchone()
+        if privileged:
+            return "superuser等の属性"
+        if member:
+            return "ロールの所属"
+        cursor.execute(
+            "SELECT count(*) FROM pg_shdepend d WHERE d.refclassid = 'pg_authid'::regclass AND d.refobjid = %s "
+            "AND NOT (d.deptype = 'a' AND d.dbid = (SELECT oid FROM pg_database WHERE datname = current_database()) "
+            "AND ((d.classid = 'pg_namespace'::regclass AND d.objid = to_regnamespace(%s)::oid) "
+            "OR (d.classid = 'pg_class'::regclass AND d.objid IN (to_regclass(%s)::oid, to_regclass(%s)::oid))))",
+            [oid, SCHEMA, f"{SCHEMA}.vendors", f"{SCHEMA}.invoices"],
+        )
+        count = cursor.fetchone()[0]
+        return f"ほかの権限・持ち物 {count:,}件（ほかのDBのものを含む）" if count else ""
 
     def _connector(self, actor: User) -> None:
         settings_dict = connection.settings_dict
@@ -339,8 +390,14 @@ class Seeder:
         )
         if conn is not None:
             # 確認用のロールでYorikiのDBへつなぐ接続先だけを揃える（ほかの用途の接続先を書き換えないため）
-            target = (values["host"], values["port"], values["database"], values["username"])
-            if (conn.kind, conn.host, conn.port, conn.database, conn.username) != (values["kind"], *target):
+            # ユーザー名は、seed_dev の印のあるロール（--db-role で前に指定したもの）なら替えてよい
+            same_db = (conn.kind, conn.host, conn.port, conn.database) == (
+                values["kind"],
+                values["host"],
+                values["port"],
+                values["database"],
+            )
+            if not same_db or (conn.username != self.db_role and not _is_marked_role(conn.username)):
                 raise SeedError(
                     f"接続先「{conn.name}」は、確認用のロール {self.db_role} でこのDBへつなぐものではありません。"
                     "名前を変えるか消してください"
@@ -387,6 +444,13 @@ class Seeder:
                 connector.is_active = True
                 connector.save(update_fields=["is_active", "updated"])
         self._log("Connector", f"{CONNECTOR}（全社。{state}）")
+
+
+def _is_marked_role(name: str) -> bool:
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT shobj_description(oid, 'pg_authid') FROM pg_roles WHERE rolname = %s", [name])
+        row = cursor.fetchone()
+    return row is not None and row[0] == MARK
 
 
 def _permission(perm: AppPermission | str) -> Permission:

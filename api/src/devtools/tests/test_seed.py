@@ -15,6 +15,7 @@ from devtools import seed
 from devtools.seed import Seeder, SeedError
 from llm.factories import ModelProfileFactory
 from llm.models import LLMConnection, ModelProfile
+from runtime.factories import RuntimeProfileFactory
 from runtime.models import RuntimeProfile
 from runtime.registry import ImageReference, InspectedImage
 from user.factories import DepartmentFactory, UserFactory
@@ -201,6 +202,33 @@ def test_seed_does_not_take_over_an_unmarked_role(seeder):
         seeder.run()
 
 
+def test_seed_does_not_reset_a_role_with_extra_privileges(seeder):
+    """印のあるロールでも、後から付いた権限があれば、固定のパスワードに戻さない"""
+    seeder.run()
+    with connection.cursor() as cursor:
+        cursor.execute("CREATE TABLE public.devtools_other (id integer)")
+        cursor.execute(f"GRANT SELECT ON public.devtools_other TO {seeder.db_role}")
+    with pytest.raises(SeedError, match="ほかの権限"):
+        Seeder(db_role=seeder.db_role).run()
+    with connection.cursor() as cursor:
+        cursor.execute(f"REVOKE SELECT ON public.devtools_other FROM {seeder.db_role}")
+    Seeder(db_role=seeder.db_role).run()
+
+
+def test_seed_does_not_take_over_other_profiles(seeder):
+    """確認用でない同じ名前のモデル設定・Runtime Profileは、引き取らずに止める"""
+    ModelProfileFactory.create(name="確認用の偽モデル（推論）")
+    with pytest.raises(SeedError, match="確認用の偽モデル（推論）"):
+        seeder.run()
+    ModelProfile.objects.filter(name="確認用の偽モデル（推論）").update(deleted=True)
+    RuntimeProfileFactory.create(name=seed.RUNTIME_PROFILE)
+    seeder.lines.clear()
+    seeder.sandbox_image = f"localhost:5001/yoriki-sandbox-docs@{DIGEST}"
+    seeder.database = False
+    with pytest.raises(SeedError, match=seed.RUNTIME_PROFILE):
+        seeder.run()
+
+
 def test_seed_does_not_take_over_other_users(seeder):
     UserFactory.create(username="check-admin", email="someone@example.co.jp")
     with pytest.raises(SeedError, match="check-admin"):
@@ -247,3 +275,11 @@ def test_check_role_reads_only_the_check_tables(seeder):
     with connection.cursor() as cursor:
         cursor.execute("SELECT has_table_privilege(%s, %s, 'SELECT')", [seeder.db_role, f"{seed.SCHEMA}.private_notes"])
         assert cursor.fetchone() == (False,)
+
+
+def test_seed_switches_the_connection_to_another_check_role(seeder):
+    """--db-role で別のロールにしても、前の印のあるロールの接続先を揃える"""
+    seeder.run()
+    other = Seeder(db_role=f"{seeder.db_role}_2")
+    other.run()
+    assert Connector.objects.get(name=seed.CONNECTOR).connection.username == other.db_role

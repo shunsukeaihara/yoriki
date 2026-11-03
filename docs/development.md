@@ -134,3 +134,101 @@ CIは、変更されたディレクトリに関係するworkflowだけが動く�
 - `makemigrations` で生成したファイルは、内容を読んで確認してからコミットする。
 - 1つのPull Requestで作るマイグレーションは、なるべく1つのアプリにつき1ファイルにまとめる（作業中に何度も生成した場合は、マージ前に作り直す）。
 - 既存データを消すマイグレーションは、ユーザー（プロジェクトの担当者）の了承を得てから作る。列の削除は、コードからの参照をなくすリリースの次のリリースで行う（deployment.md §6）。
+
+## 6 確認用の道具（`api/src/devtools/`）
+
+画面やRunを手元で確かめるための管理コマンド。`YORIKI_DEBUG=true` のときだけ動く（本番の設定では止まる）。テストでは使わない（テストはfactoryと `harness.tests.fakes.FakeAdapter` を使う）。
+
+| コマンド | 内容 |
+|---|---|
+| `seed_dev` | 確認用のデータを入れる（§6.1） |
+| `fake_llm` | 確認用の偽のLLM（OpenAI互換）を起動する（§6.2） |
+| `dev_session <ユーザー>` | ログイン済みのセッションを作り、`sessionid=…` の形でCookieを表示する（Playwright等で画面を確かめるとき） |
+
+手元で会話のRunを一通り動かす手順：
+
+```bash
+cd api
+uv run python src/manage.py seed_dev --sandbox-image localhost:5001/yoriki-sandbox-docs@sha256:<digest>
+uv run python src/manage.py fake_llm                                 # 別の端末で
+(cd src && uv run uvicorn app.asgi:application --port 8000)          # 別の端末で
+uv run python src/manage.py qcluster                                 # 別の端末で
+```
+
+Sandboxのイメージは、手元のレジストリにpushして使う（Runtime Profileには「名前@sha256:digest」で登録する。digestは `docker push` の最後に表示される）。`seed_dev` とapiには `YORIKI_SANDBOX_INSECURE_REGISTRIES=localhost:5001` が要る。
+
+```bash
+docker run -d --name yoriki-dev-registry -p 127.0.0.1:5001:5000 registry:3   # 初めてのときだけ
+docker build -f sandbox/images/docs/Dockerfile -t yoriki-sandbox-docs:dev sandbox
+docker tag yoriki-sandbox-docs:dev localhost:5001/yoriki-sandbox-docs:dev
+docker push localhost:5001/yoriki-sandbox-docs:dev
+```
+
+`check-member`（パスワード `yoriki-check`）でログインし、会話で「[shell] 作業領域を見て」のように送る。
+
+### 6.1 確認用のデータ（`seed_dev`）
+
+何度流しても同じ状態になる（名前で探して、なければ作り、あれば揃える）。確認の途中で変えたもの（無効にした、版を変えた、permissionを足した等）も元に戻す。`--dry-run` は、同じ処理を最後に取り消して、何をするかだけを表示する。
+
+| 種類 | 名前 | 内容 |
+|---|---|---|
+| 部門 | 確認用の部門 | 下の3人が所属する |
+| ユーザー | `check-member` | 確認用の社員。permissionなし |
+| | `check-lead` | 確認用の部門の担当。部門のSkillの編集・公開、部門のタスクの管理 |
+| | `check-admin` | 確認用の全社の担当。すべての部門の管理、全社のSkill・タスク、Connector・接続先、入口・出口の管理。確認用のデータの作成者 |
+| LLMの接続 | 確認用の偽LLM | ローカルLLM。`--llm-url`（既定 `http://127.0.0.1:8765/v1`。`fake_llm` の既定） |
+| | 確認用のつながらないLLM | `http://127.0.0.1:9/v1`。再試行の後のモデルの切り替えの確認に使う |
+| モデル設定 | 確認用の偽モデル | `fake`。Tool呼出し・画像入力。既定のモデル設定がなければ既定にする |
+| | 確認用の偽モデル（推論） | `fake-reasoning`。effortは low・medium・high |
+| | 確認用のつながらないモデル | つながらない接続を使う |
+| Runtime Profile | 確認用の文書処理 | `--sandbox-image` を指定したときだけ。管理画面と同じくレジストリで確かめる（手元のレジストリは `YORIKI_SANDBOX_INSECURE_REGISTRIES=localhost:5001` が要る）。資源の上限は、管理画面で変えた値を残す。既定のRuntime Profileがなければ既定にする |
+| スキーマ | `connector_check` | YorikiのDBの中に作る。表 `vendors`（取引先3件）・`invoices`（請求3件）は毎回作り直す（以前の確認で作った同じ名前の表も）。読むだけのロール `connector_check_ro` を作る（PostgreSQLのクラスタで共有。DBの利用者にロールを作る権限が要る。`deploy/compose.dev.yaml` のものは持っている） |
+| Connector | 確認用DB | 全社。上のスキーマの2つの表を公開する。`--skip-database` でスキーマと一緒に飛ばす |
+
+- パスワード（`--password`。既定 `yoriki-check`）は、SSOの設定がない手元では、パスワードでのログインにそのまま使える。
+- API key・DBのパスワードは、そのときの `YORIKI_SECRET_ENCRYPTION_KEYS` で暗号化して保存する。apiと同じ `.envrc` を読み込んで流す。
+- 基盤管理者（`createsuperuser` で作る）は作らない。
+
+### 6.2 偽のLLM（`fake_llm`）
+
+OpenAI互換の `POST /v1/chat/completions`（ストリーミングだけ）と `GET /v1/models` を返す。どう応答するかは、台本（JSON）のルールで決める。既定の台本は `api/src/devtools/scenarios/default.json`。`--scenario` で自分の台本を、`--dump <ディレクトリ>` で受けた要求の書き出し（system promptやToolの定義を確かめるとき）を指定する。台本は要求ごとに読み直す（更新日時が変わったときだけ）ので、起動したまま書き換えられる。受けた要求ごとに、どのルールに合ったかを1行表示する。
+
+既定の台本は、発言に次の語があると、その動きをする（ないときは、発言の1行目を返すだけ）。
+
+| 語 | 動き |
+|---|---|
+| `[skill]` | 一覧の最初のSkillを読み込み、資料があれば最初の1つを `read` してから答える |
+| `[skill-edit]` | `request_skill_edit` で一覧の最初のSkillの編集を提案する。承認した後の編集のRunでは、`get_skill` → `update_skill_draft`（説明を直す）→ `publish_skill_draft` |
+| `[shell]` | `shell` で作業領域を見て、結果を答える |
+| `[file]` | `write` で `/workspace/output/result.md` を書く |
+| `[ask]` | `ask_user` で対象月を尋ね、回答を受けて答える |
+| `[todo]` | `todo_write` で作業の計画を書く |
+| `[query]` | `datasource_query` で、使えるConnectorの最初の1つの `vendors` を照会する（会話では `@` で確認用DBを指定する） |
+| `[script]` | `shell` のスクリプトから `yoriki_connector` で確認用DBを照会する |
+| `[notify]` | `prepare_notification` で通知を用意する（タスクの依頼文に書く） |
+| `[slow]` | 2秒待ってから、少しずつ答える |
+| `[error]`・`[429]` | 同じ要求に、最初の2回は500、1回は429を返す（Runnerの再試行の確認） |
+
+台本の形：
+
+```json
+{
+  "models": ["fake", "fake-reasoning"],
+  "rules": [
+    {
+      "name": "資料を読む",
+      "when": {"prompt": "[skill]", "called": "skill", "match": "(?P<file>/workspace/master/[^\\n]+?) \\("},
+      "reply": {"text": "資料を読みます。", "tool_calls": [{"name": "read", "arguments": {"path": "${file}"}}]}
+    }
+  ],
+  "default": {"text": "（偽のLLM）「${prompt}」を受け取りました。"}
+}
+```
+
+- ルールは上から順に照らし、`when` の条件がすべて合った最初のルールの `reply` を返す。どれにも合わなければ `default`。
+- 「今の依頼」は、Toolを呼ばずに終わった最後のassistantの発言（前の依頼への答え）より後の部分。Runnerが利用者の発言の形で足す文脈（`<runtime_context>`、ジョブの終了の知らせ等）も、今の依頼の発言に含める。前の依頼が答えずに終わった（失敗・取消）ときは、その依頼も今の依頼に含まれる。
+- `when`：`prompt`（今の依頼の利用者の発言に、すべての語を含む）、`step`（今の依頼の中のassistantの発言の数。0が最初。配列ならどれか）、`tools`（すべてのToolが使える）、`called`（直前の発言が呼んだToolの名前。配列ならどれか。呼んでいなければ `""`）、`result`（最後のToolの結果に、すべての語を含む）、`system`（system promptに、すべての語を含む）、`model`（モデル名。配列ならどれか）、`match`（今の依頼のすべての文に対する正規表現。名前付きのグループは変数になる）。語は文字列か配列。
+- `reply`：`text`、`tool_calls`（`{"name", "arguments"}` の配列）、`finish`（`stop`・`length`・`tool_calls`。省くと、Toolを呼ぶなら `tool_calls`、ほかは `stop`）、`delay`（最初に待つ秒数）、`chunk_delay`（20文字ずつに分けて送るときの間の秒数）、`status`・`error`（HTTPのエラーの状態と文）。
+- ルールの `times`：同じ要求（モデルと発言の並びが同じ）に、最初の何回だけ合うか。Runnerの再試行の確認に使う。台本を読み直すと数え直す。
+- `${名前}` は文字列の中で置き換える。`prompt`（今の依頼の最初の利用者の発言の1行目。100文字まで）、`step`、`called`、`result`（最後のToolの結果。1000文字まで）、`model`、`enum:<Tool>.<引数>`（Toolの引数のenumの最初の値。例：`${enum:skill.name}`、`${enum:datasource_query.connector}`）と、`match` のグループ。知らない名前はそのまま残す（シェルの `${HOME}` 等を書ける）。
+- 推論の途中経過は返さない。`tool_choice` で指定されたToolも自動では呼ばないので、必要ならルールに書く（要求の `tool_choice` は `--dump` で確かめる）。

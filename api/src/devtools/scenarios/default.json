@@ -1,0 +1,220 @@
+{
+  "models": ["fake", "fake-reasoning"],
+  "rules": [
+    {
+      "name": "要約",
+      "when": {"prompt": "context compaction engine"},
+      "reply": {"text": "（偽のLLMの要約）ここまでの依頼と作業の要約です。"}
+    },
+    {
+      "name": "エラー（同じ要求に2回）",
+      "when": {"prompt": "[error]"},
+      "times": 2,
+      "reply": {"status": 500, "error": "偽のLLMのエラー"}
+    },
+    {
+      "name": "要求の上限（同じ要求に1回）",
+      "when": {"prompt": "[429]"},
+      "times": 1,
+      "reply": {"status": 429, "error": "偽のLLMの要求の上限"}
+    },
+    {
+      "name": "ゆっくり答える",
+      "when": {"prompt": "[slow]"},
+      "reply": {
+        "delay": 2,
+        "chunk_delay": 0.3,
+        "text": "ゆっくり答えています。画面に少しずつ表示されることを確かめてください。途中で止めることもできます。終わりです。"
+      }
+    },
+    {
+      "name": "Skillを読み込む",
+      "when": {"prompt": "[skill]", "tools": "skill", "step": 0},
+      "reply": {"text": "Skillを読み込みます。", "tool_calls": [{"name": "skill", "arguments": {"name": "${enum:skill.name}"}}]}
+    },
+    {
+      "name": "Skillの資料を読む",
+      "when": {"prompt": "[skill]", "called": "skill", "tools": "read", "match": "(?P<file>/workspace/master/[^\\n]+?) \\("},
+      "reply": {"text": "資料を読みます。", "tool_calls": [{"name": "read", "arguments": {"path": "${file}"}}]}
+    },
+    {
+      "name": "Skillで答える",
+      "when": {"prompt": "[skill]", "called": ["skill", "read"]},
+      "reply": {"text": "Skillの手順と資料を確かめました（偽のLLM）。\n\n${result}"}
+    },
+    {
+      "name": "編集のRun：Skillを読む",
+      "when": {"prompt": "[skill-edit]", "tools": "get_skill", "step": 0},
+      "reply": {"text": "Skillを読みます。", "tool_calls": [{"name": "get_skill", "arguments": {}}]}
+    },
+    {
+      "name": "編集のRun：Draftを直す",
+      "when": {"prompt": "[skill-edit]", "called": "get_skill", "match": "<draft revision=\"(?P<revision>\\d+)\""},
+      "reply": {
+        "text": "Draftを直します。",
+        "tool_calls": [
+          {"name": "update_skill_draft", "arguments": "{\"expected_revision\": ${revision}, \"description\": \"偽のLLMが直した説明\"}"}
+        ]
+      }
+    },
+    {
+      "name": "編集のRun：Draftを作って直す",
+      "when": {"prompt": "[skill-edit]", "called": "get_skill"},
+      "reply": {
+        "text": "Draftを作って直します。",
+        "tool_calls": [{"name": "update_skill_draft", "arguments": {"expected_revision": 0, "description": "偽のLLMが直した説明"}}]
+      }
+    },
+    {
+      "name": "編集のRun：公開する",
+      "when": {"prompt": "[skill-edit]", "called": "update_skill_draft", "match": "now revision (?P<revision>\\d+)"},
+      "reply": {
+        "text": "公開します。",
+        "tool_calls": [
+          {"name": "publish_skill_draft", "arguments": "{\"expected_revision\": ${revision}, \"change_reason\": \"偽のLLMの確認\"}"}
+        ]
+      }
+    },
+    {
+      "name": "編集のRun：答える",
+      "when": {"prompt": "[skill-edit]", "called": ["update_skill_draft", "publish_skill_draft"]},
+      "reply": {"text": "Skillを直しました。\n\n${result}"}
+    },
+    {
+      "name": "Skillの編集を頼む",
+      "when": {"prompt": "[skill-edit]", "tools": ["request_skill_edit", "skill"], "step": 0},
+      "reply": {
+        "text": "Skillの編集を提案します。",
+        "tool_calls": [
+          {"name": "request_skill_edit", "arguments": {"skill": "${enum:skill.name}", "summary": "[skill-edit] 説明を直す"}}
+        ]
+      }
+    },
+    {
+      "name": "コマンドを実行する",
+      "when": {"prompt": "[shell]", "tools": "shell", "step": 0},
+      "reply": {
+        "text": "コマンドで確かめます。",
+        "tool_calls": [{"name": "shell", "arguments": {"description": "作業領域を確かめる", "command": "ls -la /workspace && python3 --version"}}]
+      }
+    },
+    {
+      "name": "コマンドの結果で答える",
+      "when": {"prompt": "[shell]", "called": "shell"},
+      "reply": {"text": "コマンドの結果です。\n\n```\n${result}\n```"}
+    },
+    {
+      "name": "成果物を書く",
+      "when": {"prompt": "[file]", "tools": "write", "step": 0},
+      "reply": {
+        "text": "成果物を書きます。",
+        "tool_calls": [{"name": "write", "arguments": {"path": "/workspace/output/result.md", "content": "# 確認用の成果物\n\n${prompt}\n"}}]
+      }
+    },
+    {
+      "name": "成果物を書いた",
+      "when": {"prompt": "[file]", "called": "write"},
+      "reply": {"text": "/workspace/output/result.md に書きました。"}
+    },
+    {
+      "name": "利用者に確かめる",
+      "when": {"prompt": "[ask]", "tools": "ask_user", "step": 0},
+      "reply": {
+        "text": "対象を確かめます。",
+        "tool_calls": [
+          {
+            "name": "ask_user",
+            "arguments": {
+              "questions": [
+                {"header": "対象月", "question": "どの月の請求書を確かめますか。", "options": [{"label": "10月"}, {"label": "11月"}]}
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "回答を受けて答える",
+      "when": {"prompt": "[ask]", "called": "ask_user"},
+      "reply": {"text": "回答を受け取りました。\n\n${result}"}
+    },
+    {
+      "name": "作業の計画を書く",
+      "when": {"prompt": "[todo]", "tools": "todo_write", "step": 0},
+      "reply": {
+        "tool_calls": [
+          {
+            "name": "todo_write",
+            "arguments": {
+              "todos": [
+                {"content": "請求書を読む", "status": "completed"},
+                {"content": "取引先の台帳と照合する", "status": "in_progress"},
+                {"content": "結果をまとめる", "status": "pending"}
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "計画を書いて答える",
+      "when": {"prompt": "[todo]", "called": "todo_write"},
+      "reply": {"text": "作業の計画を書きました。"}
+    },
+    {
+      "name": "Connectorで照会する",
+      "when": {"prompt": "[query]", "tools": "datasource_query", "step": 0},
+      "reply": {
+        "text": "取引先を照会します。",
+        "tool_calls": [
+          {
+            "name": "datasource_query",
+            "arguments": {"connector": "${enum:datasource_query.connector}", "sql": "SELECT code, name FROM vendors ORDER BY code"}
+          }
+        ]
+      }
+    },
+    {
+      "name": "照会の結果で答える",
+      "when": {"prompt": "[query]", "called": "datasource_query"},
+      "reply": {"text": "照会の結果です。\n\n${result}"}
+    },
+    {
+      "name": "スクリプトから照会する",
+      "when": {"prompt": "[script]", "tools": "shell", "step": 0},
+      "reply": {
+        "text": "スクリプトで照会します。",
+        "tool_calls": [
+          {
+            "name": "shell",
+            "arguments": {
+              "description": "取引先をスクリプトで照会する",
+              "command": "python3 - <<'PY'\nimport yoriki_connector as yc\nr = yc.query(\"確認用DB\", \"SELECT code, name FROM vendors WHERE code IN (?, ?)\", [\"V001\", \"V002\"])\nprint(r.row_count, [row[\"name\"] for row in r.rows])\nprint(len(yc.describe(\"確認用DB\")), \"tables\")\nPY"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "スクリプトの結果で答える",
+      "when": {"prompt": "[script]", "called": "shell"},
+      "reply": {"text": "スクリプトの結果です。\n\n```\n${result}\n```"}
+    },
+    {
+      "name": "通知を用意する",
+      "when": {"prompt": "[notify]", "tools": "prepare_notification", "step": 0},
+      "reply": {
+        "text": "通知を用意します。",
+        "tool_calls": [{"name": "prepare_notification", "arguments": {"message": "確認用の通知です：${prompt}"}}]
+      }
+    },
+    {
+      "name": "通知を用意して答える",
+      "when": {"prompt": "[notify]", "called": "prepare_notification"},
+      "reply": {"text": "通知を用意しました。"}
+    }
+  ],
+  "default": {
+    "text": "（偽のLLM）「${prompt}」を受け取りました。発言に [skill]・[skill-edit]・[shell]・[file]・[ask]・[todo]・[query]・[script]・[notify]・[slow]・[error]・[429] を入れると、その動きをします。"
+  }
+}

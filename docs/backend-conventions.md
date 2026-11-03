@@ -127,6 +127,7 @@ design.md §5.1の永続オブジェクトを、次の単位で分ける。実�
 | `connector` | DatabaseConnection（社内DBの接続先と資格情報）、Connector（1つの接続の上の範囲。範囲（個人・部門・全社・システム）と部門を持つ）、ConnectorVersion（境界の版）、操作のAdapter（社内DB、SharePoint、Google Drive、MCP。design.md §4.9） |
 | `stream` | SSEのストリームview、イベントのSerializer（realtime.md） |
 | `harness` | Modelなし。Runner（実行のループ）、Tool、RunEventからの文脈の組立、圧縮、Sandboxの操作（harness.md §3） |
+| `devtools` | Modelなし。開発の確認用の管理コマンド（確認用のデータ、偽のLLM、ログイン済みのセッション。`DEBUG` のときだけ動く。development.md §6） |
 
 ---
 
@@ -707,6 +708,7 @@ class RunAdmin(admin.ModelAdmin):
 |---|---|---|
 | 管理コマンド | `<app>/management/commands/<name>.py` | 運用で繰り返し使う操作（清掃、再送、データのdump/load、Storage移行） |
 | runscript | `scripts/<name>.py`（django-extensions） | 単発の移行、調査、ダミーデータ作成 |
+| 開発用の管理コマンド | `devtools/management/commands/<name>.py`（`devtools.commands.DevCommand` を継ぐ） | 手元の確認で繰り返し使うデータとサーバー（`DEBUG` のときだけ動く。development.md §6） |
 | Q2 task | `<app>/tasks.py` | Run実行の通知、配信、定期清掃（Q2のScheduleで登録） |
 
 ### 8.2 管理コマンド

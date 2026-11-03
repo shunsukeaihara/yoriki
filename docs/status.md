@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-11-03（文書の整理の残り：design.md・harness.md・README・AGENTS.md・sandbox/README.md を今の実装と突き合わせて直した（このPR）。マージを確かめてから、§4 の「次の作業」の1から始める）
+- 最終更新：2026-11-03（文書の整理の残り：design.md・harness.md・README・AGENTS.md・sandbox/README.md を今の実装と突き合わせて直した（#75）。マージを確かめてから、§4 の「次の作業」の1から始める）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -98,7 +98,7 @@
 
 ## 4 次の作業
 
-**今の状態（2026-11-03）**：design.md §12の第1段階のうち、Skill（①〜⑤）と、Connector・タスク・配信（①〜⑦、Connectorの④a・④b）は終わった（#72・#73まで）。今は、業務（下の「第1段階の順番」の3）を作る前の整理を、利用者と決めた次の順で進めている。1（文書の整理）は #74 と、その残り（design.md・harness.md の突き合わせ）のPRで行った。#74 では、status.md の終わった段階の「決めたこと・判断した点」を設計書と突き合わせ、設計書になかった今の動きに関わるものを design.md・authorization.md・harness.md・frontend-conventions.md・sandbox/CONTRACT.md へ移してから消した（経過・レビュー・確かめたことは消した。各PRの説明に残っている）。§1 はPRごとの短い一覧にした。
+**今の状態（2026-11-03）**：design.md §12の第1段階のうち、Skill（①〜⑤）と、Connector・タスク・配信（①〜⑦、Connectorの④a・④b）は終わった（#72・#73まで）。今は、業務（下の「第1段階の順番」の3）を作る前の整理を、利用者と決めた次の順で進めている。1（文書の整理）は #74 と、その残り（design.md・harness.md の突き合わせ。#75）で行った。#74 では、status.md の終わった段階の「決めたこと・判断した点」を設計書と突き合わせ、設計書になかった今の動きに関わるものを design.md・authorization.md・harness.md・frontend-conventions.md・sandbox/CONTRACT.md へ移してから消した（経過・レビュー・確かめたことは消した。各PRの説明に残っている）。§1 はPRごとの短い一覧にした。
 
 **次の作業**：
 1. **テストの高速化**（PR）：バックエンドのテスト全体（1104件）は手元で約4分半かかる（テスト本体216秒、準備48秒、後片付け8秒。一番遅い1件でも4秒で、時間は全体に広がっている）。`pytest-xdist` で並列にする（プロセスごとのテスト用DB、Sandboxのテストのコンテナ名・作業領域が重ならないか、競合のテスト（`TestMembershipRace` 等。ロックを待って1件2秒ほど）を並列でも安定させる、待つ時間を短くする）。CIの `backend` もあわせて速くする。フロントエンドの、手元のmacOSでcomposablesのテストが「Hook timed out」で止まる問題（§5）も調べる。

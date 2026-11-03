@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import IO, Any, Protocol, TypeVar
 
 from django.conf import settings
-from django.db import connection
+from django.db import DatabaseError, connection, transaction
 from django.utils import timezone
 from nanoid import generate
 
@@ -758,9 +758,27 @@ def collect_outputs(
 
 
 def database_label() -> str:
-    """Sandboxのラベルに記録する、AttemptのDBの名前（`DATABASE_LABEL`）。接続先のホストの設定を変えても同じDBと
-    分かるように、名前だけにする"""
-    return str(connection.settings_dict["NAME"])
+    """Sandboxのラベルに記録する、AttemptのDB（`DATABASE_LABEL`）。PostgreSQLのクラスタの識別子とDBの名前にする。
+
+    クラスタの識別子は作ったときに決まるので、接続先のホストの設定を変えても変わらず、同じ名前のDBを持つ別の
+    クラスタとも重ならない。読めない環境では名前だけにする（deployment.md §7）
+    """
+    name = str(connection.settings_dict["NAME"])
+    if name not in _cluster_ids:
+        try:
+            with transaction.atomic(), connection.cursor() as cursor:
+                cursor.execute("SELECT system_identifier FROM pg_control_system()")
+                row = cursor.fetchone()
+            _cluster_ids[name] = str(row[0]) if row else ""
+        except DatabaseError:
+            logger.warning("cannot read the cluster identifier of the database; sandboxes are labeled by its name")
+            _cluster_ids[name] = ""
+    cluster = _cluster_ids[name]
+    return f"{cluster}/{name}" if cluster else name
+
+
+# DBの名前ごとのクラスタの識別子（変わらないので、プロセスの中で一度だけ読む）
+_cluster_ids: dict[str, str] = {}
 
 
 def remove_stale_sandboxes(launcher: Launcher) -> None:

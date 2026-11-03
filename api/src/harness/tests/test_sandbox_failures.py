@@ -5,6 +5,7 @@ import io
 import time
 
 import pytest
+from django.db import connection
 
 from artifact.storage import LocalStorage
 from conversation.dispatch import MessageMode, post_message
@@ -365,6 +366,7 @@ def test_read_offset_is_kept_when_the_output_cannot_be_saved(conversation, setti
 
 def test_stale_sandboxes_of_this_database_are_removed(conversation):
     """終わったAttemptのSandboxは消し、他のDBのAttemptのものと、どのDBのものか分からないものは触らない"""
+    assert database_label().endswith(f"/{connection.settings_dict['NAME']}")
     run = post(conversation)
     alive = claim_run(run.pk)
     assert alive is not None
@@ -390,6 +392,8 @@ def test_stale_sandboxes_of_this_database_are_removed(conversation):
                 container("unlabeled", ended.pk),
                 container("other-db", ended.pk, "test_yoriki_gw9"),
                 container("other-db-unknown", 10**9, "test_yoriki_gw9"),
+                # 同じ名前の、別のクラスタのDB
+                container("other-cluster", ended.pk, f"1/{connection.settings_dict['NAME']}"),
             ]
 
         def remove(self, container_id: str) -> None:

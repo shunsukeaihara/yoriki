@@ -37,8 +37,8 @@ MASTER_DIR = "/workspace/master"
 SANDBOX_LABEL = "org.yoriki.sandbox"
 ATTEMPT_LABEL = "org.yoriki.attempt"
 RUN_LABEL = "org.yoriki.run"
-# AttemptのDBの名前。同じDockerを別のDBのYoriki（手元の開発とテスト、並列のテストのプロセス等）と共有しても、
-# 他のDBのAttemptのSandboxを残ったものとして消さないようにする
+# AttemptのDB（PostgreSQLのクラスタの識別子とDBの名前）。同じDockerを別のDBのYoriki（手元の開発とテスト、
+# 並列のテストのプロセス等）と共有しても、他のDBのAttemptのSandboxを残ったものとして消さないようにする
 DATABASE_LABEL = "org.yoriki.database"
 # 補助コマンドの応答を待つ時間（秒）。grep等は補助コマンドの中で時間を区切る
 HELPER_TIMEOUT = 120

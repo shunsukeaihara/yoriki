@@ -182,10 +182,10 @@ class Seeder:
 
     def _llm_connection(self, name: str, url: str, actor: User, *, timeout: int) -> LLMConnection:
         conn = LLMConnection.objects.filter(name=name, deleted=False).first()
-        if conn is not None and conn.created_by_id != actor.pk and (conn.kind != ProviderKind.LOCAL or conn.api_key):
-            # API keyを持つ接続は、確認用の作成者のものでなければ引き取らない（keyを確認用のモデル設定で使わないため）
+        if conn is not None and (conn.kind != ProviderKind.LOCAL or conn.api_key):
+            # API keyを持つ接続は引き取らない（keyが偽のLLMへ送られるため。確認用の接続はkeyを持たない）
             raise SeedError(f"LLMの接続「{name}」は確認用のものではありません。名前を変えるか消してください")
-        if conn is not None and (conn.kind != ProviderKind.LOCAL or conn.base_url != url):
+        if conn is not None and conn.base_url != url:
             # 種別と接続先は作った後に変えない（API keyが別のサーバーへ送られ、過去の版の接続先の意味も変わるため。
             # llm.models.LLMConnection）。元の接続は名前を変えて残し、新しい接続を作る
             conn.name = f"{name}（以前の接続先 {conn.base_url or conn.get_kind_display()}）"[:100]

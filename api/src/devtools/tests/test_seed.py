@@ -302,3 +302,12 @@ def test_seed_does_not_take_over_an_llm_connection_with_a_key(seeder):
     LLMConnectionFactory.create(name=seed.FAKE_CONNECTION)  # API keyを持つ
     with pytest.raises(SeedError, match=seed.FAKE_CONNECTION):
         seeder.run()
+    # 確認用の作成者のローカルLLMの接続でも、API keyがあれば引き取らない
+    LLMConnection.objects.filter(name=seed.FAKE_CONNECTION).update(deleted=True)
+    seeder.lines.clear()
+    seeder.run()
+    conn = LLMConnection.objects.get(name=seed.FAKE_CONNECTION)
+    conn.api_key = "sk-local-0123456789"
+    conn.save()
+    with pytest.raises(SeedError, match=seed.FAKE_CONNECTION):
+        Seeder(db_role=seeder.db_role).run()

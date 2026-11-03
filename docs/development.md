@@ -168,7 +168,7 @@ docker push localhost:5001/yoriki-sandbox-docs:dev
 
 ### 6.1 確認用のデータ（`seed_dev`）
 
-何度流しても同じ状態になる（名前で探して、なければ作り、あれば揃える）。確認の途中で変えたもの（無効にした、版を変えた、permissionを足した等）も元に戻す。ただし、LLMの接続の接続先は変えない（API keyが別のサーバーへ送られないように。backend-conventions.md・`llm.models.LLMConnection`）。同じ名前の接続の接続先が違えば、元の接続を「…（以前の接続先 <URL>）」の名前にして残し、新しい接続を作る。パスワードは違うときだけ設定し直す（作ったセッションが切れないように）。`--dry-run` は、同じ処理を最後に取り消して、何をするかだけを表示する。
+何度流しても同じ状態になる（名前で探して、なければ作り、あれば揃える）。確認の途中で変えたもの（無効にした、版を変えた、permissionを足した等）も元に戻す。ただし、LLMの接続の接続先は変えない（API keyが別のサーバーへ送られないように。backend-conventions.md・`llm.models.LLMConnection`）。同じ名前の接続の接続先が違えば、元の接続を「…（以前の接続先 <URL>）」の名前にして残し、新しい接続を作る。同じ名前の接続が、確認用の作成者のものでも、API keyのないローカルLLMでもなければ止まる。パスワードは違うときだけ設定し直す（作ったセッションが切れないように）。`--dry-run` は、同じ処理を最後に取り消して、何をするかだけを表示する。
 
 | 種類 | 名前 | 内容 |
 |---|---|---|
@@ -188,7 +188,7 @@ docker push localhost:5001/yoriki-sandbox-docs:dev
 
 - パスワード（`--password`。既定 `yoriki-check`）は、SSOの設定がない手元では、パスワードでのログインにそのまま使える。
 - API key・DBのパスワードは、そのときの `YORIKI_SECRET_ENCRYPTION_KEYS` で暗号化して保存する。apiと同じ `.envrc` を読み込んで流す。
-- 基盤管理者（`createsuperuser` で作る）は作らない。同じusernameのユーザーが確認用のメールアドレス（`<username>@example.co.jp`）でないとき、基盤管理者のときは、引き取らずに止まる。
+- 基盤管理者（`createsuperuser` で作る）は作らない。同じusernameのユーザーが確認用のメールアドレス（`<username>@example.co.jp`）でないとき、基盤管理者のときは、引き取らずに止まる。確認用のユーザーの所属は確認用の部門だけにし、`is_staff` も外す（所属もpermissionと並ぶ権限の軸なので）。
 
 ### 6.2 偽のLLM（`fake_llm`）
 

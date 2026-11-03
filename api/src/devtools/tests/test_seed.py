@@ -13,13 +13,13 @@ from connector.factories import ConnectorFactory
 from connector.models import Connector, ConnectorScope, DatabaseConnection
 from devtools import seed
 from devtools.seed import Seeder, SeedError
-from llm.factories import ModelProfileFactory
+from llm.factories import LLMConnectionFactory, ModelProfileFactory
 from llm.models import LLMConnection, ModelProfile
 from runtime.factories import RuntimeProfileFactory
 from runtime.models import RuntimeProfile
 from runtime.registry import ImageReference, InspectedImage
 from user.factories import DepartmentFactory, UserFactory
-from user.models import Department, User
+from user.models import Department, DepartmentMembership, User
 from utils.permissions import AppPermission
 
 pytestmark = pytest.mark.django_db
@@ -61,6 +61,9 @@ def test_seed_is_idempotent(seeder):
     member, lead, admin = (User.objects.get(username=u) for u, _, _ in seed.USERS)
     assert member.check_password(seed.DEFAULT_PASSWORD)
     assert not member.user_permissions.exists()
+    member.refresh_from_db()
+    assert not member.is_staff
+    assert list(Department.objects.joined_by(member).values_list("name", flat=True)) == [seed.DEPARTMENT]
     assert lead.has_perm(AppPermission.PUBLISH_DEPARTMENT_SKILLS.perm)
     assert not lead.has_perm(AppPermission.PUBLISH_COMPANY_SKILLS.perm)
     assert admin.has_perm("connector.add_connector") and admin.has_perm("delivery.add_destination")
@@ -96,6 +99,8 @@ def test_seed_restores_changed_data(seeder):
     LLMConnection.objects.filter(name=seed.FAKE_CONNECTION).update(base_url="http://127.0.0.1:1/v1")
     member = User.objects.get(username="check-member")
     member.user_permissions.add(seed._permission(AppPermission.PUBLISH_COMPANY_SKILLS))
+    DepartmentMembership.objects.create(user=member, department=DepartmentFactory.create())
+    User.objects.filter(pk=member.pk).update(is_staff=True)
 
     Seeder(db_role=seeder.db_role, llm_url="http://127.0.0.1:9999/v1").run()
     profile.refresh_from_db()
@@ -108,6 +113,9 @@ def test_seed_restores_changed_data(seeder):
     old = LLMConnection.objects.get(name=f"{seed.FAKE_CONNECTION}（以前の接続先 http://127.0.0.1:1/v1）")
     assert old.base_url == "http://127.0.0.1:1/v1"
     assert not member.user_permissions.exists()
+    member.refresh_from_db()
+    assert not member.is_staff
+    assert list(Department.objects.joined_by(member).values_list("name", flat=True)) == [seed.DEPARTMENT]
 
 
 def test_seed_keeps_another_default_model(seeder):
@@ -283,3 +291,9 @@ def test_seed_switches_the_connection_to_another_check_role(seeder):
     other = Seeder(db_role=f"{seeder.db_role}_2")
     other.run()
     assert Connector.objects.get(name=seed.CONNECTOR).connection.username == other.db_role
+
+
+def test_seed_does_not_take_over_an_llm_connection_with_a_key(seeder):
+    LLMConnectionFactory.create(name=seed.FAKE_CONNECTION)  # API keyを持つ
+    with pytest.raises(SeedError, match=seed.FAKE_CONNECTION):
+        seeder.run()

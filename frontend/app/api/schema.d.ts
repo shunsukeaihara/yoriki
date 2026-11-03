@@ -3267,7 +3267,7 @@ export interface components {
             /** @description 送り先のホストと末尾の4文字 */
             readonly url_display: string;
             /**
-             * @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面への参照だけなので、この指定によらず機密のタスクにも使える
+             * @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面の中だけで、受け手を結果を見られる人に限るので、この指定によらず機密のタスクにも使える
              * @default false
              */
             allows_sensitive_results: boolean;
@@ -3331,7 +3331,7 @@ export interface components {
             /** @description 送り先のURL（https）。Webhook・Zapierでは必須、画面の通知では送らない。表示では返さない */
             url?: string;
             /**
-             * @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面への参照だけなので、この指定によらず機密のタスクにも使える
+             * @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面の中だけで、受け手を結果を見られる人に限るので、この指定によらず機密のタスクにも使える
              * @default false
              */
             allows_sensitive_results: boolean;
@@ -3383,7 +3383,7 @@ export interface components {
             /** @description 送り先のホストと末尾の4文字 */
             readonly url_display: string;
             /**
-             * @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面への参照だけなので、この指定によらず機密のタスクにも使える
+             * @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面の中だけで、受け手を結果を見られる人に限るので、この指定によらず機密のタスクにも使える
              * @default false
              */
             allows_sensitive_results: boolean;
@@ -3407,7 +3407,7 @@ export interface components {
             version?: number;
             /** @description 送り先のURL（https）。Webhook・Zapierでは必須、画面の通知では送らない。表示では返さない */
             url?: string;
-            /** @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面への参照だけなので、この指定によらず機密のタスクにも使える */
+            /** @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面の中だけで、受け手を結果を見られる人に限るので、この指定によらず機密のタスクにも使える */
             allows_sensitive_results?: boolean;
             change_reason?: string;
         };
@@ -4768,7 +4768,7 @@ export interface components {
             version?: number;
             /** @description 送り先のURL（https）。Webhook・Zapierでは必須、画面の通知では送らない。表示では返さない */
             url?: string;
-            /** @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面への参照だけなので、この指定によらず機密のタスクにも使える */
+            /** @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面の中だけで、受け手を結果を見られる人に限るので、この指定によらず機密のタスクにも使える */
             allows_sensitive_results?: boolean;
             change_reason?: string;
         };

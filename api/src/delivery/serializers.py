@@ -77,8 +77,8 @@ class DestinationSerializer(serializers.ModelSerializer):
         required=False,
         default=False,
         help_text=_(
-            "機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面への参照だけなので、"
-            "この指定によらず機密のタスクにも使える"
+            "機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面の中だけで、受け手を"
+            "結果を見られる人に限るので、この指定によらず機密のタスクにも使える"
         ),
     )
     change_reason = serializers.CharField(max_length=500, required=False, allow_blank=True, write_only=True)

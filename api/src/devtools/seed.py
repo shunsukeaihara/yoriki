@@ -370,7 +370,16 @@ class Seeder:
             [oid, SCHEMA, f"{SCHEMA}.vendors", f"{SCHEMA}.invoices"],
         )
         count = cursor.fetchone()[0]
-        return f"ほかの権限・持ち物 {count:,}件（ほかのDBのものを含む）" if count else ""
+        if count:
+            return f"ほかの権限・持ち物 {count:,}件（ほかのDBのものを含む）"
+        # 確認用のスキーマにはUSAGEだけ（表は作り直した直後なので、権限は残っていない）
+        cursor.execute(
+            "SELECT string_agg(DISTINCT a.privilege_type, ', ') FROM pg_namespace n, aclexplode(n.nspacl) a "
+            "WHERE n.nspname = %s AND a.grantee = %s AND a.privilege_type <> 'USAGE'",
+            [SCHEMA, oid],
+        )
+        extra = cursor.fetchone()[0]
+        return f"スキーマ {SCHEMA} の {extra}" if extra else ""
 
     def _connector(self, actor: User) -> None:
         settings_dict = connection.settings_dict

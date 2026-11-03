@@ -221,6 +221,11 @@ def test_seed_does_not_reset_a_role_with_extra_privileges(seeder):
     with connection.cursor() as cursor:
         cursor.execute(f"REVOKE SELECT ON public.devtools_other FROM {seeder.db_role}")
     Seeder(db_role=seeder.db_role).run()
+    # 確認用のスキーマのUSAGEのほかの権限
+    with connection.cursor() as cursor:
+        cursor.execute(f"GRANT CREATE ON SCHEMA {seed.SCHEMA} TO {seeder.db_role}")
+    with pytest.raises(SeedError, match="CREATE"):
+        Seeder(db_role=seeder.db_role).run()
 
 
 def test_seed_does_not_take_over_other_profiles(seeder):

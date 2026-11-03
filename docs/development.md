@@ -50,7 +50,7 @@ VS Codeを標準のエディタとし、リポジトリの `.vscode/settings.jso
 | lint | ruff（設定は `ruff.toml`。`DJ`（Django）、`B`、`I`（import順）、`PL`（pylint相当）等） | `uv run ruff check` |
 | 整形 | ruff format | `uv run ruff format` |
 | 型チェック | mypy＋django-stubs＋djangorestframework-stubs | `uv run mypy src` |
-| テスト | pytest＋pytest-django＋factory_boy | `uv run pytest` |
+| テスト | pytest＋pytest-django＋pytest-xdist＋factory_boy | `uv run pytest` |
 
 - pylint（pylint_django）・autopep8・black・yapfは併用せず、ruffに一本化する。
 - 日本語のコメントや文字列に全角の記号（「（」「：」等）を使うので、ruffの `RUF001`〜`RUF003` は無効にしている。
@@ -59,6 +59,7 @@ VS Codeを標準のエディタとし、リポジトリの `.vscode/settings.jso
 - テストはSQLiteではなくPostgreSQLで実行する（`select_for_update`、LISTEN/NOTIFY、advisory lock等、PostgreSQLの機能に依存するため）。ローカルでは `deploy/compose.dev.yaml` のPostgreSQLを使う。
 - PostgreSQLに接続できないときは、pytestは接続を長く待たずに、起動のコマンド（`docker compose -f deploy/compose.dev.yaml up -d`）を案内して終わる（`conftest.py`）。
 - pytestは `app.settings_test` を使う。`.envrc` の `DJANGO_SETTINGS_MODULE` より優先させるため、`pyproject.toml` の `addopts` に `--ds` で指定している。テスト用DBは `--reuse-db` で使い回すので、マイグレーションを変えたら `uv run pytest --create-db` で作り直す。
+- pytestは、pytest-xdistでCPUの数だけのプロセスに分けて並列に動かす（`addopts` の `-n auto --maxprocesses 8 --dist worksteal`。プロセスごとに接続プールを持つので、PostgreSQLの接続の上限を超えないように8までにする）。テスト用DBはプロセスごとに作る（`test_<DB名>_gw0` 等）。1つのテストを `--pdb` で調べるとき等、並列にしたくないときは `-n 0` を付ける。
 - settingsの読み込みに環境変数（`YORIKI_SECRET_KEY` 等）が要るので、mypy（django-stubs）とpytestは `.envrc` を読み込んだ状態で実行する。
 
 ### 3.2 フロントエンド（`frontend/`）

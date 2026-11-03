@@ -6,6 +6,7 @@ from conversation.dispatch import MessageMode, post_message
 from conversation.factories import ConversationFactory
 from conversation.models import ConversationMessage, InstructionState, MessageRole, UserInstruction
 from harness import runner as runner_module
+from harness.context import build_items, provider_key
 from harness.runner import Runner
 from llm.providers.base import ProviderError, StopReason, ToolChoice
 from run.models import (
@@ -320,7 +321,6 @@ def test_max_tokens_reply_is_nudged(conversation):
 
 
 @pytest.mark.django_db
-@pytest.mark.django_db
 def test_next_request_inherits_the_context_of_the_earlier_requests(conversation, app_user):
     """同じ会話の次の依頼は、前の依頼の文脈（発言・Tool呼出し・応答）をそのまま引き継ぐ（design.md §5.1）"""
     todos = {"todos": [{"content": "読む", "status": "completed"}]}
@@ -395,6 +395,16 @@ def test_provider_state_is_replayed_only_for_the_same_model(conversation):
     run = execute(run, adapter)
     assistant = next(m for m in adapter.requests[1].messages if m.tool_calls)
     assert assistant.provider_state == {"blocks": ["thinking"]}
+
+    # 別のモデル（途中でモデルを切り替えた等）の応答の途中経過は、戻さない
+    event = RunEvent.objects.filter(run=run, kind=RunEventKind.ASSISTANT_MESSAGE).exclude(data__provider_state=None)
+    recorded = event.get()
+    assert recorded.data["provider"] == provider_key(run)
+    recorded.data["provider"] = {**recorded.data["provider"], "model": "another-model"}
+    recorded.save(update_fields=["data"])
+    items = build_items(run, RunEvent.objects.filter(run=run).order_by("sequence"))
+    replayed = next(i.message for i in items if i.message.tool_calls)
+    assert replayed.provider_state is None
 
 
 @pytest.mark.django_db

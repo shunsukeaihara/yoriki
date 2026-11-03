@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import IO, Any, Protocol, TypeVar
 
 from django.conf import settings
+from django.db import DatabaseError, connection, transaction
 from django.utils import timezone
 from nanoid import generate
 
@@ -33,6 +34,7 @@ from run.errors import LeaseLost
 from run.models import Checkpoint, ExecutionAttempt, Run, RunKind
 from runtime.launcher import (
     ATTEMPT_LABEL,
+    DATABASE_LABEL,
     MASTER_DIR,
     RUN_LABEL,
     WORK_DIR,
@@ -251,7 +253,7 @@ class SandboxSession:
         spec = SandboxSpec.for_version(
             version,
             platform,
-            labels={RUN_LABEL: self.run.uid, ATTEMPT_LABEL: str(self.attempt.pk)},
+            labels={RUN_LABEL: self.run.uid, ATTEMPT_LABEL: str(self.attempt.pk), DATABASE_LABEL: database_label()},
             input_dir=str(self.input_dir),
             master_dir=str(self.master_dir),
         )
@@ -755,12 +757,48 @@ def collect_outputs(
     return collected
 
 
+def database_label() -> str:
+    """Sandboxのラベルに記録する、AttemptのDB（`DATABASE_LABEL`）。PostgreSQLのクラスタの識別子とDBの名前にする。
+
+    クラスタの識別子は作ったときに決まるので、接続先のホストの設定を変えても変わらず、同じ名前のDBを持つ別の
+    クラスタとも重ならない。読めない環境では名前だけにする（deployment.md §7）
+    """
+    name = str(connection.settings_dict["NAME"])
+    if name not in _cluster_ids:
+        try:
+            _cluster_ids[name] = _read_cluster_id()
+        except DatabaseError:
+            logger.warning("cannot read the cluster identifier of the database; sandboxes are labeled by its name")
+            _cluster_ids[name] = ""
+    cluster = _cluster_ids[name]
+    return f"{cluster}/{name}" if cluster else name
+
+
+def _read_cluster_id() -> str:
+    with transaction.atomic(), connection.cursor() as cursor:
+        cursor.execute("SELECT system_identifier FROM pg_control_system()")
+        row = cursor.fetchone()
+    return str(row[0]) if row else ""
+
+
+# DBの名前ごとのクラスタの識別子（変わらないので、プロセスの中で一度だけ読む）
+_cluster_ids: dict[str, str] = {}
+
+
 def remove_stale_sandboxes(launcher: Launcher) -> None:
-    """終わったAttemptのSandboxが残っていれば消す（Workerが落ちた等）。leaseの切れたAttemptのものも消す"""
+    """終わったAttemptのSandboxが残っていれば消す（Workerが落ちた等）。leaseの切れたAttemptのものも消す。
+
+    他のDBのAttemptのものは判定できないので触らない。DBのラベルのないもの（ラベルを付ける前の版が起動したもの）も、
+    どのDBのものか分からないので触らない（deployment.md §7）
+    """
     containers = launcher.containers()
+    database = database_label()
     ids = {}
     for container in containers:
-        value = (container.get("Labels") or {}).get(ATTEMPT_LABEL, "")
+        labels = container.get("Labels") or {}
+        if labels.get(DATABASE_LABEL) != database:
+            continue
+        value = labels.get(ATTEMPT_LABEL, "")
         if value.isdigit():
             ids[container["Id"]] = int(value)
     if not ids:

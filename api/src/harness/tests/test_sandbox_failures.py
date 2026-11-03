@@ -5,12 +5,13 @@ import io
 import time
 
 import pytest
+from django.db import DatabaseError, connection
 
 from artifact.storage import LocalStorage
 from conversation.dispatch import MessageMode, post_message
 from conversation.factories import ConversationFactory
 from harness.runner import Runner
-from harness.sandbox import WORKSPACE_LOST, Job, SandboxSession
+from harness.sandbox import WORKSPACE_LOST, Job, SandboxSession, database_label, remove_stale_sandboxes
 from harness.tools import shell as shell_tool
 from harness.tools.base import ToolContext
 from harness.tools.shell import _job_text
@@ -18,7 +19,7 @@ from llm.providers.base import ToolCall
 from run.errors import LeaseLost
 from run.models import Checkpoint, ExecutionAttempt, Run, RunEndReason, RunEvent, RunEventKind, RunStatus
 from run.tasks import claim_run
-from runtime.launcher import Exec, SandboxUnavailable
+from runtime.launcher import ATTEMPT_LABEL, DATABASE_LABEL, Exec, SandboxUnavailable
 
 from .fakes import FakeAdapter, FakeSession, calls, reply
 
@@ -361,3 +362,57 @@ def test_read_offset_is_kept_when_the_output_cannot_be_saved(conversation, setti
     text = shell_tool._output(context, job)
     assert "could not be saved" in text
     assert job.read_offset == 0
+
+
+def test_stale_sandboxes_of_this_database_are_removed(conversation):
+    """終わったAttemptのSandboxは消し、他のDBのAttemptのものと、どのDBのものか分からないものは触らない"""
+    run = post(conversation)
+    alive = claim_run(run.pk)
+    assert alive is not None
+    ended = ExecutionAttempt.objects.create(
+        run=run, number=alive.number + 1, lease_expires=alive.lease_expires, ended=alive.started
+    )
+    alive_pk = alive.pk
+
+    def container(cid: str, attempt: int, database: str | None = None) -> dict:
+        labels = {ATTEMPT_LABEL: str(attempt)}
+        if database is not None:
+            labels[DATABASE_LABEL] = database
+        return {"Id": cid, "Labels": labels}
+
+    class Launcher:
+        def __init__(self):
+            self.removed: list[str] = []
+
+        def containers(self):
+            return [
+                container("alive", alive_pk, database_label()),
+                container("ended", ended.pk, database_label()),
+                container("unlabeled", ended.pk),
+                container("other-db", ended.pk, "test_yoriki_gw9"),
+                container("other-db-unknown", 10**9, "test_yoriki_gw9"),
+                # 同じ名前の、別のクラスタのDB
+                container("other-cluster", ended.pk, f"1/{connection.settings_dict['NAME']}"),
+            ]
+
+        def remove(self, container_id: str) -> None:
+            self.removed.append(container_id)
+
+    launcher = Launcher()
+    remove_stale_sandboxes(launcher)  # type: ignore[arg-type]
+    assert launcher.removed == ["ended"]
+
+
+def test_sandboxes_are_labeled_by_the_database_name_without_the_cluster_identifier(monkeypatch):
+    """クラスタの識別子を読めない環境では、DBの名前だけで見分ける"""
+    name = connection.settings_dict["NAME"]
+    monkeypatch.setattr("harness.sandbox._cluster_ids", {})
+    monkeypatch.setattr("harness.sandbox._read_cluster_id", lambda: "7698")
+    assert database_label() == f"7698/{name}"
+
+    def denied() -> str:
+        raise DatabaseError("permission denied for function pg_control_system")
+
+    monkeypatch.setattr("harness.sandbox._cluster_ids", {})
+    monkeypatch.setattr("harness.sandbox._read_cluster_id", denied)
+    assert database_label() == name

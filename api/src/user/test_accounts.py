@@ -4,7 +4,6 @@
 """
 
 import threading
-import time
 from datetime import timedelta
 
 import pytest
@@ -12,6 +11,8 @@ from django.contrib.auth.models import Group, Permission
 from django.db import IntegrityError, connection, transaction
 from django.utils import timezone
 from rest_framework.test import APIClient
+
+from utils.testing import wait_for_lock_waiter
 
 from .factories import SSOProviderFactory, UserFactory, grant
 from .models import Invitation, InvitationPurpose, User, lock_accounts
@@ -498,7 +499,7 @@ class TestAcceptRace:
                     target = user_admin if change == "issuer_lost_permission" else password_user
                     lock_accounts(target)
                     locked.set()
-                    time.sleep(2)  # 受け入れの要求がロックを待つ間に、権限を変える
+                    wait_for_lock_waiter()  # 受け入れの要求がロックを待つ間に、権限を変える
                     if change == "issuer_lost_permission":
                         user_admin.user_permissions.remove(*_permissions("user.view_user"))
                     else:
@@ -531,7 +532,7 @@ class TestUpdateRace:
                 with transaction.atomic():
                     lock_accounts(password_user)
                     locked.set()
-                    time.sleep(2)  # 更新の要求がロックを待つ間に、パスワードを変える
+                    wait_for_lock_waiter()  # 更新の要求がロックを待つ間に、パスワードを変える
                     user = User.objects.get(pk=password_user.pk)
                     user.set_password("another-horse-battery-staple")
                     user.save(update_fields=["password"])
@@ -563,7 +564,7 @@ class TestUpdateRace:
                 with transaction.atomic():
                     lock_accounts(user_admin)
                     locked.set()
-                    time.sleep(2)  # 更新の要求がロックを待つ間に、操作する人の権限を外す
+                    wait_for_lock_waiter()  # 更新の要求がロックを待つ間に、操作する人の権限を外す
                     user_admin.user_permissions.clear()
             finally:
                 connection.close()

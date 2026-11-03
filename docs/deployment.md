@@ -60,7 +60,7 @@ yoriki/
 - buildxでamd64とarm64をビルドし、provenanceとSBOMを付けてDocker Hubへpushする。イメージ名は `<org>/yoriki-sandbox-<profile>`、タグは日付（`YYYY.MM.DD`）とする（例：`<org>/yoriki-sandbox-docs:2026.10.16`）。
 - 公開したdigest（index＝manifest listのdigest）をworkflowの出力とリリースノートに残す。管理画面でRuntime Profileの新しい版としてdigestを登録すると、以後に始めるRunで使われる（既定のRuntime Profileの場合。design.md §7.3）。
 - イメージにはラベル `org.yoriki.sandbox-contract=<契約番号>` を付ける。Runnerが対応しない契約番号のイメージは、管理画面で登録できない。契約を変えたらCONTRACT.mdとラベルの番号を同時に上げ、契約テストで検出できるようにする。
-- Runnerは対応する契約番号のイメージだけを起動する（Workerでもラベルを確かめる）。契約番号を上げたRunnerに更新するときは、次の順で行う：(1) 新しい契約のイメージを公開する、(2) 実行中・順番待ち・回答待ちのRunを終えるか停止する（Runは開始時のRuntime Profileの版を固定しているので、古い契約の版に固定されたRunは、更新後にSandboxを起動できずに失敗する）、(3) 本体を更新し、新しいイメージのdigestを既定のRuntime Profileの新しい版として登録する。古い契約の版は、更新後は新しいRunにも使えない。
+- Runnerは対応する契約番号のイメージだけを起動する（Workerでもラベルを確かめる）。契約番号を上げたRunnerに更新するときは、次の順で行う：(1) 新しい契約のイメージを公開する、(2) 実行中・順番待ち・回答待ちのRunを終えるか停止する（Runは開始時のRuntime Profileの版を固定しているので、古い契約の版に固定されたRunは、更新後にSandboxを起動できずに失敗する）、(3) 本体を更新し、新しいイメージのdigestを既定のRuntime Profileの新しい版として登録する。(2)から(3)の登録までは新しい受付を止めておく（§6の手順でnginxを止め、手順5ではnginx以外を起動して登録してからnginxを戻す）。古い契約の版は、更新後は新しいRunにも使えない。
 - リポジトリがprivateの間も、Docker Hubのイメージはpublicで公開できる。ただし、レイヤーの中身は誰でも見られるので、秘密情報や社内向けの設定を入れない。
 
 ---
@@ -273,9 +273,9 @@ docker compose -f deploy/compose.yaml exec api python manage.py resume_workers
 ```
 
 - design.md §10の順序（イメージ → migration → 起動）に従う。
-- `drain_workers`・`resume_workers` は、Workerの実行（Run）を実装するときに作る。それまでは手順2と6を飛ばす。
+- `drain_workers`・`resume_workers` はまだない（Workerが受け付けを止めて実行中のRunを待つ仕組みとあわせて作る）。それまでは無停止の更新はできない。手順2と6の代わりに、利用者に停止の時間を知らせ、手順1の後に `docker compose -f deploy/compose.yaml stop nginx` で新しい受付（画面・API・Webhookの入口）を止める（複数台の構成（§8.4）では、すべてのエッジのサーバーで `docker compose -f deploy/compose.edge.yaml stop edge-nginx` を実行し、Runの数の確認・migration・すべてのアプリとWorkerのサーバーの入れ替えを終えてから、エッジを戻す）。そのうえで、受け付け済みのRunが終わるのを待つ（`docker compose -f deploy/compose.yaml exec api python manage.py shell -c "from run.models import Run, RunStatus; print(Run.objects.filter(status__in=[RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.RETRY_WAIT, RunStatus.CANCELLING]).count())"` が0になるまで。確認待ちのRunは動いていないので待たない。ただし、Sandboxの契約番号が変わる更新では、確認待ちのRunも終えるか停止し、新しい契約のRuntime Profileを登録してからnginxを戻す。§2.1）。手順5の `up -d` でnginxも戻る（契約番号が変わる更新では、手順5でnginx以外のサービスを名前で指定して起動し、登録の後に `up -d` でnginxを戻す）。Webhookの送り元には止めている間は届かないので、送り元の再送に頼る。待てずに入れ替えたRunは、新しいqclusterが最後のCheckpointから再開する（Checkpointは今はAttemptを終えるときだけ作るので、それより後のWorkspaceの変更は失われ、モデルに知らせる。harness.md §11.1）。Workerサーバーは、手順5と同じときに入れ替え、古いイメージのqclusterを残さない。
 - migrationは、旧バージョンのコードでも動く形（列の追加は先、削除は次のリリース）で書き、更新中に旧apiが動いていても壊れないようにする。
-- Workerサーバー（§3.2）は、手順2のdrainの後、手順6の再開の前に同じイメージへ入れ替える。
+- Workerサーバー（§3.2）は、手順2のdrainの後、手順6の再開の前に同じイメージへ入れ替える（drainがない間は、受付を止めてRunの終わりを確かめた後、nginxを戻す前に入れ替える）。
 
 ---
 
@@ -471,7 +471,7 @@ docker compose -f deploy/compose.db.yaml up -d
 
   - 各サーバーの `/etc/yoriki/yoriki.env` は、DBの接続先・S3の設定・Secretを同じ内容にする。サーバーごとに違うのは、Worker IDと実行枠の数だけにする。
   - 振り分け用のnginxの `upstream` に並べるアプリサーバーの一覧は、`deploy/env` 等で管理し、台数を増減したらエッジの2台で再読込（`nginx -s reload`）する。
-  - 更新は、エッジのnginxで1台ずつ振り分けから外し、§6の手順（drain → 入れ替え → 戻す）で順に行う。migrationは最初の1台でだけ実行する。
+  - 更新は、エッジのnginxで1台ずつ振り分けから外し、§6の手順（drain → 入れ替え → 戻す）で順に行う。migrationは最初の1台でだけ実行する。drainがない間は1台ずつの更新はできず、§6の暫定の手順で、すべてのエッジの受付を止めてから全台を入れ替える。
 - **利用者のIPアドレス**：`CF-Connecting-IP` をエッジのnginxで受け取り、アプリサーバーへは `X-Forwarded-For` で渡す。アプリサーバーのnginxは、エッジのホストのIPだけを信頼する（`set_real_ip_from`）。
 
 ### 8.5 Cloudflareは無料プランを前提にする

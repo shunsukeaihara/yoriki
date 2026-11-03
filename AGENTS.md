@@ -9,12 +9,14 @@ Yoriki（よりき）は、社員が業務用AI Agentを安全に使うための
 
 - 開発の状況と次の作業（作業を始める前に読む）：[docs/status.md](docs/status.md)
 - 製品の設計・要件・データモデル・状態遷移：[docs/design.md](docs/design.md)（大きいため、必要な章だけを読む）
+- 権限の設計（範囲、所属とpermission、Runの実行許可、読める範囲と出口）：[docs/authorization.md](docs/authorization.md)
 - バックエンドの実装規約：[docs/backend-conventions.md](docs/backend-conventions.md)
 - Model / Serializer / ViewSetの実装例：[docs/backend-examples.md](docs/backend-examples.md)
 - フロントエンドの実装規約：[docs/frontend-conventions.md](docs/frontend-conventions.md)
 - フロントエンドの実装例：[docs/frontend-examples.md](docs/frontend-examples.md)
 - リアルタイム通信（SSE）の方針：[docs/realtime.md](docs/realtime.md)
 - エージェントのハーネス（Runner、Tool、文脈の組立、Sandboxでの実行）：[docs/harness.md](docs/harness.md)
+- Sandboxのイメージと、Runnerとの契約：[sandbox/README.md](sandbox/README.md)、[sandbox/CONTRACT.md](sandbox/CONTRACT.md)
 - 配備・Compose・Nginx・イメージの方針：[docs/deployment.md](docs/deployment.md)
 - 開発の進め方（ブランチ、コミット、lint・テスト、CI、VS Code）：[docs/development.md](docs/development.md)
 

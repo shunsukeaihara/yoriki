@@ -177,7 +177,9 @@ defineExpose({ onSubmit, loading, canPost, reset })
         :hint="
           hasUrl
             ? $t('個人情報・機密情報を扱うタスクの結果を、この送り先へ送ってよいときだけ付けます')
-            : $t('画面の通知は認証の要る画面への参照だけなので、この指定によらず機密のタスクにも使えます')
+            : $t(
+                '画面の通知はログインした画面の中だけで、結果を見られる人にだけ届くので、この指定によらず機密のタスクにも使えます',
+              )
         "
         :error-messages="errors.allowsSensitiveResults"
       />

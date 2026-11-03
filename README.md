@@ -3,8 +3,8 @@
 社員が業務用のAI Agentを、安全に・共通の社内Webサービスとして使うための基盤。
 
 - 社員はチャットで業務を依頼し、エージェントは許可された範囲でファイル処理やコードの実行を行う。業務ごとの手順や資料はSkillにまとめ、社員が `/` で指定するか、エージェントが使えるものから選ぶ。社内DBはConnectorとして `@` で指定して読める。
-- 決まった業務はタスク（プロンプトのテンプレート・使うSkillの版・入力の項目）として定義し、会話を介さずに実行する。
-- 管理者はLLMの接続とモデル設定、Sandboxの実行環境、Connector、ユーザーと部門、SSO、利用量を一元管理する。
+- 決まった業務はタスク（プロンプトのテンプレート・使うSkillの版・入力の項目）として定義し、手動・チャット・Webhookから起動する。結果と成果物は出口（Webhook・Zapier・画面の通知）へ届ける。
+- 管理者はLLMの接続とモデル設定、Sandboxの実行環境、Connector、タスクの入口と出口、ユーザーと部門、SSO、利用量を一元管理する。
 - 権限はLLMの判断ではなく、サーバーと実行環境（ネットワークのないSandbox。本番はgVisor）で強制する。
 
 > pre-alpha。設計書の第1段階（[docs/design.md](docs/design.md) §12）を実装している途中。OSSとして公開する予定。
@@ -15,21 +15,22 @@
 |---|---|
 | ログインとアカウント | 社内SSO（Microsoft 365・Google Workspace。設定は管理画面で行う）、SSOのない導入先向けのYorikiのアカウント（招待・パスワード）、部門と所属、permissionによる権限（[docs/authorization.md](docs/authorization.md)） |
 | LLM | 接続（OpenAI・Anthropic・Gemini・ローカルLLM。API keyは暗号化して保存）、版を持つモデル設定、各社のAPIを共通化するProvider Adapter。各社のAgent SDKは使わず、自前のハーネスで動かす |
-| 会話 | 依頼・応答の逐次表示（SSE）、作業の計画と記録、確認への回答、実行中の追加の指示、次の依頼、停止、モデルとeffortの切り替え、添付と成果物 |
+| 会話 | 依頼・応答の逐次表示（SSE）、作業の計画と記録、確認への回答、実行中の追加の指示、次の依頼、停止、モデルとeffortの切り替え、添付と成果物、`/` でのSkill・タスクの指定と `@` でのConnectorの指定、チャットからのタスクの起動 |
 | ハーネスとSandbox | Run・Attempt（lease・fencing）・RunEventを正本にした実行と障害からの再開、要約の圧縮。コマンドはネットワークのないSandboxのコンテナで動かす（Runtime Profileでイメージをdigestで固定、本番はgVisor）。文書処理用のイメージ（`sandbox/images/docs`） |
 | Skill | 個人・部門・全社・システムの範囲、Draftと公開・不変の版・切戻し・緊急停止、資料（MD・CSV・PPTXの検証と差分）、評価ケースによるDraftの評価、会話からのSkillの作成・更新、Skillが使うConnectorの宣言、機密のSkill |
-| Connector | 社内DB（PostgreSQL・MySQL・SQL Server）の読取り。公開する表・列と上限を版で持ち、会話では `datasource_describe`・`datasource_query` で使う |
-| タスク | タスクの定義と版、入力の項目、手動でのタスクのRun（APIだけ。画面はまだない） |
+| Connector | 社内DB（PostgreSQL・MySQL・SQL Server）の読取り。公開する表・列と上限を版で持ち、会話では `datasource_describe`・`datasource_query` で使う。Skillのスクリプトからも中継（`yoriki_connector`）で読める |
+| タスク | タスクの定義と版、入力の項目、手動・チャットからの起動、Webhookの入口（payloadからの入力とファイルの取り込み）、タスクのRunの画面、修正チャット（試しの実行とタスクの定義の編集） |
+| 配信 | 出口（汎用のWebhook・Zapier・画面の通知）、結果と成果物の受け渡し（取得用のリンク）、配信の再試行、通知の書き方 |
 | ファイル | 添付・成果物・Workspaceのsnapshotの保存先（Local・S3） |
 | 配備 | Dockerfile、Docker Composeの単一ホスト構成と複数台構成、nginx、Cloudflare Tunnel（[docs/deployment.md](docs/deployment.md)） |
 
-まだないもの（Webhookでの起動、通知・配信、Teams・Slack等のChannel、Pluginの仕組み、Pythonのパッケージの追加、クオータ等）と次の作業は [docs/status.md](docs/status.md) にまとめている。
+まだないもの（スケジュールでの起動、Teams・Slack等のChannel、Pluginの仕組み、HTTP・SharePoint等のConnector、Pythonのパッケージの追加、クオータと予算の上限等）と次の作業は [docs/status.md](docs/status.md) にまとめている。
 
 ## 文書
 
 | 文書 | 内容 |
 |---|---|
-| [docs/design.md](docs/design.md) | 設計企画書（要件、データモデル、実行、Skill、Connector、LLM、認証、段階的な実装計画） |
+| [docs/design.md](docs/design.md) | 設計企画書（要件、Skill、タスクと配信、Connector、LLM、実行と再開、Sandbox、認証、画面、段階的な実装計画） |
 | [docs/authorization.md](docs/authorization.md) | 権限の設計（範囲、利用・業務の管理・基盤の管理の3つの層、Runの実行許可） |
 | [docs/harness.md](docs/harness.md) | エージェントのハーネス（Runner）の設計（Tool、文脈の組み立て、Sandboxでの実行、圧縮、再開） |
 | [docs/realtime.md](docs/realtime.md) | リアルタイム通信（SSE）の方針 |
@@ -45,7 +46,7 @@
 
 | ディレクトリ | 内容 |
 |---|---|
-| `api/` | Django / DRF / Django Q2（API、Runner、Worker）。アプリは `user`、`llm`、`conversation`、`run`、`harness`、`stream`、`usage`、`runtime`、`artifact`、`skill`・`resources`、`connector`、`task` |
+| `api/` | Django / DRF / Django Q2（API、Runner、Worker）。アプリは `user`、`llm`、`conversation`、`run`、`harness`、`stream`、`usage`、`runtime`、`artifact`、`skill`・`resources`、`connector`、`task`、`delivery`。共通の部品は `common`・`utils` |
 | `frontend/` | Nuxt 4 / Nuxt UI 4（社員向けの画面と、`/manage` の管理画面） |
 | `sandbox/` | エージェントがコマンドを動かすSandboxのイメージ、補助コマンド `yoriki-sandbox`、契約テスト |
 | `deploy/` | Docker Compose、nginxの設定、本番の環境変数のexample |

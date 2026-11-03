@@ -36,8 +36,8 @@ class DestinationKind(models.IntegerChoices):
 
     WEBHOOK = 1, _("Webhook")
     ZAPIER = 2, _("Zapier")
-    # 画面の通知。送り先のURLはなく、Yorikiの利用者の通知欄に載せる（認証の要る画面への参照だけなので、機密の
-    # タスクにも使える）
+    # 画面の通知。送り先のURLはなく、Yorikiの利用者の通知欄に載せる（認証の要る画面の中だけで、受け手をRunの結果を
+    # 見られる人に限るので、機密のタスクにも使える。authorization.md §7）
     IN_APP = 3, _("画面の通知")
 
 
@@ -173,7 +173,7 @@ class Destination(models.Model):
             return gettext("出口が停止中です")
         if task is None or not self.allowed_for(task):
             return gettext("出口がタスクの範囲で使えなくなりました")
-        # 画面の通知は認証の要る画面への参照だけなので、機密のタスクにも使える
+        # 画面の通知は認証の要る画面の中だけで、受け手をRunの結果を見られる人に限るので、機密のタスクにも使える
         if sensitive and self.kind in URL_KINDS and not self.current_revision.allows_sensitive_results:
             return gettext("出口が機密の結果を送ってよい先ではありません")
         return ""

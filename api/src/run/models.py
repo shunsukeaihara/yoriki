@@ -651,7 +651,7 @@ class Checkpoint(models.Model):
     """Workspaceのsnapshotを確定した区切り（design.md §5.4・§7.9、harness.md §11.1）。作成後に変更・削除しない。
 
     新しいAttemptは、そのRunの最後のCheckpointからWorkspaceを戻す。同じ会話の次の依頼（子のRun）は、親のRunの最後の
-    Checkpointから始める。snapshotの中身は保存先（runtime/storage.py）にあり、ここには場所と版だけを持つ
+    Checkpointから始める。snapshotの中身は保存先（artifact/storage.py）にあり、ここには場所と版だけを持つ
     """
 
     uid = NanoidField(unique=True)

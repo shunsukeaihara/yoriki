@@ -8799,7 +8799,7 @@ components:
         allows_sensitive_results:
           type: boolean
           default: false
-          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面への参照だけなので、この指定によらず機密のタスクにも使える
+          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面の中だけで、受け手を結果を見られる人に限るので、この指定によらず機密のタスクにも使える
         secret_rotated:
           type: string
           format: date-time
@@ -8925,7 +8925,7 @@ components:
         allows_sensitive_results:
           type: boolean
           default: false
-          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面への参照だけなので、この指定によらず機密のタスクにも使える
+          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面の中だけで、受け手を結果を見られる人に限るので、この指定によらず機密のタスクにも使える
         change_reason:
           type: string
           writeOnly: true
@@ -9033,7 +9033,7 @@ components:
         allows_sensitive_results:
           type: boolean
           default: false
-          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面への参照だけなので、この指定によらず機密のタスクにも使える
+          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面の中だけで、受け手を結果を見られる人に限るので、この指定によらず機密のタスクにも使える
         secret_rotated:
           type: string
           format: date-time
@@ -9090,7 +9090,7 @@ components:
           maxLength: 2000
         allows_sensitive_results:
           type: boolean
-          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面への参照だけなので、この指定によらず機密のタスクにも使える
+          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面の中だけで、受け手を結果を見られる人に限るので、この指定によらず機密のタスクにも使える
         change_reason:
           type: string
           writeOnly: true
@@ -11771,7 +11771,7 @@ components:
           maxLength: 2000
         allows_sensitive_results:
           type: boolean
-          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面への参照だけなので、この指定によらず機密のタスクにも使える
+          description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面の中だけで、受け手を結果を見られる人に限るので、この指定によらず機密のタスクにも使える
         change_reason:
           type: string
           writeOnly: true

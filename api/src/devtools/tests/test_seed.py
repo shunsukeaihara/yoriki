@@ -10,14 +10,14 @@ from django.core.management.base import CommandError
 from django.db import connection
 
 from connector.factories import ConnectorFactory
-from connector.models import Connector, ConnectorScope
+from connector.models import Connector, ConnectorScope, DatabaseConnection
 from devtools import seed
 from devtools.seed import Seeder, SeedError
 from llm.factories import ModelProfileFactory
 from llm.models import LLMConnection, ModelProfile
 from runtime.models import RuntimeProfile
 from runtime.registry import ImageReference, InspectedImage
-from user.factories import DepartmentFactory
+from user.factories import DepartmentFactory, UserFactory
 from user.models import Department, User
 from utils.permissions import AppPermission
 
@@ -193,24 +193,18 @@ def test_seed_replaces_an_older_check_table_only_when_asked(seeder):
     Seeder(db_role=seeder.db_role).run()
 
 
-def test_seed_does_not_take_over_a_privileged_role(seeder):
+def test_seed_does_not_take_over_an_unmarked_role(seeder):
+    """印のない同じ名前のロール（ほかの用途かもしれない）は、パスワードを変えずに止める"""
     with connection.cursor() as cursor:
-        cursor.execute(f"CREATE ROLE {seeder.db_role} LOGIN CREATEDB")
-    with pytest.raises(SeedError, match="権限の属性"):
+        cursor.execute(f"CREATE ROLE {seeder.db_role} LOGIN")
+    with pytest.raises(SeedError, match="DROP ROLE"):
         seeder.run()
 
 
-def test_seed_marks_a_plain_existing_role(seeder):
-    with connection.cursor() as cursor:
-        cursor.execute(f"CREATE ROLE {seeder.db_role} LOGIN")
-    seeder.run()
-    with connection.cursor() as cursor:
-        cursor.execute("SELECT shobj_description(oid, 'pg_authid') FROM pg_roles WHERE rolname = %s", [seeder.db_role])
-        assert cursor.fetchone() == (seed.MARK,)
-    # 印を付けた後は、権限の属性があっても（seed_dev のものなので）揃える
-    with connection.cursor() as cursor:
-        cursor.execute(f"ALTER ROLE {seeder.db_role} CREATEDB")
-    Seeder(db_role=seeder.db_role).run()
+def test_seed_does_not_take_over_other_users(seeder):
+    UserFactory.create(username="check-admin", email="someone@example.co.jp")
+    with pytest.raises(SeedError, match="check-admin"):
+        seeder.run()
 
 
 def test_seed_does_not_rewrite_a_connector_it_cannot_own(seeder):
@@ -221,6 +215,13 @@ def test_seed_does_not_rewrite_a_connector_it_cannot_own(seeder):
     with pytest.raises(SeedError, match="別のConnector"):
         Seeder(db_role=seeder.db_role).run()
     Connector.objects.filter(pk=other.pk).update(deleted=True)
+    # 確認用のロールでこのDBへつなぐものでない接続先
+    DatabaseConnection.objects.filter(pk=connector.connection_id).update(host="db.example.co.jp")
+    with pytest.raises(SeedError, match="確認用のロール"):
+        Seeder(db_role=seeder.db_role).run()
+    DatabaseConnection.objects.filter(pk=connector.connection_id).update(
+        host=connection.settings_dict["HOST"] or "localhost"
+    )
     # 全社でない同じ名前のConnector
     Connector.objects.filter(pk=connector.pk).update(
         scope=ConnectorScope.DEPARTMENT, department=DepartmentFactory.create()
@@ -236,3 +237,13 @@ def test_seed_keeps_sessions(seeder, settings):
     before = User.objects.get(username="check-member").get_session_auth_hash()
     Seeder(database=False).run()
     assert User.objects.get(username="check-member").get_session_auth_hash() == before
+
+
+def test_check_role_reads_only_the_check_tables(seeder):
+    with connection.cursor() as cursor:
+        cursor.execute(f"CREATE SCHEMA IF NOT EXISTS {seed.SCHEMA}")
+        cursor.execute(f"CREATE TABLE {seed.SCHEMA}.private_notes (body text)")
+    seeder.run()
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT has_table_privilege(%s, %s, 'SELECT')", [seeder.db_role, f"{seed.SCHEMA}.private_notes"])
+        assert cursor.fetchone() == (False,)

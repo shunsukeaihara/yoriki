@@ -158,10 +158,13 @@ class Seeder:
         return department
 
     def _user(self, username: str, label: str, perms: Iterable[AppPermission | str], department: Department) -> User:
-        user, created = User.objects.get_or_create(
-            username=username, defaults={"email": f"{username}@example.co.jp", "display_name": label}
-        )
-        user.email = f"{username}@example.co.jp"
+        email = f"{username}@example.co.jp"
+        user, created = User.objects.get_or_create(username=username, defaults={"email": email, "display_name": label})
+        if not created and (user.email != email or user.is_superuser or user.is_system):
+            # 確認用のメールアドレスでない同じ名前のユーザーは、確認用のアカウントとして引き取らない
+            raise SeedError(
+                f"ユーザー {username} は確認用のアカウントではありません（{user.email}）。名前を変えるか消してください"
+            )
         user.display_name = label
         user.is_active = True
         if not user.check_password(self.password):
@@ -254,9 +257,8 @@ class Seeder:
         """Yorikiと同じPostgreSQLに、確認用のスキーマと、読むだけのロールを作る。
 
         表は毎回作り直す。作り直す・パスワードを設定し直すのは、seed_dev が作った印（コメント）のある表・ロールだけ。
-        印のない同じ名前の表（以前に手で作ったもの）は `recreate_tables` のときだけ消す。印のないロールは、権限の
-        属性がなく、どのロールにも属していなければ、印を付けて使う（ロールはクラスタで共有なので、ほかの用途の
-        ロールを書き換えないため）
+        印のない同じ名前の表（以前に手で作ったもの）は `recreate_tables` のときだけ消す。印のない同じ名前のロールが
+        あれば止める（ロールはクラスタで共有なので、ほかの用途のロールのパスワードを変えないため）
         """
         schema, role = sql.Identifier(SCHEMA), sql.Identifier(self.db_role)
         with connection.cursor() as cursor:
@@ -291,29 +293,25 @@ class Seeder:
             cursor.executemany(f"INSERT INTO {SCHEMA}.invoices VALUES (%s, %s, %s, %s)", INVOICES)
             self._role(cursor, role)
             cursor.execute(sql.SQL("GRANT USAGE ON SCHEMA {} TO {}").format(schema, role))
-            cursor.execute(sql.SQL("GRANT SELECT ON ALL TABLES IN SCHEMA {} TO {}").format(schema, role))
+            # スキーマのほかの表は読ませない（確認用の2つの表だけ）
+            cursor.execute(sql.SQL("GRANT SELECT ON {}.vendors, {}.invoices TO {}").format(schema, schema, role))
         self._log(
             "確認用のスキーマ",
             f"{SCHEMA}（取引先 {len(VENDORS):,}件、請求 {len(INVOICES):,}件。ロール {self.db_role}）",
         )
 
     def _role(self, cursor, role: sql.Identifier) -> None:
-        cursor.execute(
-            "SELECT r.rolsuper OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication OR r.rolbypassrls, "
-            "EXISTS (SELECT 1 FROM pg_auth_members m WHERE m.member = r.oid), "
-            "shobj_description(r.oid, 'pg_authid') FROM pg_roles r WHERE r.rolname = %s",
-            [self.db_role],
-        )
+        cursor.execute("SELECT shobj_description(oid, 'pg_authid') FROM pg_roles WHERE rolname = %s", [self.db_role])
         row = cursor.fetchone()
         if row is None:
             cursor.execute(sql.SQL("CREATE ROLE {} LOGIN PASSWORD {}").format(role, sql.Literal(DB_ROLE_PASSWORD)))
+        elif row[0] != MARK:
+            # 直接付けた権限や持ち物は、ほかのDBのものまで確かめられないので、印のないロールは引き取らない
+            raise SeedError(
+                f"ロール {self.db_role} は seed_dev が作ったロールではありません。別の用途のロールなら名前を変え、"
+                "以前の確認で手で作ったものなら消してください（DROP ROLE）"
+            )
         else:
-            privileged, member, comment = row
-            if comment != MARK and (privileged or member):
-                raise SeedError(
-                    f"ロール {self.db_role} は seed_dev が作ったロールではなく、権限の属性か、ほかのロールへの所属が"
-                    "あります。別の用途のロールなら、名前を変えるか消してください"
-                )
             cursor.execute(sql.SQL("ALTER ROLE {} LOGIN PASSWORD {}").format(role, sql.Literal(DB_ROLE_PASSWORD)))
         cursor.execute(sql.SQL("COMMENT ON ROLE {} IS {}").format(role, sql.Literal(MARK)))
 
@@ -340,6 +338,13 @@ class Seeder:
             else DatabaseConnection.objects.filter(name=DB_CONNECTION, deleted=False).first()
         )
         if conn is not None:
+            # 確認用のロールでYorikiのDBへつなぐ接続先だけを揃える（ほかの用途の接続先を書き換えないため）
+            target = (values["host"], values["port"], values["database"], values["username"])
+            if (conn.kind, conn.host, conn.port, conn.database, conn.username) != (values["kind"], *target):
+                raise SeedError(
+                    f"接続先「{conn.name}」は、確認用のロール {self.db_role} でこのDBへつなぐものではありません。"
+                    "名前を変えるか消してください"
+                )
             # ほかのConnectorも使う接続先は書き換えない（そちらの接続も変わるため）
             others = Connector.objects.filter(connection=conn, deleted=False).exclude(name=CONNECTOR)
             if others.exists():

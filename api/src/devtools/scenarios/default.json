@@ -211,7 +211,7 @@
     {
       "name": "通知を用意して答える",
       "when": {"prompt": "[notify]", "called": "prepare_notification"},
-      "reply": {"text": "通知を用意しました。"}
+      "reply": {"text": "通知の用意の結果です。\n\n${result}"}
     }
   ],
   "default": {

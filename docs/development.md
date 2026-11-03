@@ -182,12 +182,12 @@ docker push localhost:5001/yoriki-sandbox-docs:dev
 | | 確認用の偽モデル（推論） | `fake-reasoning`。effortは low・medium・high |
 | | 確認用のつながらないモデル | つながらない接続を使う |
 | Runtime Profile | 確認用の文書処理 | `--sandbox-image` を指定したときだけ。管理画面と同じくレジストリで確かめる（手元のレジストリは `YORIKI_SANDBOX_INSECURE_REGISTRIES=localhost:5001` が要る）。資源の上限は、管理画面で変えた値を残す。既定のRuntime Profileがなければ既定にする |
-| スキーマ | `connector_check` | YorikiのDBの中に作る。表 `vendors`（取引先3件）・`invoices`（請求3件）は毎回作り直す。読むだけのロール `connector_check_ro` を作る（PostgreSQLのクラスタで共有。DBの利用者にロールを作る権限が要る。`deploy/compose.dev.yaml` のものは持っている）。作り直す・パスワードを設定し直すのは、`seed_dev` の印（コメント `yoriki seed_dev`）のある表・ロールだけ。印のない同じ名前の表があれば止まり、`--recreate-tables` を付けたときだけ消して作り直す。印のない同じ名前のロールは、権限の属性（superuser等）とほかのロールへの所属がなければ印を付けて使い、あれば止まる |
-| Connector | 確認用DB | 全社。上のスキーマの2つの表を公開する。`--skip-database` でスキーマと一緒に飛ばす。同じ名前のConnectorが全社でないとき、その接続先をほかのConnectorも使うときは止まる |
+| スキーマ | `connector_check` | YorikiのDBの中に作る。表 `vendors`（取引先3件）・`invoices`（請求3件）は毎回作り直す。読むだけのロール `connector_check_ro` を作る（PostgreSQLのクラスタで共有。DBの利用者にロールを作る権限が要る。`deploy/compose.dev.yaml` のものは持っている）。作り直す・パスワードを設定し直すのは、`seed_dev` の印（コメント `yoriki seed_dev`）のある表・ロールだけ。印のない同じ名前の表があれば止まり、`--recreate-tables` を付けたときだけ消して作り直す。印のない同じ名前のロールがあれば止まる（ほかの用途のロールのパスワードを変えないため。以前の確認で手で作ったものなら `DROP ROLE` で消す）。ロールが読めるのは確認用の2つの表だけ |
+| Connector | 確認用DB | 全社。上のスキーマの2つの表を公開する。`--skip-database` でスキーマと一緒に飛ばす。同じ名前のConnectorが全社でないとき、その接続先が確認用のロールでこのDBへつなぐもの（ホスト・ポート・DB名・ユーザー名が同じ）でないとき、その接続先をほかのConnectorも使うときは止まる |
 
 - パスワード（`--password`。既定 `yoriki-check`）は、SSOの設定がない手元では、パスワードでのログインにそのまま使える。
 - API key・DBのパスワードは、そのときの `YORIKI_SECRET_ENCRYPTION_KEYS` で暗号化して保存する。apiと同じ `.envrc` を読み込んで流す。
-- 基盤管理者（`createsuperuser` で作る）は作らない。
+- 基盤管理者（`createsuperuser` で作る）は作らない。同じusernameのユーザーが確認用のメールアドレス（`<username>@example.co.jp`）でないとき、基盤管理者のときは、引き取らずに止まる。
 
 ### 6.2 偽のLLM（`fake_llm`）
 
@@ -205,7 +205,7 @@ OpenAI互換の `POST /v1/chat/completions`（ストリーミングだけ）と 
 | `[todo]` | `todo_write` で作業の計画を書く |
 | `[query]` | `datasource_query` で、使えるConnectorの最初の1つの `vendors` を照会する（会話では `@` で確認用DBを指定する） |
 | `[script]` | `shell` のスクリプトから `yoriki_connector` で確認用DBを照会する |
-| `[notify]` | `prepare_notification` で通知を用意する（タスクの依頼文に書く） |
+| `[notify]` | `prepare_notification` で通知を用意し、結果を答える（タスクの依頼文に書く）。業務結果のSchemaのあるタスクでは先に `submit_result` が要り、引数がSchemaで決まるので、台本を書く |
 | `[slow]` | 2秒待ってから、少しずつ答える |
 | `[error]`・`[429]` | 同じ要求に、最初の2回は500、1回は429を返す（Runnerの再試行の確認） |
 

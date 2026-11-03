@@ -766,15 +766,19 @@ def database_label() -> str:
     name = str(connection.settings_dict["NAME"])
     if name not in _cluster_ids:
         try:
-            with transaction.atomic(), connection.cursor() as cursor:
-                cursor.execute("SELECT system_identifier FROM pg_control_system()")
-                row = cursor.fetchone()
-            _cluster_ids[name] = str(row[0]) if row else ""
+            _cluster_ids[name] = _read_cluster_id()
         except DatabaseError:
             logger.warning("cannot read the cluster identifier of the database; sandboxes are labeled by its name")
             _cluster_ids[name] = ""
     cluster = _cluster_ids[name]
     return f"{cluster}/{name}" if cluster else name
+
+
+def _read_cluster_id() -> str:
+    with transaction.atomic(), connection.cursor() as cursor:
+        cursor.execute("SELECT system_identifier FROM pg_control_system()")
+        row = cursor.fetchone()
+    return str(row[0]) if row else ""
 
 
 # DBの名前ごとのクラスタの識別子（変わらないので、プロセスの中で一度だけ読む）

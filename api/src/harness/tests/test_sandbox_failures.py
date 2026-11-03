@@ -5,7 +5,7 @@ import io
 import time
 
 import pytest
-from django.db import connection
+from django.db import DatabaseError, connection
 
 from artifact.storage import LocalStorage
 from conversation.dispatch import MessageMode, post_message
@@ -366,7 +366,6 @@ def test_read_offset_is_kept_when_the_output_cannot_be_saved(conversation, setti
 
 def test_stale_sandboxes_of_this_database_are_removed(conversation):
     """終わったAttemptのSandboxは消し、他のDBのAttemptのものと、どのDBのものか分からないものは触らない"""
-    assert database_label().endswith(f"/{connection.settings_dict['NAME']}")
     run = post(conversation)
     alive = claim_run(run.pk)
     assert alive is not None
@@ -402,3 +401,18 @@ def test_stale_sandboxes_of_this_database_are_removed(conversation):
     launcher = Launcher()
     remove_stale_sandboxes(launcher)  # type: ignore[arg-type]
     assert launcher.removed == ["ended"]
+
+
+def test_sandboxes_are_labeled_by_the_database_name_without_the_cluster_identifier(monkeypatch):
+    """クラスタの識別子を読めない環境では、DBの名前だけで見分ける"""
+    name = connection.settings_dict["NAME"]
+    monkeypatch.setattr("harness.sandbox._cluster_ids", {})
+    monkeypatch.setattr("harness.sandbox._read_cluster_id", lambda: "7698")
+    assert database_label() == f"7698/{name}"
+
+    def denied() -> str:
+        raise DatabaseError("permission denied for function pg_control_system")
+
+    monkeypatch.setattr("harness.sandbox._cluster_ids", {})
+    monkeypatch.setattr("harness.sandbox._read_cluster_id", denied)
+    assert database_label() == name

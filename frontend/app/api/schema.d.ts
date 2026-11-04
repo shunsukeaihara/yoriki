@@ -5943,7 +5943,7 @@ export interface components {
             readonly destination_info: components["schemas"]["DestinationChoice"] | null;
             /** @description 今、手動で実行できるか（停止中でなく、版がある） */
             readonly can_run: boolean;
-            /** @description このタスクの入口（作る・変えるのは連携の管理者） */
+            /** @description このタスクの入口 */
             readonly triggers: components["schemas"]["TaskTrigger"][];
             readonly created_by: components["schemas"]["MinimumUser"];
             /** Format: date-time */
@@ -6021,7 +6021,7 @@ export interface components {
             readonly destination_info: components["schemas"]["DestinationChoice"] | null;
             /** @description 今、手動で実行できるか（停止中でなく、版がある） */
             readonly can_run: boolean;
-            /** @description このタスクの入口（作る・変えるのは連携の管理者） */
+            /** @description このタスクの入口 */
             readonly triggers: components["schemas"]["TaskTrigger"][];
             readonly created_by: components["schemas"]["MinimumUser"];
             /** Format: date-time */

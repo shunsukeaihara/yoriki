@@ -37,7 +37,6 @@ export const PermissionCode = {
   DELETE_CONNECTOR: 'connector.delete_connector',
   // 入口の一覧と出口（連携の管理者。authorization.md §5.5）
   VIEW_TRIGGER_BINDING: 'task.view_triggerbinding',
-  CHANGE_TRIGGER_BINDING: 'task.change_triggerbinding',
   VIEW_DESTINATION: 'delivery.view_destination',
   ADD_DESTINATION: 'delivery.add_destination',
   CHANGE_DESTINATION: 'delivery.change_destination',

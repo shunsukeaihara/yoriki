@@ -107,7 +107,7 @@ def _payload(event_id="evt-1", vendor="ACME", total=12000):
     return {"event": {"id": event_id}, "data": {"vendor_name": vendor, "total": total, "memo": "前回と同じ"}}
 
 
-# --- 入口の管理（連携の管理者） ---
+# --- 入口の管理（タスクを管理できる人） ---
 
 
 def test_creating_a_webhook_needs_task_management_and_shows_the_key_once(api_client, app_user, manager, task):
@@ -208,6 +208,9 @@ def test_system_task_managers_create_webhooks_on_the_same_screen(api_client):
 def test_the_list_shows_only_what_is_decided_and_cannot_change_anything(api_client, app_user, task, webhook):
     binding, _key = webhook
     api_client.force_login(app_user)
+    assert api_client.get(BINDING_LIST).status_code == 403
+    # 以前の入口の変更のpermissionだけでは、一覧も見られない
+    api_client.force_login(grant(UserFactory.create(), "task.change_triggerbinding"))
     assert api_client.get(BINDING_LIST).status_code == 403
 
     viewer = grant(UserFactory.create(), "task.view_triggerbinding")

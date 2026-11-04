@@ -225,7 +225,7 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
     )
     change_reason = serializers.CharField(max_length=500, required=False, allow_blank=True, write_only=True)
     can_run = serializers.SerializerMethodField(help_text=_("今、手動で実行できるか（停止中でなく、版がある）"))
-    triggers = serializers.SerializerMethodField(help_text=_("このタスクの入口（作る・変えるのは連携の管理者）"))
+    triggers = serializers.SerializerMethodField(help_text=_("このタスクの入口"))
     created_by = MinimumUserSerializer(read_only=True)
 
     class Meta:

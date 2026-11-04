@@ -14704,7 +14704,7 @@ components:
           items:
             $ref: '#/components/schemas/TaskTrigger'
           readOnly: true
-          description: このタスクの入口（作る・変えるのは連携の管理者）
+          description: このタスクの入口
         created_by:
           allOf:
           - $ref: '#/components/schemas/MinimumUser'
@@ -14866,7 +14866,7 @@ components:
           items:
             $ref: '#/components/schemas/TaskTrigger'
           readOnly: true
-          description: このタスクの入口（作る・変えるのは連携の管理者）
+          description: このタスクの入口
         created_by:
           allOf:
           - $ref: '#/components/schemas/MinimumUser'

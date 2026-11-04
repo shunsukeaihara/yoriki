@@ -25,7 +25,7 @@ from run.serializers import RunCancelSerializer, RunSerializer, prefetch_todos
 from skill.models import SkillVersion
 from user.models import Department
 from utils.exceptions import Conflict
-from utils.permissions import AppUser, ModelPermissions
+from utils.permissions import AppUser, require_permission
 from utils.views import SoftDeleteMixin
 
 from . import checks
@@ -709,7 +709,8 @@ class AppTaskTriggerReceiptViewSet(TaskTriggerMixin, mixins.ListModelMixin, Gene
     tags=["manage/trigger_binding"],
 )
 class TriggerBindingViewSet(mixins.ListModelMixin, GenericViewSet):
-    permission_classes = [ModelPermissions]
+    # view だけで判定する（`ModelPermissions` は change でも見せる。この一覧では change は何も任せない）
+    permission_classes = [require_permission("task.view_triggerbinding")]
     # 鍵を作った人の権限の判定を行で使い回すので、同じ人を同じオブジェクトにする（select_relatedにしない）
     queryset = (
         TriggerBinding.objects.alive()

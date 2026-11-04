@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-11-04（入力の変数の課題に結論を出し、入口をタスクを管理できる人が作る形を design.md 0.45 に書いた。コードはまだ変えていない。§4 の「次の作業」の1から始める）
+- 最終更新：2026-11-04（入力の変数の課題に結論を出し、入口をタスクを管理できる人が作る形を design.md 0.45 に書いた（#78）。コードはまだ変えていない。#78 のマージを確かめてから、§4 の「次の作業」の1から始める）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -38,6 +38,7 @@
 | #74・#75 | 文書の整理（status.md の決めたことを設計書へ移し、設計書・README を今の実装と突き合わせた） |
 | #76 | テストの並列化（pytest-xdist。development.md §3.1）、残ったSandboxの掃除を同じDBのものに限る（ラベル `org.yoriki.database`） |
 | #77 | 確認用の道具（`devtools`：`seed_dev`・`fake_llm`・`dev_session`。development.md §6） |
+| #78 | 設計：Webhookの入口をタスクを管理できる人が作る形（design.md 0.45、authorization.md §5.5・§13）。実装はまだ |
 
 各PRの中身は、Pull Requestの説明と設計書を見る。
 
@@ -104,7 +105,7 @@
 **今の状態（2026-11-03）**：design.md §12の第1段階のうち、Skill（①〜⑤）と、Connector・タスク・配信（①〜⑦、Connectorの④a・④b）は終わった（#72・#73まで）。今は、業務（下の「第1段階の順番」の3）を作る前の整理を、利用者と決めた次の順で進めている。文書の整理は #74 と、その残り（design.md・harness.md の突き合わせ。#75）で、テストの高速化は #76 で行った（バックエンドのテスト全体は、手元（8コア）で約5分から約35秒に、4並列でも約45秒になった）。#74 では、status.md の終わった段階の「決めたこと・判断した点」を設計書と突き合わせ、設計書になかった今の動きに関わるものを design.md・authorization.md・harness.md・frontend-conventions.md・sandbox/CONTRACT.md へ移してから消した（経過・レビュー・確かめたことは消した。各PRの説明に残っている）。§1 はPRごとの短い一覧にした。確認用の道具は #77 で入れた（偽のLLM `fake_llm`、確認用のデータ `seed_dev`、ログイン済みのセッション `dev_session`。development.md §6）。
 
 **次の作業**：
-1. **入口の管理をタスクを管理できる人へ移す実装**（design.md 0.45、authorization.md §5.5・§13）：入力の項目はタスク、payloadとの対応は入口の形のまま、入口の作成・設定・試す操作・受付の履歴をタスクの権限とタスクの画面へ移す。1つのタスクに複数の入口を付けられるようにする（`uniq_task_webhook` と、それを確かめる処理を外す）。鍵を作った人を入口に記録し、その人がタスクを管理できなくなったら警告を出す。`/manage/trigger_bindings` は、`task.view_triggerbinding` で見るだけの一覧にする。連携の管理者のGroupのpermissionをマイグレーションで直し、`seed_dev` の `check-admin` も合わせる。
+1. **入口の管理をタスクを管理できる人へ移す実装**（#78 で決めた形。design.md 0.45、authorization.md §5.5・§13）：入力の項目はタスク、payloadとの対応は入口の形のまま、入口の作成・設定・試す操作・受付の履歴をタスクの権限とタスクの画面へ移す。1つのタスクに複数の入口を付けられるようにする（`uniq_task_webhook` と、それを確かめる処理を外す）。鍵を作った人を入口に記録し、その人がタスクを管理できなくなったら警告を出す。`/manage/trigger_bindings` は、`task.view_triggerbinding` で見るだけの一覧にする。連携の管理者のGroupのpermissionをマイグレーションで直し、`seed_dev` の `check-admin` も合わせる。
 2. **最初の2つの業務**（下の3）：何をSkill・タスク・Connector・出口で用意するか、足りない機能、PRの分け方を利用者と決めてから作る。
 - 後回しにしたもの（利用者と決めた）：公式のスキル（`SKILL.md` の形のフォルダ）の取り込みと、Sandboxへの Node.js（npm）のエコシステムの追加。文書系の公式スキルは Node.js と LibreOffice に頼り、ライセンスで同梱できないものがある（確かめてから決める）。LibreOffice は大きすぎるので入れない（design.md §7.6 の方針のまま）。
 

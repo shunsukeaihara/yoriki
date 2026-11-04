@@ -175,7 +175,7 @@ docker push localhost:5001/yoriki-sandbox-docs:dev
 | 部門 | 確認用の部門（seed_dev） | 下の3人が所属する（3人の所属は、この部門だけにする） |
 | ユーザー | `check-member` | 確認用の社員。permissionなし |
 | | `check-lead` | 確認用の部門の担当。部門のSkillの編集・公開、部門のタスクの管理 |
-| | `check-admin` | 確認用の全社の担当。すべての部門の管理、全社のSkill・タスク、Connector・接続先、入口・出口の管理。確認用のデータの作成者 |
+| | `check-admin` | 確認用の全社の担当。すべての部門の管理、全社のSkill・タスク、Connector・接続先、出口の管理。確認用のデータの作成者 |
 | LLMの接続 | 偽LLM（seed_dev） | ローカルLLM。`--llm-url`（既定 `http://127.0.0.1:8765/v1`。`fake_llm` の既定）。接続先は作った後に変えないので、`--llm-url` を変えると前の接続を消して新しい接続を作る |
 | | つながらないLLM（seed_dev） | `http://127.0.0.1:9/v1`。再試行の後のモデルの切り替えの確認に使う |
 | モデル設定 | 偽モデル（seed_dev） | `fake`。Tool呼出し・画像入力。既定のモデル設定がなければ既定にする |

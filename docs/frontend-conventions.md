@@ -364,7 +364,7 @@ export const usePermission = defineStore('permission', () => {
 - 管理画面のサイドメニューは `composables/manage.ts` の `useManageMenu()` に1か所で定義する。各リンクに `permission`（リンク先のページの `definePageMeta` と同じもの）を持たせ、権限のない項目は表示しない。見出し（`children` を持つ項目。例：Connector → DB Connector → 接続先・Connector）で入れ子にでき、表示できるリンクが1つもない見出しは出さない。`items` はメニューの木、`links` は表示できるリンクを平らにしたもので、見出しの文字・`/manage` の最初の移動先・入口の判定には `links` を使う。
 - `pages/manage.vue` の `definePageMeta({ layout: 'manage', middleware: 'manage' })` は `/manage` 以下の全ページに適用される（route metaは親から子に引き継がれる）。`middleware/manage.ts` は、表示できるリンクが1つもなければ403にする。`/manage` に入れる権限の一覧を別に持たず、メニューの定義から決める。`/manage` 自体はメニューの最初の項目へ移動する。
 - 社員向けのlayoutの「管理」の入口も、表示できるメニュー項目があるときだけ出す。
-- 画面は層で分ける（authorization.md §7.3）。業務画面（ルート直下）は利用と業務の管理（個人・部門・全社のSkill・タスク）で、一覧は所属で絞られる。管理画面（`/manage`）は基盤の管理（Connector・接続・入口・出口、システムのSkill・タスク、LLM・Runtime Profile・SSO・ユーザー・部門）で、所属を問わず全件を扱う。部門のSkillの公開者や部門のタスク管理者は、管理画面に入らない。
+- 画面は層で分ける（authorization.md §7.3）。業務画面（ルート直下）は利用と業務の管理（個人・部門・全社のSkill・タスク）で、一覧は所属で絞られる。管理画面（`/manage`）は基盤の管理（Connector・接続・出口、入口の一覧、システムのSkill・タスク、LLM・Runtime Profile・SSO・ユーザー・部門）で、所属を問わず全件を扱う。部門のSkillの公開者や部門のタスク管理者は、管理画面に入らない。
 - 業務画面のSkill・タスクの一覧は、範囲のタブ（個人・部門・全社）と部門の選択で絞ってから、選んで詳細（編集）に入る形にする（authorization.md §7.3.1）。部門の選択肢は、Skillは `usableDepartments`、タスクは `manageableDepartments` から作る。
 - 管理画面のボタンや操作は `v-if="hasPermission(PermissionCode.X)"` で出し分ける。業務画面の範囲を持つもの（Skill・タスク）の1件ごとの操作は、APIが返す操作の可否（`access` 等）で出し分ける（個人のものはpermissionなしで本人が扱えるため。§6.1）。どちらも、コメントで「サーバー側でも403で弾かれる」ことを書いておく。
 - 特定の組織IDやユーザーIDをフロントエンドに直接書いて機能を出し分けない。出し分けが必要なら、サーバーが権限か設定値として返す。
@@ -485,7 +485,7 @@ pages/
     ├── runtime_profiles.vue・runtime_profiles/[runtimeProfileId].vue
     ├── database_connections.vue・database_connections/[databaseConnectionId].vue
     ├── connectors.vue・connectors/[connectorId].vue
-    ├── trigger_bindings.vue・trigger_bindings/[bindingId].vue  # 入口（Webhook）
+    ├── trigger_bindings.vue      # 入口（Webhook）の一覧（見るだけ。設定はタスクの画面）
     ├── destinations.vue・destinations/[destinationId].vue      # 出口
     ├── system_skills.vue         # システムのSkillの一覧（詳細は skills/[skillId] を使い回す）
     └── system_tasks.vue          # システムのタスクの一覧（詳細は tasks/[taskId] を使い回す）

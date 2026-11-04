@@ -652,10 +652,10 @@ DATABASES = {
 - **範囲を持つもの**（Skill・Connector・タスク・入口・出口）の判定は、各アプリのQuerySetとModelに置き、Viewに条件を書かない。
   - 一覧の絞り込みはQuerySetのメソッド（`visible_to(user)`・`manageable_by(user)` 等）、1件の判定はModelの `can(user, 操作)` にする。操作は「見る・使う・管理・起動・結果を見る・ログを見る・候補に出す」等を区別する。範囲ごとの規則は1つの表に書き、QuerySetとModelの両方がそれを読む。
   - Viewは `get_queryset` でQuerySetのメソッドを使い、操作の前にModelの `can()` を呼ぶ。一覧では隠れるのにIDを指定すると読める、という食い違いを作らない。
-  - Serializerの関連の項目（Skill・Connector・入口・出口のID）の `queryset` も同じメソッドで絞り、保存の直前（`validate`）にも `can()` で確かめる。
+  - Serializerの関連の項目（Skill・Connector・出口のID）の `queryset` も同じメソッドで絞り、保存の直前（`validate`）にも `can()` で確かめる。
   - Worker（Django Q2）と管理コマンドでも同じ判定を呼ぶ。Q2にはIDだけを渡し、WorkerはユーザーとRunをDBから読み直して判定する（§8.4）。
   - 一覧は部門・範囲・持ち主・有効の条件でSQLで絞り、1件ずつ判定しない。
-- **管理のModel**（基盤の管理。Connector・接続、LLMの接続・モデル設定、Runtime Profile、SSOの設定、ユーザー、部門と所属、入口・出口等）のViewSetは `ModelPermissions` で、操作ごとにそのModelの標準のpermission（一覧・詳細は `view_*`、作成は `add_*`、更新は `change_*`、削除は `delete_*`）を確かめる。所属は問わない。`@action` は `action_permissions = {"check": "view"}` のように種類を書く（書いていない操作は断る）。Djangoの管理画面と同じく、`change_*` を持つ人は `view` の操作もできる。対象のModelが違うとき（版の履歴等）は `permission_model` で指定する。
+- **管理のModel**（基盤の管理。Connector・接続、LLMの接続・モデル設定、Runtime Profile、SSOの設定、ユーザー、部門と所属、出口、入口の一覧等）のViewSetは `ModelPermissions` で、操作ごとにそのModelの標準のpermission（一覧・詳細は `view_*`、作成は `add_*`、更新は `change_*`、削除は `delete_*`）を確かめる。所属は問わない。`@action` は `action_permissions = {"check": "view"}` のように種類を書く（書いていない操作は断る）。Djangoの管理画面と同じく、`change_*` を持つ人は `view` の操作もできる。対象のModelが違うとき（版の履歴等）は `permission_model` で指定する。
 - Yorikiで定義したpermissionだけで決まる操作は `require_permission(AppPermission.XXX)` で確認する。`require_permission` は、ログイン済みで `user.has_perm()` が真の場合に許可するpermissionクラスを返す。Django標準のpermissionは `"<app_label>.<codename>"` の文字列で渡す。
 - permissionを持つユーザーの一覧（通知の宛先等）は `User.objects.with_permission(AppPermission.XXX)` で取得する（直接・Group経由・基盤管理者を含む）。
 - `AppUser` は `_AppUser(BasePermission)` を定義し、公開名を `AppUser = IsAuthenticated & _AppUser` にする。`DenyAll` はどの要求も通さない。

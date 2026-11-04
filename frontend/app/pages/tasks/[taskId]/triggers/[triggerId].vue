@@ -128,7 +128,13 @@ const tabs = computed(() => [
     <template #header>
       <UDashboardNavbar :title="binding?.name ?? $t('入口')">
         <template #leading>
-          <DBtn :to="backPath" color="neutral" variant="ghost" icon="i-lucide-arrow-left" :aria-label="$t('タスクへ')" />
+          <DBtn
+            :to="backPath"
+            color="neutral"
+            variant="ghost"
+            icon="i-lucide-arrow-left"
+            :aria-label="$t('タスクへ')"
+          />
         </template>
         <template #right>
           <template v-if="binding">
@@ -212,7 +218,11 @@ const tabs = computed(() => [
           </template>
           <template #receipts>
             <div class="pt-4">
-              <TriggerBindingReceiptList v-model:reload-key="receiptsReloadKey" :task-id="taskId" :binding-id="triggerId" />
+              <TriggerBindingReceiptList
+                v-model:reload-key="receiptsReloadKey"
+                :task-id="taskId"
+                :binding-id="triggerId"
+              />
             </div>
           </template>
           <template #revisions>

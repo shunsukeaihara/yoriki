@@ -24,7 +24,9 @@ const listPath = computed(() => (task.value?.scope === TaskScope.SYSTEM ? '/mana
 // 個人のタスクにはWebhookの入口を付けない（authorization.md §5.4）
 const tabs = computed(() => [
   { label: t('設定'), value: 'settings', slot: 'settings' as const },
-  ...(task.value?.scope === TaskScope.PERSONAL ? [] : [{ label: t('入口'), value: 'triggers', slot: 'triggers' as const }]),
+  ...(task.value?.scope === TaskScope.PERSONAL
+    ? []
+    : [{ label: t('入口'), value: 'triggers', slot: 'triggers' as const }]),
   { label: t('実行の履歴'), value: 'runs', slot: 'runs' as const },
   { label: t('版の履歴'), value: 'revisions', slot: 'revisions' as const },
 ])
@@ -266,12 +268,13 @@ const onDelete = async () => {
           icon="i-lucide-key-round"
           :title="$t('鍵の作り直しを確かめてください')"
           :description="
-            $t(
-              '鍵を作った人が今はこのタスクを管理できない、または作った人の記録がない入口があります：{names}',
-              { names: triggersToRotate.map((item) => item.name).join('、') },
-            )
+            $t('鍵を作った人が今はこのタスクを管理できない、または作った人の記録がない入口があります：{names}', {
+              names: triggersToRotate.map((item) => item.name).join('、'),
+            })
           "
-          :actions="[{ label: $t('入口を見る'), color: 'warning', variant: 'outline', onClick: () => (tab = 'triggers') }]"
+          :actions="[
+            { label: $t('入口を見る'), color: 'warning', variant: 'outline', onClick: () => (tab = 'triggers') },
+          ]"
         />
 
         <div v-if="task.scope !== TaskScope.SYSTEM" class="grid gap-1 rounded-md border border-default p-3 text-sm">

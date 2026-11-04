@@ -23,7 +23,10 @@ const { onSubmit, loading, errors } = createSubmit({
   form: sample,
   fn: (text) => {
     tried.value = current.value
-    return api.tasks(props.taskId).triggers(props.bindingId).preview({ sample: text, ...props.settings })
+    return api
+      .tasks(props.taskId)
+      .triggers(props.bindingId)
+      .preview({ sample: text, ...props.settings })
   },
   onSuccess: (value) => (result.value = value),
   onError: (err) => {

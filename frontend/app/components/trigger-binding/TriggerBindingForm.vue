@@ -71,12 +71,15 @@ const { onSubmit, loading, errors } = createSubmit({
     const { id, task } = modelValue.value!
     // 名前は版の外なので、変えたときだけ送る（古い画面からの保存で、別の人が変えた名前を戻さない）
     const name = f.name.trim() !== modelValue.value?.name ? f.name.trim() : undefined
-    return api.tasks(task).triggers(id).patch({
-      version: f.version,
-      name,
-      ...settings.value,
-      changeReason: f.changeReason || undefined,
-    })
+    return api
+      .tasks(task)
+      .triggers(id)
+      .patch({
+        version: f.version,
+        name,
+        ...settings.value,
+        changeReason: f.changeReason || undefined,
+      })
   },
   onSuccess: (result) => {
     emit('updated', result)

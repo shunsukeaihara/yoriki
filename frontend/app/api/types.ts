@@ -223,7 +223,7 @@ export type Delivery = Api<'Delivery'>
 export type DeliveryAttempt = Api<'DeliveryAttempt'>
 export type DeliveryListParams = ListParams & { run?: string; status?: DeliveryStatusEnum }
 
-// 出口（Destination）と入口（TriggerBinding）の管理（連携の管理者。authorization.md §5.5）。中身は今の版の値を平らに持つ
+// 出口（Destination。連携の管理者）と入口（TriggerBinding。タスクを管理できる人）。authorization.md §5.5。中身は今の版の値を平らに持つ
 export type Destination = Api<'Destination'>
 // 作成と署名の鍵の作り直しの応答。署名の鍵はこのときだけ返る
 export type DestinationSecret = Api<'DestinationSecret'>
@@ -239,13 +239,14 @@ export type DestinationListParams = ListParams & {
   suspended?: boolean
 }
 export type TriggerBinding = Api<'TriggerBinding'>
+export type TriggerBindingListItem = Api<'TriggerBindingList'>
+export type MinimumUser = Api<'MinimumUser'>
 // 作成と鍵の作り直しの応答。鍵はこのときだけ返る
 export type TriggerBindingKey = Api<'TriggerBindingKey'>
 export type TriggerBindingWrite = Api<'TriggerBindingRequest'>
 export type TriggerBindingUpdate = Api<'TriggerBindingUpdateRequest'>
 export type TriggerBindingRevision = Api<'TriggerBindingRevision'>
 export type TriggerInput = Api<'TriggerInput'>
-export type TriggerTask = Api<'TriggerTask'>
 export type TriggerReceipt = Api<'TriggerReceipt'>
 export type TriggerPreview = Api<'TriggerPreview'>
 export type TriggerPreviewOutcomeEnum = Schemas['TriggerPreviewOutcomeEnum']

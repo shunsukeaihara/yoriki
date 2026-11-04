@@ -42,14 +42,12 @@ from .dispatch import (
 from .errors import CannotRun, VersionConflict
 from .models import (
     BUSINESS_SCOPES,
-    WEBHOOK_TASK_SCOPES,
     TaskAction,
     TaskDefinition,
     TaskDefinitionRevision,
     TaskScope,
     TriggerBinding,
     TriggerBindingRevision,
-    TriggerKind,
     TriggerReceipt,
 )
 from .serializers import (
@@ -67,13 +65,13 @@ from .serializers import (
     TaskSkillChoiceSerializer,
     TaskSuspendSerializer,
     TriggerBindingKeySerializer,
+    TriggerBindingListSerializer,
     TriggerBindingRevisionSerializer,
     TriggerBindingSerializer,
     TriggerBindingStateSerializer,
     TriggerBindingUpdateSerializer,
     TriggerPreviewSerializer,
     TriggerReceiptSerializer,
-    TriggerTaskSerializer,
 )
 from .webhook import PayloadError
 
@@ -139,7 +137,7 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
     lookup_field = "uid"
     queryset = TaskDefinition.objects.select_related(
         "owner", "department", "created_by", "current_revision__model_profile__current_version"
-    ).prefetch_related("triggers")
+    ).prefetch_related("triggers__key_created_by")
     serializer_class = TaskDefinitionSerializer
     filterset_class = TaskFilter
     search_fields = ("name",)
@@ -585,8 +583,9 @@ class AppTaskRunMessageViewSet(mixins.ListModelMixin, GenericViewSet):
 
 
 @extend_schema(
-    description="タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（連携の管理者。authorization.md §5.5）",
-    tags=["manage/trigger_binding"],
+    description="タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（タスクを管理できる人。"
+    "authorization.md §5.5）。1つのタスクに複数の入口を付けられる",
+    tags=["app/task/trigger"],
 )
 @extend_schema_view(
     create=extend_schema(responses={201: TriggerBindingKeySerializer}),
@@ -598,23 +597,20 @@ class AppTaskRunMessageViewSet(mixins.ListModelMixin, GenericViewSet):
     ),
     destroy=extend_schema(description="入口を消す。鍵はすぐに使えなくなる（受け付けたRunは止めない）"),
 )
-class TriggerBindingViewSet(SoftDeleteMixin, ModelViewSet):
-    permission_classes = [ModelPermissions]
-    action_permissions = {
-        "suspend": "change",
-        "resume": "change",
-        "rotate_key": "change",
-        "tasks": "add",
-        "preview": "view",
-    }
+class AppTaskTriggerViewSet(TaskMixin, SoftDeleteMixin, ModelViewSet):
+    permission_classes = [AppUser]
     lookup_field = "uid"
-    queryset = TriggerBinding.objects.alive().select_related(
-        "task__department", "task__current_revision", "current_revision", "created_by"
+    # 鍵を作った人の権限の判定を行で使い回すので、同じ人を同じオブジェクトにする（select_relatedにしない）
+    queryset = (
+        TriggerBinding.objects.alive()
+        .select_related("task__department", "task__current_revision", "current_revision", "created_by")
+        .prefetch_related("key_created_by")
     )
     serializer_class = TriggerBindingSerializer
-    filterset_fields = ["suspended"]
-    search_fields = ("name", "task__name")
     ordering = ("name", "pk")
+
+    def get_queryset(self):
+        return super().get_queryset().filter(task=self.task)
 
     def get_serializer_class(self):
         if self.action in ("update", "partial_update"):
@@ -622,7 +618,8 @@ class TriggerBindingViewSet(SoftDeleteMixin, ModelViewSet):
         return super().get_serializer_class()
 
     def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
+        context = {**self.get_serializer_context(), "task": self.task}
+        serializer = self.get_serializer(data=request.data, context=context)
         serializer.is_valid(raise_exception=True)
         binding = serializer.save(actor=request.user)
         data = TriggerBindingKeySerializer(binding, context=self.get_serializer_context()).data
@@ -648,7 +645,7 @@ class TriggerBindingViewSet(SoftDeleteMixin, ModelViewSet):
     )
     @action(detail=True, methods=["post"], url_path="rotate_key", serializer_class=TriggerBindingStateSerializer)
     def rotate_key(self, request, *args, **kwargs):
-        return self._change_state(request, TriggerBindingKeySerializer, rotate_key=True)
+        return self._change_state(request, TriggerBindingKeySerializer, rotate_key=True, actor=request.user)
 
     @transaction.atomic
     def _change_state(self, request, output, **changes) -> Response:
@@ -659,7 +656,7 @@ class TriggerBindingViewSet(SoftDeleteMixin, ModelViewSet):
 
     @extend_schema(
         description="サンプルのpayload（JSON）で、重複のキーと項目の取り出しを試す（保存しない。design.md §4.2）。"
-        "保存していない受け取り方でも試せる。埋め込んだ後のプロンプトは、タスクを管理できる人にだけ返す",
+        "保存していない受け取り方でも試せる",
         request=TriggerPreviewSerializer,
         responses=TriggerPreviewSerializer,
     )
@@ -668,42 +665,24 @@ class TriggerBindingViewSet(SoftDeleteMixin, ModelViewSet):
         binding = self.get_object()
         serializer = TriggerPreviewSerializer(data=request.data, context=self.get_serializer_context())
         serializer.is_valid(raise_exception=True)
-        return Response(serializer.preview(binding, request.user))
-
-    @extend_schema(
-        description="入口を付けられるタスク（部門・全社・システム。まだWebhookの入口がないもの）",
-        responses=TriggerTaskSerializer(many=True),
-    )
-    @action(detail=False, methods=["get"], serializer_class=TriggerTaskSerializer)
-    def tasks(self, request, *args, **kwargs):
-        taken = TriggerBinding.objects.alive().filter(kind=TriggerKind.WEBHOOK).values("task")
-        qs = (
-            TaskDefinition.objects.filter(deleted=False, scope__in=WEBHOOK_TASK_SCOPES)
-            .exclude(pk__in=taken)
-            .select_related("department", "current_revision")
-            .order_by("name", "pk")
-        )
-        if name := request.query_params.get("search"):
-            qs = qs.filter(name__icontains=name)
-        page = self.paginate_queryset(qs)
-        serializer = self.get_serializer(page, many=True)
-        return self.get_paginated_response(serializer.data)
+        return Response(serializer.preview(binding))
 
 
-class TriggerBindingMixin:
-    kwargs: dict[str, str]
+class TaskTriggerMixin(TaskMixin):
+    """URLの入口を、管理できるタスクの入口に限定して取得する"""
 
     @property
     def binding(self) -> TriggerBinding:
         if not hasattr(self, "_binding"):
-            self._binding = get_object_or_404(TriggerBinding.objects.alive(), uid=self.kwargs["binding"])
+            self._binding = get_object_or_404(
+                TriggerBinding.objects.alive(), task=self.task, uid=self.kwargs["binding"]
+            )
         return self._binding
 
 
-@extend_schema(description="入口の受け取り方の版の履歴", tags=["manage/trigger_binding/revision"])
-class TriggerBindingRevisionViewSet(TriggerBindingMixin, ReadOnlyModelViewSet):
-    permission_classes = [ModelPermissions]
-    permission_model = TriggerBinding
+@extend_schema(description="入口の受け取り方の版の履歴", tags=["app/task/trigger/revision"])
+class AppTaskTriggerRevisionViewSet(TaskTriggerMixin, ReadOnlyModelViewSet):
+    permission_classes = [AppUser]
     lookup_field = "number"
     queryset = TriggerBindingRevision.objects.select_related("created_by")
     serializer_class = TriggerBindingRevisionSerializer
@@ -713,19 +692,34 @@ class TriggerBindingRevisionViewSet(TriggerBindingMixin, ReadOnlyModelViewSet):
         return super().get_queryset().filter(binding=self.binding)
 
 
-@extend_schema(
-    description="入口の受付の履歴（Runの状態まで。結果・ログはタスクの画面で、タスクを管理できる人が見る）",
-    tags=["manage/trigger_binding/receipt"],
-)
-class TriggerReceiptViewSet(TriggerBindingMixin, mixins.ListModelMixin, GenericViewSet):
-    permission_classes = [ModelPermissions]
-    permission_model = TriggerBinding
+@extend_schema(description="入口の受付の履歴（Runの状態まで）", tags=["app/task/trigger/receipt"])
+class AppTaskTriggerReceiptViewSet(TaskTriggerMixin, mixins.ListModelMixin, GenericViewSet):
+    permission_classes = [AppUser]
     queryset = TriggerReceipt.objects.select_related("binding_revision", "run")
     serializer_class = TriggerReceiptSerializer
     ordering = ("-created", "-pk")
 
     def get_queryset(self):
         return super().get_queryset().filter(binding=self.binding)
+
+
+@extend_schema(
+    description="発行済みの入口の一覧（見るだけ。所属を問わない。authorization.md §5.5）。入口を作る・変えるのは、"
+    "タスクを管理できる人がタスクの画面で行う",
+    tags=["manage/trigger_binding"],
+)
+class TriggerBindingViewSet(mixins.ListModelMixin, GenericViewSet):
+    permission_classes = [ModelPermissions]
+    # 鍵を作った人の権限の判定を行で使い回すので、同じ人を同じオブジェクトにする（select_relatedにしない）
+    queryset = (
+        TriggerBinding.objects.alive()
+        .select_related("task__department", "created_by")
+        .prefetch_related("key_created_by")
+    )
+    serializer_class = TriggerBindingListSerializer
+    filterset_fields = ["suspended"]
+    search_fields = ("name", "task__name")
+    ordering = ("name", "pk")
 
 
 def hook_error(

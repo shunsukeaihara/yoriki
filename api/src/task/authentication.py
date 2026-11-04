@@ -21,7 +21,7 @@ class WebhookKeyAuthentication(HookKeyAuthentication):
 
 
 class WebhookTaskPermission(BasePermission):
-    """認証した入口のタスクだけ（入口とタスクは1対1）。別のタスクのURLは、あるかどうかも見せずに404にする"""
+    """認証した入口のタスクだけ（入口が起動するタスクは1つ）。別のタスクのURLは、あるかどうかも見せずに404にする"""
 
     def has_permission(self, request, view) -> bool:
         binding = request.auth

@@ -1,10 +1,10 @@
 <script setup lang="ts">
 /**
  * サンプルのpayload（JSON）を貼り、受付と同じ処理で、重複のキーと取り出した値・項目ごとの誤りを確かめる（design.md
- * §4.2）。保存していない受け取り方（編集中のイベントIDの場所・項目の取り出し）で試し、何も保存しない。埋め込んだ後の
- * プロンプトは、そのタスクを管理できる人にだけサーバーが返す
+ * §4.2）。保存していない受け取り方（編集中のイベントIDの場所・項目の取り出し）で試し、何も保存しない
  */
 const props = defineProps<{
+  taskId: string
   bindingId: string
   settings: { eventIdPath: string; inputs?: TriggerInput[]; maxPayloadBytes?: number }
 }>()
@@ -23,7 +23,7 @@ const { onSubmit, loading, errors } = createSubmit({
   form: sample,
   fn: (text) => {
     tried.value = current.value
-    return api.manage.triggerBindings(props.bindingId).preview({ sample: text, ...props.settings })
+    return api.tasks(props.taskId).triggers(props.bindingId).preview({ sample: text, ...props.settings })
   },
   onSuccess: (value) => (result.value = value),
   onError: (err) => {
@@ -178,9 +178,6 @@ defineExpose({ onSubmit })
             class="max-h-80 overflow-auto rounded-md bg-elevated p-3 font-mono text-xs"
           >
             <TaskPromptText :text="result.prompt" />
-          </p>
-          <p v-else class="text-muted">
-            {{ $t('このタスクを管理する権限がないので、タスクの依頼文は表示しません') }}
           </p>
         </div>
       </template>

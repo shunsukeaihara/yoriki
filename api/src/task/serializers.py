@@ -96,15 +96,22 @@ class TaskInputSerializer(serializers.Serializer):
         return attrs
 
 
+KEY_NEEDS_ROTATION_HELP = _(
+    "鍵を作った人がタスクを管理できない（手元に鍵が残っているおそれがあるので、鍵の作り直しを確かめる）。"
+    "鍵を作り直すと消える"
+)
+
+
 class TaskTriggerSerializer(ReadOnlyModelSerializer):
-    """タスクの画面に出す入口（タスクを管理できる人が見る。作る・変えるのは連携の管理者）"""
+    """タスクの一覧・詳細に出す入口の要約（設定は入口のAPI `app/v1/tasks/{task}/triggers/`）"""
 
     id = serializers.CharField(source="uid", read_only=True)
     kind = serializers.ChoiceField(choices=TriggerKind.choices, read_only=True)
+    key_needs_rotation = serializers.BooleanField(read_only=True, help_text=KEY_NEEDS_ROTATION_HELP)
 
     class Meta:
         model = TriggerBinding
-        fields = ["id", "kind", "name", "suspended", "key_prefix", "created"]
+        fields = ["id", "kind", "name", "suspended", "key_prefix", "key_needs_rotation", "created"]
 
 
 class TaskDefinitionSerializer(serializers.ModelSerializer):
@@ -646,9 +653,7 @@ class TriggerInputSerializer(serializers.Serializer):
 
 
 class TriggerTaskInputSerializer(serializers.Serializer):
-    """入口の画面に出すタスクの入力の項目。取り出しの設定に要るもの（名前・表示名・型・必須）だけを返し、説明・
-    選択肢・文字数の上限等のタスクの定義の中身は返さない（連携の管理者がタスクを管理できるとは限らない。
-    authorization.md §5.3）"""
+    """入口の画面に出すタスクの入力の項目（取り出しの設定に要る名前・表示名・型・必須）"""
 
     name = serializers.CharField(read_only=True)
     label = serializers.CharField(read_only=True)  # type: ignore[assignment]
@@ -685,18 +690,17 @@ def unknown_trigger_inputs(task: TaskDefinition, mappings: list[dict[str, str]])
 
 
 class TriggerBindingSerializer(serializers.ModelSerializer):
-    """入口の作成と表示（連携の管理者。authorization.md §5.5）。受け取り方は今の版の値を平らに出す。
+    """入口の作成と表示（タスクを管理できる人。authorization.md §5.5）。受け取り方は今の版の値を平らに出す。
 
-    タスクは作成時に決め、変えない（付け替えるときは入口を作り直す）。鍵は作成時と作り直したときに一度だけ返す。
-    更新では、編集を始めた時点の `version` を送り、その間に他の人が版を作っていたら409になる
+    タスクはURLで決まり、変えない（付け替えるときは入口を作り直す。作成ではビューが `context["task"]` に入れる）。
+    鍵は作成時と作り直したときに一度だけ返す。更新では、編集を始めた時点の `version` を送り、その間に他の人が版を
+    作っていたら409になる
     """
 
     id = serializers.CharField(source="uid", read_only=True)
     kind = serializers.ChoiceField(choices=TriggerKind.choices, read_only=True)
     task: "serializers.SlugRelatedField[TaskDefinition]" = serializers.SlugRelatedField(
-        slug_field="uid",
-        queryset=TaskDefinition.objects.filter(deleted=False, scope__in=WEBHOOK_TASK_SCOPES),
-        help_text=_("起動するタスク（部門・全社・システム）。作成した後は変えられない"),
+        slug_field="uid", read_only=True
     )
     task_info = TriggerTaskSerializer(source="task", read_only=True)
     name = serializers.CharField(max_length=100)
@@ -735,6 +739,8 @@ class TriggerBindingSerializer(serializers.ModelSerializer):
     change_reason = serializers.CharField(max_length=500, required=False, allow_blank=True, write_only=True)
     url = serializers.SerializerMethodField(help_text=_("送り元に設定するURL（/api/ からのパス）"))
     created_by = MinimumUserSerializer(read_only=True)
+    key_created_by = MinimumUserSerializer(read_only=True, allow_null=True)
+    key_needs_rotation = serializers.BooleanField(read_only=True, help_text=KEY_NEEDS_ROTATION_HELP)
 
     class Meta:
         model = TriggerBinding
@@ -751,6 +757,8 @@ class TriggerBindingSerializer(serializers.ModelSerializer):
             "url",
             "key_prefix",
             "key_rotated",
+            "key_created_by",
+            "key_needs_rotation",
             "created_by",
             "created",
             "updated",
@@ -773,9 +781,9 @@ class TriggerBindingSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         if self.instance is None:
-            task: TaskDefinition = attrs["task"]
-            if TriggerBinding.objects.alive().filter(task=task, kind=TriggerKind.WEBHOOK).exists():
-                raise serializers.ValidationError({"task": _("このタスクには、もうWebhookの入口があります")})
+            task: TaskDefinition = self.context["task"]
+            if task.scope not in WEBHOOK_TASK_SCOPES:
+                raise serializers.ValidationError({"task": _("個人のタスクには、Webhookの入口を付けられません")})
         else:
             if "version_number" not in attrs:
                 raise serializers.ValidationError({"version": _("編集を始めた時点の版を送ってください")})
@@ -797,17 +805,17 @@ class TriggerBindingSerializer(serializers.ModelSerializer):
 
     @transaction.atomic
     def create(self, validated_data) -> TriggerBinding:
-        # 同じタスクへの同時の作成を、タスクの行のロックで直列にしてから確かめ直す（1対1）
+        # タスクの削除・通知先の変更と直列にしてから確かめる
         task = (
             TaskDefinition.objects.select_for_update(of=("self",))
             .select_related("current_revision")
-            .get(pk=validated_data["task"].pk)
+            .get(pk=self.context["task"].pk)
         )
-        if task.deleted or TriggerBinding.objects.alive().filter(task=task, kind=TriggerKind.WEBHOOK).exists():
-            raise serializers.ValidationError({"task": _("このタスクには、もうWebhookの入口があります")})
+        if task.deleted:
+            raise Conflict()
         _check_failure_notice(task)
         binding, key = TriggerBinding.create_with_revision(
-            task=validated_data["task"],
+            task=task,
             name=validated_data["name"],
             actor=validated_data["actor"],
             change_reason=validated_data.get("change_reason", ""),
@@ -855,9 +863,7 @@ def _check_failure_notice(task: TaskDefinition) -> None:
 
 
 class TriggerBindingUpdateSerializer(TriggerBindingSerializer):
-    """入口の更新。タスクは変えられない"""
-
-    task = serializers.SlugRelatedField(slug_field="uid", read_only=True)
+    """入口の更新"""
 
     class Meta(TriggerBindingSerializer.Meta):
         pass
@@ -870,6 +876,43 @@ class TriggerBindingUpdateSerializer(TriggerBindingSerializer):
                 field.required = False
                 field.default = serializers.empty
         return fields
+
+
+class TriggerBindingListTaskSerializer(ReadOnlyModelSerializer):
+    """入口の一覧に出すタスク（名前・範囲・部門だけ。定義は返さない）"""
+
+    scope_display = serializers.CharField(source="get_scope_display", read_only=True)
+    department = MinimumDepartmentSerializer(read_only=True, allow_null=True)
+
+    class Meta:
+        model = TaskDefinition
+        fields = ["name", "scope", "scope_display", "department"]
+
+
+class TriggerBindingListSerializer(ReadOnlyModelSerializer):
+    """発行済みの入口の一覧（`task.view_triggerbinding` を持つ人。authorization.md §5.5）。取り出しの設定、受付の履歴、
+    タスクの定義は返さない"""
+
+    id = serializers.CharField(source="uid", read_only=True)
+    task_info = TriggerBindingListTaskSerializer(source="task", read_only=True)
+    created_by = MinimumUserSerializer(read_only=True)
+    key_created_by = MinimumUserSerializer(read_only=True, allow_null=True)
+    key_needs_rotation = serializers.BooleanField(read_only=True, help_text=KEY_NEEDS_ROTATION_HELP)
+
+    class Meta:
+        model = TriggerBinding
+        fields = [
+            "id",
+            "name",
+            "task_info",
+            "key_prefix",
+            "suspended",
+            "created_by",
+            "created",
+            "key_created_by",
+            "key_rotated",
+            "key_needs_rotation",
+        ]
 
 
 class TriggerBindingKeySerializer(TriggerBindingSerializer):
@@ -907,8 +950,7 @@ class TriggerPreviewSerializer(serializers.Serializer):
     ファイルの項目は試せない）。
 
     名前は項目の名前のまま返すため、値と誤りは名前のキーの辞書ではなく並びにする（APIクライアントのcamelCaseの
-    変換で名前を変えない）。埋め込んだ後のプロンプトは、タスクを管理できる人にだけ返す（連携の管理者がタスクの依頼文を
-    見てよいとは限らない）"""
+    変換で名前を変えない）"""
 
     sample = serializers.CharField(
         max_length=MAX_PAYLOAD_BYTES,
@@ -962,18 +1004,17 @@ class TriggerPreviewSerializer(serializers.Serializer):
         read_only=True,
         help_text=_(
             "入口・タスクの今の状態で、受付が断る・断りうる理由。入口・タスクの停止は断る。タスクの定義が保存のときの"
-            "検査に通らない理由（Skillの停止等）は断りうる。定義の中身は、タスクを管理できる人にだけ詳しく返す"
+            "検査に通らない理由（Skillの停止等）は断りうる"
         ),
     )
     duplicate = serializers.BooleanField(
         read_only=True,
         help_text=_("前に受け付けた要求と同じ（送ると前のRunを返し、新しいRunは作らない）"),
     )
-    can_view_prompt = serializers.BooleanField(read_only=True)
     prompt = serializers.CharField(
         read_only=True,
         allow_null=True,
-        help_text=_("埋め込んだ後のプロンプト（タスクを管理できる人だけ。断る要求ではnull）"),
+        help_text=_("埋め込んだ後のプロンプト（断る要求ではnull）"),
     )
 
     def validate_event_id_path(self, value: str) -> str:
@@ -987,7 +1028,7 @@ class TriggerPreviewSerializer(serializers.Serializer):
     def validate_inputs(self, value: list[dict[str, str]]) -> list[dict[str, str]]:
         return _check_trigger_inputs(value)  # 保存できない取り出しでは試さない（保存と同じく400）
 
-    def preview(self, binding: TriggerBinding, user) -> dict[str, Any]:
+    def preview(self, binding: TriggerBinding) -> dict[str, Any]:
         """受付（task.dispatch.receive_webhook()）と同じ順で確かめる：入口の停止 → payload → 前の受付との重複（同じ
         要求なら、ここで前のRunを返して終わる） → タスクの状態とRunを始められるか → 項目"""
         data = self.validated_data
@@ -1001,7 +1042,6 @@ class TriggerPreviewSerializer(serializers.Serializer):
         current = binding.current_revision
         definitions = revision.inputs if revision else []
         files = [d for d in definitions if d["type"] == TaskInputType.FILE]
-        can_view_prompt = TaskDefinition.objects.manageable_by(user).filter(pk=task.pk).exists()
         refusals: list[str] = []
         if binding.suspended or current is None:
             refusals.append(str(_("この入口は停止中です")))
@@ -1016,7 +1056,6 @@ class TriggerPreviewSerializer(serializers.Serializer):
             "required_file_inputs": [d["name"] for d in files if d.get("required")],
             "run_problems": refusals,
             "duplicate": False,
-            "can_view_prompt": can_view_prompt,
             "prompt": None,
         }
         # 対にならないサロゲートは、サンプルの欄（CharField）が400で断るので、ここではUTF-8にできる
@@ -1045,7 +1084,7 @@ class TriggerPreviewSerializer(serializers.Serializer):
                 result["event_id_error"] = exc.detail
         doubts: list[str] = []
         if not refusals:
-            task_refusals, doubts = _task_problems(task, detailed=can_view_prompt)
+            task_refusals, doubts = _task_problems(task)
             refusals += task_refusals
             result["run_problems"] = [*refusals, *doubts]
         mappings = data.get("inputs", current.inputs if current else [])
@@ -1059,17 +1098,17 @@ class TriggerPreviewSerializer(serializers.Serializer):
             return result  # 断る要求ではRunを作らないので、プロンプトもない（欠けた値で埋めたものを見せない）
         unconfirmed = bool(doubts) or bool(absent_files & set(result["required_file_inputs"]))
         result["outcome"] = TriggerPreviewOutcome.UNCONFIRMED if unconfirmed else TriggerPreviewOutcome.ACCEPTED
-        if can_view_prompt and revision is not None:
+        if revision is not None:
             result["prompt"] = render(revision.prompt_template, cleaned)
         return result
 
 
-def _task_problems(task: TaskDefinition, *, detailed: bool) -> tuple[list[str], list[str]]:
+def _task_problems(task: TaskDefinition) -> tuple[list[str], list[str]]:
     """タスクの今の状態で、受付が断る理由と、断りうる理由。
 
     断るのは、タスクの停止等と、Runを始められないもの（モデル設定・実行環境・Skill・Connector・通知先。受付と同じ
     task.dispatch.plan_run()）。断りうるのは、定義が保存のときの検査に通らないもの（受付は断らないものもある。受付時に
-    既定に戻すeffort等）。理由はタスクの定義の中身に触れるので、`detailed`（タスクを管理できる人）のときだけ詳しく返す"""
+    既定に戻すeffort等）"""
     revision = task.current_revision
     if problem := checks.task_problem(task) or ("" if task.in_service() else _("タスクの今の版がありません")):
         return [str(problem)], []
@@ -1077,13 +1116,9 @@ def _task_problems(task: TaskDefinition, *, detailed: bool) -> tuple[list[str], 
     try:
         plan_run(task, revision, lock=False)  # 読むだけ（受付を待たせない）
     except CannotRun as exc:
-        generic = _("タスクを今は実行できません（タスクの管理者に確かめてください）")
-        return [str(exc) if detailed else str(generic)], []
+        return [str(exc)], []
     content = {name: getattr(revision, name) for name in REVISION_FIELDS}
-    problems = [str(m) for messages in checks.content_errors(task, content).values() for m in messages]
-    if problems and not detailed:
-        return [], [str(_("タスクの定義に、実行を断られうる設定があります（タスクの管理者に確かめてください）"))]
-    return [], problems
+    return [], [str(m) for messages in checks.content_errors(task, content).values() for m in messages]
 
 
 def _preview_inputs(
@@ -1114,7 +1149,7 @@ class TriggerBindingStateSerializer(serializers.Serializer):
             current.save(update_fields=["suspended", "updated"])
             instance.suspended = current.suspended
         if validated_data.get("rotate_key"):
-            instance.issued_key = instance.rotate_key()  # type: ignore[attr-defined]
+            instance.issued_key = instance.rotate_key(actor=validated_data["actor"])  # type: ignore[attr-defined]
         return instance
 
     def create(self, validated_data):
@@ -1132,7 +1167,7 @@ class TriggerBindingRevisionSerializer(ReadOnlyModelSerializer):
 
 
 class TriggerReceiptSerializer(ReadOnlyModelSerializer):
-    """入口の受付の履歴（連携の管理者）。Runの結果・ログは返さない（タスクを管理できる人がタスクの画面で見る）"""
+    """入口の受付の履歴（タスクを管理できる人）。Runの結果・ログはタスクのRunのAPIで見る"""
 
     id = serializers.CharField(source="uid", read_only=True)
     binding_version = serializers.IntegerField(source="binding_revision.number", read_only=True)

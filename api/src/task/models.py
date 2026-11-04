@@ -317,7 +317,7 @@ class TaskDefinition(models.Model):
         current.deleted = True
         current.save(update_fields=["deleted", "updated"])
         self.deleted = True
-        # 入口も消す（鍵を使えなくする。監査ログに残すため1件ずつ保存する）
+        # 入口もすべて消す（鍵を使えなくする。受付の履歴と版は残す。監査ログに残すため1件ずつ保存する）
         for binding in TriggerBinding.objects.alive().filter(task=current):
             binding.deleted = True
             binding.save(update_fields=["deleted", "updated"])
@@ -432,12 +432,13 @@ class TriggerBindingQuerySet(models.QuerySet):
 
 
 class TriggerBinding(models.Model):
-    """タスクの入口（design.md §4.1・§4.2、authorization.md §5.5）。連携の管理者（Modelのpermission）が作る。
+    """タスクの入口（design.md §4.1・§4.2、authorization.md §5.5）。タスクを管理できる人がタスクの画面で作る。
 
-    Webhookの入口とタスクは1対1で、タスクは作成時に決めて変えない（鍵を持つ送り元が、後から付けたタスクまで起動
-    できないように。付け替えるときは入口を作り直す）。鍵はハッシュと見分け用の先頭の数文字だけを保存し、作成時と
-    作り直したときに一度だけ返す。受け取り方（重複の判定、項目の取り出し、payloadの上限）は不変の版
-    （TriggerBindingRevision）が持ち、保存のたびに新しい版を作る。受け付けたRunは受付時の版を記録する
+    入口が起動するタスクは1つだけで、作成時に決めて変えない（鍵を持つ送り元が、後から付けたタスクまで起動できない
+    ように。付け替えるときは入口を作り直す）。1つのタスクには、送り元ごとに複数の入口を付けられる。範囲と部門は
+    タスクのものを使う。鍵はハッシュと見分け用の先頭の数文字だけを保存し、作成時と作り直したときに一度だけ返す。
+    受け取り方（重複の判定、項目の取り出し、payloadの上限）は不変の版（TriggerBindingRevision）が持ち、保存のたびに
+    新しい版を作る。受け付けたRunは受付時の版を記録する
     """
 
     uid = NanoidField(unique=True)
@@ -462,6 +463,15 @@ class TriggerBinding(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+", verbose_name=_("作成者")
     )
     key_rotated = models.DateTimeField(_("鍵を作った日時"), null=True, blank=True)
+    # 鍵を最後に作った人。空なら、誰の手元に鍵があるか分からない（この項目を足す前に作った鍵）
+    key_created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("鍵を作った人"),
+    )
 
     created = models.DateTimeField(auto_now_add=True, db_index=True)
     updated = models.DateTimeField(auto_now=True)
@@ -472,18 +482,18 @@ class TriggerBinding(models.Model):
     class Meta:
         verbose_name = _("タスクの入口")
         verbose_name_plural = verbose_name
-        constraints = [
-            # Webhookの入口とタスクは1対1（authorization.md §5.5）
-            models.UniqueConstraint(
-                fields=["task"], condition=Q(kind=TriggerKind.WEBHOOK, deleted=False), name="uniq_task_webhook"
-            ),
-        ]
 
     def __str__(self):
         return self.name
 
     def in_service(self) -> bool:
         return not self.deleted and not self.suspended and self.current_revision_id is not None
+
+    @property
+    def key_needs_rotation(self) -> bool:
+        """鍵を作った人がタスクを管理できない（手元に鍵が残っているおそれがある）。表示のときに今の権限で判定し、
+        鍵を作り直すと消える。自動では止めない（authorization.md §5.5）"""
+        return self.key_created_by is None or not self.task.can(self.key_created_by, TaskAction.MANAGE)
 
     @property
     def version_number(self) -> int:
@@ -510,6 +520,7 @@ class TriggerBinding(models.Model):
             key_hash=key_hash,
             key_prefix=prefix,
             key_rotated=timezone.now(),
+            key_created_by=actor,
             created_by=actor,
         )
         binding.revise(actor=actor, expected_version=0, change_reason=change_reason, **content)
@@ -542,13 +553,15 @@ class TriggerBinding(models.Model):
         return revision
 
     @transaction.atomic
-    def rotate_key(self) -> str:
+    def rotate_key(self, *, actor) -> str:
         """鍵を作り直す。前の鍵はすぐに使えなくなる。新しい鍵はここでだけ返す"""
         key, key_hash, prefix = self.new_key()
         current = TriggerBinding.objects.select_for_update(of=("self",)).get(pk=self.pk)
         current.key_hash, current.key_prefix, current.key_rotated = key_hash, prefix, timezone.now()
-        current.save(update_fields=["key_hash", "key_prefix", "key_rotated", "updated"])
+        current.key_created_by = actor
+        current.save(update_fields=["key_hash", "key_prefix", "key_rotated", "key_created_by", "updated"])
         self.key_hash, self.key_prefix, self.key_rotated = key_hash, prefix, current.key_rotated
+        self.key_created_by = actor
         return key
 
 

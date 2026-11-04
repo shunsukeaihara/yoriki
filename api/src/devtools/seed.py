@@ -58,7 +58,7 @@ USERS: tuple[tuple[str, str, tuple[AppPermission | str, ...]], ...] = (
             AppPermission.MANAGE_COMPANY_TASKS,
             *(f"connector.{action}_connector" for action in CRUD),
             *(f"connector.{action}_databaseconnection" for action in CRUD),
-            *(f"task.{action}_triggerbinding" for action in CRUD),
+            "task.view_triggerbinding",
             *(f"delivery.{action}_destination" for action in CRUD),
         ),
     ),

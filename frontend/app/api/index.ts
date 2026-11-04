@@ -212,6 +212,33 @@ const createAPI = () => {
         ...readOnlyResource<Delivery, DeliveryListParams>(http, `app/v1/tasks/${id}/deliveries`, did),
         retry: () => http.post<Delivery, Delivery>(`app/v1/tasks/${id}/deliveries/${did}/retry/`),
       }),
+      // タスクの入口（Webhook）。作成と鍵の作り直しの応答にだけ、鍵（key）が入る
+      triggers: (triggerId?: string) => ({
+        ...readOnlyResource<TriggerBinding, ListParams>(http, `app/v1/tasks/${id}/triggers`, triggerId),
+        create: (data: TriggerBindingWrite) =>
+          http.post<TriggerBindingKey, TriggerBindingKey>(`app/v1/tasks/${id}/triggers/`, data),
+        patch: (data: Partial<TriggerBindingUpdate>) =>
+          http.patch<TriggerBinding, TriggerBinding>(`app/v1/tasks/${id}/triggers/${triggerId}/`, data),
+        delete: () => http.delete<undefined, undefined>(`app/v1/tasks/${id}/triggers/${triggerId}/`),
+        suspend: () => http.post<TriggerBinding, TriggerBinding>(`app/v1/tasks/${id}/triggers/${triggerId}/suspend/`),
+        resume: () => http.post<TriggerBinding, TriggerBinding>(`app/v1/tasks/${id}/triggers/${triggerId}/resume/`),
+        rotateKey: () =>
+          http.post<TriggerBindingKey, TriggerBindingKey>(`app/v1/tasks/${id}/triggers/${triggerId}/rotate_key/`),
+        // サンプルのpayloadで取り出しを試す（保存しない）
+        preview: (data: TriggerPreviewRequest) =>
+          http.post<TriggerPreview, TriggerPreview>(`app/v1/tasks/${id}/triggers/${triggerId}/preview/`, data),
+        revisions: (number?: number) =>
+          readOnlyResource<TriggerBindingRevision>(
+            http,
+            `app/v1/tasks/${id}/triggers/${triggerId}/revisions`,
+            number?.toString(),
+          ),
+        receipts: (params?: ListParams) =>
+          http.get<Paginated<TriggerReceipt>, Paginated<TriggerReceipt>>(
+            `app/v1/tasks/${id}/triggers/${triggerId}/receipts/`,
+            { params },
+          ),
+      }),
       // 編集画面で選ぶ候補（その範囲のタスクに登録できるもの。authorization.md §7.2）
       skillChoices: (params: TaskChoiceParams) =>
         http.get<Paginated<TaskSkillChoice>, Paginated<TaskSkillChoice>>('app/v1/tasks/skill_choices/', { params }),
@@ -349,28 +376,10 @@ const createAPI = () => {
         revisions: (number?: number) =>
           readOnlyResource<DestinationRevision>(http, `v1/destinations/${id}/revisions`, number?.toString()),
       }),
-      // タスクの入口（Webhook）。作成と鍵の作り直しの応答にだけ、鍵（key）が入る
-      triggerBindings: (id?: string) => ({
-        ...readOnlyResource<TriggerBinding, TriggerBindingListParams>(http, 'v1/trigger_bindings', id),
-        create: (data: TriggerBindingWrite) =>
-          http.post<TriggerBindingKey, TriggerBindingKey>('v1/trigger_bindings/', data),
-        // 更新ではタスクを送れない
-        patch: (data: Partial<TriggerBindingUpdate>) =>
-          http.patch<TriggerBinding, TriggerBinding>(`v1/trigger_bindings/${id}/`, data),
-        delete: () => http.delete<undefined, undefined>(`v1/trigger_bindings/${id}/`),
-        suspend: () => http.post<TriggerBinding, TriggerBinding>(`v1/trigger_bindings/${id}/suspend/`),
-        resume: () => http.post<TriggerBinding, TriggerBinding>(`v1/trigger_bindings/${id}/resume/`),
-        rotateKey: () => http.post<TriggerBindingKey, TriggerBindingKey>(`v1/trigger_bindings/${id}/rotate_key/`),
-        // サンプルのpayloadで取り出しを試す（保存しない）
-        preview: (data: TriggerPreviewRequest) =>
-          http.post<TriggerPreview, TriggerPreview>(`v1/trigger_bindings/${id}/preview/`, data),
-        // 入口を付けられるタスク（まだWebhookの入口がない、部門・全社・システムのもの）
-        tasks: (params?: ListParams) =>
-          http.get<Paginated<TriggerTask>, Paginated<TriggerTask>>('v1/trigger_bindings/tasks/', { params }),
-        revisions: (number?: number) =>
-          readOnlyResource<TriggerBindingRevision>(http, `v1/trigger_bindings/${id}/revisions`, number?.toString()),
-        receipts: (params?: ListParams) =>
-          http.get<Paginated<TriggerReceipt>, Paginated<TriggerReceipt>>(`v1/trigger_bindings/${id}/receipts/`, {
+      // 発行済みの入口（Webhook）の一覧（見るだけ。入口はタスクの画面で作る。authorization.md §5.5）
+      triggerBindings: () => ({
+        list: (params?: TriggerBindingListParams) =>
+          http.get<Paginated<TriggerBindingListItem>, Paginated<TriggerBindingListItem>>('v1/trigger_bindings/', {
             params,
           }),
       }),

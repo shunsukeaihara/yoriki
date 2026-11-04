@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** 入口の受け取り方の版の履歴（読み取り専用）。新しい版から順に並べる */
-const props = defineProps<{ bindingId: string }>()
+const props = defineProps<{ taskId: string; bindingId: string }>()
 const reloadKey = defineModel<number>('reloadKey', { default: 0 })
 const api = useAPI()
 
@@ -8,7 +8,7 @@ const {
   items: revisions,
   loading,
   fetchAll,
-} = useFetchAll(() => api.manage.triggerBindings(props.bindingId).revisions().list())
+} = useFetchAll(() => api.tasks(props.taskId).triggers(props.bindingId).revisions().list())
 watch(reloadKey, fetchAll, { immediate: true })
 </script>
 

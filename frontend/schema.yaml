@@ -3200,6 +3200,477 @@ paths:
           description: ''
         '409':
           description: 他の処理と競合した
+  /api/app/v1/tasks/{task}/triggers/:
+    get:
+      operationId: app_v1_tasks_triggers_list
+      description: タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（タスクを管理できる人。authorization.md
+        §5.5）。1つのタスクに複数の入口を付けられる
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/task/trigger
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTriggerBindingList'
+          description: ''
+    post:
+      operationId: app_v1_tasks_triggers_create
+      description: タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（タスクを管理できる人。authorization.md
+        §5.5）。1つのタスクに複数の入口を付けられる
+      parameters:
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/task/trigger
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerBindingRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TriggerBindingRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TriggerBindingRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerBindingKey'
+          description: ''
+  /api/app/v1/tasks/{task}/triggers/{binding}/receipts/:
+    get:
+      operationId: app_v1_tasks_triggers_receipts_list
+      description: 入口の受付の履歴（Runの状態まで）
+      parameters:
+      - in: path
+        name: binding
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/task/trigger/receipt
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTriggerReceiptList'
+          description: ''
+  /api/app/v1/tasks/{task}/triggers/{binding}/revisions/:
+    get:
+      operationId: app_v1_tasks_triggers_revisions_list
+      description: 入口の受け取り方の版の履歴
+      parameters:
+      - in: path
+        name: binding
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/task/trigger/revision
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTriggerBindingRevisionList'
+          description: ''
+  /api/app/v1/tasks/{task}/triggers/{binding}/revisions/{number}/:
+    get:
+      operationId: app_v1_tasks_triggers_revisions_retrieve
+      description: 入口の受け取り方の版の履歴
+      parameters:
+      - in: path
+        name: binding
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: number
+        schema:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          title: 版
+        required: true
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - app/task/trigger/revision
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerBindingRevision'
+          description: ''
+  /api/app/v1/tasks/{task}/triggers/{uid}/:
+    get:
+      operationId: app_v1_tasks_triggers_retrieve
+      description: タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（タスクを管理できる人。authorization.md
+        §5.5）。1つのタスクに複数の入口を付けられる
+      parameters:
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/task/trigger
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerBinding'
+          description: ''
+    put:
+      operationId: app_v1_tasks_triggers_update
+      description: タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（タスクを管理できる人。authorization.md
+        §5.5）。1つのタスクに複数の入口を付けられる
+      parameters:
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/task/trigger
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerBindingUpdateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TriggerBindingUpdateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TriggerBindingUpdateRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerBinding'
+          description: ''
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、他の人が版を作った）
+    patch:
+      operationId: app_v1_tasks_triggers_partial_update
+      description: タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（タスクを管理できる人。authorization.md
+        §5.5）。1つのタスクに複数の入口を付けられる
+      parameters:
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/task/trigger
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTriggerBindingUpdateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTriggerBindingUpdateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTriggerBindingUpdateRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerBinding'
+          description: ''
+        '409':
+          description: 他の変更と競合した（編集を始めた後に、他の人が版を作った）
+    delete:
+      operationId: app_v1_tasks_triggers_destroy
+      description: 入口を消す。鍵はすぐに使えなくなる（受け付けたRunは止めない）
+      parameters:
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/task/trigger
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/app/v1/tasks/{task}/triggers/{uid}/preview/:
+    post:
+      operationId: app_v1_tasks_triggers_preview_create
+      description: サンプルのpayload（JSON）で、重複のキーと項目の取り出しを試す（保存しない。design.md §4.2）。保存していない受け取り方でも試せる
+      parameters:
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/task/trigger
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TriggerPreviewRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TriggerPreviewRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TriggerPreviewRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerPreview'
+          description: ''
+  /api/app/v1/tasks/{task}/triggers/{uid}/resume/:
+    post:
+      operationId: app_v1_tasks_triggers_resume_create
+      description: 停止を解く
+      parameters:
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/task/trigger
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerBinding'
+          description: ''
+  /api/app/v1/tasks/{task}/triggers/{uid}/rotate_key/:
+    post:
+      operationId: app_v1_tasks_triggers_rotate_key_create
+      description: 鍵を作り直す。前の鍵はすぐに使えなくなる。新しい鍵は応答で一度だけ返す
+      parameters:
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/task/trigger
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerBindingKey'
+          description: ''
+  /api/app/v1/tasks/{task}/triggers/{uid}/suspend/:
+    post:
+      operationId: app_v1_tasks_triggers_suspend_create
+      description: 停止する。新しい要求を受け付けない
+      parameters:
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/task/trigger
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TriggerBinding'
+          description: ''
   /api/app/v1/tasks/{uid}/:
     get:
       operationId: app_v1_tasks_retrieve
@@ -6125,7 +6596,7 @@ paths:
   /api/v1/trigger_bindings/:
     get:
       operationId: v1_trigger_bindings_list
-      description: タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（連携の管理者。authorization.md §5.5）
+      description: 発行済みの入口の一覧（見るだけ。所属を問わない。authorization.md §5.5）。入口を作る・変えるのは、タスクを管理できる人がタスクの画面で行う
       parameters:
       - name: cursor
         required: false
@@ -6164,398 +6635,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaginatedTriggerBindingList'
-          description: ''
-    post:
-      operationId: v1_trigger_bindings_create
-      description: タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（連携の管理者。authorization.md §5.5）
-      tags:
-      - manage/trigger_binding
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TriggerBindingRequest'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/TriggerBindingRequest'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/TriggerBindingRequest'
-        required: true
-      security:
-      - cookieAuth: []
-      responses:
-        '201':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TriggerBindingKey'
-          description: ''
-  /api/v1/trigger_bindings/{binding}/receipts/:
-    get:
-      operationId: v1_trigger_bindings_receipts_list
-      description: 入口の受付の履歴（Runの状態まで。結果・ログはタスクの画面で、タスクを管理できる人が見る）
-      parameters:
-      - in: path
-        name: binding
-        schema:
-          type: string
-          pattern: ^[^/]+$
-        required: true
-      - name: cursor
-        required: false
-        in: query
-        description: The pagination cursor value.
-        schema:
-          type: string
-      - name: ordering
-        required: false
-        in: query
-        description: Which field to use when ordering the results.
-        schema:
-          type: string
-      - name: page_size
-        required: false
-        in: query
-        description: Number of results to return per page.
-        schema:
-          type: integer
-      - name: search
-        required: false
-        in: query
-        description: A search term.
-        schema:
-          type: string
-      tags:
-      - manage/trigger_binding/receipt
-      security:
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PaginatedTriggerReceiptList'
-          description: ''
-  /api/v1/trigger_bindings/{binding}/revisions/:
-    get:
-      operationId: v1_trigger_bindings_revisions_list
-      description: 入口の受け取り方の版の履歴
-      parameters:
-      - in: path
-        name: binding
-        schema:
-          type: string
-          pattern: ^[^/]+$
-        required: true
-      - name: cursor
-        required: false
-        in: query
-        description: The pagination cursor value.
-        schema:
-          type: string
-      - name: ordering
-        required: false
-        in: query
-        description: Which field to use when ordering the results.
-        schema:
-          type: string
-      - name: page_size
-        required: false
-        in: query
-        description: Number of results to return per page.
-        schema:
-          type: integer
-      - name: search
-        required: false
-        in: query
-        description: A search term.
-        schema:
-          type: string
-      tags:
-      - manage/trigger_binding/revision
-      security:
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PaginatedTriggerBindingRevisionList'
-          description: ''
-  /api/v1/trigger_bindings/{binding}/revisions/{number}/:
-    get:
-      operationId: v1_trigger_bindings_revisions_retrieve
-      description: 入口の受け取り方の版の履歴
-      parameters:
-      - in: path
-        name: binding
-        schema:
-          type: string
-          pattern: ^[^/]+$
-        required: true
-      - in: path
-        name: number
-        schema:
-          type: integer
-          maximum: 2147483647
-          minimum: 0
-          title: 版
-        required: true
-      tags:
-      - manage/trigger_binding/revision
-      security:
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TriggerBindingRevision'
-          description: ''
-  /api/v1/trigger_bindings/{uid}/:
-    get:
-      operationId: v1_trigger_bindings_retrieve
-      description: タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（連携の管理者。authorization.md §5.5）
-      parameters:
-      - in: path
-        name: uid
-        schema:
-          type: string
-        required: true
-      tags:
-      - manage/trigger_binding
-      security:
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TriggerBinding'
-          description: ''
-    put:
-      operationId: v1_trigger_bindings_update
-      description: タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（連携の管理者。authorization.md §5.5）
-      parameters:
-      - in: path
-        name: uid
-        schema:
-          type: string
-        required: true
-      tags:
-      - manage/trigger_binding
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TriggerBindingUpdateRequest'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/TriggerBindingUpdateRequest'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/TriggerBindingUpdateRequest'
-      security:
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TriggerBinding'
-          description: ''
-        '409':
-          description: 他の変更と競合した（編集を始めた後に、他の人が版を作った）
-    patch:
-      operationId: v1_trigger_bindings_partial_update
-      description: タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（連携の管理者。authorization.md §5.5）
-      parameters:
-      - in: path
-        name: uid
-        schema:
-          type: string
-        required: true
-      tags:
-      - manage/trigger_binding
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PatchedTriggerBindingUpdateRequest'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/PatchedTriggerBindingUpdateRequest'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/PatchedTriggerBindingUpdateRequest'
-      security:
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TriggerBinding'
-          description: ''
-        '409':
-          description: 他の変更と競合した（編集を始めた後に、他の人が版を作った）
-    delete:
-      operationId: v1_trigger_bindings_destroy
-      description: 入口を消す。鍵はすぐに使えなくなる（受け付けたRunは止めない）
-      parameters:
-      - in: path
-        name: uid
-        schema:
-          type: string
-        required: true
-      tags:
-      - manage/trigger_binding
-      security:
-      - cookieAuth: []
-      responses:
-        '204':
-          description: No response body
-  /api/v1/trigger_bindings/{uid}/preview/:
-    post:
-      operationId: v1_trigger_bindings_preview_create
-      description: サンプルのpayload（JSON）で、重複のキーと項目の取り出しを試す（保存しない。design.md §4.2）。保存していない受け取り方でも試せる。埋め込んだ後のプロンプトは、タスクを管理できる人にだけ返す
-      parameters:
-      - in: path
-        name: uid
-        schema:
-          type: string
-        required: true
-      tags:
-      - manage/trigger_binding
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/TriggerPreviewRequest'
-          application/x-www-form-urlencoded:
-            schema:
-              $ref: '#/components/schemas/TriggerPreviewRequest'
-          multipart/form-data:
-            schema:
-              $ref: '#/components/schemas/TriggerPreviewRequest'
-        required: true
-      security:
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TriggerPreview'
-          description: ''
-  /api/v1/trigger_bindings/{uid}/resume/:
-    post:
-      operationId: v1_trigger_bindings_resume_create
-      description: 停止を解く
-      parameters:
-      - in: path
-        name: uid
-        schema:
-          type: string
-        required: true
-      tags:
-      - manage/trigger_binding
-      security:
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TriggerBinding'
-          description: ''
-  /api/v1/trigger_bindings/{uid}/rotate_key/:
-    post:
-      operationId: v1_trigger_bindings_rotate_key_create
-      description: 鍵を作り直す。前の鍵はすぐに使えなくなる。新しい鍵は応答で一度だけ返す
-      parameters:
-      - in: path
-        name: uid
-        schema:
-          type: string
-        required: true
-      tags:
-      - manage/trigger_binding
-      security:
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TriggerBindingKey'
-          description: ''
-  /api/v1/trigger_bindings/{uid}/suspend/:
-    post:
-      operationId: v1_trigger_bindings_suspend_create
-      description: 停止する。新しい要求を受け付けない
-      parameters:
-      - in: path
-        name: uid
-        schema:
-          type: string
-        required: true
-      tags:
-      - manage/trigger_binding
-      security:
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/TriggerBinding'
-          description: ''
-  /api/v1/trigger_bindings/tasks/:
-    get:
-      operationId: v1_trigger_bindings_tasks_list
-      description: 入口を付けられるタスク（部門・全社・システム。まだWebhookの入口がないもの）
-      parameters:
-      - name: cursor
-        required: false
-        in: query
-        description: The pagination cursor value.
-        schema:
-          type: string
-      - name: ordering
-        required: false
-        in: query
-        description: Which field to use when ordering the results.
-        schema:
-          type: string
-      - name: page_size
-        required: false
-        in: query
-        description: Number of results to return per page.
-        schema:
-          type: integer
-      - name: search
-        required: false
-        in: query
-        description: A search term.
-        schema:
-          type: string
-      - in: query
-        name: suspended
-        schema:
-          type: boolean
-      tags:
-      - manage/trigger_binding
-      security:
-      - cookieAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PaginatedTriggerTaskList'
+                $ref: '#/components/schemas/PaginatedTriggerBindingListList'
           description: ''
   /api/v1/users/:
     get:
@@ -11564,6 +11644,25 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TriggerBinding'
+    PaginatedTriggerBindingListList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TriggerBindingList'
     PaginatedTriggerBindingRevisionList:
       type: object
       required:
@@ -11602,25 +11701,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TriggerReceipt'
-    PaginatedTriggerTaskList:
-      type: object
-      required:
-      - results
-      properties:
-        next:
-          type: string
-          nullable: true
-          format: uri
-          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
-        previous:
-          type: string
-          nullable: true
-          format: uri
-          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
-        results:
-          type: array
-          items:
-            $ref: '#/components/schemas/TriggerTask'
     PatchedConnectorUpdateRequest:
       type: object
       description: Connectorの更新。使うDB接続と範囲・部門は変えられないので、読み取り専用にする
@@ -12201,7 +12281,7 @@ components:
           maxLength: 500
     PatchedTriggerBindingUpdateRequest:
       type: object
-      description: 入口の更新。タスクは変えられない
+      description: 入口の更新
       properties:
         name:
           type: string
@@ -15583,7 +15663,7 @@ components:
       - version
     TaskTrigger:
       type: object
-      description: タスクの画面に出す入口（タスクを管理できる人が見る。作る・変えるのは連携の管理者）
+      description: タスクの一覧・詳細に出す入口の要約（設定は入口のAPI `app/v1/tasks/{task}/triggers/`）
       properties:
         id:
           type: string
@@ -15605,6 +15685,10 @@ components:
           type: string
           readOnly: true
           title: 鍵の先頭
+        key_needs_rotation:
+          type: boolean
+          readOnly: true
+          description: 鍵を作った人がタスクを管理できない（手元に鍵が残っているおそれがあるので、鍵の作り直しを確かめる）。鍵を作り直すと消える
         created:
           type: string
           format: date-time
@@ -15612,6 +15696,7 @@ components:
       required:
       - created
       - id
+      - key_needs_rotation
       - key_prefix
       - kind
       - name
@@ -15749,10 +15834,11 @@ components:
     TriggerBinding:
       type: object
       description: |-
-        入口の作成と表示（連携の管理者。authorization.md §5.5）。受け取り方は今の版の値を平らに出す。
+        入口の作成と表示（タスクを管理できる人。authorization.md §5.5）。受け取り方は今の版の値を平らに出す。
 
-        タスクは作成時に決め、変えない（付け替えるときは入口を作り直す）。鍵は作成時と作り直したときに一度だけ返す。
-        更新では、編集を始めた時点の `version` を送り、その間に他の人が版を作っていたら409になる
+        タスクはURLで決まり、変えない（付け替えるときは入口を作り直す。作成ではビューが `context["task"]` に入れる）。
+        鍵は作成時と作り直したときに一度だけ返す。更新では、編集を始めた時点の `version` を送り、その間に他の人が版を
+        作っていたら409になる
       properties:
         id:
           type: string
@@ -15763,7 +15849,7 @@ components:
           readOnly: true
         task:
           type: string
-          description: 起動するタスク（部門・全社・システム）。作成した後は変えられない
+          readOnly: true
         task_info:
           allOf:
           - $ref: '#/components/schemas/TriggerTask'
@@ -15810,6 +15896,15 @@ components:
           readOnly: true
           nullable: true
           title: 鍵を作った日時
+        key_created_by:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+          nullable: true
+        key_needs_rotation:
+          type: boolean
+          readOnly: true
+          description: 鍵を作った人がタスクを管理できない（手元に鍵が残っているおそれがあるので、鍵の作り直しを確かめる）。鍵を作り直すと消える
         created_by:
           allOf:
           - $ref: '#/components/schemas/MinimumUser'
@@ -15826,6 +15921,8 @@ components:
       - created
       - created_by
       - id
+      - key_created_by
+      - key_needs_rotation
       - key_prefix
       - key_rotated
       - kind
@@ -15848,7 +15945,7 @@ components:
           readOnly: true
         task:
           type: string
-          description: 起動するタスク（部門・全社・システム）。作成した後は変えられない
+          readOnly: true
         task_info:
           allOf:
           - $ref: '#/components/schemas/TriggerTask'
@@ -15895,6 +15992,15 @@ components:
           readOnly: true
           nullable: true
           title: 鍵を作った日時
+        key_created_by:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+          nullable: true
+        key_needs_rotation:
+          type: boolean
+          readOnly: true
+          description: 鍵を作った人がタスクを管理できない（手元に鍵が残っているおそれがあるので、鍵の作り直しを確かめる）。鍵を作り直すと消える
         created_by:
           allOf:
           - $ref: '#/components/schemas/MinimumUser'
@@ -15916,6 +16022,8 @@ components:
       - created_by
       - id
       - key
+      - key_created_by
+      - key_needs_rotation
       - key_prefix
       - key_rotated
       - kind
@@ -15925,18 +16033,104 @@ components:
       - task_info
       - updated
       - url
+    TriggerBindingList:
+      type: object
+      description: |-
+        発行済みの入口の一覧（`task.view_triggerbinding` を持つ人。authorization.md §5.5）。取り出しの設定、受付の履歴、
+        タスクの定義は返さない
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+          title: 名前
+          maxLength: 100
+        task_info:
+          allOf:
+          - $ref: '#/components/schemas/TriggerBindingListTask'
+          readOnly: true
+        key_prefix:
+          type: string
+          readOnly: true
+          title: 鍵の先頭
+        suspended:
+          type: boolean
+          readOnly: true
+          title: 停止中
+        created_by:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        key_created_by:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+          nullable: true
+        key_rotated:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 鍵を作った日時
+        key_needs_rotation:
+          type: boolean
+          readOnly: true
+          description: 鍵を作った人がタスクを管理できない（手元に鍵が残っているおそれがあるので、鍵の作り直しを確かめる）。鍵を作り直すと消える
+      required:
+      - created
+      - created_by
+      - id
+      - key_created_by
+      - key_needs_rotation
+      - key_prefix
+      - key_rotated
+      - name
+      - suspended
+      - task_info
+    TriggerBindingListTask:
+      type: object
+      description: 入口の一覧に出すタスク（名前・範囲・部門だけ。定義は返さない）
+      properties:
+        name:
+          type: string
+          readOnly: true
+          title: 名前
+          maxLength: 100
+        scope:
+          allOf:
+          - $ref: '#/components/schemas/SkillScopeEnum'
+          readOnly: true
+          title: 範囲
+          minimum: 0
+          maximum: 32767
+        scope_display:
+          type: string
+          readOnly: true
+        department:
+          allOf:
+          - $ref: '#/components/schemas/MinimumDepartment'
+          readOnly: true
+          nullable: true
+      required:
+      - department
+      - name
+      - scope
+      - scope_display
     TriggerBindingRequest:
       type: object
       description: |-
-        入口の作成と表示（連携の管理者。authorization.md §5.5）。受け取り方は今の版の値を平らに出す。
+        入口の作成と表示（タスクを管理できる人。authorization.md §5.5）。受け取り方は今の版の値を平らに出す。
 
-        タスクは作成時に決め、変えない（付け替えるときは入口を作り直す）。鍵は作成時と作り直したときに一度だけ返す。
-        更新では、編集を始めた時点の `version` を送り、その間に他の人が版を作っていたら409になる
+        タスクはURLで決まり、変えない（付け替えるときは入口を作り直す。作成ではビューが `context["task"]` に入れる）。
+        鍵は作成時と作り直したときに一度だけ返す。更新では、編集を始めた時点の `version` を送り、その間に他の人が版を
+        作っていたら409になる
       properties:
-        task:
-          type: string
-          minLength: 1
-          description: 起動するタスク（部門・全社・システム）。作成した後は変えられない
         name:
           type: string
           minLength: 1
@@ -15968,7 +16162,6 @@ components:
           maxLength: 500
       required:
       - name
-      - task
     TriggerBindingRevision:
       type: object
       description: 表示専用のModelSerializer。すべての項目を読み取り専用にする
@@ -16022,7 +16215,7 @@ components:
       - number
     TriggerBindingUpdateRequest:
       type: object
-      description: 入口の更新。タスクは変えられない
+      description: 入口の更新
       properties:
         name:
           type: string
@@ -16095,8 +16288,7 @@ components:
         ファイルの項目は試せない）。
 
         名前は項目の名前のまま返すため、値と誤りは名前のキーの辞書ではなく並びにする（APIクライアントのcamelCaseの
-        変換で名前を変えない）。埋め込んだ後のプロンプトは、タスクを管理できる人にだけ返す（連携の管理者がタスクの依頼文を
-        見てよいとは限らない）
+        変換で名前を変えない）
       properties:
         outcome:
           allOf:
@@ -16149,21 +16341,17 @@ components:
           items:
             type: string
           readOnly: true
-          description: 入口・タスクの今の状態で、受付が断る・断りうる理由。入口・タスクの停止は断る。タスクの定義が保存のときの検査に通らない理由（Skillの停止等）は断りうる。定義の中身は、タスクを管理できる人にだけ詳しく返す
+          description: 入口・タスクの今の状態で、受付が断る・断りうる理由。入口・タスクの停止は断る。タスクの定義が保存のときの検査に通らない理由（Skillの停止等）は断りうる
         duplicate:
           type: boolean
           readOnly: true
           description: 前に受け付けた要求と同じ（送ると前のRunを返し、新しいRunは作らない）
-        can_view_prompt:
-          type: boolean
-          readOnly: true
         prompt:
           type: string
           readOnly: true
           nullable: true
-          description: 埋め込んだ後のプロンプト（タスクを管理できる人だけ。断る要求ではnull）
+          description: 埋め込んだ後のプロンプト（断る要求ではnull）
       required:
-      - can_view_prompt
       - duplicate
       - event_id
       - event_id_error
@@ -16216,8 +16404,7 @@ components:
         ファイルの項目は試せない）。
 
         名前は項目の名前のまま返すため、値と誤りは名前のキーの辞書ではなく並びにする（APIクライアントのcamelCaseの
-        変換で名前を変えない）。埋め込んだ後のプロンプトは、タスクを管理できる人にだけ返す（連携の管理者がタスクの依頼文を
-        見てよいとは限らない）
+        変換で名前を変えない）
       properties:
         sample:
           type: string
@@ -16267,7 +16454,7 @@ components:
       - value
     TriggerReceipt:
       type: object
-      description: 入口の受付の履歴（連携の管理者）。Runの結果・ログは返さない（タスクを管理できる人がタスクの画面で見る）
+      description: 入口の受付の履歴（タスクを管理できる人）。Runの結果・ログはタスクのRunのAPIで見る
       properties:
         id:
           type: string
@@ -16362,10 +16549,7 @@ components:
       - suspended
     TriggerTaskInput:
       type: object
-      description: |-
-        入口の画面に出すタスクの入力の項目。取り出しの設定に要るもの（名前・表示名・型・必須）だけを返し、説明・
-        選択肢・文字数の上限等のタスクの定義の中身は返さない（連携の管理者がタスクを管理できるとは限らない。
-        authorization.md §5.3）
+      description: 入口の画面に出すタスクの入力の項目（取り出しの設定に要る名前・表示名・型・必須）
       properties:
         name:
           type: string

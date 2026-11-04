@@ -9,7 +9,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connection, transaction
 
-from connector.factories import ConnectorFactory
+from connector.factories import ConnectorFactory, DatabaseConnectionFactory
 from connector.models import Connector
 from devtools import seed
 from devtools.seed import Seeder, SeedError
@@ -230,3 +230,11 @@ def test_seed_stops_on_a_role_it_did_not_make(seeder):
         cursor.execute(f"CREATE ROLE {seeder.db_role} LOGIN")
     with pytest.raises(SeedError, match=seeder.db_role):
         seeder.run()
+
+
+def test_seed_stops_on_a_connection_it_did_not_make(seeder):
+    seeder.run()
+    other = DatabaseConnectionFactory.create()
+    Connector.objects.filter(name=seed.CONNECTOR).update(connection=other)
+    with pytest.raises(SeedError, match="接続先"):
+        Seeder(db_role=seeder.db_role).run()

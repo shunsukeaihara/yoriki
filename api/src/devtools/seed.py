@@ -1,7 +1,8 @@
 """確認用のデータ。何度流しても同じ状態になるように、自分で作ったものを名前で探して揃える（docs/development.md §6.1）。
 
-自分で作ったものかは、作成者（確認用の全社の担当）と、ロールの印（コメント）で見分ける。同じ名前で自分で作ったもの
-でないものがあれば、書き換えずに止める。名前には「（seed_dev）」を付け、ほかのデータと重ならないようにする。
+名前には「（seed_dev）」等を付けてほかのデータと重ならないようにし、その名前のものを自分のものとして扱う。作成者を
+持つもの（LLMの接続・モデル設定・Runtime Profile・Connectorとその接続先）は、作成者（確認用の全社の担当）も確かめ、
+違えば止める。ロールはクラスタで共有なので、印（コメント）のないものは使わない。
 本番の設定では作らない（管理コマンドは DEBUG のときだけ動く）。パスワード等は確認用の固定の値
 """
 
@@ -301,6 +302,8 @@ class Seeder:
         }
         connector = _own(Connector, CONNECTOR, actor)
         conn = connector.connection if connector else _own(DatabaseConnection, DB_CONNECTION, actor)
+        if conn is not None and conn.created_by_id != actor.pk:
+            raise SeedError(f"Connectorの接続先「{conn.name}」は seed_dev が作ったものではありません")
         if conn is None:
             conn = DatabaseConnection.objects.create(name=DB_CONNECTION, created_by=actor, **values)
         else:

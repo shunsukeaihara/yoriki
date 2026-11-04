@@ -26,7 +26,7 @@ class TaskDefinitionRevisionAdmin(ReadOnlyAdmin):
 class TriggerBindingAdmin(ReadOnlyAdmin):
     """作成・変更・停止・鍵の作り直しはYorikiの画面（API）で行う（鍵は一度だけ表示し、版を記録する）"""
 
-    raw_id_fields = ("task", "current_revision", "created_by")
+    raw_id_fields = ("task", "current_revision", "created_by", "key_created_by")
     list_display = ("id", "uid", "name", "kind", "task", "key_prefix", "current_revision", "suspended", "deleted")
     list_filter = ("kind", "suspended", "deleted")
     search_fields = ("uid", "name", "key_prefix", "task__name")

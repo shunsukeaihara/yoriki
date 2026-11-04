@@ -1134,6 +1134,163 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/app/v1/tasks/{task}/triggers/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（タスクを管理できる人。authorization.md §5.5）。1つのタスクに複数の入口を付けられる */
+        get: operations["app_v1_tasks_triggers_list"];
+        put?: never;
+        /** @description タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（タスクを管理できる人。authorization.md §5.5）。1つのタスクに複数の入口を付けられる */
+        post: operations["app_v1_tasks_triggers_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/tasks/{task}/triggers/{binding}/receipts/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 入口の受付の履歴（Runの状態まで） */
+        get: operations["app_v1_tasks_triggers_receipts_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/tasks/{task}/triggers/{binding}/revisions/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 入口の受け取り方の版の履歴 */
+        get: operations["app_v1_tasks_triggers_revisions_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/tasks/{task}/triggers/{binding}/revisions/{number}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 入口の受け取り方の版の履歴 */
+        get: operations["app_v1_tasks_triggers_revisions_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/tasks/{task}/triggers/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（タスクを管理できる人。authorization.md §5.5）。1つのタスクに複数の入口を付けられる */
+        get: operations["app_v1_tasks_triggers_retrieve"];
+        /** @description タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（タスクを管理できる人。authorization.md §5.5）。1つのタスクに複数の入口を付けられる */
+        put: operations["app_v1_tasks_triggers_update"];
+        post?: never;
+        /** @description 入口を消す。鍵はすぐに使えなくなる（受け付けたRunは止めない） */
+        delete: operations["app_v1_tasks_triggers_destroy"];
+        options?: never;
+        head?: never;
+        /** @description タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（タスクを管理できる人。authorization.md §5.5）。1つのタスクに複数の入口を付けられる */
+        patch: operations["app_v1_tasks_triggers_partial_update"];
+        trace?: never;
+    };
+    "/api/app/v1/tasks/{task}/triggers/{uid}/preview/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description サンプルのpayload（JSON）で、重複のキーと項目の取り出しを試す（保存しない。design.md §4.2）。保存していない受け取り方でも試せる */
+        post: operations["app_v1_tasks_triggers_preview_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/tasks/{task}/triggers/{uid}/resume/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 停止を解く */
+        post: operations["app_v1_tasks_triggers_resume_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/tasks/{task}/triggers/{uid}/rotate_key/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 鍵を作り直す。前の鍵はすぐに使えなくなる。新しい鍵は応答で一度だけ返す */
+        post: operations["app_v1_tasks_triggers_rotate_key_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/app/v1/tasks/{task}/triggers/{uid}/suspend/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 停止する。新しい要求を受け付けない */
+        post: operations["app_v1_tasks_triggers_suspend_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/app/v1/tasks/{uid}/": {
         parameters: {
             query?: never;
@@ -2096,165 +2253,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（連携の管理者。authorization.md §5.5） */
+        /** @description 発行済みの入口の一覧（見るだけ。所属を問わない。authorization.md §5.5）。入口を作る・変えるのは、タスクを管理できる人がタスクの画面で行う */
         get: operations["v1_trigger_bindings_list"];
-        put?: never;
-        /** @description タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（連携の管理者。authorization.md §5.5） */
-        post: operations["v1_trigger_bindings_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/trigger_bindings/{binding}/receipts/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description 入口の受付の履歴（Runの状態まで。結果・ログはタスクの画面で、タスクを管理できる人が見る） */
-        get: operations["v1_trigger_bindings_receipts_list"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/trigger_bindings/{binding}/revisions/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description 入口の受け取り方の版の履歴 */
-        get: operations["v1_trigger_bindings_revisions_list"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/trigger_bindings/{binding}/revisions/{number}/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description 入口の受け取り方の版の履歴 */
-        get: operations["v1_trigger_bindings_revisions_retrieve"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/trigger_bindings/{uid}/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（連携の管理者。authorization.md §5.5） */
-        get: operations["v1_trigger_bindings_retrieve"];
-        /** @description タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（連携の管理者。authorization.md §5.5） */
-        put: operations["v1_trigger_bindings_update"];
-        post?: never;
-        /** @description 入口を消す。鍵はすぐに使えなくなる（受け付けたRunは止めない） */
-        delete: operations["v1_trigger_bindings_destroy"];
-        options?: never;
-        head?: never;
-        /** @description タスクの入口（Webhook）の一覧・作成・変更・停止・鍵の作り直し（連携の管理者。authorization.md §5.5） */
-        patch: operations["v1_trigger_bindings_partial_update"];
-        trace?: never;
-    };
-    "/api/v1/trigger_bindings/{uid}/preview/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** @description サンプルのpayload（JSON）で、重複のキーと項目の取り出しを試す（保存しない。design.md §4.2）。保存していない受け取り方でも試せる。埋め込んだ後のプロンプトは、タスクを管理できる人にだけ返す */
-        post: operations["v1_trigger_bindings_preview_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/trigger_bindings/{uid}/resume/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** @description 停止を解く */
-        post: operations["v1_trigger_bindings_resume_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/trigger_bindings/{uid}/rotate_key/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** @description 鍵を作り直す。前の鍵はすぐに使えなくなる。新しい鍵は応答で一度だけ返す */
-        post: operations["v1_trigger_bindings_rotate_key_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/trigger_bindings/{uid}/suspend/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** @description 停止する。新しい要求を受け付けない */
-        post: operations["v1_trigger_bindings_suspend_create"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/trigger_bindings/tasks/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description 入口を付けられるタスク（部門・全社・システム。まだWebhookの入口がないもの） */
-        get: operations["v1_trigger_bindings_tasks_list"];
         put?: never;
         post?: never;
         delete?: never;
@@ -4656,6 +4656,19 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["TriggerBinding"][];
         };
+        PaginatedTriggerBindingListList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["TriggerBindingList"][];
+        };
         PaginatedTriggerBindingRevisionList: {
             /**
              * Format: uri
@@ -4681,19 +4694,6 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["TriggerReceipt"][];
-        };
-        PaginatedTriggerTaskList: {
-            /**
-             * Format: uri
-             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
-             */
-            next?: string | null;
-            /**
-             * Format: uri
-             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
-             */
-            previous?: string | null;
-            results: components["schemas"]["TriggerTask"][];
         };
         /** @description Connectorの更新。使うDB接続と範囲・部門は変えられないので、読み取り専用にする */
         PatchedConnectorUpdateRequest: {
@@ -4982,7 +4982,7 @@ export interface components {
             notification_instructions?: string;
             change_reason?: string;
         };
-        /** @description 入口の更新。タスクは変えられない */
+        /** @description 入口の更新 */
         PatchedTriggerBindingUpdateRequest: {
             name?: string;
             /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
@@ -5943,7 +5943,7 @@ export interface components {
             readonly destination_info: components["schemas"]["DestinationChoice"] | null;
             /** @description 今、手動で実行できるか（停止中でなく、版がある） */
             readonly can_run: boolean;
-            /** @description このタスクの入口（作る・変えるのは連携の管理者） */
+            /** @description このタスクの入口 */
             readonly triggers: components["schemas"]["TaskTrigger"][];
             readonly created_by: components["schemas"]["MinimumUser"];
             /** Format: date-time */
@@ -6021,7 +6021,7 @@ export interface components {
             readonly destination_info: components["schemas"]["DestinationChoice"] | null;
             /** @description 今、手動で実行できるか（停止中でなく、版がある） */
             readonly can_run: boolean;
-            /** @description このタスクの入口（作る・変えるのは連携の管理者） */
+            /** @description このタスクの入口 */
             readonly triggers: components["schemas"]["TaskTrigger"][];
             readonly created_by: components["schemas"]["MinimumUser"];
             /** Format: date-time */
@@ -6333,7 +6333,7 @@ export interface components {
             /** @description 固定する版の番号。Skillが新しい版を公開しても変わらない */
             version: number;
         };
-        /** @description タスクの画面に出す入口（タスクを管理できる人が見る。作る・変えるのは連携の管理者） */
+        /** @description タスクの一覧・詳細に出す入口の要約（設定は入口のAPI `app/v1/tasks/{task}/triggers/`） */
         TaskTrigger: {
             readonly id: string;
             readonly kind: components["schemas"]["TriggerKindEnum"];
@@ -6343,6 +6343,8 @@ export interface components {
             readonly suspended: boolean;
             /** 鍵の先頭 */
             readonly key_prefix: string;
+            /** @description 鍵を作った人がタスクを管理できない（手元に鍵が残っているおそれがあるので、鍵の作り直しを確かめる）。鍵を作り直すと消える */
+            readonly key_needs_rotation: boolean;
             /** Format: date-time */
             readonly created: string;
         };
@@ -6410,16 +6412,16 @@ export interface components {
          */
         ToolsEnum: "read" | "write" | "edit" | "glob" | "grep" | "shell" | "job_output" | "job_kill" | "ask_user" | "todo_write" | "datasource_describe" | "datasource_query";
         /**
-         * @description 入口の作成と表示（連携の管理者。authorization.md §5.5）。受け取り方は今の版の値を平らに出す。
+         * @description 入口の作成と表示（タスクを管理できる人。authorization.md §5.5）。受け取り方は今の版の値を平らに出す。
          *
-         *     タスクは作成時に決め、変えない（付け替えるときは入口を作り直す）。鍵は作成時と作り直したときに一度だけ返す。
-         *     更新では、編集を始めた時点の `version` を送り、その間に他の人が版を作っていたら409になる
+         *     タスクはURLで決まり、変えない（付け替えるときは入口を作り直す。作成ではビューが `context["task"]` に入れる）。
+         *     鍵は作成時と作り直したときに一度だけ返す。更新では、編集を始めた時点の `version` を送り、その間に他の人が版を
+         *     作っていたら409になる
          */
         TriggerBinding: {
             readonly id: string;
             readonly kind: components["schemas"]["TriggerKindEnum"];
-            /** @description 起動するタスク（部門・全社・システム）。作成した後は変えられない */
-            task: string;
+            readonly task: string;
             readonly task_info: components["schemas"]["TriggerTask"];
             name: string;
             /** 停止中 */
@@ -6447,6 +6449,9 @@ export interface components {
              * Format: date-time
              */
             readonly key_rotated: string | null;
+            readonly key_created_by: components["schemas"]["MinimumUser"] | null;
+            /** @description 鍵を作った人がタスクを管理できない（手元に鍵が残っているおそれがあるので、鍵の作り直しを確かめる）。鍵を作り直すと消える */
+            readonly key_needs_rotation: boolean;
             readonly created_by: components["schemas"]["MinimumUser"];
             /** Format: date-time */
             readonly created: string;
@@ -6457,8 +6462,7 @@ export interface components {
         TriggerBindingKey: {
             readonly id: string;
             readonly kind: components["schemas"]["TriggerKindEnum"];
-            /** @description 起動するタスク（部門・全社・システム）。作成した後は変えられない */
-            task: string;
+            readonly task: string;
             readonly task_info: components["schemas"]["TriggerTask"];
             name: string;
             /** 停止中 */
@@ -6486,6 +6490,9 @@ export interface components {
              * Format: date-time
              */
             readonly key_rotated: string | null;
+            readonly key_created_by: components["schemas"]["MinimumUser"] | null;
+            /** @description 鍵を作った人がタスクを管理できない（手元に鍵が残っているおそれがあるので、鍵の作り直しを確かめる）。鍵を作り直すと消える */
+            readonly key_needs_rotation: boolean;
             readonly created_by: components["schemas"]["MinimumUser"];
             /** Format: date-time */
             readonly created: string;
@@ -6495,14 +6502,47 @@ export interface components {
             readonly key: string;
         };
         /**
-         * @description 入口の作成と表示（連携の管理者。authorization.md §5.5）。受け取り方は今の版の値を平らに出す。
+         * @description 発行済みの入口の一覧（`task.view_triggerbinding` を持つ人。authorization.md §5.5）。取り出しの設定、受付の履歴、
+         *     タスクの定義は返さない
+         */
+        TriggerBindingList: {
+            readonly id: string;
+            /** 名前 */
+            readonly name: string;
+            readonly task_info: components["schemas"]["TriggerBindingListTask"];
+            /** 鍵の先頭 */
+            readonly key_prefix: string;
+            /** 停止中 */
+            readonly suspended: boolean;
+            readonly created_by: components["schemas"]["MinimumUser"];
+            /** Format: date-time */
+            readonly created: string;
+            readonly key_created_by: components["schemas"]["MinimumUser"] | null;
+            /**
+             * 鍵を作った日時
+             * Format: date-time
+             */
+            readonly key_rotated: string | null;
+            /** @description 鍵を作った人がタスクを管理できない（手元に鍵が残っているおそれがあるので、鍵の作り直しを確かめる）。鍵を作り直すと消える */
+            readonly key_needs_rotation: boolean;
+        };
+        /** @description 入口の一覧に出すタスク（名前・範囲・部門だけ。定義は返さない） */
+        TriggerBindingListTask: {
+            /** 名前 */
+            readonly name: string;
+            /** 範囲 */
+            readonly scope: components["schemas"]["SkillScopeEnum"];
+            readonly scope_display: string;
+            readonly department: components["schemas"]["MinimumDepartment"] | null;
+        };
+        /**
+         * @description 入口の作成と表示（タスクを管理できる人。authorization.md §5.5）。受け取り方は今の版の値を平らに出す。
          *
-         *     タスクは作成時に決め、変えない（付け替えるときは入口を作り直す）。鍵は作成時と作り直したときに一度だけ返す。
-         *     更新では、編集を始めた時点の `version` を送り、その間に他の人が版を作っていたら409になる
+         *     タスクはURLで決まり、変えない（付け替えるときは入口を作り直す。作成ではビューが `context["task"]` に入れる）。
+         *     鍵は作成時と作り直したときに一度だけ返す。更新では、編集を始めた時点の `version` を送り、その間に他の人が版を
+         *     作っていたら409になる
          */
         TriggerBindingRequest: {
-            /** @description 起動するタスク（部門・全社・システム）。作成した後は変えられない */
-            task: string;
             name: string;
             /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
             version?: number;
@@ -6536,7 +6576,7 @@ export interface components {
             /** Format: date-time */
             readonly created: string;
         };
-        /** @description 入口の更新。タスクは変えられない */
+        /** @description 入口の更新 */
         TriggerBindingUpdateRequest: {
             name?: string;
             /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
@@ -6573,8 +6613,7 @@ export interface components {
          *     ファイルの項目は試せない）。
          *
          *     名前は項目の名前のまま返すため、値と誤りは名前のキーの辞書ではなく並びにする（APIクライアントのcamelCaseの
-         *     変換で名前を変えない）。埋め込んだ後のプロンプトは、タスクを管理できる人にだけ返す（連携の管理者がタスクの依頼文を
-         *     見てよいとは限らない）
+         *     変換で名前を変えない）
          */
         TriggerPreview: {
             /**
@@ -6598,12 +6637,11 @@ export interface components {
             readonly file_inputs: string[];
             /** @description 型がファイルの必須の項目 */
             readonly required_file_inputs: string[];
-            /** @description 入口・タスクの今の状態で、受付が断る・断りうる理由。入口・タスクの停止は断る。タスクの定義が保存のときの検査に通らない理由（Skillの停止等）は断りうる。定義の中身は、タスクを管理できる人にだけ詳しく返す */
+            /** @description 入口・タスクの今の状態で、受付が断る・断りうる理由。入口・タスクの停止は断る。タスクの定義が保存のときの検査に通らない理由（Skillの停止等）は断りうる */
             readonly run_problems: string[];
             /** @description 前に受け付けた要求と同じ（送ると前のRunを返し、新しいRunは作らない） */
             readonly duplicate: boolean;
-            readonly can_view_prompt: boolean;
-            /** @description 埋め込んだ後のプロンプト（タスクを管理できる人だけ。断る要求ではnull） */
+            /** @description 埋め込んだ後のプロンプト（断る要求ではnull） */
             readonly prompt: string | null;
         };
         TriggerPreviewError: {
@@ -6628,8 +6666,7 @@ export interface components {
          *     ファイルの項目は試せない）。
          *
          *     名前は項目の名前のまま返すため、値と誤りは名前のキーの辞書ではなく並びにする（APIクライアントのcamelCaseの
-         *     変換で名前を変えない）。埋め込んだ後のプロンプトは、タスクを管理できる人にだけ返す（連携の管理者がタスクの依頼文を
-         *     見てよいとは限らない）
+         *     変換で名前を変えない）
          */
         TriggerPreviewRequest: {
             /** @description サンプルのpayload（JSON） */
@@ -6651,7 +6688,7 @@ export interface components {
             /** @description 確かめた後の値（受付時にタスクの入力になる値） */
             value: unknown;
         };
-        /** @description 入口の受付の履歴（連携の管理者）。Runの結果・ログは返さない（タスクを管理できる人がタスクの画面で見る） */
+        /** @description 入口の受付の履歴（タスクを管理できる人）。Runの結果・ログはタスクのRunのAPIで見る */
         TriggerReceipt: {
             readonly id: string;
             readonly binding_version: number;
@@ -6683,11 +6720,7 @@ export interface components {
             readonly suspended: boolean;
             readonly inputs: components["schemas"]["TriggerTaskInput"][];
         };
-        /**
-         * @description 入口の画面に出すタスクの入力の項目。取り出しの設定に要るもの（名前・表示名・型・必須）だけを返し、説明・
-         *     選択肢・文字数の上限等のタスクの定義の中身は返さない（連携の管理者がタスクを管理できるとは限らない。
-         *     authorization.md §5.3）
-         */
+        /** @description 入口の画面に出すタスクの入力の項目（取り出しの設定に要る名前・表示名・型・必須） */
         TriggerTaskInput: {
             readonly name: string;
             readonly label: string;
@@ -9236,6 +9269,355 @@ export interface operations {
             };
         };
     };
+    app_v1_tasks_triggers_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                task: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedTriggerBindingList"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_triggers_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TriggerBindingRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["TriggerBindingRequest"];
+                "multipart/form-data": components["schemas"]["TriggerBindingRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerBindingKey"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_triggers_receipts_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                binding: string;
+                task: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedTriggerReceiptList"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_triggers_revisions_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                binding: string;
+                task: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedTriggerBindingRevisionList"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_triggers_revisions_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                binding: string;
+                number: number;
+                task: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerBindingRevision"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_triggers_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerBinding"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_triggers_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["TriggerBindingUpdateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["TriggerBindingUpdateRequest"];
+                "multipart/form-data": components["schemas"]["TriggerBindingUpdateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerBinding"];
+                };
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、他の人が版を作った） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    app_v1_tasks_triggers_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    app_v1_tasks_triggers_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedTriggerBindingUpdateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedTriggerBindingUpdateRequest"];
+                "multipart/form-data": components["schemas"]["PatchedTriggerBindingUpdateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerBinding"];
+                };
+            };
+            /** @description 他の変更と競合した（編集を始めた後に、他の人が版を作った） */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    app_v1_tasks_triggers_preview_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TriggerPreviewRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["TriggerPreviewRequest"];
+                "multipart/form-data": components["schemas"]["TriggerPreviewRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerPreview"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_triggers_resume_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerBinding"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_triggers_rotate_key_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerBindingKey"];
+                };
+            };
+        };
+    };
+    app_v1_tasks_triggers_suspend_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerBinding"];
+                };
+            };
+        };
+    };
     app_v1_tasks_retrieve: {
         parameters: {
             query?: never;
@@ -11778,342 +12160,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PaginatedTriggerBindingList"];
-                };
-            };
-        };
-    };
-    v1_trigger_bindings_create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TriggerBindingRequest"];
-                "application/x-www-form-urlencoded": components["schemas"]["TriggerBindingRequest"];
-                "multipart/form-data": components["schemas"]["TriggerBindingRequest"];
-            };
-        };
-        responses: {
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TriggerBindingKey"];
-                };
-            };
-        };
-    };
-    v1_trigger_bindings_receipts_list: {
-        parameters: {
-            query?: {
-                /** @description The pagination cursor value. */
-                cursor?: string;
-                /** @description Which field to use when ordering the results. */
-                ordering?: string;
-                /** @description Number of results to return per page. */
-                page_size?: number;
-                /** @description A search term. */
-                search?: string;
-            };
-            header?: never;
-            path: {
-                binding: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaginatedTriggerReceiptList"];
-                };
-            };
-        };
-    };
-    v1_trigger_bindings_revisions_list: {
-        parameters: {
-            query?: {
-                /** @description The pagination cursor value. */
-                cursor?: string;
-                /** @description Which field to use when ordering the results. */
-                ordering?: string;
-                /** @description Number of results to return per page. */
-                page_size?: number;
-                /** @description A search term. */
-                search?: string;
-            };
-            header?: never;
-            path: {
-                binding: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaginatedTriggerBindingRevisionList"];
-                };
-            };
-        };
-    };
-    v1_trigger_bindings_revisions_retrieve: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                binding: string;
-                number: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TriggerBindingRevision"];
-                };
-            };
-        };
-    };
-    v1_trigger_bindings_retrieve: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                uid: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TriggerBinding"];
-                };
-            };
-        };
-    };
-    v1_trigger_bindings_update: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                uid: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["TriggerBindingUpdateRequest"];
-                "application/x-www-form-urlencoded": components["schemas"]["TriggerBindingUpdateRequest"];
-                "multipart/form-data": components["schemas"]["TriggerBindingUpdateRequest"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TriggerBinding"];
-                };
-            };
-            /** @description 他の変更と競合した（編集を始めた後に、他の人が版を作った） */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    v1_trigger_bindings_destroy: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                uid: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description No response body */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    v1_trigger_bindings_partial_update: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                uid: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["PatchedTriggerBindingUpdateRequest"];
-                "application/x-www-form-urlencoded": components["schemas"]["PatchedTriggerBindingUpdateRequest"];
-                "multipart/form-data": components["schemas"]["PatchedTriggerBindingUpdateRequest"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TriggerBinding"];
-                };
-            };
-            /** @description 他の変更と競合した（編集を始めた後に、他の人が版を作った） */
-            409: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    v1_trigger_bindings_preview_create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                uid: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TriggerPreviewRequest"];
-                "application/x-www-form-urlencoded": components["schemas"]["TriggerPreviewRequest"];
-                "multipart/form-data": components["schemas"]["TriggerPreviewRequest"];
-            };
-        };
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TriggerPreview"];
-                };
-            };
-        };
-    };
-    v1_trigger_bindings_resume_create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                uid: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TriggerBinding"];
-                };
-            };
-        };
-    };
-    v1_trigger_bindings_rotate_key_create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                uid: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TriggerBindingKey"];
-                };
-            };
-        };
-    };
-    v1_trigger_bindings_suspend_create: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                uid: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TriggerBinding"];
-                };
-            };
-        };
-    };
-    v1_trigger_bindings_tasks_list: {
-        parameters: {
-            query?: {
-                /** @description The pagination cursor value. */
-                cursor?: string;
-                /** @description Which field to use when ordering the results. */
-                ordering?: string;
-                /** @description Number of results to return per page. */
-                page_size?: number;
-                /** @description A search term. */
-                search?: string;
-                suspended?: boolean;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["PaginatedTriggerTaskList"];
+                    "application/json": components["schemas"]["PaginatedTriggerBindingListList"];
                 };
             };
         };

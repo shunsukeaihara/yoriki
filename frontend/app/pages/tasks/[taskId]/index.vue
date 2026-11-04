@@ -3,7 +3,7 @@
  * タスクの詳細（design.md §11.9）。中身の編集（保存のたびに版ができる）、手動実行、実行の履歴、版の履歴、停止・再開・
  * 削除、修正チャット（design.md §11.11）。タスクの定義は管理できる人だけが見られ（authorization.md §5.3）、見られる人は
  * すべての操作ができる。
- * 入口（Webhook）と通知先の登録は連携の管理者が管理画面で行い、ここでは見るだけ・選ぶだけ
+ * 入口（Webhook）はここで作る（authorization.md §5.5）。通知先の登録は連携の管理者が管理画面で行い、ここでは選ぶだけ
  */
 import { AxiosError } from 'axios'
 import TaskForm from '~/components/task/TaskForm.vue'
@@ -13,7 +13,6 @@ const api = useAPI()
 const toast = useToast()
 const confirm = useConfirmDialog()
 const { t } = useI18n()
-const { hasAny } = usePermission()
 const taskId = route.params.taskId as string
 
 const { data: task, error } = await useAsyncData(`task-${taskId}`, () => api.tasks(taskId).get())
@@ -22,13 +21,20 @@ if (error.value) throw createError(error.value) // 404 / 403 はエラー画面�
 // システムのタスクは管理画面の一覧から開く
 const listPath = computed(() => (task.value?.scope === TaskScope.SYSTEM ? '/manage/system_tasks' : '/tasks'))
 
+// 個人のタスクにはWebhookの入口を付けない（authorization.md §5.4）
 const tabs = computed(() => [
   { label: t('設定'), value: 'settings', slot: 'settings' as const },
+  ...(task.value?.scope === TaskScope.PERSONAL
+    ? []
+    : [{ label: t('入口'), value: 'triggers', slot: 'triggers' as const }]),
   { label: t('実行の履歴'), value: 'runs', slot: 'runs' as const },
   { label: t('版の履歴'), value: 'revisions', slot: 'revisions' as const },
 ])
-const tab = ref('settings')
+// 入口の画面から戻るときは ?tab=triggers で開く
+const queryTab = route.query.tab as string | undefined
+const tab = ref(tabs.value.some((item) => item.value === queryTab) ? queryTab! : 'settings')
 const runsReloadKey = ref(0)
+const triggersReloadKey = ref(0)
 const revisionsReloadKey = ref(0)
 
 const formRef = ref<InstanceType<typeof TaskForm> | null>(null)
@@ -75,6 +81,17 @@ const onRunConflicted = async () => {
   conflicted.value = true
   await reloadAll()
 }
+
+// 入口を足したら、タスクの入口の要約（警告・一覧の表示）も読み直す。編集中のフォームは task の変更では書き換わらない
+const onTriggersChanged = async () => {
+  try {
+    task.value = await api.tasks(taskId).get()
+  } catch (err) {
+    toast.add({ title: t('エラー'), description: makeErrorMsg(err), color: 'error' })
+  }
+}
+// 鍵の作り直しを確かめる入口（authorization.md §5.5）
+const triggersToRotate = computed(() => (task.value?.triggers ?? []).filter((item) => item.keyNeedsRotation))
 
 const onStarted = () => {
   tab.value = 'runs'
@@ -244,24 +261,21 @@ const onDelete = async () => {
           "
           :description="task.problems.join('、')"
         />
-        <div v-if="task.triggers.length" class="grid gap-1 rounded-md border border-default p-3 text-sm">
-          <p class="font-medium">{{ $t('入口') }}</p>
-          <div v-for="trigger in task.triggers" :key="trigger.id" class="flex flex-wrap items-center gap-2">
-            <UIcon name="i-lucide-webhook" />
-            <!-- 連携の管理者には、入口の管理画面へのリンクにする -->
-            <NuxtLink
-              v-if="hasAny(ManagePagePermissions.TRIGGER_BINDING)"
-              :to="`/manage/trigger_bindings/${trigger.id}`"
-              class="text-primary"
-            >
-              {{ trigger.name }}
-            </NuxtLink>
-            <span v-else>{{ trigger.name }}</span>
-            <code class="text-xs text-muted">{{ trigger.keyPrefix }}…</code>
-            <UBadge v-if="trigger.suspended" color="error" variant="subtle" size="sm">{{ $t('停止中') }}</UBadge>
-          </div>
-          <p class="text-xs text-muted">{{ $t('入口は連携の管理者が管理画面で作り、鍵を管理します') }}</p>
-        </div>
+        <UAlert
+          v-if="triggersToRotate.length"
+          color="warning"
+          variant="subtle"
+          icon="i-lucide-key-round"
+          :title="$t('鍵の作り直しを確かめてください')"
+          :description="
+            $t('鍵を作った人が今はこのタスクを管理できない、または作った人の記録がない入口があります：{names}', {
+              names: triggersToRotate.map((item) => item.name).join('、'),
+            })
+          "
+          :actions="[
+            { label: $t('入口を見る'), color: 'warning', variant: 'outline', onClick: () => (tab = 'triggers') },
+          ]"
+        />
 
         <div v-if="task.scope !== TaskScope.SYSTEM" class="grid gap-1 rounded-md border border-default p-3 text-sm">
           <DSwitch
@@ -306,6 +320,12 @@ const onDelete = async () => {
                   {{ $t('保存') }}
                 </DBtn>
               </div>
+            </div>
+          </template>
+
+          <template #triggers>
+            <div class="pt-4">
+              <TriggerBindingList v-model:reload-key="triggersReloadKey" :task="task" @changed="onTriggersChanged" />
             </div>
           </template>
 

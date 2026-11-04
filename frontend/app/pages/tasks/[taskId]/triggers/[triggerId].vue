@@ -1,24 +1,24 @@
 <script setup lang="ts">
+/**
+ * タスクの入口（Webhook）の画面（タスクを管理できる人。authorization.md §5.5）。受け取り方の編集（保存のたびに版）、
+ * サンプルのpayloadで試す、受付の履歴、版の履歴、停止・鍵の作り直し・削除
+ */
 import { AxiosError } from 'axios'
 import TriggerBindingForm from '~/components/trigger-binding/TriggerBindingForm.vue'
 
-const emit = defineEmits<{ changed: [] }>()
 const route = useRoute()
-const router = useRouter()
 const api = useAPI()
 const toast = useToast()
 const confirm = useConfirmDialog()
 const { t } = useI18n()
-const { hasPermission } = usePermission()
-const bindingId = route.params.bindingId as string
+const taskId = route.params.taskId as string
+const triggerId = route.params.triggerId as string
+const trigger = () => api.tasks(taskId).triggers(triggerId)
 
-const {
-  data: binding,
-  error,
-  refresh,
-} = await useAsyncData(`trigger-binding-${bindingId}`, () => api.manage.triggerBindings(bindingId).get())
+const { data: binding, error, refresh } = await useAsyncData(`task-trigger-${triggerId}`, () => trigger().get())
 if (error.value) throw createError(error.value) // 404 / 403 はエラー画面にする
 
+const backPath = `/tasks/${taskId}?tab=triggers`
 const formRef = ref<InstanceType<typeof TriggerBindingForm> | null>(null)
 const tab = ref('settings')
 const revisionsReloadKey = ref(0)
@@ -29,17 +29,12 @@ const conflicted = ref(false)
 const issuedKey = ref<string | null>(null)
 const busy = ref(false)
 
-// 編集・停止・鍵の作り直しはサーバー側でも権限を確認し、なければ403になる
-const canChange = computed(() => hasPermission(PermissionCode.CHANGE_TRIGGER_BINDING))
 // 試すのは、編集中の受け取り方（保存していないもの）。フォームがまだなければ今の版（送らない項目はサーバーが今の版を使う）
 const previewSettings = computed(() => formRef.value?.settings ?? { eventIdPath: binding.value?.eventIdPath ?? '' })
-
-const close = () => router.push('/manage/trigger_bindings')
 
 const onUpdated = () => {
   conflicted.value = false
   revisionsReloadKey.value = Date.now()
-  emit('changed')
 }
 const onFailed = (err: unknown) => {
   conflicted.value = err instanceof AxiosError && err.response?.status === 409
@@ -60,7 +55,6 @@ const run = async (fn: () => Promise<void>) => {
   busy.value = true
   try {
     await fn()
-    emit('changed')
   } catch (err) {
     toast.add({ title: t('エラー'), description: makeErrorMsg(err), color: 'error' })
   } finally {
@@ -77,13 +71,13 @@ const onSuspend = async () => {
   })
   if (!ok) return
   await run(async () => {
-    binding.value = await api.manage.triggerBindings(bindingId).suspend()
+    binding.value = await trigger().suspend()
     toast.add({ title: t('停止しました'), color: 'success' })
   })
 }
 const onResume = () =>
   run(async () => {
-    binding.value = await api.manage.triggerBindings(bindingId).resume()
+    binding.value = await trigger().resume()
     toast.add({ title: t('停止を解きました'), color: 'success' })
   })
 
@@ -95,7 +89,7 @@ const onRotate = async () => {
   })
   if (!ok) return
   await run(async () => {
-    const { key, ...rest } = await api.manage.triggerBindings(bindingId).rotateKey()
+    const { key, ...rest } = await trigger().rotateKey()
     issuedKey.value = key
     binding.value = rest
     toast.add({ title: t('鍵を作り直しました'), color: 'success' })
@@ -113,10 +107,9 @@ const onDelete = async () => {
   })
   if (!ok) return
   try {
-    await api.manage.triggerBindings(bindingId).delete()
+    await trigger().delete()
     toast.add({ title: t('削除しました'), color: 'success' })
-    emit('changed')
-    close()
+    await navigateTo(backPath)
   } catch (err) {
     toast.add({ title: t('エラー'), description: makeErrorMsg(err), color: 'error' })
   }
@@ -131,15 +124,35 @@ const tabs = computed(() => [
 </script>
 
 <template>
-  <DDrawer
-    :open="true"
-    :title="binding?.name ?? $t('入口')"
-    :description="binding ? $t('現在の版：{number}', { number: binding.version ?? 0 }) : undefined"
-    :ui="{ content: 'sm:max-w-3xl' }"
-    @update:open="(open) => !open && close()"
-  >
-    <template #content>
-      <div v-if="binding" class="grid gap-4">
+  <UDashboardPanel :id="`task-trigger-${triggerId}`">
+    <template #header>
+      <UDashboardNavbar :title="binding?.name ?? $t('入口')">
+        <template #leading>
+          <DBtn
+            :to="backPath"
+            color="neutral"
+            variant="ghost"
+            icon="i-lucide-arrow-left"
+            :aria-label="$t('タスクへ')"
+          />
+        </template>
+        <template #right>
+          <template v-if="binding">
+            <DBtn v-if="binding.suspended" color="neutral" variant="outline" :loading="busy" @click="onResume">
+              {{ $t('停止を解く') }}
+            </DBtn>
+            <DBtn v-else color="neutral" variant="outline" :loading="busy" @click="onSuspend">{{ $t('停止') }}</DBtn>
+            <DBtn color="neutral" variant="outline" :loading="busy" @click="onRotate">{{ $t('鍵を作り直す') }}</DBtn>
+            <DBtn color="error" variant="ghost" icon="i-lucide-trash-2" :aria-label="$t('削除')" @click="onDelete">
+              <span class="hidden sm:inline">{{ $t('削除') }}</span>
+            </DBtn>
+          </template>
+        </template>
+      </UDashboardNavbar>
+    </template>
+
+    <template #body>
+      <UContainer v-if="binding" class="grid max-w-4xl min-w-0 gap-4">
         <UAlert
           v-if="binding.suspended"
           color="error"
@@ -147,6 +160,7 @@ const tabs = computed(() => [
           icon="i-lucide-pause"
           :title="$t('停止中です。新しい要求を受け付けません')"
         />
+        <TriggerBindingKeyWarning v-if="binding.keyNeedsRotation" :created-by="binding.keyCreatedBy" />
         <UAlert
           v-if="conflicted"
           color="warning"
@@ -166,12 +180,7 @@ const tabs = computed(() => [
         <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
           <dt class="text-muted">{{ $t('起動するタスク') }}</dt>
           <dd>
-            {{ binding.taskInfo.name }}
-            <span class="text-xs text-muted">
-              （{{ binding.taskInfo.scopeDisplay
-              }}<template v-if="binding.taskInfo.department">・{{ binding.taskInfo.department.name }}</template
-              >）
-            </span>
+            <NuxtLink :to="backPath" class="text-primary">{{ binding.taskInfo.name }}</NuxtLink>
             <UBadge v-if="binding.taskInfo.suspended" color="error" variant="subtle" size="sm" class="ml-1">
               {{ $t('タスクは停止中') }}
             </UBadge>
@@ -185,54 +194,48 @@ const tabs = computed(() => [
             <code class="text-xs">Authorization: Bearer {{ binding.keyPrefix }}…</code>
             <span v-if="binding.keyRotated" class="ml-2 text-xs text-muted">
               {{ $t('鍵を作った日時：{date}', { date: formatDatetime(binding.keyRotated) }) }}
+              <template v-if="binding.keyCreatedBy">
+                （{{ binding.keyCreatedBy.displayName || binding.keyCreatedBy.email }}）
+              </template>
             </span>
           </dd>
         </dl>
         <UTabs v-model="tab" :items="tabs" variant="link" :unmount-on-hide="false">
           <template #settings>
-            <div class="pt-4">
+            <div class="grid gap-4 pt-4">
               <TriggerBindingForm ref="formRef" v-model="binding" @updated="onUpdated" @failed="onFailed" />
+              <div class="flex justify-end border-t border-default pt-4">
+                <DBtn :disabled="!formRef?.canPost" :loading="formRef?.loading" @click="formRef?.onSubmit()">
+                  {{ $t('更新') }}
+                </DBtn>
+              </div>
             </div>
           </template>
           <template #preview>
             <div class="pt-4">
-              <TriggerBindingPreview :binding-id="bindingId" :settings="previewSettings" />
+              <TriggerBindingPreview :task-id="taskId" :binding-id="triggerId" :settings="previewSettings" />
             </div>
           </template>
           <template #receipts>
             <div class="pt-4">
-              <TriggerBindingReceiptList v-model:reload-key="receiptsReloadKey" :binding-id="bindingId" />
+              <TriggerBindingReceiptList
+                v-model:reload-key="receiptsReloadKey"
+                :task-id="taskId"
+                :binding-id="triggerId"
+              />
             </div>
           </template>
           <template #revisions>
             <div class="pt-4">
-              <TriggerBindingRevisionList v-model:reload-key="revisionsReloadKey" :binding-id="bindingId" />
+              <TriggerBindingRevisionList
+                v-model:reload-key="revisionsReloadKey"
+                :task-id="taskId"
+                :binding-id="triggerId"
+              />
             </div>
           </template>
         </UTabs>
-      </div>
+      </UContainer>
     </template>
-    <template #footer>
-      <!-- 削除はサーバー側でも権限を確認し、権限がなければ403になる -->
-      <DBtn v-if="hasPermission(PermissionCode.DELETE_TRIGGER_BINDING)" color="error" variant="ghost" @click="onDelete">
-        {{ $t('削除') }}
-      </DBtn>
-      <template v-if="canChange && binding">
-        <DBtn v-if="binding.suspended" color="neutral" variant="outline" :loading="busy" @click="onResume">
-          {{ $t('停止を解く') }}
-        </DBtn>
-        <DBtn v-else color="neutral" variant="outline" :loading="busy" @click="onSuspend">{{ $t('停止') }}</DBtn>
-        <DBtn color="neutral" variant="outline" :loading="busy" @click="onRotate">{{ $t('鍵を作り直す') }}</DBtn>
-      </template>
-      <div class="flex-1" />
-      <DBtn
-        v-if="canChange && tab === 'settings'"
-        :disabled="!formRef?.canPost"
-        :loading="formRef?.loading"
-        @click="formRef?.onSubmit()"
-      >
-        {{ $t('更新') }}
-      </DBtn>
-    </template>
-  </DDrawer>
+  </UDashboardPanel>
 </template>

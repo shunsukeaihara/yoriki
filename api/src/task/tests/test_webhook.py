@@ -2,14 +2,16 @@
 payloadのファイル化、状態を確かめる口"""
 
 import hashlib
+import importlib
 import io
 import json
 from unittest import mock
 from urllib.parse import urlencode
 
 import pytest
+from django.apps import apps
+from django.contrib.auth.models import Group, Permission
 from django.core.files.uploadedfile import SimpleUploadedFile
-from rest_framework.exceptions import ValidationError
 
 from artifact.models import ArtifactKind, BlobObject
 from artifact.tests.test_api import body_of
@@ -30,24 +32,24 @@ from task.models import (
 )
 from task.serializers import TriggerBindingSerializer
 from task.webhook import PayloadError, extract, parse_path, parse_payload
-from user.factories import UserFactory, grant
-from user.models import SYSTEM_USERNAME, User, system_user
+from user.factories import DepartmentFactory, DepartmentMembershipFactory, UserFactory, grant
+from user.models import SYSTEM_USERNAME, DepartmentMembership, User, system_user
+from utils.exceptions import Conflict
 from utils.permissions import AppPermission
 
 pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("default_runtime")]
 
-BINDINGS = "/api/v1/trigger_bindings/"
+BINDING_LIST = "/api/v1/trigger_bindings/"
 INPUTS = [
     {"name": "vendor", "label": "取引先", "type": "string", "required": True},
     {"name": "amount", "label": "金額", "type": "integer"},
 ]
-BINDING_PERMS = [f"task.{kind}_triggerbinding" for kind in ("view", "add", "change", "delete")]
 
 
-@pytest.fixture(name="integrator")
-def fixture_integrator(db) -> User:
-    """連携の管理者（入口のModelのpermissionだけ。タスクを管理する権限は持たない）"""
-    return grant(UserFactory.create(), *BINDING_PERMS)
+@pytest.fixture(name="manager")
+def fixture_manager(db) -> User:
+    """全社のタスクを管理できる人（入口のためのpermissionはない）"""
+    return grant(UserFactory.create(), AppPermission.MANAGE_COMPANY_TASKS)
 
 
 def notified(scope: TaskScope = TaskScope.COMPANY, **kwargs) -> dict:
@@ -69,17 +71,20 @@ def fixture_task(db) -> TaskDefinition:
     )
 
 
+def _bindings(task: TaskDefinition) -> str:
+    return f"/api/app/v1/tasks/{task.uid}/triggers/"
+
+
 def _create_binding(api_client, user, task, **data):
     api_client.force_login(user)
-    body = {"task": task.uid, "name": "経費SaaS", **data}
-    return api_client.post(BINDINGS, body, format="json")
+    return api_client.post(_bindings(task), {"name": "経費SaaS", **data}, format="json")
 
 
 @pytest.fixture(name="webhook")
-def fixture_webhook(api_client, integrator, task) -> tuple[TriggerBinding, str]:
+def fixture_webhook(api_client, manager, task) -> tuple[TriggerBinding, str]:
     res = _create_binding(
         api_client,
-        integrator,
+        manager,
         task,
         event_id_path="$.event.id",
         inputs=[{"name": "vendor", "path": "$.data.vendor_name"}, {"name": "amount", "path": "$.data['total']"}],
@@ -102,63 +107,232 @@ def _payload(event_id="evt-1", vendor="ACME", total=12000):
     return {"event": {"id": event_id}, "data": {"vendor_name": vendor, "total": total, "memo": "前回と同じ"}}
 
 
-# --- 入口の管理（連携の管理者） ---
+# --- 入口の管理（タスクを管理できる人） ---
 
 
-def test_creating_a_webhook_needs_the_permission_and_shows_the_key_once(api_client, app_user, integrator, task):
-    assert _create_binding(api_client, app_user, task).status_code == 403
+def test_creating_a_webhook_needs_task_management_and_shows_the_key_once(api_client, app_user, manager, task):
+    # タスクを管理できない人には、タスクがあるかどうかも見せない
+    assert _create_binding(api_client, app_user, task).status_code == 404
+    viewer = grant(UserFactory.create(), "task.view_triggerbinding", "task.add_triggerbinding")
+    assert _create_binding(api_client, viewer, task).status_code == 404
 
-    res = _create_binding(api_client, integrator, task)
+    res = _create_binding(api_client, manager, task)
     assert res.status_code == 201, res.json()
     data = res.json()
     assert data["key"].startswith("yrk_wh_")
     assert data["key"].startswith(data["key_prefix"])
     assert data["url"] == f"/api/hooks/v1/tasks/{task.uid}/"
+    assert data["task"] == task.uid
     assert data["version"] == 1
     assert data["max_payload_bytes"] == 1024 * 1024
     assert data["task_info"]["inputs"][0]["name"] == "vendor"
-    # 取り出しの設定に要るものだけ（説明・選択肢等のタスクの定義の中身は返さない）
-    assert set(data["task_info"]["inputs"][0]) == {"name", "label", "type", "required"}
-    candidates = api_client.get(f"{BINDINGS}tasks/").json()["results"]
-    assert all(set(i) == {"name", "label", "type", "required"} for c in candidates for i in c["inputs"])
+    assert data["key_created_by"]["id"] == manager.uid
+    assert data["key_needs_rotation"] is False
     # 鍵は保存せず、一覧・詳細にも出さない
     binding = TriggerBinding.objects.get(uid=data["id"])
+    assert binding.key_created_by == manager
     assert data["key"] not in (binding.key_hash, binding.key_prefix)
-    assert "key" not in api_client.get(f"{BINDINGS}{data['id']}/").json()
+    assert "key" not in api_client.get(f"{_bindings(task)}{data['id']}/").json()
+    assert "key" not in api_client.get(_bindings(task)).json()["results"][0]
 
 
-def test_a_task_has_at_most_one_webhook_and_personal_tasks_have_none(api_client, integrator, task):
-    assert _create_binding(api_client, integrator, task).status_code == 201
-    res = _create_binding(api_client, integrator, task)
+def test_department_task_managers_handle_only_webhooks_of_their_department(api_client):
+    department, other = DepartmentFactory.create(), DepartmentFactory.create()
+    user = grant(UserFactory.create(), AppPermission.MANAGE_DEPARTMENT_TASKS)
+    DepartmentMembershipFactory.create(user=user, department=department)
+    mine = TaskDefinitionFactory.create(**notified(), scope=TaskScope.DEPARTMENT, department=department, name="自部門")
+    theirs = TaskDefinitionFactory.create(**notified(), scope=TaskScope.DEPARTMENT, department=other, name="他部門")
+    assert _create_binding(api_client, user, mine).status_code == 201
+    assert _create_binding(api_client, user, theirs).status_code == 404
+    binding = TriggerBinding.objects.get(task=mine)
+    # 別のタスクのURLからは、入口も版も受付も見えない
+    wrong = _bindings(TaskDefinitionFactory.create(scope=TaskScope.PERSONAL, owner=user))
+    assert api_client.get(f"{wrong}{binding.uid}/").status_code == 404
+    assert api_client.get(f"{wrong}{binding.uid}/revisions/").status_code == 404
+    assert api_client.get(f"{wrong}{binding.uid}/receipts/").status_code == 404
+    # 部門を離れたら、作った入口も触れない
+    DepartmentMembership.objects.filter(user=user).delete()
+    user = User.objects.get(pk=user.pk)
+    api_client.force_login(user)
+    assert api_client.get(f"{_bindings(mine)}{binding.uid}/").status_code == 404
+    assert api_client.post(f"{_bindings(mine)}{binding.uid}/rotate_key/").status_code == 404
+
+
+def test_a_task_can_have_several_webhooks_each_with_its_own_settings(api_client, manager, task):
+    first = _create_binding(api_client, manager, task, name="経費SaaS", event_id_path="$.id").json()
+    second = _create_binding(api_client, manager, task, name="基幹", event_id_path="$.no").json()
+    assert first["id"] != second["id"]
+    assert first["key"] != second["key"]
+    assert first["url"] == second["url"]  # どの入口かは鍵で決まる
+    triggers = api_client.get(f"/api/app/v1/tasks/{task.uid}/").json()["triggers"]
+    assert {t["name"] for t in triggers} == {"経費SaaS", "基幹"}
+    api_client.logout()
+
+    def event(number: str) -> dict:
+        return {"id": number, "no": number, "inputs": {"vendor": "ACME"}}
+
+    # 重複は入口ごとに判定する（入口をまたぐと、別の出来事を同じと誤る）
+    one = _send(api_client, task, first["key"], event("1"))
+    other = _send(api_client, task, second["key"], event("1"))
+    assert (one.status_code, other.status_code) == (202, 202)
+    assert one.json()["run_id"] != other.json()["run_id"]
+    assert _send(api_client, task, first["key"], event("1")).status_code == 200
+    # 送り元に見えるのは、自分の入口が受け付けたRunだけ
+    own = f"{_hook(task)}runs/{other.json()['run_id']}/"
+    assert api_client.get(own, HTTP_AUTHORIZATION=f"Bearer {second['key']}").status_code == 200
+    assert api_client.get(own, HTTP_AUTHORIZATION=f"Bearer {first['key']}").status_code == 404
+    # 1つを消しても、ほかの入口は動く
+    api_client.force_login(manager)
+    assert api_client.delete(f"{_bindings(task)}{first['id']}/").status_code == 204
+    api_client.logout()
+    assert _send(api_client, task, first["key"], event("2")).status_code == 401
+    assert _send(api_client, task, second["key"], event("2")).status_code == 202
+
+
+def test_personal_tasks_have_no_webhook(api_client, app_user):
+    personal = TaskDefinitionFactory.create(scope=TaskScope.PERSONAL, owner=app_user)
+    res = _create_binding(api_client, app_user, personal)
     assert res.status_code == 400
     assert "task" in res.json()
 
-    personal = TaskDefinitionFactory.create(scope=TaskScope.PERSONAL)
-    assert _create_binding(api_client, integrator, personal).status_code == 400
 
-    # 候補のタスクには、入口のあるタスクと個人のタスクを出さない
-    other = TaskDefinitionFactory.create(scope=TaskScope.SYSTEM, name="突合")
-    names = [t["name"] for t in api_client.get(f"{BINDINGS}tasks/").json()["results"]]
-    assert names == [other.name]
+def test_system_task_managers_create_webhooks_on_the_same_screen(api_client):
+    user = grant(UserFactory.create(), AppPermission.MANAGE_SYSTEM_TASKS)
+    task = TaskDefinitionFactory.create(**notified(TaskScope.SYSTEM), scope=TaskScope.SYSTEM, name="突合")
+    assert _create_binding(api_client, user, task).status_code == 201
 
 
-def test_the_mapping_must_name_task_inputs_and_valid_paths(api_client, integrator, task):
-    res = _create_binding(api_client, integrator, task, inputs=[{"name": "unknown", "path": "$.a"}])
+# --- 発行済みの入口の一覧（見るだけ） ---
+
+
+def test_the_list_shows_only_what_is_decided_and_cannot_change_anything(api_client, app_user, task, webhook):
+    binding, _key = webhook
+    api_client.force_login(app_user)
+    assert api_client.get(BINDING_LIST).status_code == 403
+    # 以前の入口の変更のpermissionだけでは、一覧も見られない
+    api_client.force_login(grant(UserFactory.create(), "task.change_triggerbinding"))
+    assert api_client.get(BINDING_LIST).status_code == 403
+
+    viewer = grant(UserFactory.create(), "task.view_triggerbinding")
+    api_client.force_login(viewer)
+    rows = api_client.get(BINDING_LIST).json()["results"]
+    assert [row["id"] for row in rows] == [binding.uid]
+    assert set(rows[0]) == {
+        "id",
+        "name",
+        "task_info",
+        "key_prefix",
+        "suspended",
+        "created_by",
+        "created",
+        "key_created_by",
+        "key_rotated",
+        "key_needs_rotation",
+    }
+    # タスクの定義（入力の項目等）とタスクのIDは返さない
+    assert set(rows[0]["task_info"]) == {"name", "scope", "scope_display", "department"}
+    # 検索と絞り込み
+    assert api_client.get(BINDING_LIST, {"search": "請求書"}).json()["results"]
+    assert not api_client.get(BINDING_LIST, {"search": "ない名前"}).json()["results"]
+    assert not api_client.get(BINDING_LIST, {"suspended": "true"}).json()["results"]
+    # 見るだけ（作成・詳細・変更・停止・鍵の作り直し・削除の口がない）。タスクを管理できない人は設定のAPIも読めない
+    everything = grant(viewer, *(f"task.{kind}_triggerbinding" for kind in ("add", "change", "delete")))
+    api_client.force_login(everything)
+    assert api_client.post(BINDING_LIST, {"name": "x"}, format="json").status_code in (403, 405)
+    url = f"{BINDING_LIST}{binding.uid}/"
+    assert api_client.get(url).status_code == 404
+    assert api_client.patch(url, {"name": "x"}, format="json").status_code == 404
+    assert api_client.delete(url).status_code == 404
+    assert api_client.post(f"{url}rotate_key/").status_code == 404
+    assert api_client.post(f"{url}preview/", {"sample": "{}"}, format="json").status_code == 404
+    assert api_client.get(f"{url}receipts/").status_code == 404
+    assert api_client.get(f"{_bindings(task)}{binding.uid}/").status_code == 404
+    assert api_client.get(f"/api/app/v1/tasks/{task.uid}/").status_code == 404
+    # 消した入口は一覧に出ない
+    TriggerBinding.objects.filter(pk=binding.pk).update(deleted=True)
+    assert not api_client.get(BINDING_LIST).json()["results"]
+
+
+def test_a_warning_appears_when_the_key_creator_loses_the_task(api_client, manager, task, webhook):
+    binding, _key = webhook
+    viewer = grant(UserFactory.create(), "task.view_triggerbinding")
+
+    def warnings() -> tuple[bool, bool]:
+        api_client.force_login(viewer)
+        listed = api_client.get(BINDING_LIST).json()["results"][0]["key_needs_rotation"]
+        api_client.force_login(other_manager)
+        shown = api_client.get(f"/api/app/v1/tasks/{task.uid}/").json()["triggers"][0]["key_needs_rotation"]
+        assert api_client.get(f"{_bindings(task)}{binding.uid}/").json()["key_needs_rotation"] is shown
+        return listed, shown
+
+    other_manager = grant(UserFactory.create(), AppPermission.MANAGE_COMPANY_TASKS)
+    assert warnings() == (False, False)
+
+    # 鍵を作った人がタスクを管理できなくなると、警告を出す（止めない）
+    manager.user_permissions.clear()
+    assert warnings() == (True, True)
+    binding.refresh_from_db()
+    assert binding.in_service()
+    # 管理できる人が鍵を作り直すと消える
+    api_client.force_login(other_manager)
+    assert api_client.post(f"{_bindings(task)}{binding.uid}/rotate_key/").status_code == 200
+    binding.refresh_from_db()
+    assert binding.key_created_by == other_manager
+    assert warnings() == (False, False)
+    # アカウントを止めた人も管理できない
+    User.objects.filter(pk=other_manager.pk).update(is_active=False)
+    binding.refresh_from_db()
+    assert binding.key_needs_rotation is True
+
+
+def test_a_key_of_unknown_origin_needs_rotation(api_client, manager, task, webhook):
+    """この項目を足す前に作った鍵は、誰の手元にあるか分からないので、鍵を作り直すまで警告を出す"""
+    binding, _key = webhook
+    TriggerBinding.objects.filter(pk=binding.pk).update(key_created_by=None)
+    api_client.force_login(manager)
+    url = f"{_bindings(task)}{binding.uid}/"
+    assert api_client.get(url).json()["key_needs_rotation"] is True
+    assert api_client.post(f"{url}rotate_key/").json()["key_needs_rotation"] is False
+
+
+def test_the_list_does_not_repeat_permission_queries_for_the_same_key_creator(
+    api_client, manager, task, django_assert_max_num_queries
+):
+    for number in range(5):
+        assert _create_binding(api_client, manager, task, name=f"入口{number}").status_code == 201
+    api_client.force_login(grant(UserFactory.create(), "task.view_triggerbinding"))
+    with django_assert_max_num_queries(12):
+        assert len(api_client.get(BINDING_LIST).json()["results"]) == 5
+
+
+def test_the_group_of_integration_admins_only_views_webhooks():
+    group, _created = Group.objects.get_or_create(name="連携の管理者")
+    codes = [f"{kind}_triggerbinding" for kind in ("view", "add", "change", "delete")]
+    group.permissions.set(Permission.objects.filter(content_type__app_label="task", codename__in=codes))
+    migration = importlib.import_module("task.migrations.0009_trigger_key_created_by")
+    migration.remove_permissions(apps, None)
+    assert list(group.permissions.values_list("codename", flat=True)) == ["view_triggerbinding"]
+    migration.restore_permissions(apps, None)
+    assert group.permissions.count() == 4
+
+
+def test_the_mapping_must_name_task_inputs_and_valid_paths(api_client, manager, task):
+    res = _create_binding(api_client, manager, task, inputs=[{"name": "unknown", "path": "$.a"}])
     assert res.status_code == 400
     assert "unknown" in str(res.json()["inputs"])
 
-    res = _create_binding(api_client, integrator, task, inputs=[{"name": "vendor", "path": "data.vendor"}])
+    res = _create_binding(api_client, manager, task, inputs=[{"name": "vendor", "path": "data.vendor"}])
     assert res.status_code == 400
-    res = _create_binding(api_client, integrator, task, event_id_path="$.event[")
+    res = _create_binding(api_client, manager, task, event_id_path="$.event[")
     assert res.status_code == 400
-    res = _create_binding(api_client, integrator, task, max_payload_bytes=11 * 1024 * 1024)
+    res = _create_binding(api_client, manager, task, max_payload_bytes=11 * 1024 * 1024)
     assert res.status_code == 400
 
 
-def test_saving_makes_a_new_version_and_detects_conflicts(api_client, integrator, webhook):
+def test_saving_makes_a_new_version_and_detects_conflicts(api_client, manager, webhook):
     binding, _key = webhook
-    api_client.force_login(integrator)
-    url = f"{BINDINGS}{binding.uid}/"
+    api_client.force_login(manager)
+    url = f"{_bindings(binding.task)}{binding.uid}/"
     res = api_client.patch(url, {"version": 1, "max_payload_bytes": 2048}, format="json")
     assert res.status_code == 200, res.json()
     assert (res.json()["version"], res.json()["max_payload_bytes"], res.json()["event_id_path"]) == (
@@ -178,15 +352,15 @@ def test_saving_makes_a_new_version_and_detects_conflicts(api_client, integrator
 
 def _preview(api_client, binding, sample, **data):
     body = {"sample": sample if isinstance(sample, str) else json.dumps(sample), **data}
-    return api_client.post(f"{BINDINGS}{binding.uid}/preview/", body, format="json")
+    return api_client.post(f"{_bindings(binding.task)}{binding.uid}/preview/", body, format="json")
 
 
-def test_preview_extracts_with_unsaved_settings_and_saves_nothing(api_client, app_user, integrator, webhook):
+def test_preview_extracts_with_unsaved_settings_and_saves_nothing(api_client, app_user, manager, webhook):
     binding, _key = webhook
     api_client.force_login(app_user)
-    assert _preview(api_client, binding, _payload()).status_code == 403
+    assert _preview(api_client, binding, _payload()).status_code == 404
 
-    api_client.force_login(integrator)
+    api_client.force_login(manager)
     res = _preview(
         api_client,
         binding,
@@ -205,8 +379,7 @@ def test_preview_extracts_with_unsaved_settings_and_saves_nothing(api_client, ap
     # フォームの値のように文字で届いた整数は、受付と同じく読み替える
     assert body["values"] == [{"name": "vendor", "value": "ACME"}, {"name": "amount", "value": 12000}]
     assert body["input_errors"] == []
-    # 連携の管理者がタスクを管理できなければ、タスクの依頼文は返さない
-    assert (body["can_view_prompt"], body["prompt"]) == (False, None)
+    assert "ACME" in body["prompt"]
     # 試すだけで、版も受付もRunも作らない
     binding.refresh_from_db()
     assert binding.current_revision.event_id_path == "$.event.id"
@@ -215,37 +388,36 @@ def test_preview_extracts_with_unsaved_settings_and_saves_nothing(api_client, ap
     assert not Run.objects.exists()
 
 
-def test_preview_shows_the_prompt_to_task_managers(api_client, integrator, webhook):
+def test_preview_shows_the_prompt(api_client, manager, webhook):
     binding, _key = webhook
-    api_client.force_login(grant(integrator, AppPermission.MANAGE_COMPANY_TASKS))
+    api_client.force_login(manager)
     res = _preview(
         api_client, binding, _payload(vendor="ACME"), inputs=[{"name": "vendor", "path": "$.data.vendor_name"}]
     )
     body = res.json()
-    assert body["can_view_prompt"] is True
     # 受付と同じく、値は信頼しない内容として囲んで埋め込む
     assert "ACME" in body["prompt"]
     assert body["prompt"].endswith(" の請求書を確認してください。")
     assert body["prompt"] != "ACME の請求書を確認してください。"
 
 
-def test_preview_reports_what_the_hook_would_refuse(api_client, integrator, webhook):
+def test_preview_reports_what_the_hook_would_refuse(api_client, manager, webhook):
     binding, _key = webhook
-    api_client.force_login(integrator)
+    api_client.force_login(manager)
     res = _preview(api_client, binding, "{not json")
     assert res.status_code == 200
     assert (res.json()["outcome"], res.json()["values"]) == ("refused", [])
     assert res.json()["format_error"]
     # 要求の本文のJSONで \\ud800 とエスケープした、対にならないサロゲートは、サンプルの欄の誤り（400。500にしない）
     res = api_client.post(
-        f"{BINDINGS}{binding.uid}/preview/",
+        f"{_bindings(binding.task)}{binding.uid}/preview/",
         json.dumps({"sample": '{"data": {"vendor_name": "\ud800"}}'}),
         content_type="application/json",
     )
     assert (res.status_code, list(res.json())) == (400, ["sample"])
 
     # イベントIDだけが使えなくても、受付は断る（プロンプトも作らない）
-    api_client.force_login(grant(integrator, AppPermission.MANAGE_COMPANY_TASKS))
+    api_client.force_login(manager)
     res = _preview(api_client, binding, {"event": {"id": [1]}, "data": {"vendor_name": "ACME"}})
     assert (res.json()["outcome"], res.json()["input_errors"], res.json()["prompt"]) == ("refused", [], None)
     assert res.json()["event_id_error"]
@@ -279,9 +451,9 @@ def test_preview_reports_what_the_hook_would_refuse(api_client, integrator, webh
     assert (res.status_code, list(res.json())) == (400, ["inputs"])
 
 
-def test_preview_reflects_the_state_of_the_webhook_and_the_task(api_client, integrator, task, webhook):
+def test_preview_reflects_the_state_of_the_webhook_and_the_task(api_client, manager, task, webhook):
     binding, _key = webhook
-    api_client.force_login(integrator)
+    api_client.force_login(manager)
     sample = _payload()
     # 入口・タスクの停止は、受付と同じく断る
     TriggerBinding.objects.filter(pk=binding.pk).update(suspended=True)
@@ -294,15 +466,8 @@ def test_preview_reflects_the_state_of_the_webhook_and_the_task(api_client, inte
     TaskDefinition.objects.filter(pk=task.pk).update(suspended=False)
     assert _preview(api_client, binding, sample).json()["outcome"] == "accepted"
 
-    # Runを始められない（既定の実行環境がない・通知先の停止）なら、受付と同じく断る。理由はタスクを管理できる人にだけ
-    # 詳しく見せる
+    # Runを始められない（既定の実行環境がない・通知先の停止）なら、受付と同じく断る
     RuntimeProfile.objects.update(is_default=False)
-    body = _preview(api_client, binding, sample).json()
-    assert (body["outcome"], body["run_problems"]) == (
-        "refused",
-        ["タスクを今は実行できません（タスクの管理者に確かめてください）"],
-    )
-    api_client.force_login(grant(integrator, AppPermission.MANAGE_COMPANY_TASKS))
     body = _preview(api_client, binding, sample).json()
     assert body["outcome"] == "refused"
     assert "Runtime Profile" in body["run_problems"][0]
@@ -310,11 +475,11 @@ def test_preview_reflects_the_state_of_the_webhook_and_the_task(api_client, inte
     assert _send(api_client, task, _key, sample).status_code == 409
 
 
-def test_preview_uses_the_edited_limit_and_the_receipts(api_client, integrator, task, webhook):
+def test_preview_uses_the_edited_limit_and_the_receipts(api_client, manager, task, webhook):
     binding, key = webhook
     sample = _payload(event_id="evt-7")
     # 編集中の上限（保存していない）で確かめる
-    api_client.force_login(integrator)
+    api_client.force_login(manager)
     assert _preview(api_client, binding, sample, max_payload_bytes=1024).json()["format_error"] == ""
     big = {**sample, "memo": "x" * 2000}
     assert _preview(api_client, binding, big, max_payload_bytes=1024).json()["format_error"]
@@ -323,7 +488,7 @@ def test_preview_uses_the_edited_limit_and_the_receipts(api_client, integrator, 
     # 前に受け付けた要求と同じなら、前のRunを返す（新しいRunは作らない）。同じイベントIDで違う内容なら、受付と同じく断る
     api_client.logout()
     assert _send(api_client, task, key, sample).status_code == 202
-    api_client.force_login(integrator)
+    api_client.force_login(manager)
     body = _preview(api_client, binding, json.dumps(sample)).json()
     assert (body["outcome"], body["duplicate"]) == ("accepted", True)
     body = _preview(api_client, binding, _payload(event_id="evt-7", vendor="Other")).json()
@@ -334,17 +499,17 @@ def test_preview_uses_the_edited_limit_and_the_receipts(api_client, integrator, 
 
     # 受付と同じく、重複はタスクの状態や項目より先に判定する（停止した後の再送も前のRunを返す）
     TaskDefinition.objects.filter(pk=task.pk).update(suspended=True)
-    api_client.force_login(integrator)
+    api_client.force_login(manager)
     body = _preview(api_client, binding, json.dumps(sample)).json()
     assert (body["outcome"], body["duplicate"], body["run_problems"]) == ("accepted", True, [])
     api_client.logout()
     assert _send(api_client, task, key, sample).status_code == 200
 
 
-def test_preview_refuses_json_values_for_file_inputs(api_client, integrator):
-    task, _key = _file_task(api_client, integrator)
+def test_preview_refuses_json_values_for_file_inputs(api_client, manager):
+    task, _key = _file_task(api_client, manager)
     binding = TriggerBinding.objects.get(task=task)
-    api_client.force_login(integrator)
+    api_client.force_login(manager)
     # JSONの値（URL等）はファイルの項目の値にしない。受付と同じく断る
     body = _preview(api_client, binding, {"inputs": {"vendor": "ACME", "invoice": "https://example.com/a.pdf"}}).json()
     assert body["outcome"] == "refused"
@@ -353,10 +518,10 @@ def test_preview_refuses_json_values_for_file_inputs(api_client, integrator):
     assert res.status_code == 400
 
 
-def test_preview_accepts_empty_optional_file_inputs(api_client, integrator):
+def test_preview_accepts_empty_optional_file_inputs(api_client, manager):
     optional = [*INPUTS, {"name": "invoice", "label": "請求書", "type": "file", "required": False}]
     task = TaskDefinitionFactory.create(**notified(), scope=TaskScope.COMPANY, revision__inputs=optional)
-    res = _create_binding(api_client, integrator, task)
+    res = _create_binding(api_client, manager, task)
     binding = TriggerBinding.objects.get(task=task)
     for empty in (None, ""):
         body = _preview(api_client, binding, {"inputs": {"vendor": "ACME", "invoice": empty}}).json()
@@ -367,10 +532,10 @@ def test_preview_accepts_empty_optional_file_inputs(api_client, integrator):
     )
 
 
-def test_preview_skips_file_inputs_and_keeps_the_payload_limit(api_client, integrator):
-    task, _key = _file_task(api_client, integrator, max_payload_bytes=1024)
+def test_preview_skips_file_inputs_and_keeps_the_payload_limit(api_client, manager):
+    task, _key = _file_task(api_client, manager, max_payload_bytes=1024)
     binding = TriggerBinding.objects.get(task=task)
-    api_client.force_login(integrator)
+    api_client.force_login(manager)
     body = _preview(api_client, binding, {"inputs": {"vendor": "ACME"}}).json()
     assert (body["file_inputs"], body["required_file_inputs"]) == (["invoice"], ["invoice"])
     assert body["input_errors"] == []
@@ -380,10 +545,10 @@ def test_preview_skips_file_inputs_and_keeps_the_payload_limit(api_client, integ
     assert body["format_error"]
 
 
-def test_rotating_the_key_disables_the_old_one(api_client, integrator, task, webhook):
+def test_rotating_the_key_disables_the_old_one(api_client, manager, task, webhook):
     binding, old_key = webhook
-    api_client.force_login(integrator)
-    res = api_client.post(f"{BINDINGS}{binding.uid}/rotate_key/")
+    api_client.force_login(manager)
+    res = api_client.post(f"{_bindings(binding.task)}{binding.uid}/rotate_key/")
     assert res.status_code == 200
     new_key = res.json()["key"]
     assert new_key != old_key
@@ -392,17 +557,17 @@ def test_rotating_the_key_disables_the_old_one(api_client, integrator, task, web
     assert _send(api_client, task, new_key, _payload()).status_code == 202
 
 
-def test_suspended_or_deleted_webhooks_do_not_start_runs(api_client, integrator, task, webhook):
+def test_suspended_or_deleted_webhooks_do_not_start_runs(api_client, manager, task, webhook):
     binding, key = webhook
-    api_client.force_login(integrator)
-    api_client.post(f"{BINDINGS}{binding.uid}/suspend/")
+    api_client.force_login(manager)
+    api_client.post(f"{_bindings(binding.task)}{binding.uid}/suspend/")
     api_client.logout()
     res = _send(api_client, task, key, _payload())
     assert (res.status_code, res.json()["code"]) == (403, "trigger_suspended")
 
-    api_client.force_login(integrator)
-    api_client.post(f"{BINDINGS}{binding.uid}/resume/")
-    assert api_client.delete(f"{BINDINGS}{binding.uid}/").status_code == 204
+    api_client.force_login(manager)
+    api_client.post(f"{_bindings(binding.task)}{binding.uid}/resume/")
+    assert api_client.delete(f"{_bindings(binding.task)}{binding.uid}/").status_code == 204
     api_client.logout()
     assert _send(api_client, task, key, _payload()).status_code == 401
     assert not Run.objects.exists()
@@ -415,12 +580,19 @@ def test_task_managers_see_the_webhook_of_their_task(api_client, platform_admin,
     assert [(t["id"], t["key_prefix"]) for t in triggers] == [(binding.uid, binding.key_prefix)]
 
 
-def test_deleting_the_task_deletes_its_webhook(api_client, task, webhook):
+def test_deleting_the_task_deletes_its_webhooks_and_keeps_the_history(api_client, manager, task, webhook):
     binding, key = webhook
+    assert _send(api_client, task, key, _payload()).status_code == 202
+    second = _create_binding(api_client, manager, task, name="基幹").json()
+    api_client.logout()
     task.soft_delete()
-    binding.refresh_from_db()
-    assert binding.deleted
+    assert not TriggerBinding.objects.alive().filter(task=task).exists()
+    assert TriggerBinding.objects.filter(task=task).count() == 2
     assert _send(api_client, task, key, _payload()).status_code == 401
+    assert _send(api_client, task, second["key"], _payload()).status_code == 401
+    # 受付の履歴と入口の版は残す
+    assert TriggerReceipt.objects.filter(binding=binding).count() == 1
+    assert TriggerBindingRevision.objects.filter(binding=binding).exists()
 
 
 # --- 受付 ---
@@ -501,8 +673,8 @@ def test_idempotency_key_header_and_no_key(api_client, task, webhook):
     assert Run.objects.count() == 3
 
 
-def test_recommended_format_needs_no_mapping(api_client, integrator, task):
-    res = _create_binding(api_client, integrator, task)
+def test_recommended_format_needs_no_mapping(api_client, manager, task):
+    res = _create_binding(api_client, manager, task)
     key = res.json()["key"]
     api_client.logout()
     body = {"event_id": "z-1", "message": "経理の確認用", "inputs": {"vendor": "ACME", "amount": "300"}}
@@ -518,8 +690,8 @@ def test_recommended_format_needs_no_mapping(api_client, integrator, task):
     assert (res.status_code, set(res.json()["inputs"])) == (400, {"unknown"})
 
 
-def test_form_values_and_text(api_client, integrator, task):
-    res = _create_binding(api_client, integrator, task, inputs=[{"name": "vendor", "path": "$.vendor"}])
+def test_form_values_and_text(api_client, manager, task):
+    res = _create_binding(api_client, manager, task, inputs=[{"name": "vendor", "path": "$.vendor"}])
     key = res.json()["key"]
     api_client.logout()
     res = _send(
@@ -549,14 +721,14 @@ def _send_multipart(api_client, task, key, data, **headers):
     return api_client.post(_hook(task), data, format="multipart", HTTP_AUTHORIZATION=f"Bearer {key}", **headers)
 
 
-def _file_task(api_client, integrator, **binding):
+def _file_task(api_client, manager, **binding):
     task = TaskDefinitionFactory.create(
         **notified(),
         scope=TaskScope.COMPANY,
         revision__prompt_template="{{ inputs.invoice }} を確認してください。",
         revision__inputs=FILE_INPUTS,
     )
-    res = _create_binding(api_client, integrator, task, **binding)
+    res = _create_binding(api_client, manager, task, **binding)
     api_client.logout()
     return task, res.json()["key"]
 
@@ -565,9 +737,9 @@ def _extra_files():
     return [SimpleUploadedFile("memo.txt", "前回と同じ".encode()), SimpleUploadedFile("webhook_payload.json", b"{}")]
 
 
-def test_multipart_files_are_placed_and_file_inputs_point_to_them(api_client, integrator):
+def test_multipart_files_are_placed_and_file_inputs_point_to_them(api_client, manager):
     mapping = [{"name": "vendor", "path": "$.vendor"}, {"name": "invoice", "path": "$.document"}]
-    task, key = _file_task(api_client, integrator, inputs=mapping, event_id_path="$.id")
+    task, key = _file_task(api_client, manager, inputs=mapping, event_id_path="$.id")
     data = {
         "id": "evt-1",
         "vendor": "ACME",
@@ -616,9 +788,9 @@ def test_multipart_files_are_placed_and_file_inputs_point_to_them(api_client, in
     assert (changed.status_code, changed.json()["code"]) == (409, "event_id_reused")
 
 
-def test_resending_multipart_in_another_part_order_returns_the_same_run(api_client, integrator):
+def test_resending_multipart_in_another_part_order_returns_the_same_run(api_client, manager):
     mapping = [{"name": "vendor", "path": "$.vendor"}, {"name": "invoice", "path": "$.a"}]
-    task, key = _file_task(api_client, integrator, inputs=mapping, event_id_path="$.id")
+    task, key = _file_task(api_client, manager, inputs=mapping, event_id_path="$.id")
 
     def body(*parts: str) -> bytes:
         files = {"a": b"%PDF-a", "b": b"%PDF-b"}
@@ -636,8 +808,8 @@ def test_resending_multipart_in_another_part_order_returns_the_same_run(api_clie
     assert (again.status_code, again.json()["run_id"]) == (200, first.json()["run_id"])
 
 
-def test_resends_write_nothing_and_refused_requests_delete_what_was_written(api_client, integrator):
-    task, key = _file_task(api_client, integrator, event_id_path="$.event_id")
+def test_resends_write_nothing_and_refused_requests_delete_what_was_written(api_client, manager):
+    task, key = _file_task(api_client, manager, event_id_path="$.event_id")
     data = {"event_id": "e-1", "inputs[vendor]": "ACME", "inputs[invoice]": SimpleUploadedFile("a.pdf", b"1")}
     with (
         mock.patch.object(BlobObject, "write", wraps=BlobObject.write) as write,
@@ -659,8 +831,8 @@ def test_resends_write_nothing_and_refused_requests_delete_what_was_written(api_
     assert Run.objects.count() == 1
 
 
-def test_a_failed_write_deletes_the_files_written_before_it(api_client, integrator):
-    task, key = _file_task(api_client, integrator)
+def test_a_failed_write_deletes_the_files_written_before_it(api_client, manager):
+    task, key = _file_task(api_client, manager)
     data = {"inputs[vendor]": "ACME", "inputs[invoice]": SimpleUploadedFile("a.pdf", b"1")}
     write = BlobObject.write
     with (
@@ -685,9 +857,9 @@ def test_files_recorded_by_a_run_are_not_discarded():
     assert [c.args[1] for c in delete.call_args_list] == [unrecorded_key]
 
 
-def test_a_json_value_shaped_like_a_file_is_not_the_same_input(api_client, integrator):
+def test_a_json_value_shaped_like_a_file_is_not_the_same_input(api_client, manager):
     mapping = [{"name": "vendor", "path": "$.vendor"}, {"name": "invoice", "path": "$.doc"}]
-    task, key = _file_task(api_client, integrator, inputs=mapping, event_id_path="$.id")
+    task, key = _file_task(api_client, manager, inputs=mapping, event_id_path="$.id")
     content = b"%PDF-1.7"
     described = {"file": "a.pdf", "size": len(content), "sha256": hashlib.sha256(content).hexdigest()}
     files = {"id": "x", "vendor": "A", "doc": SimpleUploadedFile("a.pdf", content)}
@@ -699,8 +871,8 @@ def test_a_json_value_shaped_like_a_file_is_not_the_same_input(api_client, integ
     assert json_payload.sha256 != receipt.payload_sha256
 
 
-def test_recommended_format_in_multipart(api_client, integrator):
-    task, key = _file_task(api_client, integrator)
+def test_recommended_format_in_multipart(api_client, manager):
+    task, key = _file_task(api_client, manager)
     data = {
         "event_id": "z-1",
         "inputs[vendor]": "ACME",
@@ -723,8 +895,8 @@ def test_recommended_format_in_multipart(api_client, integrator):
     assert (res.status_code, set(res.json()["inputs"])) == (400, {"invoice"})
 
 
-def test_file_inputs_need_files(api_client, integrator):
-    task, key = _file_task(api_client, integrator)
+def test_file_inputs_need_files(api_client, manager):
+    task, key = _file_task(api_client, manager)
     # JSONでは、ファイルの項目にURLや文字を送っても取り込まない
     res = _send(api_client, task, key, {"inputs": {"vendor": "ACME", "invoice": "https://example.com/a.pdf"}})
     assert (res.status_code, res.json()["code"], set(res.json()["inputs"])) == (400, "invalid_inputs", {"invoice"})
@@ -739,8 +911,8 @@ def test_file_inputs_need_files(api_client, integrator):
     assert not Run.objects.exists()
 
 
-def test_multipart_limits_and_encoding(api_client, integrator, settings):
-    task, key = _file_task(api_client, integrator)
+def test_multipart_limits_and_encoding(api_client, manager, settings):
+    task, key = _file_task(api_client, manager)
     settings.YORIKI_ATTACHMENTS_PER_MESSAGE = 3
     files = [SimpleUploadedFile(f"{i}.txt", b"x") for i in range(3)]
     res = _send_multipart(api_client, task, key, {"inputs[vendor]": "ACME", "files": files})
@@ -776,9 +948,9 @@ def test_multipart_limits_and_encoding(api_client, integrator, settings):
     assert Run.objects.count() == 1
 
 
-def test_text_payload_is_kept_as_a_text_file(api_client, integrator):
+def test_text_payload_is_kept_as_a_text_file(api_client, manager):
     task = TaskDefinitionFactory.create(**notified(), scope=TaskScope.COMPANY, revision__inputs=[])
-    key = _create_binding(api_client, integrator, task).json()["key"]
+    key = _create_binding(api_client, manager, task).json()["key"]
     api_client.logout()
     res = _send(api_client, task, key, "請求書が届きました", content_type="text/plain; charset=utf-8")
     assert res.status_code == 202, res.json()
@@ -786,10 +958,12 @@ def test_text_payload_is_kept_as_a_text_file(api_client, integrator):
     assert run.conversation.messages.get().attachments.get().name == "webhook_payload.txt"
 
 
-def test_payload_size_limit(api_client, integrator, task, webhook):
+def test_payload_size_limit(api_client, manager, task, webhook):
     binding, key = webhook
-    api_client.force_login(integrator)
-    api_client.patch(f"{BINDINGS}{binding.uid}/", {"version": 1, "max_payload_bytes": 1024}, format="json")
+    api_client.force_login(manager)
+    api_client.patch(
+        f"{_bindings(binding.task)}{binding.uid}/", {"version": 1, "max_payload_bytes": 1024}, format="json"
+    )
     api_client.logout()
     res = _send(api_client, task, key, _payload(vendor="あ" * 400))
     assert (res.status_code, res.json()["code"]) == (413, "payload_too_large")
@@ -819,7 +993,7 @@ def test_task_that_cannot_run_is_refused_without_details(api_client, task, webho
 # --- 状態を確かめる口 ---
 
 
-def test_the_sender_sees_only_the_state_of_its_runs(api_client, integrator, task, webhook):
+def test_the_sender_sees_only_the_state_of_its_runs(api_client, manager, task, webhook):
     _binding, key = webhook
     run_id = _send(api_client, task, key, _payload()).json()["run_id"]
     url = f"{_hook(task)}runs/{run_id}/"
@@ -834,22 +1008,24 @@ def test_the_sender_sees_only_the_state_of_its_runs(api_client, integrator, task
 
     # 他の入口のRunは見えない
     other_task = TaskDefinitionFactory.create(**notified(), scope=TaskScope.COMPANY, revision__inputs=[])
-    other_key = _create_binding(api_client, integrator, other_task).json()["key"]
+    other_key = _create_binding(api_client, manager, other_task).json()["key"]
     api_client.logout()
     other_run = _send(api_client, other_task, other_key, {}).json()["run_id"]
     assert api_client.get(f"{_hook(task)}runs/{other_run}/", HTTP_AUTHORIZATION=f"Bearer {key}").status_code == 404
     assert api_client.get(url).status_code == 401
 
 
-def test_the_admin_sees_receipts_without_results(api_client, integrator, task, webhook):
+def test_task_managers_see_the_receipts(api_client, app_user, manager, task, webhook):
     binding, key = webhook
     _send(api_client, task, key, _payload())
-    api_client.force_login(integrator)
-    receipts = api_client.get(f"{BINDINGS}{binding.uid}/receipts/").json()["results"]
+    url = f"{_bindings(task)}{binding.uid}/receipts/"
+    api_client.force_login(app_user)
+    assert api_client.get(url).status_code == 404
+    api_client.force_login(manager)
+    receipts = api_client.get(url).json()["results"]
     assert [(r["dedup_key"], r["run_status"]) for r in receipts] == [("event:evt-1", RunStatus.QUEUED)]
     assert "result" not in receipts[0]
-    # 連携の管理者はタスクを管理できないので、タスクのRunの結果・ログは見えない
-    assert api_client.get(f"/api/app/v1/tasks/{task.uid}/runs/").status_code == 404
+    assert [r["number"] for r in api_client.get(f"{_bindings(task)}{binding.uid}/revisions/").json()["results"]] == [1]
 
 
 def test_task_managers_see_the_receipt_and_delivery_of_a_webhook_run(api_client, task, webhook):
@@ -891,7 +1067,7 @@ def test_system_user_cannot_log_in_and_is_hidden_from_user_admin(api_client, pla
 def test_a_key_rotated_or_suspended_after_authentication_cannot_start_a_run(task, webhook):
     binding, _key = webhook
     authenticated = TriggerBinding.objects.get(pk=binding.pk)  # 認証したときに読んだ入口
-    binding.rotate_key()
+    binding.rotate_key(actor=binding.created_by)
     with pytest.raises(PayloadError) as exc:
         receive_webhook(
             authenticated, body=json.dumps(_payload()).encode(), content_type="application/json", idempotency_key=None
@@ -913,18 +1089,20 @@ def test_a_resend_with_a_key_rotated_after_authentication_is_refused(task, webho
     body = json.dumps(_payload()).encode()
     receive_webhook(binding, body=body, content_type="application/json", idempotency_key=None)
     authenticated = TriggerBinding.objects.get(pk=binding.pk)
-    binding.rotate_key()
+    binding.rotate_key(actor=binding.created_by)
     # 再送でも、作り直した後の古い鍵では前のRunを返さない
     with pytest.raises(PayloadError) as exc:
         receive_webhook(authenticated, body=body, content_type="application/json", idempotency_key=None)
     assert exc.value.status == 401
 
 
-def test_resending_after_changing_the_event_id_path_returns_the_same_run(api_client, integrator, task, webhook):
+def test_resending_after_changing_the_event_id_path_returns_the_same_run(api_client, manager, task, webhook):
     binding, key = webhook
     first = _send(api_client, task, key, _payload()).json()["run_id"]
-    api_client.force_login(integrator)
-    api_client.patch(f"{BINDINGS}{binding.uid}/", {"version": 1, "event_id_path": "$.data.vendor_name"}, format="json")
+    api_client.force_login(manager)
+    api_client.patch(
+        f"{_bindings(binding.task)}{binding.uid}/", {"version": 1, "event_id_path": "$.data.vendor_name"}, format="json"
+    )
     api_client.logout()
     res = _send(api_client, task, key, _payload())
     assert (res.status_code, res.json()["run_id"]) == (200, first)
@@ -953,16 +1131,15 @@ def test_the_current_payload_limit_applies_after_locking(task, webhook):
     assert exc.value.status == 413
 
 
-def test_creating_a_second_webhook_after_the_check_is_refused(api_client, integrator, task):
-    """作成前の確かめの後に、別の要求が同じタスクに入口を作った場合も、500ではなく入力の誤りにする"""
-    serializer = TriggerBindingSerializer(
-        data={"task": task.uid, "name": "A"}, context={"request": type("R", (), {"user": integrator})()}
-    )
+def test_creating_a_webhook_after_the_task_was_deleted_is_refused(api_client, manager, task):
+    """作成前の確かめの後にタスクが消された場合も、消したタスクに入口を作らない"""
+    context = {"request": type("R", (), {"user": manager})(), "task": task}
+    serializer = TriggerBindingSerializer(data={"name": "A"}, context=context)
     assert serializer.is_valid(), serializer.errors
-    assert _create_binding(api_client, integrator, task).status_code == 201
-    with pytest.raises(ValidationError):
-        serializer.save(actor=integrator)
-    assert TriggerBinding.objects.alive().filter(task=task).count() == 1
+    TaskDefinition.objects.filter(pk=task.pk).update(deleted=True)
+    with pytest.raises(Conflict):
+        serializer.save(actor=manager)
+    assert not TriggerBinding.objects.filter(task=task).exists()
 
 
 def _content(binding):
@@ -970,10 +1147,10 @@ def _content(binding):
     return {name: getattr(revision, name) for name in ("event_id_path", "inputs", "max_payload_bytes")}
 
 
-def test_form_with_too_many_fields_is_refused(api_client, integrator, settings):
+def test_form_with_too_many_fields_is_refused(api_client, manager, settings):
     settings.DATA_UPLOAD_MAX_NUMBER_FIELDS = 3
     task = TaskDefinitionFactory.create(**notified(), scope=TaskScope.COMPANY, revision__inputs=[])
-    key = _create_binding(api_client, integrator, task).json()["key"]
+    key = _create_binding(api_client, manager, task).json()["key"]
     api_client.logout()
     body = urlencode({f"f{n}": "x" for n in range(4)})
     res = _send(api_client, task, key, body, content_type="application/x-www-form-urlencoded")
@@ -1016,13 +1193,13 @@ def test_non_finite_numbers_are_refused(api_client, task, webhook):
         assert (res.status_code, res.json()["code"]) == (400, "invalid_json"), number
 
 
-def test_webhook_stays_editable_after_the_task_drops_an_input(api_client, integrator, task, webhook):
+def test_webhook_stays_editable_after_the_task_drops_an_input(api_client, manager, task, webhook):
     binding, _key = webhook
     revision = task.current_revision
     content = {name: getattr(revision, name) for name in REVISION_FIELDS}
     task.revise(actor=task.created_by, expected_version=1, **{**content, "inputs": INPUTS[:1]})
-    api_client.force_login(integrator)
-    url = f"{BINDINGS}{binding.uid}/"
+    api_client.force_login(manager)
+    url = f"{_bindings(binding.task)}{binding.uid}/"
     res = api_client.patch(url, {"version": 1, "max_payload_bytes": 2048}, format="json")
     assert res.status_code == 200, res.json()
     # 取り出しを送るときは、タスクにない項目を断る
@@ -1039,22 +1216,22 @@ def test_system_user_does_not_reuse_an_employee_account():
     assert system_user().is_active is False
 
 
-def test_form_with_invalid_utf8_is_refused(api_client, integrator):
+def test_form_with_invalid_utf8_is_refused(api_client, manager):
     task = TaskDefinitionFactory.create(**notified(), scope=TaskScope.COMPANY, revision__inputs=[])
-    key = _create_binding(api_client, integrator, task, event_id_path="$.event_id").json()["key"]
+    key = _create_binding(api_client, manager, task, event_id_path="$.event_id").json()["key"]
     api_client.logout()
     res = _send(api_client, task, key, "event_id=%FF", content_type="application/x-www-form-urlencoded")
     assert (res.status_code, res.json()["code"]) == (400, "invalid_form")
     assert not Run.objects.exists()
 
 
-def test_resending_an_old_event_after_a_new_one_collides_on_the_new_path(api_client, integrator, task, webhook):
+def test_resending_an_old_event_after_a_new_one_collides_on_the_new_path(api_client, manager, task, webhook):
     """前の版でイベントAを受け、場所を変えた版でイベントBを受けた後に、Aを再送しても前のRunを返す"""
     binding, key = webhook
     event_a = {"event": {"id": "a"}, "id": "shared", "data": {"vendor_name": "ACME"}}
     run_a = _send(api_client, task, key, event_a).json()["run_id"]
-    api_client.force_login(integrator)
-    api_client.patch(f"{BINDINGS}{binding.uid}/", {"version": 1, "event_id_path": "$.id"}, format="json")
+    api_client.force_login(manager)
+    api_client.patch(f"{_bindings(binding.task)}{binding.uid}/", {"version": 1, "event_id_path": "$.id"}, format="json")
     api_client.logout()
     event_b = {"event": {"id": "b"}, "id": "shared", "data": {"vendor_name": "別の会社"}}
     assert _send(api_client, task, key, event_b).status_code == 202

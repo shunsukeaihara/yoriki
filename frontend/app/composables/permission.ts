@@ -35,11 +35,8 @@ export const PermissionCode = {
   ADD_CONNECTOR: 'connector.add_connector',
   CHANGE_CONNECTOR: 'connector.change_connector',
   DELETE_CONNECTOR: 'connector.delete_connector',
-  // 入口と出口（連携の管理者。authorization.md §5.5）
+  // 入口の一覧と出口（連携の管理者。authorization.md §5.5）
   VIEW_TRIGGER_BINDING: 'task.view_triggerbinding',
-  ADD_TRIGGER_BINDING: 'task.add_triggerbinding',
-  CHANGE_TRIGGER_BINDING: 'task.change_triggerbinding',
-  DELETE_TRIGGER_BINDING: 'task.delete_triggerbinding',
   VIEW_DESTINATION: 'delivery.view_destination',
   ADD_DESTINATION: 'delivery.add_destination',
   CHANGE_DESTINATION: 'delivery.change_destination',

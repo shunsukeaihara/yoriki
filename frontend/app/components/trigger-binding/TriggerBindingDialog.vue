@@ -2,10 +2,11 @@
 import DDialog from '../common/DDialog.vue'
 
 /**
- * 入口（Webhook）の作成（連携の管理者。authorization.md §5.5）。タスクと名前だけを決め、イベントIDの場所・項目の
- * 取り出し・上限は、作った後の画面でサンプルのpayloadを試しながら決める。入口とタスクは1対1で、タスクは作成した後は
- * 変えられない。作成の応答にだけ鍵が入るので、閉じる前に表示する
+ * 入口（Webhook）の作成（タスクを管理できる人。authorization.md §5.5）。名前だけを決め、イベントIDの場所・項目の
+ * 取り出し・上限は、作った後の画面でサンプルのpayloadを試しながら決める。結果の通知はタスクに1つなので、どの入口から
+ * 起動したRunの結果も同じ出口へ届くことを示す。作成の応答にだけ鍵が入るので、閉じる前に表示する
  */
+const props = defineProps<{ task: TaskDetail }>()
 const emit = defineEmits<{ saved: [value: TriggerBinding] }>()
 const api = useAPI()
 const router = useRouter()
@@ -13,17 +14,14 @@ const toast = useToast()
 const { t } = useI18n()
 
 const dialog = ref<InstanceType<typeof DDialog> | null>(null)
-const emptyForm = () => ({ task: null as string | null, name: '' })
+const emptyForm = () => ({ name: '' })
 const form = ref(emptyForm())
 const created = ref<TriggerBindingKey | null>(null)
-// 選んだタスクの入力の項目（作った後に取り出しを設定する目安として見せる）
-const selectedTask = ref<TriggerTask | null>(null)
 
 const onOpen = (open: boolean) => {
   if (open) {
     form.value = emptyForm()
     created.value = null
-    selectedTask.value = null
     errors.value = {}
   }
 }
@@ -32,12 +30,14 @@ const { onSubmit, loading, errors } = createSubmit({
   form,
   // 受け取り方は既定（推奨の形式・1MiB）で作り、作った後の画面で決める
   fn: (f) =>
-    api.manage.triggerBindings().create({
-      task: f.task!,
-      name: f.name.trim(),
-      eventIdPath: '',
-      maxPayloadBytes: DEFAULT_MAX_PAYLOAD_KIB * 1024,
-    }),
+    api
+      .tasks(props.task.id)
+      .triggers()
+      .create({
+        name: f.name.trim(),
+        eventIdPath: '',
+        maxPayloadBytes: DEFAULT_MAX_PAYLOAD_KIB * 1024,
+      }),
   onSuccess: (result) => {
     created.value = result
     emit('saved', result)
@@ -45,17 +45,12 @@ const { onSubmit, loading, errors } = createSubmit({
   },
   onError: (err) => toast.add({ title: t('エラー'), description: makeErrorMsg(err), color: 'error' }),
 })
-const canPost = computed(() => Boolean(form.value.task && form.value.name.trim()))
-
-const taskDescription = (item: unknown) => {
-  const task = item as TriggerTask
-  return task.department ? `${task.scopeDisplay}・${task.department.name}` : task.scopeDisplay
-}
+const canPost = computed(() => Boolean(form.value.name.trim()))
 
 const openSettings = () => {
   const id = created.value?.id
   dialog.value?.closeDialog()
-  if (id) router.push(`/manage/trigger_bindings/${id}`)
+  if (id) router.push(`/tasks/${props.task.id}/triggers/${id}`)
 }
 </script>
 
@@ -90,39 +85,27 @@ const openSettings = () => {
       </div>
       <DFormStack v-else>
         <DFormAlert :errors="errors" />
-        <DAutocomplete
-          v-model="form.task"
-          :label="$t('起動するタスク')"
-          required
-          :search-fn="api.manage.triggerBindings().tasks"
-          :item-description="taskDescription"
-          :clearable="false"
-          :hint="
-            $t(
-              '部門・全社・システムのタスクのうち、まだ入口がないもの。作成した後は変更できません。タスクには、失敗を知らせる通知先が必要です',
-            )
-          "
-          :error-messages="errors.task"
-          @selected="(item) => (selectedTask = item as TriggerTask | null)"
-        />
-        <div v-if="selectedTask?.inputs.length" class="grid gap-1 text-sm">
-          <span class="text-muted">{{
-            $t('タスクの入力の項目（作った後に、payloadからの取り出しを設定します）')
-          }}</span>
-          <div class="flex flex-wrap gap-1">
-            <UBadge v-for="input in selectedTask.inputs" :key="input.name" color="neutral" variant="outline">
-              {{ input.label || input.name }}
-              <span class="font-mono text-muted">{{ input.name }}</span>
-            </UBadge>
-          </div>
-        </div>
         <DTextField
           v-model="form.name"
           :label="$t('名前')"
           required
-          :hint="$t('送り元が分かる名前（例：経費SaaS）')"
+          :hint="$t('送り元が分かる名前（例：経費SaaS）。送り元ごとに入口を分けます')"
           :error-messages="errors.name"
         />
+        <!-- サーバーの入力の誤り（失敗を知らせる通知先がない等）は、タスクの設定の問題なので欄の外に出す -->
+        <p v-if="errors.task" class="text-sm text-error">{{ errors.task.join('、') }}</p>
+        <div class="grid gap-1 text-sm" data-testid="trigger-destination">
+          <span class="text-muted">{{ $t('結果の届け先') }}</span>
+          <span v-if="task.destinationInfo">{{ task.destinationInfo.name }}</span>
+          <span v-else class="text-warning">{{
+            $t('通知先がありません。Webhookで起動するタスクには、失敗を知らせる通知先が必要です')
+          }}</span>
+          <span class="text-xs text-muted">{{
+            $t(
+              '結果の通知はタスクに1つなので、どの入口から起動しても同じ通知先に届きます。送り元ごとに届け先を分けたいときは、タスクを分けます',
+            )
+          }}</span>
+        </div>
       </DFormStack>
     </template>
     <template #footer="{ closeDialog }">

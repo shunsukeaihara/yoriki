@@ -1,6 +1,6 @@
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { DestinationForm, TriggerBindingForm, TriggerBindingPreview } from '#components'
+import { DestinationForm, TriggerBindingForm, TriggerBindingKeyWarning, TriggerBindingPreview } from '#components'
 
 const { create, patch, triggerPatch, preview, emptyList } = vi.hoisted(() => ({
   create: vi.fn(),
@@ -13,8 +13,8 @@ const { create, patch, triggerPatch, preview, emptyList } = vi.hoisted(() => ({
 mockNuxtImport('useAPI', () => () => ({
   manage: {
     destinations: () => ({ create, patch, departments: emptyList }),
-    triggerBindings: () => ({ patch: triggerPatch, preview, tasks: emptyList }),
   },
+  tasks: () => ({ triggers: () => ({ patch: triggerPatch, preview }) }),
 }))
 
 const user = { id: 'u1', email: 'u1@example.com', displayName: 'U1' }
@@ -67,6 +67,8 @@ const binding: TriggerBinding = {
   url: '/api/hooks/v1/tasks/t1/',
   keyPrefix: 'yrk_abcd',
   keyRotated: null,
+  keyCreatedBy: user,
+  keyNeedsRotation: false,
   createdBy: user,
   created: '2026-10-31T00:00:00Z',
   updated: '2026-10-31T00:00:00Z',
@@ -249,10 +251,9 @@ describe('TriggerBindingPreview', () => {
       requiredFileInputs: [],
       runProblems: [],
       duplicate: false,
-      canViewPrompt: false,
       prompt: null,
     })
-    const wrapper = await mountSuspended(TriggerBindingPreview, { props: { bindingId: 'b1', settings } })
+    const wrapper = await mountSuspended(TriggerBindingPreview, { props: { taskId: 't1', bindingId: 'b1', settings } })
     const vm = wrapper.vm as unknown as { onSubmit: () => Promise<void> }
     await wrapper.find('textarea').setValue('{"id": "evt-1", "vendor": "ACME"}')
     await vm.onSubmit()
@@ -272,7 +273,7 @@ describe('TriggerBindingPreview', () => {
     expect(wrapper.text()).toContain('もう一度試してください')
   })
 
-  it('受け付けられる要求では、プロンプトを返されたときだけ出し、返されなければ権限がないことを示す', async () => {
+  it('受け付けられる要求では、埋め込んだ後のプロンプトを出す', async () => {
     const ok = {
       outcome: TriggerPreviewOutcome.ACCEPTED,
       requiredFileInputs: [],
@@ -285,22 +286,17 @@ describe('TriggerBindingPreview', () => {
       inputErrors: [],
       fileInputs: [],
     }
-    preview.mockResolvedValueOnce({ ...ok, canViewPrompt: false, prompt: null })
     preview.mockResolvedValueOnce({
       ...ok,
-      canViewPrompt: true,
       prompt: 'ACME の請求書を確認してください。',
     })
-    const wrapper = await mountSuspended(TriggerBindingPreview, { props: { bindingId: 'b1', settings } })
+    const wrapper = await mountSuspended(TriggerBindingPreview, { props: { taskId: 't1', bindingId: 'b1', settings } })
     const vm = wrapper.vm as unknown as { onSubmit: () => Promise<void> }
     await wrapper.find('textarea').setValue('{"vendor": "ACME"}')
     await vm.onSubmit()
     await nextTick()
     expect(wrapper.text()).toContain('この要求は受け付けられます')
-    expect(wrapper.text()).toContain('タスクの依頼文は表示しません')
     expect(wrapper.text()).toContain('重複を判定せず')
-    await vm.onSubmit()
-    await nextTick()
     expect(wrapper.text()).toContain('ACME の請求書を確認してください。')
   })
 
@@ -311,7 +307,6 @@ describe('TriggerBindingPreview', () => {
       values: [{ name: 'vendor', value: 'ACME' }],
       inputErrors: [],
       fileInputs: ['invoice'],
-      canViewPrompt: true,
     }
     preview.mockResolvedValueOnce({
       ...base,
@@ -331,7 +326,7 @@ describe('TriggerBindingPreview', () => {
       duplicate: false,
       prompt: 'ACME を確認してください。',
     })
-    const wrapper = await mountSuspended(TriggerBindingPreview, { props: { bindingId: 'b1', settings } })
+    const wrapper = await mountSuspended(TriggerBindingPreview, { props: { taskId: 't1', bindingId: 'b1', settings } })
     const vm = wrapper.vm as unknown as { onSubmit: () => Promise<void> }
     await wrapper.find('textarea').setValue('{"vendor": "ACME"}')
     await vm.onSubmit()
@@ -355,7 +350,6 @@ describe('TriggerBindingPreview', () => {
       inputErrors: [],
       fileInputs: [],
       requiredFileInputs: [],
-      canViewPrompt: false,
       prompt: null,
     }
     preview.mockResolvedValueOnce({
@@ -368,7 +362,7 @@ describe('TriggerBindingPreview', () => {
       outcome: TriggerPreviewOutcome.UNCONFIRMED,
       runProblems: ['タスクの定義に、実行を断られうる設定があります（タスクの管理者に確かめてください）'],
     })
-    const wrapper = await mountSuspended(TriggerBindingPreview, { props: { bindingId: 'b1', settings } })
+    const wrapper = await mountSuspended(TriggerBindingPreview, { props: { taskId: 't1', bindingId: 'b1', settings } })
     const vm = wrapper.vm as unknown as { onSubmit: () => Promise<void> }
     await wrapper.find('textarea').setValue('{}')
     await vm.onSubmit()
@@ -382,7 +376,7 @@ describe('TriggerBindingPreview', () => {
     expect(wrapper.text()).not.toContain('必須のファイルの項目')
   })
 
-  it('前の受付と同じ要求では、権限がないとは示さずに、プロンプトを作らないことを示す', async () => {
+  it('前の受付と同じ要求では、プロンプトを作らないことを示す', async () => {
     preview.mockResolvedValueOnce({
       outcome: TriggerPreviewOutcome.ACCEPTED,
       formatError: '',
@@ -394,17 +388,15 @@ describe('TriggerBindingPreview', () => {
       requiredFileInputs: [],
       runProblems: [],
       duplicate: true,
-      canViewPrompt: true,
       prompt: null,
     })
-    const wrapper = await mountSuspended(TriggerBindingPreview, { props: { bindingId: 'b1', settings } })
+    const wrapper = await mountSuspended(TriggerBindingPreview, { props: { taskId: 't1', bindingId: 'b1', settings } })
     await wrapper.find('textarea').setValue('{"id": "evt-1"}')
     await (wrapper.vm as unknown as { onSubmit: () => Promise<void> }).onSubmit()
     await nextTick()
     // 前に受け付けた要求と同じなら、新しいRunを作らないことを示す
     expect(wrapper.text()).toContain('送ると前のRunを返し、新しいRunは作りません')
     expect(wrapper.text()).toContain('前のRunを返すので、新しいプロンプトは作りません')
-    expect(wrapper.text()).not.toContain('権限がない')
   })
 
   it('読めないpayloadは、その理由だけを出す', async () => {
@@ -419,15 +411,23 @@ describe('TriggerBindingPreview', () => {
       values: [],
       inputErrors: [],
       fileInputs: [],
-      canViewPrompt: true,
       prompt: null,
     })
-    const wrapper = await mountSuspended(TriggerBindingPreview, { props: { bindingId: 'b1', settings } })
+    const wrapper = await mountSuspended(TriggerBindingPreview, { props: { taskId: 't1', bindingId: 'b1', settings } })
     await wrapper.find('textarea').setValue('{')
     await (wrapper.vm as unknown as { onSubmit: () => Promise<void> }).onSubmit()
     await nextTick()
     const text = wrapper.find('[data-testid="trigger-preview-result"]').text()
     expect(text).toContain('JSONとして読めません')
     expect(text).not.toContain('取り出した値')
+  })
+})
+
+describe('TriggerBindingKeyWarning', () => {
+  it('鍵を作った人の名前を出し、記録がなければ誰の手元にあるか分からないことを示す', async () => {
+    const named = await mountSuspended(TriggerBindingKeyWarning, { props: { createdBy: user } })
+    expect(named.text()).toContain('U1 さんは、今はこのタスクを管理できません')
+    const unknown = await mountSuspended(TriggerBindingKeyWarning, { props: { createdBy: null } })
+    expect(unknown.text()).toContain('誰の手元にあるか分かりません')
   })
 })

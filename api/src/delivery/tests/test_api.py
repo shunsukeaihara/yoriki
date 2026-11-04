@@ -309,10 +309,10 @@ def test_choices_show_only_what_task_managers_may_pick(api_client, app_user, com
 
 
 def test_a_webhook_needs_a_failure_notice_and_the_task_cannot_drop_it(api_client, company_manager):
-    integrator = grant(UserFactory.create(), "task.view_triggerbinding", "task.add_triggerbinding")
     task = TaskDefinitionFactory.create(scope=TaskScope.COMPANY)
-    api_client.force_login(integrator)
-    res = api_client.post("/api/v1/trigger_bindings/", {"task": task.uid, "name": "経費SaaS"}, format="json")
+    triggers = f"{TASKS}{task.uid}/triggers/"
+    api_client.force_login(company_manager)
+    res = api_client.post(triggers, {"name": "経費SaaS"}, format="json")
     assert res.status_code == 400
     assert "run.failed" in str(res.json()["task"])
 
@@ -322,15 +322,14 @@ def test_a_webhook_needs_a_failure_notice_and_the_task_cannot_drop_it(api_client
         expected_version=1,
         **{**_content(task), "destination": destination, "notify_events": [NotifyEvent.COMPLETED]},
     )
-    res = api_client.post("/api/v1/trigger_bindings/", {"task": task.uid, "name": "経費SaaS"}, format="json")
+    res = api_client.post(triggers, {"name": "経費SaaS"}, format="json")
     assert res.status_code == 400  # 完了だけでは足りない
 
     task.revise(actor=task.created_by, expected_version=2, **{**_content(task), "notify_events": [NotifyEvent.FAILED]})
-    res = api_client.post("/api/v1/trigger_bindings/", {"task": task.uid, "name": "経費SaaS"}, format="json")
+    res = api_client.post(triggers, {"name": "経費SaaS"}, format="json")
     assert res.status_code == 201, res.json()
 
     # 入口のあるタスクは、失敗の通知を外せない
-    api_client.force_login(company_manager)
     res = api_client.patch(f"{TASKS}{task.uid}/", {"version": 3, "notify_events": ["run.completed"]}, format="json")
     assert res.status_code == 400
     assert "notify_events" in res.json()

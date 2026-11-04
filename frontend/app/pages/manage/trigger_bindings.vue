@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 
-// 部門・全社・システムのタスクの入口（Webhook）を全件扱う（所属は問わない。authorization.md §5.5）
+// 発行済みの入口（Webhook）を見渡す（見るだけ。所属は問わない。入口はタスクの画面で作る。authorization.md §5.5）
 definePageMeta({ permission: ManagePagePermissions.TRIGGER_BINDING })
 
 const api = useAPI()
-const { hasPermission } = usePermission()
 const { t } = useI18n()
 const reloadKey = ref(0)
 const reload = () => (reloadKey.value = Date.now())
@@ -17,13 +16,15 @@ const clearParams = () => {
   reload()
 }
 
-const columns: TableColumn<TriggerBinding>[] = [
+const userName = (user: MinimumUser | null) => (user ? user.displayName || user.email : '—')
+
+const columns: TableColumn<TriggerBindingListItem>[] = [
   { accessorKey: 'name', header: t('名前') },
   { accessorKey: 'taskInfo', header: t('起動するタスク') },
   { accessorKey: 'keyPrefix', header: t('鍵') },
-  { accessorKey: 'version', header: t('版') },
   { accessorKey: 'suspended', header: t('状態') },
-  { accessorKey: 'updated', header: t('更新日時') },
+  { accessorKey: 'created', header: t('作成') },
+  { accessorKey: 'keyRotated', header: t('鍵の作成') },
 ]
 </script>
 
@@ -34,19 +35,10 @@ const columns: TableColumn<TriggerBinding>[] = [
         :title="$t('入口（Webhook）')"
         :description="
           $t(
-            '外のサービスからタスクを起動する受け口です。入口とタスクは1対1で、鍵を持つ送り元はそのタスクだけを起動できます。受け取ったpayloadはそのままファイルとしてエージェントに渡し、必要な項目だけを取り出してタスクの入力にします',
+            '発行済みの入口の一覧です。入口は、そのタスクを管理できる人がタスクの画面で作り、設定します。鍵を作った人がタスクを管理できなくなった入口には警告を出します',
           )
         "
-      >
-        <template #end>
-          <!-- 作成はサーバー側でも権限を確認し、なければ403になる -->
-          <TriggerBindingDialog v-if="hasPermission(PermissionCode.ADD_TRIGGER_BINDING)" @saved="reload">
-            <template #trigger="{ on }">
-              <DBtn icon="i-lucide-plus" v-on="on">{{ $t('入口を追加') }}</DBtn>
-            </template>
-          </TriggerBindingDialog>
-        </template>
-      </ListPageTitle>
+      />
 
       <TableSearchForm :reload="reload" :clear="clearParams">
         <DTextField v-model="params.search" :label="$t('名前・タスクの名前')" />
@@ -59,30 +51,33 @@ const columns: TableColumn<TriggerBinding>[] = [
         :fetch="api.manage.triggerBindings().list"
         :params="params"
       >
-        <template #name-cell="{ row }">
-          <NuxtLink :to="`/manage/trigger_bindings/${row.original.id}`" class="text-primary">
-            {{ row.original.name }}
-          </NuxtLink>
-        </template>
         <template #taskInfo-cell="{ row }">
           <div>{{ row.original.taskInfo.name }}</div>
           <div class="text-xs text-muted">
             {{ row.original.taskInfo.scopeDisplay }}
             <template v-if="row.original.taskInfo.department">・{{ row.original.taskInfo.department.name }}</template>
-            <template v-if="row.original.taskInfo.suspended">・{{ $t('タスクは停止中') }}</template>
           </div>
         </template>
         <template #keyPrefix-cell="{ row }">
           <code class="text-xs text-muted">{{ row.original.keyPrefix }}…</code>
+          <UBadge v-if="row.original.keyNeedsRotation" color="warning" variant="subtle" size="sm" class="ml-2">
+            {{ $t('鍵の確認') }}
+          </UBadge>
         </template>
         <template #suspended-cell="{ row }">
           <UBadge :color="row.original.suspended ? 'error' : 'success'" variant="subtle">
             {{ row.original.suspended ? $t('停止中') : $t('動いている') }}
           </UBadge>
         </template>
-        <template #updated-cell="{ row }">{{ formatDatetime(row.original.updated) }}</template>
+        <template #created-cell="{ row }">
+          <div>{{ formatDatetime(row.original.created) }}</div>
+          <div class="text-xs text-muted">{{ userName(row.original.createdBy) }}</div>
+        </template>
+        <template #keyRotated-cell="{ row }">
+          <div>{{ row.original.keyRotated ? formatDatetime(row.original.keyRotated) : '—' }}</div>
+          <div class="text-xs text-muted">{{ userName(row.original.keyCreatedBy) }}</div>
+        </template>
       </DDataTable>
     </UContainer>
-    <NuxtPage @changed="reload" />
   </div>
 </template>

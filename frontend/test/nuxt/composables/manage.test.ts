@@ -53,7 +53,7 @@ describe('useManageMenu（連携）', () => {
     const { items, links } = useManageMenu()
     expect(items.value.map((item) => item.label)).toEqual(['連携'])
     expect(links.value.map((link) => link.to)).toEqual(['/manage/trigger_bindings'])
-    login([PermissionCode.CHANGE_DESTINATION, PermissionCode.CHANGE_TRIGGER_BINDING])
+    login([PermissionCode.CHANGE_DESTINATION, PermissionCode.VIEW_TRIGGER_BINDING])
     expect(useManageMenu().links.value.map((link) => link.to)).toEqual([
       '/manage/trigger_bindings',
       '/manage/destinations',

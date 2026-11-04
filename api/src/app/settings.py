@@ -69,6 +69,7 @@ INSTALLED_APPS = [
     "connector",
     "task",
     "delivery",
+    "devtools",
 ]
 
 MIDDLEWARE = [

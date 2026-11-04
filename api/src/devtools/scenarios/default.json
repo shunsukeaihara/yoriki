@@ -189,7 +189,7 @@
             "name": "shell",
             "arguments": {
               "description": "取引先をスクリプトで照会する",
-              "command": "python3 - <<'PY'\nimport yoriki_connector as yc\nr = yc.query(\"確認用DB\", \"SELECT code, name FROM vendors WHERE code IN (?, ?)\", [\"V001\", \"V002\"])\nprint(r.row_count, [row[\"name\"] for row in r.rows])\nprint(len(yc.describe(\"確認用DB\")), \"tables\")\nPY"
+              "command": "python3 - <<'PY'\nimport yoriki_connector as yc\nr = yc.query(\"確認用DB（seed_dev）\", \"SELECT code, name FROM vendors WHERE code IN (?, ?)\", [\"V001\", \"V002\"])\nprint(r.row_count, [row[\"name\"] for row in r.rows])\nprint(len(yc.describe(\"確認用DB（seed_dev）\")), \"tables\")\nPY"
             }
           }
         ]

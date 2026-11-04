@@ -168,27 +168,26 @@ docker push localhost:5001/yoriki-sandbox-docs:dev
 
 ### 6.1 確認用のデータ（`seed_dev`）
 
-何度流しても同じ状態になる（名前で探して、なければ作り、あれば揃える）。確認の途中で変えたもの（無効にした、版を変えた、permissionを足した等）も元に戻す。ただし、LLMの接続の接続先は変えない（API keyが別のサーバーへ送られないように。backend-conventions.md・`llm.models.LLMConnection`）。同じ名前の接続の接続先が違えば、元の接続を「…（以前の接続先 <URL>）」の名前にして残し、新しい接続を作る。同じ名前の接続がローカルLLMでないとき、API keyを持つときは止まる（keyを偽のLLMへ送らないため）。パスワードは違うときだけ設定し直す（作ったセッションが切れないように）。`--dry-run` は、同じ処理を最後に取り消して、何をするかだけを表示する。
+`seed_dev` が自分で作ったものだけを扱い、何度流しても同じ状態になる（名前で探して、なければ作り、あれば揃える）。確認の途中で変えたもの（無効にした、版を変えた、permission・所属を足した等）も元に戻す。自分で作ったものかは、作成者（`check-admin`）と、ロールの印（コメント `yoriki seed_dev`）で見分ける。同じ名前で自分で作ったものでないものがあれば、書き換えずに止まる（名前には「（seed_dev）」を付け、ほかのデータと重ならないようにしている）。`--dry-run` は、同じ処理を最後に取り消して、何をするかだけを表示する。
 
 | 種類 | 名前 | 内容 |
 |---|---|---|
-| 部門 | 確認用の部門 | 下の3人が所属する |
+| 部門 | 確認用の部門（seed_dev） | 下の3人が所属する（3人の所属は、この部門だけにする） |
 | ユーザー | `check-member` | 確認用の社員。permissionなし |
 | | `check-lead` | 確認用の部門の担当。部門のSkillの編集・公開、部門のタスクの管理 |
 | | `check-admin` | 確認用の全社の担当。すべての部門の管理、全社のSkill・タスク、Connector・接続先、入口・出口の管理。確認用のデータの作成者 |
-| LLMの接続 | 確認用の偽LLM | ローカルLLM。`--llm-url`（既定 `http://127.0.0.1:8765/v1`。`fake_llm` の既定） |
-| | 確認用のつながらないLLM | `http://127.0.0.1:9/v1`。再試行の後のモデルの切り替えの確認に使う |
-| モデル設定 | 確認用の偽モデル | `fake`。Tool呼出し・画像入力。既定のモデル設定がなければ既定にする |
-| | 確認用の偽モデル（推論） | `fake-reasoning`。effortは low・medium・high |
-| | 確認用のつながらないモデル | つながらない接続を使う |
-| | （3つとも） | 同じ名前のモデル設定は、確認用の作成者（`check-admin`）が作ったか、今の版が確認用の接続（名前を変えて残したものを含む）を使うときだけ揃え、ほかは止まる |
-| Runtime Profile | 確認用の文書処理 | `--sandbox-image` を指定したときだけ。管理画面と同じくレジストリで確かめる（手元のレジストリは `YORIKI_SANDBOX_INSECURE_REGISTRIES=localhost:5001` が要る）。資源の上限は、管理画面で変えた値を残す。同じ名前で確認用の作成者のものでなければ止まる。既定のRuntime Profileがなければ既定にする |
-| スキーマ | `connector_check` | YorikiのDBの中に作る。表 `vendors`（取引先3件）・`invoices`（請求3件）は毎回作り直す。読むだけのロール `connector_check_ro` を作る（PostgreSQLのクラスタで共有。DBの利用者にロールを作る権限が要る。`deploy/compose.dev.yaml` のものは持っている）。作り直す・パスワードを設定し直すのは、`seed_dev` の印（コメント `yoriki seed_dev`）のある表・ロールだけ。印のない同じ名前の表があれば止まり、`--recreate-tables` を付けたときだけ消して作り直す。印のない同じ名前のロールがあれば止まる（ほかの用途のロールのパスワードを変えないため。以前の確認で手で作ったものなら `DROP ROLE` で消す）。ロールが読めるのは確認用の2つの表だけで、ほかの権限・持ち物（ほかのDBのものを含む）や属性が付いていても止まる。同じクラスタで別のDBにも流すときは、`--db-role` でDBごとに別のロールにする |
-| Connector | 確認用DB | 全社。上のスキーマの2つの表を公開する。`--skip-database` でスキーマと一緒に飛ばす。同じ名前のConnectorが全社でないとき、その接続先が確認用のロールでこのDBへつなぐもの（ホスト・ポート・DB名・ユーザー名が同じ）でないとき、その接続先をほかのConnectorも使うときは止まる |
+| LLMの接続 | 偽LLM（seed_dev） | ローカルLLM。`--llm-url`（既定 `http://127.0.0.1:8765/v1`。`fake_llm` の既定）。接続先は作った後に変えないので、`--llm-url` を変えると前の接続を消して新しい接続を作る |
+| | つながらないLLM（seed_dev） | `http://127.0.0.1:9/v1`。再試行の後のモデルの切り替えの確認に使う |
+| モデル設定 | 偽モデル（seed_dev） | `fake`。Tool呼出し・画像入力。既定のモデル設定がなければ既定にする |
+| | 偽モデル・推論（seed_dev） | `fake-reasoning`。effortは low・medium・high |
+| | つながらないモデル（seed_dev） | つながらない接続を使う |
+| Runtime Profile | 文書処理（seed_dev） | `--sandbox-image` を指定したときだけ。管理画面と同じくレジストリで確かめる（手元のレジストリは `YORIKI_SANDBOX_INSECURE_REGISTRIES=localhost:5001` が要る）。資源の上限は、管理画面で変えた値を残す。既定のRuntime Profileがなければ既定にする |
+| スキーマ | `devtools_check` | YorikiのDBの中に作る。表 `vendors`（取引先3件）・`invoices`（請求3件）は毎回作り直す。2つの表だけを読むロール `devtools_check_ro` を作る（PostgreSQLのクラスタで共有。DBの利用者にロールを作る権限が要る。`deploy/compose.dev.yaml` のものは持っている） |
+| Connector | 確認用DB（seed_dev） | 全社。上のスキーマの2つの表を公開する。接続先は「確認用DBの接続（seed_dev）」。`--skip-database` でスキーマと一緒に飛ばす |
 
-- パスワード（`--password`。既定 `yoriki-check`）は、SSOの設定がない手元では、パスワードでのログインにそのまま使える。
+- パスワード（`--password`。既定 `yoriki-check`）は、SSOの設定がない手元では、パスワードでのログインにそのまま使える。違うときだけ設定し直す（作ったセッションが切れないように）。
 - API key・DBのパスワードは、そのときの `YORIKI_SECRET_ENCRYPTION_KEYS` で暗号化して保存する。apiと同じ `.envrc` を読み込んで流す。
-- 基盤管理者（`createsuperuser` で作る）は作らない。同じusernameのユーザーが確認用のメールアドレス（`<username>@example.co.jp`）でないとき、基盤管理者のときは、引き取らずに止まる。確認用のユーザーの所属は確認用の部門だけにし、`is_staff` も外す（所属もpermissionと並ぶ権限の軸なので）。
+- 基盤管理者（`createsuperuser` で作る）は作らない。
 
 ### 6.2 偽のLLM（`fake_llm`）
 
@@ -204,8 +203,8 @@ OpenAI互換の `POST /v1/chat/completions`（ストリーミングだけ）と 
 | `[file]` | `write` で `/workspace/output/result.md` を書く |
 | `[ask]` | `ask_user` で対象月を尋ね、回答を受けて答える |
 | `[todo]` | `todo_write` で作業の計画を書く |
-| `[query]` | `datasource_query` で、使えるConnectorの最初の1つの `vendors` を照会する（会話では `@` で確認用DBを指定する） |
-| `[script]` | `shell` のスクリプトから `yoriki_connector` で確認用DBを照会する |
+| `[query]` | `datasource_query` で、使えるConnectorの最初の1つの `vendors` を照会する（会話では `@` で「確認用DB（seed_dev）」を指定する） |
+| `[script]` | `shell` のスクリプトから `yoriki_connector` で「確認用DB（seed_dev）」を照会する（会話では `@` で指定する） |
 | `[notify]` | `prepare_notification` で通知を用意し、結果を答える（タスクの依頼文に書く）。業務結果のSchemaのあるタスクでは先に `submit_result` が要り、引数がSchemaで決まるので、台本を書く |
 | `[slow]` | 2秒待ってから、少しずつ答える |
 | `[error]`・`[429]` | 同じ要求に、最初の2回は500、1回は429を返す（Runnerの再試行の確認） |

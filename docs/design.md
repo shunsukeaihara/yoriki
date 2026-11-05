@@ -831,7 +831,7 @@ Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプ�
 
 - Sandboxのイメージに、小さなPythonのライブラリ（`yoriki_connector`）を入れる。スクリプトは `yoriki_connector.query("販売DB", sql, params)` のように呼ぶ（`describe` で表と列も読める）。
 - 通信路は、Runnerが `docker exec` でSandboxの中に始める中継（補助コマンドの `relay`）だけにする。ライブラリはSandboxの中のUnixドメインソケット（`/tmp` の下）へ要求を送り、中継がexecの標準入出力でRunnerへ渡し、応答を返す。ホストのソケットをmountしない（gVisorでホストのソケットへの接続を許す設定が要らず、手元のDocker Desktopでも同じに動く。Sandboxからの通信はRunnerが始めたexecを通るものだけで、外へは出ない）。中継はAttemptごとに始め、Attemptを終えるときに閉じる。Sandboxの中で止められたら、次にコマンドを始めるときに始め直す。
-- Runnerは要求を受けると、LLMのTool呼出し（`datasource_query`・`datasource_describe`）と同じConnectorの処理を通す。Runに固定したConnectorの一覧、操作のたびの権限の確かめ直し（Connectorの権限。依頼した人が今も使えるか、タスクのRunならタスクに固定したもので範囲の中か、機密ならローカルLLMか。authorization.md §6）、読取り専用の強制、上限、ToolInvocationへの記録はすべて同じで、スクリプトからの呼出しだからといって範囲を広げない。呼べるのは、そのRunでエージェントにそのToolを出しているとき（Skillの「使ってよいTool」で外したRunでは、スクリプトからも呼べない）。
+- Runnerは要求を受けると、LLMのTool呼出し（`datasource_query`・`datasource_describe`）と同じConnectorの処理を通す。タスクのRunではタスクに固定したConnectorの一覧、会話のRunでは依頼した人の今の一覧（同じRunの途中で使えるようになったものも呼べる）、操作のたびの権限の確かめ直し（Connectorの権限。依頼した人が今も使えるか、タスクのRunならタスクに固定したもので範囲の中か、機密ならローカルLLMか。authorization.md §6）、読取り専用の強制、上限、ToolInvocationへの記録はすべて同じで、スクリプトからの呼出しだからといって範囲を広げない。呼べるのは、そのRunでエージェントにそのToolを出しているとき（Skillの「使ってよいTool」で外したRunでは、スクリプトからも呼べない）。
 - 要求はRunnerのスレッドで1つずつ処理する（記録と接続の枠をDBで扱うため）。処理するのは、コマンドの終わりを待つ間（`shell`・`job_output`）とステップの区切りなので、バックグラウンドのジョブから呼ぶと、エージェントが次に待つまで応答が返らないことがある。
 - 接続情報やtokenは通信路を流れず、Sandboxには結果だけが返る。結果の全体はToolと同じく `/workspace/input/connectors/{invocation_id}/result.csv` にファイルとして置き、ライブラリがそれを読んで行を返す。結果はモデルの文脈（RunEvent）には入れず、スクリプトにだけ返す。
 - 1つのRunからの呼出しの回数（1,000回。Attemptをまたいで数える）と頻度（1分に120回。超えたらライブラリが待ってやり直す）に上限を設け、スクリプトの不具合で社内DBに大量の問合せが流れないようにする。
@@ -1056,7 +1056,7 @@ Workerはworker_id、承認済みruntime profile、OS/architecture、Python ABI�
 | LLM呼出し | 固定したModelProfileでのLLM呼出し。同じプロセス内のProvider Adapterを通す。API keyはControl Planeと同じ信頼範囲のサーバーの中だけで使い、Sandboxへ渡さない（§4.8） |
 | Connector操作 | Connector（同じプロセス内のConnectorの処理）を通した操作の実行。Connectorの今の版の境界と、Runに固定したSkill・タスクで許可された操作だけを受け付け、fencing tokenを照合する（§4.9） |
 
-各操作では、対象Attemptのleaseとfencing token（§6.3）、Run開始時に固定した権限・Binding・ModelProfileを照合し、対象Attemptのファイル・LLM・Connector操作・イベント操作だけを許可する。WorkerサーバーはDBの認証情報とSecretを持つので、Control Planeと同じ信頼範囲のサーバーに限る。Workerは信頼された運用コンポーネントであり、Sandboxとは権限を分ける。
+各操作では、対象Attemptのleaseとfencing token（§6.3）、Runの実行許可・Binding・ModelProfileを照合し、対象Attemptのファイル・LLM・Connector操作・イベント操作だけを許可する。WorkerサーバーはDBの認証情報とSecretを持つので、Control Planeと同じ信頼範囲のサーバーに限る。Workerは信頼された運用コンポーネントであり、Sandboxとは権限を分ける。
 
 package要求・Skill更新・通知準備は、Runに許可された操作と対象に限る。Workerで動くことだけを理由に全社Skillを編集できる設計にはしない。イメージとwheelのcacheは内容hashをキーにし、可変な仮想環境をRun間で共有しない。
 

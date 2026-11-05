@@ -931,7 +931,7 @@ agentセッション（履歴、入力）
 3. 同じDB transactionでOutboxを記録する。DispatcherがQClusterへRun IDを通知する。
 4. WorkerがRunを原子的にclaimし、Attemptとleaseを作成する。
 5. 固定されたSkillと必要な内容を読み込む。コマンド処理が必要な場合は、許可された添付・資料と実行環境を復元してSandboxを起動する。
-6. RunnerがLLMとToolを反復し、結果を記録する。Tool前後の安全な区切りで追加指示と取消を確認する。Python依存の追加はEnvironment Revision、Skillの変更はSkill Draftとして管理し、安全な区切りでCheckpointを確定する。
+6. RunnerがLLMとToolを反復し、結果を記録する。Tool前後の安全な区切りで追加指示と取消を確認する。Python依存の追加はEnvironment Revision、Skillの変更はSkill Draftとして管理し、Workerを手放す前にCheckpointを確定する。
 7. 未反映の指示がなく、ジョブとサブエージェントも残っていないことを確認し（残っていれば§5.3の待ちへ移る）、成果物と必要な最終Workspace snapshot（タスクの実行では作らない。§7.9）を保存・検証する。業務結果Schemaを検証し、ResultEnvelope、Checkpoint、完了イベント、設定済み通知の配信Outboxを同じDB transactionで確定してRunを完了する。通知候補が不正なら標準形式を使う。配信は確定後に非同期で行い、人間も同じConversationで結果を確認できる。
 8. 必要な永続化を確認してWorkspace Persistence Adapterで一時領域を解放し、Sandboxを削除して実使用量に基づき予算予約を精算する（初期の実装は精算しない。手順2）。Skill編集Runでは公開結果またはDraft参照を残す。
 

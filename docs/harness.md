@@ -105,7 +105,7 @@ RunnerはQClusterのプロセスの中で動き、Provider Adapter・Connector�
 6. **Toolの実行**：各Tool呼出しをToolInvocationとして記録してから実行し、結果をRunEventとして記録する。並べ方は§7.6。Toolの組（§7.6）と組の間、および外部の確定した変更・利用者とのやり取りを伴うTool（effectが `WRITE_EXTERNAL`・`INTERACT`）の直前にも、1と同じ確認をする。
 7. **次へ**：Tool呼出しがあれば1へ戻る。なければ親が動き終える。ジョブかサブエージェントが残っていれば待ち（§4.3の `waiting_background`）、なければRunを終える（§4.3）。
 
-ステップの区切り（1と6の後）と、6のToolの組の間が「安全な区切り」（design.md §5.2の6・§5.5）で、取消の受付と追加指示の取込みはここで行う。Checkpointの確定はステップの区切りで行う（§11.1）。
+ステップの区切り（1と6の後）と、6のToolの組の間が「安全な区切り」（design.md §5.2の6・§5.5）で、取消の受付と追加指示の取込みはここで行う。Checkpointの確定はWorkerを手放す前に行う（§11.1）。
 
 1つの応答のToolを実行している途中で区切りの確認にかかったときは、残りの呼出しを次のように扱う。
 
@@ -115,7 +115,7 @@ RunnerはQClusterのプロセスの中で動き、Provider Adapter・Connector�
 
 ### 4.3 Runの終わり方
 
-終わり方には名前を付け、RunEventとRunの状態（design.md §5.3）に記録する。`waiting_user`・`waiting_background`・`retry_wait` はAttemptの終わり方（ジョブが動いている間はAttemptを終えず、同じAttemptのまま待つ）で、Runの終わり方（`end_reason`。終わりの状態のときだけ `run.status` に記録する）には入らない。どの終わり方でも、`/workspace/output` の成果物とWorkspace snapshotは保存できる範囲で保存する（SWE-agentの途中提出と同じ考え方）。
+終わり方には名前を付け、RunEventとRunの状態（design.md §5.3）に記録する。`waiting_user`・`waiting_background`・`retry_wait` はAttemptの終わり方（ジョブが動いている間はAttemptを終えず、同じAttemptのまま待つ）で、Runの終わり方（`end_reason`。終わりの状態のときだけ `run.status` に記録する）には入らない。どの終わり方でも、`/workspace/output` の成果物は保存できる範囲で保存する（SWE-agentの途中提出と同じ考え方）。snapshotは会話のRunだけ保存し、タスクの実行が終わるときは作らない（§8.1）。
 
 | 終わり方 | きっかけ | Runの状態 |
 |---|---|---|
@@ -511,7 +511,7 @@ Docker操作はLauncher（design.md §7.3、`runtime/launcher.py`）にまとめ
 
 - DockerはSDK（docker-py）でソケットを通して操作し、apiのイメージにdocker CLIを入れない。execのIDを持てるので、終了と終了コードをexecの状態（inspect）から読める。
 - 起動したら、inspectの結果でsandbox/CONTRACT.md §2の制限がかかっていることを確かめ直し、違えば使わずに消す（design.md §7.2の対策の1）。イメージの契約番号のラベルもWorkerで確かめる。
-- SandboxはAttemptごとに1つで、最初にSandboxのToolが呼ばれた時点で起動し、agentセッションの最新のsnapshotからワークスペースを戻す（修正チャットのタスクのRunと編集のRunは空から。design.md §7.9）。親もジョブも動いていなければ片付ける。
+- SandboxはAttemptごとに1つで、最初にSandboxのToolが呼ばれた時点で起動し、agentセッションの最新のsnapshotからワークスペースを戻す（修正チャットのタスクのRunと、その後の最初の編集のRunは空から。design.md §7.9、§10.10）。親もジョブも動いていなければ片付ける。
 - Workerを手放すとき（ジョブが動いていない確認待ち・完了・停止・失敗）は、`kill` の `all` で残ったプロセスを止めた後に `/workspace/work`・`/workspace/output` をSandboxの中のtarで取り出して保存し（tmpfsは `docker cp` で読めない）、Checkpointを記録してから状態を変え、最後に `docker rm -f` で消す。保存できなければ再試行し、それでも駄目なら失敗にする（黙って進めない）。タスクの実行の完了では、同じtarから成果物を回収するだけでsnapshotを作らない。
 - 同じtarから `/workspace/output` の通常のファイルを取り出し、成果物（Artifact）として保存する（design.md §7.4）。symlink・特殊なファイル・隠しファイルは回収せず、会話の同じパスの最新の成果物と中身が同じファイルも回収し直さない。1回に200個まで。
 - 保存先はArtifactと同じStorage Backend（`artifact/storage.py`。design.md §7.8）。S3にすれば、別のWorkerでも最後のCheckpointから戻せる。
@@ -675,7 +675,7 @@ Runが使うSkill（`/` で指定したものと、読み込んだもの）が�
 - Skillのスクリプトからの呼出し（design.md §4.9.6。`harness/script_connectors.py`）も、同じConnectorの処理とToolInvocationの記録を通す。
   - Sandboxを起動したとき、このRunに `datasource_query`・`datasource_describe` のどちらかを出していて、Connectorの一覧があれば、Sandboxの中の中継（`yoriki-sandbox relay`。sandbox/CONTRACT.md §4.9）を `docker exec` で始める。中継が止まっていれば、次にコマンドを始めるときに始め直す。始められなければ、そのAttemptでは始め直さず、スクリプトからは呼べないまま続ける（ライブラリが `unavailable` を返す）。
   - 中継から届いた要求は、受け取るスレッドで列に積むだけにし（32件まで。あふれたら `busy` で、ライブラリが待ってやり直す。中継はSandboxの中のもので置き換えられうるので、受け取る1行も2MiBまで、行の速さも10秒に500行までにし、超えたら通信路を閉じる）、Runnerのスレッドで1つずつ処理する（1回に8件まで。残りは次に処理する）。応答は書込みのスレッドが書き、Runnerのスレッドは待たない（中継が読まずに書く前の応答が64件か16MiBを超えたら閉じる）。応答1件は4MiBまでで、超える結果（表・列の多い `describe`）は `too_large` で返し、失敗として記録する。処理するのは、ジョブの終わりを待つ間（`shell`・`job_output`。要求が届けばすぐ、1件ずつ処理し、間で待つ時間の期限と取消を確かめる。処理中の1件は止められないので、その分は `timeout_seconds` を過ぎうる）と、ステップの区切り（終わったジョブを知らせる前）。モデルの応答を待つ間は処理しないので、スクリプトは待つ。
-  - 引数は、Toolと同じSchema（`connector` は一覧の名前のenum、知らない項目は断る）で確かめ、全体で64KiBまで（記録に残すため）。前のAttemptで閉じられなかった呼出し（leaseを失った等）は、再開のときに結果不明で閉じる。操作のToolをこのRunに今出していなければ断る（Skillの「使ってよいTool」で外したRunでは、スクリプトからも呼べない）。
+  - 引数は、Toolと同じSchema（`connector` は今の一覧の名前、知らない項目は断る）で確かめ、全体で64KiBまで（記録に残すため）。前のAttemptで閉じられなかった呼出し（leaseを失った等）は、再開のときに結果不明で閉じる。操作のToolをこのRunに今出していなければ断る（Skillの「使ってよいTool」で外したRunでは、スクリプトからも呼べない）。
   - 呼出しはToolInvocation（`call_id` は `script-` で始まる。`value` に `via: "script"` と、そのときに実行していたToolの呼出しのID `during`。失敗したら、スクリプトへ返した説明を `error`）に記録し、RunEventには入れない（モデルの文脈に結果を入れない）。画面の作業の記録には、RunEventとは別のAPI（`/api/app/v1/runs/{run}/script_calls/`。作業の記録と同じく、Runの結果とログを見られる人だけ）で返し、`during` の呼出しの下に「この間に処理したスクリプトからの照会」として出す（要求を出したジョブではなく、処理したときに待っていたコマンドなので。ステップの区切りで処理したものは、時刻の順で間に出す）。1つのコマンドの下では100件ずつ出し、続きは「さらに表示」で出す（1つのRunで1,000回まで呼べるため）。結果の行は出さず行数だけを出す（行は「Connectorの結果」のファイルで見られる）。失敗は、種類（`rejected` 等）と、スクリプトへ返した説明（Connectorのエラー文を含む。英語のまま）を出す。読めなかったら、記録の中に「読み直す」を出す。実行中の画面は、Runが動いている間（ステップの区切りでも処理するので、コマンドを待つ間に限らない）5秒ごとに、まだ終わっていない呼出し（なければ最後の呼出し）から後だけを読み直す（`since`。全件を読み直さない）。
   - system promptでは、`shell` と `datasource_query` を出しているRunにだけ、スクリプトから `yoriki_connector` で問い合わせられること、使い方、行ごとに照会せず `IN` 等でまとめて読むこと、スクリプトは前面で動かすか `job_output` で待つこと（モデルの応答を待つ間は要求を処理しないため）を案内する（`harness/prompts.py` の `SCRIPT_CONNECTORS`）。結果のCSVはToolと同じくArtifactにして `/workspace/input/connectors/{invocation_id}/result.csv` に置き、スクリプトには場所・列・行数・打ち切ったかを返す（行はライブラリがファイルから読む）。
   - 上限：1つのRunで1,000回（Attemptをまたいで、記録した呼出しを数える）、1分に120回（Attemptの中では断る要求も含めて数え、前のAttemptの直近1分の記録した呼出しも数える。超えたら `rate_limited` と待つ秒数を返し、ライブラリが待ってやり直す）。
@@ -803,7 +803,7 @@ Codexの非同期の質問と、Gemini CLIの「承認待ちのTool呼出し」�
 **動かし方**：親のLLMが `subagent`（§7.4）を呼ぶ。Runnerは次を順に行い、子のIDをすぐ返す。親は待たない。
 
 1. `model`・`effort` を確かめて固定する。選べるのはagentセッションで使えるものだけ（機密ならローカルLLM）で、既定は親と同じ。利用者向けの選択の画面は作らない。
-2. 親のコンテナの中で `/workspace/work`・`/workspace/output` のtarを作り、保存先へ一時的に置く（親のsnapshotとは別の扱い。親のコンテナがなければ最新のsnapshotを使う）。親のコマンドが書き込み中でもその時点のファイルを写し、書き込み中のファイルの中身は保証しない。作れなければ親へエラーを返す。
+2. 親のコンテナの中で `/workspace/work`・`/workspace/output` のtarを作り、保存先へ一時的に置く（親のsnapshotとは別の扱い。親のコンテナがなければ最新のsnapshotを使う）。親のコマンドが書き込み中でもその時点のファイルを写し、書き込み中のファイルの中身は保証しない（ジョブが動いていれば、そのことを親への結果と子の指示に添える）。作れなければ親へエラーを返す。
 3. Subagentを記録し、子のAttemptをQ2へ渡す。
 
 **ワークスペース**：親と同じRuntime Profileの版で別のSandboxを起動し、コピーを展開する。`/workspace/input`・`/workspace/master` は親と同じものを読取り専用で置く。コピーは自由に読み書きでき、親の変更は子から見えず、子の変更は親から見えない。

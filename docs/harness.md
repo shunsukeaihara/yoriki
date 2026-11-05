@@ -808,7 +808,7 @@ Codexの非同期の質問と、Gemini CLIの「承認待ちのTool呼出し」�
 
 **ワークスペース**：親と同じRuntime Profileの版で別のSandboxを起動し、コピーを展開する。`/workspace/input`・`/workspace/master` は親と同じものを読取り専用で置く。コピーは自由に読み書きでき、親の変更は子から見えず、子の変更は親から見えない。
 
-**種類とTool**：種類は組込みの汎用の1つだけ。Toolは、Sandboxの土台のTool（`todo_write` を除く）と `skill`・`datasource_*` のうち、親のRunに出しているToolとの共通部分だけ（§7.5。子を通してSkill・タスクのToolの制限を越えさせない）。呼ぶたびに親の実行許可（authorization.md §6）で確かめる。Skillは読み込んで使えるが変更はできない。タスクのRunの子は、タスクに固定した版だけを読む。`ask_user`、`submit_result`、`present_files`、`prepare_notification`、`request_*`、`install_python_packages`、`subagent` は出さない。困ったら報告で親へ返すよう指示する。孫は作らない。
+**種類とTool**：種類は組込みの汎用の1つだけ。Toolは、Sandboxの土台のTool（`todo_write` を除く）と `skill`・`datasource_*` のうち、親のRunに出しているToolとの共通部分だけ（§7.5。子を通してSkill・タスクのToolの制限を越えさせない）。呼ぶたびに親の実行許可（authorization.md §6）で確かめる。Skillは読み込んで使えるが変更はできない。親に `skill` を出していないRun（タスクのRun、`/` でSkillを指定したRun）では子にも出さず、親に固定したSkillの内容を子の最初の発言に入れる。`ask_user`、`submit_result`、`present_files`、`prepare_notification`、`request_*`、`install_python_packages`、`subagent` は出さない。困ったら報告で親へ返すよう指示する。孫は作らない。
 
 **親へ返すもの**：テキストとファイルだけ。
 

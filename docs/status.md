@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-11-04（入口の管理をタスクを管理できる人へ移す実装（#79）。#79 のマージを確かめてから、§4 の「次の作業」の1から始める）
+- 最終更新：2026-11-06（agentセッションとSandboxのイメージの新案を入れた（#80）。§4 の「次の作業」の1から始める）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -39,6 +39,7 @@
 | #76 | テストの並列化（pytest-xdist。development.md §3.1）、残ったSandboxの掃除を同じDBのものに限る（ラベル `org.yoriki.database`） |
 | #77 | 確認用の道具（`devtools`：`seed_dev`・`fake_llm`・`dev_session`。development.md §6） |
 | #78・#79 | Webhookの入口をタスクを管理できる人が作る形（設計：design.md 0.45、authorization.md §5.5・§13。実装：入口のAPIと画面をタスクの下へ移し、1つのタスクに複数の入口、鍵を作った人の記録と警告、`/manage/trigger_bindings` は見るだけの一覧） |
+| #80 | 新案：agentセッション（[session-proposal.md](session-proposal.md)）、Sandboxのイメージ（[sandbox-proposal.md](sandbox-proposal.md)）。設計書と実装はまだ |
 
 各PRの中身は、Pull Requestの説明と設計書を見る。
 
@@ -105,8 +106,10 @@
 **今の状態（2026-11-03）**：design.md §12の第1段階のうち、Skill（①〜⑤）と、Connector・タスク・配信（①〜⑦、Connectorの④a・④b）は終わった（#72・#73まで）。今は、業務（下の「第1段階の順番」の3）を作る前の整理を、利用者と決めた次の順で進めている。文書の整理は #74 と、その残り（design.md・harness.md の突き合わせ。#75）で、テストの高速化は #76 で行った（バックエンドのテスト全体は、手元（8コア）で約5分から約35秒に、4並列でも約45秒になった）。#74 では、status.md の終わった段階の「決めたこと・判断した点」を設計書と突き合わせ、設計書になかった今の動きに関わるものを design.md・authorization.md・harness.md・frontend-conventions.md・sandbox/CONTRACT.md へ移してから消した（経過・レビュー・確かめたことは消した。各PRの説明に残っている）。§1 はPRごとの短い一覧にした。確認用の道具は #77 で入れた（偽のLLM `fake_llm`、確認用のデータ `seed_dev`、ログイン済みのセッション `dev_session`。development.md §6）。
 
 **次の作業**：
-1. **最初の2つの業務**（下の3）：何をSkill・タスク・Connector・出口で用意するか、足りない機能、PRの分け方を利用者と決めてから作る。
-- 後回しにしたもの（利用者と決めた）：公式のスキル（`SKILL.md` の形のフォルダ）の取り込みと、Sandboxへの Node.js（npm）のエコシステムの追加。文書系の公式スキルは Node.js と LibreOffice に頼り、ライセンスで同梱できないものがある（確かめてから決める）。LibreOffice は大きすぎるので入れない（design.md §7.6 の方針のまま）。
+1. [session-proposal.md](session-proposal.md)・[sandbox-proposal.md](sandbox-proposal.md) を読み、設計書（design.md・harness.md 等）を直す。
+2. 設計書に合わせて実装を直す。
+
+業務は人間が作り、足りない機能をエージェントが直す。外部のSkillの取り込みは、いったん検討から外す。ほかの作業（クオータと予算の強制、`/runs`、CSP等）の順番は未決。
 
 **第1段階の順番**（design.md §12。1つの目的ごとに1つのPull Requestにして、上から進める）：
 

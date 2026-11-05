@@ -1241,7 +1241,7 @@ wheelは公開indexから再取得できることだけに依存せず、再開�
 
 ### 7.8 Storage Backendによるファイル保存
 
-Artifact Storeは論理的な保存サービスの名称とし、実装をArtifact ServiceとStorage Backendに分ける。Artifact Serviceは所有者・権限・版・参照・保持期限を管理し、Storage Backendはファイルbytesを扱う。サーバー設定でBackendを切り替えても、Skill、Run、会話は同じArtifact IDを使う。
+Artifact Storeは論理的な保存サービスの名称とし、実装をArtifact ServiceとStorage Backendに分ける。Artifact Serviceは所有者・権限・版・参照を管理し、Storage Backendはファイルbytesを扱う。サーバー設定でBackendを切り替えても、Skill、Run、会話は同じArtifact IDを使う。
 
 | 保存対象 | 管理情報 | bytesの保存先 |
 |---|---|---|
@@ -1255,7 +1255,7 @@ Artifact Storeは論理的な保存サービスの名称とし、実装をArtifa
 
 Storage Backendの契約は、validate_config、healthcheck、put_immutable、open_read、stat、deleteとする。put_immutableは新しいobject keyへ保存し、保存参照・サイズ・SHA-256を返す。同じ操作の再送は同じ内容として確認でき、既存の別内容を上書きしない。Backend固有のETag等を、基盤で計算する内容hashの代わりにはしない。
 
-署名付きURL、サーバー内コピー、multipart等はcapabilitiesとして宣言する任意機能とする。業務コードはローカルの絶対pathやfilesystemのrename、ディレクトリ一覧を必須としない。Django Storageを実装内部で使えるが、権限・不変性・保持期限・snapshot整合性はArtifact Serviceが保証する。ローカルpathを提供しないStorageもあるため、共通処理はstream／論理参照を使う。
+署名付きURL、サーバー内コピー、multipart等はcapabilitiesとして宣言する任意機能とする。業務コードはローカルの絶対pathやfilesystemのrename、ディレクトリ一覧を必須としない。Django Storageを実装内部で使えるが、権限・不変性・snapshot整合性はArtifact Serviceが保証する。ローカルpathを提供しないStorageもあるため、共通処理はstream／論理参照を使う。
 
 Artifactは不変のBlobObjectを参照し、BlobLocationにbackend_id、設定世代、object key、必要なprovider version IDを記録する。bucket名やhost root、資格情報は基盤設定へ置く。object keyはサーバーが生成し、ユーザーのファイル名を直接pathにしない。論理的なResource Versionと、S3等の物理的なversion IDは別に管理する。
 
@@ -1752,7 +1752,7 @@ Checkpointとsnapshot、入力待ち、Run続行、lease、fencing、Outbox、Re
 
 確認待ちからの回答、停止後の続行、再接続時の画面復元、完了と追加指示が競合する場合を検証する。外部スレッドの作成結果不明、返信再送、複数人・Webとの同時回答、質問の世代切替、Botの反射、Gateway切断、アーカイブ・権限失効も対象にする。チャットの表示と実際に適用した条件が一致することを確認する。
 
-Skill資料の同時更新、複数ファイルの公開失敗、候補編集中のWorker停止、旧版の復元、添付期限切れ後の原本保持も検証する。Skill本文とマスターの異なる世代が混ざらないことを確認する。
+Skill資料の同時更新、複数ファイルの公開失敗、候補編集中のWorker停止、旧版の復元、元の添付を明示的に消した後の原本保持も検証する。Skill本文とマスターの異なる世代が混ざらないことを確認する。
 
 Triggerの重複受付、結果保存直後の停止、通知の整形失敗、通知再送、期限付きURLの更新、確認待ちからの続行を検証する。通知の失敗でエージェントの実行が重複しないことと、Plugin・Binding更新後も既存Runの実行条件と通知先を維持することを確認する。
 
@@ -1783,7 +1783,7 @@ QClusterだけを動かすWorkerサーバー（同じ私設ネットワーク、
 | 環境復元 | 別Workerで同一imageと依存を復元し、ABI不適合Workerには配分しない |
 | コマンド不要のSkill | shell権限とSandboxを使わずにテキスト処理とSkill編集ができる |
 | エージェントによる更新 | ユーザー依頼からDraftを作成し、権限があれば公開して次のRunへ反映できる |
-| 公開範囲 | 個人用更新が部門・全社へ波及せず、そのSkillを使う会話の次のRunだけに反映する（タスクは固定した版のまま）。権限のない利用者には、Skill・Connectorがエージェントの候補としても見えない |
+| 公開範囲 | 個人用更新が部門・全社へ波及せず、そのSkillを使う会話で次に読み込むときから反映する（読み込み済みの版は、利用者が `/` で指定し直さなければ変わらない。タスクは固定した版のまま）。権限のない利用者には、Skill・Connectorがエージェントの候補としても見えない |
 | 権限拡張防止 | Skill本文・Schemaの変更でToolやResource権限を増やせない |
 | 変更依頼の区別 | 添付内の更新指示や今回限りの修正で共有Skillが永続変更されない |
 | Skill競合と再送 | 同時編集を検出し、公開直後の再送でも版を重複作成しない |

@@ -727,7 +727,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 
 class Command(BaseCommand):
-    help = "保持期限を過ぎたArtifactを清掃する"
+    help = "保存期限を過ぎたワークスペースを清掃する"
 
     def add_arguments(self, parser):
         parser.add_argument("--dry-run", action="store_true", help="変更せずに対象を表示する")

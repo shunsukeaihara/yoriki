@@ -15,7 +15,7 @@
 |---|---|
 | ログインとアカウント | 社内SSO（Microsoft 365・Google Workspace。設定は管理画面で行う）、SSOのない導入先向けのYorikiのアカウント（招待・パスワード）、部門と所属、permissionによる権限（[docs/authorization.md](docs/authorization.md)） |
 | LLM | 接続（OpenAI・Anthropic・Gemini・ローカルLLM。API keyは暗号化して保存）、版を持つモデル設定、各社のAPIを共通化するProvider Adapter。各社のAgent SDKは使わず、自前のハーネスで動かす |
-| 会話 | 依頼・応答の逐次表示（SSE）、作業の計画と記録、確認への回答、実行中の追加の指示、次の依頼、停止、モデルとeffortの切り替え、添付と成果物、`/` でのSkill・タスクの指定と `@` でのConnectorの指定、チャットからのタスクの起動 |
+| 会話 | 依頼・応答の逐次表示（SSE）、作業の計画と記録、確認への回答、実行中の追加の指示、停止、モデルとeffortの切り替え、添付と成果物、`/` でのSkill・タスクの指定と `@` でのConnectorの指定、チャットからのタスクの起動 |
 | ハーネスとSandbox | Run・Attempt（lease・fencing）・RunEventを正本にした実行と障害からの再開、要約の圧縮。コマンドはネットワークのないSandboxのコンテナで動かす（Runtime Profileでイメージをdigestで固定、本番はgVisor）。文書処理用のイメージ（`sandbox/images/docs`） |
 | Skill | 個人・部門・全社・システムの範囲、Draftと公開・不変の版・切戻し・緊急停止、資料（MD・CSV・PPTXの検証と差分）、評価ケースによるDraftの評価、会話からのSkillの作成・更新、Skillが使うConnectorの宣言、機密のSkill |
 | Connector | 社内DB（PostgreSQL・MySQL・SQL Server）の読取り。公開する表・列と上限を版で持ち、会話では `datasource_describe`・`datasource_query` で使う。Skillのスクリプトからも中継（`yoriki_connector`）で読める |

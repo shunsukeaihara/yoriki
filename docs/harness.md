@@ -341,12 +341,12 @@ class ToolResult:
 
 | Tool | 引数 | 内容 | effect | 並列 |
 |---|---|---|---|---|
-| `skill` | `name`（使えるSkillの名前のenum） | Skillを読み込む（§10.1） | READ | 不可（Manifestへの追記を伴うので、1つずつ実行する） |
+| `skill` | `name`（使えるSkillの名前。一覧は§10.1） | Skillを読み込む（§10.1） | READ | 不可（Manifestへの追記を伴うので、1つずつ実行する） |
 | `ask_user` | `questions`（1〜3。各 `header`・`question`・`options`・`multi_select`） | 利用者に確かめる（§10.3） | INTERACT | 不可（単独で呼ぶ） |
 | `present_files` | `files`（`path`・`description` の並び。4件まで） | 主な成果物を示す（§10.5） | READ | 不可 |
 | `submit_result` | 業務結果のSchema（SkillかTask Definitionのもの） | 業務結果を確定する（§10.5） | READ | 不可（単独で呼ぶ） |
 | `install_python_packages` | `packages`（`name`・`version`） | 管理された取得で、Run専用の環境へ入れる（design.md §7.6） | WRITE_SANDBOX | 不可 |
-| `datasource_describe` | `connector`（Run開始時に固定した一覧の名前のenum） | 公開している表・列の説明（design.md §4.9.2） | READ | 不可（同時実行の枠と記録をDBで扱うので、1つずつ実行する） |
+| `datasource_describe` | `connector`（使えるConnectorの名前。一覧は§10.2） | 公開している表・列の説明（design.md §4.9.2） | READ | 不可（同時実行の枠と記録をDBで扱うので、1つずつ実行する） |
 | `datasource_query` | `connector`、`sql`、`params`（文字列の並び） | SELECT文（引数の場所は `?`）を実行し、結果をCSVで `/workspace/input/connectors/{invocation_id}/` に置く | READ | 不可（同上。接続の同時実行数の上限の中で） |
 | `request_skill_edit` | `skill`（編集するSkillの名前。新しく作るなら空）、`summary`（変更の要約） | Skillの編集を提案し、利用者の確認を待つ（§10.9）。答える人がいる業務のRunだけに出す（修正チャットのタスクのRunには出さない） | INTERACT | 不可（単独で呼ぶ） |
 | `request_task_edit` | `summary`（変更の要約） | タスクの定義の変更を提案し、利用者の確認を待つ（§10.10）。修正チャットのタスクのRunだけに出す | INTERACT | 不可（単独で呼ぶ） |
@@ -671,7 +671,7 @@ Runが使うSkill（`/` で指定したものと、読み込んだもの）が�
 - 接続先への操作は、接続の同時実行数の上限の中で行う。枠（ConnectionLease）は接続の行をロックして数えてから取り、全Workerとapi（管理画面の接続の確認・表の一覧・説明・試し実行）を通して数える。空かなければ60秒まで（管理画面は10秒まで）待ち、それでも空かなければエラーとしてモデルに返す。操作は別のスレッドで行い、待つ間はAttemptのleaseと枠の期限を延ばす（実行時間の上限はleaseより長く設定でき、DBの上限は文ごとに効くため）。
 - 結果はArtifact（種別「Connectorの結果」）として保存し、Sandboxの `/workspace/input/connectors/{invocation_id}/result.csv` に読取り専用で置く。同じ会話の次の依頼でも読める（authorization.md §6.1）。モデルには、件数・列名・先頭の10行・ファイルの場所だけを返し、行は `<untrusted_content>` で囲む（§6.3）（design.md §4.9.1）。ファイルを読むTool（`read`・`shell`）のないRunでは、上限の中の結果を表として返す。
 - `@` で明示したConnectorは、Run開始時に使えるかを確かめ（使えなければRunを始めない）、公開している表の名前と説明を最初の `message.user` に入れる（列の型は `datasource_describe` で確かめさせる。Run開始時に接続先へつながない）。`@` を指定したメッセージは、実行中なら親へ渡す。発言を受け付けるときに今の権限で確かめ（使えなければ理由を返して受け付けない）、取り込むときに表の名前と説明を `message.user` に入れる。`/` で指定したSkillがConnectorのToolを許さなければ、指定を断る。`@` で指定できるのは1つのメッセージで5つまで。本文がなく `@` だけを指定した依頼は受け付けない（Connectorだけでは何を頼むかが決まらないため）。Toolを使えないモデルの会話では、ConnectorのToolを出さないので、`@` の一覧にConnectorを出さず、指定しても断る。
-- 機密のフラグの付いたConnectorは、機密の会話・タスクのRun（`handles_sensitive_data`。開始時の会話の区分を持つ）にだけ一覧に出し、使わせる。機密の会話はローカルLLMのモデルだけで、扱わない会話に戻せないので、Connectorの情報はクラウドのモデルへ渡らない。`@` で機密のConnectorを指定できるのも機密の会話だけ。会話を途中で機密にしたら、実行中のRunにも印を付け（モデルの切り替えの候補がローカルLLMだけになる）、モデルがローカルLLMなら、機密のConnectorを次に発言を取り込むときから一覧に出す。操作のたびにも、Runの区分とモデル（ローカルLLMか）を確かめる。
+- 機密のフラグの付いたConnectorは、機密の会話・タスクのRun（`handles_sensitive_data`。開始時の会話の区分を持つ）にだけ一覧に出し、使わせる。機密の会話はローカルLLMのモデルだけで、扱わない会話に戻せないので、Connectorの情報はクラウドのモデルへ渡らない。`@` で機密のConnectorを指定できるのも機密の会話だけ。会話を途中で機密にできるのは会話のモデルがローカルLLMのときだけで、実行中のRunもそのモデルへ切り替え、印を付ける（モデルの切り替えの候補がローカルLLMだけになる）。クラウドのモデルで動いているサブエージェントは止めて親に知らせる（§10.11）。機密のConnectorは次に発言を取り込むときから一覧に出す。操作のたびにも、Runの区分とモデル（ローカルLLMか）を確かめる。
 - Skillのスクリプトからの呼出し（design.md §4.9.6。`harness/script_connectors.py`）も、同じConnectorの処理とToolInvocationの記録を通す。
   - Sandboxを起動したとき、このRunに `datasource_query`・`datasource_describe` のどちらかを出していて、Connectorの一覧があれば、Sandboxの中の中継（`yoriki-sandbox relay`。sandbox/CONTRACT.md §4.9）を `docker exec` で始める。中継が止まっていれば、次にコマンドを始めるときに始め直す。始められなければ、そのAttemptでは始め直さず、スクリプトからは呼べないまま続ける（ライブラリが `unavailable` を返す）。
   - 中継から届いた要求は、受け取るスレッドで列に積むだけにし（32件まで。あふれたら `busy` で、ライブラリが待ってやり直す。中継はSandboxの中のもので置き換えられうるので、受け取る1行も2MiBまで、行の速さも10秒に500行までにし、超えたら通信路を閉じる）、Runnerのスレッドで1つずつ処理する（1回に8件まで。残りは次に処理する）。応答は書込みのスレッドが書き、Runnerのスレッドは待たない（中継が読まずに書く前の応答が64件か16MiBを超えたら閉じる）。応答1件は4MiBまでで、超える結果（表・列の多い `describe`）は `too_large` で返し、失敗として記録する。処理するのは、ジョブの終わりを待つ間（`shell`・`job_output`。要求が届けばすぐ、1件ずつ処理し、間で待つ時間の期限と取消を確かめる。処理中の1件は止められないので、その分は `timeout_seconds` を過ぎうる）と、ステップの区切り（終わったジョブを知らせる前）。モデルの応答を待つ間は処理しないので、スクリプトは待つ。
@@ -808,7 +808,7 @@ Codexの非同期の質問と、Gemini CLIの「承認待ちのTool呼出し」�
 
 **ワークスペース**：親と同じRuntime Profileの版で別のSandboxを起動し、コピーを展開する。`/workspace/input`・`/workspace/master` は親と同じものを読取り専用で置く。コピーは自由に読み書きでき、親の変更は子から見えず、子の変更は親から見えない。
 
-**種類とTool**：種類は組込みの汎用の1つだけ。Toolは、Sandboxの土台のTool（`todo_write` を除く）と、親の実行許可（authorization.md §6）の範囲の `skill`・`datasource_*`。Skillは読み込んで使えるが変更はできない。タスクのRunの子は、タスクに固定した版だけを読む。`ask_user`、`submit_result`、`present_files`、`prepare_notification`、`request_*`、`install_python_packages`、`subagent` は出さない。困ったら報告で親へ返すよう指示する。孫は作らない。
+**種類とTool**：種類は組込みの汎用の1つだけ。Toolは、Sandboxの土台のTool（`todo_write` を除く）と `skill`・`datasource_*` のうち、親のRunに出しているToolとの共通部分だけ（§7.5。子を通してSkill・タスクのToolの制限を越えさせない）。呼ぶたびに親の実行許可（authorization.md §6）で確かめる。Skillは読み込んで使えるが変更はできない。タスクのRunの子は、タスクに固定した版だけを読む。`ask_user`、`submit_result`、`present_files`、`prepare_notification`、`request_*`、`install_python_packages`、`subagent` は出さない。困ったら報告で親へ返すよう指示する。孫は作らない。
 
 **親へ返すもの**：テキストとファイルだけ。
 
@@ -825,7 +825,7 @@ Codexの非同期の質問と、Gemini CLIの「承認待ちのTool呼出し」�
 
 **親の動き**：終わった子は `subagent.finished` として記録し、親を起こす（確認待ちの間は起こさず、回答のときに渡す。design.md §5.3）。親が待つだけで、ジョブも動いていなければ、親はAttemptを終えてWorkerを空ける。止めてよいものは積極的に止めるよう、説明文に書く。
 
-**障害と上限**：実行時間の上限（§4.4）を超えたら止めて親に知らせる。Workerやコンテナが落ちた子は自動で再試行せず、失敗として親へ伝える（一時のコピーは消す）。agentセッションの停止で子も止まる。1つのAttemptの間は、ほかの親と同じくleaseとfencing tokenで書込みを確かめる。
+**障害と上限**：実行時間の上限（§4.4）を超えたら止めて親に知らせる。Workerやコンテナが落ちた子は自動で再試行せず、失敗として親へ伝える（一時のコピーは消す）。agentセッションの停止で子も止まる。会話を途中で機密にしたら、クラウドのモデルで動いている子は止めて親に知らせる（機密の会話の内容をクラウドへ送らないため）。1つのAttemptの間は、ほかの親と同じくleaseとfencing tokenで書込みを確かめる。
 
 **記録**：RunEvent・ToolInvocation・UsageLedgerは親のRunのものとして、どの子のものかを持つ。sequenceは親と通しで、子の文脈は子のものだけから組み立てる。利用量も子に結び付ける。
 

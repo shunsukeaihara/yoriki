@@ -652,7 +652,7 @@ LibreOffice・Node.js・pandoc・poppler-utils・markitdownはこれからイメ
 - 固定した版の資料を、Sandboxの外から `/workspace/master/skills/{skill_id}/` へ置いて（bind mountなので動いているSandboxにもそのまま見え、Sandboxからは読取り専用のまま）、置けたことを確かめてからManifestへ追記し、`skill` の結果を返す。置けなければ読込みを失敗にし、Manifestへは追記しない。
 - Sandboxをまだ起動していないときは、起動するときに、Manifestに追記した全Skillの資料を展開する。
 
-同じRunでもう一度読み込んでも、追記した版を返す（途中で公開し直されても切り替えない）。
+同じRunで `skill` でもう一度読み込んでも、追記した版を返す（途中で公開し直されても切り替えない）。利用者が発言で `/` で指定し直したときだけ、その時点の最新の公開版へ切り替え、Manifestに追記して切り替えた時点を記録する。
 
 Runが使うSkill（`/` で指定したものと、読み込んだもの）が停止・削除されたか、利用者が使えなくなったら（権限の失効。宣言したConnectorを使えなくなった、宣言した表をConnectorが公開しなくなった、機密でないRunで機密のSkillになった、も含む）、過去の版でも使わせない（design.md §3.2・§4.9.1）。Runnerは毎ステップの区切りで確かめ、`skill` で終える。モデルの切り替えの候補と、利用者が会話のモデルを変えるときも、Runが使うSkillの必要な能力を持つモデルに限る。
 
@@ -685,7 +685,7 @@ Runが使うSkill（`/` で指定したものと、読み込んだもの）が�
 Codexの非同期の質問と、Gemini CLIの「承認待ちのTool呼出し」を合わせた形にする。
 
 1. モデルが `ask_user` を呼ぶ。引数は1〜3個の質問で、各質問は `header`（12文字まで）、`question`、`options`（2〜4。`label`・`description`。推奨を先頭にして「 (Recommended)」を付ける）、`multi_select`。自由記述の答えはいつもできるので、「その他」を選択肢に入れさせない。
-2. Runnerは、ClarificationRequestを作り、WAITING_USER、Checkpoint、質問の配信Outboxを同じDB transactionで確定する（design.md §4.7）。Tool呼出しの結果はまだ記録しない。ジョブが動いていなければAttemptを終え、Workerを手放す。動いていれば同じAttemptのまま待つ（design.md §5.3）。
+2. Runnerは、ClarificationRequestを作り、WAITING_USERと質問の配信Outboxを同じDB transactionで確定する（design.md §4.7）。Tool呼出しの結果はまだ記録しない。ジョブが動いていなければ、先にワークスペースを保存し、同じtransactionでCheckpointも確定してAttemptを終え、Workerを手放す。動いていればCheckpointは確定せず（ジョブがファイルを変え続けるため）、同じAttemptのまま待ち、全部止まってWorkerを手放すときに保存する（design.md §5.3）。
 3. 回答がWeb画面か外部スレッドから届いたら、`clarification.answered` と、その `ask_user` 呼出しへの `tool.result`（質問ごとの答えと、回答者の表示名）を記録し、Attemptを手放していればRunを再キューする。手放していなければ同じAttemptへ渡す。確認待ちの間に終わったジョブとサブエージェントの結果も、ここで渡す。
 4. 親は、RunEventから文脈を組み立て直して続ける。Tool呼出しの直後にその結果がある形になるので、どのプロバイダでも続けられる。
 
@@ -825,7 +825,7 @@ Codexの非同期の質問と、Gemini CLIの「承認待ちのTool呼出し」�
 
 **親の動き**：終わった子は `subagent.finished` として記録し、親を起こす（確認待ちの間は起こさず、回答のときに渡す。design.md §5.3）。親が待つだけで、ジョブも動いていなければ、親はAttemptを終えてWorkerを空ける。止めてよいものは積極的に止めるよう、説明文に書く。
 
-**障害と上限**：実行時間の上限（§4.4）を超えたら止めて親に知らせる。Workerやコンテナが落ちた子は自動で再試行せず、失敗として親へ伝える（一時のコピーは消す）。agentセッションの停止で子も止まる。会話を途中で機密にしたら、クラウドのモデルで動いている子は止めて親に知らせる（機密の会話の内容をクラウドへ送らないため）。1つのAttemptの間は、ほかの親と同じくleaseとfencing tokenで書込みを確かめる。
+**障害と上限**：実行時間の上限（§4.4）を超えたら止めて親に知らせる。Workerやコンテナが落ちた子は自動で再試行せず、失敗として親へ伝える（一時のコピーは消す）。agentセッションの停止で子も止まる（親がWorkerを手放した確認待ち・裏の作業の待ちでも、停止と回答期限切れは、動いている子とジョブが止まったことを確かめてから終わりの状態へ移す。design.md §5.3）。会話を途中で機密にしたら、クラウドのモデルで動いている子は止めて親に知らせる（機密の会話の内容をクラウドへ送らないため）。1つのAttemptの間は、ほかの親と同じくleaseとfencing tokenで書込みを確かめる。
 
 **記録**：RunEvent・ToolInvocation・UsageLedgerは親のRunのものとして、どの子のものかを持つ。sequenceは親と通しで、子の文脈は子のものだけから組み立てる。利用量も子に結び付ける。
 

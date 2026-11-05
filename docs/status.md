@@ -85,7 +85,7 @@
 - 外部のSkillの取り込みで後回しにしたもの（2026-11-02、利用者と決めた）：外部のSkill（`SKILL.md` と `scripts/`・`references/` 等のフォルダ）の取り込み（frontmatterと本文・資料をYorikiのSkillへどう写すか、Draft → 評価 → 公開を通すか、誰が取り込めるか）。いったん検討の外。必要な道具はイメージに入れる（design.md §7.6）。
 - Sandboxで後回しにしたもの：`install_python_packages` と `/packages`（PackageBundle・EnvironmentRevision）、ステップごとのCheckpoint（今はAttemptを終えるときだけ。0.47でWorkerを手放す前だけに決めた。障害で落ちると、最後のCheckpointより後の変更は失われ、モデルに知らせる）、snapshotの保持期限と削除、非公開のレジストリからのpullの認証。
 - 引き継いだ文脈が、それだけでモデルの文脈に収まらないほど大きいとき（前の依頼が文脈の上限で失敗した等）は、要約の要求も収まらず、次の依頼も失敗する。前の依頼の中で圧縮が働くので通常は起きない。
-- 成果物とファイルで後回しにしたもの：Storage Backendの `validate_config`・`healthcheck`（セットアップ時の確認。design.md §7.8）、既存のファイルを新しい保存先へ移すコマンド（design.md §7.10。以前の保存先を読む設定 `YORIKI_STORAGE_PREVIOUS` はある）、WorkspaceSnapshotのModel（今はCheckpointが保存先・key・hashを持つ）、ワークスペースの保存期限での自動削除（`cleanup_artifacts` を見直す）、添付と成果物の個別の削除、`Artifact.expires` と `YORIKI_ARTIFACT_RETENTION_DAYS` をなくす（実装で行う。design.md §8）、DBに記録する前に失敗した参照のないobjectの回収、S3の期限付きURL（今はapiが読んで返す）、送らずに残った添付の削除、画像のプレビュー、エージェントの `present_files`（harness.md §10.5）。
+- 成果物とファイルで後回しにしたもの：Storage Backendの `validate_config`・`healthcheck`（セットアップ時の確認。design.md §7.8）、既存のファイルを新しい保存先へ移すコマンド（design.md §7.10。以前の保存先を読む設定 `YORIKI_STORAGE_PREVIOUS` はある）、WorkspaceSnapshotのModel（今はCheckpointが保存先・key・hashを持つ）、ワークスペースの保存期限での自動削除（`cleanup_workspaces`）、添付と成果物の個別の削除、`Artifact.expires` と `YORIKI_ARTIFACT_RETENTION_DAYS` をなくす（実装で行う。design.md §8）、DBに記録する前に失敗した参照のないobjectの回収、S3の期限付きURL（今はapiが読んで返す）、送らずに残った添付の削除、画像のプレビュー、エージェントの `present_files`（harness.md §10.5）。
 - gVisorで後回しにしたもの：rootless Dockerとの組み合わせ（確かめていない。gVisorではuserns-remapを使う）、メモリの超過でSandboxごと止まるのを避ける方法（gVisorの中の上限をホストのcgroupより先に効かせる設定は、runscの外から指定できなかった）、プロセス数の換算（×2＋64）の見直し（試験の値から決めた）。
 - `read` の画像で後回しにしたもの：上限（1回の要求で20枚、長辺1568px、`read` の1回で5ページ）をモデル設定の値にする（harness.md §12。上限の小さいローカルLLMで要るとき）、画面の作業の記録でTool結果の画像を見せる、Tool結果の画像のBlobObjectの清掃（Runを消すときや保持期限。今は残り続ける）。
 - 補助コマンドが返すパス（symlinkを辿った先）と、モデルが指定したパスが違うと、読んだ版の記録が見つからず `edit` が「まだ読んでいない」になる（symlinkを使うときだけ）。
@@ -123,7 +123,7 @@
 
 1. **Skill**：済み（#34〜#41）。後回しにしたものは §3。
 2. **Connector・タスク・配信**：済み（#42〜#73）。範囲の外：HTTP・SharePoint・MCPのConnector、Teams・Slack・DiscordのInteraction Binding（下の4）。
-   - design.md §12 の第1段階のうち、ほかに残るもの（§3）：Plugin Registry（下の4とあわせて）、クオータと予算の強制、清掃（`cleanup_artifacts` 等）、`install_python_packages`・PackageBundle・EnvironmentRevision、Sandboxのイメージの Docker Hub への配布、実行履歴の画面（`/runs`）。順番は、最初の2つの業務で要るものから利用者と決める。
+   - design.md §12 の第1段階のうち、ほかに残るもの（§3）：Plugin Registry（下の4とあわせて）、クオータと予算の強制、清掃（`cleanup_workspaces` 等）、`install_python_packages`・PackageBundle・EnvironmentRevision、Sandboxのイメージの Docker Hub への配布、実行履歴の画面（`/runs`）。順番は、最初の2つの業務で要るものから利用者と決める。
 3. **最初の2つの業務**（design.md §13。Skillとタスクとして作る）：請求書PDF → 社内DBと照合 → 取込用のCSV、契約書レビュー → Zapierへ結果。
 4. **Channel Plugin**（Teams・Slack・Discord。`plugin` のRegistry）。
 

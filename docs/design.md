@@ -1167,7 +1167,7 @@ Sandboxのイメージは1つ（`yoriki-sandbox-docs`）にし、文書処理を
 | 変換の道具 | pandoc、poppler-utils（`pdftoppm`） |
 | フォント | Noto Sans CJKとNoto Serif CJKの、RegularとBold（`fonts-noto-cjk`）。アラビア文字、絵文字、タイ文字等のほかの文字は入れない |
 
-Sandboxにネットワークがないこと、rootfsが読取り専用であることは変えない。`npm install` はできないので、Node.jsのパッケージもPythonと同じく、版とhashを固定したlockからイメージに入れる。
+Sandboxにネットワークがないこと、rootfsが読取り専用であることは変えない。`npm install` はできないので、Node.jsのパッケージもPythonと同じく、版とhashを固定したlockからイメージに入れる。置き場所はイメージのルートの `/node_modules` にする。Nodeは親のディレクトリを順に探すので、`/workspace/work` 等のどこのスクリプトからも、`require` でも `import` でも読める（`NODE_PATH` は `import` に効かないので使わない）。
 
 PDFへの変換はデザインの確認に使う。きれいなPDFは利用者が手元で作る。fontconfigで、`sans` はNoto Sans CJK JP、`serif` はNoto Serif CJK JP、`monospace` はNoto Sans Mono CJK JPへ向け、メイリオ、游ゴシック、MSゴシック、Arial、Calibri等はSansへ、MS明朝、Times New Roman等はSerifへ向ける。文書の言語の指定が中国語や韓国語なら、そちらの字形を優先する。元のフォントと文字の幅が違うので、改行やレイアウトはずれることがある。
 

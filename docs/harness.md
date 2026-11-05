@@ -546,7 +546,7 @@ Runnerは、shell以外のToolの処理もSandboxの中で行う。ファイル�
 - GNUのツール：coreutils、findutils、grep、sed、gawk、diffutils、file、tar、gzip・xz・zip・unzip、bc、jq、ripgrep。
 - Python（mise.tomlの版）と、頻出のライブラリ（pandas、openpyxl、xlsxwriter、pypdf、pdfplumber、pypdfium2、python-docx、python-pptx、rapidfuzz、charset-normalizer、matplotlib 等。design.md §7.6。一覧は `sandbox/images/docs/requirements.in`）。文字コードの判定は、LGPLの chardet ではなくMITの charset-normalizer を使う。
 - 文書の変換：LibreOffice（ヘッドレスのWriter・Calc・Impress）、pandoc、poppler-utils（`pdftoppm`）、markitdown。
-- Node.jsと、版とhashを固定したlockから入れたパッケージ（`docx`、`pptxgenjs`、`react`、`react-dom`、`react-icons`、`sharp`。`npm install` はできない。design.md §7.6）。
+- Node.jsと、版とhashを固定したlockから入れたパッケージ（`docx`、`pptxgenjs`、`react`、`react-dom`、`react-icons`、`sharp`。`npm install` はできない。`/node_modules` に置き、`/workspace/work` のスクリプトから `require`・`import` で読めることを契約テストで確かめる。design.md §7.6）。
 - 日本語：UTF-8のファイル名、Shift_JISのCSVの読み書き、日本語のフォント（Noto Sans CJK・Noto Serif CJKのRegular・Bold。OFL。よくあるフォントの名前はfontconfigでこれらへ向ける。design.md §7.6）。
 - 契約テストは、代表的なコマンドの一覧（`sandbox/tests/commands.toml`。数百を目標に、Skillで使われたコマンドから増やす）を実際の制限の下で実行し、終了コードと出力を確かめる。
 

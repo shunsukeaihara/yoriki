@@ -685,7 +685,7 @@ sequenceDiagram
   P->>H: 同じスレッドに結果を表示
 ```
 
-質問はClarificationRequestとしてID、世代、本文、回答形式、期限を持つ。必要なsnapshotを保存・検証した後、質問、WAITING_USER、Checkpoint、質問配信Outboxを同じDB transactionで確定する。質問の文面や選択肢はエージェントが作れるが、未保存状態で外部へ質問したり、通知の書き方で質問ID・回答条件を変更したりしない。質問投稿に失敗した場合も回答待ちの状態を保持し、配信だけを再試行する。
+質問はClarificationRequestとしてID、世代、本文、回答形式、期限を持つ。ジョブが動いていなければ、snapshotを保存・検証した後、質問、WAITING_USER、Checkpoint、質問配信Outboxを同じDB transactionで確定する。ジョブが動いていれば、snapshotとCheckpointは作らず、同じAttemptのまま質問、WAITING_USER、質問配信Outboxを確定する（§5.3）。上の図はジョブが動いていない場合を示す。質問の文面や選択肢はエージェントが作れるが、未保存状態で外部へ質問したり、通知の書き方で質問ID・回答条件を変更したりしない。質問投稿に失敗した場合も回答待ちの状態を保持し、配信だけを再試行する。
 
 最初のスレッド作成はRun単位で直列化し、以後の投稿は作成結果が確定してから送る。親投稿に成功した直後の障害では、operation key・外部message参照・提供側で可能な照合を使う。結果不明のまま親投稿を無条件に再作成しない。先に届いた返信は受信記録として保持し、スレッド対応の確定後に照合する。確実な照合ができない場合は運用上の復旧待ちとし、同じRunへ複数の有効スレッドを割り当てない。
 
@@ -697,7 +697,7 @@ sequenceDiagram
 
 初期仕様では一Runにつき未回答の質問は一つとする。普通の返信は受付時の未回答質問の世代へ結び付ける。質問番号や返信対象が指定されていればそれを優先し、解決済みの質問への遅延返信を後続質問の回答へ転用しない。世代切替の競合や回答対象が曖昧な場合は同じスレッドで確認する。複数人の同時回答やWeb画面との競合はrevision検証で一度だけ確定し、余分な回答を黙って上書きしない。
 
-有効な回答候補、ConversationMessage、質問状態、再開Outboxを原子的に保存し、同じRunをWAITING_USERからQUEUEDへ戻す。次のAttemptは元のManifestとCheckpointを復元して回答を反映する。不足があれば同じスレッドで再質問する。追加添付は管理側が取得・検証してArtifactとして保存できてから反映する。取得できないファイルは未取得として示し、入力が揃ったことにしない。
+有効な回答候補、ConversationMessage、質問状態、再開Outboxを原子的に保存し、Attemptを手放していれば同じRunをWAITING_USERからQUEUEDへ戻し、次のAttemptが元のManifestとCheckpointを復元して回答を反映する。手放していなければ同じAttemptへ回答を渡す。不足があれば同じスレッドで再質問する。追加添付は管理側が取得・検証してArtifactとして保存できてから反映する。取得できないファイルは未取得として示し、入力が揃ったことにしない。
 
 実行中の返信は、人が起動したRunで、送り主がそのRunを起動した本人（Yorikiのアカウントに紐付いた人）のときだけUserInstructionとして次の安全な区切りで取り込む（ほかの参加者の指示を、起動した人の権限で実行しないため）。それ以外の参加者の返信と、入口から起動したRunでは、未回答の質問への回答としてだけ受け付け、それ以外の返信は取り込まずに、受け付けないことをスレッドで知らせる（authorization.md §6）。停止は共通取消経路へ渡す。挨拶・雑談・別依頼で現在の質問を自動解決しない。Bot自身や他Botの投稿、連携による反射イベントは回答入力から除外し、外部event IDとmessage IDで再送を重複適用しない。既に適用した回答の編集・削除では過去の判断を巻き戻さず、訂正は、起動した本人からなら新しい指示として受け付ける（それ以外は、未回答の質問への回答のときだけ受け付ける）。
 
@@ -1372,7 +1372,7 @@ Skillファイルは1ファイルのサイズ、Skillあたりの件数・総量
 
 表は主なサービス。静的ファイルを配る `static`、バックアップの `backup` 等を含む全体は deployment.md §3.1。
 
-APIとQClusterは同じDjango imageを使い、起動commandを分ける。SandboxはRunごとに動的生成する。API、PostgreSQL等を外部へ直接公開せず、Nginxだけを公開する。画面とAPIは同じドメインに置き、APIは `/api/` の下に置く。nginxはパスを書き換えずに転送し、CORSは使わない（deployment.md §4）。エージェントの実行枠を増やす場合はQClusterだけのWorkerサーバー（`compose.qcluster.yaml`）を使い、すべてのサーバーを同じ私設ネットワークに置く（§6.1、deployment.md §3.2）。アプリサーバーを複数台にする構成は deployment.md §8.4 とする。社内SSO（§10.0）を利用し、権限は所属とpermissionで判定する（authorization.md）。
+APIとQClusterは同じDjango imageを使い、起動commandを分ける。SandboxはAttemptごとに動的生成する（サブエージェントがあれば1つのRunで同時に複数）。API、PostgreSQL等を外部へ直接公開せず、Nginxだけを公開する。画面とAPIは同じドメインに置き、APIは `/api/` の下に置く。nginxはパスを書き換えずに転送し、CORSは使わない（deployment.md §4）。エージェントの実行枠を増やす場合はQClusterだけのWorkerサーバー（`compose.qcluster.yaml`）を使い、すべてのサーバーを同じ私設ネットワークに置く（§6.1、deployment.md §3.2）。アプリサーバーを複数台にする構成は deployment.md §8.4 とする。社内SSO（§10.0）を利用し、権限は所属とpermissionで判定する（authorization.md）。
 
 Webhook受信endpointは対話ログインへのredirectを使わず、専用のAPI認証・サイズ上限・rate limitを適用する。成果物配信は期限付き取得tokenで対象Artifactだけへアクセスできる経路を用意する。これらのアプリAPIはNginx経由とし、DBやWorkerへの外部経路は作らない。S3の構成では、APIが確かめた後の短い期限の署名付きURLで、対象objectの取得だけS3へ直接接続する。
 

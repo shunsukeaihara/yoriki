@@ -43,7 +43,7 @@ yoriki/
 | `yoriki-frontend` | `frontend/` を `nuxt build` したNodeサーバー | frontend | 同上 |
 | `nginx`（公式） | 設定は `deploy/nginx/` をmountする | nginx | Docker Hub公式 |
 | `postgres`（公式） | — | postgres | Docker Hub公式 |
-| `<org>/yoriki-sandbox-<profile>` | `sandbox/images/<profile>/` | Runごとに動的に起動 | 公開Docker Hub（design.md §10.1） |
+| `<org>/yoriki-sandbox-<profile>` | `sandbox/images/<profile>/` | Attemptごとに動的に起動（サブエージェントがあれば1つのRunで同時に複数） | 公開Docker Hub（design.md §10.1） |
 
 - `yoriki-api` は1つのイメージを、起動コマンドを変えて複数のサービスで使う（design.md §10）。
 - 本体のイメージ（`yoriki-api`、`yoriki-frontend`）は配布しない。導入する人がソースからビルドする。`yoriki-api` には、ライセンス上そのまま再配布できないもの（SQL Server用のMicrosoft ODBC Driver。ビルド時にMicrosoftのリポジトリから取得し、ビルドする人がライセンスに同意する）が入るため（design.md §4.9.2）。
@@ -132,7 +132,7 @@ networks:
 - **公開するポートはnginxの443（と80のリダイレクト）だけ。** api、postgres等のポートはホストへpublishしない。
 - **Dockerソケットはqclusterにだけ渡す。** apiやfrontendには渡さない（design.md §7.3）。Dockerソケットはホストのroot権限と同等なので、qclusterのコンテナには必要なもの以外をmountしない。将来は、Launcherをホスト上の専用プロセスに分けるか、rootless Dockerにする。
 - **workspacesはホストとコンテナで同じパスにする。** qclusterの中から見たパスで、ホストのdockerdにbind mountを指示するため。パスがずれると、Sandboxに空のディレクトリがmountされる。ディレクトリは、qclusterのコンテナの利用者（uid 10001）が書けるように前もって作る（§7.1。ないとDockerがrootの持ち物として作り、Workspaceを保存できない）。
-- **Sandboxはcomposeのサービスにしない。** LauncherがRunごとに `network_mode: none` 等の制限付きで起動する（design.md §7.2）。
+- **Sandboxはcomposeのサービスにしない。** LauncherがAttemptごとに `network_mode: none` 等の制限付きで起動する（サブエージェントがあれば1つのRunで同時に複数）（design.md §7.2）。
 - **外へ通信するサービス**：api（LLM、Connector、外部連携）、qcluster（LLM、配信、イメージのpull）、channel-listener（Slack等への常時接続）は、`backend` に加えて外へ出られる `egress` ネットワークにも参加させる。postgresは参加させない。
 - **migrateは自動で実行しない。** apiの起動時に実行すると、複数のプロセスが同時にmigrationを走らせるため。更新手順（§6）で明示的に実行する。
 

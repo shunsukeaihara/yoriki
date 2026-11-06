@@ -89,7 +89,9 @@ def build_catalog(user, model_version, *, sensitive: bool, connectors: set[str])
     return catalog_of(Skill.objects.usable_by(user), model_version, usable)
 
 
-def catalog_of(queryset, model_version, keep: Callable[[list[Skill]], list[Skill]]) -> dict[str, Any]:
+def catalog_of(
+    queryset, model_version, keep: Callable[[list[Skill]], list[Skill]], *, trim: bool = True
+) -> dict[str, Any]:
     """Skillの一覧：使うモデルが必要な能力を持ち、`keep` が残すもの。本人のものを先に（同じ名前なら、より身近な範囲の
     ものを先に見せる）"""
     skills = (
@@ -127,6 +129,8 @@ def catalog_of(queryset, model_version, keep: Callable[[list[Skill]], list[Skill
             # Connectorの一覧に、宣言したConnectorを先に並べるため（restrict_catalog()）
             entry["connectors"] = skill_connectors.declared_uids(version)
         entries.append(entry)
+    if not trim:
+        return {"skills": entries, "omitted": 0}
     budget = int(model_version.max_input_tokens * CATALOG_CONTEXT_RATIO)
     for limit in DESCRIPTION_LIMITS:
         shortened = [{**e, "description": _one_line(e["description"], limit)} for e in entries]

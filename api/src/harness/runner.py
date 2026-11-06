@@ -604,27 +604,31 @@ class Runner:
         )
         if not pending:
             return False
-        for instruction in pending:
-            self._place_chosen_assets(take_chosen(self.run_obj, instruction.message))
-        applied = False
+        # 1件ずつ置いて確かめて記録する（同じSkillを別の版で指定した発言が並んでも、前の発言の指定を失わないように）
+        applied = [self._apply_one_instruction(instruction) for instruction in pending]
+        if self.session.started and any(i.message.skills for i in pending):
+            self._settle_chosen_assets()
+        if any(applied) and self.session.started:
+            # 追加指示に付いた添付を、動いているSandboxの /workspace/input にも置く
+            self.session.sync_inputs()
+        return any(applied)
+
+    def _apply_one_instruction(self, pending: UserInstruction) -> bool:
+        self._place_chosen_assets(take_chosen(self.run_obj, pending.message))
         with self.run_obj.fenced(self.attempt) as run:
-            instructions = list(
+            instruction = (
                 UserInstruction.objects.select_for_update(of=("self",))
-                .filter(pk__in=[i.pk for i in pending], state=InstructionState.RECEIVED)
+                .filter(pk=pending.pk, state=InstructionState.RECEIVED)
                 .select_related("message")
-                .order_by("pk")
+                .first()
             )
+            if instruction is None:
+                return False
             # 資料を置く間に権限が変わりうるので、記録の直前にもう一度確かめる
-            taken = {i.pk: self._recheck_chosen(run, i.message) for i in instructions}
-            self._refresh_catalogs(
-                run,
-                connectors=[c for chosen in taken.values() for c in chosen.connectors],
-                skills=[s.entry for chosen in taken.values() for s in chosen.skills],
-            )
-            for instruction in instructions:
-                self._apply_instruction(run, instruction, taken[instruction.pk])
-                applied = True
-            if run.result is not None and not all(i.is_answer for i in instructions):
+            chosen = self._recheck_chosen(run, instruction.message)
+            self._refresh_catalogs(run, connectors=chosen.connectors, skills=[s.entry for s in chosen.skills])
+            self._apply_instruction(run, instruction, chosen)
+            if run.result is not None and not instruction.is_answer:
                 # 確定した業務結果は、取り込んだ指示を反映していない。確定し直させる（harness.md §10.4・§10.5）。
                 # 通知の候補も前の業務結果から作ったものなので消す
                 Run.objects.filter(pk=run.pk).update(result=None, notification=None, updated=timezone.now())
@@ -632,12 +636,7 @@ class Runner:
                 self.run_obj.notification = None
                 RunEvent.record(run, RunEventKind.CONTEXT, {"text": RESULT_RESET_NOTICE, "result_reset": True})
             self.run_obj.manifest = run.manifest
-        if self.session.started and any(i.message.skills for i in pending):
-            self._settle_chosen_assets()
-        if applied and self.session.started:
-            # 追加指示に付いた添付を、動いているSandboxの /workspace/input にも置く
-            self.session.sync_inputs()
-        return applied
+        return True
 
     def _place_chosen_assets(self, chosen: Chosen) -> None:
         """動いているSandboxへ、指定したSkillの資料を置く（transactionの外で）。置けなかったものは、記録の直前に確かめる"""

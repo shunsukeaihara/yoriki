@@ -1,5 +1,7 @@
 """発言を取り込むときの扱い（harness.md §10.1・§10.2・§10.4、design.md §5.5）"""
 
+from typing import Any, cast
+
 import pytest
 
 from artifact.factories import ArtifactFactory
@@ -15,9 +17,10 @@ from harness.intake import Chosen
 from harness.runner import Runner
 from run.models import ClarificationRequest, ClarificationStatus, Run, RunEvent, RunEventKind, RunStatus
 from run.tasks import claim_run
-from skill.factories import SkillVersionFactory
+from skill.factories import SkillFactory, SkillVersionFactory
+from skill.models import SkillScope
 
-from .fakes import FakeAdapter, calls, reply
+from .fakes import FakeAdapter, FakeSession, calls, reply
 
 pytestmark = pytest.mark.usefixtures("default_runtime")
 
@@ -442,3 +445,83 @@ def test_what_the_catalog_omits_is_still_usable_in_a_conversation(conversation, 
     assert not results["c1"]["is_error"]
     assert "not listed" in " ".join(user_texts(adapter.requests[0]))
     assert 'No connector named "ないDB"' in str(results["c2"]["content"])
+
+
+class PlacingSession(FakeSession):
+    """動いているSandboxの代わり。Skillごとに、今置いている版を覚える"""
+
+    @property
+    def started(self) -> bool:
+        return True
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.placed: dict[str, int] = {}
+
+    def place_skill_assets(self, skill, version) -> None:
+        self.placed[skill.uid] = version.pk
+
+    def has_skill_assets(self, skill, version) -> bool:
+        return self.placed.get(skill.uid) == version.pk
+
+    def sync_skill_assets(self) -> None:
+        pass
+
+    def sync_inputs(self) -> None:
+        pass
+
+    def serve_script_requests(self) -> None:
+        pass
+
+    def finished_unreported(self) -> list:
+        return []
+
+    def running_jobs(self, *, refresh: bool = False) -> list:
+        return []
+
+
+@pytest.mark.django_db
+def test_two_messages_choosing_a_skill_in_different_versions_are_both_taken_in(conversation, app_user):
+    """同じ区切りで、同じSkillを別の版で指定した発言が並んでも、前の発言の指定を失わない"""
+    skill = publish(app_user, instructions="第1版の手順")
+    run = start(conversation)
+
+    def choose_twice():
+        send(conversation, body="1つ目", skills=[skill])
+        SkillVersionFactory.create(skill=skill, tools=[], instructions="第2版の手順")
+        skill.refresh_from_db()
+        send(conversation, body="2つ目", skills=[skill])
+
+    adapter = DuringFirstReply([calls(("c1", "todo_write", TODOS)), reply("終わりました。")], choose_twice)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    Runner(attempt, adapter_factory=adapter, sleep=lambda _s: None, session_factory=cast(Any, PlacingSession)).run()
+    run.refresh_from_db()
+
+    assert run.status == RunStatus.COMPLETED, run.error
+    texts = user_texts(adapter.requests[1])
+    assert "第1版の手順" in next(t for t in texts if "1つ目" in t)
+    second = next(t for t in texts if "2つ目" in t)
+    assert "第2版の手順" in second and "replaces version 1" in second
+    assert [e["number"] for e in run.manifest["appended"] if e["kind"] == "skill"] == [1, 2]
+    assert not ConversationMessage.objects.filter(conversation=conversation, role=MessageRole.SYSTEM).exists()
+
+
+@pytest.mark.django_db
+def test_an_omitted_skill_with_a_shared_name_is_found_by_its_listed_name(conversation, app_user, monkeypatch):
+    monkeypatch.setattr(skills_module, "CATALOG_CONTEXT_RATIO", 0)
+    publish(app_user, name="名寄せ", instructions="個人の手順")
+    company = SkillFactory.create(scope=SkillScope.COMPANY, owner=None, name="名寄せ")
+    SkillVersionFactory.create(skill=company, instructions="全社の手順")
+    run = start(conversation)
+    adapter = FakeAdapter(
+        [
+            calls(("c1", "skill", {"name": "名寄せ (個人)"})),
+            calls(("c2", "skill", {"name": "名寄せ"})),
+            reply("終わりました。"),
+        ]
+    )
+    run = execute(run, adapter)
+    results = {e.data["call_id"]: e.data for e in RunEvent.objects.filter(run=run, kind=RunEventKind.TOOL_RESULT)}
+    assert "個人の手順" in str(results["c1"]["content"])
+    assert results["c2"]["is_error"]  # 1つに決まらない

@@ -147,7 +147,11 @@ def _only_uid(queryset, name: str) -> str | None:
 
 def unlisted_skill(run: Run, name: str) -> str | None:
     """一覧の量の上限で省いたSkillのID。一覧は見せ方で、アクセス範囲を狭めない（harness.md §10.1）"""
-    return _only_uid(_run_scope(run)[0], name)
+    scope = _run_scope(run)[0]
+    # 一覧と同じ名前の割当てで引く（同じ名前のSkillは「名前 (個人)」等で区別する）
+    named = catalog_of(scope, run.model_version, lambda runnable: runnable, trim=False)["skills"]
+    found = next((e["skill"] for e in named if e["name"] == name), None)
+    return found or _only_uid(scope, name)
 
 
 def unlisted_connector(run: Run, name: str) -> str | None:

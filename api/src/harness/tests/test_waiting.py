@@ -302,6 +302,65 @@ def test_step_limit_with_a_running_job_does_not_complete(conversation):
     assert run.end_reason == RunEndReason.STEP_LIMIT
 
 
+def test_step_limit_with_an_unseen_finished_job_does_not_complete(conversation):
+    run = post(conversation)
+    Run.objects.filter(pk=run.pk).update(step_count=MAX_STEPS, result={"a": 1})
+    run.refresh_from_db()
+    tool = make_submit_result_tool({"type": "object"})
+
+    class WithResult(Runner):
+        def _exposed_tools(self):
+            return (tool,)
+
+    sessions: list[JobSession] = []
+
+    def factory(r, a, **kw):
+        sessions.append(JobSession(r, a, tick=lambda _s: None, **kw))
+        return sessions[0]
+
+    class FinishesWhileReplying(FakeAdapter):
+        def stream(self, request):
+            sessions[0].finish()
+            yield from super().stream(request)
+
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    WithResult(
+        attempt,
+        adapter_factory=FinishesWhileReplying([reply("まとめです。")]),
+        sleep=lambda _s: None,
+        session_factory=factory,
+    ).run()
+    run.refresh_from_db()
+    assert run.status == RunStatus.FAILED
+    assert run.end_reason == RunEndReason.STEP_LIMIT
+
+
+def test_new_attempt_after_a_lost_worker_says_the_jobs_are_gone(conversation):
+    run = post(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    RunEvent.record(
+        run,
+        RunEventKind.TOOL_RESULT,
+        {"call_id": "c1", "name": "shell", "content": [{"type": "text", "text": "started"}], "is_error": False},
+    )
+    Run.objects.filter(pk=run.pk).update(status=RunStatus.WAITING_BACKGROUND)
+    ExecutionAttempt.objects.filter(pk=attempt.pk).update(lease_expires=timezone.now() - timedelta(minutes=1))
+    _recover(attempt.pk)
+    run.refresh_from_db()
+    assert run.status == RunStatus.QUEUED
+    notice_seen: list[str] = []
+
+    class Recording(FakeAdapter):
+        def stream(self, request):
+            notice_seen.extend(m.text for m in request.messages)
+            yield from super().stream(request)
+
+    run_with(run, Recording([reply("確かめます。")]), FakeSession)
+    assert any("Background jobs from that attempt are not running anymore" in text for text in notice_seen)
+
+
 def test_cancel_while_waiting_stops_the_job(conversation, app_user):
     run = post(conversation)
 

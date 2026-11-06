@@ -368,7 +368,8 @@ class Runner:
             else:
                 state = "are empty again"
             parts = [
-                f"The previous attempt was interrupted. The files in /workspace/work and /workspace/output {state}.",
+                f"The previous attempt was interrupted. The files in /workspace/work and /workspace/output {state}. "
+                "Background jobs from that attempt are not running anymore, and their results are unknown.",
                 *lost,
             ]
             text = "[" + " ".join(parts) + "]"
@@ -503,10 +504,11 @@ class Runner:
         return self._execute_calls(result.calls)
 
     def _finish_at_step_limit(self, text: str) -> bool:
-        """ステップ数の上限の最後のまとめの応答で終える。業務結果を確定していて、ジョブが残っていなければ完了にする（その
-        間に追加の指示が届いていれば、取り込んで続ける）。ジョブが残っていれば、止めて上限の失敗にする（もう親を起こせ
-        ず、止めたジョブの結果を親が見ないまま完了にしないため。design.md §5.3）"""
-        if any(t.name == SUBMIT_RESULT for t in self.tools) and not self._result_missing() and not self._running_jobs():
+        """ステップ数の上限の最後のまとめの応答で終える。業務結果を確定していて、ジョブの結果もすべて親が見ていれば完了に
+        する（その間に追加の指示が届いていれば、取り込んで続ける）。ジョブが残っているか、結果を見ていないジョブがあれば、
+        もう親を起こせないので上限の失敗にする（design.md §5.3）"""
+        jobs_left = self._running_jobs() or (self.session.started and self.session.finished_unreported())
+        if any(t.name == SUBMIT_RESULT for t in self.tools) and not self._result_missing() and not jobs_left:
             return self._finish_with_reply(text, RunStatus.COMPLETED, RunEndReason.COMPLETED)
         self._finish_with_reply(text, RunStatus.FAILED, RunEndReason.STEP_LIMIT)
         return False

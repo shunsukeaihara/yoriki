@@ -129,18 +129,6 @@ def test_suspended_skill_cannot_be_loaded(conversation, app_user):
 
 
 @pytest.mark.django_db
-def test_skill_needing_tools_missing_in_this_run_is_not_loaded(conversation, app_user):
-    skill, _version = publish(app_user, tools=["shell"])
-    run = start(conversation)
-    Run.objects.filter(pk=run.pk).update(runtime_version=None)  # Sandboxを使わないRun
-    adapter = FakeAdapter([calls(("c1", "skill", {"name": skill.name})), reply("できませんでした")])
-    run = execute(run, adapter)
-    [result] = results(run, "skill")
-    assert result["is_error"]
-    assert "shell" in result["content"][0]["text"]
-
-
-@pytest.mark.django_db
 def test_catalog_excludes_skills_the_model_cannot_run(app_user):
     conversation = ConversationFactory.create(owner=app_user)
     version = conversation.model_profile.current_version
@@ -175,33 +163,33 @@ def test_catalog_separates_same_names_and_shortens_to_the_budget(app_user):
 
 
 @pytest.mark.django_db
-def test_chosen_skill_is_given_with_the_first_message_and_limits_the_tools(conversation, app_user):
+def test_chosen_skill_is_given_with_the_first_message_and_does_not_limit_the_tools(conversation, app_user):
     skill, version = publish(app_user, instructions="手順の本文", tools=["read", "todo_write"])
     run = start(conversation, body="この3件を確認して", skills=[skill])
     assert run.manifest["fixed"]["skills"] == [
         {"skill": skill.uid, "name": skill.name, "version": version.pk, "number": version.number}
     ]
-    assert run.manifest["fixed"]["skill_catalog"] is None
+    assert [e["name"] for e in run.manifest["fixed"]["skill_catalog"]["skills"]] == [skill.name]
     adapter = FakeAdapter([reply("確認しました")])
     run = execute(run, adapter)
 
     request = adapter.requests[0]
-    assert tool_names(request) == ["read", "todo_write", "request_skill_edit"]
+    # 指定は使うものを明示するだけで、呼び出せる範囲は変わらない（authorization.md §6）
+    assert {"read", "shell", "datasource_query", "skill", "request_skill_edit"} <= set(tool_names(request))
     message = next(m.text for m in request.messages if m.role == "user" and m.text.startswith("この3件を確認して"))
     assert "手順の本文" in message
     assert f'<skill name="{skill.name}" version="{version.number}">' in message
     context = next(m.text for m in request.messages if "<runtime_context>" in m.text)
-    assert "<skills>" not in context
+    assert "<skills>" in context
 
 
 @pytest.mark.django_db
-def test_chosen_skill_without_tools_gets_no_work_tools(conversation, app_user):
+def test_chosen_skill_without_tools_keeps_the_work_tools(conversation, app_user):
     skill, _version = publish(app_user, tools=[])
     run = start(conversation, skills=[skill])
     adapter = FakeAdapter([reply("回答案です")])
     execute(run, adapter)
-    # Skillの編集の提案だけは出す（作業の権限を増やさない。harness.md §7.5）
-    assert tool_names(adapter.requests[0]) == ["request_skill_edit"]
+    assert {"read", "shell", "request_skill_edit"} <= set(tool_names(adapter.requests[0]))
 
 
 @pytest.mark.django_db
@@ -234,8 +222,8 @@ def test_submit_result_records_the_business_result(conversation, app_user):
         ]
     )
     run = execute(run, adapter)
-    assert tool_names(adapter.requests[0]) == ["submit_result", "request_skill_edit"]
-    assert adapter.requests[0].tools[0].parameters == RESULT_SCHEMA
+    assert "read" in tool_names(adapter.requests[0])
+    assert next(t for t in adapter.requests[0].tools if t.name == "submit_result").parameters == RESULT_SCHEMA
     invalid, recorded = results(run, "submit_result")
     assert invalid["is_error"]
     assert not recorded["is_error"]

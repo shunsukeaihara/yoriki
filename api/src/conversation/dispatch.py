@@ -9,7 +9,7 @@ from django.utils.translation import gettext as _
 from artifact.models import Artifact, ArtifactKind
 from connector.models import Connector
 from harness.catalogs import build_catalogs
-from harness.connectors import DATASOURCE_TOOL_NAMES, ConnectorUnavailable
+from harness.connectors import ConnectorUnavailable
 from harness.connectors import explicit_text as explicit_connectors_text
 from harness.connectors import resolve_explicit as resolve_explicit_connectors
 from harness.skills import SkillUnavailable, declared_connectors, explicit_text, resolve_explicit
@@ -27,7 +27,7 @@ from run.models import (
 )
 from runtime.models import RuntimeProfile
 from skill.connectors import skill_is_sensitive
-from skill.models import CONVERSATION_SCOPES, Skill, SkillAction, SkillVersion
+from skill.models import CONVERSATION_SCOPES, Skill, SkillAction
 
 from .models import Conversation, ConversationMessage, InstructionKind, InstructionState, MessageRole, UserInstruction
 
@@ -213,8 +213,7 @@ def _answer_question(question: ClarificationRequest, message: ConversationMessag
 
 
 def _check_chosen(conversation: Conversation, skills: list[Skill], connectors: list[Connector]) -> None:
-    """動いているRunへ渡す発言で指定したSkill・Connectorを、依頼した人の今の権限で確かめる（会話の行ロックの中で呼ぶ）。
-    このRunにないToolを要するSkillは、断らずに、取り込むときに案内させる（harness.md §10.1）"""
+    """動いているRunへ渡す発言で指定したSkill・Connectorを、依頼した人の今の権限で確かめる（会話の行ロックの中で呼ぶ）"""
     run = active_run(conversation)
     if run is None or run.status == RunStatus.CANCELLING:
         return  # 新しいRunで始めるので、start_run() が確かめる
@@ -227,14 +226,6 @@ def _check_chosen(conversation: Conversation, skills: list[Skill], connectors: l
         resolve_explicit_connectors(connectors, owner, version, sensitive=sensitive)
     except ConnectorUnavailable as exc:
         raise CannotStart(_("指定したConnectorを使えません。%(reason)s") % {"reason": exc}) from exc
-    fixed = (run.manifest or {}).get("fixed", {}).get("skills") or []
-    if connectors and fixed and not _allow_connector_tools(fixed):
-        raise CannotStart(_("今の作業のSkillはConnectorのToolを使わないので、Connectorを指定できません。"))
-
-
-def _allow_connector_tools(skills: list[dict[str, Any]]) -> bool:
-    tools = SkillVersion.objects.filter(pk__in=[s["version"] for s in skills]).values_list("tools", flat=True)
-    return any(name in DATASOURCE_TOOL_NAMES for names in tools for name in names)
 
 
 def _task_run_instructed(conversation: Conversation) -> Run | None:
@@ -359,17 +350,12 @@ def chosen_connectors(message: ConversationMessage) -> list[Connector]:
     return [found[uid] for uid in ids]
 
 
-def resolve_connectors(
-    message: ConversationMessage, user, version, skills: list[dict[str, object]], *, sensitive: bool
-):
-    """`@` で指定したConnectorを確かめる。`/` で指定したSkillがConnectorのToolを許さなければ使えないので断る"""
+def resolve_connectors(message: ConversationMessage, user, version, *, sensitive: bool):
+    """`@` で指定したConnectorを、依頼した人の今の権限で確かめる"""
     try:
-        connectors = resolve_explicit_connectors(chosen_connectors(message), user, version, sensitive=sensitive)
+        return resolve_explicit_connectors(chosen_connectors(message), user, version, sensitive=sensitive)
     except ConnectorUnavailable as exc:
         raise CannotStart(_("指定したConnectorを使えません。%(reason)s") % {"reason": exc}) from exc
-    if connectors and skills and not _allow_connector_tools(skills):
-        raise CannotStart(_("指定したSkillはConnectorのToolを使わないので、Connectorを指定できません。"))
-    return connectors
 
 
 def start_run(conversation: Conversation, message: ConversationMessage, actor, *, parent: Run | None = None) -> Run:
@@ -395,7 +381,7 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
             conversation, message, actor, version=version, effort=effort, runtime_version=runtime_version
         )
     # Skillの編集の依頼は、対象のSkillを固定した編集のRunにする（harness.md §10.9）。それ以外では、`/` で指定した
-    # Skillをその時点の公開中の版へ解決して固定する（Toolの一覧をRunの中で変えない。harness.md §7.5・§10.1）
+    # Skillをその時点の公開中の版へ解決して読み込む（呼び出せる範囲は変わらない。harness.md §7.5・§10.1）
     # 機密のConnectorとSkillは、機密の会話のRunにだけ出す（design.md §4冒頭）
     sensitive = conversation.handles_sensitive_data
     skill_edit = (
@@ -411,12 +397,12 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
         raise CannotStart(_("指定したSkillを使えません。%(reason)s") % {"reason": exc}) from exc
     # エージェントが使える一覧。`@` で指定したものと、Skillが宣言したものを先に並べる。発言を取り込むたびに作り直し、
     # 使えるかは操作のたびに確かめ直す（harness.md §10.1・§10.2）
-    connectors = resolve_connectors(message, conversation.owner, version, skills, sensitive=sensitive)
+    connectors = resolve_connectors(message, conversation.owner, version, sensitive=sensitive)
     catalog, connector_catalog = build_catalogs(
         conversation.owner,
         version,
         sensitive=sensitive,
-        list_skills=not skills and skill_edit is None,
+        list_skills=skill_edit is None,
         explicit=[*connectors, *declared_connectors(skills)],
     )
     fixed: dict[str, object] = {

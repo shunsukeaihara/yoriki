@@ -227,6 +227,11 @@ def loaded_entries(run: Run) -> list[dict[str, Any]]:
     return list(latest.values())
 
 
+def result_skills(run: Run) -> set[str]:
+    """このRunの submit_result の形を決めているSkillのID（Runを始めるときに `/` で指定したもの）"""
+    return {e["skill"] for e in ((run.manifest or {}).get("fixed") or {}).get("skills", [])}
+
+
 def explicit_versions(run: Run) -> list[SkillContentSource]:
     """`/` で指定して固定したSkillの版（Draftの評価のRunでは、評価に写したDraftの中身）。Runの中では変わらない"""
     entries = list(((run.manifest or {}).get("fixed") or {}).get("skills", []))

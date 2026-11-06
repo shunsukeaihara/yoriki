@@ -8,6 +8,8 @@ from connector.factories import ConnectorFactory
 from conversation.dispatch import CannotStart, post_message
 from conversation.factories import ConversationFactory
 from conversation.models import ConversationMessage, InstructionKind, InstructionState, MessageRole, UserInstruction
+from harness import runner as runner_module
+from harness.intake import Chosen
 from harness.runner import Runner
 from run.models import ClarificationRequest, ClarificationStatus, Run, RunEvent, RunEventKind, RunStatus
 from run.tasks import claim_run
@@ -146,23 +148,17 @@ def test_a_skill_listed_by_a_rebuild_can_be_loaded(conversation, app_user):
 
 
 @pytest.mark.django_db
-def test_a_run_started_with_a_chosen_skill_gets_no_skill_list(conversation):
-    """`/` で指定して始めたRunには、Skillの一覧を出さない（作り直しても出ない）"""
-    skill = SkillVersionFactory.create(
-        skill__created_by=conversation.owner, skill__name="請求書の照合", tools=["todo_write"]
-    ).skill
+def test_a_run_started_with_a_chosen_skill_keeps_the_whole_scope(conversation, app_user):
+    """`/` は使うものを明示するだけで、ToolもSkillの一覧も絞らない（authorization.md §6）"""
+    skill = SkillVersionFactory.create(skill__created_by=app_user, skill__name="請求書の照合", tools=["read"]).skill
+    other = SkillVersionFactory.create(skill__created_by=app_user, skill__name="別のSkill", tools=["shell"]).skill
     run = start(conversation, skills=[skill])
-
-    adapter = DuringFirstReply(
-        [calls(("c1", "todo_write", TODOS)), reply("終わりました。")],
-        lambda: send(conversation, body="支店は別にして"),
-    )
+    adapter = FakeAdapter([calls(("c1", "skill", {"name": other.name})), reply("終わりました。")])
     run = execute(run, adapter)
 
-    assert run.manifest["fixed"]["skill_catalog"] is None
-    assert not [e for e in run.manifest["appended"] if e["kind"] == "skill_catalog"]
-    assert len(adapter.requests) == 2
-    assert not any("<skills>" in t for t in user_texts(adapter.requests[1]))
+    assert {"read", "shell", "skill", "datasource_query"} <= {t.name for t in adapter.requests[0].tools}
+    assert any('<skill name="別のSkill">' in t for t in user_texts(adapter.requests[0]))
+    assert [e["skill"] for e in run.manifest["appended"] if e["kind"] == "skill"] == [other.uid]
 
 
 def publish(owner, *, name="請求書の照合", tools=(), **kwargs):
@@ -224,24 +220,6 @@ def test_choosing_a_loaded_skill_again_switches_to_the_latest_version(conversati
     assert "新しい手順" in text and "replaces version 1" in text
     # 同じRunで読み込み直すと、切り替えた版を返す
     assert "新しい手順" in results["c2"]
-
-
-@pytest.mark.django_db
-def test_chosen_skill_that_needs_missing_tools_is_not_loaded(conversation, app_user):
-    """Toolの一覧は変えないので読み込まず、Runの後に指定し直すよう案内させる。受付では断らない"""
-    first = publish(app_user, name="計画だけ", tools=["todo_write"])
-    second = publish(app_user, name="コマンドを使う", tools=["shell"], instructions="秘密の手順")
-    run = start(conversation, skills=[first])
-    adapter = DuringFirstReply(
-        [calls(("c1", "todo_write", TODOS)), reply("終わりました。")],
-        lambda: send(conversation, body="これも", skills=[second]),
-    )
-    run = execute(run, adapter)
-
-    text = next(t for t in user_texts(adapter.requests[1]) if "これも" in t)
-    assert "秘密の手順" not in text
-    assert 'The user chose the skill "コマンドを使う"' in text and "shell" in text
-    assert not [e for e in run.manifest["appended"] if e["kind"] == "skill"]
 
 
 @pytest.mark.django_db
@@ -308,12 +286,80 @@ def test_connector_chosen_during_a_run_shows_its_tables(conversation):
 
 
 @pytest.mark.django_db
-def test_connector_is_refused_when_the_chosen_skill_of_the_run_forbids_its_tools(conversation, app_user):
+def test_connector_is_accepted_whatever_tools_the_chosen_skill_of_the_run_declares(conversation, app_user):
     skill = publish(app_user, tools=["read"])
     connector = ConnectorFactory.create(name="販売管理", version__tables=TABLES)
     start(conversation, skills=[skill])
-    with pytest.raises(CannotStart, match="Connector"):
-        send(conversation, body="こちらも", connectors=[connector])
+    message = send(conversation, body="こちらも", connectors=[connector])
+    assert UserInstruction.objects.get(message=message).kind == InstructionKind.CURRENT
+
+
+@pytest.mark.django_db
+def test_choices_revoked_while_placing_assets_are_not_recorded(conversation, app_user, monkeypatch):
+    """資料を置く間に失効したものは、記録の直前の確かめで止める"""
+    skill = publish(app_user, name="止めたSkill", instructions="止めた手順")
+    run = start(conversation)
+    original = runner_module.take_chosen
+    taken: list[Chosen] = []
+
+    def take_then_revoke(*args):
+        chosen = original(*args)
+        if not taken:
+            taken.append(chosen)
+            skill.suspended = True
+            skill.save(update_fields=["suspended"])
+        return chosen
+
+    monkeypatch.setattr(runner_module, "take_chosen", take_then_revoke)
+    adapter = DuringFirstReply(
+        [calls(("c1", "todo_write", TODOS)), reply("終わりました。")],
+        lambda: send(conversation, body="これも", skills=[skill]),
+    )
+    run = execute(run, adapter)
+
+    assert taken[0].skills  # 最初の確かめでは使えた
+    assert not [e for e in run.manifest["appended"] if e["kind"] == "skill"]
+    text = next(t for t in user_texts(adapter.requests[1]) if "これも" in t)
+    assert "止めた手順" not in text and "cannot be used now" in text
+
+
+@pytest.mark.django_db
+def test_choices_with_an_answer_clear_the_submitted_result(conversation, app_user):
+    """回答に添えた指定は作業の条件を変えるので、確定した業務結果を確定し直させる"""
+    chosen = publish(app_user, name="判定", output_schema=SCHEMA)
+    added = publish(app_user, name="追加の基準", instructions="追加の基準の手順")
+    run = start(conversation, skills=[chosen])
+    run = execute(
+        run,
+        FakeAdapter(
+            [calls(("c1", "submit_result", {"verdict": "ok"})), calls(("q1", "ask_user", QUESTION))],
+        ),
+    )
+    assert run.status == RunStatus.WAITING_USER
+    assert run.result == {"verdict": "ok"}
+
+    send(conversation, body="大阪支店です", skills=[added])
+    adapter = FakeAdapter([calls(("c2", "submit_result", {"verdict": "ng"})), reply("判定し直しました。")])
+    run = execute(run, adapter)
+
+    assert any("追加の基準の手順" in t for t in user_texts(adapter.requests[0]))
+    assert RunEvent.objects.filter(run=run, kind=RunEventKind.CONTEXT, data__result_reset=True).exists()
+    assert run.result == {"verdict": "ng"}
+
+
+@pytest.mark.django_db
+def test_an_answer_without_choices_keeps_the_submitted_result(conversation, app_user):
+    chosen = publish(app_user, name="判定", output_schema=SCHEMA)
+    run = start(conversation, skills=[chosen])
+    run = execute(
+        run,
+        FakeAdapter(
+            [calls(("c1", "submit_result", {"verdict": "ok"})), calls(("q1", "ask_user", QUESTION))],
+        ),
+    )
+    send(conversation, body="大阪支店です")
+    run = execute(run, FakeAdapter([reply("終わりました。")]))
+    assert run.result == {"verdict": "ok"}
 
 
 @pytest.mark.django_db

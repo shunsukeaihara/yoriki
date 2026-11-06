@@ -89,14 +89,14 @@ from .context import (
     provider_key,
 )
 from .context import runtime_context as build_runtime_context
-from .intake import Chosen, take_chosen
+from .intake import UNUSABLE_NOTE, Chosen, take_chosen
 from .prompts import system_prompt
 from .recovery import request_model_switch
 from .result_files import missing_files
 from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, WORKSPACE_ROLLED_BACK, Job, SandboxSession, Suspended
 from .script_connectors import ScriptConnectors
 from .skill_edit import revoked_edit
-from .skills import SkillContentSource, explicit_versions, revoked_skill
+from .skills import SkillContentSource, explicit_versions, result_skills, revoked_skill
 from .task_edit import revoked_task_edit
 from .tools import ALL_TOOLS, ASK_USER, SANDBOX_TOOLS, WORKSPACE_WRITING_TOOLS
 from .tools.base import Effect, Tool, ToolContext, ToolResult
@@ -605,16 +605,19 @@ class Runner:
         )
         if not pending:
             return False
+        for instruction in pending:
+            self._place_chosen_assets(take_chosen(self.run_obj, instruction.message))
         exposed = frozenset(t.name for t in self._exposed_tools())
-        taken = {i.pk: self._take_chosen(i.message, exposed) for i in pending}
         applied = False
         with self.run_obj.fenced(self.attempt) as run:
-            instructions = (
+            instructions = list(
                 UserInstruction.objects.select_for_update(of=("self",))
-                .filter(pk__in=taken, state=InstructionState.RECEIVED)
+                .filter(pk__in=[i.pk for i in pending], state=InstructionState.RECEIVED)
                 .select_related("message")
                 .order_by("pk")
             )
+            # 資料を置く間に権限が変わりうるので、記録の直前にもう一度確かめる
+            taken = {i.pk: self._recheck_chosen(run, i.message) for i in instructions}
             self._refresh_catalogs(
                 run,
                 connectors=[c for chosen in taken.values() for c in chosen.connectors],
@@ -623,7 +626,9 @@ class Runner:
             for instruction in instructions:
                 self._apply_instruction(run, instruction, taken[instruction.pk], exposed)
                 applied = True
-            if applied and run.result is not None and not all(i.is_answer for i in pending):
+            # 回答の本文はToolの結果で渡したが、指定を取り込んだなら作業の条件が変わっている
+            changed = any(not i.is_answer or taken[i.pk].skills or taken[i.pk].connectors for i in instructions)
+            if changed and run.result is not None:
                 # 確定した業務結果は、取り込んだ指示を反映していない。確定し直させる（harness.md §10.4・§10.5）。
                 # 通知の候補も前の業務結果から作ったものなので消す
                 Run.objects.filter(pk=run.pk).update(result=None, notification=None, updated=timezone.now())
@@ -636,15 +641,23 @@ class Runner:
             self.session.sync_inputs()
         return applied
 
-    def _take_chosen(self, message: ConversationMessage, exposed: frozenset[str]) -> Chosen:
-        """発言で指定したものを確かめ、動いているSandboxへSkillの資料を置く。置けなければ読み込まない"""
-        chosen = take_chosen(self.run_obj, message, exposed)
+    def _place_chosen_assets(self, chosen: Chosen) -> None:
+        """動いているSandboxへ、指定したSkillの資料を置く（transactionの外で）。置けなかったものは、記録の直前に確かめる"""
+        if not self.session.started:
+            return
+        for item in chosen.skills:
+            try:
+                self.session.place_skill_assets(item.skill, item.version)
+            except SandboxUnavailable as exc:
+                logger.warning("run %s: cannot place skill assets: %s", self.run_obj.uid, exc)
+
+    def _recheck_chosen(self, run: Run, message: ConversationMessage) -> Chosen:
+        """記録の直前に今の権限で確かめる。動いているSandboxに資料を置けていないSkill（置けなかった、確かめる間に公開し
+        直された）は読み込まない（harness.md §10.1）"""
+        chosen = take_chosen(run, message)
         if self.session.started:
             for item in list(chosen.skills):
-                try:
-                    self.session.place_skill_assets(item.skill, item.version)
-                except SandboxUnavailable as exc:
-                    logger.warning("run %s: cannot place skill assets: %s", self.run_obj.uid, exc)
+                if not self.session.has_skill_assets(item.skill, item.version):
                     chosen.drop_skill(item, _("資料を置けませんでした"))
         return chosen
 
@@ -661,7 +674,6 @@ class Runner:
             run.append_manifest("connector", entry)
         if entries or chosen.connectors:
             run.save(update_fields=["manifest", "updated"])
-        fixed = (run.manifest.get("fixed") or {}).get("skills") or [] if run.manifest else []
         text = CHOSEN_WITH_ANSWER if instruction.is_answer else f"{ADDITIONAL_INSTRUCTION_PREFIX}\n{message.body}"
         data = user_message_data(
             message,
@@ -671,10 +683,10 @@ class Runner:
             connector_catalog=run.current_catalog("connector_catalog"),
             # 本文と添付は回答として渡した。submit_result の形は、Runを始めるときに指定したSkillで決まっている
             with_attachments=not instruction.is_answer,
-            result_skills={e["skill"] for e in fixed} if SUBMIT_RESULT in exposed else set(),
+            result_skills=result_skills(run) if SUBMIT_RESULT in exposed else set(),
         )
-        if notes := chosen.model_notes():
-            data["notes_text"] = "\n".join(notes)
+        if chosen.unusable:
+            data["notes_text"] = UNUSABLE_NOTE
         RunEvent.record(run, RunEventKind.USER_MESSAGE, data)
         if chosen.unusable:
             ConversationMessage.objects.create(
@@ -707,8 +719,8 @@ class Runner:
     def _exposed_tools(self) -> tuple[Tool, ...]:
         """Runに出すToolの一覧（harness.md §7.5）。Tool呼出しに対応しないモデルには出さない。
 
-        `/` でSkillを指定したRunでは、そのSkillの使ってよいToolに限り、業務結果のSchemaがあれば submit_result を
-        加える。指定がなければ、利用者が使えるToolの全体と、Skillを読み込む `skill` を出す
+        会話のRunでは、利用者が使えるToolの全体と、Skillを読み込む `skill` を出す。`/` で業務結果のSchemaを持つSkillを
+        指定して始めたRunには submit_result を加える
         """
         if not self.run_obj.model_version.supports_tools:
             return ()
@@ -750,19 +762,22 @@ class Runner:
         elif tasks.is_task_run(self.run_obj):
             # タスクのRunの一覧はタスクに固定したものだけで変わらないので、なければConnectorのToolは出さない
             tools = self._task_run_tools(explicit, datasource if connector_names(self.run_obj) else ())
-        elif explicit:
+        elif self.run_obj.kind == RunKind.EVALUATION:
+            # Draftの評価のRun：評価するSkillの「使ってよいTool」だけで動くことを確かめる（design.md §3.7.1）
             allowed = {name for version in explicit for name in version.tools}
             tools = tuple(t for t in (*ALL_TOOLS, *datasource) if t.name in allowed)
-            schema = next((v.output_schema for v in explicit if v.output_schema), None)
-            if schema:
-                tools += (make_submit_result_tool(schema),)
-            # Skillの編集の提案は作業の権限を増やさないので、Skillの指定にかかわらず出す（harness.md §7.5）
-            tools += (REQUEST_SKILL_EDIT,)
+            tools += self._result_tool(explicit)
         else:
-            # `skill` もいつも出す（一覧は発言を取り込むときに変わるので、途中で使えるようになる。harness.md §10.1）
-            tools = (*ALL_TOOLS, *datasource, SKILL, REQUEST_SKILL_EDIT)
+            # 会話のRun：呼び出せる範囲は依頼した人の権限で決まり、`/` の指定では変わらない（`skill` の一覧は発言を
+            # 取り込むときに変わるので、いつも出す。harness.md §7.5の2・§10.1）
+            tools = (*ALL_TOOLS, *datasource, SKILL, REQUEST_SKILL_EDIT, *self._result_tool(explicit))
         self.skill_tools = tools
         return tools
+
+    @staticmethod
+    def _result_tool(explicit: list[SkillContentSource]) -> tuple[Tool, ...]:
+        schema = next((v.output_schema for v in explicit if v.output_schema), None)
+        return (make_submit_result_tool(schema),) if schema else ()
 
     def _task_run_tools(self, explicit: list[SkillContentSource], datasource: tuple[Tool, ...]) -> tuple[Tool, ...]:
         """タスクのRun：固定したSkillの「使ってよいTool」を合わせたものだけ。

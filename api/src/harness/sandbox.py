@@ -310,6 +310,9 @@ class SandboxSession:
         for entry in entries:
             self.place_skill_assets(skills[entry["skill"]], contents[content_key(entry)])
 
+    def has_skill_assets(self, skill, version) -> bool:
+        return self.skill_versions.get(skill.uid) == f"version:{version.pk}"
+
     def place_skill_assets(self, skill, version) -> None:
         """Skillの版の資料を /workspace/master/skills/<Skill>/<key>/ に置く。bind mountなので、動いているSandboxにも
         そのまま見える（harness.md §10.1）。Draftの評価のRunでは、評価に写したDraftの資料を同じ場所に置く

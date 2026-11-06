@@ -94,11 +94,13 @@ const removeConnector = (id: string) => {
   selectedConnectors.value = selectedConnectors.value.filter((c) => c.id !== id)
 }
 const attachmentsReady = computed(() => (props.attachments ?? []).every((a) => a.artifact))
-// Skill の編集の依頼では、どう変えるかの本文が要る
+// Skill の編集の依頼では、どう変えるかの本文が要る。確認待ちでは、Skill の指定だけでは回答にならない
 const hasContent = computed(() =>
   skillEdit.value
     ? Boolean(text.value.trim())
-    : Boolean(text.value.trim()) || Boolean(props.attachments?.length) || selectedSkills.value.length > 0,
+    : Boolean(text.value.trim()) ||
+      Boolean(props.attachments?.length) ||
+      (selectedSkills.value.length > 0 && !props.hasOpenQuestion),
 )
 
 const placeholder = computed(() => {

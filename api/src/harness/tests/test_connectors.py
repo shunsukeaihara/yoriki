@@ -433,12 +433,13 @@ def test_chosen_connector_that_was_disabled_does_not_start_the_run(conversation)
 
 
 @pytest.mark.django_db
-def test_chosen_connector_with_a_skill_that_does_not_query_is_refused(conversation, app_user):
-    connector = ConnectorFactory.create(name="販売管理")
+def test_chosen_connector_with_a_skill_that_does_not_query_is_accepted(conversation, app_user):
+    """Skillの「使ってよいTool」は、会話で呼び出せる範囲を変えない（authorization.md §6）"""
+    connector = ConnectorFactory.create(name="販売管理", version__tables=TABLES)
     skill = SkillFactory.create(created_by=app_user)
     SkillVersionFactory.create(skill=skill, tools=["read"])
-    with pytest.raises(CannotStart, match="ConnectorのTool"):
-        start(conversation, skills=[skill], connectors=[connector])
+    run = start(conversation, skills=[skill], connectors=[connector])
+    assert run.manifest["fixed"]["connectors"][0]["connector"] == connector.uid
 
 
 @pytest.mark.django_db
@@ -453,7 +454,8 @@ def test_message_with_a_connector_during_a_run_goes_to_the_parent(conversation):
 
 
 @pytest.mark.django_db
-def test_chosen_skill_limits_the_connector_tools(conversation, app_user):
+def test_chosen_skill_does_not_limit_the_connector_tools(conversation, app_user, monkeypatch):
+    monkeypatch.setattr(datasource_module, "_can_read_files", lambda _context: False)
     ConnectorFactory.create(name="販売管理", version__tables=TABLES)
     skill = SkillFactory.create(created_by=app_user)
     SkillVersionFactory.create(skill=skill, tools=["datasource_query"])
@@ -464,7 +466,7 @@ def test_chosen_skill_limits_the_connector_tools(conversation, app_user):
     run = execute(run, adapter)
 
     names = [t.name for t in adapter.requests[0].tools]
-    assert "datasource_query" in names and "datasource_describe" not in names and "read" not in names
+    assert "datasource_query" in names and "datasource_describe" in names and "read" in names
     # ファイルを読めないRunでは、上限の中の結果を表として見せる
     [result] = results(run, "datasource_query")
     text = text_of(result)
@@ -477,6 +479,7 @@ def test_chosen_skill_limits_the_connector_tools(conversation, app_user):
 def test_truncated_inline_rows_keep_the_untrusted_content_closed(conversation, app_user, monkeypatch):
     """囲んだ行の途中で切っても、囲みを閉じ、切ったことの案内を囲みの外に書く"""
     monkeypatch.setattr(datasource_module, "limit_for", lambda _context: 120)
+    monkeypatch.setattr(datasource_module, "_can_read_files", lambda _context: False)
     ConnectorFactory.create(name="販売管理", version__tables=TABLES)
     skill = SkillFactory.create(created_by=app_user)
     SkillVersionFactory.create(skill=skill, tools=["datasource_query"])

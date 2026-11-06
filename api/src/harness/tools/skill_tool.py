@@ -9,7 +9,7 @@ from run.models import RunEvent, RunEventKind
 from skill.models import Skill, SkillAction, SkillVersion
 
 from ..connectors import catalog as connector_catalog
-from ..skills import loaded_entries, manifest_entry, render, skill_catalog
+from ..skills import loaded_entries, manifest_entry, render, result_skills, skill_catalog
 from .base import Effect, Tool, ToolContext, ToolResult
 from .submit_result import NAME as SUBMIT_RESULT
 
@@ -59,12 +59,6 @@ def execute(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         return _unusable(reason)
     assert skill.current_version_id is not None  # unusable_reason() が確かめた
     version = SkillVersion.objects.prefetch_related("assets__resource_version").get(pk=skill.current_version_id)
-    missing = [name for name in version.tools if name not in context.exposed]
-    if missing:
-        return ToolResult.error(
-            f"This skill needs tools that are not available in this work: {', '.join(missing)}. Do not load it now. "
-            "Tell the user to start a new request that names the skill with /."
-        )
     # 資料を置けたことを確かめてから追記する。置けなければ追記しない（harness.md §10.1）。
     # Sandboxをまだ起動していなければ、起動するときにManifestの全Skillの資料を置く
     if context.session is not None and context.session.started:
@@ -92,7 +86,7 @@ def _loaded(skill: Skill, version: SkillVersion, name: str, context: ToolContext
             skill,
             version,
             name=name,
-            result_tool=SUBMIT_RESULT in context.exposed,
+            result_tool=SUBMIT_RESULT in context.exposed and skill.uid in result_skills(context.run),
             connector_names={e["connector"]: e["name"] for e in connector_catalog(context.run).get("connectors", [])},
         ),
         value={"skill": skill.uid, "version": version.number},

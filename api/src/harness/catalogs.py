@@ -44,9 +44,8 @@ def refreshes_catalogs(run: Run) -> bool:
 
 
 def lists_skills(run: Run) -> bool:
-    """エージェントが探して使うSkillの一覧を出すRunか。`/` で指定して始めたRunと編集のRunには出さない"""
-    fixed = (run.manifest or {}).get("fixed") or {}
-    return run.kind == RunKind.WORK and not tasks.is_task_run(run) and not fixed.get("skills")
+    """エージェントが探して使うSkillの一覧を出すRunか。業務の会話のRunには、`/` の指定にかかわらず出す"""
+    return run.kind == RunKind.WORK and not tasks.is_task_run(run)
 
 
 def rebuild_catalogs(

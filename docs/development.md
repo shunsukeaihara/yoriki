@@ -230,5 +230,5 @@ OpenAI互換の `POST /v1/chat/completions`（ストリーミングだけ）と 
 - `when`：`prompt`（今の依頼の利用者の発言に、すべての語を含む）、`step`（今の依頼の中のassistantの発言の数。0が最初。配列ならどれか）、`tools`（すべてのToolが使える）、`called`（直前の発言が呼んだToolの名前。配列ならどれか。呼んでいなければ `""`）、`result`（最後のToolの結果に、すべての語を含む）、`system`（system promptに、すべての語を含む）、`model`（モデル名。配列ならどれか）、`match`（今の依頼のすべての文に対する正規表現。名前付きのグループは変数になる）。語は文字列か配列。
 - `reply`：`text`、`tool_calls`（`{"name", "arguments"}` の配列）、`finish`（`stop`・`length`・`tool_calls`。省くと、Toolを呼ぶなら `tool_calls`、ほかは `stop`）、`delay`（最初に待つ秒数）、`chunk_delay`（20文字ずつに分けて送るときの間の秒数）、`status`・`error`（HTTPのエラーの状態と文）。
 - ルールの `times`：同じ要求（モデルと発言の並びが同じ）に、最初の何回だけ合うか。Runnerの再試行の確認に使う。台本を読み直すと数え直す。
-- `${名前}` は文字列の中で置き換える。`prompt`（今の依頼の最初の利用者の発言の1行目。100文字まで）、`step`、`called`、`result`（最後のToolの結果。1000文字まで）、`model`、`enum:<Tool>.<引数>`（Toolの引数のenumの最初の値。例：`${enum:skill.name}`、`${enum:datasource_query.connector}`）と、`match` のグループ。知らない名前はそのまま残す（シェルの `${HOME}` 等を書ける）。
+- `${名前}` は文字列の中で置き換える。`prompt`（今の依頼の最初の利用者の発言の1行目。100文字まで）、`step`、`called`、`result`（最後のToolの結果。1000文字まで）、`model`、`skill`・`connector`（最後の `<runtime_context>` の一覧の最初の名前）と、`match` のグループ。知らない名前はそのまま残す（シェルの `${HOME}` 等を書ける）。
 - 推論の途中経過は返さない。`tool_choice` で指定されたToolも自動では呼ばないので、必要ならルールに書く（要求の `tool_choice` は `--dump` で確かめる）。

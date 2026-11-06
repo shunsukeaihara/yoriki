@@ -162,7 +162,7 @@ def test_agent_sees_usable_connectors_and_reads_with_them(conversation, app_user
     assert run.status == RunStatus.COMPLETED
     first = adapter.requests[0]
     query_tool = next(t for t in first.tools if t.name == "datasource_query")
-    assert query_tool.parameters["properties"]["connector"]["enum"] == ["経理", "販売管理"]
+    assert "enum" not in query_tool.parameters["properties"]["connector"]
     context = next(m.text for m in first.messages if m.role == "user" and "<runtime_context>" in m.text)
     assert '<connector name="販売管理">受注と取引先</connector>' in context
     assert "datasource_describe" in first.messages[0].text  # system promptの使い方
@@ -195,13 +195,15 @@ def test_agent_sees_usable_connectors_and_reads_with_them(conversation, app_user
 
 
 @pytest.mark.django_db
-def test_no_connector_tools_without_usable_connectors(conversation):
+def test_connector_tools_are_exposed_without_usable_connectors(conversation):
+    """一覧は発言を取り込むときに変わるので、今は使えなくてもToolを出す（harness.md §10.2）"""
     run = start(conversation)
     assert run.manifest["fixed"]["connector_catalog"] is None
-    adapter = FakeAdapter([reply("できません")])
-    execute(run, adapter)
+    adapter = FakeAdapter([calls(("c1", "datasource_describe", {"connector": "販売管理"})), reply("できません")])
+    run = execute(run, adapter)
     names = [t.name for t in adapter.requests[0].tools]
-    assert "datasource_query" not in names and "datasource_describe" not in names
+    assert "datasource_query" in names and "datasource_describe" in names
+    assert 'No connector named "販売管理"' in text_of(results(run, "datasource_describe")[0])
 
 
 @pytest.mark.django_db

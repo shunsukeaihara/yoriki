@@ -75,6 +75,7 @@ from stream.notifier import notify_delta
 from usage.models import UsageLedger, UsagePurpose
 
 from . import compaction, tasks
+from .catalogs import rebuild_catalogs, refreshes_catalogs
 from .connectors import catalog_names as connector_names
 from .context import (
     ADDITIONAL_INSTRUCTION_PREFIX,
@@ -97,12 +98,12 @@ from .skills import SkillContentSource, explicit_versions, revoked_skill
 from .task_edit import revoked_task_edit
 from .tools import ALL_TOOLS, ASK_USER, SANDBOX_TOOLS, WORKSPACE_WRITING_TOOLS
 from .tools.base import Effect, Tool, ToolContext, ToolResult
-from .tools.datasource import make_datasource_tools
+from .tools.datasource import DATASOURCE_TOOLS
 from .tools.prepare_notification import PREPARE_NOTIFICATION
 from .tools.request_skill_edit import REQUEST_SKILL_EDIT
 from .tools.request_task_edit import REQUEST_TASK_EDIT
 from .tools.skill_admin import CREATE_SKILL, SKILL_ADMIN_TOOLS
-from .tools.skill_tool import make_skill_tool
+from .tools.skill_tool import SKILL
 from .tools.submit_result import NAME as SUBMIT_RESULT
 from .tools.submit_result import make_submit_result_tool, original_schema
 from .tools.task_admin import TASK_ADMIN_TOOLS
@@ -328,8 +329,7 @@ class Runner:
             self._record_tool_result(call["id"], call["name"], ToolResult.error(text), ToolStatus.UNKNOWN)
         self._out_of_memory_notice()
         self._workspace_notices(self._events())
-        user = self.run_obj.owner
-        context = build_runtime_context(self.run_obj, user_name=user.display_name or user.email)
+        context = self._runtime_context()
         last = next(
             (
                 e
@@ -340,6 +340,10 @@ class Runner:
         )
         if last is None or last.data.get("text") != context:
             self._record(RunEventKind.CONTEXT, {"text": context})
+
+    def _runtime_context(self) -> str:
+        user = self.run_obj.owner
+        return build_runtime_context(self.run_obj, user_name=user.display_name or user.email)
 
     def _out_of_memory_notice(self) -> None:
         """前のAttemptのSandboxがメモリの上限を超えて止まったなら、モデルに知らせる（同じことを繰り返させない）"""
@@ -597,6 +601,8 @@ class Runner:
                 .select_related("message")
                 .order_by("pk")
             )
+            if instructions:
+                self._refresh_catalogs(run)
             for instruction in instructions:
                 text = f"{ADDITIONAL_INSTRUCTION_PREFIX}\n{instruction.message.body}"
                 RunEvent.record(run, RunEventKind.USER_MESSAGE, user_message_data(instruction.message, text))
@@ -615,6 +621,23 @@ class Runner:
             # 追加指示に付いた添付を、動いているSandboxの /workspace/input にも置く
             self.session.sync_inputs()
         return applied
+
+    def _refresh_catalogs(self, run: Run, **chosen: list[dict[str, Any]]) -> None:
+        """発言を取り込むときに、Skill・Connectorの一覧を依頼した人の今の権限で作り直す。変わったらManifestに残し、
+        今の一覧を `context.snapshot` で知らせる（harness.md §10.1・§10.2）。発言より先に記録する"""
+        if not refreshes_catalogs(run):
+            return
+        skills, connectors = rebuild_catalogs(run, **chosen)
+        changed = False
+        for kind, value in (("skill_catalog", skills), ("connector_catalog", connectors)):
+            if (run.current_catalog(kind) or None) != value:
+                run.append_manifest(kind, {"value": value})
+                changed = True
+        if not changed:
+            return
+        run.save(update_fields=["manifest", "updated"])
+        self.run_obj.manifest = run.manifest
+        RunEvent.record(run, RunEventKind.CONTEXT, {"text": self._runtime_context()})
 
     def _exposed_tools(self) -> tuple[Tool, ...]:
         """Runに出すToolの一覧（harness.md §7.5）。Tool呼出しに対応しないモデルには出さない。
@@ -647,9 +670,8 @@ class Runner:
         if self.skill_tools is not None:
             return self.skill_tools
         explicit = explicit_versions(self.run_obj)
-        # Run開始時に固定した、依頼した人が使えるConnector。なければConnectorのToolは出さない（harness.md §7.5の3）
-        names = connector_names(self.run_obj)
-        datasource = make_datasource_tools(names) if names else ()
+        # ConnectorのToolはいつも出す（一覧は発言を取り込むときに変わるので、途中で使えるようになる。harness.md §10.2）
+        datasource = DATASOURCE_TOOLS
         if self.run_obj.kind == RunKind.SKILL_EDIT:
             # Skillの編集のRun：Skill管理のToolを出し、Skillを使う・提案するToolは出さない（harness.md §10.9）。
             # 新しいSkillを作る依頼でだけ create_skill を出す
@@ -661,7 +683,8 @@ class Runner:
             # （harness.md §10.10）
             tools = (*ALL_TOOLS, *TASK_ADMIN_TOOLS)
         elif tasks.is_task_run(self.run_obj):
-            tools = self._task_run_tools(explicit, datasource)
+            # タスクのRunの一覧はタスクに固定したものだけで変わらないので、なければConnectorのToolは出さない
+            tools = self._task_run_tools(explicit, datasource if connector_names(self.run_obj) else ())
         elif explicit:
             allowed = {name for version in explicit for name in version.tools}
             tools = tuple(t for t in (*ALL_TOOLS, *datasource) if t.name in allowed)
@@ -671,11 +694,8 @@ class Runner:
             # Skillの編集の提案は作業の権限を増やさないので、Skillの指定にかかわらず出す（harness.md §7.5）
             tools += (REQUEST_SKILL_EDIT,)
         else:
-            tools = (*ALL_TOOLS, *datasource)
-            catalog = ((self.run_obj.manifest or {}).get("fixed") or {}).get("skill_catalog") or {}
-            if names := [e["name"] for e in catalog.get("skills", [])]:
-                tools += (make_skill_tool(names),)
-            tools += (REQUEST_SKILL_EDIT,)
+            # `skill` もいつも出す（一覧は発言を取り込むときに変わるので、途中で使えるようになる。harness.md §10.1）
+            tools = (*ALL_TOOLS, *datasource, SKILL, REQUEST_SKILL_EDIT)
         self.skill_tools = tools
         return tools
 

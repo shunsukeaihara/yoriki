@@ -1,4 +1,5 @@
-"""Skillを読み込む（harness.md §10.1）。引数の名前は、Run開始時に固定した一覧（Manifest）のenumにする"""
+"""Skillを読み込む（harness.md §10.1）。引数の名前は文字列で、今の一覧にある名前だけを受け付ける（一覧がRunの中で
+変わるので、Toolの定義をprompt cacheのために変えない）"""
 
 from typing import Any
 
@@ -8,7 +9,7 @@ from run.models import RunEvent, RunEventKind
 from skill.models import Skill, SkillAction, SkillVersion
 
 from ..connectors import catalog as connector_catalog
-from ..skills import loaded_entries, manifest_entry, render
+from ..skills import loaded_entries, manifest_entry, render, skill_catalog
 from .base import Effect, Tool, ToolContext, ToolResult
 from .submit_result import NAME as SUBMIT_RESULT
 
@@ -26,25 +27,25 @@ the skill uses, and the result schema if it has one. Loading the same skill agai
 version."""
 
 
-def make_skill_tool(names: list[str]) -> Tool:
-    parameters = {
-        "type": "object",
-        "properties": {
-            "name": {"type": "string", "enum": names, "description": "The skill name, exactly as listed in <skills>."}
-        },
-        "required": ["name"],
-        "additionalProperties": False,
-    }
-    # 読み込みはManifestへの追記とRunEventの記録を伴うので、Runnerのスレッドで1つずつ実行する（並べない）
-    return Tool(NAME, DESCRIPTION, parameters, execute, Effect.READ, replay_safe=True)
+# 一覧にない名前のエラーに添える候補の数
+MAX_CANDIDATES = 20
+
+PARAMETERS = {
+    "type": "object",
+    "properties": {"name": {"type": "string", "description": "The skill name, exactly as listed in <skills>."}},
+    "required": ["name"],
+    "additionalProperties": False,
+}
 
 
 def execute(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     run = context.run
-    catalog = ((run.manifest or {}).get("fixed") or {}).get("skill_catalog") or {}
-    entry = next((e for e in catalog.get("skills", []) if e["name"] == arguments["name"]), None)
+    skills = skill_catalog(run).get("skills", [])
+    entry = next((e for e in skills if e["name"] == arguments["name"]), None)
     if entry is None:
-        return ToolResult.error(f'No skill named "{arguments["name"]}" is available. Use a name listed in <skills>.')
+        candidates = ", ".join(e["name"] for e in skills[:MAX_CANDIDATES]) or "(none)"
+        return ToolResult.error(f'No skill named "{arguments["name"]}" is available. Available skills: {candidates}.')
+
     skill = Skill.objects.select_related("current_version", "department").filter(uid=entry["skill"]).first()
     if skill is None or skill.deleted:
         return ToolResult.error("This skill was deleted. Continue without it, and tell the user.")
@@ -101,3 +102,7 @@ def _loaded(skill: Skill, version: SkillVersion, name: str, context: ToolContext
 
 def _unusable(reason: str) -> ToolResult:
     return ToolResult.error(f"This skill cannot be used now ({reason}). Continue without it, and tell the user.")
+
+
+# 読み込みはManifestへの追記とRunEventの記録を伴うので、Runnerのスレッドで1つずつ実行する（並べない）
+SKILL = Tool(NAME, DESCRIPTION, PARAMETERS, execute, Effect.READ, replay_safe=True)

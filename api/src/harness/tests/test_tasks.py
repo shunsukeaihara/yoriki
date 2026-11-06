@@ -74,7 +74,7 @@ def test_task_run_uses_only_the_fixed_skill_tools_and_connectors(admin):
     # 固定したSkillの「使ってよいTool」だけ。skill・ask_user・request_skill_edit は出さない
     assert sorted(t.name for t in first.tools) == ["datasource_query", "read", "shell", "submit_result"]
     query_tool = next(t for t in first.tools if t.name == "datasource_query")
-    assert query_tool.parameters["properties"]["connector"]["enum"] == ["経理DB"]
+    assert "enum" not in query_tool.parameters["properties"]["connector"]
     context = next(m.text for m in first.messages if m.role == "user" and "<runtime_context>" in m.text)
     assert "<mode>task</mode>" in context
     # 起動した人は部門に所属していないが、システムのタスクの範囲で部門のConnectorを使える

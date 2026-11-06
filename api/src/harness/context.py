@@ -295,12 +295,12 @@ def runtime_context(run: Run, *, user_name: str) -> str:
         ),
         f"  <confidential>{'true' if run.handles_sensitive_data else 'false'}</confidential>",
     ]
-    # エージェントが選べるSkillの一覧（Run開始時に固定したもの。`/` で指定したRunにはない）
-    catalog = ((run.manifest or {}).get("fixed") or {}).get("skill_catalog")
+    # エージェントが選べるSkillの一覧（今のもの。`/` で指定して始めたRunにはない。harness.md §10.1）
+    catalog = run.current_catalog("skill_catalog")
     if catalog and catalog.get("skills"):
         lines.append(catalog_text(catalog))
-    # エージェントが使えるConnectorの一覧（Run開始時に固定したもの。harness.md §10.2）
-    connectors = ((run.manifest or {}).get("fixed") or {}).get("connector_catalog")
+    # エージェントが使えるConnectorの一覧（今のもの。harness.md §10.2）
+    connectors = run.current_catalog("connector_catalog")
     if connectors and connectors.get("connectors"):
         lines.append(connector_catalog_text(connectors))
     # Skillの編集のRunの対象（harness.md §10.9）

@@ -399,6 +399,15 @@ class Run(models.Model):
         appended = self.manifest.setdefault("appended", [])
         appended.append({"kind": kind, "at": timezone.now().isoformat(), **value})
 
+    def current_catalog(self, kind: str) -> dict[str, Any] | None:
+        """今の一覧（`skill_catalog`・`connector_catalog`）。発言を取り込むときに作り直していれば、その最後のもの
+        （harness.md §10.1・§10.2）"""
+        manifest = self.manifest or {}
+        for entry in reversed(manifest.get("appended", [])):
+            if entry.get("kind") == kind:
+                return entry["value"]
+        return (manifest.get("fixed") or {}).get(kind)
+
     @contextmanager
     def fenced(self, attempt: "ExecutionAttempt"):
         """Attemptがまだ実行の権利を持つことを、行ロックの中で確かめる。Runnerの書込みはすべてこの中で行う"""

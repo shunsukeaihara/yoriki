@@ -8,20 +8,11 @@ from django.utils.translation import gettext as _
 
 from artifact.models import Artifact, ArtifactKind
 from connector.models import Connector
+from harness.catalogs import build_catalogs
 from harness.connectors import DATASOURCE_TOOL_NAMES, ConnectorUnavailable
-from harness.connectors import build_catalog as build_connector_catalog
 from harness.connectors import explicit_text as explicit_connectors_text
 from harness.connectors import resolve_explicit as resolve_explicit_connectors
-from harness.connectors import usable_uids as usable_connector_uids
-from harness.skills import (
-    SkillUnavailable,
-    build_catalog,
-    catalog_connectors,
-    declared_connectors,
-    explicit_text,
-    resolve_explicit,
-    restrict_catalog,
-)
+from harness.skills import SkillUnavailable, declared_connectors, explicit_text, resolve_explicit
 from run.dispatch import enqueue_run
 from run.models import (
     ACTIVE_STATUSES,
@@ -69,7 +60,7 @@ def user_message_data(
     すべてあり、作業ファイルも最新のCheckpointから引き継ぐので、前の依頼のファイルを使う依頼に答えられるように。
     `skills` は `/` で指定してRun開始時に解決したSkill（Manifestの内容）。本文も添え、モデルに `skill` を呼ばせない。
     `connectors` は `@` で指定したConnector。公開している表の説明を添える（harness.md §10.2）。
-    `connector_catalog` はRunに固定したConnectorの一覧で、Skillの本文のConnectorの名前に使う
+    `connector_catalog` はRunのConnectorの一覧で、Skillの本文のConnectorの名前に使う
     """
     data: dict[str, object] = {"text": text, "message": message.uid}
     if skills:
@@ -372,8 +363,7 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
             conversation, message, actor, version=version, effort=effort, runtime_version=runtime_version
         )
     # Skillの編集の依頼は、対象のSkillを固定した編集のRunにする（harness.md §10.9）。それ以外では、`/` で指定した
-    # Skillをその時点の公開中の版へ解決して固定し、指定がなければ、エージェントが選べるSkillの一覧を固定する
-    # （Toolの一覧と `skill` の引数をRunの中で変えない。harness.md §7.5・§10.1）
+    # Skillをその時点の公開中の版へ解決して固定する（Toolの一覧をRunの中で変えない。harness.md §7.5・§10.1）
     # 機密のConnectorとSkillは、機密の会話のRunにだけ出す（design.md §4冒頭）
     sensitive = conversation.handles_sensitive_data
     skill_edit = (
@@ -387,31 +377,16 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
         )
     except SkillUnavailable as exc:
         raise CannotStart(_("指定したSkillを使えません。%(reason)s") % {"reason": exc}) from exc
-    # Skillの一覧には、宣言したConnectorをこのRunで使えるものだけを出す（design.md §4.9.1）
-    catalog = (
-        build_catalog(
-            conversation.owner,
-            version,
-            sensitive=sensitive,
-            connectors=usable_connector_uids(conversation.owner, sensitive=sensitive),
-        )
-        if not skills and skill_edit is None and version.supports_tools
-        else None
-    )
-    # エージェントが使えるConnectorの一覧も固定する（Toolの引数をRunの中で変えない。harness.md §10.2）。
-    # 使えるかは操作のたびに確かめ直す。`@` で指定したものと、Skillが宣言したものを先に並べる
+    # エージェントが使える一覧。`@` で指定したものと、Skillが宣言したものを先に並べる。発言を取り込むたびに作り直し、
+    # 使えるかは操作のたびに確かめ直す（harness.md §10.1・§10.2）
     connectors = resolve_connectors(message, conversation.owner, version, skills, sensitive=sensitive)
-    connector_catalog = (
-        build_connector_catalog(
-            conversation.owner,
-            sensitive=sensitive,
-            explicit=[*connectors, *declared_connectors(skills), *catalog_connectors(catalog)],
-        )
-        if version.supports_tools
-        else None
+    catalog, connector_catalog = build_catalogs(
+        conversation.owner,
+        version,
+        sensitive=sensitive,
+        list_skills=not skills and skill_edit is None,
+        explicit=[*connectors, *declared_connectors(skills)],
     )
-    if catalog is not None:
-        catalog = restrict_catalog(catalog, {e["connector"] for e in (connector_catalog or {}).get("connectors", [])})
     fixed: dict[str, object] = {
         "model_version": version.pk,
         "effort": effort,

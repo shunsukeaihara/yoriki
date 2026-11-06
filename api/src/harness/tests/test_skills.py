@@ -83,7 +83,7 @@ def test_agent_sees_usable_skills_and_loads_one(conversation, app_user):
     assert run.status == RunStatus.COMPLETED
     first = adapter.requests[0]
     skill_tool = next(t for t in first.tools if t.name == "skill")
-    assert skill_tool.parameters["properties"]["name"]["enum"] == ["請求書の照合"]
+    assert "enum" not in skill_tool.parameters["properties"]["name"]
     context = next(m.text for m in first.messages if m.role == "user" and "<runtime_context>" in m.text)
     assert '<skill name="請求書の照合">請求書と発注を照合する</skill>' in context
     [result] = results(run, "skill")

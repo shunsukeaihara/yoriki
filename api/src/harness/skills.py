@@ -1,8 +1,9 @@
 """会話・タスクでSkillを使う（harness.md §10.1、design.md §3.2）。
 
-エージェントに見せるSkillの一覧と、入力欄の `/` で指定したSkillは、Run開始時に決めてManifestに固定する
-（Toolの一覧と `skill` の引数のenumをRunの中で変えないため）。エージェントが途中で読み込んだSkillは、その時点の
-公開中の版へ解決してManifestへ追記する。資料はSandboxの /workspace/master/skills/<Skill>/<key>/ に読取り専用で置く。
+エージェントに見せるSkillの一覧は、Run開始時と発言を取り込むたびに作り直してManifestに残す（harness/catalogs.py）。
+Toolの定義は変えず、`skill` の引数は文字列にする（prompt cacheを保つため）。Run開始時に `/` で指定したSkillは
+Manifestに固定し、途中で読み込んだSkillと発言で指定したSkillは、その時点の公開中の版へ解決してManifestへ追記する。
+資料はSandboxの /workspace/master/skills/<Skill>/<key>/ に読取り専用で置く。
 """
 
 import re
@@ -71,7 +72,7 @@ def build_catalog(user, model_version, *, sensitive: bool, connectors: set[str])
     （`connectors`）にあり、機密の制限に合う（機密のSkillは機密のRunだけ）Skillの名前と説明（harness.md §10.1）。
 
     一覧の量は文脈の2%までにし、超えたら説明を短くして、それでも入らない分は数だけを示す。同じ名前のSkillが
-    範囲（個人・部門・全社）の違いで重なれば、範囲を添えて分ける（`skill` の引数のenumにするため）
+    範囲（個人・部門・全社）の違いで重なれば、範囲を添えて分ける（`skill` の引数で名前を指すため）
     """
     skills = (
         Skill.objects.usable_by(user)
@@ -127,6 +128,10 @@ def build_catalog(user, model_version, *, sensitive: bool, connectors: set[str])
             break
         listed.append(entry)
     return {"skills": listed, "omitted": len(entries) - len(listed)}
+
+
+def skill_catalog(run: Run) -> dict[str, Any]:
+    return run.current_catalog("skill_catalog") or {}
 
 
 def catalog_connectors(catalog: dict[str, Any] | None) -> list[dict[str, Any]]:

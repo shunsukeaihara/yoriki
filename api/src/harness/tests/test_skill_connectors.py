@@ -265,11 +265,11 @@ def test_skill_whose_declared_table_is_no_longer_published_is_not_used(app_user)
 @pytest.mark.django_db
 def test_chosen_skill_names_connectors_as_the_run_lists_them(app_user, monkeypatch):
     """`/` で指定したSkillの本文も、Runに固定したConnectorの一覧の名前を使う"""
-    from conversation import dispatch as dispatch_module  # noqa: PLC0415
+    from harness import catalogs as catalogs_module  # noqa: PLC0415
 
     connector = ConnectorFactory.create(name="販売管理", version__tables=TABLES)
     skill, _version = _declaring(app_user, connector)
-    build = dispatch_module.build_connector_catalog
+    build = catalogs_module.build_connector_catalog
 
     def renaming(*args, **kwargs):
         catalog = build(*args, **kwargs)
@@ -277,7 +277,7 @@ def test_chosen_skill_names_connectors_as_the_run_lists_them(app_user, monkeypat
         connector.save(update_fields=["name"])
         return catalog
 
-    monkeypatch.setattr(dispatch_module, "build_connector_catalog", renaming)
+    monkeypatch.setattr(catalogs_module, "build_connector_catalog", renaming)
     run = _start(ConversationFactory.create(owner=app_user), skills=[skill])
     event = run.events.filter(kind=RunEventKind.USER_MESSAGE).first()
     assert event is not None

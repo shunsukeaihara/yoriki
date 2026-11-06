@@ -83,6 +83,9 @@ def test_reply_completes_the_run(conversation):
     assert {t.name for t in request.tools} == {
         "ask_user",
         "request_skill_edit",
+        "skill",
+        "datasource_describe",
+        "datasource_query",
         "todo_write",
         "read",
         "write",

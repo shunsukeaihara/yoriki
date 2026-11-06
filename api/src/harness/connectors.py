@@ -1,9 +1,9 @@
 """会話でConnectorを使う（harness.md §10.2、design.md §4.9.1）。
 
-エージェントに見せるConnectorの一覧と、入力欄の `@` で指定したConnectorは、Run開始時に決めてManifestに固定する
-（Toolの一覧と `connector` の引数のenumをRunの中で変えないため）。一覧は依頼した人が使えるもので、機密のフラグの
-付いたものはローカルLLMのモデルのときだけ載せる。使えるか（範囲・所属・停止・機密）は、操作のたびに確かめ直す
-（authorization.md §6）。
+エージェントに見せるConnectorの一覧は、Run開始時と発言を取り込むたびに作り直してManifestに残す（harness/catalogs.py）。
+Toolの定義は変えず、`connector` の引数は文字列にする（prompt cacheを保つため）。一覧は依頼した人が使えるもので、
+機密のフラグの付いたものはローカルLLMのモデルのときだけ載せる。使えるか（範囲・所属・停止・機密）は、操作のたびに
+確かめ直す（authorization.md §6）。
 """
 
 import re
@@ -92,7 +92,7 @@ def fixed_catalog(connectors: Sequence[Connector]) -> dict[str, Any] | None:
 
 
 def catalog(run: Run) -> dict[str, Any]:
-    return ((run.manifest or {}).get("fixed") or {}).get("connector_catalog") or {}
+    return run.current_catalog("connector_catalog") or {}
 
 
 def catalog_names(run: Run) -> list[str]:

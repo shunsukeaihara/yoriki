@@ -49,7 +49,7 @@ def user_message_data(
     connectors: list[dict[str, object]] | None = None,
     connector_catalog: dict[str, Any] | None = None,
     with_attachments: bool = True,
-    result_skills: set[str] | None = None,
+    result_tool: bool = True,
 ) -> dict[str, object]:
     """利用者の発言のRunEventの内容。添付は /workspace/input の場所とあわせて残す（harness/context.py が読む）。
 
@@ -58,12 +58,12 @@ def user_message_data(
     `skills` は `/` で指定して解決したSkill（Manifestの内容）。本文も添え、モデルに `skill` を呼ばせない。
     `connectors` は `@` で指定したConnector。公開している表の説明を添える（harness.md §10.2）。
     `connector_catalog` はRunのConnectorの一覧で、Skillの本文のConnectorの名前に使う。
-    `with_attachments` が偽なら添付を添えない（確認への回答で渡した）。`result_skills` は explicit_text() を見る
+    `with_attachments` が偽なら添付を添えない（確認への回答で渡した）。`result_tool` はRunに submit_result があるか
     """
     data: dict[str, object] = {"text": text, "message": message.uid}
     if skills:
         data["skills"] = skills
-        data["skills_text"] = explicit_text(skills, connector_catalog, result_skills=result_skills)
+        data["skills_text"] = explicit_text(skills, connector_catalog, result_tool=result_tool)
     if connectors:
         data["connectors"] = connectors
         data["connectors_text"] = explicit_connectors_text(connectors)
@@ -435,7 +435,13 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
     message.save(update_fields=["run"])
     RunEvent.record(run, RunEventKind.STATUS, {"status": RunStatus.QUEUED}, actor=actor)
     data = user_message_data(
-        message, message.body, first=True, skills=skills, connectors=connectors, connector_catalog=connector_catalog
+        message,
+        message.body,
+        first=True,
+        skills=skills,
+        connectors=connectors,
+        connector_catalog=connector_catalog,
+        result_tool=False,
     )
     RunEvent.record(run, RunEventKind.USER_MESSAGE, data, actor=actor)
     enqueue_run(run)

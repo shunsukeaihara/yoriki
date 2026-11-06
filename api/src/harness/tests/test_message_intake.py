@@ -234,7 +234,7 @@ def test_chosen_skill_with_a_schema_writes_the_result_in_the_final_reply(convers
 
     assert "submit_result" not in [t.name for t in adapter.requests[1].tools]
     text = next(t for t in user_texts(adapter.requests[1]) if "判定して" in t)
-    assert "submit_result is not available for this skill" in text
+    assert "submit_result is not available" in text
 
 
 @pytest.mark.django_db
@@ -321,45 +321,6 @@ def test_choices_revoked_while_placing_assets_are_not_recorded(conversation, app
     assert not [e for e in run.manifest["appended"] if e["kind"] == "skill"]
     text = next(t for t in user_texts(adapter.requests[1]) if "これも" in t)
     assert "止めた手順" not in text and "cannot be used now" in text
-
-
-@pytest.mark.django_db
-def test_choices_with_an_answer_clear_the_submitted_result(conversation, app_user):
-    """回答に添えた指定は作業の条件を変えるので、確定した業務結果を確定し直させる"""
-    chosen = publish(app_user, name="判定", output_schema=SCHEMA)
-    added = publish(app_user, name="追加の基準", instructions="追加の基準の手順")
-    run = start(conversation, skills=[chosen])
-    run = execute(
-        run,
-        FakeAdapter(
-            [calls(("c1", "submit_result", {"verdict": "ok"})), calls(("q1", "ask_user", QUESTION))],
-        ),
-    )
-    assert run.status == RunStatus.WAITING_USER
-    assert run.result == {"verdict": "ok"}
-
-    send(conversation, body="大阪支店です", skills=[added])
-    adapter = FakeAdapter([calls(("c2", "submit_result", {"verdict": "ng"})), reply("判定し直しました。")])
-    run = execute(run, adapter)
-
-    assert any("追加の基準の手順" in t for t in user_texts(adapter.requests[0]))
-    assert RunEvent.objects.filter(run=run, kind=RunEventKind.CONTEXT, data__result_reset=True).exists()
-    assert run.result == {"verdict": "ng"}
-
-
-@pytest.mark.django_db
-def test_an_answer_without_choices_keeps_the_submitted_result(conversation, app_user):
-    chosen = publish(app_user, name="判定", output_schema=SCHEMA)
-    run = start(conversation, skills=[chosen])
-    run = execute(
-        run,
-        FakeAdapter(
-            [calls(("c1", "submit_result", {"verdict": "ok"})), calls(("q1", "ask_user", QUESTION))],
-        ),
-    )
-    send(conversation, body="大阪支店です")
-    run = execute(run, FakeAdapter([reply("終わりました。")]))
-    assert run.result == {"verdict": "ok"}
 
 
 @pytest.mark.django_db

@@ -9,7 +9,7 @@ from run.models import RunEvent, RunEventKind
 from skill.models import Skill, SkillAction, SkillVersion
 
 from ..connectors import catalog as connector_catalog
-from ..skills import loaded_entries, manifest_entry, render, result_skills, skill_catalog
+from ..skills import loaded_entries, manifest_entry, render, skill_catalog
 from .base import Effect, Tool, ToolContext, ToolResult
 from .submit_result import NAME as SUBMIT_RESULT
 
@@ -86,7 +86,7 @@ def _loaded(skill: Skill, version: SkillVersion, name: str, context: ToolContext
             skill,
             version,
             name=name,
-            result_tool=SUBMIT_RESULT in context.exposed and skill.uid in result_skills(context.run),
+            result_tool=SUBMIT_RESULT in context.exposed,
             connector_names={e["connector"]: e["name"] for e in connector_catalog(context.run).get("connectors", [])},
         ),
         value={"skill": skill.uid, "version": version.number},

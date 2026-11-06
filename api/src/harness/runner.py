@@ -96,7 +96,7 @@ from .result_files import missing_files
 from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, WORKSPACE_ROLLED_BACK, Job, SandboxSession, Suspended
 from .script_connectors import ScriptConnectors
 from .skill_edit import revoked_edit
-from .skills import SkillContentSource, explicit_versions, result_skills, revoked_skill
+from .skills import SkillContentSource, explicit_versions, revoked_skill
 from .task_edit import revoked_task_edit
 from .tools import ALL_TOOLS, ASK_USER, SANDBOX_TOOLS, WORKSPACE_WRITING_TOOLS
 from .tools.base import Effect, Tool, ToolContext, ToolResult
@@ -607,7 +607,6 @@ class Runner:
             return False
         for instruction in pending:
             self._place_chosen_assets(take_chosen(self.run_obj, instruction.message))
-        exposed = frozenset(t.name for t in self._exposed_tools())
         applied = False
         with self.run_obj.fenced(self.attempt) as run:
             instructions = list(
@@ -624,11 +623,9 @@ class Runner:
                 skills=[s.entry for chosen in taken.values() for s in chosen.skills],
             )
             for instruction in instructions:
-                self._apply_instruction(run, instruction, taken[instruction.pk], exposed)
+                self._apply_instruction(run, instruction, taken[instruction.pk])
                 applied = True
-            # 回答の本文はToolの結果で渡したが、指定を取り込んだなら作業の条件が変わっている
-            changed = any(not i.is_answer or taken[i.pk].skills or taken[i.pk].connectors for i in instructions)
-            if changed and run.result is not None:
+            if run.result is not None and not all(i.is_answer for i in instructions):
                 # 確定した業務結果は、取り込んだ指示を反映していない。確定し直させる（harness.md §10.4・§10.5）。
                 # 通知の候補も前の業務結果から作ったものなので消す
                 Run.objects.filter(pk=run.pk).update(result=None, notification=None, updated=timezone.now())
@@ -636,6 +633,8 @@ class Runner:
                 self.run_obj.notification = None
                 RunEvent.record(run, RunEventKind.CONTEXT, {"text": RESULT_RESET_NOTICE, "result_reset": True})
             self.run_obj.manifest = run.manifest
+        if self.session.started and any(i.message.skills for i in pending):
+            self._settle_chosen_assets()
         if applied and self.session.started:
             # 追加指示に付いた添付を、動いているSandboxの /workspace/input にも置く
             self.session.sync_inputs()
@@ -651,6 +650,13 @@ class Runner:
             except SandboxUnavailable as exc:
                 logger.warning("run %s: cannot place skill assets: %s", self.run_obj.uid, exc)
 
+    def _settle_chosen_assets(self) -> None:
+        """先に置いた資料をManifestに合わせる（取り込まなかったSkillの資料を除き、前の版へ戻す）"""
+        try:
+            self.session.sync_skill_assets()
+        except SandboxUnavailable as exc:
+            logger.warning("run %s: cannot settle skill assets: %s", self.run_obj.uid, exc)
+
     def _recheck_chosen(self, run: Run, message: ConversationMessage) -> Chosen:
         """記録の直前に今の権限で確かめる。動いているSandboxに資料を置けていないSkill（置けなかった、確かめる間に公開し
         直された）は読み込まない（harness.md §10.1）"""
@@ -661,9 +667,7 @@ class Runner:
                     chosen.drop_skill(item, _("資料を置けませんでした"))
         return chosen
 
-    def _apply_instruction(
-        self, run: Run, instruction: UserInstruction, chosen: Chosen, exposed: frozenset[str]
-    ) -> None:
+    def _apply_instruction(self, run: Run, instruction: UserInstruction, chosen: Chosen) -> None:
         """発言を `message.user` として記録する。指定したSkillはManifestへ追記する（同じtransaction）"""
         message = instruction.message
         entries = [item.entry for item in chosen.skills]
@@ -681,9 +685,8 @@ class Runner:
             skills=entries,
             connectors=chosen.connectors,
             connector_catalog=run.current_catalog("connector_catalog"),
-            # 本文と添付は回答として渡した。submit_result の形は、Runを始めるときに指定したSkillで決まっている
-            with_attachments=not instruction.is_answer,
-            result_skills=result_skills(run) if SUBMIT_RESULT in exposed else set(),
+            with_attachments=not instruction.is_answer,  # 本文と添付は回答として渡した
+            result_tool=False,
         )
         if chosen.unusable:
             data["notes_text"] = UNUSABLE_NOTE
@@ -719,8 +722,7 @@ class Runner:
     def _exposed_tools(self) -> tuple[Tool, ...]:
         """Runに出すToolの一覧（harness.md §7.5）。Tool呼出しに対応しないモデルには出さない。
 
-        会話のRunでは、利用者が使えるToolの全体と、Skillを読み込む `skill` を出す。`/` で業務結果のSchemaを持つSkillを
-        指定して始めたRunには submit_result を加える
+        会話のRunでは、`/` の指定にかかわらず、利用者が使えるToolの全体と、Skillを読み込む `skill` を出す
         """
         if not self.run_obj.model_version.supports_tools:
             return ()
@@ -766,18 +768,15 @@ class Runner:
             # Draftの評価のRun：評価するSkillの「使ってよいTool」だけで動くことを確かめる（design.md §3.7.1）
             allowed = {name for version in explicit for name in version.tools}
             tools = tuple(t for t in (*ALL_TOOLS, *datasource) if t.name in allowed)
-            tools += self._result_tool(explicit)
+            schema = next((v.output_schema for v in explicit if v.output_schema), None)
+            if schema:
+                tools += (make_submit_result_tool(schema),)
         else:
-            # 会話のRun：呼び出せる範囲は依頼した人の権限で決まり、`/` の指定では変わらない（`skill` の一覧は発言を
-            # 取り込むときに変わるので、いつも出す。harness.md §7.5の2・§10.1）
-            tools = (*ALL_TOOLS, *datasource, SKILL, REQUEST_SKILL_EDIT, *self._result_tool(explicit))
+            # 会話のRun：呼び出せる範囲は依頼した人の権限で決まる。`/` は使えと指示するだけで、Toolの一覧を変えない
+            # （`skill` の一覧は発言を取り込むときに変わるので、いつも出す。harness.md §7.5の2・§10.1）
+            tools = (*ALL_TOOLS, *datasource, SKILL, REQUEST_SKILL_EDIT)
         self.skill_tools = tools
         return tools
-
-    @staticmethod
-    def _result_tool(explicit: list[SkillContentSource]) -> tuple[Tool, ...]:
-        schema = next((v.output_schema for v in explicit if v.output_schema), None)
-        return (make_submit_result_tool(schema),) if schema else ()
 
     def _task_run_tools(self, explicit: list[SkillContentSource], datasource: tuple[Tool, ...]) -> tuple[Tool, ...]:
         """タスクのRun：固定したSkillの「使ってよいTool」を合わせたものだけ。

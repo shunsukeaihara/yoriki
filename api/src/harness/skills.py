@@ -159,8 +159,7 @@ def catalog_text(catalog: dict[str, Any]) -> str:
 def resolve_explicit(skills: list[Skill], user, model_version, *, sensitive: bool) -> list[dict[str, Any]]:
     """入力欄の `/` で指定したSkillを公開中の版へ解決する（design.md §3.2）。使えなければ SkillUnavailable。
 
-    返すのはManifestに固定する内容と、最初の発言に入れる本文。業務結果のSchema（`submit_result` の引数）は
-    1つのRunで1つだけにする
+    返すのはManifestに固定する内容（本文は発言に入れる）
     """
     if len(skills) > MAX_EXPLICIT_SKILLS:
         raise SkillUnavailable(_("指定できるSkillは%(limit)s個までです") % {"limit": MAX_EXPLICIT_SKILLS})
@@ -171,8 +170,6 @@ def resolve_explicit(skills: list[Skill], user, model_version, *, sensitive: boo
         assert skill.current_version_id is not None  # unusable_reason() が確かめた
         version = SkillVersion.objects.prefetch_related("assets__resource_version").get(pk=skill.current_version_id)
         resolved.append((skill, version))
-    if sum(1 for _skill, version in resolved if version.output_schema) > 1:
-        raise SkillUnavailable(_("業務結果の形を決めているSkillは、1つの依頼に1つだけ指定できます"))
     return [manifest_entry(skill, version) for skill, version in resolved]
 
 
@@ -225,11 +222,6 @@ def loaded_entries(run: Run) -> list[dict[str, Any]]:
     for entry in entries:
         latest[entry["skill"]] = entry
     return list(latest.values())
-
-
-def result_skills(run: Run) -> set[str]:
-    """このRunの submit_result の形を決めているSkillのID（Runを始めるときに `/` で指定したもの）"""
-    return {e["skill"] for e in ((run.manifest or {}).get("fixed") or {}).get("skills", [])}
 
 
 def explicit_versions(run: Run) -> list[SkillContentSource]:
@@ -327,8 +319,8 @@ def render(
         lines.append(f"<output_schema>\n{schema}\n</output_schema>")
         if not result_tool:
             lines.append(
-                "<note>submit_result is not available for this skill in this work. Put the result in this form in "
-                "your final reply instead.</note>"
+                "<note>submit_result is not available in this work. Put the result in this form in your final "
+                "reply instead.</note>"
             )
     lines.append("</skill>")
     return "\n".join(lines)
@@ -355,12 +347,11 @@ def explicit_text(
     entries: list[dict[str, Any]],
     connector_catalog: dict[str, Any] | None = None,
     *,
-    result_skills: set[str] | None = None,
+    result_tool: bool = True,
 ) -> str:
     """`/` で指定したSkillの本文。発言に添える（モデルに `skill` を呼ばせない）。Connectorの名前は、Runの
-    Connectorの一覧（`connector_catalog`）のものを使う（Toolが受け付ける名前と合わせる）。`result_skills` は、この
-    Runの submit_result の形を決めているSkillのID（None：すべて。Runを始めるときの指定）。前に読んだ版に代わるSkillには
-    そのことを添える（harness.md §10.1）"""
+    Connectorの一覧（`connector_catalog`）のものを使う（Toolが受け付ける名前と合わせる）。`result_tool` は、このRunに
+    submit_result があるか（会話のRunにはない）。前に読んだ版に代わるSkillにはそのことを添える（harness.md §10.1）"""
     contents = load_contents(entries)
     names = {e["connector"]: e["name"] for e in (connector_catalog or {}).get("connectors", [])}
     blocks = []
@@ -369,7 +360,7 @@ def explicit_text(
         block = render(
             content.skill,
             content,
-            result_tool=result_skills is None or entry["skill"] in result_skills,
+            result_tool=result_tool,
             connector_names=names,
         )
         if entry.get("replaces"):

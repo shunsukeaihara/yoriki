@@ -2,6 +2,7 @@
 
 import pytest
 
+from artifact.models import BlobObject
 from conversation.dispatch import CannotStart, post_message
 from conversation.factories import ConversationFactory
 from conversation.models import InstructionKind, UserInstruction
@@ -13,8 +14,9 @@ from harness.skills import build_catalog
 from harness.tools.base import schema_problem
 from llm.factories import ModelProfileFactory
 from resources.factories import ResourceVersionFactory
-from run.models import Run, RunEndReason, RunEvent, RunEventKind, RunStatus
+from run.models import Run, RunEndReason, RunEvent, RunEventKind, RunKind, RunStatus
 from run.tasks import claim_run
+from runtime.launcher import SandboxUnavailable
 from skill.factories import SkillFactory, SkillVersionFactory
 from skill.models import SkillAssetBinding, SkillAssetRole, SkillRequirement, SkillScope
 from user.factories import DepartmentFactory, DepartmentMembershipFactory, UserFactory
@@ -45,6 +47,14 @@ def publish(owner, name="請求書の照合", **content):
 def start(conversation, body="請求書を確認して", skills=None) -> Run:
     post_message(conversation, body=body, client_message_id="", actor=conversation.owner, skills=skills)
     return Run.objects.filter(conversation=conversation).latest("pk")
+
+
+def start_with_result(conversation, skill, body="請求書を確認して") -> Run:
+    """submit_result のあるRun。会話のRunにはないので、評価のRunとして動かす（harness.md §7.5の1）"""
+    run = start(conversation, body=body, skills=[skill])
+    Run.objects.filter(pk=run.pk).update(kind=RunKind.EVALUATION)
+    run.refresh_from_db()
+    return run
 
 
 def execute(run: Run, adapter: FakeAdapter) -> Run:
@@ -213,7 +223,7 @@ def test_message_with_a_skill_during_a_run_goes_to_the_parent(conversation, app_
 @pytest.mark.django_db
 def test_submit_result_records_the_business_result(conversation, app_user):
     skill, _version = publish(app_user, tools=[], output_schema=RESULT_SCHEMA)
-    run = start(conversation, body="契約書を確認して", skills=[skill])
+    run = start_with_result(conversation, skill, body="契約書を確認して")
     adapter = FakeAdapter(
         [
             calls(("c1", "submit_result", {"verdict": "maybe"})),
@@ -222,7 +232,6 @@ def test_submit_result_records_the_business_result(conversation, app_user):
         ]
     )
     run = execute(run, adapter)
-    assert "read" in tool_names(adapter.requests[0])
     assert next(t for t in adapter.requests[0].tools if t.name == "submit_result").parameters == RESULT_SCHEMA
     invalid, recorded = results(run, "submit_result")
     assert invalid["is_error"]
@@ -234,7 +243,7 @@ def test_submit_result_records_the_business_result(conversation, app_user):
 @pytest.mark.django_db
 def test_reply_without_submit_result_is_nudged_once_then_ends_with_no_result(conversation, app_user):
     skill, _version = publish(app_user, tools=[], output_schema=RESULT_SCHEMA)
-    run = start(conversation, skills=[skill])
+    run = start_with_result(conversation, skill)
     adapter = FakeAdapter([reply("確認しました"), reply("確認しました")])
     run = execute(run, adapter)
     assert run.status == RunStatus.FAILED
@@ -258,11 +267,16 @@ def test_loaded_skill_with_a_result_schema_asks_for_the_result_in_the_reply(conv
 
 
 @pytest.mark.django_db
-def test_two_chosen_skills_with_result_schemas_are_refused(conversation, app_user):
+def test_chosen_skill_with_a_result_schema_is_the_same_as_a_loaded_one(conversation, app_user):
+    """`/` は使えと指示するだけ。業務結果はSchemaの形で最後の応答に書かせ、書かなくても失敗にしない"""
     first, _v1 = publish(app_user, name="A", output_schema=RESULT_SCHEMA)
     second, _v2 = publish(app_user, name="B", output_schema=RESULT_SCHEMA)
-    with pytest.raises(CannotStart, match="業務結果"):
-        start(conversation, skills=[first, second])
+    run = start(conversation, skills=[first, second])
+    adapter = FakeAdapter([reply("判定：ok")])
+    run = execute(run, adapter)
+    assert run.status == RunStatus.COMPLETED
+    assert "submit_result" not in tool_names(adapter.requests[0])
+    assert any("submit_result is not available" in m.text for m in adapter.requests[0].messages)
 
 
 @pytest.mark.django_db
@@ -284,6 +298,71 @@ def test_skill_assets_are_placed_under_master(conversation, app_user, settings, 
     assert oct(placed.stat().st_mode & 0o777) == "0o644"
     text = RunEvent.objects.get(run=run, kind=RunEventKind.USER_MESSAGE).data["skills_text"]
     assert f"/workspace/master/skills/{skill.uid}/vendor-master/vendor-master.csv" in text
+    session.close()
+
+
+@pytest.mark.django_db
+def test_switching_assets_keeps_the_previous_version_on_failure(
+    conversation, app_user, settings, tmp_path, monkeypatch
+):
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path / "workspaces")
+    skill, first = publish(app_user)
+    SkillAssetBinding.objects.create(
+        version=first,
+        key="master",
+        role=SkillAssetRole.MASTER,
+        resource_version=ResourceVersionFactory.create(name="old.csv", content=b"old"),
+    )
+    run = start(conversation, skills=[skill])
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    session = SandboxSession(run, attempt)
+    session.sync_skill_assets()
+    second = SkillVersionFactory.create(skill=skill)
+    SkillAssetBinding.objects.create(
+        version=second,
+        key="master",
+        role=SkillAssetRole.MASTER,
+        resource_version=ResourceVersionFactory.create(name="new.csv", content=b"new"),
+    )
+    placed = session.master_dir / "skills" / skill.uid / "master"
+
+    def broken(_self, *_args, **_kwargs):
+        raise OSError("storage is down")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(BlobObject, "open", broken)
+        with pytest.raises(SandboxUnavailable):
+            session.place_skill_assets(skill, second)
+    assert (placed / "old.csv").read_bytes() == b"old"
+    assert not session.has_skill_assets(skill, second)
+
+    # 置けた新しい版がManifestになければ、合わせるときに前の版へ戻す
+    session.place_skill_assets(skill, second)
+    assert (placed / "new.csv").read_bytes() == b"new" and not (placed / "old.csv").exists()
+    session.sync_skill_assets()
+    assert (placed / "old.csv").read_bytes() == b"old" and not (placed / "new.csv").exists()
+    session.close()
+
+
+@pytest.mark.django_db
+def test_assets_of_a_skill_not_taken_in_are_removed(conversation, app_user, settings, tmp_path):
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path / "workspaces")
+    skill, version = publish(app_user)
+    SkillAssetBinding.objects.create(
+        version=version,
+        key="master",
+        role=SkillAssetRole.MASTER,
+        resource_version=ResourceVersionFactory.create(name="a.csv", content=b"a"),
+    )
+    run = start(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    session = SandboxSession(run, attempt)
+    session.place_skill_assets(skill, version)
+    assert (session.master_dir / "skills" / skill.uid).exists()
+    session.sync_skill_assets()
+    assert not (session.master_dir / "skills" / skill.uid).exists()
     session.close()
 
 
@@ -354,7 +433,7 @@ def test_model_switch_keeps_to_models_the_skills_in_use_can_run(conversation, ap
 def test_result_can_be_submitted_just_before_the_step_limit(conversation, app_user, monkeypatch):
     monkeypatch.setattr(runner_module, "MAX_STEPS", 2)
     skill, _version = publish(app_user, tools=["todo_write"], output_schema=RESULT_SCHEMA)
-    run = start(conversation, skills=[skill])
+    run = start_with_result(conversation, skill)
     todos = {"todos": [{"content": "読む", "status": "in_progress"}]}
     adapter = FakeAdapter(
         [
@@ -372,7 +451,7 @@ def test_result_can_be_submitted_just_before_the_step_limit(conversation, app_us
 @pytest.mark.django_db
 def test_instruction_after_the_result_asks_to_submit_it_again(conversation, app_user):
     skill, _version = publish(app_user, tools=[], output_schema=RESULT_SCHEMA)
-    run = start(conversation, skills=[skill])
+    run = start_with_result(conversation, skill)
 
     class Script(FakeAdapter):
         def stream(self, request):

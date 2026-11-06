@@ -302,7 +302,12 @@ class SandboxSession:
         self.master_dir.mkdir(parents=True, exist_ok=True)
         self.master_dir.chmod(0o755)
         run = Run.objects.only("manifest").get(pk=self.run.pk)
-        entries = [e for e in loaded_entries(run) if self.skill_versions.get(e["skill"]) != content_key(e)]
+        loaded = loaded_entries(run)
+        # 置いたがManifestへ追記しなかった（取り込む前に使えなくなった）Skillの資料は残さない
+        for uid in set(self.skill_versions) - {e["skill"] for e in loaded}:
+            shutil.rmtree(self.master_dir / "skills" / uid, ignore_errors=True)
+            del self.skill_versions[uid]
+        entries = [e for e in loaded if self.skill_versions.get(e["skill"]) != content_key(e)]
         if not entries:
             return
         skills = {s.uid: s for s in Skill.objects.filter(uid__in=[e["skill"] for e in entries])}
@@ -338,12 +343,24 @@ class SandboxSession:
         )
 
     def _place_assets(self, root: Path, files: list[tuple[str, Any]]) -> None:
-        """資料の版（ResourceVersion）を、/workspace/master の中のパスに置く。`root` の下の前の中身は消す"""
+        """資料の版（ResourceVersion）を、/workspace/master の中のパスに置く。`root` の下の前の中身は、置けてから消す
+        （版の切り替え。置けなければ前の版の資料へ戻す）"""
         self.master_dir.mkdir(parents=True, exist_ok=True)
         self.master_dir.chmod(0o755)
+        previous = root.with_name(f"{root.name}.previous")
+        shutil.rmtree(previous, ignore_errors=True)
         if root.exists():
-            # 同じSkillの別の版（版の切り替え）。前の版の資料を残さない
-            shutil.rmtree(root)
+            root.rename(previous)
+        try:
+            self._copy_assets(files)
+        except SandboxUnavailable:
+            shutil.rmtree(root, ignore_errors=True)
+            if previous.exists():
+                previous.rename(root)
+            raise
+        shutil.rmtree(previous, ignore_errors=True)
+
+    def _copy_assets(self, files: list[tuple[str, Any]]) -> None:
         for sandbox_path, resource in files:
             path = self.master_dir / posixpath.relpath(sandbox_path, MASTER_DIR)
             if self.master_dir not in path.parents:

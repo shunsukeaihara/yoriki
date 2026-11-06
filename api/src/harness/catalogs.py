@@ -64,7 +64,8 @@ def build_task_catalogs(
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """タスクのRunの（Skillの一覧、Connectorの一覧）：タスクの範囲でアクセスできるもの（authorization.md §5.4）。
     機密のものは機密のRunだけ。`explicit` は定義で使うよう指示したものとSkillが宣言したもの。`launcher` はチャットから
-    起動した人で、その人の今の権限との共通部分を取る（起動できる人なら、タスクの範囲と同じになる。authorization.md §6）"""
+    起動した人で、その人の今の権限との共通部分を取る（起動できる人なら、タスクの範囲と同じになる。
+    authorization.md §6）"""
     if not model_version.supports_tools:
         return None, None
     skills, allowed_connectors = _task_scope(task, launcher)
@@ -99,8 +100,8 @@ def rebuild_catalogs(
     run: Run, *, connectors: Sequence[dict[str, Any]] = (), skills: Sequence[dict[str, Any]] = ()
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """動いているRunの一覧を、今の権限（会話は依頼した人、タスクはタスクの範囲）で作る。`connectors`・`skills` は、今
-    取り込む発言で指定したもの。今の指定、前に `@` で指定したもの、Runが使うSkillが宣言したものの順に先に並べる（今の指定
-    を一覧の上限で外さず、前の名前もToolで使い続けられるように）"""
+    取り込む発言で指定したもの。今の指定、前に `@` で指定したもの、Runが使うSkillが宣言したものの順に先に並べる
+    （今の指定を一覧の上限で外さず、前の名前もToolで使い続けられるように）"""
     manifest = run.manifest or {}
     chosen = [
         *connectors,

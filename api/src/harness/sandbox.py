@@ -87,7 +87,8 @@ OUT_OF_MEMORY_NOTICE = (
 )
 WORKSPACE_LOST = (
     "[The files saved from the previous work could not be restored on this worker, so /workspace/work and "
-    "/workspace/output are empty. Check which files you need and recreate them before continuing.]"
+    "/workspace/output are empty. Tell the user that the working environment was lost and that you are rebuilding it "
+    "from scratch. Check which files you need and recreate them before continuing.]"
 )
 
 
@@ -134,7 +135,8 @@ class CollectedOutput:
 
 WORKSPACE_ROLLED_BACK = (
     "[The latest saved files could not be restored on this worker, so /workspace/work and /workspace/output went back "
-    "to the saved state before them. Check which files you need and redo the later changes before continuing.]"
+    "to the saved state before them. Tell the user that the latest work on the files was lost. Check which files you "
+    "need and redo the later changes before continuing.]"
 )
 
 

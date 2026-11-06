@@ -408,8 +408,19 @@ class Runner:
         if notice != WORKSPACE_ROLLED_BACK:
             return notice
         restored = self.session.restored
-        since = restored.sequence if restored is not None and restored.run_id == self.run_obj.pk else 0
-        return " ".join([notice, *(f"[{part}]" for part in self._lost_work(self._events(), since))])
+        if restored is None:
+            return notice
+        # 戻した世代が前のRunのものなら、その後のRunの変更も失われている
+        events = (
+            RunEvent.objects.filter(
+                run__conversation_id=self.run_obj.conversation_id,
+                run_id__gte=restored.run_id,
+                kind=RunEventKind.TOOL_RESULT,
+            )
+            .exclude(run_id=restored.run_id, sequence__lte=restored.sequence)
+            .order_by("run_id", "sequence")
+        )
+        return " ".join([notice, *(f"[{part}]" for part in self._lost_work(list(events), 0))])
 
     # --- ステップ ---
 

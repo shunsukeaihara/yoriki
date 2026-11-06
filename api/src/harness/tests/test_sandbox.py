@@ -309,6 +309,25 @@ def test_fallback_to_the_previous_generation_tells_what_was_lost(conversation, a
     assert "Exit code: 0" in result
 
 
+def test_fallback_to_a_generation_of_an_earlier_run_tells_what_was_lost(conversation):
+    """戻した世代が前のRunのものなら、その後のRunの変更も伝える"""
+    execute(post(conversation), FakeAdapter([calls(("c1", "shell", shell("echo 1 > a.txt"))), reply("済み")]))
+    second = execute(
+        post(conversation, "次"), FakeAdapter([calls(("c2", "shell", shell("echo 2 > b.txt"))), reply("済み")])
+    )
+    get_storage().delete(Checkpoint.objects.get(run=second).key)
+
+    run = execute(
+        post(conversation, "続けて"), FakeAdapter([calls(("c3", "shell", shell("cat a.txt"))), reply("済み")])
+    )
+
+    result = text(results(run)["c3"])
+    assert "went back to the saved state before them" in result
+    assert "shell (c2)" in result
+    assert "shell (c1)" not in result
+    assert "shell (c3)" not in result
+
+
 def test_snapshot_that_cannot_be_verified_is_not_confirmed(conversation, monkeypatch):
     """読み戻して確かめられなければ確定せず、前のsnapshotを残して別のAttemptでやり直す（design.md §7.9）"""
     monkeypatch.setattr("harness.runner.enqueue_run", lambda _run: None)

@@ -268,30 +268,34 @@ def test_next_request_continues_from_the_previous_files(conversation):
     assert "     1│v1" in text(results(third)["c2"])
 
 
-def test_next_run_replaces_the_previous_snapshot(conversation):
+def test_next_runs_keep_two_generations_of_snapshots(conversation):
     first = execute(post(conversation), FakeAdapter([calls(("c1", "shell", shell("echo 1 > a.txt"))), reply("済み")]))
     old = Checkpoint.objects.get(run=first)
     second = execute(
         post(conversation, "続けて"), FakeAdapter([calls(("c2", "shell", shell("cat a.txt"))), reply("済み")])
     )
-    assert text(results(second)["c2"]).startswith("Exit code: 0")
-    assert Checkpoint.objects.get(run__conversation=conversation).run == second
+    third = execute(
+        post(conversation, "続けて"), FakeAdapter([calls(("c3", "shell", shell("cat a.txt"))), reply("済み")])
+    )
+    assert text(results(third)["c3"]).startswith("Exit code: 0")
+    remaining = Checkpoint.objects.filter(run__conversation=conversation).order_by("pk")
+    assert [c.run for c in remaining] == [second, third]
     assert not get_storage().exists(old.key)
 
 
-def test_unverified_snapshot_does_not_replace_the_previous_one(conversation, monkeypatch):
-    """保存先で確かめられなければ確定せず、前のsnapshotを残して別のAttemptでやり直す（design.md §7.9）"""
+def test_snapshot_that_cannot_be_verified_is_not_confirmed(conversation, monkeypatch):
+    """読み戻して確かめられなければ確定せず、前のsnapshotを残して別のAttemptでやり直す（design.md §7.9）"""
     monkeypatch.setattr("harness.runner.enqueue_run", lambda _run: None)
     first = execute(post(conversation), FakeAdapter([calls(("c1", "shell", shell("echo 1 > a.txt"))), reply("済み")]))
     previous = Checkpoint.objects.get(run=first)
-    stat = LocalStorage.stat
+    open_read = LocalStorage.open_read
 
-    def missing_new_snapshot(self, key):
-        return None if key.startswith("snapshots/") and key != previous.key else stat(self, key)
+    def broken_new_snapshot(self, key):
+        return io.BytesIO(b"broken") if key.startswith("snapshots/") and key != previous.key else open_read(self, key)
 
     run = post(conversation, "続けて")
     with monkeypatch.context() as patch:
-        patch.setattr(LocalStorage, "stat", missing_new_snapshot)
+        patch.setattr(LocalStorage, "open_read", broken_new_snapshot)
         run = execute(run, FakeAdapter([calls(("c2", "shell", shell("cat a.txt"))), reply("済み")]))
     assert run.status == RunStatus.QUEUED
     assert Checkpoint.objects.get(run__conversation=conversation) == previous

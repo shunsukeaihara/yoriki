@@ -8,11 +8,20 @@ from unittest import mock
 import pytest
 from django.db import DatabaseError, connection
 
-from artifact.storage import LocalStorage, StorageError, get_storage
+from artifact.storage import LocalStorage, StorageError, StoredObject, get_storage
 from conversation.dispatch import MessageMode, post_message
 from conversation.factories import ConversationFactory
 from harness.runner import Runner
-from harness.sandbox import WORKSPACE_LOST, Job, SandboxSession, Suspended, database_label, remove_stale_sandboxes
+from harness.sandbox import (
+    WORKSPACE_LOST,
+    WORKSPACE_ROLLED_BACK,
+    Job,
+    SandboxSession,
+    Suspended,
+    database_label,
+    remove_stale_sandboxes,
+    verify_saved,
+)
 from harness.tools import shell as shell_tool
 from harness.tools.base import ToolContext
 from harness.tools.shell import _job_text
@@ -285,42 +294,119 @@ class SavingSession(FakeSession):
         return Suspended(stored, storage.backend_id, [], [], {})
 
 
-def test_only_the_latest_snapshot_is_kept(conversation):
-    """新しいsnapshotを確定したら、同じ会話の前のものを消す。別の会話のものは消さない（design.md §7.9）"""
+def test_two_generations_of_snapshots_are_kept(conversation):
+    """新しいsnapshotを確定したら、その1つ前まで残して古いものを消す。別の会話のものは消さない（design.md §7.9）"""
     other = ConversationFactory.create(owner=conversation.owner)
     kept = execute(post(other), FakeAdapter([reply("別の会話")]), SavingSession)
-    first = execute(post(conversation), FakeAdapter([reply("1回目")]), SavingSession)
-    assert first.status == RunStatus.COMPLETED
-    old = Checkpoint.objects.get(run=first)
-    assert get_storage().exists(old.key)
+    runs = [execute(post(conversation, f"{n}回目"), FakeAdapter([reply("済み")]), SavingSession) for n in range(3)]
+    assert all(run.status == RunStatus.COMPLETED for run in runs)
 
-    second = execute(post(conversation, "次"), FakeAdapter([reply("2回目")]), SavingSession)
-
-    assert second.status == RunStatus.COMPLETED
-    latest = Checkpoint.objects.get(run__conversation=conversation)
-    assert latest.run == second
-    assert get_storage().exists(latest.key)
-    assert not get_storage().exists(old.key)
+    remaining = Checkpoint.objects.filter(run__conversation=conversation).order_by("pk")
+    assert [c.run for c in remaining] == runs[1:]
+    assert all(get_storage().exists(c.key) for c in remaining)
+    assert not get_storage().exists(f"snapshots/runs/{runs[0].uid}/1.tar")
     assert get_storage().exists(Checkpoint.objects.get(run=kept).key)
 
 
 def test_snapshot_that_cannot_be_deleted_is_retried_by_the_next_save(conversation, monkeypatch):
     first = execute(post(conversation), FakeAdapter([reply("1回目")]), SavingSession)
     old = Checkpoint.objects.get(run=first)
+    execute(post(conversation, "2回目"), FakeAdapter([reply("済み")]), SavingSession)
 
     def fail(self, key):
         raise StorageError("timeout")
 
     with monkeypatch.context() as patch:
         patch.setattr(LocalStorage, "delete", fail)
-        second = execute(post(conversation, "次"), FakeAdapter([reply("2回目")]), SavingSession)
+        third = execute(post(conversation, "3回目"), FakeAdapter([reply("済み")]), SavingSession)
     # 消せなくても新しいsnapshotは使える
-    assert Checkpoint.objects.filter(run__conversation=conversation).count() == 2
-    assert Checkpoint.latest_for(second).run == second  # type: ignore[union-attr]
+    assert Checkpoint.objects.filter(run__conversation=conversation).count() == 3
+    assert Checkpoint.latest_for(third).run == third  # type: ignore[union-attr]
 
-    execute(post(conversation, "次の次"), FakeAdapter([reply("3回目")]), SavingSession)
-    assert Checkpoint.objects.filter(run__conversation=conversation).count() == 1
+    execute(post(conversation, "4回目"), FakeAdapter([reply("済み")]), SavingSession)
+    assert Checkpoint.objects.filter(run__conversation=conversation).count() == 2
     assert not get_storage().exists(old.key)
+
+
+def _checkpoint(run, attempt, sequence, data: bytes | None) -> Checkpoint:
+    """`data` がNoneなら、保存先に実体のないCheckpoint"""
+    key = f"snapshots/{sequence}.tar"
+    sha256 = get_storage().put_immutable(key, io.BytesIO(data)).sha256 if data is not None else "0" * 64
+    return Checkpoint.objects.create(
+        run=run, attempt=attempt, sequence=sequence, storage="test-main", key=key, size=1, sha256=sha256
+    )
+
+
+class RecordingSandbox:
+    def __init__(self):
+        self.restored: list[bytes] = []
+
+    def restore(self, src):
+        self.restored.append(src.read())
+
+
+def test_latest_snapshot_that_is_missing_falls_back_to_the_previous_one(conversation, settings, tmp_path):
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path)
+    run = post(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    previous = _checkpoint(run, attempt, 1, b"previous")
+    _checkpoint(run, attempt, 2, None)
+    session = SandboxSession(run, attempt)
+    sandbox = RecordingSandbox()
+
+    session._restore(sandbox)  # type: ignore[arg-type]
+
+    assert sandbox.restored == [b"previous"]
+    assert session.restored == previous
+    assert session.take_notice() == WORKSPACE_ROLLED_BACK
+
+
+def test_no_notice_when_the_latest_snapshot_is_restored(conversation, settings, tmp_path):
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path)
+    run = post(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    _checkpoint(run, attempt, 1, b"previous")
+    _checkpoint(run, attempt, 2, b"latest")
+    session = SandboxSession(run, attempt)
+    sandbox = RecordingSandbox()
+
+    session._restore(sandbox)  # type: ignore[arg-type]
+
+    assert sandbox.restored == [b"latest"]
+    assert session.take_notice() == ""
+
+
+def test_workspace_is_empty_when_no_generation_can_be_restored(conversation, settings, tmp_path):
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path)
+    run = post(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    _checkpoint(run, attempt, 1, None)
+    _checkpoint(run, attempt, 2, None)
+    session = SandboxSession(run, attempt)
+    sandbox = RecordingSandbox()
+
+    session._restore(sandbox)  # type: ignore[arg-type]
+
+    assert sandbox.restored == []
+    assert session.restored is None
+    assert session.take_notice() == WORKSPACE_LOST
+
+
+def test_saved_snapshot_is_read_back_in_full():
+    """大きさとメタデータだけでなく、保存先の中身を読んで確かめる"""
+    good = get_storage().put_immutable("snapshots/good.tar", io.BytesIO(b"tar"))
+    verify_saved(get_storage(), good)
+
+    broken = StoredObject(good.key, good.size, "0" * 64)
+    with pytest.raises(SandboxUnavailable, match="differs"):
+        verify_saved(get_storage(), broken)
+    missing = StoredObject("snapshots/missing.tar", 3, good.sha256)
+    with pytest.raises(SandboxUnavailable, match="cannot verify") as error:
+        verify_saved(get_storage(), missing)
+    assert error.value.retryable
 
 
 def _task_run(user) -> Run:

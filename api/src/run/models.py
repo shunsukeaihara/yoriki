@@ -662,8 +662,9 @@ class ToolInvocation(models.Model):
 class Checkpoint(models.Model):
     """Workspaceのsnapshotを確定した区切り（design.md §5.4・§7.9、harness.md §11.1）。作成後に変更しない。
 
-    新しいAttemptも、同じ会話の次のRunも、agentセッションの最新のCheckpointからWorkspaceを戻す。残すのは最新の1つだけで、
-    新しいものを確定した後に古いものを消す。snapshotの中身は保存先（artifact/storage.py）にあり、ここには場所と版だけを持つ
+    新しいAttemptも、同じ会話の次のRunも、agentセッションの最新のCheckpointからWorkspaceを戻す。残すのは確定した2世代で、
+    新しいものを確定した後に、それより古いものを消す。snapshotの中身は保存先（artifact/storage.py）にあり、ここには場所と
+    版だけを持つ
     """
 
     uid = NanoidField(unique=True)
@@ -690,26 +691,31 @@ class Checkpoint(models.Model):
 
     @classmethod
     def latest_for(cls, run: Run) -> "Checkpoint | None":
-        """このRunが戻すCheckpoint。Sandboxを使わなかったRunにはCheckpointがないので、会話の中でこのRunまでのRunを
-        新しい順に探す"""
+        return cls.restorable_for(run).first()
+
+    @classmethod
+    def restorable_for(cls, run: Run) -> models.QuerySet["Checkpoint"]:
+        """このRunが戻せるCheckpointを新しい順に。Sandboxを使わなかったRunにはCheckpointがないので、会話の中でこのRun
+        までのRunを探す"""
         if run.isolated_workspace:
             # タスクのRunは、ほかのRunのWorkspaceを引き継がない（修正チャットの前の実行のものも）
-            return cls.objects.filter(run=run).order_by("-sequence", "-pk").first()
+            return cls.objects.filter(run=run).order_by("-sequence", "-pk")
         if run.kind == RunKind.TASK_EDIT:
             # 修正チャットのタスクの編集のRunは、直前のタスクのRunより後の編集のRunのものだけ。タスクのRunの作業ファイル
             # は残らないので、最初の編集のRunは空のWorkspaceから始める（harness.md §10.10）
             runs = run.fix_chat_runs().exclude(trigger=RunTrigger.TASK)
-            return cls.objects.filter(run__in=runs).order_by("-run_id", "-sequence", "-pk").first()
-        return (
-            cls.objects.filter(run__conversation_id=run.conversation_id, run_id__lte=run.pk)
-            .order_by("-run_id", "-sequence", "-pk")
-            .first()
+            return cls.objects.filter(run__in=runs).order_by("-run_id", "-sequence", "-pk")
+        return cls.objects.filter(run__conversation_id=run.conversation_id, run_id__lte=run.pk).order_by(
+            "-run_id", "-sequence", "-pk"
         )
 
     @classmethod
     def discard_older(cls, checkpoint: "Checkpoint") -> None:
-        """確定したCheckpointより前のsnapshotを消す（残すのは最新の1つだけ。design.md §7.9）"""
-        cls._discard(cls.objects.filter(run__conversation_id=checkpoint.run.conversation_id, pk__lt=checkpoint.pk))
+        """確定したCheckpointとその1つ前を残し、それより古いsnapshotを消す（design.md §7.9）"""
+        rows = cls.objects.filter(run__conversation_id=checkpoint.run.conversation_id).order_by("-pk")
+        previous = rows.filter(pk__lt=checkpoint.pk).first()
+        if previous is not None:
+            cls._discard(rows.filter(pk__lt=previous.pk))
 
     @classmethod
     def discard_through(cls, run: Run) -> None:

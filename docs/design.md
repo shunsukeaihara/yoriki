@@ -2,7 +2,7 @@
 
 作成日：2026年10月2日  
 更新日：2026年11月6日  
-版：0.47 設計案  
+版：0.48 設計案  
 対象：サービス企画、開発、運用担当
 
 プロダクト名はYoriki（よりき）とする（0.16でYuhitsuから変更）。同名の製品・サービスがあることは承知の上で、検索での見つけやすさは重視しない。名称の商標・ドメイン等の確認は本設計の対象外とする。
@@ -854,7 +854,7 @@ Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプ�
 | ExecutionAttempt | Run、親かサブエージェントか（サブエージェントならSubagent）、Worker、試行番号、lease、fencing token、開始・終了、失敗理由 |
 | Subagent | 親のRun、起動したTool呼出し、種類、指示、固定したモデルの版とeffort、状態、ワークスペースのコピーの参照（終わったら消す）、返すテキストと返すファイル（Artifact）。RunEvent・ToolInvocation・UsageLedgerは、どの子のものかを持つ（harness.md §10.11） |
 | RunEvent | 単調なsequence、イベント種別、表示用内容、モデル用の内容とモデルの履歴への効き方（harness.md §5）、時刻 |
-| Checkpoint | Workspaceのsnapshotの参照（保存先・key・大きさ・SHA-256）と、それに反映されているRunEventのsequence、保存の前に止めたジョブ。snapshotの実体はagentセッションで最新の1つだけを残す。会話の文脈・Tool結果はRunEventから、指示の反映はUserInstructionから組み立てる |
+| Checkpoint | Workspaceのsnapshotの参照（保存先・key・大きさ・SHA-256）と、それに反映されているRunEventのsequence、保存の前に止めたジョブ。snapshotの実体はagentセッションで確定した2世代を残す（§7.9）。会話の文脈・Tool結果はRunEventから、指示の反映はUserInstructionから組み立てる |
 | Artifact | 論理ID、BlobObject参照、hash、サイズ、MIME、所有者、agentセッション、Run（自動の保持期限は持たない。§8） |
 | BlobObject / BlobLocation | 不変bytesのID・hash、backend_id・設定世代、object key、物理版、移行状態 |
 | WorkspaceSnapshot | Adapter・format版、ファイルManifest、環境参照、Checkpoint、保存・検証状態 |
@@ -994,7 +994,7 @@ Skill公開等の確定済み操作や外部への配信はRun停止だけで巻
 
 会話履歴だけではshell作業を再開できない。Workspaceを使うRunのCheckpointは、その時点の再開用Workspace snapshotと対応させる。入力とマスター資料は版とhashで復元し、作業ファイルはsnapshotから復元する。Sandbox・Workspaceを作らないテキスト処理ではCheckpointを作らない（会話の文脈はRunEventから組み立てる。harness.md §11.1）。
 
-MVPではworkspace.file_snapshot Adapterで、Workerを手放す前に、サイズ制限付きでworkとoutputを保存する。残すのは最新の1つだけで、保存した後のコンテナに残すものはない。保存に失敗したら再試行し、それでも駄目なら失敗にする（黙って進めない）。実行中のプロセス、開いたファイルハンドル、メモリ状態は保存しない。Workerやコンテナが落ちたら、最後の保存より後の作業ファイルが失われたことをLLMに伝え、LLMが確かめて作り直す。発言、返答、Toolの結果等の文脈はDBに残る。
+MVPではworkspace.file_snapshot Adapterで、Workerを手放す前に、サイズ制限付きでworkとoutputを保存する。残すのは確定した2世代で（§7.9）、保存した後のコンテナに残すものはない。保存に失敗したら再試行し、それでも駄目なら失敗にする（黙って進めない）。実行中のプロセス、開いたファイルハンドル、メモリ状態は保存しない。Workerやコンテナが落ちたら、最後の保存より後の作業ファイルが失われたことをLLMに伝え、LLMが確かめて作り直す。発言、返答、Toolの結果等の文脈はDBに残る。
 
 Checkpointはmanifest、状態、snapshotをStorage Backendへ保存・検証できた時点でDB参照を確定する。未確定snapshotは後で回収する。再開用snapshotとユーザー向け成果物は保存種別と消す条件を分ける（§8）。
 
@@ -1273,13 +1273,13 @@ Workspace Persistence Adapterの契約は、capture、verify、restore、release
 
 WorkspaceSnapshotにはsnapshot_id、schema_version、Adapter ID・実装版・設定版、Run／Attempt／Checkpoint、保存時刻、ファイル一覧・相対path・hash・Artifact参照、Environment Revisionを持たせる。通常はworkとoutputの必要内容を保存し、inputとmasterは固定Resource Versionから再取得する。envはimage digestと、追加したpackageのlock・保管wheelから再構築する。メモリ、実行中process、接続、開いたファイルハンドルは保存しない。
 
-退避のタイミングは、Workerを手放す前（親もジョブも動かなくなったとき）とする。Attemptの始めに最新のsnapshotを展開し、残すのは最新の1つだけとする。同じ会話の次のRunは、Runを問わずagentセッションの最新のsnapshotから始める（Sandboxを使わずに終わったRunがあっても、前のsnapshotがそのまま最新になる）。タスクの実行は、確認待ちでは保存するが、完了ではsnapshotを作らず、コンテナを片付ける前に `/workspace/output` を成果物として回収して確定し、ワークスペースは保存せずに消す。前の実行のワークスペースは引き継がない。修正チャットは、中でタスクを動かすたびにワークスペースを空で作り直す（§11.11）。容量はセットアップの既定値と業務ポリシーで制限する。保存失敗を黙って省略しない。
+退避のタイミングは、Workerを手放す前（親もジョブも動かなくなったとき）とする。Attemptの始めに最新のsnapshotを展開し、残すのは確定した2世代とする（新しいものが使えないときに、生きている中で最新のものへ戻すため）。同じ会話の次のRunは、Runを問わずagentセッションの最新のsnapshotから始める（Sandboxを使わずに終わったRunがあっても、前のsnapshotがそのまま最新になる）。タスクの実行は、確認待ちでは保存するが、完了ではsnapshotを作らず、コンテナを片付ける前に `/workspace/output` を成果物として回収して確定し、ワークスペースは保存せずに消す。前の実行のワークスペースは引き継がない。修正チャットは、中でタスクを動かすたびにワークスペースを空で作り直す（§11.11）。容量はセットアップの既定値と業務ポリシーで制限する。保存失敗を黙って省略しない。
 
-snapshot本体・Manifest・環境参照が利用可能であることをverifyした後、対応CheckpointをDBで確定する（前のsnapshotは確定の後に回収する）。Workerを手放す前の保存が済むまでWorkspaceを解放しない。保存障害は上限付きで再試行し、できなければ失敗にする。取消要求やWorker障害では最新の退避ができない場合があるため、停止を優先し、最後に確定したCheckpointと未保存範囲を記録する。
+snapshot本体を保存先から全部読み戻してhashと大きさを確かめ、Manifest・環境参照が利用可能であることをverifyした後、対応CheckpointをDBで確定する（確かめられなければ確定せず、古いものも消さない。確定した後に、1つ前より古いものを回収する）。保存先で後から壊れることは、初期は考えない（戻すときに中身のhashは確かめない）。Workerを手放す前の保存が済むまでWorkspaceを解放しない。保存障害は上限付きで再試行し、できなければ失敗にする。取消要求やWorker障害では最新の退避ができない場合があるため、停止を優先し、最後に確定したCheckpointと未保存範囲を記録する。
 
 snapshotは添付・成果物と同じStorage Backend（§7.8）に置く。S3等の共有の保存先なら、別のWorkerでも同じsnapshotから戻せる。
 
-再開は元snapshotを変更せず、新しいAttempt専用領域への復元から始める。対応するformat・Adapter・image・platformを検証する。保存先の一時的な読取りの失敗はAttemptの障害として再試行する（残るのは最新の1つだけなので、読めないまま空で続けて上書きしない）。snapshotがこのWorkerに見つからない場合（Workerのローカルディスクに保存したsnapshotを、別のWorkerで再開した等）は、再開を止めずに空のWorkspaceで続け、そのことと、作り直す必要があることをエージェントに知らせる。会話を止めるより、利用者とエージェントが状況を見て続けられる方がよいため。snapshotやarchiveの相対path、ファイル数、展開量、hashを検証し、外部から埋め込まれた絶対path、symlink、特殊ファイルを展開しない。
+再開は元snapshotを変更せず、新しいAttempt専用領域への復元から始める。対応するformat・Adapter・image・platformを検証する。保存先の一時的な読取りの失敗はAttemptの障害として再試行する（読めないまま古い世代や空で続けて上書きしない）。最新のsnapshotがこのWorkerに見つからない場合（Workerのローカルディスクに保存したsnapshotを、別のWorkerで再開した等）は、1つ前の世代から戻し、どの世代もなければ、再開を止めずに空のWorkspaceで続ける。どちらも、そのことと、作り直す必要があることをエージェントに知らせる。会話を止めるより、利用者とエージェントが状況を見て続けられる方がよいため。snapshotやarchiveの相対path、ファイル数、展開量、hashを検証し、外部から埋め込まれた絶対path、symlink、特殊ファイルを展開しない。
 
 ワークスペースはagentセッションに1つで、同時に動く親は1つなので、可変のものを2つのプロセスで共有しない（サブエージェントはコピーの上で動く）。別タスクへの暗黙の状態持越しを避け、継続的に共有する知識やファイルはSkill／Resourceの公開操作で管理する。Workerが失われても、確定済みsnapshotと環境定義から他Workerへ復元できる。
 
@@ -1963,3 +1963,4 @@ Sandboxイメージの定義は本体と同じリポジトリの `sandbox/` で�
 | 0.45 | 2026年11月4日 | Webhookの入口を、連携の管理者ではなく、そのタスクを管理できる人がタスクの画面で作ることにした。入力の項目はタスク、payloadとの対応は入口が持つ形を変えず、2つを別の人が決める調整をなくすため。入口が起動するタスクは1つのまま、1つのタスクに複数の入口を付けられるようにした（送り元ごとにpayloadの形が違うため）。鍵は今までどおりヘッダーで送り、URLに入れない。発行済みの入口の一覧は、permissionを持つ人が見るだけにした。鍵を作った人がタスクを管理できなくなったら、自動では止めず、鍵の作り直しを確かめる警告を出す（§4.1、§4.2、§11.9、authorization.md §5.5） |
 | 0.46 | 2026年11月6日 | Sandboxのイメージを1つのまま、文書処理を一通り動かせるようにすることにした。文書処理にLibreOfficeを使わない方針（0.16）を改め、LibreOffice、Node.jsとパッケージ、pandoc、poppler-utilsを入れる。フォントはNoto CJKのSans・SerifのRegular・Boldで、よくあるフォントをfontconfigで置き換える（§7.6） |
 | 0.47 | 2026年11月6日 | agentセッション（`Conversation`）、Run、Attempt、ワークスペース、ジョブ、サブエージェントを整理した。Runは話の区切りでなく、親とジョブ・サブエージェントが全部止まるまでの単位にし、発言の種類の選択（次の依頼）をなくした。作業中の `/`・`@` は依頼した人の今の権限で読む。ジョブは親が話し終えた後も動き続け、終わると親を起こす。サブエージェントを入れた。snapshotは最新の1つだけで、Workerを手放す前に保存する。ワークスペースの保存期限を管理画面の設定にし、添付・成果物は明示的に消すまで残す。アーカイブ・論理削除・物理削除を決めた。修正チャットを実行記録の入力から始められるようにし、中で動かすたびにワークスペースを空で作り直す（§5.1・§5.3・§5.5・§7・§8・§11.4・§11.11、harness.md §5.6・§8・§10.11） |
+| 0.48 | 2026年11月6日 | 残すsnapshotを最新の1つから確定した2世代に改めた。新しいものが使えないときに、生きている中で最新のものへ戻すため。古いものを消す前に、新しいものを保存先から全部読み戻して確かめる。保存先で後から壊れることは初期は考えない（§5.4・§7.9） |

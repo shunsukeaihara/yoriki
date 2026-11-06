@@ -29,7 +29,7 @@ from django.utils import timezone
 from nanoid import generate
 
 from artifact.models import CONNECTOR_RESULTS_DIR, TASK_OUTPUTS_DIR, Artifact, ArtifactKind, BlobObject
-from artifact.storage import StorageBackend, StorageError, StoredObject, get_storage
+from artifact.storage import StorageBackend, StorageError, StoredObject, get_storage, hash_stream
 from run.errors import LeaseLost
 from run.models import Checkpoint, ExecutionAttempt, Run, RunKind, RunTrigger
 from runtime.launcher import (
@@ -130,6 +130,12 @@ class CollectedOutput:
 
     path: str
     stored: StoredObject
+
+
+WORKSPACE_ROLLED_BACK = (
+    "[The latest saved files could not be restored on this worker, so /workspace/work and /workspace/output went back "
+    "to the saved state before them. Check which files you need and redo the later changes before continuing.]"
+)
 
 
 @dataclass(frozen=True)
@@ -459,32 +465,38 @@ class SandboxSession:
         return path.parent == self.input_dir and artifact.path not in (CONNECTOR_RESULTS_DIR, TASK_OUTPUTS_DIR)
 
     def _restore(self, sandbox: Sandbox) -> None:
-        checkpoint = Checkpoint.latest_for(self.run)
-        if checkpoint is None:
-            return
+        """新しい世代から順に、戻せるものから戻す。どれも戻せなければ空のWorkspaceで続ける（design.md §7.9）"""
+        checkpoints = list(Checkpoint.restorable_for(self.run))
+        for index, checkpoint in enumerate(checkpoints):
+            if self._restore_from(sandbox, checkpoint):
+                if index > 0:
+                    self.notice = WORKSPACE_ROLLED_BACK
+                return
+        if checkpoints:
+            self.notice = WORKSPACE_LOST
+
+    def _restore_from(self, sandbox: Sandbox, checkpoint: Checkpoint) -> bool:
+        """このWorkerで見つからないものはFalse（別のWorkerのローカルディスクに保存した等）"""
         # 記録した保存先から読む（既定の保存先を変えた後も、以前の保存先の設定があれば読める）
         try:
             storage = self.storage_factory(checkpoint.storage)
         except StorageError:
             logger.warning("run %s: unknown storage of checkpoint %s", self.run.uid, checkpoint.uid, exc_info=True)
-            self.notice = WORKSPACE_LOST
-            return
+            return False
         try:
             stored = storage.stat(checkpoint.key)
             if stored is None or stored.sha256 != checkpoint.sha256:
-                # 別のWorkerのローカルディスクに保存した等。空のWorkspaceで続け、モデルに知らせる
                 logger.warning("run %s: checkpoint %s is not available here", self.run.uid, checkpoint.uid)
-                self.notice = WORKSPACE_LOST
-                return
+                return False
             with storage.open_read(checkpoint.key) as src:
                 self._keep_lease(lambda: sandbox.restore(src))
         except (LeaseLost, SandboxUnavailable):
             raise
         except Exception as exc:
-            # 一時的な読取りの失敗。残るのは最新の1つだけなので、空で続けて上書きせず、別のAttemptでやり直す
-            # （design.md §7.9）
+            # 一時的な読取りの失敗。古い世代や空で続けて上書きせず、別のAttemptでやり直す（design.md §7.9）
             raise SandboxUnavailable(f"cannot read the snapshot: {exc}") from exc
         self.restored = checkpoint
+        return True
 
     def take_notice(self) -> str:
         notice, self.notice = self.notice, ""
@@ -722,9 +734,8 @@ class SandboxSession:
                 archive.seek(0)
                 try:
                     stored = storage.put_immutable(key, archive) if snapshot else None
-                    # 保存先で確かめてからCheckpointを確定し、前のsnapshotを消す（design.md §7.9）
-                    if stored is not None and storage.stat(key) != stored:
-                        raise SandboxUnavailable("cannot verify the saved workspace")
+                    if stored is not None:
+                        verify_saved(storage, stored)
                     archive.seek(0)
                     return stored, collect_outputs(archive, storage, known, present)
                 except (OSError, StorageError, tarfile.TarError) as exc:
@@ -778,6 +789,17 @@ class SandboxSession:
             self.sandbox.remove()
             self.sandbox = None
         shutil.rmtree(self.dir, ignore_errors=True)
+
+
+def verify_saved(storage: StorageBackend, stored: StoredObject) -> None:
+    """保存したものを全部読み戻して確かめる。確かめてからCheckpointを確定し、古いsnapshotを消す（design.md §7.9）"""
+    try:
+        with storage.open_read(stored.key) as saved:
+            sha256, size = hash_stream(saved)
+    except Exception as exc:
+        raise SandboxUnavailable(f"cannot verify the saved workspace: {exc}") from exc
+    if (sha256, size) != (stored.sha256, stored.size):
+        raise SandboxUnavailable("the saved workspace differs from what was written")
 
 
 def collect_outputs(

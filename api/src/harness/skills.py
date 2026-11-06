@@ -322,8 +322,8 @@ def render(
         lines.append(f"<output_schema>\n{schema}\n</output_schema>")
         if not result_tool:
             lines.append(
-                "<note>submit_result is not available in this work. Put the result in this form in your final "
-                "reply instead.</note>"
+                "<note>submit_result is not available for this skill in this work. Put the result in this form in "
+                "your final reply instead.</note>"
             )
     lines.append("</skill>")
     return "\n".join(lines)
@@ -346,12 +346,33 @@ def connectors_text(version: SkillContentSource, names: dict[str, str] | None = 
     return "\n".join(lines)
 
 
-def explicit_text(entries: list[dict[str, Any]], connector_catalog: dict[str, Any] | None = None) -> str:
-    """`/` で指定したSkillの本文。最初の発言に添える（モデルに `skill` を呼ばせない）。Connectorの名前は、Runに
-    固定したConnectorの一覧（`connector_catalog`）のものを使う（Toolが受け付ける名前と合わせる）"""
+def explicit_text(
+    entries: list[dict[str, Any]],
+    connector_catalog: dict[str, Any] | None = None,
+    *,
+    result_skills: set[str] | None = None,
+) -> str:
+    """`/` で指定したSkillの本文。発言に添える（モデルに `skill` を呼ばせない）。Connectorの名前は、Runの
+    Connectorの一覧（`connector_catalog`）のものを使う（Toolが受け付ける名前と合わせる）。`result_skills` は、この
+    Runの submit_result の形を決めているSkillのID（None：すべて。Runを始めるときの指定）。前に読んだ版に代わるSkillには
+    そのことを添える（harness.md §10.1）"""
     contents = load_contents(entries)
     names = {e["connector"]: e["name"] for e in (connector_catalog or {}).get("connectors", [])}
-    blocks = [render(contents[content_key(e)].skill, contents[content_key(e)], connector_names=names) for e in entries]
+    blocks = []
+    for entry in entries:
+        content = contents[content_key(entry)]
+        block = render(
+            content.skill,
+            content,
+            result_tool=result_skills is None or entry["skill"] in result_skills,
+            connector_names=names,
+        )
+        if entry.get("replaces"):
+            block = (
+                f"This version of the skill replaces version {entry['replaces']}, which you read earlier. "
+                f"Follow this one.\n{block}"
+            )
+        blocks.append(block)
     head = "The user chose these skills for this request. Follow them:"
     return head + "\n" + "\n\n".join(blocks)
 

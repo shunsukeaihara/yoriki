@@ -234,7 +234,7 @@ class SandboxSession:
         self.restored: Checkpoint | None = None
         # /workspace/input に置いた添付（ArtifactのID）と、/workspace/master に置いたSkillの中身（content_key()）
         self.inputs: set[int] = set()
-        self.skill_versions: set[str] = set()
+        self.skill_versions: dict[str, str] = {}  # SkillのID → 今置いている中身
         # 最初のSandboxのToolの結果に添える知らせ
         self.notice = ""
         # DBに触ってよいスレッド（Runner）
@@ -302,7 +302,7 @@ class SandboxSession:
         self.master_dir.mkdir(parents=True, exist_ok=True)
         self.master_dir.chmod(0o755)
         run = Run.objects.only("manifest").get(pk=self.run.pk)
-        entries = [e for e in loaded_entries(run) if content_key(e) not in self.skill_versions]
+        entries = [e for e in loaded_entries(run) if self.skill_versions.get(e["skill"]) != content_key(e)]
         if not entries:
             return
         skills = {s.uid: s for s in Skill.objects.filter(uid__in=[e["skill"] for e in entries])}
@@ -315,13 +315,13 @@ class SandboxSession:
         そのまま見える（harness.md §10.1）。Draftの評価のRunでは、評価に写したDraftの資料を同じ場所に置く
         （design.md §3.7.1）。置けなければ SandboxUnavailable"""
         key = f"evaluation:{version.pk}" if isinstance(version, SkillEvaluation) else f"version:{version.pk}"
-        if key in self.skill_versions:
+        if self.skill_versions.get(skill.uid) == key:
             return
         self._place_assets(
             self.master_dir / "skills" / skill.uid,
             [(asset_path(skill.uid, a.key, a.resource_version.name), a.resource_version) for a in version.assets.all()],
         )
-        self.skill_versions.add(key)
+        self.skill_versions[skill.uid] = key
 
     def place_draft_assets(self, skill, draft) -> None:
         """SkillのDraftの資料を /workspace/master/drafts/<Skill>/r<revision>/<key>/ に置く（Skillの編集のRun。

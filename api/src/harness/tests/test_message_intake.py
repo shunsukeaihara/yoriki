@@ -3,10 +3,11 @@
 import pytest
 
 from connector.factories import ConnectorFactory
-from conversation.dispatch import MessageMode, post_message
+from conversation.dispatch import CannotStart, MessageMode, post_message
 from conversation.factories import ConversationFactory
+from conversation.models import ConversationMessage, InstructionKind, InstructionState, MessageRole, UserInstruction
 from harness.runner import Runner
-from run.models import Run, RunEvent, RunEventKind, RunStatus
+from run.models import ClarificationRequest, ClarificationStatus, Run, RunEvent, RunEventKind, RunStatus
 from run.tasks import claim_run
 from skill.factories import SkillVersionFactory
 
@@ -16,6 +17,22 @@ pytestmark = pytest.mark.usefixtures("default_runtime")
 
 TABLES = [{"name": "vendors", "schema": "public", "description": "取引先", "columns": []}]
 TODOS = {"todos": [{"content": "読む", "status": "in_progress"}]}
+QUESTION = {
+    "questions": [
+        {
+            "header": "拠点",
+            "question": "どの拠点ですか",
+            "options": [{"label": "本社", "description": "本社"}, {"label": "支店", "description": "支店"}],
+            "multi_select": False,
+        }
+    ]
+}
+SCHEMA = {
+    "type": "object",
+    "properties": {"verdict": {"type": "string"}},
+    "required": ["verdict"],
+    "additionalProperties": False,
+}
 
 
 @pytest.fixture(name="conversation")
@@ -132,16 +149,236 @@ def test_a_skill_listed_by_a_rebuild_can_be_loaded(conversation, app_user):
 def test_a_run_started_with_a_chosen_skill_gets_no_skill_list(conversation):
     """`/` で指定して始めたRunには、Skillの一覧を出さない（作り直しても出ない）"""
     skill = SkillVersionFactory.create(
-        skill__created_by=conversation.owner, skill__name="請求書の照合", tools=["read"]
+        skill__created_by=conversation.owner, skill__name="請求書の照合", tools=["todo_write"]
     ).skill
     run = start(conversation, skills=[skill])
 
     adapter = DuringFirstReply(
-        [calls(("c1", "read", {"path": "/workspace/none"})), reply("終わりました。")],
+        [calls(("c1", "todo_write", TODOS)), reply("終わりました。")],
         lambda: send(conversation, body="支店は別にして"),
     )
     run = execute(run, adapter)
 
     assert run.manifest["fixed"]["skill_catalog"] is None
     assert not [e for e in run.manifest["appended"] if e["kind"] == "skill_catalog"]
-    assert not any("<skills>" in t for t in user_texts(adapter.requests[-1]))
+    assert len(adapter.requests) == 2
+    assert not any("<skills>" in t for t in user_texts(adapter.requests[1]))
+
+
+def publish(owner, *, name="請求書の照合", tools=(), **kwargs):
+    version = SkillVersionFactory.create(skill__created_by=owner, skill__name=name, tools=list(tools), **kwargs)
+    return version.skill
+
+
+@pytest.mark.django_db
+def test_skill_chosen_during_a_run_is_read_by_the_parent(conversation, app_user):
+    """`/` で指定した発言は親へ渡し、最新の公開版の本文を発言に入れる。Runは増えない"""
+    skill = publish(app_user, instructions="照合の手順")
+    run = start(conversation)
+    adapter = DuringFirstReply(
+        [calls(("c1", "todo_write", TODOS)), reply("照合しました。")],
+        lambda: send(conversation, body="この3件も", skills=[skill]),
+    )
+    run = execute(run, adapter)
+
+    assert run.status == RunStatus.COMPLETED
+    assert Run.objects.filter(conversation=conversation).count() == 1
+    text = next(t for t in user_texts(adapter.requests[1]) if "この3件も" in t)
+    assert "照合の手順" in text
+    assert next(e for e in run.manifest["appended"] if e["kind"] == "skill")["chosen"] is True
+    assert RunEvent.objects.filter(run=run, kind=RunEventKind.SKILL_LOADED).count() == 1
+    assert UserInstruction.objects.get(message__body="この3件も").state == InstructionState.APPLIED
+
+
+@pytest.mark.django_db
+def test_choosing_a_loaded_skill_again_switches_to_the_latest_version(conversation, app_user):
+    skill = publish(app_user, instructions="古い手順")
+    run = start(conversation)
+
+    def republish_and_choose():
+        SkillVersionFactory.create(skill=skill, tools=[], instructions="新しい手順")
+        send(conversation, body="もう一度", skills=[skill])
+
+    class Adapter(FakeAdapter):
+        def stream(self, request):
+            if len(self.requests) == 1:
+                republish_and_choose()
+            yield from super().stream(request)
+
+    adapter = Adapter(
+        [
+            calls(("c1", "skill", {"name": "請求書の照合"})),
+            calls(("c0", "todo_write", TODOS)),
+            calls(("c2", "skill", {"name": "請求書の照合"})),
+            reply("終わりました。"),
+        ]
+    )
+    run = execute(run, adapter)
+
+    results = {
+        e.data["call_id"]: str(e.data["content"])
+        for e in RunEvent.objects.filter(run=run, kind=RunEventKind.TOOL_RESULT)
+    }
+    assert "古い手順" in results["c1"]
+    text = next(t for t in user_texts(adapter.requests[2]) if "もう一度" in t)
+    assert "新しい手順" in text and "replaces version 1" in text
+    # 同じRunで読み込み直すと、切り替えた版を返す
+    assert "新しい手順" in results["c2"]
+
+
+@pytest.mark.django_db
+def test_chosen_skill_that_needs_missing_tools_is_not_loaded(conversation, app_user):
+    """Toolの一覧は変えないので読み込まず、Runの後に指定し直すよう案内させる。受付では断らない"""
+    first = publish(app_user, name="計画だけ", tools=["todo_write"])
+    second = publish(app_user, name="コマンドを使う", tools=["shell"], instructions="秘密の手順")
+    run = start(conversation, skills=[first])
+    adapter = DuringFirstReply(
+        [calls(("c1", "todo_write", TODOS)), reply("終わりました。")],
+        lambda: send(conversation, body="これも", skills=[second]),
+    )
+    run = execute(run, adapter)
+
+    text = next(t for t in user_texts(adapter.requests[1]) if "これも" in t)
+    assert "秘密の手順" not in text
+    assert 'The user chose the skill "コマンドを使う"' in text and "shell" in text
+    assert not [e for e in run.manifest["appended"] if e["kind"] == "skill"]
+
+
+@pytest.mark.django_db
+def test_chosen_skill_with_a_schema_writes_the_result_in_the_final_reply(conversation, app_user):
+    skill = publish(app_user, output_schema=SCHEMA)
+    run = start(conversation)
+    adapter = DuringFirstReply(
+        [calls(("c1", "todo_write", TODOS)), reply("結果です。")],
+        lambda: send(conversation, body="判定して", skills=[skill]),
+    )
+    execute(run, adapter)
+
+    assert "submit_result" not in [t.name for t in adapter.requests[1].tools]
+    text = next(t for t in user_texts(adapter.requests[1]) if "判定して" in t)
+    assert "submit_result is not available for this skill" in text
+
+
+@pytest.mark.django_db
+def test_unusable_choices_are_refused_when_the_message_is_received(conversation, app_user, other_user):
+    private = publish(other_user, name="他の人のSkill")
+    start(conversation)
+    with pytest.raises(CannotStart, match="他の人のSkill"):
+        send(conversation, body="これも", skills=[private])
+    assert not ConversationMessage.objects.filter(body="これも").exists()
+
+
+@pytest.mark.django_db
+def test_choices_revoked_before_they_are_taken_in_stay_out_of_the_context(conversation, app_user):
+    """受け付けた後に使えなくなったものは文脈に入れず、画面に示す（名前もモデルへ渡さない）"""
+    skill = publish(app_user, name="止めたSkill", instructions="止めた手順")
+    connector = ConnectorFactory.create(name="消したDB", version__tables=TABLES)
+    run = start(conversation)
+
+    def choose_and_revoke():
+        send(conversation, body="これも", skills=[skill], connectors=[connector])
+        skill.suspended = True
+        skill.save(update_fields=["suspended"])
+        connector.is_active = False
+        connector.save(update_fields=["is_active"])
+
+    adapter = DuringFirstReply([calls(("c1", "todo_write", TODOS)), reply("終わりました。")], choose_and_revoke)
+    run = execute(run, adapter)
+
+    text = next(t for t in user_texts(adapter.requests[1]) if "これも" in t)
+    assert "止めた" not in text and "消したDB" not in text
+    assert "cannot be used now" in text
+    notice = ConversationMessage.objects.get(conversation=conversation, role=MessageRole.SYSTEM)
+    assert "止めたSkill" in notice.body and "消したDB" in notice.body
+
+
+@pytest.mark.django_db
+def test_connector_chosen_during_a_run_shows_its_tables(conversation):
+    connector = ConnectorFactory.create(name="販売管理", version__tables=TABLES)
+    run = start(conversation)
+    adapter = DuringFirstReply(
+        [calls(("c1", "todo_write", TODOS)), reply("終わりました。")],
+        lambda: send(conversation, body="こちらも", connectors=[connector]),
+    )
+    run = execute(run, adapter)
+
+    text = next(t for t in user_texts(adapter.requests[1]) if "こちらも" in t)
+    assert "public.vendors" in text
+    assert [e["connector"] for e in run.manifest["appended"] if e["kind"] == "connector"] == [connector.uid]
+
+
+@pytest.mark.django_db
+def test_connector_is_refused_when_the_chosen_skill_of_the_run_forbids_its_tools(conversation, app_user):
+    skill = publish(app_user, tools=["read"])
+    connector = ConnectorFactory.create(name="販売管理", version__tables=TABLES)
+    start(conversation, skills=[skill])
+    with pytest.raises(CannotStart, match="Connector"):
+        send(conversation, body="こちらも", connectors=[connector])
+
+
+@pytest.mark.django_db
+def test_answer_with_a_skill_answers_and_loads_it_on_resume(conversation, app_user):
+    """確認待ちの発言は回答にし、指定したものは再開のときに取り込む（本文を二重に渡さない）"""
+    skill = publish(app_user, instructions="照合の手順")
+    run = start(conversation)
+    run = execute(run, FakeAdapter([calls(("q1", "ask_user", QUESTION))]))
+    assert run.status == RunStatus.WAITING_USER
+
+    send(conversation, body="大阪支店です", skills=[skill])
+
+    clarification = ClarificationRequest.objects.get(run=run)
+    assert clarification.status == ClarificationStatus.ANSWERED
+    assert clarification.comment == "大阪支店です"
+    instruction = UserInstruction.objects.get(message__body="大阪支店です")
+    assert (instruction.kind, instruction.is_answer) == (InstructionKind.CURRENT, True)
+
+    adapter = FakeAdapter([reply("終わりました。")])
+    run = execute(run, adapter)
+
+    assert run.status == RunStatus.COMPLETED
+    request = adapter.requests[0]
+    assert any("照合の手順" in t for t in user_texts(request))
+    assert not any("大阪支店です" in t for t in user_texts(request))
+    assert any("大阪支店です" in m.text for m in request.messages if m.role == "tool")
+
+
+@pytest.mark.django_db
+def test_an_answer_needs_a_body_when_a_skill_is_chosen(conversation, app_user):
+    skill = publish(app_user)
+    run = start(conversation)
+    run = execute(run, FakeAdapter([calls(("q1", "ask_user", QUESTION))]))
+
+    with pytest.raises(CannotStart, match="回答を入力"):
+        send(conversation, body="", skills=[skill])
+    assert ClarificationRequest.objects.get(run=run).status == ClarificationStatus.OPEN
+
+
+@pytest.mark.django_db
+def test_choices_with_an_answer_do_not_become_a_new_request_when_the_run_ends(conversation, app_user):
+    """再開の前にRunが終わったら、回答の本文を新しい依頼にしない"""
+    skill = publish(app_user)
+    run = start(conversation)
+    run = execute(run, FakeAdapter([calls(("q1", "ask_user", QUESTION))]))
+    send(conversation, body="大阪支店です", skills=[skill])
+
+    run.refresh_from_db()
+    run.request_cancel("止める", app_user)
+
+    instruction = UserInstruction.objects.get(message__body="大阪支店です")
+    assert instruction.state == InstructionState.DISCARDED
+    assert Run.objects.filter(conversation=conversation).count() == 1
+
+
+@pytest.mark.django_db
+def test_the_skill_edit_request_still_waits_for_the_run_to_end(conversation, app_user):
+    skill = publish(app_user)
+    start(conversation)
+    message = post_message(
+        conversation,
+        body="説明を直して",
+        client_message_id="",
+        mode=MessageMode.AUTO,
+        actor=app_user,
+        skill_edit={"id": skill.uid, "name": skill.name},
+    )
+    assert UserInstruction.objects.get(message=message).kind == InstructionKind.NEXT

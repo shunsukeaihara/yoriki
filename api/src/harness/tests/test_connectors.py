@@ -444,12 +444,12 @@ def test_chosen_connector_with_a_skill_that_does_not_query_is_refused(conversati
 
 
 @pytest.mark.django_db
-def test_message_with_a_connector_during_a_run_becomes_the_next_request(conversation):
+def test_message_with_a_connector_during_a_run_goes_to_the_parent(conversation):
     connector = ConnectorFactory.create(name="販売管理")
     run = start(conversation)
     start(conversation, body="こちらも", connectors=[connector])
     instruction = UserInstruction.objects.get(message__body="こちらも")
-    assert instruction.kind == InstructionKind.NEXT
+    assert instruction.kind == InstructionKind.CURRENT
     assert Run.objects.filter(conversation=conversation).count() == 1
     assert run.status == RunStatus.QUEUED
 

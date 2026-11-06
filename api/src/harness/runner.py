@@ -79,6 +79,7 @@ from .catalogs import rebuild_catalogs, refreshes_catalogs
 from .connectors import catalog_names as connector_names
 from .context import (
     ADDITIONAL_INSTRUCTION_PREFIX,
+    CHOSEN_WITH_ANSWER,
     RUNTIME_CONTEXT_TAG,
     Item,
     build_items,
@@ -88,6 +89,7 @@ from .context import (
     provider_key,
 )
 from .context import runtime_context as build_runtime_context
+from .intake import Chosen, take_chosen
 from .prompts import system_prompt
 from .recovery import request_model_switch
 from .result_files import missing_files
@@ -592,35 +594,98 @@ class Runner:
             )
 
     def _apply_instructions(self) -> bool:
-        """届いている追加指示を、受付順に利用者の発言として取り込む。取り込んだらTrue"""
+        """届いている発言を、受付順に取り込む。指定したSkill・Connectorは今の権限で確かめ直す（資料はSandboxの外から
+        置くので、transactionの外で先に置く。harness.md §10.1）。取り込んだらTrue"""
+        pending = list(
+            UserInstruction.objects.filter(
+                run=self.run_obj, kind=InstructionKind.CURRENT, state=InstructionState.RECEIVED
+            )
+            .select_related("message")
+            .order_by("pk")
+        )
+        if not pending:
+            return False
+        exposed = frozenset(t.name for t in self._exposed_tools())
+        taken = {i.pk: self._take_chosen(i.message, exposed) for i in pending}
         applied = False
         with self.run_obj.fenced(self.attempt) as run:
             instructions = (
                 UserInstruction.objects.select_for_update(of=("self",))
-                .filter(run=run, kind=InstructionKind.CURRENT, state=InstructionState.RECEIVED)
+                .filter(pk__in=taken, state=InstructionState.RECEIVED)
                 .select_related("message")
                 .order_by("pk")
             )
-            if instructions:
-                self._refresh_catalogs(run)
+            self._refresh_catalogs(
+                run,
+                connectors=[c for chosen in taken.values() for c in chosen.connectors],
+                skills=[s.entry for chosen in taken.values() for s in chosen.skills],
+            )
             for instruction in instructions:
-                text = f"{ADDITIONAL_INSTRUCTION_PREFIX}\n{instruction.message.body}"
-                RunEvent.record(run, RunEventKind.USER_MESSAGE, user_message_data(instruction.message, text))
-                instruction.state = InstructionState.APPLIED
-                instruction.applied = timezone.now()
-                instruction.save(update_fields=["state", "applied", "updated"])
+                self._apply_instruction(run, instruction, taken[instruction.pk], exposed)
                 applied = True
-            if applied and run.result is not None:
+            if applied and run.result is not None and not all(i.is_answer for i in pending):
                 # 確定した業務結果は、取り込んだ指示を反映していない。確定し直させる（harness.md §10.4・§10.5）。
                 # 通知の候補も前の業務結果から作ったものなので消す
                 Run.objects.filter(pk=run.pk).update(result=None, notification=None, updated=timezone.now())
                 self.run_obj.result = None
                 self.run_obj.notification = None
                 RunEvent.record(run, RunEventKind.CONTEXT, {"text": RESULT_RESET_NOTICE, "result_reset": True})
+            self.run_obj.manifest = run.manifest
         if applied and self.session.started:
             # 追加指示に付いた添付を、動いているSandboxの /workspace/input にも置く
             self.session.sync_inputs()
         return applied
+
+    def _take_chosen(self, message: ConversationMessage, exposed: frozenset[str]) -> Chosen:
+        """発言で指定したものを確かめ、動いているSandboxへSkillの資料を置く。置けなければ読み込まない"""
+        chosen = take_chosen(self.run_obj, message, exposed)
+        if self.session.started:
+            for item in list(chosen.skills):
+                try:
+                    self.session.place_skill_assets(item.skill, item.version)
+                except SandboxUnavailable as exc:
+                    logger.warning("run %s: cannot place skill assets: %s", self.run_obj.uid, exc)
+                    chosen.drop_skill(item, _("資料を置けませんでした"))
+        return chosen
+
+    def _apply_instruction(
+        self, run: Run, instruction: UserInstruction, chosen: Chosen, exposed: frozenset[str]
+    ) -> None:
+        """発言を `message.user` として記録する。指定したSkillはManifestへ追記する（同じtransaction）"""
+        message = instruction.message
+        entries = [item.entry for item in chosen.skills]
+        for entry in entries:
+            run.append_manifest("skill", entry)
+            RunEvent.record(run, RunEventKind.SKILL_LOADED, entry, comment=entry["name"])
+        for entry in chosen.connectors:
+            run.append_manifest("connector", entry)
+        if entries or chosen.connectors:
+            run.save(update_fields=["manifest", "updated"])
+        fixed = (run.manifest.get("fixed") or {}).get("skills") or [] if run.manifest else []
+        text = CHOSEN_WITH_ANSWER if instruction.is_answer else f"{ADDITIONAL_INSTRUCTION_PREFIX}\n{message.body}"
+        data = user_message_data(
+            message,
+            text,
+            skills=entries,
+            connectors=chosen.connectors,
+            connector_catalog=run.current_catalog("connector_catalog"),
+            # 本文と添付は回答として渡した。submit_result の形は、Runを始めるときに指定したSkillで決まっている
+            with_attachments=not instruction.is_answer,
+            result_skills={e["skill"] for e in fixed} if SUBMIT_RESULT in exposed else set(),
+        )
+        if notes := chosen.model_notes():
+            data["notes_text"] = "\n".join(notes)
+        RunEvent.record(run, RunEventKind.USER_MESSAGE, data)
+        if chosen.unusable:
+            ConversationMessage.objects.create(
+                conversation_id=run.conversation_id,
+                run=run,
+                role=MessageRole.SYSTEM,
+                body=_("指定したものの一部を使えませんでした（%(items)s）。") % {"items": "、".join(chosen.unusable)},
+            )
+        instruction.state = InstructionState.APPLIED
+        instruction.applied = timezone.now()
+        instruction.save(update_fields=["state", "applied", "updated"])
 
     def _refresh_catalogs(self, run: Run, **chosen: list[dict[str, Any]]) -> None:
         """発言を取り込むときに、Skill・Connectorの一覧を依頼した人の今の権限で作り直す。変わったらManifestに残し、

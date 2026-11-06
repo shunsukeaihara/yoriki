@@ -53,23 +53,26 @@ def user_message_data(
     skills: list[dict[str, object]] | None = None,
     connectors: list[dict[str, object]] | None = None,
     connector_catalog: dict[str, Any] | None = None,
+    with_attachments: bool = True,
+    result_skills: set[str] | None = None,
 ) -> dict[str, object]:
     """利用者の発言のRunEventの内容。添付は /workspace/input の場所とあわせて残す（harness/context.py が読む）。
 
     Runの最初の発言（first）には、同じ会話でそれまでに送った添付も添える。/workspace/input には会話の添付が
     すべてあり、作業ファイルも最新のCheckpointから引き継ぐので、前の依頼のファイルを使う依頼に答えられるように。
-    `skills` は `/` で指定してRun開始時に解決したSkill（Manifestの内容）。本文も添え、モデルに `skill` を呼ばせない。
+    `skills` は `/` で指定して解決したSkill（Manifestの内容）。本文も添え、モデルに `skill` を呼ばせない。
     `connectors` は `@` で指定したConnector。公開している表の説明を添える（harness.md §10.2）。
-    `connector_catalog` はRunのConnectorの一覧で、Skillの本文のConnectorの名前に使う
+    `connector_catalog` はRunのConnectorの一覧で、Skillの本文のConnectorの名前に使う。
+    `with_attachments` が偽なら添付を添えない（確認への回答で渡した）。`result_skills` は explicit_text() を見る
     """
     data: dict[str, object] = {"text": text, "message": message.uid}
     if skills:
         data["skills"] = skills
-        data["skills_text"] = explicit_text(skills, connector_catalog)
+        data["skills_text"] = explicit_text(skills, connector_catalog, result_skills=result_skills)
     if connectors:
         data["connectors"] = connectors
         data["connectors_text"] = explicit_connectors_text(connectors)
-    if attachments := describe_attachments(message):
+    if with_attachments and (attachments := describe_attachments(message)):
         data["attachments"] = attachments
     if first:
         earlier = Artifact.objects.sent_inputs(message.conversation_id).exclude(messages=message)
@@ -111,11 +114,12 @@ def post_message(
     connectors: list[Connector] | None = None,
     skill_edit: dict[str, str] | None = None,
 ):
-    """利用者のメッセージを保存し、新しいRun・追加指示・確認への回答・次の依頼のどれかとして受け付ける。
+    """利用者のメッセージを保存し、新しいRun・親へ渡す発言・確認への回答・編集のRunの依頼のどれかとして受け付ける。
 
-    Skill・Connectorを指定したメッセージは、Skillの版と使えるConnectorの一覧をRun開始時に決めるので、実行中なら
-    次の依頼にする。Skillの編集の依頼（`skill_edit`。{"id", "name"}、新しいSkillならidが空）も、別のRunになるので
-    同じく次の依頼にする
+    Skill・Connectorを指定したメッセージも、親が動いていれば親へ渡す。受け付けるときに今の権限で確かめ、使えなければ
+    理由を返す（CannotStart。取り込むときにも確かめ直す。harness.md §10.1・§10.2）。確認待ちなら、本文を確認への回答に
+    し、指定したものは再開のときに取り込む。Skillの編集の依頼（`skill_edit`。{"id", "name"}、新しいSkillならidが空）は、
+    対象とToolを始めるときに固定するので、今のRunが終わってから始める
     """
     conversation = Conversation.objects.select_for_update().get(pk=conversation.pk)
     if conversation.is_task_fix:
@@ -133,6 +137,8 @@ def post_message(
             return sent  # 再送。二重に受け付けない
     if conversation.is_task_fix:
         _check_fix_message(conversation, separate=bool(skills or connectors or skill_edit))
+    if (skills or connectors) and not skill_edit:
+        _check_chosen(conversation, skills or [], connectors or [])
     message = ConversationMessage.objects.create(
         conversation=conversation,
         sender=actor,
@@ -177,30 +183,67 @@ def post_message(
         # 修正チャットでは、追加の指示・回答の添付もタスクのRunの添付にする（Runの画面で、タスクを管理できる人が取得
         # できるように。/workspace/input にはこのRunのものだけを置く。harness.md §10.10）
         Artifact.objects.filter(pk__in=[a.pk for a in attachments]).update(run=run)
-    separate = bool(skills) or bool(connectors) or bool(skill_edit)  # 別のRunとして始める依頼
     question = ClarificationRequest.objects.filter(
         run=run,
         status=ClarificationStatus.OPEN,
         kind__in=(ClarificationKind.QUESTION, ClarificationKind.SKILL_EDIT, ClarificationKind.TASK_EDIT),
     ).first()
-    if mode == MessageMode.AUTO and question is not None and run.status == RunStatus.WAITING_USER and not separate:
-        # 確認待ちのときのメッセージは、その確認への自由記述の回答にする
-        question.accept_answer(
-            [{"selected": [], "text": ""} for _q in question.questions],
-            body,
-            actor,
-            attachments=describe_attachments(message),
-        )
+    if mode == MessageMode.AUTO and question is not None and run.status == RunStatus.WAITING_USER and not skill_edit:
+        _answer_question(question, message, actor, chosen=bool(skills or connectors))
         return message
     kind = (
         InstructionKind.NEXT
-        if mode == MessageMode.NEXT or run.status == RunStatus.CANCELLING or separate
+        if mode == MessageMode.NEXT or run.status == RunStatus.CANCELLING or skill_edit
         else InstructionKind.CURRENT
     )
     UserInstruction.objects.create(
         conversation=conversation, message=message, run=run if kind == InstructionKind.CURRENT else None, kind=kind
     )
     return message
+
+
+def _answer_question(question: ClarificationRequest, message: ConversationMessage, actor, *, chosen: bool) -> None:
+    """確認待ちのときのメッセージは、その確認への自由記述の回答にする。指定したSkill・Connector（`chosen`）は、再開の
+    ときに取り込む（design.md §5.5）"""
+    attachments = describe_attachments(message)
+    if chosen and not message.body.strip() and not attachments:
+        raise CannotStart(_("確認への回答を入力してください。"))
+    question.accept_answer(
+        [{"selected": [], "text": ""} for _q in question.questions], message.body, actor, attachments=attachments
+    )
+    if chosen:
+        UserInstruction.objects.create(
+            conversation=message.conversation,
+            message=message,
+            run=question.run,
+            kind=InstructionKind.CURRENT,
+            is_answer=True,
+        )
+
+
+def _check_chosen(conversation: Conversation, skills: list[Skill], connectors: list[Connector]) -> None:
+    """動いているRunへ渡す発言で指定したSkill・Connectorを、依頼した人の今の権限で確かめる（会話の行ロックの中で呼ぶ）。
+    このRunにないToolを要するSkillは、断らずに、取り込むときに案内させる（harness.md §10.1）"""
+    run = active_run(conversation)
+    if run is None or run.status == RunStatus.CANCELLING:
+        return  # 新しいRunで始めるので、start_run() が確かめる
+    owner, version, sensitive = conversation.owner, run.model_version, run.handles_sensitive_data
+    try:
+        resolve_explicit(skills, owner, version, sensitive=sensitive)
+    except SkillUnavailable as exc:
+        raise CannotStart(_("指定したSkillを使えません。%(reason)s") % {"reason": exc}) from exc
+    try:
+        resolve_explicit_connectors(connectors, owner, version, sensitive=sensitive)
+    except ConnectorUnavailable as exc:
+        raise CannotStart(_("指定したConnectorを使えません。%(reason)s") % {"reason": exc}) from exc
+    fixed = (run.manifest or {}).get("fixed", {}).get("skills") or []
+    if connectors and fixed and not _allow_connector_tools(fixed):
+        raise CannotStart(_("今の作業のSkillはConnectorのToolを使わないので、Connectorを指定できません。"))
+
+
+def _allow_connector_tools(skills: list[dict[str, Any]]) -> bool:
+    tools = SkillVersion.objects.filter(pk__in=[s["version"] for s in skills]).values_list("tools", flat=True)
+    return any(name in DATASOURCE_TOOL_NAMES for names in tools for name in names)
 
 
 def _task_run_instructed(conversation: Conversation, mode: str) -> Run | None:
@@ -333,10 +376,8 @@ def resolve_connectors(
         connectors = resolve_explicit_connectors(chosen_connectors(message), user, version, sensitive=sensitive)
     except ConnectorUnavailable as exc:
         raise CannotStart(_("指定したConnectorを使えません。%(reason)s") % {"reason": exc}) from exc
-    if connectors and skills:
-        tools = SkillVersion.objects.filter(pk__in=[s["version"] for s in skills]).values_list("tools", flat=True)
-        if not any(name in DATASOURCE_TOOL_NAMES for names in tools for name in names):
-            raise CannotStart(_("指定したSkillはConnectorのToolを使わないので、Connectorを指定できません。"))
+    if connectors and skills and not _allow_connector_tools(skills):
+        raise CannotStart(_("指定したSkillはConnectorのToolを使わないので、Connectorを指定できません。"))
     return connectors
 
 

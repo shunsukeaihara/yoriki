@@ -343,9 +343,12 @@ class Run(models.Model):
             from conversation.dispatch import start_next_request  # noqa: PLC0415  conversationがrunをimportするため
             from conversation.models import InstructionKind, InstructionState, UserInstruction  # noqa: PLC0415
 
-            UserInstruction.objects.filter(
+            unread = UserInstruction.objects.filter(
                 run=self, kind=InstructionKind.CURRENT, state=InstructionState.RECEIVED
-            ).update(kind=InstructionKind.NEXT, run=None, updated=timezone.now())
+            )
+            # 回答に添えた指定の本文は確認への回答なので、新しい依頼にはしない
+            unread.filter(is_answer=True).update(state=InstructionState.DISCARDED, updated=timezone.now())
+            unread.update(kind=InstructionKind.NEXT, run=None, updated=timezone.now())
             start_next_request(self.conversation)
             if self.destination_revision_id is not None:
                 # 結果の通知の配信を、終わりの状態と同じtransactionで作る（design.md §4.3）

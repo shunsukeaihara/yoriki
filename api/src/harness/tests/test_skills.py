@@ -215,14 +215,14 @@ def test_unusable_chosen_skill_does_not_start_the_run(conversation, app_user):
 
 
 @pytest.mark.django_db
-def test_message_with_a_skill_during_a_run_becomes_the_next_request(conversation, app_user):
+def test_message_with_a_skill_during_a_run_goes_to_the_parent(conversation, app_user):
     skill, _version = publish(app_user)
     start(conversation)
     post_message(
         conversation, body="次はこれ", client_message_id="", mode=MessageMode.AUTO, actor=app_user, skills=[skill]
     )
     instruction = UserInstruction.objects.get(message__body="次はこれ")
-    assert instruction.kind == InstructionKind.NEXT
+    assert instruction.kind == InstructionKind.CURRENT
     assert instruction.message.skills == [{"id": skill.uid, "name": skill.name}]
 
 

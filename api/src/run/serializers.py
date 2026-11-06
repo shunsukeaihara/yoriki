@@ -275,7 +275,7 @@ class RunSerializer(serializers.ModelSerializer):
     def get_skills(self, obj: Run) -> list[dict[str, Any]]:
         manifest = obj.manifest or {}
         chosen = [{**e, "chosen": True} for e in (manifest.get("fixed") or {}).get("skills") or []]
-        loaded = [{**e, "chosen": False} for e in manifest.get("appended", []) if e.get("kind") == "skill"]
+        loaded = [{"chosen": False, **e} for e in manifest.get("appended", []) if e.get("kind") == "skill"]
         return list(RunSkillSerializer([*chosen, *loaded], many=True).data)
 
     @extend_schema_field(RunTaskInfoSerializer(allow_null=True))

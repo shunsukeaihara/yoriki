@@ -27,6 +27,8 @@ from .task_edit import runtime_text as task_edit_text
 logger = logging.getLogger(__name__)
 
 ADDITIONAL_INSTRUCTION_PREFIX = "[Additional instruction during the work]"
+# 確認への回答に添えて指定したSkill・Connectorを取り込むときの本文（回答は ask_user の結果に入っている）
+CHOSEN_WITH_ANSWER = "[The user chose these together with the answer above]"
 RUNTIME_CONTEXT_TAG = "<runtime_context>"
 
 
@@ -197,6 +199,8 @@ def _build(key: dict[str, str], events: Iterable[RunEvent], items: list[Item]) -
                     text = f"{text}\n\n{data['skills_text']}".strip()
                 if data.get("connectors_text"):
                     text = f"{text}\n\n{data['connectors_text']}".strip()
+                if data.get("notes_text"):
+                    text = f"{text}\n\n{data['notes_text']}".strip()
                 if data.get("attachments"):
                     text = f"{text}\n\n{attachments_text(data['attachments'])}".strip()
                 if data.get("earlier_attachments"):

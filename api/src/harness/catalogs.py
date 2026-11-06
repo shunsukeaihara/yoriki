@@ -4,6 +4,7 @@ Run開始時と、発言を取り込むたびに、依頼した人の今の権�
 （`skill`・`connector` の引数は文字列）。タスクのRunの一覧は、タスクに固定したものだけで変わらない。
 """
 
+from collections.abc import Sequence
 from typing import Any
 
 from run.models import Run, RunKind
@@ -49,7 +50,7 @@ def lists_skills(run: Run) -> bool:
 
 
 def rebuild_catalogs(
-    run: Run, *, connectors: list[dict[str, Any]] = (), skills: list[dict[str, Any]] = ()
+    run: Run, *, connectors: Sequence[dict[str, Any]] = (), skills: Sequence[dict[str, Any]] = ()
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """動いているRunの一覧を、依頼した人の今の権限で作る。`connectors`・`skills` は、今取り込む発言で指定したもの。
     `@` で指定したものと、Runが使うSkillが宣言したものを先に並べる（Connectorの名前をToolで使い続けられるように）"""

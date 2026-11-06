@@ -2,9 +2,10 @@
 
 タスクのRunは、受付時に固定したタスクの版（Manifestの `fixed.task`）の依頼文と指示で動き、タスクの範囲でアクセスできる
 Skill・Connectorをすべて使える。定義で選んだものは使うよう指示するもので、アクセス範囲ではない。使えるかは、タスクの範囲
-で区切りと操作のたびに確かめ直す（task/checks.py）。チャットから起動したRunは、起動した人が今も起動できる立場かも確かめる
-（起動できる人はタスクより狭い権限を持たないので、Skill・Connectorは照らし合わせない）。修正チャットのRunは、動かした人
-（`Run.owner`）が今もタスクを管理できるかを確かめる（停止中かは見ない。design.md §11.11）。
+で区切りと操作のたびに確かめ直す（task/checks.py）。チャットから起動したRunは、起動した人が今も起動できる立場かと、起動
+した人の今の権限も確かめる（タスクの範囲 ∩ 起動した人の今の権限。起動できる人はタスクより狭い権限を持たないので、同じに
+なる）。修正チャットのRunは、動かした人（`Run.owner`）が今もタスクを管理できるかを確かめる（停止中かは見ない。
+design.md §11.11）。
 """
 
 from typing import Any
@@ -67,6 +68,9 @@ def skill_problem(run: Run, skill, version) -> str:
         return _("タスクが削除されました")
     if reason := checks.skill_problem(task, skill, version, sensitive=run.handles_sensitive_data):
         return reason
+    if run.launch == RunLaunch.CHAT:
+        user = launcher(run)
+        return checks.launcher_inactive(user) or checks.launcher_skill_problem(user, skill)
     if run.is_task_fix:
         return checks.fixer_problem(fixer(run), task)
     return ""
@@ -76,6 +80,9 @@ def connector_permitted(run: Run, connector) -> bool:
     task = load_task(run)
     if task is None or not checks.connector_permitted(task, connector, allow_suspended=run.is_task_fix):
         return False
+    if run.launch == RunLaunch.CHAT:
+        user = launcher(run)
+        return user is not None and checks.launcher_connector_permitted(user, connector)
     if run.is_task_fix:
         # 修正チャットの持ち主が、今もタスクを管理できるか（操作のたびに。authorization.md §6）
         return not checks.fixer_problem(fixer(run), task)

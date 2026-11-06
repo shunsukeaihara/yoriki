@@ -5,8 +5,9 @@
 - 実行するとき（`skill_problem()`・`connector_permitted()`・`task_problem()`）：受付時、実行の区切りごと、Connectorの
   操作のたびに、今も有効でタスクの範囲の中にあるかを確かめ直す。定義で指示したかは見ない（指示はアクセス範囲ではない）。
   個人のタスクは本人の今の権限で判定する。
-- チャットから起動したRun（`launcher_scope_problem()`）：起動した人が今も起動できる立場かだけを確かめる。起動できる人は
-  タスクより狭い権限を持たない（§5.3）ので、Skill・Connectorは起動した人とは照らし合わせない。
+- チャットから起動したRun（`launcher_scope_problem()`・`launcher_skill_problem()`・`launcher_connector_permitted()`）：
+  それに加えて、起動した人の今の権限でも判定する（タスクの範囲 ∩ 起動した人の今の権限）。起動できる人はタスクより狭い
+  権限を持たないので、起動できる間は、これはタスクの範囲と同じになる（テストで確かめる）。
 """
 
 import re
@@ -373,3 +374,12 @@ def fixer_problem(user, task) -> str:
     if task is None or not task.can(user, TaskAction.MANAGE):
         return _("修正チャットの持ち主がこのタスクを管理できなくなりました")
     return ""
+
+
+def launcher_skill_problem(user, skill: Skill) -> str:
+    """起動した人がこのSkillを今は使えない理由（使えれば空文字）"""
+    return "" if skill.can(user, SkillAction.USE) else _("起動した人がこのSkillを使えません")
+
+
+def launcher_connector_permitted(user, connector: Connector) -> bool:
+    return connector.can(user, ConnectorAction.USE)

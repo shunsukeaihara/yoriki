@@ -93,7 +93,7 @@ def catalog_text(value: dict[str, Any]) -> str:
     for entry in value["connectors"]:
         lines.append(f'    <connector name="{_escape(entry["name"])}">{_escape(entry["description"])}</connector>')
     if value.get("omitted"):
-        lines.append(f"    ({value['omitted']} more connectors are not listed)")
+        lines.append(f"    ({value['omitted']} more connectors are not listed. You can still use them by exact name.)")
     lines.append("  </connectors>")
     return "\n".join(lines)
 

@@ -163,7 +163,7 @@ def catalog_text(catalog: dict[str, Any]) -> str:
     for entry in catalog["skills"]:
         lines.append(f'    <skill name="{_escape(entry["name"])}">{_escape(entry["description"])}</skill>')
     if catalog.get("omitted"):
-        lines.append(f"    ({catalog['omitted']} more skills are not listed)")
+        lines.append(f"    ({catalog['omitted']} more skills are not listed. You can still load them by exact name.)")
     lines.append("  </skills>")
     return "\n".join(lines)
 

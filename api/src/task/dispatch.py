@@ -188,13 +188,14 @@ class RunPlan:
 
 
 def plan_run(
-    task: TaskDefinition, revision: TaskDefinitionRevision, *, lock: bool = True, deliver: bool = True
+    task: TaskDefinition, revision: TaskDefinitionRevision, *, lock: bool = True, deliver: bool = True, launcher=None
 ) -> RunPlan:
     """タスクの今の版でRunを始められるかを確かめ、Runに固定するものを決める。始められなければ CannotRun。
 
     何も作らない。受付（_start()）は `lock` で通知先の行をロックする（transactionの中で呼ぶ）。入口の画面でサンプルを
     試すとき（受付と同じ判定を見せる）は `lock=False` で読むだけにし、受付を待たせない。`deliver` が偽（修正チャット）
-    なら通知先を固定せず、使えるかも確かめない（出口へ送らない）。Connectorは停止中のタスクでも使えるとする"""
+    なら通知先を固定せず、使えるかも確かめない（出口へ送らない）。Connectorは停止中のタスクでも使えるとする。
+    `launcher` はチャットから起動した人で、一覧はその人の権限との共通部分にする（authorization.md §6）"""
     profile = revision.model_profile
     version = profile.current_version
     if version is None or not profile.is_active or profile.deleted:
@@ -229,7 +230,7 @@ def plan_run(
         instructed.append({"connector": connector.uid, "name": connector.name, "version": connector.current_version.pk})
     # Runが使えるのはタスクの範囲でアクセスできるものすべて。定義で指示したものは先に並べる（authorization.md §5.4）
     skill_catalog, connector_catalog = build_task_catalogs(
-        task, version, sensitive=sensitive, explicit=[*instructed, *declared_connectors(entries)]
+        task, version, sensitive=sensitive, explicit=[*instructed, *declared_connectors(entries)], launcher=launcher
     )
     if output_schema and not version.supports_tools:
         # 業務結果は submit_result で確定するので、モデル設定の今の版がToolを使えなければ受け付けない
@@ -262,7 +263,7 @@ def _start(
     """Runを作る。`conversation` は修正チャット（なければRunごとの会話を作る）。`client_request_id` は修正チャットの
     最初の依頼の `client_message_id`"""
     fixing = launch == RunLaunch.FIX
-    plan = plan_run(task, revision, deliver=not fixing)
+    plan = plan_run(task, revision, deliver=not fixing, launcher=actor if launch == RunLaunch.CHAT else None)
     sensitive = revision.handles_sensitive_data
     if conversation is None:
         conversation = Conversation.objects.create(

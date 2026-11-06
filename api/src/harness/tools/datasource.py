@@ -23,6 +23,7 @@ from connector.errors import ConnectorError, ConnectorErrorKind
 from connector.limits import connection_slot, run_holding
 from connector.models import Connector, ConnectorAction, ConnectorVersion
 
+from ..catalogs import unlisted_connector
 from ..connectors import DATASOURCE_TOOL_NAMES, catalog, is_allowed_for
 from ..tasks import connector_permitted, is_task_run
 from ..untrusted import close_cut, untrusted
@@ -91,17 +92,14 @@ MAX_CANDIDATES = 20
 def _resolve(arguments: dict[str, Any], context: ToolContext) -> tuple[Connector, ConnectorVersion] | ToolResult:
     run = context.run
     listed = catalog(run).get("connectors", [])
-    entry = next((e for e in listed if e["name"] == arguments["connector"]), None)
-    if entry is None:
+    uid = next((e["connector"] for e in listed if e["name"] == arguments["connector"]), None)
+    uid = uid or unlisted_connector(run, arguments["connector"])
+    if uid is None:
         candidates = ", ".join(e["name"] for e in listed[:MAX_CANDIDATES]) or "(none)"
         return ToolResult.error(
             f'No connector named "{arguments["connector"]}" is available. Available connectors: {candidates}.'
         )
-    connector = (
-        Connector.objects.select_related("connection", "current_version", "department")
-        .filter(uid=entry["connector"])
-        .first()
-    )
+    connector = Connector.objects.select_related("connection", "current_version", "department").filter(uid=uid).first()
     if connector is None:
         permitted = False
     elif is_task_run(run):

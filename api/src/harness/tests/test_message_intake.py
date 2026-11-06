@@ -10,6 +10,7 @@ from conversation.factories import ConversationFactory
 from conversation.models import ConversationMessage, InstructionKind, InstructionState, MessageRole, UserInstruction
 from harness import connectors as connectors_module
 from harness import runner as runner_module
+from harness import skills as skills_module
 from harness.intake import Chosen
 from harness.runner import Runner
 from run.models import ClarificationRequest, ClarificationStatus, Run, RunEvent, RunEventKind, RunStatus
@@ -134,7 +135,7 @@ def test_a_skill_listed_by_a_rebuild_can_be_loaded(conversation, app_user):
 
     adapter = DuringFirstReply(
         [
-            calls(("c1", "skill", {"name": "請求書の照合"})),
+            calls(("c1", "todo_write", TODOS)),
             calls(("c2", "skill", {"name": "ないSkill"}), ("c3", "skill", {"name": "請求書の照合"})),
             reply("終わりました。"),
         ],
@@ -143,7 +144,6 @@ def test_a_skill_listed_by_a_rebuild_can_be_loaded(conversation, app_user):
     run = execute(run, adapter)
 
     results = {e.data["call_id"]: e.data for e in RunEvent.objects.filter(run=run, kind=RunEventKind.TOOL_RESULT)}
-    assert "Available skills: (none)" in str(results["c1"]["content"])
     assert "Available skills: 請求書の照合" in str(results["c2"]["content"])
     assert '<skill name="請求書の照合"' in str(results["c3"]["content"])
 
@@ -420,3 +420,25 @@ def test_the_skill_edit_request_still_waits_for_the_run_to_end(conversation, app
         skill_edit={"id": skill.uid, "name": skill.name},
     )
     assert UserInstruction.objects.get(message=message).kind == InstructionKind.NEXT
+
+
+@pytest.mark.django_db
+def test_what_the_catalog_omits_is_still_usable_in_a_conversation(conversation, app_user, monkeypatch):
+    """一覧の量の上限はアクセス範囲ではない（harness.md §10.1・§10.2）"""
+    monkeypatch.setattr(connectors_module, "MAX_CATALOG_CONNECTORS", 0)
+    monkeypatch.setattr(skills_module, "CATALOG_CONTEXT_RATIO", 0)
+    ConnectorFactory.create(name="販売管理", version__tables=TABLES)
+    publish(app_user, name="請求書の照合")
+    run = start(conversation)
+    adapter = FakeAdapter(
+        [
+            calls(("c1", "skill", {"name": "請求書の照合"})),
+            calls(("c2", "datasource_query", {"connector": "ないDB", "sql": "SELECT 1"})),
+            reply("終わりました。"),
+        ]
+    )
+    run = execute(run, adapter)
+    results = {e.data["call_id"]: e.data for e in RunEvent.objects.filter(run=run, kind=RunEventKind.TOOL_RESULT)}
+    assert not results["c1"]["is_error"]
+    assert "not listed" in " ".join(user_texts(adapter.requests[0]))
+    assert 'No connector named "ないDB"' in str(results["c2"]["content"])

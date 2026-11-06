@@ -301,11 +301,11 @@ def runtime_context(run: Run, *, user_name: str) -> str:
     ]
     # エージェントが選べるSkillの一覧（今のもの。`/` で指定して始めたRunにはない。harness.md §10.1）
     catalog = run.current_catalog("skill_catalog")
-    if catalog and catalog.get("skills"):
+    if catalog and (catalog.get("skills") or catalog.get("omitted")):
         lines.append(catalog_text(catalog))
     # エージェントが使えるConnectorの一覧（今のもの。harness.md §10.2）
     connectors = run.current_catalog("connector_catalog")
-    if connectors and connectors.get("connectors"):
+    if connectors and (connectors.get("connectors") or connectors.get("omitted")):
         lines.append(connector_catalog_text(connectors))
     # Skillの編集のRunの対象（harness.md §10.9）
     if edit := skill_edit_text(run):

@@ -9,6 +9,7 @@ from run.models import RunEvent, RunEventKind
 from skill.models import Skill, SkillAction, SkillVersion
 
 from .. import tasks
+from ..catalogs import unlisted_skill
 from ..connectors import catalog as connector_catalog
 from ..skills import loaded_entries, manifest_entry, render, skill_catalog
 from .base import Effect, Tool, ToolContext, ToolResult
@@ -42,20 +43,20 @@ PARAMETERS = {
 def execute(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     run = context.run
     skills = skill_catalog(run).get("skills", [])
-    entry = next((e for e in skills if e["name"] == arguments["name"]), None)
-    if entry is None:
+    uid = next((e["skill"] for e in skills if e["name"] == arguments["name"]), None)
+    uid = uid or unlisted_skill(run, arguments["name"])
+    if uid is None:
         candidates = ", ".join(e["name"] for e in skills[:MAX_CANDIDATES]) or "(none)"
         return ToolResult.error(f'No skill named "{arguments["name"]}" is available. Available skills: {candidates}.')
 
-    skill = Skill.objects.select_related("current_version", "department").filter(uid=entry["skill"]).first()
+    skill = Skill.objects.select_related("current_version", "department").filter(uid=uid).first()
     if skill is None or skill.deleted:
         return ToolResult.error("This skill was deleted. Continue without it, and tell the user.")
 
     loaded = next((e for e in loaded_entries(run) if e["skill"] == skill.uid), None)
     if loaded is not None:
-        return _load_again(skill, loaded, entry["name"], context)
-    available = {e["connector"] for e in connector_catalog(run).get("connectors", [])}
-    if reason := _problem(run, skill, available):
+        return _load_again(skill, loaded, arguments["name"], context)
+    if reason := _problem(run, skill):
         return _unusable(reason)
     assert skill.current_version_id is not None  # unusable_reason() が確かめた
     version = SkillVersion.objects.prefetch_related("assets__resource_version").get(pk=skill.current_version_id)
@@ -63,24 +64,22 @@ def execute(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     # Sandboxをまだ起動していなければ、起動するときにManifestの全Skillの資料を置く
     if context.session is not None and context.session.started:
         context.session.place_skill_assets(skill, version)
-    value = manifest_entry(skill, version, entry["name"])
+    value = manifest_entry(skill, version, arguments["name"])
     with run.fenced(context.attempt) as current:
         current.append_manifest("skill", value)
         current.save(update_fields=["manifest", "updated"])
         RunEvent.record(current, RunEventKind.SKILL_LOADED, value, comment=skill.name)
         run.manifest = current.manifest
-    return _loaded(skill, version, entry["name"], context)
+    return _loaded(skill, version, arguments["name"], context)
 
 
-def _problem(run, skill: Skill, connectors: set[str]) -> str:
+def _problem(run, skill: Skill) -> str:
     """このRunで今読み込めない理由（読み込めれば空文字）。会話は依頼した人、タスクはタスクの範囲で判定する"""
     if tasks.is_task_run(run):
         version = skill.current_version
         reason = tasks.skill_problem(run, skill, version)
         return reason or (version.unsupported_by(run.model_version) if version else "")
-    return skill.unusable_reason(
-        run.owner, run.model_version, sensitive=run.handles_sensitive_data, connectors=connectors
-    )
+    return skill.unusable_reason(run.owner, run.model_version, sensitive=run.handles_sensitive_data)
 
 
 def _load_again(skill: Skill, loaded: dict[str, Any], name: str, context: ToolContext) -> ToolResult:

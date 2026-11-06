@@ -5,6 +5,10 @@ import pytest
 
 from connector.factories import ConnectorFactory
 from connector.models import ConnectorScope
+from harness import connectors as connectors_module
+from harness import skills as skills_module
+from harness import tasks
+from harness.catalogs import build_task_catalogs
 from harness.runner import Runner
 from harness.tests.test_connectors import TABLES, execute, fixture_fake_datasource, results, text_of
 from llm.factories import ModelProfileFactory
@@ -12,6 +16,7 @@ from run.models import Run, RunEndReason, RunEvent, RunEventKind, RunLaunch, Run
 from run.tasks import claim_run
 from skill.factories import SkillFactory, SkillVersionFactory
 from skill.models import SkillScope
+from task import checks
 from task.dispatch import start_task_run
 from task.errors import CannotRun
 from task.factories import TaskDefinitionFactory
@@ -362,3 +367,159 @@ def test_chat_launched_run_works_in_the_scope_of_the_task(app_user):
     )
     [queried] = results(run, "datasource_query")
     assert not queried["is_error"], text_of(queried)
+
+
+def test_chat_launched_run_is_refused_the_connector_the_launcher_cannot_use(app_user, monkeypatch):
+    """Connectorの操作のたびに、起動した人の今の権限でも判定する（タスクの範囲 ∩ 起動した人の権限）"""
+    department = DepartmentFactory.create()
+    manager = grant(UserFactory.create(), AppPermission.MANAGE_DEPARTMENT_TASKS)
+    DepartmentMembershipFactory.create(department=department, user=manager)
+    task = _department_task_with_connector(manager, department)
+    DepartmentMembershipFactory.create(department=department, user=app_user)
+    run = start_task_run(task, inputs={}, actor=app_user, launch=RunLaunch.CHAT)
+    monkeypatch.setattr(tasks.checks, "launcher_connector_permitted", lambda user, connector: False)
+    run = execute(
+        run,
+        FakeAdapter(
+            [calls(("c1", "datasource_query", {"connector": "経理DB", "sql": "SELECT 1"})), reply("使えませんでした")]
+        ),
+    )
+    [queried] = results(run, "datasource_query")
+    assert queried["is_error"]
+    assert "cannot be used now" in text_of(queried)
+
+
+def _scope_world(personal_owner):
+    """範囲ごとのSkill・Connector（2つの部門、全社、システム、個人）"""
+    department, other = DepartmentFactory.create(), DepartmentFactory.create()
+    for scope, place, label in (
+        (SkillScope.DEPARTMENT, department, "部門"),
+        (SkillScope.DEPARTMENT, other, "他部門"),
+        (SkillScope.COMPANY, None, "全社"),
+        (SkillScope.SYSTEM, None, "システム"),
+    ):
+        skill = SkillFactory.create(scope=scope, department=place, owner=None, name=f"{label}のSkill")
+        SkillVersionFactory.create(skill=skill)
+    personal = SkillFactory.create(created_by=personal_owner, name="個人のSkill")
+    SkillVersionFactory.create(skill=personal)
+    for connector_scope, place, label in (
+        (ConnectorScope.DEPARTMENT, department, "部門"),
+        (ConnectorScope.DEPARTMENT, other, "他部門"),
+        (ConnectorScope.COMPANY, None, "全社"),
+        (ConnectorScope.SYSTEM, None, "システム"),
+    ):
+        ConnectorFactory.create(
+            scope=connector_scope, department=place, name=f"{label}のConnector", version__tables=TABLES
+        )
+    return department
+
+
+def _scope_world_in(department):
+    other = DepartmentFactory.create()
+    for scope, place, label in ((SkillScope.COMPANY, None, "全社"), (SkillScope.DEPARTMENT, other, "他部門")):
+        skill = SkillFactory.create(scope=scope, department=place, owner=None, name=f"{label}のSkill")
+        SkillVersionFactory.create(skill=skill)
+    ConnectorFactory.create(name="全社のConnector", version__tables=TABLES)
+    ConnectorFactory.create(
+        scope=ConnectorScope.DEPARTMENT, department=other, name="他部門のConnector", version__tables=TABLES
+    )
+
+
+def _names(catalogs) -> tuple[set[str], set[str]]:
+    skills, connectors = catalogs
+    return {e["name"] for e in skills["skills"]}, {e["name"] for e in connectors["connectors"]}
+
+
+def _launchers_and_tasks():
+    """（タスクの範囲、起動できる人の種類）。authorization.md §5.3 の表のすべて"""
+    return [
+        (TaskScope.DEPARTMENT, "member"),
+        (TaskScope.DEPARTMENT, "manager_of_all"),
+        (TaskScope.COMPANY, "anyone"),
+        (TaskScope.PERSONAL, "owner"),
+    ]
+
+
+@pytest.mark.parametrize(("scope", "kind"), _launchers_and_tasks())
+def test_launcher_access_intersected_with_the_task_scope_equals_the_task_scope(scope, kind):
+    """起動できる人はタスクより狭い権限を持たないので、タスクの範囲 ∩ 起動した人の権限は、タスクの範囲と同じになる"""
+    launcher = UserFactory.create()
+    department = _scope_world(launcher)
+    if kind == "member":
+        DepartmentMembershipFactory.create(department=department, user=launcher)
+    elif kind == "manager_of_all":
+        grant(launcher, AppPermission.MANAGE_ALL_DEPARTMENTS)
+    launcher = type(launcher).objects.get(pk=launcher.pk)
+    owner = (
+        launcher if scope == TaskScope.PERSONAL else grant(UserFactory.create(), AppPermission.MANAGE_DEPARTMENT_TASKS)
+    )
+    task = TaskDefinitionFactory.create(
+        scope=scope,
+        department=department if scope == TaskScope.DEPARTMENT else None,
+        created_by=owner,
+        chat_launchable=True,
+    )
+    assert TaskDefinition.objects.launchable_by(launcher).filter(pk=task.pk).exists()
+    version = ModelProfileFactory.create(version__supports_tools=True).current_version
+
+    in_scope = build_task_catalogs(task, version, sensitive=False, explicit=[])
+    intersected = build_task_catalogs(task, version, sensitive=False, explicit=[], launcher=launcher)
+
+    assert _names(intersected) == _names(in_scope)
+    expected_skills = set(checks.allowed_skills(task).values_list("name", flat=True))
+    expected_connectors = set(checks.allowed_connectors(task).values_list("name", flat=True))
+    assert _names(intersected) == (expected_skills, expected_connectors)
+    assert expected_skills and expected_connectors  # 空同士の一致にしない
+    # 操作のたびの判定も同じ
+    for skill in checks.allowed_skills(task):
+        assert checks.launcher_skill_problem(launcher, skill) == ""
+    for connector in checks.allowed_connectors(task):
+        assert checks.launcher_connector_permitted(launcher, connector)
+
+
+def test_the_intersection_takes_away_what_the_launcher_cannot_use():
+    """共通部分を実際に取っていること：起動できない立場の人を渡せば、タスクの範囲より狭くなる"""
+    outsider = UserFactory.create()
+    department = _scope_world(outsider)
+    manager = grant(UserFactory.create(), AppPermission.MANAGE_DEPARTMENT_TASKS)
+    task = TaskDefinitionFactory.create(scope=TaskScope.DEPARTMENT, department=department, created_by=manager)
+    assert not TaskDefinition.objects.launchable_by(outsider).filter(pk=task.pk).exists()
+    version = ModelProfileFactory.create(version__supports_tools=True).current_version
+
+    skills, connectors = _names(build_task_catalogs(task, version, sensitive=False, explicit=[], launcher=outsider))
+
+    assert skills == {"全社のSkill"}
+    assert connectors == {"全社のConnector"}
+
+
+def test_what_the_catalog_omits_is_still_usable_in_the_scope_of_the_task(monkeypatch):
+    """一覧の量の上限はアクセス範囲ではない。範囲の外のものは、名前を指定しても届かない"""
+    monkeypatch.setattr(connectors_module, "MAX_CATALOG_CONNECTORS", 0)
+    monkeypatch.setattr(skills_module, "CATALOG_CONTEXT_RATIO", 0)
+    department = DepartmentFactory.create()
+    manager = grant(UserFactory.create(), AppPermission.MANAGE_DEPARTMENT_TASKS)
+    DepartmentMembershipFactory.create(department=department, user=manager)
+    _scope_world_in(department)
+    task = TaskDefinitionFactory.create(
+        scope=TaskScope.DEPARTMENT,
+        department=department,
+        created_by=manager,
+        revision__model_profile=ModelProfileFactory.create(version__supports_tools=True),
+    )
+    run = _start(task, manager)
+    adapter = FakeAdapter(
+        [
+            calls(("c1", "datasource_describe", {"connector": "全社のConnector"})),
+            calls(("c2", "datasource_describe", {"connector": "他部門のConnector"})),
+            calls(("c3", "skill", {"name": "全社のSkill"})),
+            calls(("c4", "skill", {"name": "他部門のSkill"})),
+            reply("確認しました"),
+        ]
+    )
+    run = execute(run, adapter)
+    inside, outside = results(run, "datasource_describe")
+    assert not inside["is_error"], text_of(inside)
+    assert outside["is_error"]
+    loaded, refused = results(run, "skill")
+    assert not loaded["is_error"], text_of(loaded)
+    assert refused["is_error"]

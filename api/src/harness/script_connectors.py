@@ -28,6 +28,7 @@ from run.errors import LeaseLost
 from run.models import SCRIPT_CALL_PREFIX, ExecutionAttempt, Run, ToolInvocation, ToolStatus
 from runtime.launcher import RELAY_MAX_RESPONSE, SandboxUnavailable
 
+from .catalogs import unlisted_connector
 from .connectors import DATASOURCE_TOOL_NAMES, catalog_names
 from .tools.base import ToolContext, ToolResult
 from .tools.datasource import DATASOURCE_TOOLS, Described, Queried, describe_tables, run_query
@@ -104,7 +105,7 @@ class ScriptConnectors:
         tool = next(t for t in DATASOURCE_TOOLS if t.name == name)
         if problem := tool.validate(arguments):
             return _error("invalid_argument", problem)
-        if arguments["connector"] not in names:
+        if arguments["connector"] not in names and unlisted_connector(self.run, arguments["connector"]) is None:
             return _error("invalid_argument", f"No such connector. Available connectors: {', '.join(names[:20])}.")
         return name, arguments
 

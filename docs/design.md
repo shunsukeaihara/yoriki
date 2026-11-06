@@ -1156,7 +1156,7 @@ Launcherは承認済みimage digest、固定mount根、資源上限、container 
 
 回収はコンテナ内の書込みを停止した後に実施する。通常ファイルだけを対象にし、symlink、特殊ファイル、許可外パスを拒否する。ファイル数は上限（`MAX_OUTPUT_FILES`）まで回収し、業務結果が指すファイルを回収できなければ完了にしない。総量はoutputのtmpfsの大きさで制限する。外部から取得したsnapshotやarchiveを復元するときもパストラバーサルと展開量を検証する。
 
-Artifact Storeへ保存後、hashとサイズを記録し、その参照をDBへ確定する。保存に失敗したRunはCOMPLETEDにしない。回収は親のAttemptを終えるたび（確認待ち・完了・停止・失敗）に、Workspace snapshotと同じtarから行う（タスクの実行の完了ではsnapshotを作らず、回収だけ行う。サブエージェントの `output` は成果物にせず、返すファイルとして親へ渡す。harness.md §10.11）。隠しファイルと、会話の同じパスの最新の成果物と中身が同じファイルは回収し直さない。作り直したファイルは新しいArtifactにし、前の版も残す。成果物の取得権限はRunの結果を見られる人（authorization.md §7.1。実行したときの範囲と部門で判定する）に基づき、HTML等の生成物をアプリと同じoriginで無条件に実行しない。
+Artifact Storeへ保存後、hashとサイズを記録し、その参照をDBへ確定する。保存に失敗したRunはCOMPLETEDにしない。回収は親のAttemptを終えるたび（確認待ち・完了・停止・失敗）に、Workspace snapshotと同じtarから行う（タスクの実行の完了ではsnapshotを作らず、`/workspace/output` だけを取り出して回収する。サブエージェントの `output` は成果物にせず、返すファイルとして親へ渡す。harness.md §10.11）。隠しファイルと、会話の同じパスの最新の成果物と中身が同じファイルは回収し直さない。作り直したファイルは新しいArtifactにし、前の版も残す。成果物の取得権限はRunの結果を見られる人（authorization.md §7.1。実行したときの範囲と部門で判定する）に基づき、HTML等の生成物をアプリと同じoriginで無条件に実行しない。
 
 ### 7.5 コマンドとPythonの実行ループ
 

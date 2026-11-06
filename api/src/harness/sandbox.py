@@ -55,6 +55,7 @@ T = TypeVar("T")
 WORKSPACE = "/workspace"
 # snapshotに入れるもの。input・masterは固定の版から、envはイメージと追加のpackageから作り直す（design.md §7.9）
 SNAPSHOT_PATHS = ["work", "output"]
+OUTPUT_PATHS = ["output"]
 # 1回に回収する成果物（/workspace/output のファイル）の数の上限（design.md §7.4）
 MAX_OUTPUT_FILES = 200
 # Skillのスクリプトからの要求を、処理を待つ列に積める数（design.md §4.9.6）。あふれた要求への応答
@@ -716,7 +717,8 @@ class SandboxSession:
 
         def save() -> tuple[StoredObject | None, list[CollectedOutput]]:
             with tempfile.TemporaryFile(dir=self.dir) as archive:
-                sandbox.archive(SNAPSHOT_PATHS, archive)
+                # 保存しないなら、大きい作業ファイルで回収が失敗しないように、成果物だけを取り出す
+                sandbox.archive(SNAPSHOT_PATHS if snapshot else OUTPUT_PATHS, archive)
                 archive.seek(0)
                 try:
                     stored = storage.put_immutable(key, archive) if snapshot else None

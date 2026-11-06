@@ -40,6 +40,7 @@
 | #77 | 確認用の道具（`devtools`：`seed_dev`・`fake_llm`・`dev_session`。development.md §6） |
 | #78・#79 | Webhookの入口をタスクを管理できる人が作る形（設計：design.md 0.45、authorization.md §5.5・§13。実装：入口のAPIと画面をタスクの下へ移し、1つのタスクに複数の入口、鍵を作った人の記録と警告、`/manage/trigger_bindings` は見るだけの一覧） |
 | #80 | 新案：agentセッション（design.md 0.47 §5・§7・§8・§11.11、harness.md §5.6・§8・§10.11 へ反映した）、Sandboxのイメージ（design.md 0.46 §7.6 へ反映した）。どちらも実装はまだ |
+| #84 | design.md §4 の構成図を実装に合わせた（0.48。LLMとConnectorの呼出しはqclusterのRunner。Control Planeの定義） |
 
 各PRの中身は、Pull Requestの説明と設計書を見る。
 

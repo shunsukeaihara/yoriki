@@ -341,15 +341,36 @@ def test_edit_run_sees_the_files_of_the_last_task_run(api_client, manager, setti
     assert res.status_code == 201, res.json()
     run = ConversationMessage.objects.get(uid=res.json()["id"]).run
     assert run is not None
-    # 作業ファイルは直前のタスクのRunのCheckpointから
-    checkpoint = Checkpoint.latest_for(run)
-    assert checkpoint is not None
-    assert checkpoint.run == second
+    # タスクのRunの作業ファイルは残らないので、最初の編集のRunは空のWorkspaceから（harness.md §10.10）
+    assert Checkpoint.latest_for(run) is None
     attempt = claim_run(run.pk)
     assert attempt is not None
     session = SandboxSession(run, attempt)
     session.sync_inputs()
     assert (session.input_dir / "請求書.csv").read_bytes() == b"second"
+    session.close()
+
+
+def test_edit_run_reads_the_outputs_of_the_last_task_run(api_client, manager):
+    """タスクのRunの作業ファイルは残らないので、直前のタスクのRunの成果物を /workspace/input/outputs に置く。前の実行の
+    ものは置かない（harness.md §10.10）"""
+    task = _task(manager)
+    first = _fix(api_client, manager, task)
+    Artifact.create_output(first, "前回.csv", BlobObject.put(io.BytesIO(b"first")))
+    Run.objects.filter(pk=first.pk).update(status=RunStatus.COMPLETED)
+    second = _finished_fix_in(api_client, manager, task, first.conversation)
+    Artifact.create_output(second, "結果/r.csv", BlobObject.put(io.BytesIO(b"old")))
+    Artifact.create_output(second, "結果/r.csv", BlobObject.put(io.BytesIO(b"new")))
+    res = _post(api_client, first.conversation)
+    assert res.status_code == 201, res.json()
+    run = ConversationMessage.objects.get(uid=res.json()["id"]).run
+    assert run is not None
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    session = SandboxSession(run, attempt)
+    session.sync_inputs()
+    assert (session.input_dir / "outputs" / "結果" / "r.csv").read_bytes() == b"new"
+    assert not (session.input_dir / "outputs" / "前回.csv").exists()
     session.close()
 
 
@@ -369,6 +390,27 @@ def test_edit_run_does_not_restore_files_of_earlier_runs(api_client, manager):
     run = ConversationMessage.objects.get(uid=res.json()["id"]).run
     assert run is not None
     assert Checkpoint.latest_for(run) is None
+
+
+def test_later_edit_run_restores_files_of_the_previous_edit_run(api_client, manager):
+    task = _task(manager)
+    first = _fix(api_client, manager, task)
+    Run.objects.filter(pk=first.pk).update(status=RunStatus.COMPLETED)
+    res = _post(api_client, first.conversation)
+    assert res.status_code == 201, res.json()
+    edit = ConversationMessage.objects.get(uid=res.json()["id"]).run
+    assert edit is not None
+    attempt = claim_run(edit.pk)
+    assert attempt is not None
+    checkpoint = Checkpoint.objects.create(
+        run=edit, attempt=attempt, sequence=1, storage="local:x", key="runs/a.tar", size=1, sha256="0" * 64
+    )
+    Run.objects.filter(pk=edit.pk).update(status=RunStatus.COMPLETED)
+    res = _post(api_client, first.conversation)
+    assert res.status_code == 201, res.json()
+    run = ConversationMessage.objects.get(uid=res.json()["id"]).run
+    assert run is not None
+    assert Checkpoint.latest_for(run) == checkpoint
 
 
 def _finished_fix_in(api_client, manager, task, conversation) -> Run:

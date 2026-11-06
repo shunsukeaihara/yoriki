@@ -8,6 +8,7 @@ import docker
 import pytest
 
 from artifact.models import Artifact, ArtifactKind
+from artifact.storage import LocalStorage, get_storage
 from conversation.dispatch import MessageMode, post_message
 from conversation.factories import ConversationFactory
 from conversation.models import ConversationMessage
@@ -21,11 +22,17 @@ from run.models import (
     Run,
     RunEvent,
     RunEventKind,
+    RunLaunch,
     RunStatus,
 )
 from run.tasks import claim_run
 from skill.factories import SkillFactory, SkillVersionFactory
-from skill.models import SkillAssetBinding, SkillAssetRole
+from skill.models import SkillAssetBinding, SkillAssetRole, SkillScope
+from task.dispatch import start_task_run
+from task.factories import TaskDefinitionFactory
+from task.models import TaskScope
+from user.factories import UserFactory, grant
+from utils.permissions import AppPermission
 
 from .fakes import FakeAdapter, calls, reply
 
@@ -259,6 +266,53 @@ def test_next_request_continues_from_the_previous_files(conversation):
     third = execute(third, FakeAdapter([calls(("c2", "read", {"path": "/workspace/work/a.txt"})), reply("3")]))
     assert third.parent == second
     assert "     1│v1" in text(results(third)["c2"])
+
+
+def test_next_run_replaces_the_previous_snapshot(conversation):
+    first = execute(post(conversation), FakeAdapter([calls(("c1", "shell", shell("echo 1 > a.txt"))), reply("済み")]))
+    old = Checkpoint.objects.get(run=first)
+    second = execute(
+        post(conversation, "続けて"), FakeAdapter([calls(("c2", "shell", shell("cat a.txt"))), reply("済み")])
+    )
+    assert text(results(second)["c2"]).startswith("Exit code: 0")
+    assert Checkpoint.objects.get(run__conversation=conversation).run == second
+    assert not get_storage().exists(old.key)
+
+
+def test_task_run_collects_outputs_without_a_snapshot():
+    """タスクの実行が終わるときは、成果物を回収するだけで、ワークスペースを保存しない（design.md §7.9）"""
+    skill = SkillFactory.create(scope=SkillScope.SYSTEM, name="確認", owner=None)
+    SkillVersionFactory.create(skill=skill, tools=["shell"])
+    admin = grant(UserFactory.create(), AppPermission.MANAGE_SYSTEM_TASKS)
+    task = TaskDefinitionFactory.create(
+        scope=TaskScope.SYSTEM, created_by=admin, revision__skills=[{"skill": skill.uid, "version": 1}]
+    )
+    run = start_task_run(task, inputs={}, actor=admin, launch=RunLaunch.MANUAL)
+    run = execute(run, FakeAdapter([calls(("c1", "shell", shell("echo 1 > /workspace/output/r.csv"))), reply("済み")]))
+    assert run.status == RunStatus.COMPLETED
+    assert Artifact.objects.filter(run=run, kind=ArtifactKind.OUTPUT, path="r.csv").exists()
+    assert not Checkpoint.objects.filter(run=run).exists()
+    assert containers(run) == []
+
+
+def test_failed_restore_does_not_overwrite_the_latest_snapshot(conversation, monkeypatch):
+    """戻す途中で失敗したら、途中のWorkspaceを保存せず、Sandboxも残さない。次のAttemptで同じsnapshotから戻す"""
+    monkeypatch.setattr("harness.runner.enqueue_run", lambda _run: None)
+    first = execute(post(conversation), FakeAdapter([calls(("c1", "shell", shell("echo 1 > a.txt"))), reply("済み")]))
+    latest = Checkpoint.objects.get(run=first)
+    run = post(conversation, "続けて")
+    with monkeypatch.context() as patch:
+        patch.setattr(LocalStorage, "open_read", mock.Mock(side_effect=OSError("reset")))
+        run = execute(run, FakeAdapter([calls(("c2", "shell", shell("cat a.txt")))]))
+    assert run.status == RunStatus.QUEUED
+    assert "cannot read the snapshot" in ExecutionAttempt.objects.filter(run=run).latest("number").failure
+    assert containers(run) == []
+    assert Checkpoint.objects.get(run__conversation=conversation) == latest
+    assert get_storage().exists(latest.key)
+
+    run = execute(run, FakeAdapter([calls(("c3", "shell", shell("cat a.txt"))), reply("済み")]))
+    assert run.status == RunStatus.COMPLETED
+    assert text(results(run)["c3"]).startswith("Exit code: 0")
 
 
 def test_command_that_outlives_the_timeout_becomes_a_job(conversation, monkeypatch):

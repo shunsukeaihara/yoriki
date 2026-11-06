@@ -81,7 +81,7 @@ class FakeSession:
     def out_of_memory(self) -> bool:
         return self.oom
 
-    def suspend(self):
+    def suspend(self, *, snapshot=True):
         return None
 
     def close(self) -> None:

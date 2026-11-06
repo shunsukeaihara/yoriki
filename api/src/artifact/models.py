@@ -29,6 +29,8 @@ MAX_NAME_LENGTH = 200
 MAX_NAME_BYTES = 230
 # Connectorの結果を置く /workspace/input の中のディレクトリ（harness.md §10.2）
 CONNECTOR_RESULTS_DIR = "connectors"
+# 修正チャットの編集のRunの /workspace/input で、直前のタスクのRunの成果物を置くディレクトリ（harness.md §10.10）
+TASK_OUTPUTS_DIR = "outputs"
 
 
 def clean_filename(name: str) -> str:
@@ -56,8 +58,8 @@ def _cut_bytes(text: str, limit: int) -> str:
 
 def input_paths(names: list[str], used: set[str]) -> list[str]:
     """添付を置く /workspace/input の中の名前。`used` は会話で既に使った名前。同じ名前があれば「名前 (2).拡張子」の
-    ようにする（前の添付を置き換えない）。Connectorの結果を置くディレクトリと同じ名前にしない"""
-    used = {*used, CONNECTOR_RESULTS_DIR}
+    ようにする（前の添付を置き換えない）。Connectorの結果・タスクの成果物を置くディレクトリと同じ名前にしない"""
+    used = {*used, CONNECTOR_RESULTS_DIR, TASK_OUTPUTS_DIR}
     paths = []
     for name in names:
         stem, ext = posixpath.splitext(name)

@@ -1,6 +1,6 @@
 """RunnerからSandboxを使う（harness.md §8、design.md §7.5・§7.9）。
 
-SandboxはAttemptごとに1つで、最初にSandboxのToolが呼ばれた時点で起動し、最後のCheckpointからWorkspaceを戻す。
+SandboxはAttemptごとに1つで、最初にSandboxのToolが呼ばれた時点で起動し、最新のCheckpointからWorkspaceを戻す。
 コマンドはすべてバックグラウンドのジョブとして始め、`shell` は終わりを待つだけにする。ジョブの状態の正本はSandboxの
 外にあるもの（Dockerのexecの状態と、Worker側のファイルへ書いた出力）だけにする。Attemptを終えるときは、ジョブを
 止めてからWorkspaceを取り出して保存し（Checkpoint）、Sandboxを消す。
@@ -28,10 +28,10 @@ from django.db import DatabaseError, connection, transaction
 from django.utils import timezone
 from nanoid import generate
 
-from artifact.models import CONNECTOR_RESULTS_DIR, Artifact, ArtifactKind, BlobObject
+from artifact.models import CONNECTOR_RESULTS_DIR, TASK_OUTPUTS_DIR, Artifact, ArtifactKind, BlobObject
 from artifact.storage import StorageBackend, StorageError, StoredObject, get_storage
 from run.errors import LeaseLost
-from run.models import Checkpoint, ExecutionAttempt, Run, RunKind
+from run.models import Checkpoint, ExecutionAttempt, Run, RunKind, RunTrigger
 from runtime.launcher import (
     ATTEMPT_LABEL,
     DATABASE_LABEL,
@@ -135,7 +135,8 @@ class CollectedOutput:
 class Suspended:
     """Attemptを終えるときに保存したもの"""
 
-    snapshot: StoredObject
+    # タスクの実行・Draftの評価が終わるときは作らない（Run.keeps_workspace）
+    snapshot: StoredObject | None
     backend_id: str
     # 保存の前に止めたジョブ（[{"job_id", "command"}]）
     stopped: list[dict[str, str]]
@@ -263,8 +264,14 @@ class SandboxSession:
             )
         name = f"yoriki-sandbox-{self.run.uid}-{self.attempt.number}"
         # イメージのpullで、Attemptのleaseより長くかかることがある
-        self.sandbox = self._keep_lease(lambda: launcher.start(spec, name), on_abandon=Sandbox.remove)
-        self._restore(self.sandbox)
+        sandbox = self._keep_lease(lambda: launcher.start(spec, name), on_abandon=Sandbox.remove)
+        try:
+            self._restore(sandbox)
+        except BaseException:
+            # 途中まで戻したWorkspaceを保存して、最新のsnapshotを上書きしないように、このSandboxは使わない
+            sandbox.remove()
+            raise
+        self.sandbox = sandbox
         self._start_relay()
         return self.sandbox
 
@@ -366,7 +373,8 @@ class SandboxSession:
     def sync_inputs(self) -> None:
         """会話の添付（取り込んだ依頼のもの）とConnectorの結果を、Workerのディレクトリ（Sandboxの /workspace/input に
         読取り専用でmountする）に置く。まだ置いていないものだけを足す。bind mountなので、動いているSandboxにも
-        そのまま見える。Connectorの結果は connectors/<呼出し>/ の下に置く（harness.md §10.2）"""
+        そのまま見える。Connectorの結果は connectors/<呼出し>/ の下に置く（harness.md §10.2）。修正チャットの編集のRun
+        では、直前のタスクのRunの成果物を outputs/ の下に置く（harness.md §10.10）"""
         conversation_id = self.run.conversation_id
         # 保持期限の切れたConnectorの結果は置かない（会話で照会を重ねても、置くものが増え続けないように）
         results = Artifact.objects.connector_results(conversation_id).filter(expires__gt=timezone.now())
@@ -391,21 +399,47 @@ class SandboxSession:
             if not self._input_path_ok(artifact, path):
                 logger.warning("run %s: skipping input %s with a bad name", self.run.uid, artifact.uid)
                 continue
-            try:
-                for parent in reversed(path.relative_to(self.input_dir).parents[:-1]):
-                    (self.input_dir / parent).mkdir(exist_ok=True)
-                    (self.input_dir / parent).chmod(0o755)
-                with artifact.blob.open() as src, tempfile.NamedTemporaryFile(dir=self.dir, delete=False) as tmp:
-                    shutil.copyfileobj(src, tmp, 1024 * 1024)
-                os.chmod(tmp.name, 0o644)
-                os.replace(tmp.name, path)
-            except (OSError, StorageError) as exc:
-                raise SandboxUnavailable(f"cannot prepare the attachment {artifact.uid}: {exc}") from exc
-            self.inputs.add(artifact.pk)
+            self._place_input(artifact, path)
+        if self.run.kind == RunKind.TASK_EDIT:
+            self._place_task_outputs()
+
+    def _place_task_outputs(self) -> None:
+        """直前のタスクのRunの成果物。タスクのRunのWorkspaceは残らないので、直すときはここから読む。同じパスは後のもの
+        が残る（pkの順に置くので、Runの中で作り直した版が最後になる）"""
+        outputs = (
+            Artifact.objects.filter(
+                run__in=self.run.fix_chat_runs().filter(trigger=RunTrigger.TASK),
+                kind=ArtifactKind.OUTPUT,
+                deleted=False,
+            )
+            .exclude(pk__in=self.inputs)
+            .select_related("blob")
+            .order_by("pk")
+        )
+        root = self.input_dir / TASK_OUTPUTS_DIR
+        for artifact in outputs:
+            path = root / artifact.path
+            if root not in path.parents or ".." in Path(artifact.path).parts:
+                logger.warning("run %s: skipping output %s with a bad name", self.run.uid, artifact.uid)
+                continue
+            self._place_input(artifact, path)
+
+    def _place_input(self, artifact: Artifact, path: Path) -> None:
+        try:
+            for parent in reversed(path.relative_to(self.input_dir).parents[:-1]):
+                (self.input_dir / parent).mkdir(exist_ok=True)
+                (self.input_dir / parent).chmod(0o755)
+            with artifact.blob.open() as src, tempfile.NamedTemporaryFile(dir=self.dir, delete=False) as tmp:
+                shutil.copyfileobj(src, tmp, 1024 * 1024)
+            os.chmod(tmp.name, 0o644)
+            os.replace(tmp.name, path)
+        except (OSError, StorageError) as exc:
+            raise SandboxUnavailable(f"cannot prepare the attachment {artifact.uid}: {exc}") from exc
+        self.inputs.add(artifact.pk)
 
     def _input_path_ok(self, artifact: Artifact, path: Path) -> bool:
-        """添付は /workspace/input の直下、Connectorの結果は connectors/ の下だけに置く。Connectorの結果の
-        ディレクトリと同じ名前の添付（その名前を避けるようにする前に送ったもの）は置かない"""
+        """添付は /workspace/input の直下、Connectorの結果は connectors/ の下だけに置く。Connectorの結果やタスクの
+        成果物のディレクトリと同じ名前の添付（その名前を避けるようにする前に送ったもの）は置かない"""
         if artifact.kind == ArtifactKind.CONNECTOR_RESULT:
             parts = Path(artifact.path).parts
             return (
@@ -414,26 +448,34 @@ class SandboxSession:
                 and all(p not in ("", ".", "..") for p in parts)
                 and self.input_dir in path.parents
             )
-        return path.parent == self.input_dir and artifact.path != CONNECTOR_RESULTS_DIR
+        return path.parent == self.input_dir and artifact.path not in (CONNECTOR_RESULTS_DIR, TASK_OUTPUTS_DIR)
 
     def _restore(self, sandbox: Sandbox) -> None:
         checkpoint = Checkpoint.latest_for(self.run)
         if checkpoint is None:
             return
         # 記録した保存先から読む（既定の保存先を変えた後も、以前の保存先の設定があれば読める）
-        stored = None
         try:
             storage = self.storage_factory(checkpoint.storage)
-            stored = storage.stat(checkpoint.key)
         except StorageError:
-            logger.warning("run %s: cannot read checkpoint %s", self.run.uid, checkpoint.uid, exc_info=True)
-        if stored is None or stored.sha256 != checkpoint.sha256:
-            # 別のWorkerのローカルディスクに保存した等。空のWorkspaceで続け、モデルに知らせる
-            logger.warning("run %s: checkpoint %s is not available here", self.run.uid, checkpoint.uid)
+            logger.warning("run %s: unknown storage of checkpoint %s", self.run.uid, checkpoint.uid, exc_info=True)
             self.notice = WORKSPACE_LOST
             return
-        with storage.open_read(checkpoint.key) as src:
-            self._keep_lease(lambda: sandbox.restore(src))
+        try:
+            stored = storage.stat(checkpoint.key)
+            if stored is None or stored.sha256 != checkpoint.sha256:
+                # 別のWorkerのローカルディスクに保存した等。空のWorkspaceで続け、モデルに知らせる
+                logger.warning("run %s: checkpoint %s is not available here", self.run.uid, checkpoint.uid)
+                self.notice = WORKSPACE_LOST
+                return
+            with storage.open_read(checkpoint.key) as src:
+                self._keep_lease(lambda: sandbox.restore(src))
+        except (LeaseLost, SandboxUnavailable):
+            raise
+        except Exception as exc:
+            # 一時的な読取りの失敗。残るのは最新の1つだけなので、空で続けて上書きせず、別のAttemptでやり直す
+            # （design.md §7.9）
+            raise SandboxUnavailable(f"cannot read the snapshot: {exc}") from exc
         self.restored = checkpoint
 
     def take_notice(self) -> str:
@@ -639,9 +681,10 @@ class SandboxSession:
 
     # --- Attemptの終わり ---
 
-    def suspend(self) -> Suspended | None:
+    def suspend(self, *, snapshot: bool = True) -> Suspended | None:
         """動いているものを止め、Workspaceを取り出して保存し、/workspace/output のファイルを成果物として回収する。
-        Sandboxを起動していなければNone。Checkpoint・Artifactの行はRunnerがleaseの確認の中で作る
+        `snapshot` がFalseなら、回収だけで保存しない。Sandboxを起動していなければNone。Checkpoint・Artifactの行は
+        Runnerがleaseの確認の中で作る
         """
         if self.sandbox is None:
             return None
@@ -664,19 +707,19 @@ class SandboxSession:
         known = self._known_outputs()
         present: dict[str, str] = {}
 
-        def save() -> tuple[StoredObject, list[CollectedOutput]]:
+        def save() -> tuple[StoredObject | None, list[CollectedOutput]]:
             with tempfile.TemporaryFile(dir=self.dir) as archive:
                 sandbox.archive(SNAPSHOT_PATHS, archive)
                 archive.seek(0)
                 try:
-                    snapshot = storage.put_immutable(key, archive)
+                    stored = storage.put_immutable(key, archive) if snapshot else None
                     archive.seek(0)
-                    return snapshot, collect_outputs(archive, storage, known, present)
+                    return stored, collect_outputs(archive, storage, known, present)
                 except (OSError, StorageError, tarfile.TarError) as exc:
                     raise SandboxUnavailable(f"cannot save the workspace: {exc}") from exc
 
-        snapshot, outputs = self._keep_lease(save)
-        return Suspended(snapshot, storage.backend_id, stopped, outputs, present)
+        stored, outputs = self._keep_lease(save)
+        return Suspended(stored, storage.backend_id, stopped, outputs, present)
 
     def _known_outputs(self) -> dict[str, str]:
         """会話の成果物の、パスごとの最新の中身（SHA-256）。変わっていないファイルは回収し直さない"""

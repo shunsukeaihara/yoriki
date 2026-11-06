@@ -3,23 +3,37 @@
 import functools
 import io
 import time
+from unittest import mock
 
 import pytest
 from django.db import DatabaseError, connection
 
-from artifact.storage import LocalStorage
+from artifact.storage import LocalStorage, StorageError, get_storage
 from conversation.dispatch import MessageMode, post_message
 from conversation.factories import ConversationFactory
 from harness.runner import Runner
-from harness.sandbox import WORKSPACE_LOST, Job, SandboxSession, database_label, remove_stale_sandboxes
+from harness.sandbox import WORKSPACE_LOST, Job, SandboxSession, Suspended, database_label, remove_stale_sandboxes
 from harness.tools import shell as shell_tool
 from harness.tools.base import ToolContext
 from harness.tools.shell import _job_text
 from llm.providers.base import ToolCall
 from run.errors import LeaseLost
-from run.models import Checkpoint, ExecutionAttempt, Run, RunEndReason, RunEvent, RunEventKind, RunStatus
+from run.models import (
+    Checkpoint,
+    ExecutionAttempt,
+    Run,
+    RunEndReason,
+    RunEvent,
+    RunEventKind,
+    RunKind,
+    RunLaunch,
+    RunStatus,
+    RunTrigger,
+)
 from run.tasks import claim_run
 from runtime.launcher import ATTEMPT_LABEL, DATABASE_LABEL, Exec, SandboxUnavailable
+from task.dispatch import start_task_run
+from task.factories import TaskDefinitionFactory
 
 from .fakes import FakeAdapter, FakeSession, calls, reply
 
@@ -204,6 +218,167 @@ def test_snapshot_is_read_from_the_recorded_backend(conversation, settings, tmp_
     assert restored == [b"tar"]
     assert session.restored == checkpoint
     assert session.take_notice() == ""
+
+
+class FailingStorage:
+    """このWorkerの設定にはあるが、一時的に読めない保存先"""
+
+    def stat(self, key):
+        raise StorageError("timeout")
+
+
+def test_snapshot_read_failure_is_retried_in_a_new_attempt(conversation, settings, tmp_path):
+    """一時的に読めないときは、空で続けて最新のsnapshotを上書きせず、別のAttemptでやり直す（design.md §7.9）"""
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path)
+    first = post(conversation)
+    attempt = claim_run(first.pk)
+    assert attempt is not None
+    Checkpoint.objects.create(
+        run=first, attempt=attempt, sequence=1, storage="test-main", key="runs/x.tar", size=1, sha256="0" * 64
+    )
+    session = SandboxSession(first, attempt, storage_factory=mock.Mock(return_value=FailingStorage()))
+
+    with pytest.raises(SandboxUnavailable) as error:
+        session._restore(object())  # type: ignore[arg-type]
+    assert error.value.retryable
+    assert session.restored is None
+    assert session.take_notice() == ""
+
+
+def test_snapshot_stream_failure_is_retried_in_a_new_attempt(conversation, settings, tmp_path):
+    """読み出しの途中で切れても（S3の接続の切断等）、別のAttemptでやり直す"""
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path)
+    stored = get_storage().put_immutable("snapshots/x.tar", io.BytesIO(b"tar"))
+    first = post(conversation)
+    attempt = claim_run(first.pk)
+    assert attempt is not None
+    Checkpoint.objects.create(
+        run=first,
+        attempt=attempt,
+        sequence=1,
+        storage="test-main",
+        key=stored.key,
+        size=stored.size,
+        sha256=stored.sha256,
+    )
+
+    class Sandbox:
+        def restore(self, src):
+            raise ConnectionError("reset")
+
+    session = SandboxSession(first, attempt)
+    with pytest.raises(SandboxUnavailable, match="cannot read the snapshot"):
+        session._restore(Sandbox())  # type: ignore[arg-type]
+    assert session.restored is None
+
+
+class SavingSession(FakeSession):
+    """Workspaceの保存だけを本物の保存先へ行う"""
+
+    def suspend(self, *, snapshot=True):
+        storage = get_storage()
+        stored = None
+        if snapshot:
+            stored = storage.put_immutable(
+                f"snapshots/runs/{self.run.uid}/{self.attempt.number}.tar", io.BytesIO(self.run.uid.encode())
+            )
+        return Suspended(stored, storage.backend_id, [], [], {})
+
+
+def test_only_the_latest_snapshot_is_kept(conversation):
+    """新しいsnapshotを確定したら、同じ会話の前のものを消す。別の会話のものは消さない（design.md §7.9）"""
+    other = ConversationFactory.create(owner=conversation.owner)
+    kept = execute(post(other), FakeAdapter([reply("別の会話")]), SavingSession)
+    first = execute(post(conversation), FakeAdapter([reply("1回目")]), SavingSession)
+    assert first.status == RunStatus.COMPLETED
+    old = Checkpoint.objects.get(run=first)
+    assert get_storage().exists(old.key)
+
+    second = execute(post(conversation, "次"), FakeAdapter([reply("2回目")]), SavingSession)
+
+    assert second.status == RunStatus.COMPLETED
+    latest = Checkpoint.objects.get(run__conversation=conversation)
+    assert latest.run == second
+    assert get_storage().exists(latest.key)
+    assert not get_storage().exists(old.key)
+    assert get_storage().exists(Checkpoint.objects.get(run=kept).key)
+
+
+def test_snapshot_that_cannot_be_deleted_is_retried_by_the_next_save(conversation, monkeypatch):
+    first = execute(post(conversation), FakeAdapter([reply("1回目")]), SavingSession)
+    old = Checkpoint.objects.get(run=first)
+
+    def fail(self, key):
+        raise StorageError("timeout")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(LocalStorage, "delete", fail)
+        second = execute(post(conversation, "次"), FakeAdapter([reply("2回目")]), SavingSession)
+    # 消せなくても新しいsnapshotは使える
+    assert Checkpoint.objects.filter(run__conversation=conversation).count() == 2
+    assert Checkpoint.latest_for(second).run == second  # type: ignore[union-attr]
+
+    execute(post(conversation, "次の次"), FakeAdapter([reply("3回目")]), SavingSession)
+    assert Checkpoint.objects.filter(run__conversation=conversation).count() == 1
+    assert not get_storage().exists(old.key)
+
+
+def _task_run(user) -> Run:
+    return start_task_run(TaskDefinitionFactory.create(created_by=user), inputs={}, actor=user, launch=RunLaunch.MANUAL)
+
+
+def _evaluation_run(user) -> Run:
+    run = post(ConversationFactory.create(owner=user))
+    Run.objects.filter(pk=run.pk).update(kind=RunKind.EVALUATION)
+    run.refresh_from_db()
+    return run
+
+
+@pytest.mark.parametrize("start", [_task_run, _evaluation_run], ids=["task", "evaluation"])
+def test_run_without_a_kept_workspace_ends_without_a_snapshot(app_user, start):
+    """タスクの実行とDraftの評価は、完了でsnapshotを作らない（design.md §7.9・§8）。成果物の回収は別に行う"""
+    run = start(app_user)
+    requested: list[bool] = []
+
+    class Session(SavingSession):
+        def suspend(self, *, snapshot=True):
+            requested.append(snapshot)
+            return super().suspend(snapshot=snapshot)
+
+    run = execute(run, FakeAdapter([reply("できました")]), Session)
+    assert run.status == RunStatus.COMPLETED
+    assert requested == [False]
+    assert not Checkpoint.objects.filter(run=run).exists()
+
+
+def test_snapshot_of_a_finished_task_run_is_discarded(conversation, django_capture_on_commit_callbacks):
+    """確認待ちで保存したsnapshotは、終わる（停止・失敗を含む）ときに消す。会話のRunのものは消さない"""
+    run = post(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    stored = get_storage().put_immutable("snapshots/x.tar", io.BytesIO(b"tar"))
+    Checkpoint.objects.create(
+        run=run,
+        attempt=attempt,
+        sequence=1,
+        storage="test-main",
+        key=stored.key,
+        size=stored.size,
+        sha256=stored.sha256,
+    )
+    Run.objects.filter(pk=run.pk).update(status=RunStatus.WAITING_USER)
+    run.refresh_from_db()
+
+    with django_capture_on_commit_callbacks(execute=True):
+        run.set_status(RunStatus.CANCELLED)
+    assert Checkpoint.objects.filter(run=run).exists()
+
+    Run.objects.filter(pk=run.pk).update(status=RunStatus.WAITING_USER, trigger=RunTrigger.TASK)
+    run.refresh_from_db()
+    with django_capture_on_commit_callbacks(execute=True):
+        run.set_status(RunStatus.CANCELLED)
+    assert not Checkpoint.objects.filter(run=run).exists()
+    assert not get_storage().exists(stored.key)
 
 
 def test_long_sandbox_operations_keep_the_lease(conversation, monkeypatch, settings, tmp_path):

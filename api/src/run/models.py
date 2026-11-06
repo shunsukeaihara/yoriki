@@ -6,6 +6,7 @@ Modelのメソッドの中で変わる。RunEventは追記だけの記録で、�
 
 import hashlib
 import json
+import logging
 from contextlib import contextmanager
 from datetime import timedelta
 from typing import Any
@@ -16,9 +17,12 @@ from django.db.models import Exists, Max, OuterRef, Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from artifact.storage import StorageError, get_storage
 from utils.fields import NanoidField
 
 from .errors import AlreadyAnswered, InvalidTransition, LeaseLost
+
+logger = logging.getLogger(__name__)
 
 
 class RunStatus(models.IntegerChoices):
@@ -259,6 +263,12 @@ class Run(models.Model):
         Workspaceも引き継がない（修正チャットでは、同じ会話の前の実行のものを見せない。harness.md §10.10）"""
         return self.trigger == RunTrigger.TASK
 
+    @property
+    def keeps_workspace(self) -> bool:
+        """終わった後もWorkspaceのsnapshotを残すか。タスクの実行とDraftの評価は、同じWorkspaceで続けることがないので、
+        完了・停止・失敗ではsnapshotを作らず、確認待ちで作ったものも消す（design.md §7.9・§8）"""
+        return not self.isolated_workspace and self.kind != RunKind.EVALUATION
+
     def fix_chat_runs(self) -> "RunQuerySet":
         """タスクの編集のRunが引き継ぐ、修正チャットのRun（直前のタスクのRunから、このRunまで）。添付と
         Connectorの結果はこの中のものだけを /workspace/input に置く（タスクのRunごとに名前が重なりうるため。
@@ -327,6 +337,8 @@ class Run(models.Model):
                 from conversation.evaluation import on_run_finished  # noqa: PLC0415
 
                 on_run_finished(self)
+            if not self.keeps_workspace:
+                transaction.on_commit(lambda: Checkpoint.discard_through(self))
         return event
 
     @transaction.atomic
@@ -648,10 +660,10 @@ class ToolInvocation(models.Model):
 
 
 class Checkpoint(models.Model):
-    """Workspaceのsnapshotを確定した区切り（design.md §5.4・§7.9、harness.md §11.1）。作成後に変更・削除しない。
+    """Workspaceのsnapshotを確定した区切り（design.md §5.4・§7.9、harness.md §11.1）。作成後に変更しない。
 
-    新しいAttemptは、そのRunの最後のCheckpointからWorkspaceを戻す。同じ会話の次の依頼（子のRun）は、親のRunの最後の
-    Checkpointから始める。snapshotの中身は保存先（artifact/storage.py）にあり、ここには場所と版だけを持つ
+    新しいAttemptも、同じ会話の次のRunも、agentセッションの最新のCheckpointからWorkspaceを戻す。残すのは最新の1つだけで、
+    新しいものを確定した後に古いものを消す。snapshotの中身は保存先（artifact/storage.py）にあり、ここには場所と版だけを持つ
     """
 
     uid = NanoidField(unique=True)
@@ -678,21 +690,42 @@ class Checkpoint(models.Model):
 
     @classmethod
     def latest_for(cls, run: Run) -> "Checkpoint | None":
-        """Runの最後のCheckpoint。なければ同じ会話の前の依頼（親をたどったRun）の最後のもの。
-        Sandboxを使わなかった依頼にはCheckpointがないので、さらに前の依頼のものを使う。
-        親は同じ会話の1つ前のRunなので、会話の中でこのRunまでのRunを新しい順に探す"""
+        """このRunが戻すCheckpoint。Sandboxを使わなかったRunにはCheckpointがないので、会話の中でこのRunまでのRunを
+        新しい順に探す"""
         if run.isolated_workspace:
             # タスクのRunは、ほかのRunのWorkspaceを引き継がない（修正チャットの前の実行のものも）
             return cls.objects.filter(run=run).order_by("-sequence", "-pk").first()
         if run.kind == RunKind.TASK_EDIT:
-            # 修正チャットのタスクの編集のRunは、直前のタスクのRunから後のものだけ（直前のタスクのRunがCheckpointを
-            # 残さなければ、さらに前の実行のものではなく空のWorkspaceから始める。harness.md §10.10）
-            return cls.objects.filter(run__in=run.fix_chat_runs()).order_by("-run_id", "-sequence", "-pk").first()
+            # 修正チャットのタスクの編集のRunは、直前のタスクのRunより後の編集のRunのものだけ。タスクのRunの作業ファイル
+            # は残らないので、最初の編集のRunは空のWorkspaceから始める（harness.md §10.10）
+            runs = run.fix_chat_runs().exclude(trigger=RunTrigger.TASK)
+            return cls.objects.filter(run__in=runs).order_by("-run_id", "-sequence", "-pk").first()
         return (
             cls.objects.filter(run__conversation_id=run.conversation_id, run_id__lte=run.pk)
             .order_by("-run_id", "-sequence", "-pk")
             .first()
         )
+
+    @classmethod
+    def discard_older(cls, checkpoint: "Checkpoint") -> None:
+        """確定したCheckpointより前のsnapshotを消す（残すのは最新の1つだけ。design.md §7.9）"""
+        cls._discard(cls.objects.filter(run__conversation_id=checkpoint.run.conversation_id, pk__lt=checkpoint.pk))
+
+    @classmethod
+    def discard_through(cls, run: Run) -> None:
+        """Workspaceを残さないRunが終わったときに、そのRunまでのsnapshotを消す（design.md §8）"""
+        cls._discard(cls.objects.filter(run__conversation_id=run.conversation_id, run_id__lte=run.pk))
+
+    @classmethod
+    def _discard(cls, checkpoints: models.QuerySet["Checkpoint"]) -> None:
+        """実体を消せたものだけ行を消す。消せなかったものは行が残り、次に消すときにやり直す"""
+        for checkpoint in checkpoints:
+            try:
+                get_storage(checkpoint.storage).delete(checkpoint.key)
+            except (StorageError, OSError):
+                logger.warning("cannot delete the snapshot of checkpoint %s", checkpoint.uid, exc_info=True)
+                continue
+            checkpoint.delete()
 
 
 class RunPrompt(models.Model):

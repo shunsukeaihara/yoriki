@@ -792,7 +792,7 @@ class Runner:
 
     def _finish_with_reply(self, text: str, status: RunStatus, end_reason: RunEndReason, *, error: str = "") -> bool:
         """応答を会話に載せてRunを終える。完了の前に追加指示が届いていれば、終えずにTrue（続ける）を返す"""
-        self._checkpoint()
+        self._checkpoint(ending=True)
         with self.run_obj.fenced(self.attempt) as run:
             if text.strip():
                 ConversationMessage.objects.create(
@@ -834,7 +834,7 @@ class Runner:
 
     def _finish_cancelled(self) -> None:
         # 停止を優先する。Workspaceを保存できなくても止める（design.md §7.9）
-        self._checkpoint(required=False)
+        self._checkpoint(required=False, ending=True)
         with self.run_obj.fenced(self.attempt) as run:
             ToolInvocation.objects.filter(run=run, status__in=(ToolStatus.REQUESTED, ToolStatus.RUNNING)).update(
                 status=ToolStatus.CANCELLED, ended=timezone.now()
@@ -842,7 +842,7 @@ class Runner:
             run.set_status(RunStatus.CANCELLED, comment=_("停止しました。"), end_reason=RunEndReason.CANCELLED)
 
     def _fail(self, end_reason: RunEndReason, message: str) -> None:
-        self._checkpoint(required=False)
+        self._checkpoint(required=False, ending=True)
         with self.run_obj.fenced(self.attempt) as run:
             if run.status == RunStatus.CANCELLING:
                 run.set_status(RunStatus.CANCELLED, end_reason=RunEndReason.CANCELLED)
@@ -851,14 +851,14 @@ class Runner:
 
     # --- Sandbox ---
 
-    def _checkpoint(self, *, required: bool = True) -> None:
-        """Attemptを終える前に、ジョブを止めてWorkspaceを保存する（design.md §7.9）。Sandboxを使っていなければ
-        何もしない。
+    def _checkpoint(self, *, required: bool = True, ending: bool = False) -> None:
+        """Workerを手放す前に、ジョブを止めてWorkspaceを保存する（design.md §7.9）。Sandboxを使っていなければ
+        何もしない。Runが終わるとき（ending）、Workspaceを残さないRunは成果物の回収だけを行う。
 
         保存できなければ、待ち・完了にはせず、Sandboxの障害として別のAttemptでやり直す（required）
         """
         try:
-            saved = self.session.suspend()
+            saved = self.session.suspend(snapshot=self.run_obj.keeps_workspace or not ending)
         except SandboxUnavailable:
             if required:
                 raise
@@ -869,20 +869,24 @@ class Runner:
             return
         self.workspace_outputs = saved.present
         with self.run_obj.fenced(self.attempt) as run:
-            sequence = RunEvent.objects.filter(run=run).aggregate(last=Max("sequence"))["last"] or 0
-            Checkpoint.objects.create(
-                run=run,
-                attempt=self.attempt,
-                sequence=sequence,
-                storage=saved.backend_id,
-                key=saved.snapshot.key,
-                size=saved.snapshot.size,
-                sha256=saved.snapshot.sha256,
-                stopped_jobs=saved.stopped,
-            )
+            checkpoint = None
+            if saved.snapshot is not None:
+                sequence = RunEvent.objects.filter(run=run).aggregate(last=Max("sequence"))["last"] or 0
+                checkpoint = Checkpoint.objects.create(
+                    run=run,
+                    attempt=self.attempt,
+                    sequence=sequence,
+                    storage=saved.backend_id,
+                    key=saved.snapshot.key,
+                    size=saved.snapshot.size,
+                    sha256=saved.snapshot.sha256,
+                    stopped_jobs=saved.stopped,
+                )
             # /workspace/output のファイルは、利用者が会話の画面から取得できる成果物にする（design.md §7.4）
             for output in saved.outputs:
                 Artifact.create_output(run, output.path, BlobObject.register(output.stored, saved.backend_id))
+        if checkpoint is not None:
+            Checkpoint.discard_older(checkpoint)
 
     def _sandbox_failure(self, error: SandboxUnavailable) -> None:
         """Sandboxを起動できない・失われた。やり直せるなら別のAttemptで（harness.md §4.3の retry_wait）"""

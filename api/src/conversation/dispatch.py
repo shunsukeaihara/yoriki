@@ -66,7 +66,7 @@ def user_message_data(
     """利用者の発言のRunEventの内容。添付は /workspace/input の場所とあわせて残す（harness/context.py が読む）。
 
     Runの最初の発言（first）には、同じ会話でそれまでに送った添付も添える。/workspace/input には会話の添付が
-    すべてあり、作業ファイルも前の依頼のCheckpointから引き継ぐので、前の依頼のファイルを使う依頼に答えられるように。
+    すべてあり、作業ファイルも最新のCheckpointから引き継ぐので、前の依頼のファイルを使う依頼に答えられるように。
     `skills` は `/` で指定してRun開始時に解決したSkill（Manifestの内容）。本文も添え、モデルに `skill` を呼ばせない。
     `connectors` は `@` で指定したConnector。公開している表の説明を添える（harness.md §10.2）。
     `connector_catalog` はRunに固定したConnectorの一覧で、Skillの本文のConnectorの名前に使う
@@ -425,7 +425,7 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
     if skill_edit is not None:
         fixed["skill_edit"] = skill_edit
     if parent is None:
-        # 同じ会話の前の依頼。作業ファイルはその最後のCheckpointから引き継ぐ（design.md §7.9）
+        # 同じ会話の前のRun。作業ファイルは会話の最新のCheckpointから引き継ぐ（design.md §7.9）
         parent = Run.objects.filter(conversation=conversation).order_by("-created", "-pk").first()
     run = Run.objects.create(
         conversation=conversation,
@@ -453,7 +453,7 @@ def _start_task_edit(
     conversation: Conversation, message: ConversationMessage, actor, *, version, effort, runtime_version
 ):
     """修正チャットのタスクの編集のRun（harness.md §10.10）。同じ会話の1つ前のRunを親にして文脈を引き継ぎ（タスクの
-    Runは親を持たないので、直前のタスクのRunから始まる）、作業ファイルは会話の最後のCheckpointから戻す。
+    Runは親を持たないので、直前のタスクのRunから始まる）、作業ファイルは会話の最新のCheckpointから戻す。
     Skill・Connectorは使わない"""
     task_edit = resolve_task_edit(conversation, conversation.owner, version)
     fixed: dict[str, object] = {

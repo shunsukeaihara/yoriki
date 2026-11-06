@@ -3,23 +3,47 @@
 import functools
 import io
 import time
+from typing import ClassVar
+from unittest import mock
 
 import pytest
 from django.db import DatabaseError, connection
 
-from artifact.storage import LocalStorage
+from artifact.storage import LocalStorage, StorageError, StoredObject, get_storage
 from conversation.dispatch import MessageMode, post_message
 from conversation.factories import ConversationFactory
 from harness.runner import Runner
-from harness.sandbox import WORKSPACE_LOST, Job, SandboxSession, database_label, remove_stale_sandboxes
+from harness.sandbox import (
+    WORKSPACE_LOST,
+    WORKSPACE_ROLLED_BACK,
+    Job,
+    SandboxSession,
+    Suspended,
+    database_label,
+    remove_stale_sandboxes,
+    verify_saved,
+)
 from harness.tools import shell as shell_tool
 from harness.tools.base import ToolContext
 from harness.tools.shell import _job_text
 from llm.providers.base import ToolCall
 from run.errors import LeaseLost
-from run.models import Checkpoint, ExecutionAttempt, Run, RunEndReason, RunEvent, RunEventKind, RunStatus
+from run.models import (
+    Checkpoint,
+    ExecutionAttempt,
+    Run,
+    RunEndReason,
+    RunEvent,
+    RunEventKind,
+    RunKind,
+    RunLaunch,
+    RunStatus,
+    RunTrigger,
+)
 from run.tasks import claim_run
 from runtime.launcher import ATTEMPT_LABEL, DATABASE_LABEL, Exec, SandboxUnavailable
+from task.dispatch import start_task_run
+from task.factories import TaskDefinitionFactory
 
 from .fakes import FakeAdapter, FakeSession, calls, reply
 
@@ -204,6 +228,285 @@ def test_snapshot_is_read_from_the_recorded_backend(conversation, settings, tmp_
     assert restored == [b"tar"]
     assert session.restored == checkpoint
     assert session.take_notice() == ""
+
+
+class FailingStorage:
+    """このWorkerの設定にはあるが、一時的に読めない保存先"""
+
+    def stat(self, key):
+        raise StorageError("timeout")
+
+
+def test_snapshot_read_failure_is_retried_in_a_new_attempt(conversation, settings, tmp_path):
+    """一時的に読めないときは、空で続けて最新のsnapshotを上書きせず、別のAttemptでやり直す（design.md §7.9）"""
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path)
+    first = post(conversation)
+    attempt = claim_run(first.pk)
+    assert attempt is not None
+    Checkpoint.objects.create(
+        run=first, attempt=attempt, sequence=1, storage="test-main", key="runs/x.tar", size=1, sha256="0" * 64
+    )
+    session = SandboxSession(first, attempt, storage_factory=mock.Mock(return_value=FailingStorage()))
+
+    with pytest.raises(SandboxUnavailable) as error:
+        session._restore(object())  # type: ignore[arg-type]
+    assert error.value.retryable
+    assert session.restored is None
+    assert session.take_notice() == ""
+
+
+def test_snapshot_stream_failure_is_retried_in_a_new_attempt(conversation, settings, tmp_path):
+    """読み出しの途中で切れても（S3の接続の切断等）、別のAttemptでやり直す"""
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path)
+    stored = get_storage().put_immutable("snapshots/x.tar", io.BytesIO(b"tar"))
+    first = post(conversation)
+    attempt = claim_run(first.pk)
+    assert attempt is not None
+    Checkpoint.objects.create(
+        run=first,
+        attempt=attempt,
+        sequence=1,
+        storage="test-main",
+        key=stored.key,
+        size=stored.size,
+        sha256=stored.sha256,
+    )
+
+    class Sandbox:
+        def restore(self, src):
+            raise ConnectionError("reset")
+
+    session = SandboxSession(first, attempt)
+    with pytest.raises(SandboxUnavailable, match="cannot read the snapshot"):
+        session._restore(Sandbox())  # type: ignore[arg-type]
+    assert session.restored is None
+
+
+class SavingSession(FakeSession):
+    """Workspaceの保存だけを本物の保存先へ行う"""
+
+    def suspend(self, *, snapshot=True):
+        storage = get_storage()
+        stored = None
+        if snapshot:
+            stored = storage.put_immutable(
+                f"snapshots/runs/{self.run.uid}/{self.attempt.number}.tar", io.BytesIO(self.run.uid.encode())
+            )
+        return Suspended(stored, storage.backend_id, [], [], {})
+
+
+def test_two_generations_of_snapshots_are_kept(conversation):
+    """新しいsnapshotを確定したら、その1つ前まで残して古いものを消す。別の会話のものは消さない（design.md §7.9）"""
+    other = ConversationFactory.create(owner=conversation.owner)
+    kept = execute(post(other), FakeAdapter([reply("別の会話")]), SavingSession)
+    runs = [execute(post(conversation, f"{n}回目"), FakeAdapter([reply("済み")]), SavingSession) for n in range(3)]
+    assert all(run.status == RunStatus.COMPLETED for run in runs)
+
+    remaining = Checkpoint.objects.filter(run__conversation=conversation).order_by("pk")
+    assert [c.run for c in remaining] == runs[1:]
+    assert all(get_storage().exists(c.key) for c in remaining)
+    assert not get_storage().exists(f"snapshots/runs/{runs[0].uid}/1.tar")
+    assert get_storage().exists(Checkpoint.objects.get(run=kept).key)
+
+
+def test_snapshot_that_cannot_be_deleted_is_retried_by_the_next_save(conversation, monkeypatch):
+    first = execute(post(conversation), FakeAdapter([reply("1回目")]), SavingSession)
+    old = Checkpoint.objects.get(run=first)
+    execute(post(conversation, "2回目"), FakeAdapter([reply("済み")]), SavingSession)
+
+    def fail(self, key):
+        raise StorageError("timeout")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(LocalStorage, "delete", fail)
+        third = execute(post(conversation, "3回目"), FakeAdapter([reply("済み")]), SavingSession)
+    # 消せなくても新しいsnapshotは使える
+    assert Checkpoint.objects.filter(run__conversation=conversation).count() == 3
+    assert Checkpoint.latest_for(third).run == third  # type: ignore[union-attr]
+
+    execute(post(conversation, "4回目"), FakeAdapter([reply("済み")]), SavingSession)
+    assert Checkpoint.objects.filter(run__conversation=conversation).count() == 2
+    assert not get_storage().exists(old.key)
+
+
+def _checkpoint(run, attempt, sequence, data: bytes | None) -> Checkpoint:
+    """`data` がNoneなら、保存先に実体のないCheckpoint"""
+    key = f"snapshots/{sequence}.tar"
+    sha256 = get_storage().put_immutable(key, io.BytesIO(data)).sha256 if data is not None else "0" * 64
+    return Checkpoint.objects.create(
+        run=run, attempt=attempt, sequence=sequence, storage="test-main", key=key, size=1, sha256=sha256
+    )
+
+
+class RecordingSandbox:
+    def __init__(self):
+        self.restored: list[bytes] = []
+
+    def restore(self, src):
+        self.restored.append(src.read())
+
+
+def test_latest_snapshot_that_is_missing_falls_back_to_the_previous_one(conversation, settings, tmp_path):
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path)
+    run = post(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    previous = _checkpoint(run, attempt, 1, b"previous")
+    _checkpoint(run, attempt, 2, None)
+    session = SandboxSession(run, attempt)
+    sandbox = RecordingSandbox()
+
+    session._restore(sandbox)  # type: ignore[arg-type]
+
+    assert sandbox.restored == [b"previous"]
+    assert session.restored == previous
+    assert session.take_notice() == WORKSPACE_ROLLED_BACK
+
+
+def test_no_notice_when_the_latest_snapshot_is_restored(conversation, settings, tmp_path):
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path)
+    run = post(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    _checkpoint(run, attempt, 1, b"previous")
+    _checkpoint(run, attempt, 2, b"latest")
+    session = SandboxSession(run, attempt)
+    sandbox = RecordingSandbox()
+
+    session._restore(sandbox)  # type: ignore[arg-type]
+
+    assert sandbox.restored == [b"latest"]
+    assert session.take_notice() == ""
+
+
+def test_workspace_is_empty_when_no_generation_can_be_restored(conversation, settings, tmp_path):
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path)
+    run = post(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    _checkpoint(run, attempt, 1, None)
+    _checkpoint(run, attempt, 2, None)
+    session = SandboxSession(run, attempt)
+    sandbox = RecordingSandbox()
+
+    session._restore(sandbox)  # type: ignore[arg-type]
+
+    assert sandbox.restored == []
+    assert session.restored is None
+    assert session.take_notice() == WORKSPACE_LOST
+
+
+def test_saving_after_a_fallback_keeps_the_generation_that_was_restored(conversation):
+    """最新が見つからず1つ前から戻した後の保存では、見つからなかったものではなく、戻せたものを残す"""
+    run = post(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    restored = _checkpoint(run, attempt, 1, b"previous")
+    missing = _checkpoint(run, attempt, 2, None)
+    new = _checkpoint(run, attempt, 3, b"new")
+
+    Checkpoint.discard_older(new, restored=restored)
+
+    assert set(Checkpoint.objects.filter(run=run)) == {restored, new}
+    assert not Checkpoint.objects.filter(pk=missing.pk).exists()
+
+
+def test_saved_snapshot_is_read_back_in_full():
+    """大きさとメタデータだけでなく、保存先の中身を読んで確かめる"""
+    good = get_storage().put_immutable("snapshots/good.tar", io.BytesIO(b"tar"))
+    verify_saved(get_storage(), good)
+
+    broken = StoredObject(good.key, good.size, "0" * 64)
+    with pytest.raises(SandboxUnavailable, match="differs"):
+        verify_saved(get_storage(), broken)
+    missing = StoredObject("snapshots/missing.tar", 3, good.sha256)
+    with pytest.raises(SandboxUnavailable, match="cannot verify") as error:
+        verify_saved(get_storage(), missing)
+    assert error.value.retryable
+
+
+def _start_task(user, launch: RunLaunch) -> Run:
+    """個人のタスクを手動実行で始めて、起動のしかたを変える（判定に使うのは起動のしかただけ）"""
+    task = TaskDefinitionFactory.create(created_by=user)
+    run = start_task_run(task, inputs={}, actor=user, launch=RunLaunch.MANUAL)
+    Run.objects.filter(pk=run.pk).update(launch=launch)
+    run.refresh_from_db()
+    return run
+
+
+def _evaluation_run(user) -> Run:
+    run = post(ConversationFactory.create(owner=user))
+    Run.objects.filter(pk=run.pk).update(trigger=RunTrigger.EVALUATION, kind=RunKind.EVALUATION)
+    run.refresh_from_db()
+    return run
+
+
+class RecordingSession(SavingSession):
+    requested: ClassVar[list[bool]] = []
+
+    def suspend(self, *, snapshot=True):
+        self.requested.append(snapshot)
+        return super().suspend(snapshot=snapshot)
+
+
+@pytest.mark.parametrize(
+    "start",
+    [
+        functools.partial(_start_task, launch=RunLaunch.WEBHOOK),
+        functools.partial(_start_task, launch=RunLaunch.MANUAL),
+        functools.partial(_start_task, launch=RunLaunch.CHAT),
+        _evaluation_run,
+    ],
+    ids=["webhook", "manual", "chat", "evaluation"],
+)
+def test_run_without_anyone_to_answer_ends_without_a_snapshot(app_user, start, monkeypatch):
+    """答える人がいないRunは続きがないので、snapshotを作らない（design.md §7.9・§8）。成果物の回収は別に行う"""
+    monkeypatch.setattr(RecordingSession, "requested", [])
+    run = start(app_user)
+    run = execute(run, FakeAdapter([reply("できました")]), RecordingSession)
+    assert run.status == RunStatus.COMPLETED, run.error
+    assert RecordingSession.requested == [False]
+    assert not Checkpoint.objects.filter(run=run).exists()
+
+
+def test_task_run_of_a_fix_chat_keeps_the_workspace_like_a_conversation(app_user, monkeypatch):
+    """修正チャットの中のタスクのRunには答える人がいるので、完了でも保存する"""
+    monkeypatch.setattr(RecordingSession, "requested", [])
+    run = _start_task(app_user, RunLaunch.FIX)
+    run = execute(run, FakeAdapter([reply("できました")]), RecordingSession)
+    assert run.status == RunStatus.COMPLETED, run.error
+    assert RecordingSession.requested == [True]
+    assert Checkpoint.objects.filter(run=run).exists()
+
+
+def test_snapshot_of_a_finished_task_run_is_discarded(conversation, django_capture_on_commit_callbacks):
+    """確認待ちで保存したsnapshotは、終わる（停止・失敗を含む）ときに消す。会話のRunのものは消さない"""
+    run = post(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    stored = get_storage().put_immutable("snapshots/x.tar", io.BytesIO(b"tar"))
+    Checkpoint.objects.create(
+        run=run,
+        attempt=attempt,
+        sequence=1,
+        storage="test-main",
+        key=stored.key,
+        size=stored.size,
+        sha256=stored.sha256,
+    )
+    Run.objects.filter(pk=run.pk).update(status=RunStatus.WAITING_USER)
+    run.refresh_from_db()
+
+    with django_capture_on_commit_callbacks(execute=True):
+        run.set_status(RunStatus.CANCELLED)
+    assert Checkpoint.objects.filter(run=run).exists()
+
+    Run.objects.filter(pk=run.pk).update(status=RunStatus.WAITING_USER, trigger=RunTrigger.EVALUATION)
+    run.refresh_from_db()
+    with django_capture_on_commit_callbacks(execute=True):
+        run.set_status(RunStatus.CANCELLED)
+    assert not Checkpoint.objects.filter(run=run).exists()
+    assert not get_storage().exists(stored.key)
 
 
 def test_long_sandbox_operations_keep_the_lease(conversation, monkeypatch, settings, tmp_path):

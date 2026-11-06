@@ -371,6 +371,27 @@ def test_edit_run_does_not_restore_files_of_earlier_runs(api_client, manager):
     assert Checkpoint.latest_for(run) is None
 
 
+def test_later_edit_run_restores_files_of_the_previous_edit_run(api_client, manager):
+    task = _task(manager)
+    first = _fix(api_client, manager, task)
+    Run.objects.filter(pk=first.pk).update(status=RunStatus.COMPLETED)
+    res = _post(api_client, first.conversation)
+    assert res.status_code == 201, res.json()
+    edit = ConversationMessage.objects.get(uid=res.json()["id"]).run
+    assert edit is not None
+    attempt = claim_run(edit.pk)
+    assert attempt is not None
+    checkpoint = Checkpoint.objects.create(
+        run=edit, attempt=attempt, sequence=1, storage="local:x", key="runs/a.tar", size=1, sha256="0" * 64
+    )
+    Run.objects.filter(pk=edit.pk).update(status=RunStatus.COMPLETED)
+    res = _post(api_client, first.conversation)
+    assert res.status_code == 201, res.json()
+    run = ConversationMessage.objects.get(uid=res.json()["id"]).run
+    assert run is not None
+    assert Checkpoint.latest_for(run) == checkpoint
+
+
 def _finished_fix_in(api_client, manager, task, conversation) -> Run:
     run = _fix(api_client, manager, task, conversation=conversation)
     run.set_status(RunStatus.CANCELLED)

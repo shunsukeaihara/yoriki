@@ -1,6 +1,6 @@
 """RunnerからSandboxを使う（harness.md §8、design.md §7.5・§7.9）。
 
-SandboxはAttemptごとに1つで、最初にSandboxのToolが呼ばれた時点で起動し、最後のCheckpointからWorkspaceを戻す。
+SandboxはAttemptごとに1つで、最初にSandboxのToolが呼ばれた時点で起動し、最新のCheckpointからWorkspaceを戻す。
 コマンドはすべてバックグラウンドのジョブとして始め、`shell` は終わりを待つだけにする。ジョブの状態の正本はSandboxの
 外にあるもの（Dockerのexecの状態と、Worker側のファイルへ書いた出力）だけにする。Attemptを終えるときは、ジョブを
 止めてからWorkspaceを取り出して保存し（Checkpoint）、Sandboxを消す。
@@ -29,7 +29,7 @@ from django.utils import timezone
 from nanoid import generate
 
 from artifact.models import CONNECTOR_RESULTS_DIR, Artifact, ArtifactKind, BlobObject
-from artifact.storage import StorageBackend, StorageError, StoredObject, get_storage
+from artifact.storage import StorageBackend, StorageError, StoredObject, get_storage, hash_stream
 from run.errors import LeaseLost
 from run.models import Checkpoint, ExecutionAttempt, Run, RunKind
 from runtime.launcher import (
@@ -55,6 +55,7 @@ T = TypeVar("T")
 WORKSPACE = "/workspace"
 # snapshotに入れるもの。input・masterは固定の版から、envはイメージと追加のpackageから作り直す（design.md §7.9）
 SNAPSHOT_PATHS = ["work", "output"]
+OUTPUT_PATHS = ["output"]
 # 1回に回収する成果物（/workspace/output のファイル）の数の上限（design.md §7.4）
 MAX_OUTPUT_FILES = 200
 # Skillのスクリプトからの要求を、処理を待つ列に積める数（design.md §4.9.6）。あふれた要求への応答
@@ -86,7 +87,8 @@ OUT_OF_MEMORY_NOTICE = (
 )
 WORKSPACE_LOST = (
     "[The files saved from the previous work could not be restored on this worker, so /workspace/work and "
-    "/workspace/output are empty. Check which files you need and recreate them before continuing.]"
+    "/workspace/output are empty. Tell the user that the working environment was lost and that you are rebuilding it "
+    "from scratch. Check which files you need and recreate them before continuing.]"
 )
 
 
@@ -131,11 +133,19 @@ class CollectedOutput:
     stored: StoredObject
 
 
+WORKSPACE_ROLLED_BACK = (
+    "[The latest saved files could not be restored on this worker, so /workspace/work and /workspace/output went back "
+    "to the saved state before them. Tell the user that the latest work on the files was lost. Check which files you "
+    "need and redo the later changes before continuing.]"
+)
+
+
 @dataclass(frozen=True)
 class Suspended:
     """Attemptを終えるときに保存したもの"""
 
-    snapshot: StoredObject
+    # 答える人がいないRunでは作らない（Run.is_interactive）
+    snapshot: StoredObject | None
     backend_id: str
     # 保存の前に止めたジョブ（[{"job_id", "command"}]）
     stopped: list[dict[str, str]]
@@ -263,8 +273,14 @@ class SandboxSession:
             )
         name = f"yoriki-sandbox-{self.run.uid}-{self.attempt.number}"
         # イメージのpullで、Attemptのleaseより長くかかることがある
-        self.sandbox = self._keep_lease(lambda: launcher.start(spec, name), on_abandon=Sandbox.remove)
-        self._restore(self.sandbox)
+        sandbox = self._keep_lease(lambda: launcher.start(spec, name), on_abandon=Sandbox.remove)
+        try:
+            self._restore(sandbox)
+        except BaseException:
+            # 途中まで戻したWorkspaceを保存して、最新のsnapshotを上書きしないように、このSandboxは使わない
+            sandbox.remove()
+            raise
+        self.sandbox = sandbox
         self._start_relay()
         return self.sandbox
 
@@ -417,24 +433,38 @@ class SandboxSession:
         return path.parent == self.input_dir and artifact.path != CONNECTOR_RESULTS_DIR
 
     def _restore(self, sandbox: Sandbox) -> None:
-        checkpoint = Checkpoint.latest_for(self.run)
-        if checkpoint is None:
-            return
+        """新しい世代から順に、戻せるものから戻す。どれも戻せなければ空のWorkspaceで続ける（design.md §7.9）"""
+        checkpoints = list(Checkpoint.restorable_for(self.run))
+        for index, checkpoint in enumerate(checkpoints):
+            if self._restore_from(sandbox, checkpoint):
+                if index > 0:
+                    self.notice = WORKSPACE_ROLLED_BACK
+                return
+        if checkpoints:
+            self.notice = WORKSPACE_LOST
+
+    def _restore_from(self, sandbox: Sandbox, checkpoint: Checkpoint) -> bool:
+        """このWorkerで見つからないものはFalse（別のWorkerのローカルディスクに保存した等）"""
         # 記録した保存先から読む（既定の保存先を変えた後も、以前の保存先の設定があれば読める）
-        stored = None
         try:
             storage = self.storage_factory(checkpoint.storage)
-            stored = storage.stat(checkpoint.key)
         except StorageError:
-            logger.warning("run %s: cannot read checkpoint %s", self.run.uid, checkpoint.uid, exc_info=True)
-        if stored is None or stored.sha256 != checkpoint.sha256:
-            # 別のWorkerのローカルディスクに保存した等。空のWorkspaceで続け、モデルに知らせる
-            logger.warning("run %s: checkpoint %s is not available here", self.run.uid, checkpoint.uid)
-            self.notice = WORKSPACE_LOST
-            return
-        with storage.open_read(checkpoint.key) as src:
-            self._keep_lease(lambda: sandbox.restore(src))
+            logger.warning("run %s: unknown storage of checkpoint %s", self.run.uid, checkpoint.uid, exc_info=True)
+            return False
+        try:
+            stored = storage.stat(checkpoint.key)
+            if stored is None or stored.sha256 != checkpoint.sha256:
+                logger.warning("run %s: checkpoint %s is not available here", self.run.uid, checkpoint.uid)
+                return False
+            with storage.open_read(checkpoint.key) as src:
+                self._keep_lease(lambda: sandbox.restore(src))
+        except (LeaseLost, SandboxUnavailable):
+            raise
+        except Exception as exc:
+            # 一時的な読取りの失敗。古い世代や空で続けて上書きせず、別のAttemptでやり直す（design.md §7.9）
+            raise SandboxUnavailable(f"cannot read the snapshot: {exc}") from exc
         self.restored = checkpoint
+        return True
 
     def take_notice(self) -> str:
         notice, self.notice = self.notice, ""
@@ -639,9 +669,10 @@ class SandboxSession:
 
     # --- Attemptの終わり ---
 
-    def suspend(self) -> Suspended | None:
+    def suspend(self, *, snapshot: bool = True) -> Suspended | None:
         """動いているものを止め、Workspaceを取り出して保存し、/workspace/output のファイルを成果物として回収する。
-        Sandboxを起動していなければNone。Checkpoint・Artifactの行はRunnerがleaseの確認の中で作る
+        `snapshot` がFalseなら、回収だけで保存しない。Sandboxを起動していなければNone。Checkpoint・Artifactの行は
+        Runnerがleaseの確認の中で作る
         """
         if self.sandbox is None:
             return None
@@ -664,19 +695,22 @@ class SandboxSession:
         known = self._known_outputs()
         present: dict[str, str] = {}
 
-        def save() -> tuple[StoredObject, list[CollectedOutput]]:
+        def save() -> tuple[StoredObject | None, list[CollectedOutput]]:
             with tempfile.TemporaryFile(dir=self.dir) as archive:
-                sandbox.archive(SNAPSHOT_PATHS, archive)
+                # 保存しないなら、大きい作業ファイルで回収が失敗しないように、成果物だけを取り出す
+                sandbox.archive(SNAPSHOT_PATHS if snapshot else OUTPUT_PATHS, archive)
                 archive.seek(0)
                 try:
-                    snapshot = storage.put_immutable(key, archive)
+                    stored = storage.put_immutable(key, archive) if snapshot else None
+                    if stored is not None:
+                        verify_saved(storage, stored)
                     archive.seek(0)
-                    return snapshot, collect_outputs(archive, storage, known, present)
+                    return stored, collect_outputs(archive, storage, known, present)
                 except (OSError, StorageError, tarfile.TarError) as exc:
                     raise SandboxUnavailable(f"cannot save the workspace: {exc}") from exc
 
-        snapshot, outputs = self._keep_lease(save)
-        return Suspended(snapshot, storage.backend_id, stopped, outputs, present)
+        stored, outputs = self._keep_lease(save)
+        return Suspended(stored, storage.backend_id, stopped, outputs, present)
 
     def _known_outputs(self) -> dict[str, str]:
         """会話の成果物の、パスごとの最新の中身（SHA-256）。変わっていないファイルは回収し直さない"""
@@ -723,6 +757,17 @@ class SandboxSession:
             self.sandbox.remove()
             self.sandbox = None
         shutil.rmtree(self.dir, ignore_errors=True)
+
+
+def verify_saved(storage: StorageBackend, stored: StoredObject) -> None:
+    """保存したものを全部読み戻して確かめる。確かめてからCheckpointを確定し、古いsnapshotを消す（design.md §7.9）"""
+    try:
+        with storage.open_read(stored.key) as saved:
+            sha256, size = hash_stream(saved)
+    except Exception as exc:
+        raise SandboxUnavailable(f"cannot verify the saved workspace: {exc}") from exc
+    if (sha256, size) != (stored.sha256, stored.size):
+        raise SandboxUnavailable("the saved workspace differs from what was written")
 
 
 def collect_outputs(

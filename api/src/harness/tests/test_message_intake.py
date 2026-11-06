@@ -8,6 +8,7 @@ from connector.factories import ConnectorFactory
 from conversation.dispatch import CannotStart, post_message
 from conversation.factories import ConversationFactory
 from conversation.models import ConversationMessage, InstructionKind, InstructionState, MessageRole, UserInstruction
+from harness import connectors as connectors_module
 from harness import runner as runner_module
 from harness.intake import Chosen
 from harness.runner import Runner
@@ -283,6 +284,20 @@ def test_connector_chosen_during_a_run_shows_its_tables(conversation):
     text = next(t for t in user_texts(adapter.requests[1]) if "こちらも" in t)
     assert "public.vendors" in text
     assert [e["connector"] for e in run.manifest["appended"] if e["kind"] == "connector"] == [connector.uid]
+
+
+@pytest.mark.django_db
+def test_a_newly_chosen_connector_stays_in_the_catalog_over_the_limit(conversation, monkeypatch):
+    monkeypatch.setattr(connectors_module, "MAX_CATALOG_CONNECTORS", 1)
+    old = ConnectorFactory.create(name="前のDB", version__tables=TABLES)
+    new = ConnectorFactory.create(name="今のDB", version__tables=TABLES)
+    run = start(conversation, connectors=[old])
+    adapter = DuringFirstReply(
+        [calls(("c1", "todo_write", TODOS)), reply("終わりました。")],
+        lambda: send(conversation, body="こちらも", connectors=[new]),
+    )
+    run = execute(run, adapter)
+    assert [e["name"] for e in run.current_catalog("connector_catalog")["connectors"]] == ["今のDB"]
 
 
 @pytest.mark.django_db

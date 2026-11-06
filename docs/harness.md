@@ -15,7 +15,7 @@ Yorikiの標準のエージェント（design.md §3.1）の実行ループ、To
 - **shellはコマンドごとに `docker exec` で実行する**：常駐のシェルは持たない。作業ディレクトリは呼出しごとの `workdir`（既定は `/workspace/work`）で、持ち越さない。長いコマンドはバックグラウンドのジョブにし、終わったら次のステップで知らせる（§8）。
 - **ファイルは形式ごとに読む**：`read` はテキスト・PDF・Excel・Word・PowerPoint・CSV・画像を、形式に合った形で返す。処理はSandboxの中の補助コマンド（`yoriki-sandbox`）で行う（§7.8、§8.4）。
 - **編集は文字列の置換にそろえる**：すべてのモデルで `edit(path, old_string, new_string)` を使う。読んでいないファイル、読んだ後に変わったファイルへの書込みは断る（§7.8）。
-- **Toolの一覧はRunの開始時に決めて変えない**：Runの種類・利用者の権限（タスク・評価のRunでは固定したSkill）・モデルの能力・Sandboxの有無から決め、prompt cacheを保つ。`/` は使えと指示するだけで、一覧を変えない。実行するときに、サーバーで権限を確かめ直す（§7.5）。例外として、繰り返して止めた `prepare_notification` は、それ以降の一覧から外す（§10.5）。
+- **Toolの一覧はRunの開始時に決めて変えない**：Runの種類・権限（会話は利用者、タスクはタスクの範囲）・モデルの能力・Sandboxの有無から決め、prompt cacheを保つ。`/`・`@`、タスクの定義のSkill・Connector、Skillの `tools` は使用の指示で、一覧を変えない。実行するときに、サーバーで権限を確かめ直す（§7.5）。例外として、繰り返して止めた `prepare_notification` は、それ以降の一覧から外す（§10.5）。
 - **確認待ちでWorkerを手放す**：`ask_user` を呼んだらRunをWAITING_USERにし、ジョブが動いていなければAttemptを終える。回答はそのTool呼出しの結果として記録し、新しいAttemptで続ける。ジョブが動いていれば、全部止まるまで同じAttemptで見張り、その間の回答は同じAttemptで続ける（§8.3・§10.3）。
 - **出力は上限で切り、全体は退避する**：上限を超えたTool結果は、先頭と末尾だけをモデルに見せ、全体はファイルに残して場所を示す（§7.7）。
 - **文脈の圧縮は安い手段から順に**：大きいTool結果の退避 → 古いTool結果の要約への置き換え → LLMによる要約、の順に行う。圧縮もRunEvent（置き換えの記録）として追記し、元の記録は消さない（§9）。
@@ -371,14 +371,14 @@ class ToolResult:
 
 **Runに出すToolの一覧**は、Run開始時に次から決め、`request.header` に記録する。Runの中では変えない（prompt cacheを保つため）。
 
-1. Runの種類：業務のRun、Skillの編集のRun、タスクの編集のRun、Draftの評価のRun（design.md §3.6・§3.7・§11.11）。Skill管理のToolはSkillの編集のRunだけ、タスク管理のToolはタスクの編集のRunだけ、Skill公開のToolは評価のRunには出さない。評価のRunは、評価するSkill（公開中の版か、評価に写したDraft）の `tools` に限り、業務結果のSchemaがあれば `submit_result` を加え、`skill`・`request_skill_edit` は出さない（design.md §3.7.1）。
-2. Skill：会話のRunでは、Skillの指定にかかわらず、利用者が使えるToolの全体と `skill`・`request_skill_edit` を出す（`/` は使えと指示するだけで、Toolの一覧を変えない。authorization.md §6）。タスクのRunでは、固定したSkillの `tools` を合わせたものに限り（どれにも書いていなければToolなし。引数の制限もタスクの定義に従う。authorization.md §5.4）、業務結果のSchemaがあれば `submit_result` を加える（`skill` は出さない）。タスクに通知の書き方があれば `prepare_notification` も加える（design.md §4.3）。
-3. 実行許可（authorization.md §6）：会話では、依頼した人が使えるConnector（本人の個人、使える部門の部門、全社）だけ。タスクのRunでは、タスクに固定したConnectorだけで、エージェントが探して使うことはしない（チャットから起動したRunは、それをさらに起動した人の今の権限で絞る）。システムのConnector・Skillは、システムタスクのRunにだけ出す。
+1. Runの種類：業務のRun、Skillの編集のRun、タスクの編集のRun、Draftの評価のRun（design.md §3.6・§3.7・§11.11）。Skill管理のToolはSkillの編集のRunだけ、タスク管理のToolはタスクの編集のRunだけ、Skill公開のToolは評価のRunには出さない。評価のRunは、評価するSkill（公開中の版か、評価に写したDraft）を使うよう指示して動かす。Toolは絞らず、業務結果のSchemaがあれば `submit_result` を加え、`skill`・`request_skill_edit` は出さない（design.md §3.7.1）。
+2. Skill：Skillの指定（`/`、タスクの定義）と `tools` は使用の指示で、Toolの一覧を変えない（authorization.md §1の8）。会話のRunとタスクのRunに、Runの権限で使えるToolの全体と `skill` を出す。答える人がいる会話のRunには `request_skill_edit` も出す（編集を提案するだけで、作業の権限を増やさないため）。タスクに業務結果のSchemaがあれば `submit_result` を加える。タスクに通知の書き方があれば `prepare_notification` も加える（design.md §4.3）。
+3. 実行許可（authorization.md §6）：Connector・Skillの一覧は、会話では依頼した人がアクセスできるもの（本人の個人、使える部門の部門、全社）、タスクのRunではタスクの範囲でアクセスできるもの（authorization.md §5.4）。システムのConnector・Skillは、システムタスクのRunにだけ出す。
 4. モデルの能力：Tool呼出しに対応しないモデルでは、Toolを出さない（Skillも、Toolが要るものは候補にしない。design.md §4.8）。
-5. 確認の相手：`ask_user` は、答える人がいるRun（会話、修正チャットのタスクのRun、または対話Bindingのあるタスク）だけに出す。修正チャットのタスクのRunでは、固定したSkillの `tools` に書いていなくても `ask_user` を出し、`request_task_edit` も加える（どちらも作業の権限を増やさないため）。
-6. Sandbox：SkillかTask DefinitionがSandboxを使うToolを許さないコマンド不要のRun（design.md §3.4）では、Sandboxを使うToolを出さない。Runtime ProfileはRunの単位で決まり、既定がなければRunを始めない（design.md §7.3）。Sandboxを使うToolがあるRunでも、Sandboxは最初に呼ばれた時点で起動する（design.md §4）。
+5. 確認の相手：`ask_user` は、答える人がいるRun（会話、修正チャットのタスクのRun、または対話Bindingのあるタスク）だけに出す。修正チャットのタスクのRunでは `request_task_edit` も加える（作業の権限を増やさないため）。
+6. Sandbox：Runtime Profileは Run の単位で決まり、既定がなければRunを始めない（design.md §7.3）。Sandboxは最初にSandboxのToolが呼ばれた時点で起動する（design.md §4）。
 
-**実行するとき**は、一覧に載っていることとは別に、毎回サーバーで権限を確かめ直す（利用者・Skill・Runに固定した範囲・対象のResource・Connector。design.md §3.6）。一覧に出したことを権限の根拠にしない。
+**実行するとき**は、一覧に載っていることとは別に、毎回サーバーで権限を確かめ直す（会話の利用者・タスクの範囲・対象のResource・Connector。design.md §3.6）。一覧に出したことを権限の根拠にしない。
 
 **モデルの選び方を導く文**（system promptとToolの説明に入れる）：
 
@@ -615,7 +615,7 @@ LibreOffice・Node.js・pandoc・poppler-utils・markitdownはこれからイメ
 
 **一覧**：`context.snapshot` の `<skills>` に、利用者が使えて、使うモデルの能力を満たし、宣言したConnectorを利用者が使えて（宣言した操作・表をConnectorの今の版が公開していて）、機密の制限に合うSkill（機密のSkillは機密のRunだけ。design.md §4冒頭）の名前と説明だけを並べる（design.md §3.1・§4.8・§4.9.1）。一覧の量は文脈の2%までにし、超えたら説明を短くして「ほかにN件」と書く（Codexの方式）。`skill` の引数 `name` は文字列にする（一覧がRunの中で変わるので、Toolの定義をprompt cacheのために変えない）。一覧にない名前は、候補を添えたエラーで返す。
 
-- 会話のRunの一覧は、Run開始時と発言を取り込むたびに、依頼した人の今の権限で作り直し、変わった分を `context.snapshot` で知らせる（`<runtime_context>` を今の一覧で記録し直す）。読めるものは読める。編集のRunには一覧を出さない。タスクのRunの一覧は、タスクに固定したものだけで変わらない。
+- 一覧は、Run開始時と発言を取り込むたびに、今の権限（会話は依頼した人、タスクはタスクの範囲）で作り直し、変わった分を `context.snapshot` で知らせる（`<runtime_context>` を今の一覧で記録し直す）。読めるものは読める。編集のRunには一覧を出さない。
 - 同じ名前のSkillが範囲（個人・部門・全社）の違いで重なれば、範囲を添えた名前にする（「名寄せ (個人)」）。並びは個人・部門・全社の順。
 
 **使い方の規則**（system promptに入れる）：
@@ -625,7 +625,7 @@ LibreOffice・Node.js・pandoc・poppler-utils・markitdownはこれからイメ
 - どのSkillを使うかを、利用者に1行で伝える。
 - 合うSkillがなければ、Skillなしで進めてよい。
 
-**読込み**：`skill` は会話のRunにだけ出す（タスクのRunでは、タスクに固定した版のSkillだけを使い、探して読み込まない。authorization.md §5.4）。`skill` が呼ばれたら、RunnerはそのSkillをその時点の最新の公開版へ解決し、権限・停止・必要な能力・機密の制限と、Skillの要るToolがこのRunにあるかを確かめて、Manifestへの追記と `skill.loaded` の記録を同じDB transactionで行う（design.md §3.2）。結果として返すもの：
+**読込み**：`skill` は業務の会話のRunとタスクのRunに出す（タスクのRunでも、定義で指示したSkill以外を一覧から探して読み込める。authorization.md §5.4）。`skill` が呼ばれたら、RunnerはそのSkillをその時点の最新の公開版へ解決し、権限（タスクはタスクの範囲）・停止・必要な能力・機密の制限を確かめて、Manifestへの追記と `skill.loaded` の記録を同じDB transactionで行う（design.md §3.2）。結果として返すもの：
 
 ```
 <skill name="請求書の照合" version="7">
@@ -643,7 +643,7 @@ LibreOffice・Node.js・pandoc・poppler-utils・markitdownはこれからイメ
 ```
 
 - `<connectors>` は、Skillが宣言したConnector（design.md §4.9.1）の名前、操作のTool、表（宣言していなければ「公開する表のどれでも」）。一覧に出すSkillと `/` で指定したSkillが宣言したConnectorは、このRunのConnectorの一覧の先に並べる（数の上限で外れないように）ので、`datasource_*` の `connector` にその名前を使う。
-- 会話のRunには `submit_result` はない。読み込んだ・`/` で指定したSkillに業務結果のSchemaがあれば、Schemaの形で最後の応答に書くよう本文に添える（書かなくても失敗にしない）。業務結果を確定させたいときは、Task DefinitionでSkillを固定する。
+- `submit_result` はタスクとDraftの評価のRunにだけある（Skillの指定では増えない）。読み込んだ・`/` で指定したSkillの業務結果のSchemaは、その形で最後の応答に書くよう本文に添える（書かなくても失敗にしない）。
 
 資料はSandboxを起動するときに `/workspace/master` へ展開する（design.md §3.8）。`/workspace/master` は、Workerの作業領域のディレクトリを読取り専用でbind mountしたもので（添付の `/workspace/input` と同じ方式。sandbox/CONTRACT.md §2）、Runnerはその中に `skills/{skill_id}/{資料のkey}/{ファイル名}` で置く。Sandboxを起動した後に読み込んだSkillは、次のように扱う。
 
@@ -655,7 +655,7 @@ LibreOffice・Node.js・pandoc・poppler-utils・markitdownはこれからイメ
 
 Runが使うSkill（`/` で指定したものと、読み込んだもの）が停止・削除されたか、利用者が使えなくなったら（権限の失効。宣言したConnectorを使えなくなった、宣言した表をConnectorが公開しなくなった、機密でないRunで機密のSkillになった、も含む）、過去の版でも使わせない（design.md §3.2・§4.9.1）。Runnerは毎ステップの区切りで確かめ、`skill` で終える。モデルの切り替えの候補と、利用者が会話のモデルを変えるときも、Runが使うSkillの必要な能力を持つモデルに限る。
 
-**明示した場合**（`/` やTask Definition）：Run開始時にSkill Versionへ解決し（使えなければRunを始めず、利用者に理由を返す）、Manifestに固定して（`fixed.skills`）、上と同じ内容を最初の `message.user` に入れる。モデルに `skill` を呼ばせない。
+**使うよう指示した場合**（`/` やTask Definition。読み込む手間を省くだけで、Toolの一覧もアクセス範囲も変えない）：Run開始時にSkill Versionへ解決し（使えなければRunを始めず、利用者に理由を返す）、Manifestに固定して（`fixed.skills`）、上と同じ内容を最初の `message.user` に入れる。モデルに `skill` を呼ばせない。
 
 - 1つのメッセージで指定できるSkillは3つまで。
 - 実行中の会話でSkillを指定したメッセージは親へ渡す。発言を受け付けるときに今の権限で確かめ（使えなければ理由を返して受け付けない）、取り込むときに `skill` の読込みと同じ処理（権限の確かめ直しを含む。その時点の最新の公開版）を行い、同じ内容を `message.user` に入れる。すでに読み込んだSkillを指定したら、その時点の最新の公開版を読み込み、前に読んだ版に代わることを明示する。受け付けた後に使えなくなったものは文脈に入れず、会話のシステムのメッセージで画面に示し、モデルには名前を出さずに使えなかったことだけを伝える。確認待ちの間の指定は、再開のときに取り込む（design.md §5.5）。修正チャットでは受け付けない（design.md §11.11）。
@@ -665,7 +665,7 @@ Runが使うSkill（`/` で指定したものと、読み込んだもの）が�
 ### 10.2 Connector
 
 - `datasource_describe`・`datasource_query`（design.md §4.9.2）。Toolの名前にはプロバイダの制約で `.` を使えないので、`_` にする。
-- 一覧：Run開始時と発言を取り込むたびに、依頼した人が使えるConnector（`Connector.objects.usable_by()`）の名前と説明を作り直し、`<connectors>` で見せる（変わった分を `context.snapshot` で知らせる）。Toolの `connector` の引数は文字列にする（一覧にない名前は、候補を添えたエラーで返す）。Toolを使えるモデルのRunでは、ConnectorのToolをいつも出す（途中で使えるようになるため）。タスクのRunの一覧は、タスクに固定したものだけで変わらない。
+- 一覧：Run開始時と発言を取り込むたびに、依頼した人が使えるConnector（`Connector.objects.usable_by()`）の名前と説明を作り直し、`<connectors>` で見せる（変わった分を `context.snapshot` で知らせる）。Toolの `connector` の引数は文字列にする（一覧にない名前は、候補を添えたエラーで返す）。Toolを使えるモデルのRunでは、ConnectorのToolをいつも出す（途中で使えるようになるため）。タスクのRunの一覧は、タスクの範囲で作り直す。
 - 操作のたびに、依頼した人が今も使えるか（範囲・所属・停止・削除）と、機密のConnectorなら機密のRunでモデルがローカルLLMかを確かめ直す（一覧に出したことを根拠にしない。authorization.md §6）。境界（公開する表・上限）はその時点の版を使い、使った版をToolInvocationに記録する（authorization.md §7.2）。
 - 接続先への操作は、接続の同時実行数の上限の中で行う。枠（ConnectionLease）は接続の行をロックして数えてから取り、全Workerとapi（管理画面の接続の確認・表の一覧・説明・試し実行）を通して数える。空かなければ60秒まで（管理画面は10秒まで）待ち、それでも空かなければエラーとしてモデルに返す。操作は別のスレッドで行い、待つ間はAttemptのleaseと枠の期限を延ばす（実行時間の上限はleaseより長く設定でき、DBの上限は文ごとに効くため）。
 - 結果はArtifact（種別「Connectorの結果」）として保存し、Sandboxの `/workspace/input/connectors/{invocation_id}/result.csv` に読取り専用で置く。同じ会話の次の依頼でも読める（authorization.md §6.1）。モデルには、件数・列名・先頭の10行・ファイルの場所だけを返し、行は `<untrusted_content>` で囲む（§6.3）（design.md §4.9.1）。ファイルを読むTool（`read`・`shell`）のないRunでは、上限の中の結果を表として返す。
@@ -674,7 +674,7 @@ Runが使うSkill（`/` で指定したものと、読み込んだもの）が�
 - Skillのスクリプトからの呼出し（design.md §4.9.6。`harness/script_connectors.py`）も、同じConnectorの処理とToolInvocationの記録を通す。
   - Sandboxを起動したとき、このRunに `datasource_query`・`datasource_describe` のどちらかを出していれば、Sandboxの中の中継（`yoriki-sandbox relay`。sandbox/CONTRACT.md §4.9）を `docker exec` で始める。中継が止まっていれば、次にコマンドを始めるときに始め直す。始められなければ、そのAttemptでは始め直さず、スクリプトからは呼べないまま続ける（ライブラリが `unavailable` を返す）。
   - 中継から届いた要求は、受け取るスレッドで列に積むだけにし（32件まで。あふれたら `busy` で、ライブラリが待ってやり直す。中継はSandboxの中のもので置き換えられうるので、受け取る1行も2MiBまで、行の速さも10秒に500行までにし、超えたら通信路を閉じる）、Runnerのスレッドで1つずつ処理する（1回に8件まで。残りは次に処理する）。応答は書込みのスレッドが書き、Runnerのスレッドは待たない（中継が読まずに書く前の応答が64件か16MiBを超えたら閉じる）。応答1件は4MiBまでで、超える結果（表・列の多い `describe`）は `too_large` で返し、失敗として記録する。処理するのは、ジョブの終わりを待つ間（`shell`・`job_output`。要求が届けばすぐ、1件ずつ処理し、間で待つ時間の期限と取消を確かめる。処理中の1件は止められないので、その分は `timeout_seconds` を過ぎうる）と、親が動き終えてジョブを見張る間（裏の作業の待ち・確認待ち）と、ステップの区切り（終わったジョブを知らせる前）。モデルの応答を待つ間は処理しないので、スクリプトは待つ。
-  - 引数は、Toolと同じSchema（`connector` は今の一覧の名前、知らない項目は断る）で確かめ、全体で64KiBまで（記録に残すため）。前のAttemptで閉じられなかった呼出し（leaseを失った等）は、再開のときに結果不明で閉じる。操作のToolをこのRunに今出していなければ断る（タスクのRunで、Skillの「使ってよいTool」で外したときは、スクリプトからも呼べない）。
+  - 引数は、Toolと同じSchema（`connector` は今の一覧の名前、知らない項目は断る）で確かめ、全体で64KiBまで（記録に残すため）。前のAttemptで閉じられなかった呼出し（leaseを失った等）は、再開のときに結果不明で閉じる。操作のToolをこのRunに今出していなければ断る。
   - 呼出しはToolInvocation（`call_id` は `script-` で始まる。`value` に `via: "script"` と、そのときに実行していたToolの呼出しのID `during`。失敗したら、スクリプトへ返した説明を `error`）に記録し、RunEventには入れない（モデルの文脈に結果を入れない）。画面の作業の記録には、RunEventとは別のAPI（`/api/app/v1/runs/{run}/script_calls/`。作業の記録と同じく、Runの結果とログを見られる人だけ）で返し、`during` の呼出しの下に「この間に処理したスクリプトからの照会」として出す（要求を出したジョブではなく、処理したときに待っていたコマンドなので。ステップの区切りで処理したものは、時刻の順で間に出す）。1つのコマンドの下では100件ずつ出し、続きは「さらに表示」で出す（1つのRunで1,000回まで呼べるため）。結果の行は出さず行数だけを出す（行は「Connectorの結果」のファイルで見られる）。失敗は、種類（`rejected` 等）と、スクリプトへ返した説明（Connectorのエラー文を含む。英語のまま）を出す。読めなかったら、記録の中に「読み直す」を出す。実行中の画面は、Runが動いている間（ステップの区切りでも処理するので、コマンドを待つ間に限らない）5秒ごとに、まだ終わっていない呼出し（なければ最後の呼出し）から後だけを読み直す（`since`。全件を読み直さない）。
   - system promptでは、`shell` と `datasource_query` を出しているRunにだけ、スクリプトから `yoriki_connector` で問い合わせられること、使い方、行ごとに照会せず `IN` 等でまとめて読むこと、スクリプトは前面で動かすか `job_output` で待つこと（モデルの応答を待つ間は要求を処理しないため）を案内する（`harness/prompts.py` の `SCRIPT_CONNECTORS`）。結果のCSVはToolと同じくArtifactにして `/workspace/input/connectors/{invocation_id}/result.csv` に置き、スクリプトには場所・列・行数・打ち切ったかを返す（行はライブラリがファイルから読む）。
   - 上限：1つのRunで1,000回（Attemptをまたいで、記録した呼出しを数える）、1分に120回（Attemptの中では断る要求も含めて数え、前のAttemptの直近1分の記録した呼出しも数える。超えたら `rate_limited` と待つ秒数を返し、ライブラリが待ってやり直す）。
@@ -770,7 +770,7 @@ Codexの非同期の質問と、Gemini CLIの「承認待ちのTool呼出し」�
 
 **タスクのRun**（起動のしかた「修正チャット」）：
 
-- 手動実行と同じく、受付時のタスクの版に固定し、タスクに固定したものの範囲で動く。要求のID（`client_request_id`。最初の依頼の `client_message_id`）で、同じ人のそのタスクの修正チャットの再送には前のRunを返す（タスクの行のロックの中で確かめる。IDが修正チャットのほかのメッセージで使われていれば409）。Runの画面のメッセージは、修正チャットの会話のメッセージのうち、そのRunのものだけを出す。`parent` を持たず（会話の文脈を引き継がない）、ワークスペースは動かすたびに空で作り直す（動き終えたものは、続く編集のRunが引き継ぐ）。`/workspace/input`（添付・Connectorの結果）・成果物の回収は、会話ではなくそのRunのものだけを使う。実行記録から始めたときは、元の実行の値・ファイル・入口の本文を参照して入力にする（中身を複製しない。機密の修正チャットでは、タスクの今の版のモデルがローカルLLMのときだけ動かす。design.md §11.11）。実行中の追加指示に付けた添付は、そのRunの入力として置く。
+- 手動実行と同じく、受付時のタスクの版に固定し、タスクの範囲で動く。要求のID（`client_request_id`。最初の依頼の `client_message_id`）で、同じ人のそのタスクの修正チャットの再送には前のRunを返す（タスクの行のロックの中で確かめる。IDが修正チャットのほかのメッセージで使われていれば409）。Runの画面のメッセージは、修正チャットの会話のメッセージのうち、そのRunのものだけを出す。`parent` を持たず（会話の文脈を引き継がない）、ワークスペースは動かすたびに空で作り直す（動き終えたものは、続く編集のRunが引き継ぐ）。`/workspace/input`（添付・Connectorの結果）・成果物の回収は、会話ではなくそのRunのものだけを使う。実行記録から始めたときは、元の実行の値・ファイル・入口の本文を参照して入力にする（中身を複製しない。機密の修正チャットでは、タスクの今の版のモデルがローカルLLMのときだけ動かす。design.md §11.11）。実行中の追加指示に付けた添付は、そのRunの入力として置く。
 - 答える人がいるRunとして、`ask_user` と `request_task_edit` を出し、追加指示を取り込む（§10.3・§10.4）。`request_skill_edit` は出さない。
 - 結果の通知先は固定せず（配信を作らない）、`prepare_notification` で作った通知の候補を、送るはずだった内容として画面に出す。
 - 区切りのたびに、タスクが削除されていないことと、動かした人（`Run.owner`）が今もタスクを管理できることを確かめ、外れていれば止める（停止中かは見ない。停止したときは、ほかのRunと同じく停止を依頼する）。
@@ -807,7 +807,7 @@ Codexの非同期の質問と、Gemini CLIの「承認待ちのTool呼出し」�
 
 **ワークスペース**：親と同じRuntime Profileの版で別のSandboxを起動し、コピーを展開する。`/workspace/input`・`/workspace/master` は親と同じものを読取り専用で置く。コピーは自由に読み書きでき、親の変更は子から見えず、子の変更は親から見えない。
 
-**種類とTool**：種類は組込みの汎用の1つだけ。Toolは、Sandboxの土台のTool（`todo_write` を除く）と `skill`・`datasource_*` のうち、親のRunに出しているToolとの共通部分だけ（§7.5。子を通してSkill・タスクのToolの制限を越えさせない）。呼ぶたびに親の実行許可（authorization.md §6）で確かめる。Skillは読み込んで使えるが変更はできない。親に `skill` を出していないRun（タスクのRun）では子にも出さず、親に固定したSkillの内容を子の最初の発言に入れる。`ask_user`、`submit_result`、`present_files`、`prepare_notification`、`request_*`、`install_python_packages`、`subagent` は出さない。困ったら報告で親へ返すよう指示する。孫は作らない。
+**種類とTool**：種類は組込みの汎用の1つだけ。Toolは、Sandboxの土台のTool（`todo_write` を除く）と `skill`・`datasource_*` のうち、親のRunに出しているToolとの共通部分だけ（§7.5）。呼ぶたびに親の実行許可（authorization.md §6）で確かめる。Skillは読み込んで使えるが変更はできない。親に `skill` を出していないRun（編集のRun等）では子にも出さない。親に使うよう指示したSkillがあれば、その内容を子の最初の発言に入れる。`ask_user`、`submit_result`、`present_files`、`prepare_notification`、`request_*`、`install_python_packages`、`subagent` は出さない。困ったら報告で親へ返すよう指示する。孫は作らない。
 
 **親へ返すもの**：テキストとファイルだけ。
 
@@ -945,13 +945,13 @@ Skill「請求書の照合」：手順（明細の読取り → 取引先・品�
 Task Definition「契約書レビュー」：起動はWebhook（Zapier）、使うSkillは「契約書レビュー」、モデル設定とeffortは固定、対話Bindingなし、結果通知はZapier。Skill：手順、資料（レビュー基準 `review-criteria.md`、社内規程 `contract-policy.md`）、Tool（`read`、`grep`、`todo_write`。出力のSchemaがあるので `submit_result` が加わる）、出力のSchema（判定：OK・差し戻し、理由の一覧、指摘箇所の一覧）。
 
 1. Webhookを受けたら、payloadを `/workspace/input/webhook_payload.json`、契約書（docx）を `/workspace/input/` に置く（design.md §4.2）。Skillを解決してManifestに固定し、本文と資料の一覧を最初の `message.user` に入れる。
-2. 答える人がいないので、`ask_user` は出さない。Toolの一覧はSkillの `tools` に限る（`shell` もない）。
+2. 答える人がいないので、`ask_user` は出さない。Toolは絞らない（Skillの `tools` は使うものの宣言。この手順では `shell` を使わないので、Sandboxのコマンドは動かない）。
 3. `read`（契約書。見出しの構造と本文）、`read`（レビュー基準・社内規程）を並列に。`grep` で「損害賠償」「解除」等の条項を探す。
 4. `submit_result`：`{"decision": "差し戻し", "reasons": [...], "findings": [{"clause": "第12条", "issue": "...", "quote": "..."}]}`。RunnerがSchemaで検証し、業務結果として確定する。
 5. 確定した業務結果から、Notification BindingがZapierへ投稿する（AIによるレビューであることを明記。design.md §13）。
 6. 失敗（モデルにつながらない、`no_result` 等）なら、タスクの失敗の通知先へ通知する（design.md §4.2）。
 
-確かめられること：Word文書の読取り、Skillの `tools` によるToolの絞り込み、確認の相手がいないRunの扱い、業務結果のSchemaによる完了、Sandboxでshellを使わないRun。
+確かめられること：Word文書の読取り、確認の相手がいないRunの扱い、業務結果のSchemaによる完了、Sandboxでshellを使わないRun。
 
 ---
 

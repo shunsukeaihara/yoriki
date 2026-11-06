@@ -52,12 +52,13 @@ def rebuild_catalogs(
     run: Run, *, connectors: Sequence[dict[str, Any]] = (), skills: Sequence[dict[str, Any]] = ()
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """動いているRunの一覧を、依頼した人の今の権限で作る。`connectors`・`skills` は、今取り込む発言で指定したもの。
-    `@` で指定したものと、Runが使うSkillが宣言したものを先に並べる（Connectorの名前をToolで使い続けられるように）"""
+    今取り込む指定、前に `@` で指定したもの、Runが使うSkillが宣言したものの順に先に並べる（今の指定を一覧の上限で
+    外さず、前の名前もToolで使い続けられるように）"""
     manifest = run.manifest or {}
     chosen = [
+        *connectors,
         *((manifest.get("fixed") or {}).get("connectors") or []),
         *(e for e in manifest.get("appended", []) if e.get("kind") == "connector"),
-        *connectors,
     ]
     return build_catalogs(
         run.owner,

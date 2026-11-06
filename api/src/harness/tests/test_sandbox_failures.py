@@ -11,6 +11,7 @@ from django.db import DatabaseError, connection
 from artifact.storage import LocalStorage, StorageError, StoredObject, get_storage
 from conversation.dispatch import MessageMode, post_message
 from conversation.factories import ConversationFactory
+from conversation.models import ConversationMessage, InstructionKind, MessageRole, UserInstruction
 from harness.runner import Runner
 from harness.sandbox import (
     WORKSPACE_LOST,
@@ -393,6 +394,47 @@ def test_workspace_is_empty_when_no_generation_can_be_restored(conversation, set
     assert sandbox.restored == []
     assert session.restored is None
     assert session.take_notice() == WORKSPACE_LOST
+
+
+def test_saving_after_a_fallback_keeps_the_generation_that_was_restored(conversation):
+    """最新が見つからず1つ前から戻した後の保存では、見つからなかったものではなく、戻せたものを残す"""
+    run = post(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    restored = _checkpoint(run, attempt, 1, b"previous")
+    missing = _checkpoint(run, attempt, 2, None)
+    new = _checkpoint(run, attempt, 3, b"new")
+
+    Checkpoint.discard_older(new, restored=restored)
+
+    assert set(Checkpoint.objects.filter(run=run)) == {restored, new}
+    assert not Checkpoint.objects.filter(pk=missing.pk).exists()
+
+
+def test_task_run_saves_the_workspace_when_an_instruction_keeps_it_going(app_user):
+    """最後の応答の直前に追加指示が届いて続けるときは、タスクの実行でも保存する。終わるときは保存しない"""
+    run = _task_run(app_user)
+    requested: list[bool] = []
+
+    class Session(SavingSession):
+        def suspend(self, *, snapshot=True):
+            requested.append(snapshot)
+            return super().suspend(snapshot=snapshot)
+
+    class InstructingAdapter(FakeAdapter):
+        def stream(self, request):
+            yield from super().stream(request)
+            if len(self.requests) == 1:
+                message = ConversationMessage.objects.create(
+                    conversation=run.conversation, role=MessageRole.USER, body="これも"
+                )
+                UserInstruction.objects.create(
+                    conversation=run.conversation, message=message, run=run, kind=InstructionKind.CURRENT
+                )
+
+    run = execute(run, InstructingAdapter([reply("できました"), reply("直しました")]), Session)
+    assert run.status == RunStatus.COMPLETED
+    assert requested == [True, False]
 
 
 def test_saved_snapshot_is_read_back_in_full():

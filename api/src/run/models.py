@@ -710,12 +710,13 @@ class Checkpoint(models.Model):
         )
 
     @classmethod
-    def discard_older(cls, checkpoint: "Checkpoint") -> None:
-        """確定したCheckpointとその1つ前を残し、それより古いsnapshotを消す（design.md §7.9）"""
-        rows = cls.objects.filter(run__conversation_id=checkpoint.run.conversation_id).order_by("-pk")
-        previous = rows.filter(pk__lt=checkpoint.pk).first()
+    def discard_older(cls, checkpoint: "Checkpoint", *, restored: "Checkpoint | None" = None) -> None:
+        """確定したCheckpointとその1つ前を残し、ほかのsnapshotを消す（design.md §7.9）。このAttemptが戻したもの
+        （`restored`）があれば、それを1つ前として残す（新しい世代が見つからず古い世代から戻したときに、戻せたものを消さない）"""
+        rows = cls.objects.filter(run__conversation_id=checkpoint.run.conversation_id, pk__lt=checkpoint.pk)
+        previous = restored or rows.order_by("-pk").first()
         if previous is not None:
-            cls._discard(rows.filter(pk__lt=previous.pk))
+            cls._discard(rows.exclude(pk=previous.pk))
 
     @classmethod
     def discard_through(cls, run: Run) -> None:

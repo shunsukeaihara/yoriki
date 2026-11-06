@@ -792,7 +792,8 @@ class Runner:
 
     def _finish_with_reply(self, text: str, status: RunStatus, end_reason: RunEndReason, *, error: str = "") -> bool:
         """応答を会話に載せてRunを終える。完了の前に追加指示が届いていれば、終えずにTrue（続ける）を返す"""
-        self._checkpoint(ending=True)
+        # 追加指示が届いていれば終わらないので、タスクの実行でも会話と同じくWorkspaceを保存する
+        self._checkpoint(ending=not self._instructions_pending())
         with self.run_obj.fenced(self.attempt) as run:
             if text.strip():
                 ConversationMessage.objects.create(
@@ -886,7 +887,7 @@ class Runner:
             for output in saved.outputs:
                 Artifact.create_output(run, output.path, BlobObject.register(output.stored, saved.backend_id))
         if checkpoint is not None:
-            Checkpoint.discard_older(checkpoint)
+            Checkpoint.discard_older(checkpoint, restored=self.session.restored)
 
     def _sandbox_failure(self, error: SandboxUnavailable) -> None:
         """Sandboxを起動できない・失われた。やり直せるなら別のAttemptで（harness.md §4.3の retry_wait）"""
@@ -931,6 +932,9 @@ class Runner:
         status = Run.objects.filter(pk=self.run_obj.pk).values_list("status", flat=True).first()
         if status == RunStatus.CANCELLING:
             return True
+        return self._instructions_pending()
+
+    def _instructions_pending(self) -> bool:
         return UserInstruction.objects.filter(
             run=self.run_obj, kind=InstructionKind.CURRENT, state=InstructionState.RECEIVED
         ).exists()

@@ -32,11 +32,6 @@ from skill.models import CONVERSATION_SCOPES, Skill, SkillAction, SkillVersion
 from .models import Conversation, ConversationMessage, InstructionKind, InstructionState, MessageRole, UserInstruction
 
 
-class MessageMode:
-    AUTO = "auto"  # 実行中なら今の作業への追加指示、確認待ちなら回答、それ以外は新しい依頼
-    NEXT = "next"  # 実行中なら、終わった後に始める次の依頼
-
-
 class CannotStart(Exception):
     pass
 
@@ -107,7 +102,6 @@ def post_message(
     *,
     body: str,
     client_message_id: str,
-    mode: str,
     actor,
     attachments: list[Artifact] | None = None,
     skills: list[Skill] | None = None,
@@ -161,9 +155,9 @@ def post_message(
         if len(unsent) != len(attachments):
             raise CannotStart(_("送信済みの添付が含まれています。添付し直してください。"))
         # 修正チャットで、動いているタスクのRunへの追加の指示・回答の添付は、そのRunの添付の中で名前を決める（Runごとに
-        # /workspace/input を分けるため）。タスクの編集の依頼（次の依頼を含む）への添付は、会話の添付の中で決める
+        # /workspace/input を分けるため）。タスクの編集の依頼への添付は、会話の添付の中で決める
         # （直前のタスクのRunのものと重ねない）
-        Artifact.attach(conversation, unsent, run=_task_run_instructed(conversation, mode))
+        Artifact.attach(conversation, unsent, run=_task_run_instructed(conversation))
         message.attachments.set(unsent)
     conversation.last_posted = timezone.now()
     fields = ["last_posted", "updated"]
@@ -179,7 +173,7 @@ def post_message(
         return message
     message.run = run
     message.save(update_fields=["run"])
-    if attachments and _task_run_instructed(conversation, mode) is not None:
+    if attachments and _task_run_instructed(conversation) is not None:
         # 修正チャットでは、追加の指示・回答の添付もタスクのRunの添付にする（Runの画面で、タスクを管理できる人が取得
         # できるように。/workspace/input にはこのRunのものだけを置く。harness.md §10.10）
         Artifact.objects.filter(pk__in=[a.pk for a in attachments]).update(run=run)
@@ -188,14 +182,11 @@ def post_message(
         status=ClarificationStatus.OPEN,
         kind__in=(ClarificationKind.QUESTION, ClarificationKind.SKILL_EDIT, ClarificationKind.TASK_EDIT),
     ).first()
-    if mode == MessageMode.AUTO and question is not None and run.status == RunStatus.WAITING_USER and not skill_edit:
+    if question is not None and run.status == RunStatus.WAITING_USER and not skill_edit:
         _answer_question(question, message, actor, chosen=bool(skills or connectors))
         return message
-    kind = (
-        InstructionKind.NEXT
-        if mode == MessageMode.NEXT or run.status == RunStatus.CANCELLING or skill_edit
-        else InstructionKind.CURRENT
-    )
+    # 停止中の発言は親が読まないので、終わった後の新しいRunで始める
+    kind = InstructionKind.NEXT if run.status == RunStatus.CANCELLING or skill_edit else InstructionKind.CURRENT
     UserInstruction.objects.create(
         conversation=conversation, message=message, run=run if kind == InstructionKind.CURRENT else None, kind=kind
     )
@@ -246,10 +237,10 @@ def _allow_connector_tools(skills: list[dict[str, Any]]) -> bool:
     return any(name in DATASOURCE_TOOL_NAMES for names in tools for name in names)
 
 
-def _task_run_instructed(conversation: Conversation, mode: str) -> Run | None:
+def _task_run_instructed(conversation: Conversation) -> Run | None:
     """修正チャットのメッセージが、動いているタスクのRunへの追加の指示か回答になるなら、そのRun（会話の行ロックの
-    中で呼ぶ）。次の依頼と、タスクの編集のRunへのメッセージではNone"""
-    if not conversation.is_task_fix or mode == MessageMode.NEXT:
+    中で呼ぶ）。タスクの編集のRunへのメッセージではNone"""
+    if not conversation.is_task_fix:
         return None
     run = active_run(conversation)
     if run is None or not run.isolated_workspace or run.status == RunStatus.CANCELLING:
@@ -260,7 +251,7 @@ def _task_run_instructed(conversation: Conversation, mode: str) -> Run | None:
 def _check_fix_message(conversation: Conversation, *, separate: bool) -> None:
     """修正チャット（design.md §11.11）では、Skill・Connectorの指定と、Skillの編集の依頼は受け付けない（タスクを
     今も管理できるかは post_message() が先に確かめる）。動いているRunへのメッセージは追加の指示か回答、動いていない
-    ときのメッセージと次の依頼は、タスクの編集の依頼になる（start_run()）"""
+    ときのメッセージは、タスクの編集の依頼になる（start_run()）"""
     if separate:
         raise CannotStart(_("修正チャットでは、SkillやConnectorを指定できません。"))
 
@@ -399,7 +390,7 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
         )
     if conversation.is_task_fix:
         # 修正チャットのタスクのRunは task.dispatch.start_task_run() で始める。ここで始めるのは、タスクの編集のRun
-        # （動いていないときのメッセージと次の依頼。タスクのRunが終わる直前に届いて取り込めなかった追加の指示も含む）
+        # （動いていないときのメッセージと、承認した編集の依頼。タスクのRunが終わる直前に届いて取り込めなかった発言も）
         return _start_task_edit(
             conversation, message, actor, version=version, effort=effort, runtime_version=runtime_version
         )

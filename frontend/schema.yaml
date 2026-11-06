@@ -10156,16 +10156,6 @@ components:
           type: string
           writeOnly: true
           maxLength: 64
-        mode:
-          allOf:
-          - $ref: '#/components/schemas/ModeEnum'
-          writeOnly: true
-          default: auto
-          description: |-
-            auto：実行中なら今の作業への追加指示、確認待ちなら回答。next：今の作業の後に始める
-
-            * `auto` - 自動
-            * `next` - 次の依頼
     MessageRoleEnum:
       enum:
       - 1
@@ -10447,14 +10437,6 @@ components:
       - display_name
       - email
       - id
-    ModeEnum:
-      enum:
-      - auto
-      - next
-      type: string
-      description: |-
-        * `auto` - 自動
-        * `next` - 次の依頼
     ModelProfile:
       type: object
       description: |-

@@ -4,7 +4,7 @@ import pytest
 
 from connector.factories import ConnectorFactory
 from connector.models import VERSION_FIELDS, ConnectorScope
-from conversation.dispatch import CannotStart, MessageMode, post_message
+from conversation.dispatch import CannotStart, post_message
 from conversation.factories import ConversationFactory
 from conversation.models import Conversation
 from llm.factories import LLMConnectionFactory, ModelProfileFactory
@@ -36,9 +36,7 @@ def _declaring(owner, connector, name="取引先の照合", **content):
 
 
 def _start(conversation: Conversation, body="取引先を確かめて", **kwargs) -> Run:
-    post_message(
-        conversation, body=body, client_message_id="", mode=MessageMode.AUTO, actor=conversation.owner, **kwargs
-    )
+    post_message(conversation, body=body, client_message_id="", actor=conversation.owner, **kwargs)
     return Run.objects.filter(conversation=conversation).latest("pk")
 
 

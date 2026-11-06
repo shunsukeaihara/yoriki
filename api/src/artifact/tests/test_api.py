@@ -109,7 +109,7 @@ class TestUpload:
         run.set_status(RunStatus.RUNNING)
         later = upload(api_client, conversation, name="次.csv").data["id"]
         current = upload(api_client, conversation, name="追加.csv").data["id"]
-        assert send(api_client, conversation, "2", [later], mode="next").status_code == 201
+        assert send(api_client, conversation, "2", [later], create_skill=True).status_code == 201
         assert send(api_client, conversation, "3", [current]).status_code == 201
 
         def inputs():

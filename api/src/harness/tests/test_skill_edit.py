@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from conversation.dispatch import MessageMode, post_message
+from conversation.dispatch import post_message
 from conversation.factories import ConversationFactory
 from conversation.models import ConversationMessage, InstructionKind, MessageRole, UserInstruction
 from harness.runner import Runner
@@ -75,9 +75,7 @@ def publish(owner, name="請求書の照合", **kwargs) -> Skill:
 
 
 def post(conversation, body="今後はNotify Partyが空でもエラーにしない", **kwargs) -> Run:
-    post_message(
-        conversation, body=body, client_message_id="", mode=MessageMode.AUTO, actor=conversation.owner, **kwargs
-    )
+    post_message(conversation, body=body, client_message_id="", actor=conversation.owner, **kwargs)
     return Run.objects.filter(conversation=conversation).latest("pk")
 
 

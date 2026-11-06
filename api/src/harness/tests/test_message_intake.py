@@ -2,8 +2,10 @@
 
 import pytest
 
+from artifact.factories import ArtifactFactory
+from artifact.models import Artifact, ArtifactKind
 from connector.factories import ConnectorFactory
-from conversation.dispatch import CannotStart, MessageMode, post_message
+from conversation.dispatch import CannotStart, post_message
 from conversation.factories import ConversationFactory
 from conversation.models import ConversationMessage, InstructionKind, InstructionState, MessageRole, UserInstruction
 from harness.runner import Runner
@@ -41,9 +43,7 @@ def fixture_conversation(app_user):
 
 
 def send(conversation, body="お願いします", **kwargs):
-    return post_message(
-        conversation, body=body, client_message_id="", mode=MessageMode.AUTO, actor=conversation.owner, **kwargs
-    )
+    return post_message(conversation, body=body, client_message_id="", actor=conversation.owner, **kwargs)
 
 
 def start(conversation, **kwargs) -> Run:
@@ -370,6 +370,21 @@ def test_choices_with_an_answer_do_not_become_a_new_request_when_the_run_ends(co
 
 
 @pytest.mark.django_db
+def test_attachments_of_an_answer_with_choices_stay_inputs(conversation, app_user):
+    """回答に添えた添付は回答として渡している。Runが先に終わって指定を捨てても、次の依頼から読める"""
+    skill = publish(app_user)
+    run = start(conversation)
+    run = execute(run, FakeAdapter([calls(("q1", "ask_user", QUESTION))]))
+    attachment = ArtifactFactory.create(owner=app_user, conversation=conversation, kind=ArtifactKind.ATTACHMENT)
+    send(conversation, body="大阪支店です", skills=[skill], attachments=[attachment])
+
+    assert attachment in Artifact.objects.sent_inputs(conversation.pk)
+    run.refresh_from_db()
+    run.request_cancel("止める", app_user)
+    assert attachment in Artifact.objects.sent_inputs(conversation.pk)
+
+
+@pytest.mark.django_db
 def test_the_skill_edit_request_still_waits_for_the_run_to_end(conversation, app_user):
     skill = publish(app_user)
     start(conversation)
@@ -377,7 +392,6 @@ def test_the_skill_edit_request_still_waits_for_the_run_to_end(conversation, app
         conversation,
         body="説明を直して",
         client_message_id="",
-        mode=MessageMode.AUTO,
         actor=app_user,
         skill_edit={"id": skill.uid, "name": skill.name},
     )

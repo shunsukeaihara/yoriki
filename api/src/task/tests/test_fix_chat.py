@@ -295,13 +295,13 @@ def test_messages_are_instructions_to_the_running_task(api_client, manager):
     assert res.status_code == 201, res.json()
     attachment.refresh_from_db()
     assert attachment.run == run
-    # 次の依頼は、タスクのRunが終わった後のタスクの編集の依頼になる
-    res = _post(api_client, run.conversation, "今後もインボイス番号を確かめるようにして", mode="next")
-    assert res.status_code == 201, res.json()
-    instruction = UserInstruction.objects.get(message__uid=res.json()["id"])
-    assert (instruction.kind, instruction.state) == (InstructionKind.NEXT, InstructionState.RECEIVED)
     # 追加の指示はRunnerが取り込んだものとする
     UserInstruction.objects.filter(kind=InstructionKind.CURRENT).update(state=InstructionState.APPLIED)
+    # 取り込まれないままタスクのRunが終わった発言は、タスクの編集の依頼になる
+    res = _post(api_client, run.conversation, "今後もインボイス番号を確かめるようにして")
+    assert res.status_code == 201, res.json()
+    instruction = UserInstruction.objects.get(message__uid=res.json()["id"])
+    assert (instruction.kind, instruction.state) == (InstructionKind.CURRENT, InstructionState.RECEIVED)
     run.set_status(RunStatus.CANCELLED)
     instruction.refresh_from_db()
     assert instruction.state == InstructionState.STARTED

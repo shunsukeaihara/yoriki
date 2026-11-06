@@ -14,7 +14,7 @@ from connector.adapters.base import ColumnInfo, QueryResult, TableInfo
 from connector.errors import ConnectorError, ConnectorErrorKind
 from connector.factories import ConnectorFactory
 from connector.models import VERSION_FIELDS, ConnectionLease, ConnectorScope
-from conversation.dispatch import CannotStart, MessageMode, post_message
+from conversation.dispatch import CannotStart, post_message
 from conversation.factories import ConversationFactory
 from conversation.models import InstructionKind, UserInstruction
 from harness.connectors import build_catalog, explicit_text, resolve_explicit
@@ -101,9 +101,7 @@ def fixture_conversation(app_user):
 
 
 def start(conversation, body="取引先を調べて", **kwargs) -> Run:
-    post_message(
-        conversation, body=body, client_message_id="", mode=MessageMode.AUTO, actor=conversation.owner, **kwargs
-    )
+    post_message(conversation, body=body, client_message_id="", actor=conversation.owner, **kwargs)
     return Run.objects.filter(conversation=conversation).latest("pk")
 
 

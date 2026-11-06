@@ -155,15 +155,16 @@ class ArtifactQuerySet(models.QuerySet):
 
     def sent_inputs(self, conversation_id: int) -> Self:
         """会話で送り、Runが取り込んだ添付（/workspace/input に置くもの）。まだ取り込んでいない依頼（受付済みの
-        追加指示・次の依頼）と取り消した依頼のメッセージの添付は、その依頼が始まるまで見せない"""
+        追加指示・次の依頼）と取り消した依頼のメッセージの添付は、その依頼が始まるまで見せない。確認への回答に添えた
+        添付は、指定したSkill・Connectorを取り込む前でも回答として渡している（design.md §5.5）"""
         from conversation.models import InstructionState  # noqa: PLC0415  conversationがartifactを参照するため
 
         pending = (InstructionState.RECEIVED, InstructionState.DISCARDED)
-        return (
-            self.filter(conversation_id=conversation_id, kind=ArtifactKind.ATTACHMENT, deleted=False)
-            .exclude(path="")
-            .exclude(messages__instruction__state__in=pending)
+        sent = self.filter(conversation_id=conversation_id, kind=ArtifactKind.ATTACHMENT, deleted=False).exclude(
+            path=""
         )
+        waiting = sent.filter(messages__instruction__state__in=pending, messages__instruction__is_answer=False)
+        return sent.exclude(pk__in=waiting.values("pk"))
 
     def latest_output(self, conversation_id: int, path: str, *, run=None) -> "Artifact | None":
         """会話の成果物のうち、`/workspace/output` のそのパスの最新のもの（変わっていないファイルは回収し直さないので、

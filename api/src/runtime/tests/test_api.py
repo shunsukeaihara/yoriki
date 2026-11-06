@@ -144,7 +144,7 @@ class TestRunPinsTheVersion:
     def test_a_new_run_pins_the_default_version(self, app_user):
         profile = RuntimeProfileFactory.create(is_default=True)
         conversation = ConversationFactory.create(owner=app_user)
-        message = post_message(conversation, body="集計して", client_message_id="", mode="auto", actor=app_user)
+        message = post_message(conversation, body="集計して", client_message_id="", actor=app_user)
         run = message.run
         assert run is not None
         pinned = profile.current_version

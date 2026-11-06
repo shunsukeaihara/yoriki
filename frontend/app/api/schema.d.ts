@@ -3818,14 +3818,6 @@ export interface components {
              */
             create_skill: boolean;
             client_message_id?: string;
-            /**
-             * @description auto：実行中なら今の作業への追加指示、確認待ちなら回答。next：今の作業の後に始める
-             *
-             *     * `auto` - 自動
-             *     * `next` - 次の依頼
-             * @default auto
-             */
-            mode: components["schemas"]["ModeEnum"];
         };
         /**
          * @description * `1` - ユーザー
@@ -3935,12 +3927,6 @@ export interface components {
             /** 表示名 */
             readonly display_name: string;
         };
-        /**
-         * @description * `auto` - 自動
-         *     * `next` - 次の依頼
-         * @enum {string}
-         */
-        ModeEnum: "auto" | "next";
         /**
          * @description モデル設定。中身（接続、モデル名、上限、単価、能力）は現在の版の値を平らに出す。
          *

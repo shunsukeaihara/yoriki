@@ -2,7 +2,7 @@
 
 import pytest
 
-from conversation.dispatch import CannotStart, MessageMode, post_message
+from conversation.dispatch import CannotStart, post_message
 from conversation.factories import ConversationFactory
 from conversation.models import InstructionKind, UserInstruction
 from harness import runner as runner_module
@@ -43,9 +43,7 @@ def publish(owner, name="請求書の照合", **content):
 
 
 def start(conversation, body="請求書を確認して", skills=None) -> Run:
-    post_message(
-        conversation, body=body, client_message_id="", mode=MessageMode.AUTO, actor=conversation.owner, skills=skills
-    )
+    post_message(conversation, body=body, client_message_id="", actor=conversation.owner, skills=skills)
     return Run.objects.filter(conversation=conversation).latest("pk")
 
 
@@ -218,9 +216,7 @@ def test_unusable_chosen_skill_does_not_start_the_run(conversation, app_user):
 def test_message_with_a_skill_during_a_run_goes_to_the_parent(conversation, app_user):
     skill, _version = publish(app_user)
     start(conversation)
-    post_message(
-        conversation, body="次はこれ", client_message_id="", mode=MessageMode.AUTO, actor=app_user, skills=[skill]
-    )
+    post_message(conversation, body="次はこれ", client_message_id="", actor=app_user, skills=[skill])
     instruction = UserInstruction.objects.get(message__body="次はこれ")
     assert instruction.kind == InstructionKind.CURRENT
     assert instruction.message.skills == [{"id": skill.uid, "name": skill.name}]
@@ -393,9 +389,7 @@ def test_instruction_after_the_result_asks_to_submit_it_again(conversation, app_
     class Script(FakeAdapter):
         def stream(self, request):
             if len(self.requests) == 2:
-                post_message(
-                    conversation, body="理由も書いて", client_message_id="", mode=MessageMode.AUTO, actor=app_user
-                )
+                post_message(conversation, body="理由も書いて", client_message_id="", actor=app_user)
             yield from super().stream(request)
 
     adapter = Script(

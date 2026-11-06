@@ -18,7 +18,7 @@ from run.serializers import RunSerializer
 from skill.models import Skill, SkillAction
 from utils.fields import NormalizedTextField
 
-from .dispatch import CannotStart, MessageMode, post_message
+from .dispatch import CannotStart, post_message
 from .models import Conversation, ConversationMessage, InstructionKind, InstructionState, MessageRole
 
 
@@ -324,12 +324,6 @@ class MessageSerializer(serializers.ModelSerializer):
     )
     skill_edit = serializers.SerializerMethodField()
     client_message_id = serializers.CharField(max_length=64, required=False, allow_blank=True, write_only=True)
-    mode = serializers.ChoiceField(
-        choices=[(MessageMode.AUTO, _("自動")), (MessageMode.NEXT, _("次の依頼"))],
-        default=MessageMode.AUTO,
-        write_only=True,
-        help_text=_("auto：実行中なら今の作業への追加指示、確認待ちなら回答。next：今の作業の後に始める"),
-    )
     instruction = InstructionInfoSerializer(read_only=True, allow_null=True)
     task_run = LaunchedTaskRunSerializer(
         read_only=True, allow_null=True, help_text=_("チャットから起動したタスクのRun（カードとして出すメッセージ）")
@@ -353,7 +347,6 @@ class MessageSerializer(serializers.ModelSerializer):
             "create_skill",
             "skill_edit",
             "client_message_id",
-            "mode",
             "instruction",
             "task_run",
             "created",
@@ -459,7 +452,6 @@ class MessageSerializer(serializers.ModelSerializer):
                 validated_data["conversation"],
                 body=validated_data["body"],
                 client_message_id=validated_data.get("client_message_id", ""),
-                mode=validated_data["mode"],
                 actor=validated_data["sender"],
                 attachments=validated_data.get("attachments", []),
                 skills=validated_data.get("skills", []),

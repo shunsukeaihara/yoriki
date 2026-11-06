@@ -8,7 +8,7 @@ from typing import Any, cast
 import pytest
 from django.utils import timezone
 
-from conversation.dispatch import MessageMode, post_message
+from conversation.dispatch import post_message
 from conversation.factories import ConversationFactory
 from conversation.models import ConversationMessage, MessageRole
 from harness.runner import ATTEMPT_LIMIT_SECONDS, MAX_STEPS, RUNNING_JOBS_NOTICE, Runner
@@ -107,7 +107,7 @@ def fixture_conversation(app_user):
 
 
 def post(conversation, body="作業して") -> Run:
-    post_message(conversation, body=body, client_message_id="", mode=MessageMode.AUTO, actor=conversation.owner)
+    post_message(conversation, body=body, client_message_id="", actor=conversation.owner)
     return Run.objects.filter(conversation=conversation).latest("pk")
 
 
@@ -179,9 +179,7 @@ def test_message_wakes_the_parent_while_the_job_keeps_running(conversation, app_
     def tick(session):
         if not sent:
             sent.append(True)
-            post_message(
-                conversation, body="急いで", client_message_id="", mode=MessageMode.AUTO, actor=conversation.owner
-            )
+            post_message(conversation, body="急いで", client_message_id="", actor=conversation.owner)
         else:
             session.finish()
 
@@ -203,9 +201,7 @@ def test_message_before_the_reply_ends_does_not_stop_the_job(conversation):
     class PostsWhileReplying(FakeAdapter):
         def stream(self, request):
             if not self.requests:
-                post_message(
-                    conversation, body="追加", client_message_id="", mode=MessageMode.AUTO, actor=conversation.owner
-                )
+                post_message(conversation, body="追加", client_message_id="", actor=conversation.owner)
             yield from super().stream(request)
 
     adapter = PostsWhileReplying([reply("ひとまず返します。"), reply("反映しました。")])

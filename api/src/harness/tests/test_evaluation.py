@@ -9,7 +9,7 @@ import pytest
 from connector.factories import ConnectorFactory
 from connector.models import Connector, ConnectorScope
 from conversation import evaluation as evaluation_module
-from conversation.dispatch import MessageMode, post_message
+from conversation.dispatch import post_message
 from conversation.evaluation import cancel_evaluation, match_expected, progress_evaluation, start_evaluation
 from conversation.factories import ConversationFactory
 from conversation.models import Conversation, ConversationPurpose
@@ -517,7 +517,6 @@ def _edit_run(conversation, skill: Skill) -> Run:
         conversation,
         body="手順を直して評価して",
         client_message_id="",
-        mode=MessageMode.AUTO,
         actor=conversation.owner,
         skill_edit={"id": skill.uid, "name": skill.name},
     )

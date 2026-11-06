@@ -7,7 +7,7 @@ import pytest
 
 from artifact.models import BlobObject
 from artifact.storage import StorageError
-from conversation.dispatch import MessageMode, post_message
+from conversation.dispatch import post_message
 from conversation.factories import ConversationFactory
 from harness import compaction
 from harness import context as context_module
@@ -76,7 +76,7 @@ def fixture_clear_cache():
 
 def start(*, images: bool, owner) -> Run:
     conversation = ConversationFactory.create(owner=owner, model_profile__version__supports_images=images)
-    post_message(conversation, body="読んで", client_message_id="", mode=MessageMode.AUTO, actor=owner)
+    post_message(conversation, body="読んで", client_message_id="", actor=owner)
     return Run.objects.get(conversation=conversation)
 
 

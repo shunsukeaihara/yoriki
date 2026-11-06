@@ -205,10 +205,10 @@ class TestMessage:
         assert res.data["instruction"]["kind"] == InstructionKind.CURRENT
         assert Run.objects.filter(conversation=conversation).count() == 1
 
-    def test_next_mode_queues_a_request(self, api_client, app_user):
+    def test_message_while_cancelling_starts_after_the_run(self, api_client, app_user):
         conversation = ConversationFactory.create(owner=app_user)
-        RunFactory.create(conversation=conversation, status=RunStatus.RUNNING)
-        res = api_client.post(self.url(conversation), {"body": "次はこれ", "mode": "next"}, format="json")
+        RunFactory.create(conversation=conversation, status=RunStatus.CANCELLING)
+        res = api_client.post(self.url(conversation), {"body": "次はこれ"}, format="json")
         assert res.status_code == 201, res.data
         assert UserInstruction.objects.get(conversation=conversation).kind == InstructionKind.NEXT
 

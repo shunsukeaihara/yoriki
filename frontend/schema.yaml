@@ -12120,7 +12120,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ToolsEnum'
-          description: 使ってよいTool。空ならコマンド不要のSkill
+          description: 使うTool。空ならコマンド不要のSkill
           maxItems: 50
         requires:
           type: array
@@ -13775,7 +13775,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ToolsEnum'
-          description: 使ってよいTool。空ならコマンド不要のSkill
+          description: 使うTool。空ならコマンド不要のSkill
           maxItems: 50
         requires:
           type: array
@@ -13815,7 +13815,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ToolsEnum'
-          description: 使ってよいTool。空ならコマンド不要のSkill
+          description: 使うTool。空ならコマンド不要のSkill
           maxItems: 50
         requires:
           type: array
@@ -14026,7 +14026,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ToolsEnum'
-          description: 使ってよいTool。空ならコマンド不要のSkill
+          description: 使うTool。空ならコマンド不要のSkill
           maxItems: 50
         requires:
           type: array
@@ -14451,7 +14451,7 @@ components:
             type: string
             maxLength: 100
           readOnly: true
-          title: 使ってよいTool
+          title: 使うTool
         requires:
           type: array
           items:

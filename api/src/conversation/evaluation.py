@@ -282,7 +282,7 @@ def _start_run(
                 "handles_sensitive_data": sensitive,
                 "skills": [entry],
                 "skill_catalog": None,
-                # 評価を依頼した人が使えるConnector。Draftの「使ってよいTool」にConnectorの操作があれば使う
+                # 評価を依頼した人が使えるConnector
                 "connectors": [],
                 "connector_catalog": connector_catalog,
                 "evaluation": {"evaluation": evaluation.uid, "side": side},

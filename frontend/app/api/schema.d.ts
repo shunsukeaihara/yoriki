@@ -4899,7 +4899,7 @@ export interface components {
             revision?: number;
             description?: string;
             instructions?: string;
-            /** @description 使ってよいTool。空ならコマンド不要のSkill */
+            /** @description 使うTool。空ならコマンド不要のSkill */
             tools?: components["schemas"]["ToolsEnum"][];
             requires?: components["schemas"]["SkillRequirementEnum"][];
             input_schema?: unknown;
@@ -5558,7 +5558,7 @@ export interface components {
             name: string;
             description?: string;
             instructions?: string;
-            /** @description 使ってよいTool。空ならコマンド不要のSkill */
+            /** @description 使うTool。空ならコマンド不要のSkill */
             tools?: components["schemas"]["ToolsEnum"][];
             requires?: components["schemas"]["SkillRequirementEnum"][];
             input_schema?: unknown;
@@ -5573,7 +5573,7 @@ export interface components {
             revision: number;
             description?: string;
             instructions?: string;
-            /** @description 使ってよいTool。空ならコマンド不要のSkill */
+            /** @description 使うTool。空ならコマンド不要のSkill */
             tools?: components["schemas"]["ToolsEnum"][];
             requires?: components["schemas"]["SkillRequirementEnum"][];
             input_schema?: unknown;
@@ -5655,7 +5655,7 @@ export interface components {
             revision: number;
             description?: string;
             instructions?: string;
-            /** @description 使ってよいTool。空ならコマンド不要のSkill */
+            /** @description 使うTool。空ならコマンド不要のSkill */
             tools?: components["schemas"]["ToolsEnum"][];
             requires?: components["schemas"]["SkillRequirementEnum"][];
             input_schema?: unknown;
@@ -5823,7 +5823,7 @@ export interface components {
             readonly description: string;
             /** 手順 */
             readonly instructions: string;
-            /** 使ってよいTool */
+            /** 使うTool */
             readonly tools: string[];
             /** 必要な能力 */
             readonly requires: components["schemas"]["SkillRequirementEnum"][];

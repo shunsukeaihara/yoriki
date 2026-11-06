@@ -263,7 +263,7 @@ def test_loaded_skill_with_a_result_schema_asks_for_the_result_in_the_reply(conv
     assert run.status == RunStatus.COMPLETED
     assert "submit_result" not in tool_names(adapter.requests[1])
     [result] = results(run, "skill")
-    assert "submit_result is not available" in result["content"][0]["text"]
+    assert "no submit_result for this skill" in result["content"][0]["text"]
 
 
 @pytest.mark.django_db
@@ -276,7 +276,7 @@ def test_chosen_skill_with_a_result_schema_is_the_same_as_a_loaded_one(conversat
     run = execute(run, adapter)
     assert run.status == RunStatus.COMPLETED
     assert "submit_result" not in tool_names(adapter.requests[0])
-    assert any("submit_result is not available" in m.text for m in adapter.requests[0].messages)
+    assert any("no submit_result for this skill" in m.text for m in adapter.requests[0].messages)
 
 
 @pytest.mark.django_db

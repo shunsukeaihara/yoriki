@@ -1,12 +1,10 @@
 """タスクのRun（harness.md §7.5・§10、authorization.md §5.4・§6）。
 
-タスクのRunは、受付時に固定したタスクの版（Manifestの `fixed.task`）の範囲で動く。エージェントが使えるのは、固定した
-Skillの版と、固定したConnectorだけで、`skill` で探して読み込むことも、利用者の使えるConnectorから選ぶこともしない。
-Toolは、Skillの「使ってよいTool」とタスクのToolの一覧の両方に入っているものだけ。使えるかは、起動した人ではなく
-タスクの範囲で、区切りと操作のたびに確かめ直す（task/checks.py）。チャットから起動したRunは、それに加えて起動した人
-（`Run.owner`）の今の権限でも確かめる（タスクの版の一覧 ∩ 起動した人の今の権限。authorization.md §6）。
-修正チャットのRunは、タスクに固定したものの範囲で動き、動かした人（`Run.owner`）が今もタスクを管理できるかを確かめる
-（停止中かは見ない。design.md §11.11）。
+タスクのRunは、受付時に固定したタスクの版（Manifestの `fixed.task`）の依頼文と指示で動き、タスクの範囲でアクセスできる
+Skill・Connectorをすべて使える。定義で選んだものは使うよう指示するもので、アクセス範囲ではない。使えるかは、タスクの範囲
+で区切りと操作のたびに確かめ直す（task/checks.py）。チャットから起動したRunは、起動した人が今も起動できる立場かも確かめる
+（起動できる人はタスクより狭い権限を持たないので、Skill・Connectorは照らし合わせない）。修正チャットのRunは、動かした人
+（`Run.owner`）が今もタスクを管理できるかを確かめる（停止中かは見ない。design.md §11.11）。
 """
 
 from typing import Any
@@ -67,17 +65,8 @@ def skill_problem(run: Run, skill, version) -> str:
     task = load_task(run)
     if task is None:
         return _("タスクが削除されました")
-    if reason := checks.skill_problem(
-        task,
-        skill,
-        version,
-        connectors=task_entry(run).get("connectors", []),
-        sensitive=run.handles_sensitive_data,
-    ):
+    if reason := checks.skill_problem(task, skill, version, sensitive=run.handles_sensitive_data):
         return reason
-    if run.launch == RunLaunch.CHAT:
-        user = launcher(run)
-        return checks.launcher_inactive(user) or checks.launcher_skill_problem(user, skill)
     if run.is_task_fix:
         return checks.fixer_problem(fixer(run), task)
     return ""
@@ -85,26 +74,12 @@ def skill_problem(run: Run, skill, version) -> str:
 
 def connector_permitted(run: Run, connector) -> bool:
     task = load_task(run)
-    connectors = task_entry(run).get("connectors", [])
-    if task is None or not checks.connector_permitted(
-        task, connector, connectors=connectors, allow_suspended=run.is_task_fix
-    ):
+    if task is None or not checks.connector_permitted(task, connector, allow_suspended=run.is_task_fix):
         return False
-    if run.launch == RunLaunch.CHAT:
-        user = launcher(run)
-        return user is not None and checks.launcher_connector_permitted(user, connector)
     if run.is_task_fix:
         # 修正チャットの持ち主が、今もタスクを管理できるか（操作のたびに。authorization.md §6）
         return not checks.fixer_problem(fixer(run), task)
     return True
-
-
-def allowed_tools(run: Run, skill_tools: set[str]) -> set[str]:
-    """タスクのRunが使うTool：固定したSkillの「使ってよいTool」を合わせたもの（authorization.md §5.4）。
-
-    タスクの版がToolの一覧を持っていた頃に受け付けたRunは、固定したその一覧との両方に入っているものに限る"""
-    fixed = task_entry(run).get("tools")
-    return skill_tools if fixed is None else skill_tools & set(fixed)
 
 
 def output_schema(run: Run) -> dict[str, Any] | None:

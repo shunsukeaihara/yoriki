@@ -7,6 +7,7 @@ Manifestに固定し、途中で読み込んだSkillと発言で指定したSkil
 """
 
 import re
+from collections.abc import Callable
 from typing import Any
 
 from django.db.models import Case, IntegerField, Value, When
@@ -74,11 +75,26 @@ def build_catalog(user, model_version, *, sensitive: bool, connectors: set[str])
     一覧の量は文脈の2%までにし、超えたら説明を短くして、それでも入らない分は数だけを示す。同じ名前のSkillが
     範囲（個人・部門・全社）の違いで重なれば、範囲を添えて分ける（`skill` の引数で名前を指すため）
     """
+
+    def usable(runnable: list[Skill]) -> list[Skill]:
+        declared = skill_connectors.load(s.current_version for s in runnable)
+        return [
+            s
+            for s in runnable
+            if not skill_connectors.unusable_reason(
+                s.current_version, user, sensitive=sensitive, available=connectors, connectors=declared
+            )
+        ]
+
+    return catalog_of(Skill.objects.usable_by(user), model_version, usable)
+
+
+def catalog_of(queryset, model_version, keep: Callable[[list[Skill]], list[Skill]]) -> dict[str, Any]:
+    """Skillの一覧：使うモデルが必要な能力を持ち、`keep` が残すもの。本人のものを先に（同じ名前なら、より身近な範囲の
+    ものを先に見せる）"""
     skills = (
-        Skill.objects.usable_by(user)
-        .select_related("current_version", "department")
+        queryset.select_related("current_version", "department")
         .annotate(
-            # 本人のものを先に（同じ名前なら、より身近な範囲のものを先に見せる）
             order=Case(
                 When(scope=SkillScope.PERSONAL, then=Value(0)),
                 When(scope=SkillScope.DEPARTMENT, then=Value(1)),
@@ -88,15 +104,7 @@ def build_catalog(user, model_version, *, sensitive: bool, connectors: set[str])
         )
         .order_by("order", "name", "pk")
     )
-    runnable = [s for s in skills if s.current_version and not s.current_version.unsupported_by(model_version)]
-    declared = skill_connectors.load(s.current_version for s in runnable)
-    usable = [
-        s
-        for s in runnable
-        if not skill_connectors.unusable_reason(
-            s.current_version, user, sensitive=sensitive, available=connectors, connectors=declared
-        )
-    ]
+    usable = keep([s for s in skills if s.current_version and not s.current_version.unsupported_by(model_version)])
     counts: dict[str, int] = {}
     for skill in usable:
         counts[skill.name] = counts.get(skill.name, 0) + 1
@@ -110,7 +118,11 @@ def build_catalog(user, model_version, *, sensitive: bool, connectors: set[str])
             name, number = f"{base} ({number})", number + 1
         taken.add(name)
         version = skill.current_version
-        entry = {"skill": skill.uid, "name": name, "description": version.description if version else ""}
+        entry: dict[str, Any] = {
+            "skill": skill.uid,
+            "name": name,
+            "description": version.description if version else "",
+        }
         if version is not None and version.connectors:
             # Connectorの一覧に、宣言したConnectorを先に並べるため（restrict_catalog()）
             entry["connectors"] = skill_connectors.declared_uids(version)
@@ -319,7 +331,7 @@ def render(
         lines.append(f"<output_schema>\n{schema}\n</output_schema>")
         if not result_tool:
             lines.append(
-                "<note>submit_result is not available in this work. Put the result in this form in your final "
+                "<note>This work has no submit_result for this skill. Put the result in this form in your final "
                 "reply instead.</note>"
             )
     lines.append("</skill>")
@@ -369,7 +381,7 @@ def explicit_text(
                 f"Follow this one.\n{block}"
             )
         blocks.append(block)
-    head = "The user chose these skills for this request. Follow them:"
+    head = "Use these skills for this request. Follow them:"
     return head + "\n" + "\n\n".join(blocks)
 
 

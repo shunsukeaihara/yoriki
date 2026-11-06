@@ -8,6 +8,7 @@ from django.utils.translation import gettext as _
 from run.models import RunEvent, RunEventKind
 from skill.models import Skill, SkillAction, SkillVersion
 
+from .. import tasks
 from ..connectors import catalog as connector_catalog
 from ..skills import loaded_entries, manifest_entry, render, skill_catalog
 from .base import Effect, Tool, ToolContext, ToolResult
@@ -49,13 +50,12 @@ def execute(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     skill = Skill.objects.select_related("current_version", "department").filter(uid=entry["skill"]).first()
     if skill is None or skill.deleted:
         return ToolResult.error("This skill was deleted. Continue without it, and tell the user.")
-    user, model_version = run.owner, run.model_version
 
     loaded = next((e for e in loaded_entries(run) if e["skill"] == skill.uid), None)
     if loaded is not None:
         return _load_again(skill, loaded, entry["name"], context)
     available = {e["connector"] for e in connector_catalog(run).get("connectors", [])}
-    if reason := skill.unusable_reason(user, model_version, sensitive=run.handles_sensitive_data, connectors=available):
+    if reason := _problem(run, skill, available):
         return _unusable(reason)
     assert skill.current_version_id is not None  # unusable_reason() が確かめた
     version = SkillVersion.objects.prefetch_related("assets__resource_version").get(pk=skill.current_version_id)
@@ -72,9 +72,26 @@ def execute(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     return _loaded(skill, version, entry["name"], context)
 
 
+def _problem(run, skill: Skill, connectors: set[str]) -> str:
+    """このRunで今読み込めない理由（読み込めれば空文字）。会話は依頼した人、タスクはタスクの範囲で判定する"""
+    if tasks.is_task_run(run):
+        version = skill.current_version
+        reason = tasks.skill_problem(run, skill, version)
+        return reason or (version.unsupported_by(run.model_version) if version else "")
+    return skill.unusable_reason(
+        run.owner, run.model_version, sensitive=run.handles_sensitive_data, connectors=connectors
+    )
+
+
 def _load_again(skill: Skill, loaded: dict[str, Any], name: str, context: ToolContext) -> ToolResult:
     """同じRunでは追記した版を返す（途中で公開し直されても切り替えない）。停止や権限の失効は確かめ直す"""
-    if not skill.can(context.run.owner, SkillAction.VIEW) or skill.suspended:
+    run = context.run
+    revoked = (
+        tasks.skill_problem(run, skill, None)
+        if tasks.is_task_run(run)
+        else not skill.can(run.owner, SkillAction.VIEW) or skill.suspended
+    )
+    if revoked:
         return _unusable(_("このSkillは使えなくなりました"))
     version = SkillVersion.objects.prefetch_related("assets__resource_version").get(pk=loaded["version"])
     return _loaded(skill, version, name, context)
@@ -86,12 +103,17 @@ def _loaded(skill: Skill, version: SkillVersion, name: str, context: ToolContext
             skill,
             version,
             name=name,
-            result_tool=SUBMIT_RESULT in context.exposed,
+            # submit_result の形はタスクの定義で決まる。一覧から読み込んだSkillの形は最後の応答に書かせる
+            result_tool=SUBMIT_RESULT in context.exposed and _instructed(context.run, skill),
             connector_names={e["connector"]: e["name"] for e in connector_catalog(context.run).get("connectors", [])},
         ),
         value={"skill": skill.uid, "version": version.number},
         meta={"skill": skill.name, "version": version.number},
     )
+
+
+def _instructed(run, skill: Skill) -> bool:
+    return any(e["skill"] == skill.uid for e in ((run.manifest or {}).get("fixed") or {}).get("skills", []))
 
 
 def _unusable(reason: str) -> ToolResult:

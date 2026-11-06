@@ -434,7 +434,7 @@ def test_chosen_connector_that_was_disabled_does_not_start_the_run(conversation)
 
 @pytest.mark.django_db
 def test_chosen_connector_with_a_skill_that_does_not_query_is_accepted(conversation, app_user):
-    """Skillの「使ってよいTool」は、会話で呼び出せる範囲を変えない（authorization.md §6）"""
+    """Skillの「使うTool」は、会話で呼び出せる範囲を変えない（authorization.md §6）"""
     connector = ConnectorFactory.create(name="販売管理", version__tables=TABLES)
     skill = SkillFactory.create(created_by=app_user)
     SkillVersionFactory.create(skill=skill, tools=["read"])

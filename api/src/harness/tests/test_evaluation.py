@@ -134,8 +134,9 @@ def test_evaluation_runs_the_published_version_and_the_draft_for_each_case(app_u
     adapter = submit(True)
     execute(result.draft_run, adapter)
     names = {t.name for t in adapter.requests[0].tools}
-    # Skillの `tools` と submit_result だけ。答える人がいないので ask_user も、提案・読込みのToolも出さない
-    assert names == {"read", "submit_result"}
+    # Skillの `tools` では絞らない。答える人がいないので ask_user も、提案・読込みのToolも出さない
+    assert {"read", "shell", "submit_result"} <= names
+    assert not names & {"ask_user", "request_skill_edit", "skill"}
     first = next(m.text for m in adapter.requests[0].messages if "新しい手順" in m.text)
     assert "/workspace/master/skills/" in first and "master.csv" in first
     assert "No one can answer questions" in first

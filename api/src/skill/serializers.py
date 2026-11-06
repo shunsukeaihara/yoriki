@@ -273,7 +273,7 @@ class SkillContentSerializer(serializers.ModelSerializer):
         child=serializers.ChoiceField(choices=TOOL_CHOICES),
         required=False,
         max_length=50,
-        help_text=_("使ってよいTool。空ならコマンド不要のSkill"),
+        help_text=_("使うTool。空ならコマンド不要のSkill"),
     )
     requires = serializers.ListField(
         child=serializers.ChoiceField(choices=SkillRequirement.choices), required=False, max_length=10
@@ -564,7 +564,7 @@ class SkillCreateSerializer(SkillContentSerializer):
         if not new.can(user, SkillAction.EDIT):
             raise PermissionDenied(_("この範囲にSkillを作る権限がありません"))
         if attrs.get("tools") and not new.can(user, SkillAction.PUBLISH):
-            raise PermissionDenied(_("使ってよいToolを決めるには、この範囲の公開の権限が要ります"))
+            raise PermissionDenied(_("使うToolを決めるには、この範囲の公開の権限が要ります"))
         attrs["name"] = name
         attrs["department"] = department
         return attrs
@@ -920,7 +920,7 @@ class SkillDraftSerializer(SkillContentSerializer):
             and not _can(draft.skill, self.context, SkillAction.PUBLISH)
         ):
             # 本文を編集できても、Toolは増やせない（design.md §3.6）
-            raise PermissionDenied(_("使ってよいToolを変えるには、この範囲の公開の権限が要ります"))
+            raise PermissionDenied(_("使うToolを変えるには、この範囲の公開の権限が要ります"))
         if (
             draft.is_sensitive
             and not attrs.get("is_sensitive", True)

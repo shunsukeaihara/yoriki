@@ -98,7 +98,7 @@ def out_of_bounds(declaration: dict[str, Any], connector: Connector) -> list[str
 
 def publish_errors(content: Any, skill, actor) -> list[str]:
     """公開するときに確かめる：宣言したConnectorが有効で公開する人が使えること、Skillの範囲に合うこと、宣言した操作と
-    表がConnectorの今の版の境界の中にあること、操作のToolがSkillの「使ってよいTool」にあること（design.md §4.9.1）"""
+    表がConnectorの今の版の境界の中にあること、操作のToolがSkillの「使うTool」にあること（design.md §4.9.1）"""
     errors: list[str] = []
     connectors = load([content])
     for declaration in content.connectors or []:
@@ -128,7 +128,7 @@ def publish_errors(content: Any, skill, actor) -> list[str]:
                 )
             elif operation not in content.tools:
                 errors.append(
-                    _("Connector「%(name)s」の操作「%(operation)s」を使うには、使ってよいToolに加えてください")
+                    _("Connector「%(name)s」の操作「%(operation)s」を使うには、使うToolに加えてください")
                     % {"name": name, "operation": operation}
                 )
         assert connector.current_version is not None  # in_service() が確かめた

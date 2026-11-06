@@ -192,7 +192,8 @@ def test_system_task_uses_department_connectors_of_any_department(api_client, mo
     assert "このタスクでは使えません" in res.json()["connectors"][0]
 
 
-def test_skill_declared_connector_must_be_in_the_task(api_client, model):
+def test_skill_declared_connector_must_be_in_the_scope_of_the_task(api_client, model):
+    """定義で選んでいなくても、タスクの範囲の中にあればよい"""
     admin = grant(UserFactory.create(), AppPermission.MANAGE_COMPANY_TASKS)
     connector = ConnectorFactory.create(name="販売管理", version__tables=TABLES)
     declaration = {"connector": connector.uid, "operations": ["datasource_query"], "tables": ["public.vendors"]}
@@ -200,10 +201,13 @@ def test_skill_declared_connector_must_be_in_the_task(api_client, model):
     body = {"scope": TaskScope.COMPANY, "skills": [{"skill": skill.uid, "version": 1}]}
 
     res = _create(api_client, admin, model, **body)
-    assert res.status_code == 400
-    assert "販売管理" in res.json()["connectors"][0]
-    res = _create(api_client, admin, model, connectors=[connector.uid], **body)
     assert res.status_code == 201, res.json()
+    connector.scope = ConnectorScope.DEPARTMENT
+    connector.department = DepartmentFactory.create()
+    connector.save(update_fields=["scope", "department"])
+    res = _create(api_client, admin, model, name="別の名前", **body)
+    assert res.status_code == 400
+    assert "販売管理" in res.json()["skills"][0]
 
 
 def test_sensitive_connector_needs_a_sensitive_task_with_a_local_model(api_client, model):
@@ -269,7 +273,7 @@ def test_manual_run_fixes_the_revision_and_renders_the_inputs(api_client, app_us
     assert run.parent is None
     fixed = run.manifest["fixed"]
     assert [(s["skill"], s["number"]) for s in fixed["skills"]] == [(skill.uid, 1)]
-    assert "tools" not in fixed["task"]  # Toolは固定したSkillの「使ってよいTool」で決まる
+    assert "tools" not in fixed["task"]  # Toolは固定したSkillの「使うTool」で決まる
     assert fixed["task"]["output_schema"]["properties"] == {"ok": {"type": "boolean"}}
     assert run.conversation.purpose == ConversationPurpose.TASK
     assert not Conversation.objects.owned_by(app_user).exists()  # 会話の一覧には出さない
@@ -578,17 +582,11 @@ def test_result_files_are_only_top_level_properties(api_client, app_user, model)
     assert _create(api_client, app_user, model, output_schema=flat).status_code == 201
 
 
-def test_connectors_need_a_skill_that_may_use_them(api_client, app_user, model):
-    """タスクのRunのToolは固定したSkillの「使ってよいTool」で決まるので、Connectorの操作を許すSkillがなければ、
-    登録したConnectorを使えない"""
+def test_connectors_do_not_need_a_skill_that_declares_them(api_client, app_user, model):
+    """Skillの「使うTool」は権限ではないので、Connectorの操作を宣言したSkillがなくても指示できる"""
     connector = ConnectorFactory.create()
     reader = _company_skill(tools=["read"])
     skills = [{"skill": reader.uid, "version": 1}]
-    res = _create(api_client, app_user, model, skills=skills, connectors=[connector.uid])
-    assert res.status_code == 400
-    assert "Connectorを使えるSkillがありません" in res.json()["connectors"][0]
-    querier = _company_skill(name="照合", tools=["datasource_query"])
-    skills.append({"skill": querier.uid, "version": 1})
     assert _create(api_client, app_user, model, skills=skills, connectors=[connector.uid]).status_code == 201
 
 

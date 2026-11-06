@@ -70,7 +70,7 @@ def test_connector_the_editor_cannot_use_is_not_declared(api_client, app_user):
     ("declaration", "tools", "message"),
     [
         ({"tables": ["public.secret"]}, ["datasource_query"], "公開していません"),
-        ({}, [], "使ってよいToolに加えて"),
+        ({}, [], "使うToolに加えて"),
     ],
 )
 def test_publish_checks_the_boundary_and_tools(api_client, app_user, declaration, tools, message):

@@ -1,18 +1,28 @@
 """エージェントに見せるSkill・Connectorの一覧を作る（harness.md §10.1・§10.2）。
 
-Run開始時と、発言を取り込むたびに、依頼した人の今の権限で作る。一覧を変えてもToolの定義は変わらない
-（`skill`・`connector` の引数は文字列）。タスクのRunの一覧は、タスクに固定したものだけで変わらない。
+Run開始時と、発言を取り込むたびに、今の権限（会話は依頼した人、タスクはタスクの範囲）で作る。一覧を変えてもToolの定義は
+変わらない（`skill`・`connector` の引数は文字列）。使うよう指示されたものは先に並べるだけで、範囲を変えない。
 """
 
 from collections.abc import Sequence
 from typing import Any
 
 from run.models import Run, RunKind
+from task import checks
 
 from . import tasks
 from .connectors import build_catalog as build_connector_catalog
+from .connectors import catalog_of as connector_catalog_of
+from .connectors import is_allowed_for
 from .connectors import usable_uids as usable_connector_uids
-from .skills import build_catalog, catalog_connectors, declared_connectors, loaded_entries, restrict_catalog
+from .skills import (
+    build_catalog,
+    catalog_connectors,
+    catalog_of,
+    declared_connectors,
+    loaded_entries,
+    restrict_catalog,
+)
 
 
 def build_catalogs(
@@ -38,14 +48,38 @@ def build_catalogs(
     return catalog, connector_catalog
 
 
+def build_task_catalogs(
+    task, model_version, *, sensitive: bool, explicit: list[dict[str, Any]]
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """タスクのRunの（Skillの一覧、Connectorの一覧）：タスクの範囲でアクセスできるもの（authorization.md §5.4）。
+    機密のものは機密のRunだけ。`explicit` は定義で使うよう指示したものとSkillが宣言したもの"""
+    if not model_version.supports_tools:
+        return None, None
+    catalog = catalog_of(
+        checks.allowed_skills(task),
+        model_version,
+        lambda runnable: [
+            s for s in runnable if not checks.declaration_problem(task, s.current_version, sensitive=sensitive)
+        ],
+    )
+    connectors = [
+        c
+        for c in checks.allowed_connectors(task).select_related("current_version").order_by("name", "pk")
+        if c.current_version and is_allowed_for(c.current_version, sensitive=sensitive)
+    ]
+    connector_catalog = connector_catalog_of(connectors, [*explicit, *catalog_connectors(catalog)])
+    catalog = restrict_catalog(catalog, {e["connector"] for e in (connector_catalog or {}).get("connectors", [])})
+    return catalog, connector_catalog
+
+
 def refreshes_catalogs(run: Run) -> bool:
-    """発言を取り込むときに一覧を作り直すRunか。タスクのRunはタスクに固定したもの、タスクの編集のRunは使わない"""
-    return run.kind in (RunKind.WORK, RunKind.SKILL_EDIT) and not tasks.is_task_run(run)
+    """発言を取り込むときに一覧を作り直すRunか。タスクの編集のRunはSkill・Connectorを使わない"""
+    return run.kind in (RunKind.WORK, RunKind.SKILL_EDIT)
 
 
 def lists_skills(run: Run) -> bool:
-    """エージェントが探して使うSkillの一覧を出すRunか。業務の会話のRunには、`/` の指定にかかわらず出す"""
-    return run.kind == RunKind.WORK and not tasks.is_task_run(run)
+    """エージェントが探して使うSkillの一覧を出すRunか。業務のRun（会話・タスク）には、指定にかかわらず出す"""
+    return run.kind == RunKind.WORK
 
 
 def rebuild_catalogs(
@@ -60,10 +94,16 @@ def rebuild_catalogs(
         *((manifest.get("fixed") or {}).get("connectors") or []),
         *(e for e in manifest.get("appended", []) if e.get("kind") == "connector"),
     ]
+    explicit = [*chosen, *declared_connectors([*loaded_entries(run), *skills])]
+    if tasks.is_task_run(run):
+        task = tasks.load_task(run)
+        if task is None:  # 区切りで止める。一覧はそのまま
+            return run.current_catalog("skill_catalog"), run.current_catalog("connector_catalog")
+        return build_task_catalogs(task, run.model_version, sensitive=run.handles_sensitive_data, explicit=explicit)
     return build_catalogs(
         run.owner,
         run.model_version,
         sensitive=run.handles_sensitive_data,
         list_skills=lists_skills(run),
-        explicit=[*chosen, *declared_connectors([*loaded_entries(run), *skills])],
+        explicit=explicit,
     )

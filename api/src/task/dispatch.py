@@ -20,8 +20,9 @@ from artifact.storage import get_storage
 from conversation.dispatch import user_message_data
 from conversation.models import Conversation, ConversationMessage, ConversationPurpose, MessageRole
 from delivery.models import Destination, DestinationRevision
-from harness.connectors import fixed_catalog, is_allowed_for
-from harness.skills import manifest_entry
+from harness.catalogs import build_task_catalogs
+from harness.connectors import is_allowed_for
+from harness.skills import declared_connectors, manifest_entry
 from harness.untrusted import untrusted
 from llm.models import ModelProfileVersion
 from run.dispatch import enqueue_run
@@ -130,9 +131,6 @@ def start_task_run(
             _check_launch(task, actor, launch)
             revision = task.current_revision
             assert revision is not None  # can()・in_service() が確かめた
-            # チャットからの起動は、起動した人の権限を超えない（authorization.md §6）
-            if launch == RunLaunch.CHAT and (reason := checks.launcher_problem(actor, revision)):
-                raise CannotRun(reason)
             values = inputs(revision) if callable(inputs) else inputs
             cleaned, errors = clean_inputs(revision.inputs, values)
             if errors:
@@ -183,7 +181,9 @@ class RunPlan:
     entries: list[dict[str, Any]]
     output_schema: dict[str, Any] | None
     notification: str
+    skill_catalog: dict[str, Any] | None
     connector_catalog: dict[str, Any] | None
+    connectors: list[dict[str, Any]]  # 定義で使うよう指示したConnector
     destination_revision: DestinationRevision | None
 
 
@@ -208,19 +208,17 @@ def plan_run(
         raise CannotRun(
             _("コマンドを動かす環境（Runtime Profile）が登録されていません。基盤管理者に問い合わせてください。")
         )
-    # 固定したSkillの版と、Connectorを、受付時にも確かめ直す（authorization.md §6）
+    # 定義で指示したSkillの版と、Connectorを、受付時にも確かめ直す（authorization.md §6）
     entries, output_schema = _fixed_skills(task, revision, version, sensitive=sensitive)
     # 通知の書き方。Toolを使えないモデルでは prepare_notification を出せないので、決まった形で通知する（通知のために
     # 業務を止めない。design.md §4.3）
     notification = revision.notification_instructions.strip() if version.supports_tools else ""
     connectors = checks.load_connectors(revision.connectors)
-    fixed_connectors = []
+    instructed = []
     for uid in revision.connectors:
         connector = connectors.get(uid)
         # 修正チャット（出口へ送らないRun）は、停止中のタスクでも動かす
-        if connector is None or not checks.connector_permitted(
-            task, connector, connectors=revision.connectors, allow_suspended=not deliver
-        ):
+        if connector is None or not checks.connector_permitted(task, connector, allow_suspended=not deliver):
             name = connector.name if connector else uid
             raise CannotRun(_("Connector「%(name)s」を使えません。タスクの定義を確かめてください。") % {"name": name})
         assert connector.current_version is not None  # connector_permitted() が確かめた
@@ -228,8 +226,11 @@ def plan_run(
             raise CannotRun(
                 _("Connector「%(name)s」は機密なので、このタスクでは使えません。") % {"name": connector.name}
             )
-        fixed_connectors.append(connector)
-    connector_catalog = fixed_catalog(fixed_connectors) if version.supports_tools else None
+        instructed.append({"connector": connector.uid, "name": connector.name, "version": connector.current_version.pk})
+    # Runが使えるのはタスクの範囲でアクセスできるものすべて。定義で指示したものは先に並べる（authorization.md §5.4）
+    skill_catalog, connector_catalog = build_task_catalogs(
+        task, version, sensitive=sensitive, explicit=[*instructed, *declared_connectors(entries)]
+    )
     if output_schema and not version.supports_tools:
         # 業務結果は submit_result で確定するので、モデル設定の今の版がToolを使えなければ受け付けない
         raise CannotRun(_("このタスクのモデル設定はToolを使えないので、業務結果を確定できません。"))
@@ -240,7 +241,9 @@ def plan_run(
         entries=entries,
         output_schema=output_schema,
         notification=notification,
+        skill_catalog=skill_catalog,
         connector_catalog=connector_catalog,
+        connectors=instructed,
         destination_revision=_destination_revision(task, revision, lock=lock) if deliver else None,
     )
 
@@ -288,8 +291,8 @@ def _start(
         "runtime_version": plan.runtime_version.pk,
         "handles_sensitive_data": sensitive,
         "skills": plan.entries,
-        "skill_catalog": None,
-        "connectors": [],
+        "skill_catalog": plan.skill_catalog,
+        "connectors": plan.connectors,
         "connector_catalog": plan.connector_catalog,
         "task": {
             "task": task.uid,
@@ -297,7 +300,6 @@ def _start(
             "revision": revision.pk,
             "number": revision.number,
             "launch": launch,
-            "connectors": revision.connectors,
             "output_schema": plan.output_schema,
             "inputs": inputs,
             "notification_instructions": plan.notification,
@@ -334,6 +336,7 @@ def _start(
             message,
             _first_message(text, inputs, launch, notification=plan.notification),
             skills=plan.entries,
+            connectors=plan.connectors,
             connector_catalog=plan.connector_catalog,
         ),
         actor=actor,
@@ -454,9 +457,9 @@ def _fixed_skills(
         skill, skill_version = skills.get(entry["skill"], (None, None))
         if skill is None or skill_version is None:
             raise CannotRun(_("固定したSkillの版がありません。タスクの定義を確かめてください。"))
-        reason = checks.skill_problem(
-            task, skill, skill_version, connectors=revision.connectors, sensitive=sensitive
-        ) or skill_version.unsupported_by(version)
+        reason = checks.skill_problem(task, skill, skill_version, sensitive=sensitive) or skill_version.unsupported_by(
+            version
+        )
         if reason:
             raise CannotRun(_("Skill「%(name)s」を使えません（%(reason)s）。") % {"name": skill.name, "reason": reason})
         entries.append(manifest_entry(skill, skill_version))

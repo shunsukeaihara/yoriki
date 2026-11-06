@@ -76,7 +76,6 @@ from usage.models import UsageLedger, UsagePurpose
 
 from . import compaction, tasks
 from .catalogs import rebuild_catalogs, refreshes_catalogs
-from .connectors import catalog_names as connector_names
 from .context import (
     ADDITIONAL_INSTRUCTION_PREFIX,
     CHOSEN_WITH_ANSWER,
@@ -96,9 +95,9 @@ from .result_files import missing_files
 from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, WORKSPACE_ROLLED_BACK, Job, SandboxSession, Suspended
 from .script_connectors import ScriptConnectors
 from .skill_edit import revoked_edit
-from .skills import SkillContentSource, explicit_versions, revoked_skill
+from .skills import explicit_versions, revoked_skill
 from .task_edit import revoked_task_edit
-from .tools import ALL_TOOLS, ASK_USER, SANDBOX_TOOLS, WORKSPACE_WRITING_TOOLS
+from .tools import ALL_TOOLS, SANDBOX_TOOLS, WORKSPACE_WRITING_TOOLS
 from .tools.base import Effect, Tool, ToolContext, ToolResult
 from .tools.datasource import DATASOURCE_TOOLS
 from .tools.prepare_notification import PREPARE_NOTIFICATION
@@ -722,7 +721,7 @@ class Runner:
     def _exposed_tools(self) -> tuple[Tool, ...]:
         """Runに出すToolの一覧（harness.md §7.5）。Tool呼出しに対応しないモデルには出さない。
 
-        会話のRunでは、`/` の指定にかかわらず、利用者が使えるToolの全体と、Skillを読み込む `skill` を出す
+        会話・タスクのRunでは、指定や定義にかかわらず、使えるToolの全体と、Skillを読み込む `skill` を出す
         """
         if not self.run_obj.model_version.supports_tools:
             return ()
@@ -749,12 +748,12 @@ class Runner:
         if self.skill_tools is not None:
             return self.skill_tools
         explicit = explicit_versions(self.run_obj)
-        # ConnectorのToolはいつも出す（一覧は発言を取り込むときに変わるので、途中で使えるようになる。harness.md §10.2）
-        datasource = DATASOURCE_TOOLS
+        # ConnectorのToolと `skill` はいつも出す。一覧は発言を取り込むときに変わり、指定や定義では絞らない
+        # （harness.md §7.5の2・§10.1・§10.2）
         if self.run_obj.kind == RunKind.SKILL_EDIT:
             # Skillの編集のRun：Skill管理のToolを出し、Skillを使う・提案するToolは出さない（harness.md §10.9）。
             # 新しいSkillを作る依頼でだけ create_skill を出す
-            tools = (*ALL_TOOLS, *datasource, *SKILL_ADMIN_TOOLS, TEST_SKILL_DRAFT)
+            tools = (*ALL_TOOLS, *DATASOURCE_TOOLS, *SKILL_ADMIN_TOOLS, TEST_SKILL_DRAFT)
             if not ((self.run_obj.manifest or {}).get("fixed") or {}).get("skill_edit", {}).get("skill"):
                 tools += (CREATE_SKILL,)
         elif self.run_obj.kind == RunKind.TASK_EDIT:
@@ -762,27 +761,22 @@ class Runner:
             # （harness.md §10.10）
             tools = (*ALL_TOOLS, *TASK_ADMIN_TOOLS)
         elif tasks.is_task_run(self.run_obj):
-            # タスクのRunの一覧はタスクに固定したものだけで変わらないので、なければConnectorのToolは出さない
-            tools = self._task_run_tools(explicit, datasource if connector_names(self.run_obj) else ())
+            tools = self._task_run_tools()
         elif self.run_obj.kind == RunKind.EVALUATION:
-            # Draftの評価のRun：評価するSkillの「使ってよいTool」だけで動くことを確かめる（design.md §3.7.1）
-            allowed = {name for version in explicit for name in version.tools}
-            tools = tuple(t for t in (*ALL_TOOLS, *datasource) if t.name in allowed)
+            # Draftの評価のRun：評価するSkillを使うよう指示して動かす。Toolは絞らない（design.md §3.7.1）
+            tools = (*ALL_TOOLS, *DATASOURCE_TOOLS)
             schema = next((v.output_schema for v in explicit if v.output_schema), None)
             if schema:
                 tools += (make_submit_result_tool(schema),)
         else:
-            # 会話のRun：呼び出せる範囲は依頼した人の権限で決まる。`/` は使えと指示するだけで、Toolの一覧を変えない
-            # （`skill` の一覧は発言を取り込むときに変わるので、いつも出す。harness.md §7.5の2・§10.1）
-            tools = (*ALL_TOOLS, *datasource, SKILL, REQUEST_SKILL_EDIT)
+            tools = (*ALL_TOOLS, *DATASOURCE_TOOLS, SKILL, REQUEST_SKILL_EDIT)
         self.skill_tools = tools
         return tools
 
-    def _task_run_tools(self, explicit: list[SkillContentSource], datasource: tuple[Tool, ...]) -> tuple[Tool, ...]:
-        """タスクのRun：固定したSkillの「使ってよいTool」を合わせたものだけ。
-        業務結果のSchemaはタスクのもの（なければSkillのもの）。`skill` は出さない（authorization.md §5.4）"""
-        allowed = tasks.allowed_tools(self.run_obj, {name for version in explicit for name in version.tools})
-        tools = tuple(t for t in (*ALL_TOOLS, *datasource) if t.name in allowed)
+    def _task_run_tools(self) -> tuple[Tool, ...]:
+        """タスクのRun：Toolは絞らず、タスクの範囲の一覧から `skill` で読み込める（authorization.md §5.4）。
+        業務結果のSchemaはタスクのもの（なければ定義で指示したSkillのもの）"""
+        tools = (*ALL_TOOLS, *DATASOURCE_TOOLS, SKILL)
         # 通知の書き方に従って、通知の文章と渡すファイルを決める（design.md §4.3）。通知Skillを固定していた頃に
         # 受け付けたRunも同じ
         entry = tasks.task_entry(self.run_obj)
@@ -792,10 +786,8 @@ class Runner:
         if notification:
             tools += (PREPARE_NOTIFICATION,)
         if self.run_obj.is_task_fix:
-            # 修正チャットでは、タスクを管理する人が答える。尋ねても、定義を直す提案をしても、作業の権限は
-            # 増えない（harness.md §7.5の5・§10.10）
-            if ASK_USER not in tools:
-                tools += (ASK_USER,)
+            # 修正チャットでは、タスクを管理する人が答える。定義を直す提案をしても、作業の権限は増えない
+            # （harness.md §7.5の5・§10.10）
             tools += (REQUEST_TASK_EDIT,)
         return tools
 

@@ -2,7 +2,7 @@
 /**
  * タスクの修正チャット（design.md §11.11）でタスクを動かすダイアログ。タスクの画面からは新しい修正チャットを始め、
  * 修正チャットの「もう一度動かす」からは同じ会話で動かし直す（`conversationId`。前の入力を初期値にする）。
- * タスクに固定したものの範囲で動かし、出口へは送らない
+ * タスクの範囲で動かし、出口へは送らない
  */
 import TaskRunForm from './TaskRunForm.vue'
 import DDialog from '../common/DDialog.vue'
@@ -69,7 +69,7 @@ const unknown = (values: TaskRunInputs) => {
         <ul class="mb-4 grid list-disc gap-1 ps-5 text-sm text-muted">
           <li>
             {{
-              $t('タスクの今の版（版 {number}）で、タスクに固定したSkill・Connector・モデルを使って動かします', {
+              $t('タスクの今の版（版 {number}）の依頼文と指示で、タスクの範囲で動かします', {
                 number: props.task.version,
               })
             }}

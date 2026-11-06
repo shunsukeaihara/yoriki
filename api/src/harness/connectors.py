@@ -59,7 +59,11 @@ def build_catalog(user, *, sensitive: bool, explicit: Sequence[dict[str, Any]] =
     """エージェントに見せる一覧：依頼した人が使えるConnector（部門・全社）の名前と説明。機密のConnectorは機密の
     Runのときだけ（`sensitive`）。なければNone。`@` で指定したものと `/` で指定したSkillが宣言したもの（`explicit`）は、
     数の上限で外れないように先に並べる"""
-    usable = _usable(user, sensitive=sensitive)
+    return catalog_of(_usable(user, sensitive=sensitive), explicit)
+
+
+def catalog_of(usable: list[Connector], explicit: Sequence[dict[str, Any]] = ()) -> dict[str, Any] | None:
+    """使えるConnectorの一覧。使うよう指示されたもの（`explicit`）を、数の上限で外れないように先に並べる。なければNone"""
     chosen = [e["connector"] for e in explicit]
     usable.sort(key=lambda c: chosen.index(c.uid) if c.uid in chosen else len(chosen))
     if not usable:
@@ -73,22 +77,6 @@ def build_catalog(user, *, sensitive: bool, explicit: Sequence[dict[str, Any]] =
         for c in usable[:MAX_CATALOG_CONNECTORS]
     ]
     return {"connectors": entries, "omitted": len(usable) - len(entries)}
-
-
-def fixed_catalog(connectors: Sequence[Connector]) -> dict[str, Any] | None:
-    """タスクのRunの一覧：タスクに固定したConnector（使えるかは呼び出し側で確かめたもの）。なければNone。
-    タスクのRunでは、エージェントはこの一覧の外のConnectorを探して使わない（authorization.md §5.4）"""
-    if not connectors:
-        return None
-    entries = [
-        {
-            "connector": c.uid,
-            "name": c.name,
-            "description": _one_line(c.current_version.description, DESCRIPTION_LIMIT) if c.current_version else "",
-        }
-        for c in connectors
-    ]
-    return {"connectors": entries, "omitted": 0}
 
 
 def catalog(run: Run) -> dict[str, Any]:
@@ -160,7 +148,7 @@ def explicit_text(entries: list[dict[str, Any]]) -> str:
         lines.append("</connector>")
         blocks.append("\n".join(lines))
     head = (
-        "The user chose these connectors for this request. Check the columns with datasource_describe, then read "
+        "Use these connectors for this request. Check the columns with datasource_describe, then read "
         "the data with datasource_query:"
     )
     return head + "\n" + "\n\n".join(blocks)

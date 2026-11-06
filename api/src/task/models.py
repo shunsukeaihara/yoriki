@@ -134,8 +134,7 @@ class TaskQuerySet(models.QuerySet):
         return self.filter(manageable_condition(user), deleted=False)
 
     def launchable_by(self, user) -> Self:
-        """チャットから起動できるタスク（`TaskAction.LAUNCH`）。起動した人が固定したSkill・Connectorを使えるかは、起動の
-        ときに確かめる（task/checks.py の `launcher_problem()`）"""
+        """チャットから起動できるタスク（`TaskAction.LAUNCH`）"""
         if not user.is_active:
             return self.none()
         return self.filter(

@@ -5,7 +5,6 @@ import pytest
 
 from connector.factories import ConnectorFactory
 from connector.models import ConnectorScope
-from harness import tasks
 from harness.runner import Runner
 from harness.tests.test_connectors import TABLES, execute, fixture_fake_datasource, results, text_of
 from llm.factories import ModelProfileFactory
@@ -45,11 +44,12 @@ def _start(task, actor) -> Run:
     return start_task_run(task, inputs={}, actor=actor, launch=RunLaunch.MANUAL)
 
 
-def test_task_run_uses_only_the_fixed_skill_tools_and_connectors(admin):
+def test_task_run_can_use_everything_in_the_scope_of_the_task(admin):
+    """定義で選んだものは使うよう指示するもので、アクセス範囲はタスクの範囲で決まる（authorization.md §5.4）"""
     connector = ConnectorFactory.create(
         name="経理DB", scope=ConnectorScope.DEPARTMENT, department=DepartmentFactory.create(), version__tables=TABLES
     )
-    ConnectorFactory.create(name="販売管理")  # 全社のConnectorでも、固定していなければ使わない
+    ConnectorFactory.create(name="販売管理", version__tables=TABLES)  # 定義で選んでいなくても範囲の中
     skill = _system_skill(tools=["read", "shell", "datasource_query"], output_schema=SCHEMA)
     task = TaskDefinitionFactory.create(
         scope=TaskScope.SYSTEM,
@@ -62,6 +62,7 @@ def test_task_run_uses_only_the_fixed_skill_tools_and_connectors(admin):
     adapter = FakeAdapter(
         [
             calls(("c1", "datasource_query", {"connector": "経理DB", "sql": "SELECT code FROM vendors"})),
+            calls(("c3", "datasource_query", {"connector": "販売管理", "sql": "SELECT code FROM vendors"})),
             calls(("c2", "submit_result", {"ok": True})),
             reply("確認しました"),
         ]
@@ -69,17 +70,21 @@ def test_task_run_uses_only_the_fixed_skill_tools_and_connectors(admin):
     run = execute(run, adapter)
 
     assert run.status == RunStatus.COMPLETED, run.error
+    # 選んだConnectorは使うよう指示する
+    assert any("Use these connectors" in m.text and "public.vendors" in m.text for m in adapter.requests[0].messages)
     assert run.result == {"ok": True}
     first = adapter.requests[0]
-    # 固定したSkillの「使ってよいTool」だけ。skill・ask_user・request_skill_edit は出さない
-    assert sorted(t.name for t in first.tools) == ["datasource_query", "read", "shell", "submit_result"]
+    # Skillの `tools` では絞らない。答える人がいないので ask_user は出さない
+    names = {t.name for t in first.tools}
+    assert {"read", "write", "shell", "datasource_query", "datasource_describe", "skill", "submit_result"} <= names
+    assert not names & {"ask_user", "request_skill_edit"}
     query_tool = next(t for t in first.tools if t.name == "datasource_query")
     assert "enum" not in query_tool.parameters["properties"]["connector"]
     context = next(m.text for m in first.messages if m.role == "user" and "<runtime_context>" in m.text)
     assert "<mode>task</mode>" in context
+    assert '<connector name="販売管理">' in context
     # 起動した人は部門に所属していないが、システムのタスクの範囲で部門のConnectorを使える
-    [queried] = results(run, "datasource_query")
-    assert not queried["is_error"], text_of(queried)
+    assert not any(queried["is_error"] for queried in results(run, "datasource_query"))
 
 
 def test_connector_disabled_during_the_task_run_is_refused(admin):
@@ -257,12 +262,44 @@ def test_system_task_cannot_use_a_connector_of_a_disabled_department(admin):
     assert queried["is_error"]
 
 
-def test_runs_accepted_with_a_task_tool_list_keep_it():
-    """タスクの版がToolの一覧を持っていた頃に受け付けたRunは、その一覧との両方に入っているものに限る"""
-    old = Run(manifest={"fixed": {"task": {"tools": ["read"]}}})
-    assert tasks.allowed_tools(old, {"read", "shell"}) == {"read"}
-    new = Run(manifest={"fixed": {"task": {}}})
-    assert tasks.allowed_tools(new, {"read", "shell"}) == {"read", "shell"}
+def test_task_run_cannot_use_what_is_outside_the_scope_of_the_task():
+    department = DepartmentFactory.create()
+    manager = grant(UserFactory.create(), AppPermission.MANAGE_DEPARTMENT_TASKS)
+    DepartmentMembershipFactory.create(department=department, user=manager)
+    ConnectorFactory.create(name="他部門DB", scope=ConnectorScope.DEPARTMENT, department=DepartmentFactory.create())
+    ConnectorFactory.create(name="全社DB", version__tables=TABLES)
+    outside = SkillFactory.create(
+        scope=SkillScope.DEPARTMENT, department=DepartmentFactory.create(), name="他部門の手順"
+    )
+    SkillVersionFactory.create(skill=outside)
+    inside = SkillFactory.create(scope=SkillScope.COMPANY, name="全社の手順", owner=None)
+    SkillVersionFactory.create(skill=inside, instructions="全社の手順の本文")
+    task = TaskDefinitionFactory.create(
+        scope=TaskScope.DEPARTMENT,
+        department=department,
+        created_by=manager,
+        revision__model_profile=ModelProfileFactory.create(version__supports_tools=True),
+    )
+    run = _start(task, manager)
+    adapter = FakeAdapter(
+        [
+            calls(("c1", "datasource_describe", {"connector": "他部門DB"})),
+            calls(("c2", "skill", {"name": "他部門の手順"})),
+            calls(("c3", "skill", {"name": "全社の手順"})),
+            reply("確認しました"),
+        ]
+    )
+    run = execute(run, adapter)
+
+    assert run.status == RunStatus.COMPLETED, run.error
+    context = next(m.text for m in adapter.requests[0].messages if m.role == "user" and "<runtime_context>" in m.text)
+    assert "全社DB" in context and "他部門DB" not in context
+    assert "全社の手順" in context and "他部門の手順" not in context
+    [connector] = results(run, "datasource_describe")
+    assert connector["is_error"]
+    missing, loaded = results(run, "skill")
+    assert missing["is_error"]
+    assert "全社の手順の本文" in text_of(loaded)
 
 
 # --- チャットから起動したRun（authorization.md §6） ---
@@ -299,24 +336,6 @@ def test_chat_launched_run_stops_when_the_launcher_leaves_the_department(app_use
     assert "部門から外れました" in run.error
 
 
-def test_chat_launched_run_is_refused_the_connector_the_launcher_cannot_use(app_user, monkeypatch):
-    """Connectorの操作のたびに、起動した人の今の権限でも判定する（タスクの範囲では使えても断る）"""
-    department = DepartmentFactory.create()
-    manager = grant(UserFactory.create(), AppPermission.MANAGE_DEPARTMENT_TASKS)
-    DepartmentMembershipFactory.create(department=department, user=manager)
-    task = _department_task_with_connector(manager, department)
-    DepartmentMembershipFactory.create(department=department, user=app_user)
-    run = start_task_run(task, inputs={}, actor=app_user, launch=RunLaunch.CHAT)
-    monkeypatch.setattr(tasks.checks, "launcher_connector_permitted", lambda user, connector: False)
-    adapter = FakeAdapter(
-        [calls(("c1", "datasource_query", {"connector": "経理DB", "sql": "SELECT 1"})), reply("使えませんでした")]
-    )
-    run = execute(run, adapter)
-    [queried] = results(run, "datasource_query")
-    assert queried["is_error"]
-    assert "cannot be used now" in text_of(queried)
-
-
 def test_chat_launched_run_stops_when_the_launcher_is_deactivated(app_user):
     task = TaskDefinitionFactory.create(scope=TaskScope.COMPANY, created_by=app_user, chat_launchable=True)
     run = start_task_run(task, inputs={}, actor=app_user, launch=RunLaunch.CHAT)
@@ -325,3 +344,21 @@ def test_chat_launched_run_stops_when_the_launcher_is_deactivated(app_user):
     run = execute(run, FakeAdapter([]))
     assert (run.status, run.end_reason) == (RunStatus.FAILED, RunEndReason.TASK)
     assert "起動した人" in run.error
+
+
+def test_chat_launched_run_works_in_the_scope_of_the_task(app_user):
+    """起動できる人はタスクより狭い権限を持たないので、起動した人とは照らし合わせず、タスクの範囲で動く"""
+    department = DepartmentFactory.create()
+    manager = grant(UserFactory.create(), AppPermission.MANAGE_DEPARTMENT_TASKS)
+    DepartmentMembershipFactory.create(department=department, user=manager)
+    task = _department_task_with_connector(manager, department)
+    DepartmentMembershipFactory.create(department=department, user=app_user)
+    run = start_task_run(task, inputs={}, actor=app_user, launch=RunLaunch.CHAT)
+    run = execute(
+        run,
+        FakeAdapter(
+            [calls(("c1", "datasource_query", {"connector": "経理DB", "sql": "SELECT 1"})), reply("確認しました")]
+        ),
+    )
+    [queried] = results(run, "datasource_query")
+    assert not queried["is_error"], text_of(queried)

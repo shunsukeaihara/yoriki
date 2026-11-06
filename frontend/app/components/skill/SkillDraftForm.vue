@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * SkillのDraft（編集中の中身）の編集。保存では編集を始めた時点の revision を送り、その間に他の人が変えていたら409になる。
- * 使ってよいToolは、公開の権限がある人だけが変えられる（design.md §3.6。サーバーでも確かめる）。
+ * 使うToolは、公開の権限がある人だけが変えられる（design.md §3.6。サーバーでも確かめる）。
  * 機密のフラグは、編集の権限で付けられ、外すのは公開の権限がある人だけ（authorization.md §5.1）。
  *
  * 資料の追加・置換でも Draft の revision が増えるので、revision は v-model の Draft に合わせ続け、入力中の文は残す。
@@ -118,7 +118,7 @@ defineExpose({ onSubmit, loading, canPost, dirty, reset })
     />
     <DCheckboxGroup
       v-model="form.tools"
-      :label="$t('使ってよいTool')"
+      :label="$t('使うTool')"
       :hint="
         canChangeTools
           ? $t('何も選ばなければ、コマンドを使わないSkillになります')

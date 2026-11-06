@@ -1,7 +1,7 @@
 """Skill（design.md §3）。
 
 Skillは可変の入れ物で、範囲（個人・部門・全社・システム）と、公開中の版（current_version）を持つ。中身（説明、手順、
-使ってよいTool、必要な能力、入出力のSchema、資料）は、編集中のSkillDraftと、公開した不変のSkillVersionが持つ。
+使うTool、必要な能力、入出力のSchema、資料）は、編集中のSkillDraftと、公開した不変のSkillVersionが持つ。
 DraftはSkillごとに1つで、revisionで同時の編集を検出し、公開すると閉じる（design.md §3.7）。
 公開・切戻し・停止はSkillChangeに記録し、operation keyで再送による重複を防ぐ。
 
@@ -120,8 +120,8 @@ class SkillContent(models.Model):
     # エージェントと社員がSkillを選ぶための説明（何をするか、どんな依頼のときに使うか）
     description = models.TextField(_("説明"), blank=True)
     instructions = models.TextField(_("手順"), blank=True)
-    # 使ってよいTool。空ならコマンド不要のSkill（design.md §3.4）。利用者の権限を超えるToolは与えない
-    tools = ArrayField(models.CharField(max_length=100), verbose_name=_("使ってよいTool"), default=list, blank=True)
+    # 使うTool。空ならコマンド不要のSkill（design.md §3.4）。利用者の権限を超えるToolは与えない
+    tools = ArrayField(models.CharField(max_length=100), verbose_name=_("使うTool"), default=list, blank=True)
     requires = ArrayField(
         models.PositiveSmallIntegerField(choices=SkillRequirement.choices),
         verbose_name=_("必要な能力"),

@@ -235,7 +235,7 @@ def test_chosen_skill_with_a_schema_writes_the_result_in_the_final_reply(convers
 
     assert "submit_result" not in [t.name for t in adapter.requests[1].tools]
     text = next(t for t in user_texts(adapter.requests[1]) if "判定して" in t)
-    assert "submit_result is not available" in text
+    assert "no submit_result for this skill" in text
 
 
 @pytest.mark.django_db
@@ -297,7 +297,9 @@ def test_a_newly_chosen_connector_stays_in_the_catalog_over_the_limit(conversati
         lambda: send(conversation, body="こちらも", connectors=[new]),
     )
     run = execute(run, adapter)
-    assert [e["name"] for e in run.current_catalog("connector_catalog")["connectors"]] == ["今のDB"]
+    catalog = run.current_catalog("connector_catalog")
+    assert catalog is not None
+    assert [e["name"] for e in catalog["connectors"]] == ["今のDB"]
 
 
 @pytest.mark.django_db

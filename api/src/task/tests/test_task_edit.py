@@ -341,61 +341,15 @@ def test_edit_run_sees_the_files_of_the_last_task_run(api_client, manager, setti
     assert res.status_code == 201, res.json()
     run = ConversationMessage.objects.get(uid=res.json()["id"]).run
     assert run is not None
-    # タスクのRunの作業ファイルは残らないので、最初の編集のRunは空のWorkspaceから（harness.md §10.10）
-    assert Checkpoint.latest_for(run) is None
+    # 作業ファイルは直前のタスクのRunのCheckpointから
+    checkpoint = Checkpoint.latest_for(run)
+    assert checkpoint is not None
+    assert checkpoint.run == second
     attempt = claim_run(run.pk)
     assert attempt is not None
     session = SandboxSession(run, attempt)
     session.sync_inputs()
     assert (session.input_dir / "請求書.csv").read_bytes() == b"second"
-    session.close()
-
-
-def test_edit_run_reads_the_outputs_of_the_last_task_run(api_client, manager):
-    """タスクのRunの作業ファイルは残らないので、直前のタスクのRunの成果物を /workspace/input/outputs に置く。前の実行の
-    ものは置かない（harness.md §10.10）"""
-    task = _task(manager)
-    first = _fix(api_client, manager, task)
-    Artifact.create_output(first, "前回.csv", BlobObject.put(io.BytesIO(b"first")))
-    Run.objects.filter(pk=first.pk).update(status=RunStatus.COMPLETED)
-    second = _finished_fix_in(api_client, manager, task, first.conversation)
-    Artifact.create_output(second, "結果/r.csv", BlobObject.put(io.BytesIO(b"old")))
-    Artifact.create_output(second, "結果/r.csv", BlobObject.put(io.BytesIO(b"new")))
-    res = _post(api_client, first.conversation)
-    assert res.status_code == 201, res.json()
-    run = ConversationMessage.objects.get(uid=res.json()["id"]).run
-    assert run is not None
-    attempt = claim_run(run.pk)
-    assert attempt is not None
-    session = SandboxSession(run, attempt)
-    session.sync_inputs()
-    assert (session.input_dir / "outputs" / "結果" / "r.csv").read_bytes() == b"new"
-    assert not (session.input_dir / "outputs" / "前回.csv").exists()
-    session.close()
-
-
-@pytest.mark.parametrize(
-    ("older", "newer", "kept"),
-    [("report", "report/r.csv", "report/r.csv"), ("report/r.csv", "report", "report")],
-    ids=["file-then-directory", "directory-then-file"],
-)
-def test_conflicting_outputs_keep_the_newer_one(api_client, manager, older, newer, kept):
-    """作り直しでファイルとディレクトリが衝突しても、編集のRunを止めず、新しいものを置く"""
-    task = _task(manager)
-    first = _fix(api_client, manager, task)
-    Artifact.create_output(first, older, BlobObject.put(io.BytesIO(b"old")))
-    Artifact.create_output(first, newer, BlobObject.put(io.BytesIO(b"new")))
-    Run.objects.filter(pk=first.pk).update(status=RunStatus.COMPLETED)
-    res = _post(api_client, first.conversation)
-    assert res.status_code == 201, res.json()
-    run = ConversationMessage.objects.get(uid=res.json()["id"]).run
-    assert run is not None
-    attempt = claim_run(run.pk)
-    assert attempt is not None
-    session = SandboxSession(run, attempt)
-    session.sync_inputs()
-    session.sync_inputs()
-    assert (session.input_dir / "outputs" / kept).read_bytes() == b"new"
     session.close()
 
 

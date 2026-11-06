@@ -88,7 +88,7 @@ from .context import runtime_context as build_runtime_context
 from .prompts import system_prompt
 from .recovery import request_model_switch
 from .result_files import missing_files
-from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, SandboxSession
+from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, WORKSPACE_ROLLED_BACK, SandboxSession
 from .script_connectors import ScriptConnectors
 from .skill_edit import revoked_edit
 from .skills import SkillContentSource, explicit_versions, revoked_skill
@@ -348,21 +348,8 @@ class Runner:
         own = checkpoint if checkpoint is not None and checkpoint.run_id == self.run_obj.pk else None
         notices = [e for e in events if e.kind == RunEventKind.CONTEXT and e.data.get("workspace")]
         since = max([own.sequence if own else 0, *(e.sequence for e in notices if e.data["workspace"] == "reset")])
-        changed = [
-            f"{e.data['name']} ({e.data['call_id']})"
-            for e in events
-            if e.kind == RunEventKind.TOOL_RESULT
-            and e.sequence > since
-            and e.data.get("name") in WORKSPACE_WRITING_TOOLS
-        ]
-        # 退避した出力のファイルも、最後のCheckpointより後のものは消えている
-        spilled = [
-            path
-            for e in events
-            if e.kind == RunEventKind.TOOL_RESULT and e.sequence > since
-            for path in (e.data.get("meta") or {}).get("spilled", [])
-        ]
-        if changed or spilled:
+        lost = self._lost_work(events, since)
+        if lost:
             # Sandboxは最初のSandboxのToolで起動して戻すので、ここでは戻せたかがまだ分からない。
             # 戻せなかったときは、その時点で知らせる（SandboxSession.notice）
             if own is not None:
@@ -372,19 +359,9 @@ class Runner:
             else:
                 state = "are empty again"
             parts = [
-                f"The previous attempt was interrupted. The files in /workspace/work and /workspace/output {state}."
+                f"The previous attempt was interrupted. The files in /workspace/work and /workspace/output {state}.",
+                *lost,
             ]
-            if changed:
-                parts.append(
-                    "These later tool calls changed files, and their effects are not in the current files: "
-                    f"{', '.join(changed[:20])}. Check the current files and redo what is needed. Read a file again "
-                    "before you edit it."
-                )
-            if spilled:
-                parts.append(
-                    f"The saved full outputs of earlier tool calls are gone: {', '.join(spilled[:20])}. Call the tool "
-                    "again if you need the full output."
-                )
             text = "[" + " ".join(parts) + "]"
             self._record(RunEventKind.CONTEXT, {"text": text, "workspace": "reset"})
         if own is not None and own.stopped_jobs and not any(e.data.get("checkpoint") == own.uid for e in notices):
@@ -394,6 +371,45 @@ class Runner:
                 "Run them again if you still need them.]"
             )
             self._record(RunEventKind.CONTEXT, {"text": text, "workspace": "jobs_stopped", "checkpoint": own.uid})
+
+    @staticmethod
+    def _lost_work(events: list[RunEvent], since: int) -> list[str]:
+        """Workspaceを戻したときに失われた、`since` より後の変更をモデルに伝える文"""
+        changed = [
+            f"{e.data['name']} ({e.data['call_id']})"
+            for e in events
+            if e.kind == RunEventKind.TOOL_RESULT
+            and e.sequence > since
+            and e.data.get("name") in WORKSPACE_WRITING_TOOLS
+        ]
+        # 退避した出力のファイルも、戻した時点より後のものは消えている
+        spilled = [
+            path
+            for e in events
+            if e.kind == RunEventKind.TOOL_RESULT and e.sequence > since
+            for path in (e.data.get("meta") or {}).get("spilled", [])
+        ]
+        parts = []
+        if changed:
+            parts.append(
+                "These later tool calls changed files, and their effects are not in the current files: "
+                f"{', '.join(changed[:20])}. Check the current files and redo what is needed. Read a file again "
+                "before you edit it."
+            )
+        if spilled:
+            parts.append(
+                f"The saved full outputs of earlier tool calls are gone: {', '.join(spilled[:20])}. Call the tool "
+                "again if you need the full output."
+            )
+        return parts
+
+    def _sandbox_notice(self, notice: str) -> str:
+        """Sandboxを起動したときの知らせ。1つ前の世代へ戻したなら、戻した時点より後の変更も伝える"""
+        if notice != WORKSPACE_ROLLED_BACK:
+            return notice
+        restored = self.session.restored
+        since = restored.sequence if restored is not None and restored.run_id == self.run_obj.pk else 0
+        return " ".join([notice, *(f"[{part}]" for part in self._lost_work(self._events(), since))])
 
     # --- ステップ ---
 
@@ -792,8 +808,7 @@ class Runner:
 
     def _finish_with_reply(self, text: str, status: RunStatus, end_reason: RunEndReason, *, error: str = "") -> bool:
         """応答を会話に載せてRunを終える。完了の前に追加指示が届いていれば、終えずにTrue（続ける）を返す"""
-        # 追加指示が届いていれば終わらないので、タスクの実行でも会話と同じくWorkspaceを保存する
-        self._checkpoint(ending=not self._instructions_pending())
+        self._checkpoint()
         with self.run_obj.fenced(self.attempt) as run:
             if text.strip():
                 ConversationMessage.objects.create(
@@ -835,7 +850,7 @@ class Runner:
 
     def _finish_cancelled(self) -> None:
         # 停止を優先する。Workspaceを保存できなくても止める（design.md §7.9）
-        self._checkpoint(required=False, ending=True)
+        self._checkpoint(required=False)
         with self.run_obj.fenced(self.attempt) as run:
             ToolInvocation.objects.filter(run=run, status__in=(ToolStatus.REQUESTED, ToolStatus.RUNNING)).update(
                 status=ToolStatus.CANCELLED, ended=timezone.now()
@@ -843,7 +858,7 @@ class Runner:
             run.set_status(RunStatus.CANCELLED, comment=_("停止しました。"), end_reason=RunEndReason.CANCELLED)
 
     def _fail(self, end_reason: RunEndReason, message: str) -> None:
-        self._checkpoint(required=False, ending=True)
+        self._checkpoint(required=False)
         with self.run_obj.fenced(self.attempt) as run:
             if run.status == RunStatus.CANCELLING:
                 run.set_status(RunStatus.CANCELLED, end_reason=RunEndReason.CANCELLED)
@@ -852,14 +867,14 @@ class Runner:
 
     # --- Sandbox ---
 
-    def _checkpoint(self, *, required: bool = True, ending: bool = False) -> None:
+    def _checkpoint(self, *, required: bool = True) -> None:
         """Workerを手放す前に、ジョブを止めてWorkspaceを保存する（design.md §7.9）。Sandboxを使っていなければ
-        何もしない。Runが終わるとき（ending）、Workspaceを残さないRunは成果物の回収だけを行う。
+        何もしない。答える人がいないRunは続きがないので、成果物の回収だけを行う。
 
         保存できなければ、待ち・完了にはせず、Sandboxの障害として別のAttemptでやり直す（required）
         """
         try:
-            saved = self.session.suspend(snapshot=self.run_obj.keeps_workspace or not ending)
+            saved = self.session.suspend(snapshot=self.run_obj.is_interactive)
         except SandboxUnavailable:
             if required:
                 raise
@@ -932,9 +947,6 @@ class Runner:
         status = Run.objects.filter(pk=self.run_obj.pk).values_list("status", flat=True).first()
         if status == RunStatus.CANCELLING:
             return True
-        return self._instructions_pending()
-
-    def _instructions_pending(self) -> bool:
         return UserInstruction.objects.filter(
             run=self.run_obj, kind=InstructionKind.CURRENT, state=InstructionState.RECEIVED
         ).exists()
@@ -1106,7 +1118,7 @@ class Runner:
             ToolInvocation.objects.filter(pk=invocation.pk).update(value=result.value)
             return result
         if tool.needs_sandbox and (notice := self.session.take_notice()):
-            result = replace(result, content=(TextPart(notice), *result.content))
+            result = replace(result, content=(TextPart(self._sandbox_notice(notice)), *result.content))
         status = ToolStatus.FAILED if result.is_error else ToolStatus.SUCCEEDED
         self._record_tool_result(call.id, call.name, self._with_repeat_notice(call, result), status, invocation)
         return result

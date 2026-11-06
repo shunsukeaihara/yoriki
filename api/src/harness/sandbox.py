@@ -28,10 +28,10 @@ from django.db import DatabaseError, connection, transaction
 from django.utils import timezone
 from nanoid import generate
 
-from artifact.models import CONNECTOR_RESULTS_DIR, TASK_OUTPUTS_DIR, Artifact, ArtifactKind, BlobObject
+from artifact.models import CONNECTOR_RESULTS_DIR, Artifact, ArtifactKind, BlobObject
 from artifact.storage import StorageBackend, StorageError, StoredObject, get_storage, hash_stream
 from run.errors import LeaseLost
-from run.models import Checkpoint, ExecutionAttempt, Run, RunKind, RunTrigger
+from run.models import Checkpoint, ExecutionAttempt, Run, RunKind
 from runtime.launcher import (
     ATTEMPT_LABEL,
     DATABASE_LABEL,
@@ -142,7 +142,7 @@ WORKSPACE_ROLLED_BACK = (
 class Suspended:
     """Attemptを終えるときに保存したもの"""
 
-    # タスクの実行・Draftの評価が終わるときは作らない（Run.keeps_workspace）
+    # 答える人がいないRunでは作らない（Run.is_interactive）
     snapshot: StoredObject | None
     backend_id: str
     # 保存の前に止めたジョブ（[{"job_id", "command"}]）
@@ -380,8 +380,7 @@ class SandboxSession:
     def sync_inputs(self) -> None:
         """会話の添付（取り込んだ依頼のもの）とConnectorの結果を、Workerのディレクトリ（Sandboxの /workspace/input に
         読取り専用でmountする）に置く。まだ置いていないものだけを足す。bind mountなので、動いているSandboxにも
-        そのまま見える。Connectorの結果は connectors/<呼出し>/ の下に置く（harness.md §10.2）。修正チャットの編集のRun
-        では、直前のタスクのRunの成果物を outputs/ の下に置く（harness.md §10.10）"""
+        そのまま見える。Connectorの結果は connectors/<呼出し>/ の下に置く（harness.md §10.2）"""
         conversation_id = self.run.conversation_id
         # 保持期限の切れたConnectorの結果は置かない（会話で照会を重ねても、置くものが増え続けないように）
         results = Artifact.objects.connector_results(conversation_id).filter(expires__gt=timezone.now())
@@ -406,54 +405,21 @@ class SandboxSession:
             if not self._input_path_ok(artifact, path):
                 logger.warning("run %s: skipping input %s with a bad name", self.run.uid, artifact.uid)
                 continue
-            self._place_input(artifact, path)
-        if self.run.kind == RunKind.TASK_EDIT:
-            self._place_task_outputs()
-
-    def _place_task_outputs(self) -> None:
-        """直前のタスクのRunの成果物。タスクのRunのWorkspaceは残らないので、直すときはここから読む。Runの中で作り直した
-        ファイルも回収した版が残っているので、新しいものから順に見て、同じパスや、ファイルとディレクトリが衝突する古いものは
-        置かない（`report` の後に `report/result.csv` を作った等）"""
-        outputs = (
-            Artifact.objects.filter(
-                run__in=self.run.fix_chat_runs().filter(trigger=RunTrigger.TASK),
-                kind=ArtifactKind.OUTPUT,
-                deleted=False,
-            )
-            .select_related("blob")
-            .order_by("-pk")
-        )
-        root = self.input_dir / TASK_OUTPUTS_DIR
-        files: set[Path] = set()
-        directories: set[Path] = set()
-        for artifact in outputs:
-            path = root / artifact.path
-            if root not in path.parents or ".." in Path(artifact.path).parts:
-                logger.warning("run %s: skipping output %s with a bad name", self.run.uid, artifact.uid)
-                continue
-            if path in files or path in directories or not files.isdisjoint(path.parents):
-                continue
-            files.add(path)
-            directories.update(path.parents)
-            if artifact.pk not in self.inputs:
-                self._place_input(artifact, path)
-
-    def _place_input(self, artifact: Artifact, path: Path) -> None:
-        try:
-            for parent in reversed(path.relative_to(self.input_dir).parents[:-1]):
-                (self.input_dir / parent).mkdir(exist_ok=True)
-                (self.input_dir / parent).chmod(0o755)
-            with artifact.blob.open() as src, tempfile.NamedTemporaryFile(dir=self.dir, delete=False) as tmp:
-                shutil.copyfileobj(src, tmp, 1024 * 1024)
-            os.chmod(tmp.name, 0o644)
-            os.replace(tmp.name, path)
-        except (OSError, StorageError) as exc:
-            raise SandboxUnavailable(f"cannot prepare the attachment {artifact.uid}: {exc}") from exc
-        self.inputs.add(artifact.pk)
+            try:
+                for parent in reversed(path.relative_to(self.input_dir).parents[:-1]):
+                    (self.input_dir / parent).mkdir(exist_ok=True)
+                    (self.input_dir / parent).chmod(0o755)
+                with artifact.blob.open() as src, tempfile.NamedTemporaryFile(dir=self.dir, delete=False) as tmp:
+                    shutil.copyfileobj(src, tmp, 1024 * 1024)
+                os.chmod(tmp.name, 0o644)
+                os.replace(tmp.name, path)
+            except (OSError, StorageError) as exc:
+                raise SandboxUnavailable(f"cannot prepare the attachment {artifact.uid}: {exc}") from exc
+            self.inputs.add(artifact.pk)
 
     def _input_path_ok(self, artifact: Artifact, path: Path) -> bool:
-        """添付は /workspace/input の直下、Connectorの結果は connectors/ の下だけに置く。Connectorの結果やタスクの
-        成果物のディレクトリと同じ名前の添付（その名前を避けるようにする前に送ったもの）は置かない"""
+        """添付は /workspace/input の直下、Connectorの結果は connectors/ の下だけに置く。Connectorの結果の
+        ディレクトリと同じ名前の添付（その名前を避けるようにする前に送ったもの）は置かない"""
         if artifact.kind == ArtifactKind.CONNECTOR_RESULT:
             parts = Path(artifact.path).parts
             return (
@@ -462,7 +428,7 @@ class SandboxSession:
                 and all(p not in ("", ".", "..") for p in parts)
                 and self.input_dir in path.parents
             )
-        return path.parent == self.input_dir and artifact.path not in (CONNECTOR_RESULTS_DIR, TASK_OUTPUTS_DIR)
+        return path.parent == self.input_dir and artifact.path != CONNECTOR_RESULTS_DIR
 
     def _restore(self, sandbox: Sandbox) -> None:
         """新しい世代から順に、戻せるものから戻す。どれも戻せなければ空のWorkspaceで続ける（design.md §7.9）"""

@@ -283,6 +283,32 @@ def test_next_runs_keep_two_generations_of_snapshots(conversation):
     assert not get_storage().exists(old.key)
 
 
+def test_fallback_to_the_previous_generation_tells_what_was_lost(conversation, app_user):
+    """最新のsnapshotが見つからず1つ前の世代へ戻したら、2世代の間のファイルの変更をモデルに伝える"""
+    run = execute(
+        post(conversation),
+        FakeAdapter([calls(("c1", "shell", shell("echo 1 > a.txt"))), calls(("c2", "ask_user", QUESTION))]),
+    )
+    ClarificationRequest.objects.get(run=run).accept_answer([{"selected": ["CSV"], "text": ""}], "", app_user)
+    run = execute(
+        run, FakeAdapter([calls(("c3", "shell", shell("echo 2 > b.txt"))), calls(("c4", "ask_user", QUESTION))])
+    )
+    assert Checkpoint.objects.filter(run=run).count() == 2
+    get_storage().delete(Checkpoint.latest_for(run).key)  # type: ignore[union-attr]
+    ClarificationRequest.objects.filter(run=run).latest("pk").accept_answer(
+        [{"selected": ["CSV"], "text": ""}], "", app_user
+    )
+
+    run = execute(run, FakeAdapter([calls(("c5", "shell", shell("cat a.txt && test ! -e b.txt"))), reply("済み")]))
+
+    assert run.status == RunStatus.COMPLETED
+    result = text(results(run)["c5"])
+    assert "went back to the saved state before them" in result
+    assert "shell (c3)" in result
+    assert "shell (c1)" not in result
+    assert "Exit code: 0" in result
+
+
 def test_snapshot_that_cannot_be_verified_is_not_confirmed(conversation, monkeypatch):
     """読み戻して確かめられなければ確定せず、前のsnapshotを残して別のAttemptでやり直す（design.md §7.9）"""
     monkeypatch.setattr("harness.runner.enqueue_run", lambda _run: None)

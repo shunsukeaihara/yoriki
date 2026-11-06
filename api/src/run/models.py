@@ -249,7 +249,7 @@ class Run(models.Model):
     @property
     def is_interactive(self) -> bool:
         """答える人がいる（会話のRunと、修正チャットのタスクのRun）。ほかのタスクのRunは、対話Bindingがある場合だけ
-        （後で加える）"""
+        （後で加える）。答える人がいないRunは続きがないので、Workspaceを保存しない（design.md §7.9・§8）"""
         return self.trigger == RunTrigger.CONVERSATION or self.is_task_fix
 
     @property
@@ -262,12 +262,6 @@ class Run(models.Model):
         """/workspace/input・成果物の回収・Checkpointを、会話ではなくこのRunの単位にする。タスクのRunは会話の文脈も
         Workspaceも引き継がない（修正チャットでは、同じ会話の前の実行のものを見せない。harness.md §10.10）"""
         return self.trigger == RunTrigger.TASK
-
-    @property
-    def keeps_workspace(self) -> bool:
-        """終わった後もWorkspaceのsnapshotを残すか。タスクの実行とDraftの評価は、同じWorkspaceで続けることがないので、
-        完了・停止・失敗ではsnapshotを作らず、確認待ちで作ったものも消す（design.md §7.9・§8）"""
-        return not self.isolated_workspace and self.kind != RunKind.EVALUATION
 
     def fix_chat_runs(self) -> "RunQuerySet":
         """タスクの編集のRunが引き継ぐ、修正チャットのRun（直前のタスクのRunから、このRunまで）。添付と
@@ -337,7 +331,7 @@ class Run(models.Model):
                 from conversation.evaluation import on_run_finished  # noqa: PLC0415
 
                 on_run_finished(self)
-            if not self.keeps_workspace:
+            if not self.is_interactive:
                 transaction.on_commit(lambda: Checkpoint.discard_through(self))
         return event
 
@@ -701,10 +695,9 @@ class Checkpoint(models.Model):
             # タスクのRunは、ほかのRunのWorkspaceを引き継がない（修正チャットの前の実行のものも）
             return cls.objects.filter(run=run).order_by("-sequence", "-pk")
         if run.kind == RunKind.TASK_EDIT:
-            # 修正チャットのタスクの編集のRunは、直前のタスクのRunより後の編集のRunのものだけ。タスクのRunの作業ファイル
-            # は残らないので、最初の編集のRunは空のWorkspaceから始める（harness.md §10.10）
-            runs = run.fix_chat_runs().exclude(trigger=RunTrigger.TASK)
-            return cls.objects.filter(run__in=runs).order_by("-run_id", "-sequence", "-pk")
+            # 修正チャットのタスクの編集のRunは、直前のタスクのRunから後のものだけ（直前のタスクのRunがCheckpointを
+            # 残さなければ、さらに前の実行のものではなく空のWorkspaceから始める。harness.md §10.10）
+            return cls.objects.filter(run__in=run.fix_chat_runs()).order_by("-run_id", "-sequence", "-pk")
         return cls.objects.filter(run__conversation_id=run.conversation_id, run_id__lte=run.pk).order_by(
             "-run_id", "-sequence", "-pk"
         )
@@ -720,7 +713,7 @@ class Checkpoint(models.Model):
 
     @classmethod
     def discard_through(cls, run: Run) -> None:
-        """Workspaceを残さないRunが終わったときに、そのRunまでのsnapshotを消す（design.md §8）"""
+        """Workspaceを保存しないRunが終わったときに、そのRunまでのsnapshotを消す（design.md §8）"""
         cls._discard(cls.objects.filter(run__conversation_id=run.conversation_id, run_id__lte=run.pk))
 
     @classmethod

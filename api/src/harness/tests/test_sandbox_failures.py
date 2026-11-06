@@ -3,6 +3,7 @@
 import functools
 import io
 import time
+from typing import ClassVar
 from unittest import mock
 
 import pytest
@@ -11,7 +12,6 @@ from django.db import DatabaseError, connection
 from artifact.storage import LocalStorage, StorageError, StoredObject, get_storage
 from conversation.dispatch import MessageMode, post_message
 from conversation.factories import ConversationFactory
-from conversation.models import ConversationMessage, InstructionKind, MessageRole, UserInstruction
 from harness.runner import Runner
 from harness.sandbox import (
     WORKSPACE_LOST,
@@ -411,32 +411,6 @@ def test_saving_after_a_fallback_keeps_the_generation_that_was_restored(conversa
     assert not Checkpoint.objects.filter(pk=missing.pk).exists()
 
 
-def test_task_run_saves_the_workspace_when_an_instruction_keeps_it_going(app_user):
-    """最後の応答の直前に追加指示が届いて続けるときは、タスクの実行でも保存する。終わるときは保存しない"""
-    run = _task_run(app_user)
-    requested: list[bool] = []
-
-    class Session(SavingSession):
-        def suspend(self, *, snapshot=True):
-            requested.append(snapshot)
-            return super().suspend(snapshot=snapshot)
-
-    class InstructingAdapter(FakeAdapter):
-        def stream(self, request):
-            yield from super().stream(request)
-            if len(self.requests) == 1:
-                message = ConversationMessage.objects.create(
-                    conversation=run.conversation, role=MessageRole.USER, body="これも"
-                )
-                UserInstruction.objects.create(
-                    conversation=run.conversation, message=message, run=run, kind=InstructionKind.CURRENT
-                )
-
-    run = execute(run, InstructingAdapter([reply("できました"), reply("直しました")]), Session)
-    assert run.status == RunStatus.COMPLETED
-    assert requested == [True, False]
-
-
 def test_saved_snapshot_is_read_back_in_full():
     """大きさとメタデータだけでなく、保存先の中身を読んで確かめる"""
     good = get_storage().put_immutable("snapshots/good.tar", io.BytesIO(b"tar"))
@@ -451,32 +425,58 @@ def test_saved_snapshot_is_read_back_in_full():
     assert error.value.retryable
 
 
-def _task_run(user) -> Run:
-    return start_task_run(TaskDefinitionFactory.create(created_by=user), inputs={}, actor=user, launch=RunLaunch.MANUAL)
-
-
-def _evaluation_run(user) -> Run:
-    run = post(ConversationFactory.create(owner=user))
-    Run.objects.filter(pk=run.pk).update(kind=RunKind.EVALUATION)
+def _start_task(user, launch: RunLaunch) -> Run:
+    """個人のタスクを手動実行で始めて、起動のしかたを変える（判定に使うのは起動のしかただけ）"""
+    task = TaskDefinitionFactory.create(created_by=user)
+    run = start_task_run(task, inputs={}, actor=user, launch=RunLaunch.MANUAL)
+    Run.objects.filter(pk=run.pk).update(launch=launch)
     run.refresh_from_db()
     return run
 
 
-@pytest.mark.parametrize("start", [_task_run, _evaluation_run], ids=["task", "evaluation"])
-def test_run_without_a_kept_workspace_ends_without_a_snapshot(app_user, start):
-    """タスクの実行とDraftの評価は、完了でsnapshotを作らない（design.md §7.9・§8）。成果物の回収は別に行う"""
+def _evaluation_run(user) -> Run:
+    run = post(ConversationFactory.create(owner=user))
+    Run.objects.filter(pk=run.pk).update(trigger=RunTrigger.EVALUATION, kind=RunKind.EVALUATION)
+    run.refresh_from_db()
+    return run
+
+
+class RecordingSession(SavingSession):
+    requested: ClassVar[list[bool]] = []
+
+    def suspend(self, *, snapshot=True):
+        self.requested.append(snapshot)
+        return super().suspend(snapshot=snapshot)
+
+
+@pytest.mark.parametrize(
+    "start",
+    [
+        functools.partial(_start_task, launch=RunLaunch.WEBHOOK),
+        functools.partial(_start_task, launch=RunLaunch.MANUAL),
+        functools.partial(_start_task, launch=RunLaunch.CHAT),
+        _evaluation_run,
+    ],
+    ids=["webhook", "manual", "chat", "evaluation"],
+)
+def test_run_without_anyone_to_answer_ends_without_a_snapshot(app_user, start, monkeypatch):
+    """答える人がいないRunは続きがないので、snapshotを作らない（design.md §7.9・§8）。成果物の回収は別に行う"""
+    monkeypatch.setattr(RecordingSession, "requested", [])
     run = start(app_user)
-    requested: list[bool] = []
-
-    class Session(SavingSession):
-        def suspend(self, *, snapshot=True):
-            requested.append(snapshot)
-            return super().suspend(snapshot=snapshot)
-
-    run = execute(run, FakeAdapter([reply("できました")]), Session)
-    assert run.status == RunStatus.COMPLETED
-    assert requested == [False]
+    run = execute(run, FakeAdapter([reply("できました")]), RecordingSession)
+    assert run.status == RunStatus.COMPLETED, run.error
+    assert RecordingSession.requested == [False]
     assert not Checkpoint.objects.filter(run=run).exists()
+
+
+def test_task_run_of_a_fix_chat_keeps_the_workspace_like_a_conversation(app_user, monkeypatch):
+    """修正チャットの中のタスクのRunには答える人がいるので、完了でも保存する"""
+    monkeypatch.setattr(RecordingSession, "requested", [])
+    run = _start_task(app_user, RunLaunch.FIX)
+    run = execute(run, FakeAdapter([reply("できました")]), RecordingSession)
+    assert run.status == RunStatus.COMPLETED, run.error
+    assert RecordingSession.requested == [True]
+    assert Checkpoint.objects.filter(run=run).exists()
 
 
 def test_snapshot_of_a_finished_task_run_is_discarded(conversation, django_capture_on_commit_callbacks):
@@ -501,7 +501,7 @@ def test_snapshot_of_a_finished_task_run_is_discarded(conversation, django_captu
         run.set_status(RunStatus.CANCELLED)
     assert Checkpoint.objects.filter(run=run).exists()
 
-    Run.objects.filter(pk=run.pk).update(status=RunStatus.WAITING_USER, trigger=RunTrigger.TASK)
+    Run.objects.filter(pk=run.pk).update(status=RunStatus.WAITING_USER, trigger=RunTrigger.EVALUATION)
     run.refresh_from_db()
     with django_capture_on_commit_callbacks(execute=True):
         run.set_status(RunStatus.CANCELLED)

@@ -56,11 +56,9 @@ TOOL_GUIDANCE = {
     ),
     "get_task": (
         "- This work is in the fix chat of a task (<task_edit> in the runtime context), after a run of the task "
-        "whose record is above. Its working files are not kept: /workspace/work and /workspace/output started empty, "
-        "and its inputs are in /workspace/input and its deliverables in /workspace/input/outputs. Answer questions "
-        "about that run from the record and these files without changing the task. Change the task only when the "
-        "user asks for it: read it with `get_task`, change only what the user asked for, and save it with "
-        "`update_task`. Only the prompt template, the notification "
+        "whose record is above. Answer questions about that run from the record and the files in the workspace "
+        "without changing the task. Change the task only when the user asks for it: read it with `get_task`, change "
+        "only what the user asked for, and save it with `update_task`. Only the prompt template, the notification "
         "instructions and the descriptions of the input fields can be changed here; tell the user to change the "
         "skills, connectors, destination, model or input fields on the task screen, and to change a skill in a "
         "normal conversation. In the final reply, give the version you saved and what changed; it is used from the "

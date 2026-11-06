@@ -453,7 +453,7 @@ def _start_task_edit(
     conversation: Conversation, message: ConversationMessage, actor, *, version, effort, runtime_version
 ):
     """修正チャットのタスクの編集のRun（harness.md §10.10）。同じ会話の1つ前のRunを親にして文脈を引き継ぎ（タスクの
-    Runは親を持たないので、直前のタスクのRunから始まる）。作業ファイルは残らないので、最初の編集のRunは空から始める。
+    Runは親を持たないので、直前のタスクのRunから始まる）、作業ファイルは会話の最新のCheckpointから戻す。
     Skill・Connectorは使わない"""
     task_edit = resolve_task_edit(conversation, conversation.owner, version)
     fixed: dict[str, object] = {

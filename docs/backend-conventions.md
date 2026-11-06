@@ -714,20 +714,20 @@ class RunAdmin(admin.ModelAdmin):
 ### 8.2 管理コマンド
 
 ```python
-"""期限切れArtifactを清掃するコマンド。
+"""保存期限を過ぎたワークスペースを清掃するコマンド。
 
 Usage:
     # 削除対象の件数だけを表示する
-    python manage.py cleanup_artifacts --dry-run
+    python manage.py cleanup_workspaces --dry-run
 
     # 削除を実行する
-    python manage.py cleanup_artifacts
+    python manage.py cleanup_workspaces
 """
 from django.core.management.base import BaseCommand, CommandError
 
 
 class Command(BaseCommand):
-    help = "保持期限を過ぎたArtifactを清掃する"
+    help = "保存期限を過ぎたワークスペースを清掃する"
 
     def add_arguments(self, parser):
         parser.add_argument("--dry-run", action="store_true", help="変更せずに対象を表示する")

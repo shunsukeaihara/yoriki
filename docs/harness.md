@@ -91,21 +91,21 @@ RunnerはQClusterのプロセスの中で動き、Provider Adapter・Connector�
 | 用語 | 意味 |
 |---|---|
 | ステップ | 1回のモデル呼出しと、その応答が要求したToolの実行 |
-| Run | 1つの依頼の処理。複数のステップからなる（design.md §5.1） |
-| Attempt | Runを1つのWorkerで実行する試み。確認待ち・障害・再試行のたびに新しくなる |
-| 最後の応答 | Tool呼出しを含まない応答。会話のRunでは、これで完了する |
+| Run | Workerを起動する単位。親の動きをひとまとめにした記録と、親のモデル・版の固定の単位で、話の区切りではない。親が動き終え、ジョブとサブエージェントがなくなった時点で終わる（design.md §5.1。0.47の形で、実装はこれから。docs/status.md §4） |
+| Attempt | 親またはサブエージェントを1つのWorkerで動かす1回分。Workerを手放すか障害のたびに新しくなる |
+| 最後の応答 | Tool呼出しを含まない応答。親が動き終える。ジョブとサブエージェントが残っていなければ、会話のRunはこれで完了する |
 
 ### 4.2 1ステップの流れ
 
-1. **区切りの確認**：leaseを更新し、取消要求と緊急停止を確かめる。届いている追加指示（UserInstruction）とジョブの終了を、RunEventとして取り込む（§10.4）。
+1. **区切りの確認**：leaseを更新し、取消要求と緊急停止を確かめる。届いている発言（UserInstruction）とジョブ・サブエージェントの終了を、RunEventとして取り込む（§10.4）。
 2. **文脈の組立**：RunEventから要求（system prompt、Toolの定義、メッセージ）を組み立てる（§5）。圧縮が必要なら、先に圧縮だけを行い、このステップを終える（§9）。
 3. **予算の予約**：このステップの入力token（cacheから読む分・書く分を分ける）と最大出力token（推論の分を含む）を、モデル設定の単価で見積もった額を予約する（§10.6）。
 4. **モデルの呼出し**：Provider Adapterで呼ぶ。テキストの差分は保存しない一時イベントとして画面へ送る（realtime.md）。
 5. **応答の確定**：応答の本文、Tool呼出し、推論の途中経過（プロバイダ固有の部分）、利用量、要求IDを1つのRunEventとして記録し、利用量を精算する。応答が途中で切れた・失敗した試みは別の種類のイベントとして記録し、モデルに見せる履歴には入れない（§11.2）。
 6. **Toolの実行**：各Tool呼出しをToolInvocationとして記録してから実行し、結果をRunEventとして記録する。並べ方は§7.6。Toolの組（§7.6）と組の間、および外部の確定した変更・利用者とのやり取りを伴うTool（effectが `WRITE_EXTERNAL`・`INTERACT`）の直前にも、1と同じ確認をする。
-7. **次へ**：Tool呼出しがあれば1へ戻る。なければRunを終える（§4.3）。
+7. **次へ**：Tool呼出しがあれば1へ戻る。なければ親が動き終える。ジョブかサブエージェントが残っていれば待ち（§4.3の `waiting_background`）、なければRunを終える（§4.3）。
 
-ステップの区切り（1と6の後）と、6のToolの組の間が「安全な区切り」（design.md §5.2の6・§5.5）で、取消の受付と追加指示の取込みはここで行う。Checkpointの確定はステップの区切りで行う（§11.1）。
+ステップの区切り（1と6の後）と、6のToolの組の間が「安全な区切り」（design.md §5.2の6・§5.5）で、取消の受付と追加指示の取込みはここで行う。Checkpointの確定はWorkerを手放す前に行う（§11.1）。
 
 1つの応答のToolを実行している途中で区切りの確認にかかったときは、残りの呼出しを次のように扱う。
 
@@ -115,12 +115,13 @@ RunnerはQClusterのプロセスの中で動き、Provider Adapter・Connector�
 
 ### 4.3 Runの終わり方
 
-終わり方には名前を付け、RunEventとRunの状態（design.md §5.3）に記録する。`waiting_user`・`retry_wait` はAttemptの終わり方で、Runの終わり方（`end_reason`。終わりの状態のときだけ `run.status` に記録する）には入らない。どの終わり方でも、`/workspace/output` の成果物とWorkspace snapshotは保存できる範囲で保存する（SWE-agentの途中提出と同じ考え方）。
+終わり方には名前を付け、RunEventとRunの状態（design.md §5.3）に記録する。`waiting_user`・`waiting_background` はRunの待ちの状態で、Workerを手放すときだけAttemptの終わり方として記録する（ジョブが動いている間はAttemptを終えず、同じAttemptのまま待つ）。`retry_wait` はAttemptの終わり方。どれもRunの終わり方（`end_reason`。終わりの状態のときだけ `run.status` に記録する）には入らない。どの終わり方でも、`/workspace/output` の成果物は保存できる範囲で保存する（SWE-agentの途中提出と同じ考え方）。snapshotは会話のRunだけ保存し、タスクの実行が終わるときは作らない（§8.1）。
 
 | 終わり方 | きっかけ | Runの状態 |
 |---|---|---|
-| `completed` | 最後の応答。業務結果のSchemaがあるRunでは、`submit_result` で確定した後の最後の応答（§10.5） | COMPLETED |
+| `completed` | 最後の応答で、ジョブとサブエージェントが残っていない。業務結果のSchemaがあるRunでは、`submit_result` で確定した後の最後の応答（§10.5） | COMPLETED |
 | `waiting_user` | `ask_user`、モデルの障害時の切り替えの確認（§10.8） | WAITING_USER |
+| `waiting_background` | 最後の応答で、ジョブかサブエージェントが残っている | WAITING_BACKGROUND |
 | `cancelled` | 取消要求 | CANCELLED |
 | `retry_wait` | 復旧できる障害（Sandboxの喪失、Workerの停止） | RETRY_WAIT |
 | `step_limit` | ステップ数の上限 | FAILED |
@@ -143,7 +144,11 @@ RunnerはQClusterのプロセスの中で動き、Provider Adapter・Connector�
 | 上限 | 初期値 | 達したとき |
 |---|---|---|
 | ステップ数 | 200 | 最後に1回だけ、Toolを使わせない設定（`tool_choice: none`。Toolの定義は残す）で、ここまでの結果・残りの作業・利用者への提案をまとめさせてから `step_limit` で終える |
-| 実行時間（1つのRunの合計。確認待ちの間は数えない） | 60分 | 同上 |
+| 実行時間（1つのRunの合計。親が動いている間だけ数える。確認待ち・裏の作業を待つ間は数えない） | 60分 | 同上 |
+| ジョブの実行時間 | Runtime Profile（初期値30分） | 止めて親に知らせる |
+| サブエージェントの実行時間 | Runtime Profile（初期値30分。ジョブとは別の項目） | 止めて親に知らせる |
+| 同時に動くサブエージェント | 4（設定で変えられる） | `subagent` にエラーを返す |
+| 1つのAttempt（Q2のtimeoutより短くする） | 55分 | ジョブを止めて保存し、新しいAttemptへ移る。止めたことをモデルに知らせる |
 | 予算 | 予算の設定（design.md §9） | 同上（まとめの分を残して予約する） |
 | 業務結果のSchemaがあるRun | — | 上の各上限の前に、1回だけ「今ある結果で `submit_result` を呼ぶ」猶予を与える（Gemini CLIの方式） |
 
@@ -211,13 +216,14 @@ Anthropicのthinkingブロック（署名付き）、OpenAIのreasoning（暗号
 
 ### 5.6 同じ会話・同じタスクの中での引継ぎ
 
-同じ会話の中では、文脈とWorkspaceを必ず引き継ぐ（design.md §5.1）。同じ会話の次の依頼は新しいRunになるが、モデルから見ると1つの続いた会話になる。
+同じ会話の中では、文脈とワークスペースを必ず引き継ぐ（design.md §5.1）。Runが終わった後の発言は新しいRunになるが、モデルから見ると1つの続いた会話になる。
 
-- **文脈**：子のRunの要求は、親のRun（同じ会話の前の依頼）の最後の要求と同じ履歴を先頭に置き、その後に自分のRunEventを続ける。親が引き継いだ分も含むので、何件前の依頼まででも遡る（`harness/context.py` の `inherited_items()`）。親は終わっていて記録が変わらないので、Runnerは最初に1回だけ読む。
-- 引き継いだ履歴は、sequence 0 の1つのまとまりとして扱う。長くなれば、圧縮（§9）がまとまりごと要約に入れる（途中では切らない）。親がまとまりごと圧縮していれば、それより前のRunは読まない。
-- 親が結果のないTool呼出しのまま終わっていた（失敗・停止）ときは、結果が分からないことを結果として補う（§5.4）。
-- モデル・effortは子のRunのもので、推論の途中経過は同じ接続・同じモデルの応答のものだけを戻す（§5.5）。
-- **Workspace**：`/workspace/work`・`/workspace/output` は親のRunの最後のCheckpointから戻し（§8.1）、`/workspace/input` には会話でそれまでに送った添付をすべて置く。最初の発言には、それまでの添付の一覧を添える。
+- **文脈**：新しいRunの要求は、前のRun（`Run.parent`）の最後の要求と同じ履歴を先頭に置き、その後に自分のRunEventを続ける。前のRunが引き継いだ分も含むので、何件前まででも遡る（`harness/context.py` の `inherited_items()`）。前のRunは終わっていて記録が変わらないので、Runnerは最初に1回だけ読む。
+- 引き継いだ履歴は、sequence 0 の1つのまとまりとして扱う。長くなれば、圧縮（§9）がまとまりごと要約に入れる（途中では切らない）。前のRunがまとまりごと圧縮していれば、それより前のRunは読まない。
+- 前のRunが結果のないTool呼出しのまま終わっていた（失敗・停止）ときは、結果が分からないことを結果として補う（§5.4）。
+- モデル・effortは新しいRunのもので、推論の途中経過は同じ接続・同じモデルの応答のものだけを戻す（§5.5）。
+- **ワークスペース**：`/workspace/work`・`/workspace/output` はagentセッションの最新のsnapshotから戻し（§8.1）、`/workspace/input` には会話でそれまでに送った添付をすべて置く。新しいRunの最初の発言には、それまでの添付の一覧を添える。
+- **サブエージェント**：子の文脈は親のものと混ぜない。子の文脈は、子の指示と、子のRunEventだけで組み立てる（§10.11）。
 - **タスク**：トリガーで起動してから終わるまでが1つのRunで、その間（確認待ち・再試行・別のAttempt）は文脈とWorkspaceを引き継ぐ。別のときのトリガーで起動したRunは別のもので、前の回の文脈もWorkspaceも引き継がない。チャットから起動したタスクのRunも、会話の文脈を引き継がず、タスクの定義と入力だけで文脈を組み立てる（authorization.md §6。会話に残った、もう使えない部門の情報をタスクの出口へ流させないため）。
 
 ## 6 system promptと実行時の文脈
@@ -335,15 +341,17 @@ class ToolResult:
 
 | Tool | 引数 | 内容 | effect | 並列 |
 |---|---|---|---|---|
-| `skill` | `name`（使えるSkillの名前のenum） | Skillを読み込む（§10.1） | READ | 不可（Manifestへの追記を伴うので、1つずつ実行する） |
+| `skill` | `name`（使えるSkillの名前。一覧は§10.1） | Skillを読み込む（§10.1） | READ | 不可（Manifestへの追記を伴うので、1つずつ実行する） |
 | `ask_user` | `questions`（1〜3。各 `header`・`question`・`options`・`multi_select`） | 利用者に確かめる（§10.3） | INTERACT | 不可（単独で呼ぶ） |
 | `present_files` | `files`（`path`・`description` の並び。4件まで） | 主な成果物を示す（§10.5） | READ | 不可 |
 | `submit_result` | 業務結果のSchema（SkillかTask Definitionのもの） | 業務結果を確定する（§10.5） | READ | 不可（単独で呼ぶ） |
 | `install_python_packages` | `packages`（`name`・`version`） | 管理された取得で、Run専用の環境へ入れる（design.md §7.6） | WRITE_SANDBOX | 不可 |
-| `datasource_describe` | `connector`（Run開始時に固定した一覧の名前のenum） | 公開している表・列の説明（design.md §4.9.2） | READ | 不可（同時実行の枠と記録をDBで扱うので、1つずつ実行する） |
+| `datasource_describe` | `connector`（使えるConnectorの名前。一覧は§10.2） | 公開している表・列の説明（design.md §4.9.2） | READ | 不可（同時実行の枠と記録をDBで扱うので、1つずつ実行する） |
 | `datasource_query` | `connector`、`sql`、`params`（文字列の並び） | SELECT文（引数の場所は `?`）を実行し、結果をCSVで `/workspace/input/connectors/{invocation_id}/` に置く | READ | 不可（同上。接続の同時実行数の上限の中で） |
 | `request_skill_edit` | `skill`（編集するSkillの名前。新しく作るなら空）、`summary`（変更の要約） | Skillの編集を提案し、利用者の確認を待つ（§10.9）。答える人がいる業務のRunだけに出す（修正チャットのタスクのRunには出さない） | INTERACT | 不可（単独で呼ぶ） |
 | `request_task_edit` | `summary`（変更の要約） | タスクの定義の変更を提案し、利用者の確認を待つ（§10.10）。修正チャットのタスクのRunだけに出す | INTERACT | 不可（単独で呼ぶ） |
+| `subagent` | `description`、`prompt`、`model`・`effort`（任意。既定は親と同じ） | サブエージェントを動かす。すぐに子のIDを返し、終わると親を起こす（§10.11）。親のRunだけに出す | WRITE_SANDBOX | 不可 |
+| `subagent_kill` | `id` | サブエージェントを止める | WRITE_SANDBOX | 不可 |
 | `prepare_notification` | `message`（通知の文章）、`files`（渡すファイル。任意） | 完了の通知の文章と、出口へ渡す業務結果のファイルの絞り込みを決める（design.md §4.3）。通知の書き方のあるタスクのRunだけに出す。業務結果のSchemaがあれば `submit_result` の後だけ受け付ける | READ | 不可 |
 | Skill管理のTool | §10.9 | Skillの編集のRun（関連Run）だけに出す（design.md §3.6） | 主にWRITE_EXTERNAL（`get_skill` はREAD、`test_skill_draft` はINTERACT） | 不可 |
 | タスク管理のTool | §10.10 | タスクの編集のRun（関連Run）だけに出す | 主にWRITE_EXTERNAL（`get_task` はREAD） | 不可 |
@@ -355,7 +363,7 @@ class ToolResult:
   - 許可はモデル設定ごと（ModelProfileの能力「組込みのWeb検索」と、許可の設定）と、使える部門で行う。ローカルLLMにはないので、機密の会話・タスクのRunでは使えない。
   - Toolとしてはプロバイダの組込みの形のまま渡し（Codexの方式）、Runnerは実行しない。検索の問い合わせと出典はプロバイダの応答から取り出し、RunEventに記録する。
   - 問い合わせの文字列やプロバイダがページを開く動作も、社内のデータの持ち出し口になりうるので、各社の許可するドメインの絞り込み（OpenAI・Anthropicのドメインの指定等）を設定できるようにし、結果は信頼しない内容として扱う。
-- **サブエージェント**：MVPは1つの会話で1つの主たるRunを進める（design.md §5.1）。並列の調査が必要になったら、子のRunとして検討する。
+- **フォーク（親の文脈を引き継ぐ子）、終わった子に続きを頼むTool、孫**：入れない（§10.11）。
 - **思考用のTool（`think`）**：推論の制御はeffortで行う。
 
 ### 7.5 Toolの見せ方（選び方）
@@ -497,14 +505,14 @@ Traceback (most recent call last):
 
 - 終わりの判定が確実になる（プロセスの終了を待つだけ。常駐シェルのようにプロンプトの印を読まない）。
 - 時間切れ・取消では、そのコマンドのプロセスグループだけを止めればよく、壊れたシェルを作り直す処理が要らない。
-- Attemptが変わってもシェルの状態を引き継ぐ必要がない。Workspaceはsnapshotから戻し、作業ディレクトリは呼出しごとの `workdir` で指定する（design.md §7.5「セッションとprocessはAttemptに属し、別Workerへの再開で引き継がない」）。
+- Attemptが変わってもシェルの状態を引き継ぐ必要がない。Workspaceはsnapshotから戻し、作業ディレクトリは呼出しごとの `workdir` で指定する（design.md §7.5「シェルの状態とprocessはAttemptに属し、別Workerへの再開で引き継がない」）。
 
 Docker操作はLauncher（design.md §7.3、`runtime/launcher.py`）にまとめ、Runnerは決まった操作だけを呼ぶ。
 
 - DockerはSDK（docker-py）でソケットを通して操作し、apiのイメージにdocker CLIを入れない。execのIDを持てるので、終了と終了コードをexecの状態（inspect）から読める。
 - 起動したら、inspectの結果でsandbox/CONTRACT.md §2の制限がかかっていることを確かめ直し、違えば使わずに消す（design.md §7.2の対策の1）。イメージの契約番号のラベルもWorkerで確かめる。
-- SandboxはAttemptごとに1つで、最初にSandboxのToolが呼ばれた時点で起動し、最後のCheckpointからWorkspaceを戻す（Runに自分のCheckpointがなければ、同じ会話の前の依頼のもの。design.md §7.9）。
-- Attemptを終えるとき（確認待ち・完了・停止・失敗）は、ジョブを止め、`kill` の `all` の後に `/workspace/work`・`/workspace/output` をSandboxの中のtarで取り出して保存し（tmpfsは `docker cp` で読めない）、Checkpointを記録してから状態を変え、最後に `docker rm -f` で消す。確認待ち・完了で保存できなければ、Sandboxの障害として別のAttemptでやり直す。
+- SandboxはAttemptごとに1つで、最初にSandboxのToolが呼ばれた時点で起動し、agentセッションの最新のsnapshotからワークスペースを戻す（修正チャットのタスクのRunと、その後の最初の編集のRunは空から。design.md §7.9、§10.10）。親もジョブも動いていなければ片付ける。
+- Workerを手放すとき（ジョブが動いていない確認待ち・完了・停止・失敗）は、`kill` の `all` で残ったプロセスを止めた後に `/workspace/work`・`/workspace/output` をSandboxの中のtarで取り出して保存し（tmpfsは `docker cp` で読めない）、Checkpointを記録してから状態を変え、最後に `docker rm -f` で消す。保存できなければ再試行し、それでも駄目なら失敗にする（黙って進めない）。タスクの実行の完了では、同じtarから成果物を回収するだけでsnapshotを作らない。
 - 同じtarから `/workspace/output` の通常のファイルを取り出し、成果物（Artifact）として保存する（design.md §7.4）。symlink・特殊なファイル・隠しファイルは回収せず、会話の同じパスの最新の成果物と中身が同じファイルも回収し直さない。1回に200個まで。
 - 保存先はArtifactと同じStorage Backend（`artifact/storage.py`。design.md §7.8）。S3にすれば、別のWorkerでも最後のCheckpointから戻せる。
 - 会話の添付は、Workerの作業領域のAttemptごとのディレクトリに置き、`/workspace/input` に読取り専用のbind mountで見せる。実行中に届いた追加指示の添付も、同じディレクトリに足せばそのまま見える。
@@ -523,11 +531,11 @@ Docker操作はLauncher（design.md §7.3、`runtime/launcher.py`）にまとめ
 
 - すべてのコマンドを、LauncherがDockerのexecとして始め、Sandboxの中の `yoriki-sandbox exec` で独立したプロセスグループにする。ジョブの状態の正本は、Sandboxの外にあるものだけにする。終了と終了コードはDockerのexecの状態（inspect）から、出力はLauncherがexecの出力を受け取ってWorker側のファイル（Attemptの作業領域。Sandboxには見えない）へ書いたものから読む。Sandboxの中のファイル（エージェントのコマンドが書き換えられる）を、ジョブの状態として使わない。
 - `shell` は、ジョブの終了を `timeout_seconds` まで待つ。終わればその結果を返す。終わらなければ、それまでの出力と `job_id` を返し、ジョブは続ける（DeepSeek Harnessの方式）。`background: true` なら待たずに `job_id` を返す。
-- 終わったジョブは、次のステップの前に `job.finished` として記録し、`context.snapshot` でモデルに知らせる。モデルは `job_output` で出力を読む。待つだけのループ（`sleep` と確認の繰返し）をしないよう、説明文に書く。
+- ジョブは親が話し終えた後も、確認待ちの間も動き続ける。終わったジョブは `job.finished` として記録し、親が動いていれば次のステップの前に `context.snapshot` でモデルに知らせ、動き終えていれば親を起こす（同じAttempt）。確認待ちの間は起こさず、回答で動き出すときに知らせる。モデルは `job_output` で出力を読む。待つだけのループ（`sleep` と確認の繰返し）をしないよう、止めてよいものは積極的に止めるよう、説明文に書く。
 - 同時に動かせるジョブは4つまで。1つのジョブの実行時間の上限はRuntime Profileで決める（初期値30分）。
 - Worker側に書く出力は、1つのジョブで64MB、1つのAttemptの合計で512MBまで。超えた分は捨て（コマンドは止めない）、捨てたことを出力に書く。Workerのディスクを埋めさせないため。
-- 確認待ち・完了・取消でAttemptを終えるときは、動いているジョブを止めてから、Checkpointを確定する（design.md §7.5）。ジョブはプロセスグループで止めるが、コマンドが `setsid` 等でグループを離れると届かないので、最後に `yoriki-sandbox kill` の `all`（PID 1以外のすべて）で止める（sandbox/CONTRACT.md §4.2）。止めたことは、再開時に `context.snapshot` でモデルに知らせる。
-- 最後の応答の前に、動いているジョブがあれば、Runnerはその旨をモデルに返して、待つか止めるかを決めさせる（1回だけ）。
+- ジョブが動いている間、Attemptは終えず、Workerを使い続ける（動いているRunの枠を塞ぐ）。取消でAttemptを終えるときだけ、動いているジョブを止めてからCheckpointを確定する（design.md §7.5）。1つのAttemptの上限（§4.4）で移るときも同じ。ジョブはプロセスグループで止めるが、コマンドが `setsid` 等でグループを離れると届かないので、最後に `yoriki-sandbox kill` の `all`（PID 1以外のすべて）で止める（sandbox/CONTRACT.md §4.2）。止めたことは、再開時に `context.snapshot` でモデルに知らせる。
+- タスクの実行で、最後の応答の前に動いているジョブかサブエージェントがあれば、Runnerはその旨をモデルに返して、待つか止めるかを決めさせる（1回だけ。それでも最後の応答を返せば待ちへ移る）。残っている間の `submit_result` はエラーで返す。会話では、そのまま待ちへ移る。
 
 ### 8.4 Sandboxの中の補助コマンド `yoriki-sandbox`
 
@@ -606,9 +614,9 @@ LibreOffice・Node.js・pandoc・poppler-utils・markitdownはこれからイメ
 
 ### 10.1 Skill
 
-**一覧**：`context.snapshot` の `<skills>` に、利用者が使えて、使うモデルの能力を満たし、宣言したConnectorを利用者が使えて（宣言した操作・表をConnectorの今の版が公開していて）、機密の制限に合うSkill（機密のSkillは機密のRunだけ。design.md §4冒頭）の名前と説明だけを並べる（design.md §3.1・§4.8・§4.9.1）。一覧の量は文脈の2%までにし、超えたら説明を短くして「ほかにN件」と書く（Codexの方式）。`skill` の引数 `name` は、一覧の名前のenumにする。
+**一覧**：`context.snapshot` の `<skills>` に、利用者が使えて、使うモデルの能力を満たし、宣言したConnectorを利用者が使えて（宣言した操作・表をConnectorの今の版が公開していて）、機密の制限に合うSkill（機密のSkillは機密のRunだけ。design.md §4冒頭）の名前と説明だけを並べる（design.md §3.1・§4.8・§4.9.1）。一覧の量は文脈の2%までにし、超えたら説明を短くして「ほかにN件」と書く（Codexの方式）。`skill` の引数 `name` は文字列にする（一覧がRunの中で変わるので、Toolの定義をprompt cacheのために変えない）。一覧にない名前は、候補を添えたエラーで返す。
 
-- 一覧はRun開始時に決めてManifestに固定する（`fixed.skill_catalog`）。Toolの定義（`skill` のenum）をRunの中で変えないためで、Runの途中で公開されたSkillは次の依頼から一覧に出る。`/` でSkillを指定したRunには一覧を出さない。
+- 会話のRunの一覧は、Run開始時と発言を取り込むたびに、依頼した人の今の権限で作り直し、変わった分を `context.snapshot` で知らせる。読めるものは読める。`/` でSkillを指定したRunには一覧を出さない。タスクのRunの一覧は、タスクに固定したものだけで変わらない。
 - 同じ名前のSkillが範囲（個人・部門・全社）の違いで重なれば、範囲を添えた名前にする（「名寄せ (個人)」）。並びは個人・部門・全社の順。
 
 **使い方の規則**（system promptに入れる）：
@@ -644,30 +652,30 @@ LibreOffice・Node.js・pandoc・poppler-utils・markitdownはこれからイメ
 - 固定した版の資料を、Sandboxの外から `/workspace/master/skills/{skill_id}/` へ置いて（bind mountなので動いているSandboxにもそのまま見え、Sandboxからは読取り専用のまま）、置けたことを確かめてからManifestへ追記し、`skill` の結果を返す。置けなければ読込みを失敗にし、Manifestへは追記しない。
 - Sandboxをまだ起動していないときは、起動するときに、Manifestに追記した全Skillの資料を展開する。
 
-同じRunでもう一度読み込んでも、追記した版を返す（途中で公開し直されても切り替えない）。
+同じRunで `skill` でもう一度読み込んでも、追記した版を返す（途中で公開し直されても切り替えない）。利用者が発言で `/` で指定し直したときだけ、その時点の最新の公開版へ切り替え、Manifestに追記して切り替えた時点を記録する。
 
 Runが使うSkill（`/` で指定したものと、読み込んだもの）が停止・削除されたか、利用者が使えなくなったら（権限の失効。宣言したConnectorを使えなくなった、宣言した表をConnectorが公開しなくなった、機密でないRunで機密のSkillになった、も含む）、過去の版でも使わせない（design.md §3.2・§4.9.1）。Runnerは毎ステップの区切りで確かめ、`skill` で終える。モデルの切り替えの候補と、利用者が会話のモデルを変えるときも、Runが使うSkillの必要な能力を持つモデルに限る。
 
 **明示した場合**（`/` やTask Definition）：Run開始時にSkill Versionへ解決し（使えなければRunを始めず、利用者に理由を返す）、Manifestに固定して（`fixed.skills`）、上と同じ内容を最初の `message.user` に入れる。モデルに `skill` を呼ばせない。
 
 - 1つのメッセージで指定できるSkillは3つまで。業務結果のSchemaを持つSkillは、そのうち1つまで（`submit_result` の引数が1つに決まるように）。
-- 実行中の会話でSkillを指定したメッセージは、Skillの版を依頼を始めるときに決めるので、次の依頼として受け付ける（design.md §11.4）。
+- 実行中の会話でSkillを指定したメッセージは親へ渡す。発言を受け付けるときに今の権限で確かめ（使えなければ理由を返して受け付けない）、取り込むときに `skill` の読込みと同じ処理（権限の確かめ直しを含む。その時点の最新の公開版。Toolの一覧は変えない。業務結果のSchemaは最後の応答に書かせる）を行い、同じ内容を `message.user` に入れる。Skillの要るToolがこのRunになければ（最初に別のSkillを `/` で指定してToolを絞ったRun等）、§7.5のとおり読み込まず、今のRunが終わった後に指定し直すよう利用者へ案内させる。すでに読み込んだSkillを指定したら、その時点の最新の公開版を読み込み、前に読んだ版に代わることを明示する。修正チャットでは受け付けない（design.md §11.11）。
 
 **スクリプト**：Skillの資料にスクリプトがあれば、書き直さずに実行するか、コピーして直して使うよう、system promptに書く（Codexの方式）。
 
 ### 10.2 Connector
 
 - `datasource_describe`・`datasource_query`（design.md §4.9.2）。Toolの名前にはプロバイダの制約で `.` を使えないので、`_` にする。
-- 一覧：Run開始時に、依頼した人が使えるConnector（`Connector.objects.usable_by()`）の名前と説明を決めてManifestに固定し（`fixed.connector_catalog`）、`<connectors>` で見せる。Toolの `connector` の引数は、その名前のenumにする。使えるConnectorがなければ、ConnectorのToolを出さない。`/` でSkillを指定したRunでは、Skillの「使ってよいTool」にあるものだけを出す。
+- 一覧：Run開始時と発言を取り込むたびに、依頼した人が使えるConnector（`Connector.objects.usable_by()`）の名前と説明を作り直し、`<connectors>` で見せる（変わった分を `context.snapshot` で知らせる）。Toolの `connector` の引数は文字列にする（一覧にない名前は、候補を添えたエラーで返す）。Toolを使えるモデルのRunでは、ConnectorのToolをいつも出す（途中で使えるようになるため）。タスクのRunの一覧は、タスクに固定したものだけで変わらない。`/` でSkillを指定したRunでは、Skillの「使ってよいTool」にあるものだけを出す。
 - 操作のたびに、依頼した人が今も使えるか（範囲・所属・停止・削除）と、機密のConnectorなら機密のRunでモデルがローカルLLMかを確かめ直す（一覧に出したことを根拠にしない。authorization.md §6）。境界（公開する表・上限）はその時点の版を使い、使った版をToolInvocationに記録する（authorization.md §7.2）。
 - 接続先への操作は、接続の同時実行数の上限の中で行う。枠（ConnectionLease）は接続の行をロックして数えてから取り、全Workerとapi（管理画面の接続の確認・表の一覧・説明・試し実行）を通して数える。空かなければ60秒まで（管理画面は10秒まで）待ち、それでも空かなければエラーとしてモデルに返す。操作は別のスレッドで行い、待つ間はAttemptのleaseと枠の期限を延ばす（実行時間の上限はleaseより長く設定でき、DBの上限は文ごとに効くため）。
 - 結果はArtifact（種別「Connectorの結果」）として保存し、Sandboxの `/workspace/input/connectors/{invocation_id}/result.csv` に読取り専用で置く。同じ会話の次の依頼でも読める（authorization.md §6.1）。モデルには、件数・列名・先頭の10行・ファイルの場所だけを返し、行は `<untrusted_content>` で囲む（§6.3）（design.md §4.9.1）。ファイルを読むTool（`read`・`shell`）のないRunでは、上限の中の結果を表として返す。
-- `@` で明示したConnectorは、Run開始時に使えるかを確かめ（使えなければRunを始めない）、公開している表の名前と説明を最初の `message.user` に入れる（列の型は `datasource_describe` で確かめさせる。Run開始時に接続先へつながない）。`@` を指定したメッセージは、実行中なら次の依頼として受け付ける（一覧をRun開始時に決めるため）。`/` で指定したSkillがConnectorのToolを許さなければ、指定を断る。`@` で指定できるのは1つのメッセージで5つまで。本文がなく `@` だけを指定した依頼は受け付けない（Connectorだけでは何を頼むかが決まらないため）。Toolを使えないモデルの会話では、ConnectorのToolを出さないので、`@` の一覧にConnectorを出さず、指定しても断る。
-- 機密のフラグの付いたConnectorは、機密の会話・タスクのRun（`handles_sensitive_data`。開始時の会話の区分を持つ）にだけ一覧に出し、使わせる。機密の会話はローカルLLMのモデルだけで、扱わない会話に戻せないので、Connectorの情報はクラウドのモデルへ渡らない。`@` で機密のConnectorを指定できるのも機密の会話だけ。会話を途中で機密にしたら、実行中のRunにも印を付け（モデルの切り替えの候補がローカルLLMだけになる）、機密のConnectorは次の依頼から一覧に出す。操作のたびにも、Runの区分とモデル（ローカルLLMか）を確かめる。
+- `@` で明示したConnectorは、Run開始時に使えるかを確かめ（使えなければRunを始めない）、公開している表の名前と説明を最初の `message.user` に入れる（列の型は `datasource_describe` で確かめさせる。Run開始時に接続先へつながない）。`@` を指定したメッセージは、実行中なら親へ渡す。発言を受け付けるときに今の権限で確かめ（使えなければ理由を返して受け付けない）、取り込むときにもう一度今の権限と公開範囲を確かめ（使えなくなっていれば情報を文脈に入れず、そのことを画面に示す）、表の名前と説明を `message.user` に入れる。`/` で指定したSkillがConnectorのToolを許さなければ、指定を断る。`@` で指定できるのは1つのメッセージで5つまで。本文がなく `@` だけを指定した依頼は受け付けない（Connectorだけでは何を頼むかが決まらないため）。Toolを使えないモデルの会話では、ConnectorのToolを出さないので、`@` の一覧にConnectorを出さず、指定しても断る。
+- 機密のフラグの付いたConnectorは、機密の会話・タスクのRun（`handles_sensitive_data`。開始時の会話の区分を持つ）にだけ一覧に出し、使わせる。機密の会話はローカルLLMのモデルだけで、扱わない会話に戻せないので、Connectorの情報はクラウドのモデルへ渡らない。`@` で機密のConnectorを指定できるのも機密の会話だけ。会話を途中で機密にできるのは会話のモデルがローカルLLMのときだけで、実行中のRunもそのモデルへ切り替え、印を付ける（モデルの切り替えの候補がローカルLLMだけになる）。クラウドのモデルで動いているサブエージェントは止めて親に知らせる（§10.11）。機密のConnectorは次に発言を取り込むときから一覧に出す。操作のたびにも、Runの区分とモデル（ローカルLLMか）を確かめる。
 - Skillのスクリプトからの呼出し（design.md §4.9.6。`harness/script_connectors.py`）も、同じConnectorの処理とToolInvocationの記録を通す。
-  - Sandboxを起動したとき、このRunに `datasource_query`・`datasource_describe` のどちらかを出していて、Connectorの一覧があれば、Sandboxの中の中継（`yoriki-sandbox relay`。sandbox/CONTRACT.md §4.9）を `docker exec` で始める。中継が止まっていれば、次にコマンドを始めるときに始め直す。始められなければ、そのAttemptでは始め直さず、スクリプトからは呼べないまま続ける（ライブラリが `unavailable` を返す）。
+  - Sandboxを起動したとき、このRunに `datasource_query`・`datasource_describe` のどちらかを出していれば、Sandboxの中の中継（`yoriki-sandbox relay`。sandbox/CONTRACT.md §4.9）を `docker exec` で始める。中継が止まっていれば、次にコマンドを始めるときに始め直す。始められなければ、そのAttemptでは始め直さず、スクリプトからは呼べないまま続ける（ライブラリが `unavailable` を返す）。
   - 中継から届いた要求は、受け取るスレッドで列に積むだけにし（32件まで。あふれたら `busy` で、ライブラリが待ってやり直す。中継はSandboxの中のもので置き換えられうるので、受け取る1行も2MiBまで、行の速さも10秒に500行までにし、超えたら通信路を閉じる）、Runnerのスレッドで1つずつ処理する（1回に8件まで。残りは次に処理する）。応答は書込みのスレッドが書き、Runnerのスレッドは待たない（中継が読まずに書く前の応答が64件か16MiBを超えたら閉じる）。応答1件は4MiBまでで、超える結果（表・列の多い `describe`）は `too_large` で返し、失敗として記録する。処理するのは、ジョブの終わりを待つ間（`shell`・`job_output`。要求が届けばすぐ、1件ずつ処理し、間で待つ時間の期限と取消を確かめる。処理中の1件は止められないので、その分は `timeout_seconds` を過ぎうる）と、ステップの区切り（終わったジョブを知らせる前）。モデルの応答を待つ間は処理しないので、スクリプトは待つ。
-  - 引数は、Toolと同じSchema（`connector` は一覧の名前のenum、知らない項目は断る）で確かめ、全体で64KiBまで（記録に残すため）。前のAttemptで閉じられなかった呼出し（leaseを失った等）は、再開のときに結果不明で閉じる。操作のToolをこのRunに今出していなければ断る（Skillの「使ってよいTool」で外したRunでは、スクリプトからも呼べない）。
+  - 引数は、Toolと同じSchema（`connector` は今の一覧の名前、知らない項目は断る）で確かめ、全体で64KiBまで（記録に残すため）。前のAttemptで閉じられなかった呼出し（leaseを失った等）は、再開のときに結果不明で閉じる。操作のToolをこのRunに今出していなければ断る（Skillの「使ってよいTool」で外したRunでは、スクリプトからも呼べない）。
   - 呼出しはToolInvocation（`call_id` は `script-` で始まる。`value` に `via: "script"` と、そのときに実行していたToolの呼出しのID `during`。失敗したら、スクリプトへ返した説明を `error`）に記録し、RunEventには入れない（モデルの文脈に結果を入れない）。画面の作業の記録には、RunEventとは別のAPI（`/api/app/v1/runs/{run}/script_calls/`。作業の記録と同じく、Runの結果とログを見られる人だけ）で返し、`during` の呼出しの下に「この間に処理したスクリプトからの照会」として出す（要求を出したジョブではなく、処理したときに待っていたコマンドなので。ステップの区切りで処理したものは、時刻の順で間に出す）。1つのコマンドの下では100件ずつ出し、続きは「さらに表示」で出す（1つのRunで1,000回まで呼べるため）。結果の行は出さず行数だけを出す（行は「Connectorの結果」のファイルで見られる）。失敗は、種類（`rejected` 等）と、スクリプトへ返した説明（Connectorのエラー文を含む。英語のまま）を出す。読めなかったら、記録の中に「読み直す」を出す。実行中の画面は、Runが動いている間（ステップの区切りでも処理するので、コマンドを待つ間に限らない）5秒ごとに、まだ終わっていない呼出し（なければ最後の呼出し）から後だけを読み直す（`since`。全件を読み直さない）。
   - system promptでは、`shell` と `datasource_query` を出しているRunにだけ、スクリプトから `yoriki_connector` で問い合わせられること、使い方、行ごとに照会せず `IN` 等でまとめて読むこと、スクリプトは前面で動かすか `job_output` で待つこと（モデルの応答を待つ間は要求を処理しないため）を案内する（`harness/prompts.py` の `SCRIPT_CONNECTORS`）。結果のCSVはToolと同じくArtifactにして `/workspace/input/connectors/{invocation_id}/result.csv` に置き、スクリプトには場所・列・行数・打ち切ったかを返す（行はライブラリがファイルから読む）。
   - 上限：1つのRunで1,000回（Attemptをまたいで、記録した呼出しを数える）、1分に120回（Attemptの中では断る要求も含めて数え、前のAttemptの直近1分の記録した呼出しも数える。超えたら `rate_limited` と待つ秒数を返し、ライブラリが待ってやり直す）。
@@ -677,9 +685,9 @@ Runが使うSkill（`/` で指定したものと、読み込んだもの）が�
 Codexの非同期の質問と、Gemini CLIの「承認待ちのTool呼出し」を合わせた形にする。
 
 1. モデルが `ask_user` を呼ぶ。引数は1〜3個の質問で、各質問は `header`（12文字まで）、`question`、`options`（2〜4。`label`・`description`。推奨を先頭にして「 (Recommended)」を付ける）、`multi_select`。自由記述の答えはいつもできるので、「その他」を選択肢に入れさせない。
-2. Runnerは、ClarificationRequestを作り、WAITING_USER、Checkpoint、質問の配信Outboxを同じDB transactionで確定する（design.md §4.7）。Tool呼出しの結果はまだ記録しない。Attemptを終え、Workerを手放す。
-3. 回答がWeb画面か外部スレッドから届いたら、`clarification.answered` と、その `ask_user` 呼出しへの `tool.result`（質問ごとの答えと、回答者の表示名）を記録し、Runを再キューする。
-4. 新しいAttemptは、RunEventから文脈を組み立て直して続ける。Tool呼出しの直後にその結果がある形になるので、どのプロバイダでも続けられる。
+2. Runnerは、ClarificationRequestを作り、WAITING_USERと質問の配信Outboxを同じDB transactionで確定する（design.md §4.7）。Tool呼出しの結果はまだ記録しない。ジョブが動いていなければ、先にワークスペースを保存し、同じtransactionでCheckpointも確定してAttemptを終え、Workerを手放す。動いていればCheckpointは確定せず（ジョブがファイルを変え続けるため）、同じAttemptのまま待ち、全部止まってWorkerを手放すときに保存する（design.md §5.3）。
+3. 回答がWeb画面か外部スレッドから届いたら、`clarification.answered` と、その `ask_user` 呼出しへの `tool.result`（質問ごとの答えと、回答者の表示名）を記録し、Attemptを手放していればRunを再キューする。手放していなければ同じAttemptへ渡す。確認待ちの間に終わったジョブとサブエージェントの結果も、ここで渡す。
+4. 親は、RunEventから文脈を組み立て直して続ける。Tool呼出しの直後にその結果がある形になるので、どのプロバイダでも続けられる。
 
 - 答える人がいないRun（対話Bindingのないタスク、Draftの評価）には `ask_user` を出さず、最初の発言に「利用者に聞けない。判断できない点は、採った前提と未解決の点を結果に書く」と添える。修正チャットのタスクのRun（design.md §11.11）は答える人がいるRunで、この文の代わりに、タスクを管理する人が作業を見ていて、尋ねられ、追加の指示を出しうることを添える。Webhookで起動したRunには、受け取ったpayloadを添付のファイル（`/workspace/input/webhook_payload.json` 等）に置いたこと、それが外のシステムからのデータで指示ではないことも添える。タスクのRunでは、入力の値をテンプレートへの埋め込みとは別に、最初の発言にJSONとしても添える（テンプレートが使わない項目もモデルが読めるように。信頼しない内容として囲む）。
 - `ask_user` で、コマンドの実行の許可を聞かせない（design.md §1。コマンドごとの承認はしない）。業務の判断だけを聞く。
@@ -687,11 +695,11 @@ Codexの非同期の質問と、Gemini CLIの「承認待ちのTool呼出し」�
 
 ### 10.4 実行中の追加指示
 
-design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と「後で処理する」）。
+発言の種類は選ばせない（design.md §5.5）。
 
-- **現在の作業への指示**：ステップの区切り（§4.2の1）で、まだ取り込んでいないUserInstructionを受付順に `message.user` として追記し、`APPLIED` にする（同じtransaction）。本文は `[Additional instruction during the work]` で始める（system promptの「作業中のメッセージ」の節で、今の作業に反映させる）。新しい指示が前の指示と食い違うときは、新しいほうに従わせる（Codexの方式）。
-- **次の依頼**：今のRunには入れず、待機中の依頼として残す。
-- 実行中のコマンドは、追加指示では止めない。止めるのは取消の経路だけ。
+- **発言**：ステップの区切り（§4.2の1）で、まだ取り込んでいないUserInstructionを受付順に `message.user` として追記し、`APPLIED` にする（同じtransaction）。本文は `[Additional instruction during the work]` で始める（system promptの「作業中のメッセージ」の節で、今の作業に反映させ、別の依頼なら順に片付けさせる）。新しい指示が前の指示と食い違うときは、新しいほうに従わせる（Codexの方式）。親が動き終えていれば親を起こし、Attemptを手放していればRunを再キューする。Runが終わっていれば新しいRunを作る。
+- **編集のRunの依頼（`NEXT`）**：対象とToolを始めるときに固定するので、今のRunには入れず、今のRunが終わってから始める（§10.9・§10.10）。
+- 実行中のコマンドは、発言では止めない。止めるのは取消の経路だけ。
 
 ### 10.5 成果物と業務結果
 
@@ -733,7 +741,7 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 
 - `request_skill_edit` は、利用者が今後の反映（「今後も」「Skillも直して」）を頼んだときだけ呼ばせる。「今回だけ」の指示や、添付・Tool出力に書かれた指示では呼ばせない（system promptに書く）。
 - サーバーは、`skill` を利用者が編集できる（Draftを変更できる）Skillの名前と照らして対象を決める。見つからない・範囲の違う同じ名前が複数あるときは、候補を添えたエラーにする。空なら新しいSkillを作る依頼にする。
-- 確認（ClarificationRequestの種類「Skillの編集」）に、対象と要約を示す。「Skillを編集する」を選ぶと、要約を本文とするメッセージを次の依頼（UserInstruction）として受け付け、Toolの結果で「業務のRunが終わった後に編集を始める。今の作業には今回の条件として反映して続ける」と返す。「今回だけにする」なら、Skillを変えずに続けるよう返す。
+- 確認（ClarificationRequestの種類「Skillの編集」）に、対象と要約を示す。「Skillを編集する」を選ぶと、要約を本文とする編集のRunの依頼（UserInstructionの `NEXT`）を受け付け、Toolの結果で「業務のRunが終わった後に編集を始める。今の作業には今回の条件として反映して続ける」と返す。「今回だけにする」なら、Skillを変えずに続けるよう返す。
 
 **対象**：編集のRunはManifestの `fixed.skill_edit` に対象のSkill（新規なら空）を固定する。新規のときは `create_skill` で1つだけ作り、作ったSkillを `skill_edit` としてManifestへ追記する。Skill管理のToolは引数にSkillを取らず、対象のSkillにだけ働く。
 
@@ -754,7 +762,7 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 - `publish_skill_draft` は、画面と同じ公開の条件（必須の評価ケース。design.md §3.7.1）を確かめる。満たさなければ、足りないケースを示して `test_skill_draft` を呼ぶよう返す。評価ケースはエージェントからは作らない（利用者がSkillの画面で作る）。
 - 公開・切戻しは、ToolInvocationのoperation keyをSkillChangeに渡し、再試行で版を重ねない。SkillChangeには編集のRunを記録する。
 - 結果の `value` に、Skillの名前・範囲・状態（変更案を保存・公開・切戻し）・版・変更点を持たせ、画面はそれを会話に表示し、Skillの画面（版の中身・切戻し）へのリンクを置く（design.md §11.6）。
-- 編集のRunで公開しても、進行中・確認待ちの業務のRunは元の版を使い続ける。次の依頼から新しい版を使う。
+- 編集のRunで公開しても、進行中・確認待ちの業務のRunは読み込んだ版を使い続ける。次に読み込むときから新しい版を使う。
 - 機密のSkill（公開中の版かDraftが機密のフラグを持つか、機密のConnectorを宣言しているもの。design.md §4冒頭）は、機密の会話の編集のRunでだけ扱う。機密でないRunでは、編集の依頼を受け付けず、`request_skill_edit` の候補にも名前を出さず、`get_skill` も中身を返さない。編集の途中で機密になったら、読んだ中身を次のモデルの呼出しで送らないように、毎ステップの区切りで止める。機密でない編集のRunでは、機密の版へ切り戻さない。
 
 ### 10.10 修正チャットとタスクの編集のRun
@@ -763,17 +771,17 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 
 **タスクのRun**（起動のしかた「修正チャット」）：
 
-- 手動実行と同じく、受付時のタスクの版に固定し、タスクに固定したものの範囲で動く。要求のID（`client_request_id`。最初の依頼の `client_message_id`）で、同じ人のそのタスクの修正チャットの再送には前のRunを返す（タスクの行のロックの中で確かめる。IDが修正チャットのほかのメッセージで使われていれば409）。Runの画面のメッセージは、修正チャットの会話のメッセージのうち、そのRunのものだけを出す。`parent` を持たず（会話の文脈を引き継がない）、`/workspace/input`（添付・Connectorの結果）・成果物の回収・Checkpointは、会話ではなくそのRunのものだけを使う（同じ会話の前の実行の作業ファイルを見せない）。実行中の追加指示に付けた添付は、そのRunの入力として置く。
+- 手動実行と同じく、受付時のタスクの版に固定し、タスクに固定したものの範囲で動く。要求のID（`client_request_id`。最初の依頼の `client_message_id`）で、同じ人のそのタスクの修正チャットの再送には前のRunを返す（タスクの行のロックの中で確かめる。IDが修正チャットのほかのメッセージで使われていれば409）。Runの画面のメッセージは、修正チャットの会話のメッセージのうち、そのRunのものだけを出す。`parent` を持たず（会話の文脈を引き継がない）、ワークスペースは動かすたびに空で作り直し、動き終えたら残さない。`/workspace/input`（添付・Connectorの結果）・成果物の回収は、会話ではなくそのRunのものだけを使う。実行記録から始めたときは、元の実行の値・ファイル・入口の本文を参照して入力にする（中身を複製しない。機密の修正チャットでは、タスクの今の版のモデルがローカルLLMのときだけ動かす。design.md §11.11）。実行中の追加指示に付けた添付は、そのRunの入力として置く。
 - 答える人がいるRunとして、`ask_user` と `request_task_edit` を出し、追加指示を取り込む（§10.3・§10.4）。`request_skill_edit` は出さない。
 - 結果の通知先は固定せず（配信を作らない）、`prepare_notification` で作った通知の候補を、送るはずだった内容として画面に出す。
 - 区切りのたびに、タスクが削除されていないことと、動かした人（`Run.owner`）が今もタスクを管理できることを確かめ、外れていれば止める（停止中かは見ない。停止したときは、ほかのRunと同じく停止を依頼する）。
 
-**始め方（編集のRun）**：修正チャットで、Runが動いていないときに送ったメッセージ（次の依頼を含む）は、タスクの編集のRunになる（`Run.kind`）。タスクのRunを始めるのは「もう一度動かす」のAPIだけ。タスクのRunの `request_task_edit` を利用者が確認で承認すると、要約を本文とするメッセージを次の依頼として受け付ける（`request_skill_edit` と同じ。確認の種類「タスクの編集」、選択肢は「タスクを直す」「今回だけにする」）。`request_task_edit` は、利用者が今後の反映（「今後は」「タスクも直して」）を頼んだときだけ呼ばせる。確認待ちの間に送ったメッセージは、ほかの確認と同じく自由記述の回答にし、承認としては扱わない。タスクのRunが終わる直前に届いて取り込めなかった追加の指示も、次の依頼としてタスクの編集のRunになる（動かし直すのは「もう一度動かす」）。
+**始め方（編集のRun）**：修正チャットで、Runが動いていないときに送ったメッセージは、タスクの編集のRunになる（`Run.kind`）。タスクのRunを始めるのは「もう一度動かす」のAPIだけ。タスクのRunの `request_task_edit` を利用者が確認で承認すると、要約を本文とする編集のRunの依頼（`NEXT`）を受け付ける（`request_skill_edit` と同じ。確認の種類「タスクの編集」、選択肢は「タスクを直す」「今回だけにする」）。`request_task_edit` は、利用者が今後の反映（「今後は」「タスクも直して」）を頼んだときだけ呼ばせる。確認待ちの間に送ったメッセージは、ほかの確認と同じく自由記述の回答にし、承認としては扱わない。タスクのRunが終わる直前に届いて取り込めなかった発言も、タスクの編集のRunになる（動かし直すのは「もう一度動かす」）。
 
-- 始めるときに、依頼した人が今もタスクを管理できるか、タスクに版があるか、モデルがToolを使えるかを確かめる。機密でない修正チャットで、タスクの今の版が機密なら始めない（機密のタスクの定義を、クラウドのモデルへ送らない。新しい修正チャットを始める）。始められない次の依頼は、ほかの次の依頼と同じく、理由を会話のシステムのメッセージに残して取り消す。
+- 始めるときに、依頼した人が今もタスクを管理できるか、タスクに版があるか、モデルがToolを使えるかを確かめる。機密でない修正チャットで、タスクの今の版が機密なら始めない（機密のタスクの定義を、クラウドのモデルへ送らない。新しい修正チャットを始める）。始められない依頼は、理由を会話のシステムのメッセージに残して取り消す。
 - 区切りのたびに同じことを確かめ（依頼した人がタスクを管理できなくなった・タスクが削除された・機密でない修正チャットでタスクが機密になった）、外れていれば止める（終わり方は「タスクを続けられない」）。
 
-**文脈**：編集のRunは、同じ会話の1つ前のRunを親にして文脈を引き継ぐ。タスクのRunは親を持たないので、編集の文脈は直前のタスクのRunから始まる。Workspaceは、直前のタスクのRunから後のRunの最後のCheckpointから戻す（直前のタスクのRunがCheckpointを残さなければ、さらに前の実行のものではなく空のWorkspaceから始める）。`/workspace/input` には、直前のタスクのRunから後のRun（そのタスクのRunと、その後の編集のRun）の添付とConnectorの結果だけを置き、最初の発言に添える前の添付の一覧と、回収し直さない既知の成果物も同じ範囲にする（タスクのRunごとに入力の名前が重なりうるため。`Run.fix_chat_runs()`）。編集のRunへの添付の名前は、会話の添付の中で重ならないように決める。Manifestの `fixed.task_edit` に対象のタスクを固定し、`<runtime_context>` に `<task_edit task="..." version="..." />` を置く。モデルは修正チャットのモデル設定（始めたときはタスクのモデル設定。会話の画面で切り替えられるが、Toolを使えるモデルだけ）を使う。次の依頼の添付は、タスクのRunの添付にせず、名前も会話の添付の中で決める。
+**文脈**：編集のRunは、同じ会話の1つ前のRunを親にして文脈を引き継ぐ。タスクのRunは親を持たないので、編集の文脈は直前のタスクのRunから始まる。作業ファイルは残らないので、ワークスペースは空から始める（編集のRunの続きは、その後の編集のRunの最新のsnapshotから戻す）。`/workspace/input` には、直前のタスクのRunから後のRun（そのタスクのRunと、その後の編集のRun）の添付とConnectorの結果だけを置き、`/workspace/input/outputs/` に直前のタスクのRunの成果物を読取り専用で置き、最初の発言に添える前の添付の一覧と、回収し直さない既知の成果物も同じ範囲にする（タスクのRunごとに入力の名前が重なりうるため。`Run.fix_chat_runs()`）。編集のRunへの添付の名前は、会話の添付の中で重ならないように決める。Manifestの `fixed.task_edit` に対象のタスクを固定し、`<runtime_context>` に `<task_edit task="..." version="..." />` を置く。モデルは修正チャットのモデル設定（始めたときはタスクのモデル設定。会話の画面で切り替えられるが、Toolを使えるモデルだけ）を使う。編集のRunの依頼の添付は、タスクのRunの添付にせず、名前も会話の添付の中で決める。
 
 **Tool**：Sandboxの土台のTool、`ask_user`、`todo_write` と、次のタスク管理のTool。Skill・Connectorは使わない（`skill`・`submit_result`・`request_*` も出さない）。
 
@@ -788,6 +796,39 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 - 画面の更新のAPIと同じSerializer（`TaskDefinitionUpdateSerializer`）に、送る項目だけを渡して保存する。入力の項目は、説明だけを差し替えた今の版の項目の一覧を送る（項目の追加・削除・型の変更はできない。知らない名前は断る）。保存した人は依頼した人にする。保存と同じtransactionの中で、保存の後にもう一度権限と機密の区分を確かめ、外れていれば保存を取りやめる。同じく保存の後に、Attemptがまだ実行の権利を持つかを確かめ、失っていれば戻す（`Run.fenced()` で包むと、ロックの順がタスクの停止と逆になるため）。
 - Runの `task_changes` に、保存したタスクの版（何度か保存したら最後の版。項目ごとに最初の変更前と最後の変更後。結果が元と同じになった項目は出さない）を出す。
 
+### 10.11 サブエージェント
+
+親のワークスペースのコピーの上で別のAttemptとして動く子（design.md §5.1）。親と同時に複数動かせる。どのWorkerでもよい。利用者向けの画面は作業の記録だけで、子の記録は親の履歴の中に入れ子で見せる。
+
+**動かし方**：親のLLMが `subagent`（§7.4）を呼ぶ。Runnerは次を順に行い、子のIDをすぐ返す。親は待たない。
+
+1. `model`・`effort` を確かめて固定する。選べるのはagentセッションで使えるものだけ（機密ならローカルLLM）で、既定は親と同じ。タスクのRunでは親と同じモデル（タスクに固定したもの）だけにし、会話では親のRunのSkillの必要な能力を持つモデルに限る。利用者向けの選択の画面は作らない。
+2. 親のコンテナの中で `/workspace/work`・`/workspace/output` のtarを作り、保存先へ一時的に置く（親のsnapshotとは別の扱い。親のコンテナがなければ最新のsnapshotを使う）。親のコマンドが書き込み中でもその時点のファイルを写し、書き込み中のファイルの中身は保証しない（ジョブが動いていれば、そのことを親への結果と子の指示に添える）。作れなければ親へエラーを返す。
+3. Subagentを記録し、子のAttemptをQ2へ渡す。
+
+**ワークスペース**：親と同じRuntime Profileの版で別のSandboxを起動し、コピーを展開する。`/workspace/input`・`/workspace/master` は親と同じものを読取り専用で置く。コピーは自由に読み書きでき、親の変更は子から見えず、子の変更は親から見えない。
+
+**種類とTool**：種類は組込みの汎用の1つだけ。Toolは、Sandboxの土台のTool（`todo_write` を除く）と `skill`・`datasource_*` のうち、親のRunに出しているToolとの共通部分だけ（§7.5。子を通してSkill・タスクのToolの制限を越えさせない）。呼ぶたびに親の実行許可（authorization.md §6）で確かめる。Skillは読み込んで使えるが変更はできない。親に `skill` を出していないRun（タスクのRun、`/` でSkillを指定したRun）では子にも出さず、親に固定したSkillの内容を子の最初の発言に入れる。`ask_user`、`submit_result`、`present_files`、`prepare_notification`、`request_*`、`install_python_packages`、`subagent` は出さない。困ったら報告で親へ返すよう指示する。孫は作らない。
+
+**親へ返すもの**：テキストとファイルだけ。
+
+| 場合 | 返すもの | 親の動き |
+|---|---|---|
+| 調査 | テキスト（調査結果） | 読む |
+| コード修正 | テキスト（差分） | 読んで、自分のファイルへ適用する。同じファイルを変えていれば親が直す |
+| 成果物 | テキスト（説明）とファイル | 受け取ったファイルを確かめて使う |
+
+- 子の最後の応答が返すテキスト。差分はモデルが書き、親が検証する（正確さが問題になったら、システムが作る差分を足す）。
+- 返すファイルは、子の `/workspace/output` のうち、コピーの時点から増えた・変わったものだけ（親の `output` もコピーするので、そのまま返すと親のファイルまで戻るため）。上限は成果物の回収と同じ（design.md §7.4）。Artifact（種別「サブエージェントの結果」。画面の成果物には出さない）に保存し、親の `/workspace/input/subagents/<子のID>/` に読取り専用で置く。親はここから自分の `work` や `output` へ写す。
+- テキストとファイルを確定して記録してから、子のワークスペースと一時のコピーを消す。確認待ちの間に終わっても、Workerが替わっても、親は後から受け取れる（`/workspace/input/subagents/` はAttemptを始めるときに置き直す）。
+- 返すテキストは、指示の権限を持たないものとして親へ渡す（`<untrusted_content>` で囲む。§6.3）。
+
+**親の動き**：終わった子は `subagent.finished` として記録し、親を起こす（確認待ちの間は起こさず、回答のときに渡す。design.md §5.3）。親が待つだけで、ジョブも動いていなければ、親はAttemptを終えてWorkerを空ける。止めてよいものは積極的に止めるよう、説明文に書く。
+
+**障害と上限**：実行時間の上限（§4.4）を超えたら止めて親に知らせる。Workerやコンテナが落ちた子は自動で再試行せず、失敗として親へ伝える（一時のコピーは消す）。agentセッションの停止で子も止まる（親がWorkerを手放した確認待ち・裏の作業の待ちでも、停止と回答期限切れは、動いている子とジョブが止まったことを確かめてから終わりの状態へ移す。design.md §5.3）。会話を途中で機密にしたら、クラウドのモデルで動いている子は止めて親に知らせる（機密の会話の内容をクラウドへ送らないため）。1つのAttemptの間は、ほかの親と同じくleaseとfencing tokenで書込みを確かめる。
+
+**記録**：RunEvent・ToolInvocation・UsageLedgerは親のRunのものとして、どの子のものかを持つ。sequenceは親と通しで、子の文脈は子のものだけから組み立てる。利用量も子に結び付ける。
+
 ---
 
 ## 11 障害と再開
@@ -795,8 +836,8 @@ design.md §5.5の区別に合わせる（OpenCodeの「すぐ取り込む」と
 ### 11.1 記録の順序とやり直し
 
 - モデルの呼出しの前に、要求の組立に使ったRunEventがすべて確定していることを確かめる。Toolの実行の前に `tool.call` を確定する（DeepSeek Harness・OpenHandsの方式）。すべての書込みでleaseとfencing tokenを照合する（design.md §6.3）。
-- 新しいAttemptでは、RunEventの最新の `compaction` とその後のイベントから文脈を組み立てる（Codexの方式）。WorkspaceはCheckpointのsnapshotから戻す（作業ディレクトリは持ち越さない）。
-- **Workspaceと記録の食い違い**：CheckpointにはWorkspace snapshotと、その時点のRunEventのsequenceを一緒に記録する（design.md §5.4）。CheckpointはSandboxのファイルを変えたToolを実行したステップの区切りで確定する（大きさの上限の中で。design.md §7.9）。初期は、Attemptを終えるとき（確認待ち・完了・停止・失敗）だけ確定する（§8.1）。障害で最後のCheckpointより後のRunEventが残っているときは、記録を消さずに、次の内容の `context.snapshot` を追記してから続ける。
+- 新しいAttemptでは、RunEventの最新の `compaction` とその後のイベントから文脈を組み立てる（Codexの方式）。ワークスペースは最新のsnapshotから戻す（作業ディレクトリは持ち越さない）。
+- **Workspaceと記録の食い違い**：CheckpointにはWorkspace snapshotと、その時点のRunEventのsequenceを一緒に記録する（design.md §5.4）。Checkpointは、Workerを手放すときに確定する（§8.1。design.md §7.9）。ジョブが動いている確認待ちで落ちたときも、同じく最後の保存まで戻る。障害で最後のCheckpointより後のRunEventが残っているときは、記録を消さずに、次の内容の `context.snapshot` を追記してから続ける。
   - 作業ファイルを、sequence Nの時点（最後に保存した区切り）に戻したこと。
   - それより後にSandboxのファイルを変えたTool呼出し（`shell`・`write`・`edit`・`install_python_packages` 等）の一覧と、その結果は今のファイルに反映されていないこと。必要なら確かめてやり直すこと。
   - 読んだファイルの版の記録（§7.8）は、sequence Nまでのものだけを使う。
@@ -929,5 +970,5 @@ Task Definition「契約書レビュー」：起動はWebhook（Zapier）、使�
 - モデル向けの文を英語で書く方針は、日本語の業務文書での結果を見て確かめる。
 - MCPのConnectorでToolが増えたときの、Toolの定義を後から読み込む仕組み（§7.5）。
 - Web検索・Web取得のConnectorと、プロバイダ組込みのWeb検索の許可（§7.4）。検索の先（検索API）を差し替えられる形にし、結果はURL・タイトル・抜粋・日付の共通の形にそろえる。
-- 子のRunによる並列の調査（サブエージェント）。
+- サブエージェントの種類の定義を増やす、終わった子に続きを頼む、システムが作る差分（§10.11）。
 - 日本語の文章のtoken数の見積もりの精度（§7.7）。

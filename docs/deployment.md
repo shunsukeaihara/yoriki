@@ -43,7 +43,7 @@ yoriki/
 | `yoriki-frontend` | `frontend/` を `nuxt build` したNodeサーバー | frontend | 同上 |
 | `nginx`（公式） | 設定は `deploy/nginx/` をmountする | nginx | Docker Hub公式 |
 | `postgres`（公式） | — | postgres | Docker Hub公式 |
-| `<org>/yoriki-sandbox-<profile>` | `sandbox/images/<profile>/` | Runごとに動的に起動 | 公開Docker Hub（design.md §10.1） |
+| `<org>/yoriki-sandbox-<profile>` | `sandbox/images/<profile>/` | Attemptごとに動的に起動（サブエージェントがあれば1つのRunで同時に複数） | 公開Docker Hub（design.md §10.1） |
 
 - `yoriki-api` は1つのイメージを、起動コマンドを変えて複数のサービスで使う（design.md §10）。
 - 本体のイメージ（`yoriki-api`、`yoriki-frontend`）は配布しない。導入する人がソースからビルドする。`yoriki-api` には、ライセンス上そのまま再配布できないもの（SQL Server用のMicrosoft ODBC Driver。ビルド時にMicrosoftのリポジトリから取得し、ビルドする人がライセンスに同意する）が入るため（design.md §4.9.2）。
@@ -132,7 +132,7 @@ networks:
 - **公開するポートはnginxの443（と80のリダイレクト）だけ。** api、postgres等のポートはホストへpublishしない。
 - **Dockerソケットはqclusterにだけ渡す。** apiやfrontendには渡さない（design.md §7.3）。Dockerソケットはホストのroot権限と同等なので、qclusterのコンテナには必要なもの以外をmountしない。将来は、Launcherをホスト上の専用プロセスに分けるか、rootless Dockerにする。
 - **workspacesはホストとコンテナで同じパスにする。** qclusterの中から見たパスで、ホストのdockerdにbind mountを指示するため。パスがずれると、Sandboxに空のディレクトリがmountされる。ディレクトリは、qclusterのコンテナの利用者（uid 10001）が書けるように前もって作る（§7.1。ないとDockerがrootの持ち物として作り、Workspaceを保存できない）。
-- **Sandboxはcomposeのサービスにしない。** LauncherがRunごとに `network_mode: none` 等の制限付きで起動する（design.md §7.2）。
+- **Sandboxはcomposeのサービスにしない。** LauncherがAttemptごとに `network_mode: none` 等の制限付きで起動する（サブエージェントがあれば1つのRunで同時に複数）（design.md §7.2）。
 - **外へ通信するサービス**：api（LLM、Connector、外部連携）、qcluster（LLM、配信、イメージのpull）、channel-listener（Slack等への常時接続）は、`backend` に加えて外へ出られる `egress` ネットワークにも参加させる。postgresは参加させない。
 - **migrateは自動で実行しない。** apiの起動時に実行すると、複数のプロセスが同時にmigrationを走らせるため。更新手順（§6）で明示的に実行する。
 
@@ -273,7 +273,7 @@ docker compose -f deploy/compose.yaml exec api python manage.py resume_workers
 ```
 
 - design.md §10の順序（イメージ → migration → 起動）に従う。
-- `drain_workers`・`resume_workers` はまだない（Workerが受け付けを止めて実行中のRunを待つ仕組みとあわせて作る）。それまでは無停止の更新はできない。手順2と6の代わりに、利用者に停止の時間を知らせ、手順1の後に `docker compose -f deploy/compose.yaml stop nginx` で新しい受付（画面・API・Webhookの入口）を止める（複数台の構成（§8.4）では、すべてのエッジのサーバーで `docker compose -f deploy/compose.edge.yaml stop edge-nginx` を実行し、Runの数の確認・migration・すべてのアプリとWorkerのサーバーの入れ替えを終えてから、エッジを戻す）。そのうえで、受け付け済みのRunが終わるのを待つ（`docker compose -f deploy/compose.yaml exec api python manage.py shell -c "from run.models import Run, RunStatus; print(Run.objects.filter(status__in=[RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.RETRY_WAIT, RunStatus.CANCELLING]).count())"` が0になるまで。確認待ちのRunは動いていないので待たない。ただし、Sandboxの契約番号が変わる更新では、確認待ちのRunも終えるか停止し、新しい契約のRuntime Profileを登録してからnginxを戻す。§2.1）。手順5の `up -d` でnginxも戻る（契約番号が変わる更新では、手順5でnginx以外のサービスを名前で指定して起動し、登録の後に `up -d` でnginxを戻す）。Webhookの送り元には止めている間は届かないので、送り元の再送に頼る。待てずに入れ替えたRunは、新しいqclusterが最後のCheckpointから再開する（Checkpointは今はAttemptを終えるときだけ作るので、それより後のWorkspaceの変更は失われ、モデルに知らせる。harness.md §11.1）。Workerサーバーは、手順5と同じときに入れ替え、古いイメージのqclusterを残さない。
+- `drain_workers`・`resume_workers` はまだない（Workerが受け付けを止めて実行中のRunを待つ仕組みとあわせて作る）。それまでは無停止の更新はできない。手順2と6の代わりに、利用者に停止の時間を知らせ、手順1の後に `docker compose -f deploy/compose.yaml stop nginx` で新しい受付（画面・API・Webhookの入口）を止める（複数台の構成（§8.4）では、すべてのエッジのサーバーで `docker compose -f deploy/compose.edge.yaml stop edge-nginx` を実行し、Runの数の確認・migration・すべてのアプリとWorkerのサーバーの入れ替えを終えてから、エッジを戻す）。そのうえで、受け付け済みのRunが終わるのを待つ（`docker compose -f deploy/compose.yaml exec api python manage.py shell -c "from run.models import Run, RunStatus; print(Run.objects.filter(status__in=[RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.RETRY_WAIT, RunStatus.CANCELLING]).count())"` が0になるまで。agentセッションの実装（design.md 0.47）で、このコマンドの一覧に `RunStatus.WAITING_BACKGROUND` を足し、終わっていないAttempt（確認待ちの間に動くジョブ・サブエージェント）も数える（今のコードにはまだない）。動いているもののない確認待ちのRunは待たない。ただし、Sandboxの契約番号が変わる更新では、確認待ちのRunも終えるか停止し、新しい契約のRuntime Profileを登録してからnginxを戻す。§2.1）。手順5の `up -d` でnginxも戻る（契約番号が変わる更新では、手順5でnginx以外のサービスを名前で指定して起動し、登録の後に `up -d` でnginxを戻す）。Webhookの送り元には止めている間は届かないので、送り元の再送に頼る。待てずに入れ替えたRunは、新しいqclusterが最後のCheckpointから再開する（Checkpointは今はAttemptを終えるときだけ作るので、それより後のWorkspaceの変更は失われ、モデルに知らせる。harness.md §11.1）。Workerサーバーは、手順5と同じときに入れ替え、古いイメージのqclusterを残さない。
 - migrationは、旧バージョンのコードでも動く形（列の追加は先、削除は次のリリース）で書き、更新中に旧apiが動いていても壊れないようにする。
 - Workerサーバー（§3.2）は、手順2のdrainの後、手順6の再開の前に同じイメージへ入れ替える（drainがない間は、受付を止めてRunの終わりを確かめた後、nginxを戻す前に入れ替える）。
 
@@ -287,7 +287,7 @@ docker compose -f deploy/compose.yaml exec api python manage.py resume_workers
 - **掃除**：使わなくなったSandboxイメージは、RunやCheckpointが参照していないことを確認してから削除する（design.md §10.1）。`docker image prune` を無条件に実行しない。
 - **Sandboxのコンテナ**：LauncherはAttemptを終えるときにSandboxを `docker rm -f` で消す。Workerが落ちて残ったものは、次にSandboxを起動するときに、終わったAttemptのもの（ラベル `org.yoriki.attempt`）を探して消す。別のDBのAttemptのもの（ラベル `org.yoriki.database` のPostgreSQLのクラスタの識別子とDBの名前が違うもの。同じDockerで手元の開発とテストを動かすとき等）と、このラベルのないもの（ラベルを付ける前の版が起動したもの）は、どのDBのものか判定できないので消さない。クラスタの識別子（`pg_control_system()`）を読めない環境ではDBの名前だけで見分けるので、同じDockerで複数の環境を動かすときは、それぞれのDBの名前を分ける。ラベルのないものが残っていたら、Runが動いていないことを確かめてから `docker ps -a --filter label=org.yoriki.sandbox=1` で探して消す。
 - **結果の配信**：出口（Webhook・Zapier）への送信はqclusterから行う。qclusterのコンテナ（Workerサーバーを含む）から送り先（`hooks.zapier.com` 等）へのHTTPSの外向きの通信が要る。環境変数のproxy（`HTTPS_PROXY`）は使わず、名前を引いて確かめたアドレスへ直接つなぐ（design.md §4.4）。社内のアドレスへ送るときだけ、`YORIKI_DELIVERY_ALLOWED_NETWORKS` に許すネットワーク（CIDR）を指定する。出口へ成果物を渡すときは、外（Zapier等）から見たYorikiのURLを `YORIKI_PUBLIC_URL` に指定する（取得用のURLの元。未設定なら、ファイルを渡す配信は失敗にする）。認証プロキシの裏に置く場合も、`/api/files/` はプロキシを通さない（§8.6）。
-- **ファイルの保存先**：添付・成果物・Workspaceのsnapshot（tar）は、`YORIKI_STORAGE_BACKEND` で選んだ保存先（Localなら `/var/lib/yoriki/objects`、S3ならbucket）に置く（§7.2）。保持期限での削除はまだない（docs/status.md §3）。
+- **ファイルの保存先**：添付・成果物・Workspaceのsnapshot（tar）は、`YORIKI_STORAGE_BACKEND` で選んだ保存先（Localなら `/var/lib/yoriki/objects`、S3ならbucket）に置く（§7.2）。ワークスペースの保存期限での削除はまだない。添付と成果物は明示的に消すまで残す（design.md §8、docs/status.md §3）。
 
 ### 7.1 Sandboxを動かすホスト
 

@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-11-06（Sandboxのイメージの新案を design.md 0.46 へ反映した。§4 の「次の作業」から始める）
+- 最終更新：2026-11-06（agentセッションの新案を design.md 0.47 へ反映した。§4 の「次の作業」から始める）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -39,7 +39,7 @@
 | #76 | テストの並列化（pytest-xdist。development.md §3.1）、残ったSandboxの掃除を同じDBのものに限る（ラベル `org.yoriki.database`） |
 | #77 | 確認用の道具（`devtools`：`seed_dev`・`fake_llm`・`dev_session`。development.md §6） |
 | #78・#79 | Webhookの入口をタスクを管理できる人が作る形（設計：design.md 0.45、authorization.md §5.5・§13。実装：入口のAPIと画面をタスクの下へ移し、1つのタスクに複数の入口、鍵を作った人の記録と警告、`/manage/trigger_bindings` は見るだけの一覧） |
-| #80 | 新案：agentセッション（[session-proposal.md](session-proposal.md)）、Sandboxのイメージ（design.md 0.46 §7.6 へ反映した。実装はまだ） |
+| #80 | 新案：agentセッション（design.md 0.47 §5・§7・§8・§11.11、harness.md §5.6・§8・§10.11 へ反映した）、Sandboxのイメージ（design.md 0.46 §7.6 へ反映した）。どちらも実装はまだ |
 
 各PRの中身は、Pull Requestの説明と設計書を見る。
 
@@ -72,24 +72,24 @@
 - 管理コマンド：`drain_workers`・`resume_workers`（まだない。更新の手順の2と6は飛ばす。deployment.md §6）、孤立したSandboxのコンテナと作業領域（`YORIKI_WORKSPACES_DIR/attempts/`）の定期の回収（今はSandboxを起動するときに残ったコンテナを消すだけ。design.md §8）。
 - 業務のアプリは `llm`、`conversation`、`run`、`harness`、`stream`、`usage`、`runtime`（Runtime Profile、Launcher）、`artifact`、`skill`・`resources`、`connector`、`task`、`delivery` まで。`plugin`、`worker` 等（backend-conventions.md §1.2）は、まだない。
 - 権限で後回しにしたもの：システムのSkillの詳細を管理画面の中に置く（今は `/manage/system_skills` の一覧から業務画面の `/skills/[id]` を開く）、個人Connector（会話でのConnectorの段階）、業務画面の `/connectors`、ユーザーの更新APIでの所属の書込み（今は部門の所属のAPIで付け外しする。防止策は同じ）、部門の「無効」（今は論理削除で、所属と履歴は残る）、部門のものを別の部門・全社へ移す操作（authorization.md §9）、管理画面の詳細の入力欄を見るだけの人には止める（今は保存のボタンを出さないだけ。ユーザーは止める）。
-- Connectorで後回しにしたもの：Plugin Registry（`plugin` アプリ。今は種別からAdapterをコードで選ぶ。Channel Pluginの段階で、タスク・配信のPluginとあわせて作る）、個人Connector、業務画面の `/connectors`、`datasource_*` を並べて実行する（今は同時実行の枠と記録をDBで扱うので1つずつ）、実行中の会話で `@` を指定したメッセージを今の作業に取り込む（今は次の依頼）、会話のConnectorの結果の件数・合計の大きさの上限（今は保持期限の切れたものを置かないだけで、Attemptごとに残りをすべて置く。添付とあわせて決める）、Toolからの呼出しの1つのRunでの回数・頻度の上限（スクリプトからの呼出しには定数の上限がある。design.md §4.9.6）、SQL ServerのSNAPSHOT分離（DB側で有効なら使う。design.md §4.9.2）、MariaDB（MySQLの `MAX_EXECUTION_TIME` がない。試していない）、HTTP・SharePoint・Google Drive・MCPのConnector、書込みの操作。PostgreSQLの証明書の確認（`verify-full`）は、OSの証明書（`sslrootcert=system`。libpq 16以降）を使い、社内のCAの証明書を指定する項目はまだない。PyMySQLは1.2.1〜1.2.3の不具合（作ったばかりのユーザーがTLSなしで初めてログインすると失敗する）を避けて1.2.0に固定している（`api/pyproject.toml`）。直った版が出たら上げる。
+- Connectorで後回しにしたもの：Plugin Registry（`plugin` アプリ。今は種別からAdapterをコードで選ぶ。Channel Pluginの段階で、タスク・配信のPluginとあわせて作る）、個人Connector、業務画面の `/connectors`、`datasource_*` を並べて実行する（今は同時実行の枠と記録をDBで扱うので1つずつ）、会話のConnectorの結果の件数・合計の大きさの上限（今は保持期限の切れたものを置かないだけで、Attemptごとに残りをすべて置く。添付とあわせて決める）、Toolからの呼出しの1つのRunでの回数・頻度の上限（スクリプトからの呼出しには定数の上限がある。design.md §4.9.6）、SQL ServerのSNAPSHOT分離（DB側で有効なら使う。design.md §4.9.2）、MariaDB（MySQLの `MAX_EXECUTION_TIME` がない。試していない）、HTTP・SharePoint・Google Drive・MCPのConnector、書込みの操作。PostgreSQLの証明書の確認（`verify-full`）は、OSの証明書（`sslrootcert=system`。libpq 16以降）を使い、社内のCAの証明書を指定する項目はまだない。PyMySQLは1.2.1〜1.2.3の不具合（作ったばかりのユーザーがTLSなしで初めてログインすると失敗する）を避けて1.2.0に固定している（`api/pyproject.toml`）。直った版が出たら上げる。
 - Skillのスクリプトからの呼出しで後回しにしたもの（④a・④b）：実行中の画面への知らせ（今はRunが動いている間の5秒ごとの差分の読み直しで、SSEでは送らない）、実際のモデルが案内どおりにスクリプトから呼ぶかの確認（偽のLLMだけで確かめた）、モデルの応答を待つ間の要求の処理（今はジョブを待つ間とステップの区切りだけ。バックグラウンドのジョブのスクリプトは待つ）、どのジョブからの要求かの記録（今はそのときに実行していたToolの呼出しのIDだけ）、回数・頻度の上限をConnectorやRuntime Profileの設定にする（今は定数）、スクリプトから呼べる操作をSkillの宣言でさらに絞る（今はToolと同じ）、HTTP・SharePoint等のConnectorの操作（社内DBの `query`・`describe` だけ）。
-- Skillで後回しにしたもの：実行中のRunでSkillを最新の公開版へ切り替える依頼（design.md §3.2）、Resource Collection、MD・CSV・PPTX以外の形式（XLSX・DOCX・PDF等）の検証、PPTXの画像としてのプレビュー（LibreOfficeをイメージに入れた後に作れる。design.md §7.6）、本文（説明・手順・Schema）の版の差分の表示（今は変わった項目名だけ。資料の差分は #40 で表示）、公開せずに捨てたDraftの資料の原本の回収、共通Skillから個人用を派生させる操作、Draftを開いた後に別の版が公開されたときの取り込み（今は破棄して開き直す）、画面のToolの選択肢と説明（今はフロントエンドに `harness.tools.ALL_TOOLS` と同じ一覧を持つ。APIで返すようにする）。
+- Skillで後回しにしたもの：Resource Collection、MD・CSV・PPTX以外の形式（XLSX・DOCX・PDF等）の検証、PPTXの画像としてのプレビュー（LibreOfficeをイメージに入れた後に作れる。design.md §7.6）、本文（説明・手順・Schema）の版の差分の表示（今は変わった項目名だけ。資料の差分は #40 で表示）、公開せずに捨てたDraftの資料の原本の回収、共通Skillから個人用を派生させる操作、Draftを開いた後に別の版が公開されたときの取り込み（今は破棄して開き直す）、画面のToolの選択肢と説明（今はフロントエンドに `harness.tools.ALL_TOOLS` と同じ一覧を持つ。APIで返すようにする）。
 - SkillのConnectorの宣言で後回しにしたもの：システムのConnectorを宣言したSkillの評価（今は断る。評価のRunからシステムのConnectorを使えないため。システムのタスクの段階で扱う）、個人Connectorの宣言、Draftだけが機密のSkillの印（一覧と詳細の「機密」は公開中の版で決める。Draftのフォームでは分かる）、Connectorの版で表の名前が変わったときに宣言を直す案内（今は公開時の検証の誤りで分かるだけ）、宣言を加えるときの操作の既定（今は両方を選ぶので、Toolに `datasource_describe` がないと公開時に止まる）。
 - Webhookの入口で後回しにしたもの：入口の一覧で警告のあるものだけに絞る（今は印を見るだけ）、1つのタスクの中で入口の名前を重ねない（今は重ねられる）、URLの取得（許可した取得先と取得用の資格情報を入口に置く形。必要な送り元が出てきたら。design.md §4.2）、型がファイルの項目の形式・大きさの制限（今は入口の本文の上限と、手動実行では添付と同じ上限だけ）、HMAC署名の検証、スケジュールの入口、重複のキーの保持期限（今は消さずに持ち続ける）、受付の記録とpayloadのファイルの清掃（Runの会話とあわせて）、入口ごとの頻度の上限（今はnginxの `/api/hooks/` のrate limitだけ）。
-- タスクで後回しにしたもの：タスクごとのConnectorの取得件数の上限とToolの引数の制限（authorization.md §5.4）、管理できる人へのRunの状態の通知（ユーザー宛てのSSEは起動した人だけ。タスクの画面の実行の履歴は、自分が手動実行したRunの状態の通知で読み直し、ほかの人・入口からのRunは「読み直す」ボタンで読む）、Skillの新しい版の知らせ（今はタスクの画面の「新しい版があります」だけ）、タスクのRunの会話の清掃、タスクのRunの再実行（今のタスクの定義で新しいRunを作り、入力を引き継ぐ。authorization.md §6。入口から受けたファイルの項目は、添付を新しいRunへ写す処理も要る。⑦cで利用者と決めて後回しにした。今は手動実行で入力し直す）、版の履歴の中身と差分の表示（今は版の番号・変更の理由・保存した人だけ）。チャットからの起動で後回しにしたもの（⑦d-1）：出口が画面の通知でないタスクで、起動した人へ画面の通知を出すこと（今は出口が画面の通知のときだけ起動した人に届き、ほかは会話のカードとユーザー宛ての `run.status` だけ）、候補の検索（今は200件まで読み、`/` の一覧の中で絞る）、再読み込みでの二重の起動（起動の要求がnginxからDjangoへ渡り終わり、Djangoがファイルの保存とRun・カードのトランザクションを処理している間に画面を読み込み直すと、起動のIDは画面のメモリにしかないので失われる。再読み込みした画面のメッセージの取得がコミットより先に返ってカードが出ず、利用者が同じタスクをもう一度起動すると、別のIDなので2つ目のRunができる。Djangoは切断で同期のビューのスレッドを止めないので、1つ目もコミットされる。処理はふつう1秒もかからない。利用者の判断で、まれな事象として直していない。直すなら、起動の前に、起動のIDつき・`task_run` が空の「受付中」のカード（`ConversationMessage`）を先に作る要求を分け、起動の処理が済んだらカードにRunを結ぶ形がよい（新しいモデルもRunの状態も要らない。受付中のまま一定の時間が過ぎたカードは「受け付けられませんでした」にする。Runを先に受付中で作る形は、固定するものが空のRunとWorker・一覧・見える範囲で扱う新しい状態が要るので避ける。どの形でも、再読み込みで画面の入力は消える）。手動実行・チャットから起動したタスクのRunの状態の通知（ログインユーザー宛ての `run.status`）で、サイドバーの会話の一覧が一覧に出さない会話を取りに行き、404で一覧から外す（表示には出ないが、要求が1回むだになる）。
+- タスクで後回しにしたもの：タスクごとのConnectorの取得件数の上限とToolの引数の制限（authorization.md §5.4）、管理できる人へのRunの状態の通知（ユーザー宛てのSSEは起動した人だけ。タスクの画面の実行の履歴は、自分が手動実行したRunの状態の通知で読み直し、ほかの人・入口からのRunは「読み直す」ボタンで読む）、Skillの新しい版の知らせ（今はタスクの画面の「新しい版があります」だけ）、タスクのRunの会話の清掃、本番のタスクのRunの再実行（今のタスクの定義で新しいRunを作り、入力を引き継ぐ。authorization.md §6。⑦cで利用者と決めて後回しにした。実行記録からの修正チャットは design.md §11.11 で実装する）、版の履歴の中身と差分の表示（今は版の番号・変更の理由・保存した人だけ）。チャットからの起動で後回しにしたもの（⑦d-1）：出口が画面の通知でないタスクで、起動した人へ画面の通知を出すこと（今は出口が画面の通知のときだけ起動した人に届き、ほかは会話のカードとユーザー宛ての `run.status` だけ）、候補の検索（今は200件まで読み、`/` の一覧の中で絞る）、再読み込みでの二重の起動（起動の要求がnginxからDjangoへ渡り終わり、Djangoがファイルの保存とRun・カードのトランザクションを処理している間に画面を読み込み直すと、起動のIDは画面のメモリにしかないので失われる。再読み込みした画面のメッセージの取得がコミットより先に返ってカードが出ず、利用者が同じタスクをもう一度起動すると、別のIDなので2つ目のRunができる。Djangoは切断で同期のビューのスレッドを止めないので、1つ目もコミットされる。処理はふつう1秒もかからない。利用者の判断で、まれな事象として直していない。直すなら、起動の前に、起動のIDつき・`task_run` が空の「受付中」のカード（`ConversationMessage`）を先に作る要求を分け、起動の処理が済んだらカードにRunを結ぶ形がよい（新しいモデルもRunの状態も要らない。受付中のまま一定の時間が過ぎたカードは「受け付けられませんでした」にする。Runを先に受付中で作る形は、固定するものが空のRunとWorker・一覧・見える範囲で扱う新しい状態が要るので避ける。どの形でも、再読み込みで画面の入力は消える）。手動実行・チャットから起動したタスクのRunの状態の通知（ログインユーザー宛ての `run.status`）で、サイドバーの会話の一覧が一覧に出さない会話を取りに行き、404で一覧から外す（表示には出ないが、要求が1回むだになる）。
 - 修正チャットで後回しにしたもの（⑦d-2a・⑦d-2b）：修正チャットでのSkillの修正（ふつうの会話のSkillの編集で行う）、出口へ送る内容の全体のプレビュー（今は `prepare_notification` の文章と渡すファイルだけ。通知の書き方がなければ「送っていません」とだけ出す）、タスクの画面から自分の修正チャットの一覧を開く（今はサイドバーの会話の一覧から開く）。再読み込みでの二重の実行（要求のIDは画面のメモリに持つので、送った後に応答の前に再読み込みして送り直すと、別のRunになりうる。⑦d-1 の起動と同じ制約で、出口へは送らない）。修正チャットのタスクのRunも、固定したSkillが `todo_write` を許さなければ作業の計画を書けない（ほかのタスクのRunと同じ）。
 - 会話からのSkill更新で後回しにしたもの：中身が前の版と同じDraftの公開を止めない（版が増える）、Draftに他の人の未公開の変更があっても一緒に公開する（`get_skill` の説明で、公開の前に利用者へ伝えさせるだけ）、編集のRunの対象は1つだけ（複数のSkillをまとめて直す依頼は分ける）、別のAttemptで再開すると `/workspace/master` のDraftの資料が置き直されない（`get_skill` を呼び直せば置く）。
 - 資料の検証で後回しにしたもの：検証の結果に検証の仕組みの版を持たせていない（検証の規則を変えても、保存した結果は取り直すまで古いまま）、MDの差分は2MBまで、PPTXの「編集した候補」かどうかは置いた場所（`/workspace/input` か）だけで決める、CSVの行の差分はキーの列がなければ行の組合せの増減だけ、10MBを超えるCSVはキー・型・先頭の0・差分を調べない（全行を持たない方法が要る）。
 - Draftの評価で後回しにしたもの：エージェントによる評価ケースの作成（今は画面だけ。design.md §3.7の「例示を公開先に適した内容へ一般化する」とあわせて決める）、評価の結果の画面での作業の記録（今は最後の応答・業務結果・失敗の理由だけ。評価のRunは依頼者の一覧に出さない会話にある）、評価のRunの会話・添付の清掃、評価のRunの同時実行の上限（今はQ2の順番待ちに任せる）、予算の上限（利用量の記録だけ）、停止中のSkillの評価（今は始めない）、編集のRunが評価を待つ間のRunの状態の表示（今は「確認待ち」で、画面の案内で「評価しています」と示す）、判定の指示文の調整（実際のモデルで試していない）。
 - 外部のSkillの取り込みで後回しにしたもの（2026-11-02、利用者と決めた）：外部のSkill（`SKILL.md` と `scripts/`・`references/` 等のフォルダ）の取り込み（frontmatterと本文・資料をYorikiのSkillへどう写すか、Draft → 評価 → 公開を通すか、誰が取り込めるか）。いったん検討の外。必要な道具はイメージに入れる（design.md §7.6）。
-- Sandboxで後回しにしたもの：`install_python_packages` と `/packages`（PackageBundle・EnvironmentRevision）、ステップごとのCheckpoint（今はAttemptを終えるときだけ。障害で落ちると、最後のCheckpointより後の変更は失われ、モデルに知らせる）、snapshotの保持期限と削除、非公開のレジストリからのpullの認証。
+- Sandboxで後回しにしたもの：`install_python_packages` と `/packages`（PackageBundle・EnvironmentRevision）、ステップごとのCheckpoint（今はAttemptを終えるときだけ。0.47でWorkerを手放す前だけに決めた。障害で落ちると、最後のCheckpointより後の変更は失われ、モデルに知らせる）、snapshotの保持期限と削除、非公開のレジストリからのpullの認証。
 - 引き継いだ文脈が、それだけでモデルの文脈に収まらないほど大きいとき（前の依頼が文脈の上限で失敗した等）は、要約の要求も収まらず、次の依頼も失敗する。前の依頼の中で圧縮が働くので通常は起きない。
-- 成果物とファイルで後回しにしたもの：Storage Backendの `validate_config`・`healthcheck`（セットアップ時の確認。design.md §7.8）、既存のファイルを新しい保存先へ移すコマンド（design.md §7.10。以前の保存先を読む設定 `YORIKI_STORAGE_PREVIOUS` はある）、WorkspaceSnapshotのModel（今はCheckpointが保存先・key・hashを持つ）、保持期限での清掃（`cleanup_artifacts`。期限 `expires` は記録している）と、DBに記録する前に失敗した参照のないobjectの回収、S3の期限付きURL（今はapiが読んで返す）、送らずに残った添付の削除、画像のプレビュー、エージェントの `present_files`（harness.md §10.5）。
+- 成果物とファイルで後回しにしたもの：Storage Backendの `validate_config`・`healthcheck`（セットアップ時の確認。design.md §7.8）、既存のファイルを新しい保存先へ移すコマンド（design.md §7.10。以前の保存先を読む設定 `YORIKI_STORAGE_PREVIOUS` はある）、WorkspaceSnapshotのModel（今はCheckpointが保存先・key・hashを持つ）、ワークスペースの保存期限での自動削除（`cleanup_workspaces`）、添付と成果物の個別の削除、`Artifact.expires` と `YORIKI_ARTIFACT_RETENTION_DAYS` をなくす（実装で行う。design.md §8）、DBに記録する前に失敗した参照のないobjectの回収、S3の期限付きURL（今はapiが読んで返す）、送らずに残った添付の削除、画像のプレビュー、エージェントの `present_files`（harness.md §10.5）。
 - gVisorで後回しにしたもの：rootless Dockerとの組み合わせ（確かめていない。gVisorではuserns-remapを使う）、メモリの超過でSandboxごと止まるのを避ける方法（gVisorの中の上限をホストのcgroupより先に効かせる設定は、runscの外から指定できなかった）、プロセス数の換算（×2＋64）の見直し（試験の値から決めた）。
 - `read` の画像で後回しにしたもの：上限（1回の要求で20枚、長辺1568px、`read` の1回で5ページ）をモデル設定の値にする（harness.md §12。上限の小さいローカルLLMで要るとき）、画面の作業の記録でTool結果の画像を見せる、Tool結果の画像のBlobObjectの清掃（Runを消すときや保持期限。今は残り続ける）。
 - 補助コマンドが返すパス（symlinkを辿った先）と、モデルが指定したパスが違うと、読んだ版の記録が見つからず `edit` が「まだ読んでいない」になる（symlinkを使うときだけ）。
-- 会話の画面で後回しにしたもの：次の依頼の開始前の編集・取消（design.md §11.2。APIもまだない）、会話のタイトルの変更、実行履歴の画面（`/runs`）。
+- 会話の画面で後回しにしたもの：会話のタイトルの変更、実行履歴の画面（`/runs`）。
 - Provider Adapterは、実際のプロバイダのAPIではまだ試していない（API keyが要る）。テストは各社の応答を差し替えて確かめている。
 - LLMの接続の同時実行数・1分あたりの要求数の上限は、項目があるだけで、まだ守らせていない（DB接続の同時実行数は守らせている）。
 - 契約テストの代表的なコマンドは111件。harness.md §8.5の目標（数百）へ、Skillで使われたコマンドから増やす。
@@ -103,11 +103,11 @@
 
 ## 4 次の作業
 
-**今の状態（2026-11-03）**：design.md §12の第1段階のうち、Skill（①〜⑤）と、Connector・タスク・配信（①〜⑦、Connectorの④a・④b）は終わった（#72・#73まで）。今は、業務（下の「第1段階の順番」の3）を作る前の整理を、利用者と決めた次の順で進めている。文書の整理は #74 と、その残り（design.md・harness.md の突き合わせ。#75）で、テストの高速化は #76 で行った（バックエンドのテスト全体は、手元（8コア）で約5分から約35秒に、4並列でも約45秒になった）。#74 では、status.md の終わった段階の「決めたこと・判断した点」を設計書と突き合わせ、設計書になかった今の動きに関わるものを design.md・authorization.md・harness.md・frontend-conventions.md・sandbox/CONTRACT.md へ移してから消した（経過・レビュー・確かめたことは消した。各PRの説明に残っている）。§1 はPRごとの短い一覧にした。確認用の道具は #77 で入れた（偽のLLM `fake_llm`、確認用のデータ `seed_dev`、ログイン済みのセッション `dev_session`。development.md §6）。
+**今の状態（2026-11-03）**：design.md §12の第1段階のうち、Skill（①〜⑤）と、Connector・タスク・配信（①〜⑦、Connectorの④a・④b）は終わった（#72・#73まで）。今は、業務（下の「第1段階の順番」の3）を作る前の整理を、利用者と決めた次の順で進めている。文書の整理は #74 と、その残り（design.md・harness.md の突き合わせ。#75）で、テストの高速化は #76 で行った（バックエンドのテスト全体は、手元（8コア）で約5分から約35秒に、4並列でも約45秒になった）。#74 では、status.md の終わった段階の「決めたこと・判断した点」を設計書と突き合わせ、設計書になかった今の動きに関わるものを design.md・authorization.md・harness.md・frontend-conventions.md・sandbox/CONTRACT.md へ移してから消した（経過・レビュー・確かめたことは消した。各PRの説明に残っている）。§1 はPRごとの短い一覧にした。確認用の道具は #77 で入れた（偽のLLM `fake_llm`、確認用のデータ `seed_dev`、ログイン済みのセッション `dev_session`。development.md §6）。 2026-11-06 に、agentセッションとSandboxのイメージの案を設計書へ反映した（実装はまだなので、今のコードは design.md 0.45 の動きのまま）。後回し：タスクの実行の論理削除の画面、物理削除の管理コマンド、監査ログの画面。
 
-**次の作業**：
-1. [session-proposal.md](session-proposal.md) を読み、設計書（design.md・harness.md 等）を直す。
-2. 設計書に合わせて実装を直す。
+**次の作業**（前提：#83 がマージされていること）：
+1. 設計書（design.md 0.46・0.47、harness.md §5.6・§8・§10.11）に合わせて実装を直す。大きいので、1つの目的ごとのPull Requestに分ける。分け方の案（始めるときに利用者と確かめる）：① snapshotを最新の1つにし、Workerを手放す前に保存する、② Runの区切りと `WAITING_BACKGROUND`、ジョブを親の動きと切り離す、③ 発言の渡し方と、Skill・Connectorの一覧を発言ごとに作り直す、④ サブエージェント、⑤ ワークスペースの保存期限の設定、アーカイブと論理削除、添付・成果物の期限をなくす、⑥ 修正チャット（実行記録から始める、空のワークスペース）、⑦ Sandboxのイメージ（下の確かめの後）。
+   - agentセッション：Runの区切り、WAITING_BACKGROUND、発言の渡し方（次の依頼をなくす）、Skill・Connectorの一覧を発言ごとに作り直す、最新のsnapshotだけ、ジョブを親の動きと切り離す、サブエージェント、ワークスペースの保存期限の設定の画面（自動削除はまだ作らない）、アーカイブと論理削除、実行記録からの修正チャットと空のワークスペース。Runtime Profileのメモリの初期値も見直す。偽のLLMの `${enum:<Tool>.<引数>}`（development.md §6.2）は `skill`・`connector` の引数のenumに頼るので、一覧から名前を取る形に直す。
    - Sandboxのイメージ（design.md §7.6、harness.md §8.5）は、作る前に次を確かめる。試していない。`sandbox/CONTRACT.md` §1 は、入れるPull Requestで契約番号とあわせて直す。
      - gVisorでLibreOfficeが動くか。公開されているスキルの説明には、素の `soffice` がそのサンドボックスでは止まるので専用のスクリプトを使う、とある。runc・gVisorの両方で試す。
      - LibreOfficeの設定の置き場所。`HOME` は `/workspace/work/.home` なので、そのままだと設定がsnapshotに入る。別の場所へ向けるかを決める。
@@ -117,13 +117,13 @@
      - 配布のライセンス。LibreOffice（MPL）、pandoc・poppler-utils（GPL）、Noto（OFL）、`sharp` が同梱するlibvips（LGPLと記憶。現物で確かめる）を入れて配布してよいか。
      - fontconfigの `monospace`。Noto Sans Mono CJK JP がSansのファイルに入っているはずなので、確かめる。
 
-業務は人間が作り、足りない機能をエージェントが直す。外部のSkillの取り込みは、いったん検討から外す。ほかの作業（クオータと予算の強制、`/runs`、CSP等）の順番は未決。
+マイグレーションは後でリセットするので、古い行の移行は考えなくてよい。業務は人間が作り、足りない機能をエージェントが直す。外部のSkillの取り込みは、いったん検討から外す。ほかの作業（クオータと予算の強制、`/runs`、CSP等）の順番は未決。
 
 **第1段階の順番**（design.md §12。1つの目的ごとに1つのPull Requestにして、上から進める）：
 
 1. **Skill**：済み（#34〜#41）。後回しにしたものは §3。
 2. **Connector・タスク・配信**：済み（#42〜#73）。範囲の外：HTTP・SharePoint・MCPのConnector、Teams・Slack・DiscordのInteraction Binding（下の4）。
-   - design.md §12 の第1段階のうち、ほかに残るもの（§3）：Plugin Registry（下の4とあわせて）、クオータと予算の強制、清掃（`cleanup_artifacts` 等）、`install_python_packages`・PackageBundle・EnvironmentRevision、Sandboxのイメージの Docker Hub への配布、実行履歴の画面（`/runs`）。順番は、最初の2つの業務で要るものから利用者と決める。
+   - design.md §12 の第1段階のうち、ほかに残るもの（§3）：Plugin Registry（下の4とあわせて）、クオータと予算の強制、清掃（`cleanup_workspaces` 等）、`install_python_packages`・PackageBundle・EnvironmentRevision、Sandboxのイメージの Docker Hub への配布、実行履歴の画面（`/runs`）。順番は、最初の2つの業務で要るものから利用者と決める。
 3. **最初の2つの業務**（design.md §13。Skillとタスクとして作る）：請求書PDF → 社内DBと照合 → 取込用のCSV、契約書レビュー → Zapierへ結果。
 4. **Channel Plugin**（Teams・Slack・Discord。`plugin` のRegistry）。
 

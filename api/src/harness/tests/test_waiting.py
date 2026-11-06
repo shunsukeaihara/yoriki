@@ -11,9 +11,10 @@ from django.utils import timezone
 from conversation.dispatch import MessageMode, post_message
 from conversation.factories import ConversationFactory
 from conversation.models import ConversationMessage, MessageRole
-from harness.runner import ATTEMPT_LIMIT_SECONDS, RUNNING_JOBS_NOTICE, Runner
+from harness.runner import ATTEMPT_LIMIT_SECONDS, MAX_STEPS, RUNNING_JOBS_NOTICE, Runner
 from harness.tools.base import ToolContext
 from harness.tools.submit_result import execute as submit_result
+from harness.tools.submit_result import make_submit_result_tool
 from llm.providers.base import ToolCall
 from run.factories import ClarificationRequestFactory
 from run.models import (
@@ -263,6 +264,7 @@ def test_jobs_finished_while_paused_are_all_reported_after_the_answer(conversati
                 "stopped": "",
                 "timeout_seconds": 1800,
                 "output": f"/workspace/work/.yoriki/outputs/job_{n}.txt",
+                "reported": False,
             }
             for n in (1, 2)
         ],
@@ -274,6 +276,30 @@ def test_jobs_finished_while_paused_are_all_reported_after_the_answer(conversati
     run_with(run, adapter, FakeSession)
     assert RunEvent.objects.filter(run=run, kind=RunEventKind.JOB_FINISHED).count() == 2
     assert sum("job_" in m.text and "while the work was paused" in m.text for m in adapter.requests[0].messages) == 2
+
+
+def test_step_limit_with_a_running_job_does_not_complete(conversation):
+    """もう親を起こせないので、ジョブを止めて上限の失敗にする。結果を確定していても完了にしない"""
+    run = post(conversation)
+    Run.objects.filter(pk=run.pk).update(step_count=MAX_STEPS, result={"a": 1})
+    run.refresh_from_db()
+    run_obj_tools = make_submit_result_tool({"type": "object"})
+
+    class WithResult(Runner):
+        def _exposed_tools(self):
+            return (run_obj_tools,)
+
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    WithResult(
+        attempt,
+        adapter_factory=FakeAdapter([reply("まとめです。")]),
+        sleep=lambda _s: None,
+        session_factory=cast(Any, lambda r, a, **kw: JobSession(r, a, tick=lambda _s: None, **kw)),
+    ).run()
+    run.refresh_from_db()
+    assert run.status == RunStatus.FAILED
+    assert run.end_reason == RunEndReason.STEP_LIMIT
 
 
 def test_cancel_while_waiting_stops_the_job(conversation, app_user):

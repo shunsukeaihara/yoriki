@@ -380,9 +380,7 @@ class Runner:
                 "Run them again if you still need them.]"
             )
             self._record(RunEventKind.CONTEXT, {"text": text, "workspace": "jobs_stopped", "checkpoint": own.uid})
-        if own is not None and not any(
-            e.kind == RunEventKind.JOB_FINISHED and e.data.get("checkpoint") == own.uid for e in events
-        ):
+        if own is not None and not any(e.data.get("finished_jobs") == own.uid for e in events):
             self._report_jobs_finished_while_paused(own)
 
     def _report_jobs_finished_while_paused(self, checkpoint: Checkpoint) -> None:
@@ -391,6 +389,12 @@ class Runner:
         # 途中で落ちて残りの通知が失われないよう、まとめて記録する
         with self.run_obj.fenced(self.attempt) as run:
             for job in checkpoint.finished_jobs:
+                if job["reported"]:
+                    # 終わったことはもう知らせた。読んでいない出力の場所だけを伝える
+                    place = job["output"] or "nowhere: it could not be saved in the sandbox"
+                    text = f"[The unread output of background job {job['job_id']} ({job['description']}) is {place}.]"
+                    RunEvent.record(run, RunEventKind.CONTEXT, {"text": text, "finished_jobs": checkpoint.uid})
+                    continue
                 outcome = _job_outcome(job["stopped"], job["exit_code"], job["timeout_seconds"])
                 where = (
                     f"Its output since your last read is in {job['output']}."
@@ -408,7 +412,7 @@ class Runner:
                             f"[Background job {job['job_id']} ({job['description']}) {outcome} while the work was "
                             f"paused. {where}]"
                         ),
-                        "checkpoint": checkpoint.uid,
+                        "finished_jobs": checkpoint.uid,
                     },
                     comment=_job_comment(job["description"], job["stopped"], job["exit_code"]),
                 )
@@ -499,9 +503,10 @@ class Runner:
         return self._execute_calls(result.calls)
 
     def _finish_at_step_limit(self, text: str) -> bool:
-        """ステップ数の上限の最後のまとめの応答で終える。業務結果を確定していれば完了にする（その間に追加の指示が
-        届いていれば、取り込んで続ける）"""
-        if any(t.name == SUBMIT_RESULT for t in self.tools) and not self._result_missing():
+        """ステップ数の上限の最後のまとめの応答で終える。業務結果を確定していて、ジョブが残っていなければ完了にする（その
+        間に追加の指示が届いていれば、取り込んで続ける）。ジョブが残っていれば、止めて上限の失敗にする（もう親を起こせ
+        ず、止めたジョブの結果を親が見ないまま完了にしないため。design.md §5.3）"""
+        if any(t.name == SUBMIT_RESULT for t in self.tools) and not self._result_missing() and not self._running_jobs():
             return self._finish_with_reply(text, RunStatus.COMPLETED, RunEndReason.COMPLETED)
         self._finish_with_reply(text, RunStatus.FAILED, RunEndReason.STEP_LIMIT)
         return False
@@ -857,8 +862,9 @@ class Runner:
 
     def _reply_with_jobs(self, text: str, running: list[Job]) -> bool:
         """親は動き終えたが、ジョブが残っているか、応答を待つ間に終わったジョブをまだ見ていない。応答を会話に載せ、
-        終わったジョブは次の区切りで知らせ（最後の確定は親が結果を見た後。design.md §5.3）、動いていればWorkerを手放さずに
-        待つ。タスクの実行は、終わる時点でジョブが残らない前提なので、待つか止めるかを1回だけ決めさせる（harness.md §8.3）"""
+        終わったジョブは次の区切りで知らせ（最後の確定は親が結果を見た後。design.md §5.3）、動いていれば
+        Workerを手放さずに待つ。タスクの実行は、終わる時点でジョブが残らない前提なので、待つか止めるかを1回だけ
+        決めさせる（harness.md §8.3）"""
         if not running:
             with self.run_obj.fenced(self.attempt) as run:
                 self._post_reply(run, text)

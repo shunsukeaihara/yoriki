@@ -513,6 +513,8 @@ def test_reported_job_with_unread_output_survives_a_question(conversation, app_u
     run.refresh_from_db()
     run = execute(run, FakeAdapter([calls(("c4", "read", {"path": job["output"]})), reply("読みました")]))
     assert "unread-output" in text(results(run)["c4"])
+    # 終わったことは1回だけ知らせる
+    assert RunEvent.objects.filter(run=run, kind=RunEventKind.JOB_FINISHED).count() == 1
 
 
 def test_answer_continues_in_the_same_container_while_the_job_runs(conversation, app_user, monkeypatch):

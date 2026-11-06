@@ -736,6 +736,8 @@ class SandboxSession:
                     "stopped": job.stopped,
                     "timeout_seconds": job.timeout_seconds,
                     "output": path if saved else "",
+                    # 終わったことをもう知らせた（読んでいない出力の場所だけを伝える）
+                    "reported": job.reported,
                 }
             )
         return finished

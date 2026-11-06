@@ -143,12 +143,12 @@ RunnerはQClusterのプロセスの中で動き、Provider Adapter・Connector�
 
 | 上限 | 初期値 | 達したとき |
 |---|---|---|
-| ステップ数 | 200 | 最後に1回だけ、Toolを使わせない設定（`tool_choice: none`。Toolの定義は残す）で、ここまでの結果・残りの作業・利用者への提案をまとめさせてから `step_limit` で終える |
+| ステップ数 | 200 | 最後に1回だけ、Toolを使わせない設定（`tool_choice: none`。Toolの定義は残す）で、ここまでの結果・残りの作業・利用者への提案をまとめさせてから `step_limit` で終える（業務結果を確定していてジョブも残っていなければ完了。ジョブが残っていれば止めて `step_limit`） |
 | 実行時間（1つのRunの合計。親が動いている間だけ数える。確認待ち・裏の作業を待つ間は数えない） | 60分 | 同上 |
 | ジョブの実行時間 | Runtime Profile（初期値30分） | 止めて親に知らせる |
 | サブエージェントの実行時間 | Runtime Profile（初期値30分。ジョブとは別の項目） | 止めて親に知らせる |
 | 同時に動くサブエージェント | 4（設定で変えられる） | `subagent` にエラーを返す |
-| 1つのAttempt（Q2のtimeoutより短くする） | 55分 | ジョブを止めて保存し、新しいAttemptへ移る（答える人がいないRunでも保存する。design.md §7.9）。止めたことをモデルに知らせる。確認待ちなら、保存してWorkerを手放し、回答で新しいAttemptを始める |
+| 1つのAttempt（Q2のtimeoutより短くする） | 55分 | ジョブを止めて保存し、新しいAttemptへ移る（答える人がいないRunでも保存する。design.md §7.9）。止めたことをモデルに知らせる。確認待ちなら、保存してWorkerを手放し、回答で新しいAttemptを始める。判定するのは区切りと待つ間で、モデルの呼出しやToolの途中では止めない（Q2のtimeoutまでの5分を超える呼出しは切られ、障害として最後の保存からやり直す） |
 | 予算 | 予算の設定（design.md §9） | 同上（まとめの分を残して予約する） |
 | 業務結果のSchemaがあるRun | — | 上の各上限の前に、1回だけ「今ある結果で `submit_result` を呼ぶ」猶予を与える（Gemini CLIの方式） |
 
@@ -531,7 +531,7 @@ Docker操作はLauncher（design.md §7.3、`runtime/launcher.py`）にまとめ
 
 - すべてのコマンドを、LauncherがDockerのexecとして始め、Sandboxの中の `yoriki-sandbox exec` で独立したプロセスグループにする。ジョブの状態の正本は、Sandboxの外にあるものだけにする。終了と終了コードはDockerのexecの状態（inspect）から、出力はLauncherがexecの出力を受け取ってWorker側のファイル（Attemptの作業領域。Sandboxには見えない）へ書いたものから読む。Sandboxの中のファイル（エージェントのコマンドが書き換えられる）を、ジョブの状態として使わない。
 - `shell` は、ジョブの終了を `timeout_seconds` まで待つ。終わればその結果を返す。終わらなければ、それまでの出力と `job_id` を返し、ジョブは続ける（DeepSeek Harnessの方式）。`background: true` なら待たずに `job_id` を返す。
-- ジョブは親が話し終えた後も、確認待ちの間も動き続ける。終わったジョブは `job.finished` として記録し、親が動いていれば次のステップの前に `context.snapshot` でモデルに知らせ、動き終えていれば親を起こす（同じAttempt）。確認待ちの間は起こさず、回答で動き出すときに知らせる。全部止まってWorkerを手放すときは、まだ読んでいない出力を `/workspace/work/.yoriki/outputs/{job_id}.txt` へ書いて保存し、新しいAttemptで `job.finished` として知らせる（Attemptが変わると `job_output` では読めないため）。モデルは `job_output` で出力を読む。待つだけのループ（`sleep` と確認の繰返し）をしないよう、止めてよいものは積極的に止めるよう、説明文に書く。
+- ジョブは親が話し終えた後も、確認待ちの間も動き続ける。終わったジョブは `job.finished` として記録し、親が動いていれば次のステップの前に `context.snapshot` でモデルに知らせ、動き終えていれば親を起こす（同じAttempt）。確認待ちの間は起こさず、回答で動き出すときに知らせる。全部止まってWorkerを手放すときは、まだ読んでいない出力を `/workspace/work/.yoriki/outputs/{job_id}.txt` へ書いて保存し、新しいAttemptで知らせる（まだ知らせていないジョブは `job.finished` として。Attemptが変わると `job_output` では読めないため）。モデルは `job_output` で出力を読む。待つだけのループ（`sleep` と確認の繰返し）をしないよう、止めてよいものは積極的に止めるよう、説明文に書く。
 - 同時に動かせるジョブは4つまで。1つのジョブの実行時間の上限はRuntime Profileで決める（初期値30分）。
 - Worker側に書く出力は、1つのジョブで64MB、1つのAttemptの合計で512MBまで。超えた分は捨て（コマンドは止めない）、捨てたことを出力に書く。Workerのディスクを埋めさせないため。
 - ジョブが動いている間、Attemptは終えず、Workerを使い続ける（動いているRunの枠を塞ぐ）。取消でAttemptを終えるときだけ、動いているジョブを止めてからCheckpointを確定する（design.md §7.5）。1つのAttemptの上限（§4.4）で移るときも同じ。ジョブはプロセスグループで止めるが、コマンドが `setsid` 等でグループを離れると届かないので、最後に `yoriki-sandbox kill` の `all`（PID 1以外のすべて）で止める（sandbox/CONTRACT.md §4.2）。止めたことは、再開時に `context.snapshot` でモデルに知らせる。

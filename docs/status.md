@@ -107,7 +107,7 @@
 
 **次の作業**：
 1. 設計書（design.md 0.46・0.47、harness.md §5.6・§8・§10.11）に合わせて実装を直す。
-   - agentセッション：Runの区切り、WAITING_BACKGROUND、発言の渡し方（次の依頼をなくす）、Skill・Connectorの一覧を発言ごとに作り直す、最新のsnapshotだけ、ジョブを親の動きと切り離す、サブエージェント、ワークスペースの保存期限の設定の画面（自動削除はまだ作らない）、アーカイブと論理削除、実行記録からの修正チャットと空のワークスペース。Runtime Profileのメモリの初期値も見直す。
+   - agentセッション：Runの区切り、WAITING_BACKGROUND、発言の渡し方（次の依頼をなくす）、Skill・Connectorの一覧を発言ごとに作り直す、最新のsnapshotだけ、ジョブを親の動きと切り離す、サブエージェント、ワークスペースの保存期限の設定の画面（自動削除はまだ作らない）、アーカイブと論理削除、実行記録からの修正チャットと空のワークスペース。Runtime Profileのメモリの初期値も見直す。偽のLLMの `${enum:<Tool>.<引数>}`（development.md §6.2）は `skill`・`connector` の引数のenumに頼るので、一覧から名前を取る形に直す。
    - Sandboxのイメージ（design.md §7.6、harness.md §8.5）は、作る前に次を確かめる。試していない。`sandbox/CONTRACT.md` §1 は、入れるPull Requestで契約番号とあわせて直す。
      - gVisorでLibreOfficeが動くか。公開されているスキルの説明には、素の `soffice` がそのサンドボックスでは止まるので専用のスクリプトを使う、とある。runc・gVisorの両方で試す。
      - LibreOfficeの設定の置き場所。`HOME` は `/workspace/work/.home` なので、そのままだと設定がsnapshotに入る。別の場所へ向けるかを決める。

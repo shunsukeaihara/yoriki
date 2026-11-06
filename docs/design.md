@@ -2,7 +2,7 @@
 
 作成日：2026年10月2日  
 更新日：2026年11月6日  
-版：0.48 設計案  
+版：0.49 設計案  
 対象：サービス企画、開発、運用担当
 
 プロダクト名はYoriki（よりき）とする（0.16でYuhitsuから変更）。同名の製品・サービスがあることは承知の上で、検索での見つけやすさは重視しない。名称の商標・ドメイン等の確認は本設計の対象外とする。
@@ -374,30 +374,37 @@ API・Plugin契約・設定例は本基盤独自の設計案であり、外部�
 
 ```mermaid
 flowchart TD
-  T[起動Plugin] --> A[Django Control Plane]
+  T[起動Plugin] --> A
+  subgraph CP[Control Plane（同じイメージのDjango）]
+    A[API]
+    Q[QClusterとRunner]
+    Q --> P[Workspace退避・復元]
+    P --> F[Artifact Service]
+    A --> F
+    Q --> F
+    Q --> N[配信とDispatcher]
+    N --> C[通知Plugin]
+    Q --> L[Provider Adapter]
+    Q --> K[Connector]
+    A -. 接続の確認 .-> L
+    A -. 接続の確認・試し実行 .-> K
+  end
   A --> D[(PostgreSQL)]
-  D --> Q[QClusterとRunner]
-  Q --> S[Run専用Sandbox]
-  Q --> P[Workspace退避・復元]
-  P --> F[Artifact Service]
-  A --> F
+  D --> Q
+  Q --> D
+  Q --> S[Sandbox]
   F --> B[Storage Backend]
-  Q --> A
-  D --> N[配信OutboxとDispatcher]
-  N --> C[通知Plugin]
   C --> X[設定された通知先]
-  A --> L[Provider Adapter]
   L --> M[LLMプロバイダ]
-  A --> K[Connector]
   K --> E[社内DB・SharePoint等]
 ```
 
 
-Control Planeは認証、権限、Registry、Run、予算、LLM呼出し、外部データ接続（Connector）の仲介、成果物の登録を管理する。エージェント（Runner）はLLMとの対話ループとToolの実行調整を担う。SandboxはLLMが生成したコマンドやコードを実行する場所とする。
+Control Planeは、apiとqcluster（同じイメージのDjango）を合わせた、信頼された管理側を指す。認証、権限、Registry、Run、予算、LLM呼出し、外部データ接続（Connector）の仲介、成果物の登録を管理する。apiは利用者と起動元の要求を受けてRunを作り、管理画面の接続の確認等を行う。Runの中のLLM呼出しとConnectorの操作は、qclusterのRunnerが同じプロセスの関数として行い、apiを経由しない（§6.2）。エージェント（Runner）はLLMとの対話ループとToolの実行調整を担う。SandboxはLLMが生成したコマンドやコードを実行する場所とする。
 
 Trigger Adapterが起動元を正規化し、Control Planeが共通Runを作成する。Runの確定イベントは配信OutboxからNotification Adapterへ渡す。Artifact Serviceは論理ID・権限・版を管理し、bytesの操作をStorage Backendへ委譲する。Workspace Persistence Adapterは同じArtifact Serviceを使ってsnapshotを保存する。通知先、保存先、認証情報をSandboxやLLMの自由入力に委ねない。
 
-Package取得処理は管理された補助処理で、常設サービスを必須としない。Docker HubへのpullはWorker側の準備処理、Python packageの取得は添付や社内資料を持たない専用環境で行う。Skill管理ToolはRunnerからControl Planeへ呼び出す。これらの管理通信をSandboxの通信許可へ転用しない。
+Package取得処理は管理された補助処理で、常設サービスを必須としない。Docker HubへのpullはWorker側の準備処理、Python packageの取得は添付や社内資料を持たない専用環境で行う。Skill管理ToolはRunnerが同じプロセスの関数として呼ぶ。これらの管理側の処理をSandboxの通信許可へ転用しない。
 
 RunnerとSandboxは分離する。SandboxにはLLMキー、DB認証情報（Control PlaneのDB・Connectorの接続情報・OAuth token）、Dockerソケット、社内ネットワーク接続を渡さない。Runnerは管理されたLLM経路を通してモデルを呼び、shell等の要求だけをSandboxへ渡す。
 
@@ -1039,7 +1046,7 @@ Skill更新要求は管理用の関連Runへ渡す。進行中の業務Runへ直
 
 ### 6.2 Worker契約
 
-Workerはworker_id、承認済みruntime profile、OS/architecture、Python ABI、利用可能な実行枠、バージョン、heartbeatをDBに登録する。Control Planeが適合するRunだけを割り当てる。WorkerのRunnerは次の操作を、Control Planeと同じモジュールの呼出しとしてプロセスの中で行う（HTTPの内部APIは使わない）。
+Workerはworker_id、承認済みruntime profile、OS/architecture、Python ABI、利用可能な実行枠、バージョン、heartbeatをDBに登録する。Control Planeが適合するRunだけを割り当てる。WorkerのRunnerは次の操作を、apiと同じモジュールの呼出しとしてプロセスの中で行う（HTTPの内部APIは使わない）。
 
 | 操作 | 役割 |
 |---|---|
@@ -1985,4 +1992,5 @@ Sandboxイメージの定義は本体と同じリポジトリの `sandbox/` で�
 | 0.45 | 2026年11月4日 | Webhookの入口を、連携の管理者ではなく、そのタスクを管理できる人がタスクの画面で作ることにした。入力の項目はタスク、payloadとの対応は入口が持つ形を変えず、2つを別の人が決める調整をなくすため。入口が起動するタスクは1つのまま、1つのタスクに複数の入口を付けられるようにした（送り元ごとにpayloadの形が違うため）。鍵は今までどおりヘッダーで送り、URLに入れない。発行済みの入口の一覧は、permissionを持つ人が見るだけにした。鍵を作った人がタスクを管理できなくなったら、自動では止めず、鍵の作り直しを確かめる警告を出す（§4.1、§4.2、§11.9、authorization.md §5.5） |
 | 0.46 | 2026年11月6日 | Sandboxのイメージを1つのまま、文書処理を一通り動かせるようにすることにした。文書処理にLibreOfficeを使わない方針（0.16）を改め、LibreOffice、Node.jsとパッケージ、pandoc、poppler-utilsを入れる。フォントはNoto CJKのSans・SerifのRegular・Boldで、よくあるフォントをfontconfigで置き換える（§7.6） |
 | 0.47 | 2026年11月6日 | agentセッション（`Conversation`）、Run、Attempt、ワークスペース、ジョブ、サブエージェントを整理した。Runは話の区切りでなく、親とジョブ・サブエージェントが全部止まるまでの単位にし、発言の種類の選択（次の依頼）をなくした。作業中の `/`・`@` は依頼した人の今の権限で読む。ジョブは親が話し終えた後も動き続け、終わると親を起こす。サブエージェントを入れた。snapshotは最新の1つだけで、Workerを手放す前に保存する。ワークスペースの保存期限を管理画面の設定にし、添付・成果物は明示的に消すまで残す。アーカイブ・論理削除・物理削除を決めた。修正チャットを実行記録の入力から始められるようにし、中で動かすたびにワークスペースを空で作り直す（§5.1・§5.3・§5.5・§7・§8・§11.4・§11.11、harness.md §5.6・§8・§10.11） |
-| 0.48 | 2026年11月6日 | 残すsnapshotを最新の1つから確定した2世代に改めた。新しいものが使えないときに、生きている中で最新のものへ戻すため。古いものを消す前に、新しいものを保存先から全部読み戻して確かめる。保存先で後から壊れることは初期は考えない。保存するかは答える人がいるかで決めることにし、修正チャットはふつうの会話と同じ扱いに戻した（動き終えたワークスペースを残し、編集のRunが引き継ぐ）。Webhook・手動実行・チャットから起動したタスクの実行とDraftの評価は保存しない（§5.4・§7.9・§8・§11.11） |
+| 0.48 | 2026年11月6日 | §4の構成図を実装に合わせた。Runの中のLLM呼出しとConnectorの操作はqclusterのRunnerが行い、apiを経由しない（apiからは管理画面の接続の確認等だけ）。配信もqclusterで動く。「Control Plane」はapiとqclusterを合わせた信頼された管理側を指すと明記した |
+| 0.49 | 2026年11月6日 | 残すsnapshotを最新の1つから確定した2世代に改めた。新しいものが使えないときに、生きている中で最新のものへ戻すため。古いものを消す前に、新しいものを保存先から全部読み戻して確かめる。保存先で後から壊れることは初期は考えない。保存するかは答える人がいるかで決めることにし、修正チャットはふつうの会話と同じ扱いに戻した（動き終えたワークスペースを残し、編集のRunが引き継ぐ）。Webhook・手動実行・チャットから起動したタスクの実行とDraftの評価は保存しない（§5.4・§7.9・§8・§11.11） |

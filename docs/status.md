@@ -40,6 +40,8 @@
 | #77 | 確認用の道具（`devtools`：`seed_dev`・`fake_llm`・`dev_session`。development.md §6） |
 | #78・#79 | Webhookの入口をタスクを管理できる人が作る形（設計：design.md 0.45、authorization.md §5.5・§13。実装：入口のAPIと画面をタスクの下へ移し、1つのタスクに複数の入口、鍵を作った人の記録と警告、`/manage/trigger_bindings` は見るだけの一覧） |
 | #80 | 新案：agentセッション（design.md 0.47 §5・§7・§8・§11.11、harness.md §5.6・§8・§10.11 へ反映した）、Sandboxのイメージ（design.md 0.46 §7.6 へ反映した）。実装は §4 の順に進める |
+| #84 | design.md §4 の構成図を実装に合わせた（0.48。LLMとConnectorの呼出しはqclusterのRunner。Control Planeの定義） |
+| #85 | ワークスペースの保存基準（答える人がいるか。design.md 0.49 §7.9）、snapshotを確定した2世代にする、修正チャットをふつうの会話と同じ扱いにする |
 
 各PRの中身は、Pull Requestの説明と設計書を見る。
 
@@ -105,7 +107,7 @@
 
 **今の状態（2026-11-03）**：design.md §12の第1段階のうち、Skill（①〜⑤）と、Connector・タスク・配信（①〜⑦、Connectorの④a・④b）は終わった（#72・#73まで）。今は、業務（下の「第1段階の順番」の3）を作る前の整理を、利用者と決めた次の順で進めている。文書の整理は #74 と、その残り（design.md・harness.md の突き合わせ。#75）で、テストの高速化は #76 で行った（バックエンドのテスト全体は、手元（8コア）で約5分から約35秒に、4並列でも約45秒になった）。#74 では、status.md の終わった段階の「決めたこと・判断した点」を設計書と突き合わせ、設計書になかった今の動きに関わるものを design.md・authorization.md・harness.md・frontend-conventions.md・sandbox/CONTRACT.md へ移してから消した（経過・レビュー・確かめたことは消した。各PRの説明に残っている）。§1 はPRごとの短い一覧にした。確認用の道具は #77 で入れた（偽のLLM `fake_llm`、確認用のデータ `seed_dev`、ログイン済みのセッション `dev_session`。development.md §6）。 2026-11-06 に、agentセッションとSandboxのイメージの案を設計書へ反映した。実装は下の①（snapshotを確定した2世代にする）まで進み、そのほかは design.md 0.45 の動きのまま。後回し：タスクの実行の論理削除の画面、物理削除の管理コマンド、監査ログの画面。
 
-**次の作業**（前提：snapshotを確定した2世代にするPull Request（①）がマージされていること）：
+**次の作業**（前提：#85 がマージされていること）：
 1. 設計書（design.md 0.46・0.47、harness.md §5.6・§8・§10.11）に合わせて実装を直す。1つの目的ごとのPull Requestに分け、次の順に進める（2026-11-06 に利用者と確かめた）。① snapshotを確定した2世代にし、Workerを手放す前に保存する（済み。保存するかは答える人がいるかで決め、修正チャットはふつうの会話と同じ扱いにした）、② Runの区切りと `WAITING_BACKGROUND`、ジョブを親の動きと切り離す（次はここから）、③ 発言の渡し方と、Skill・Connectorの一覧を発言ごとに作り直す、④ サブエージェント、⑤ ワークスペースの保存期限の設定、アーカイブと論理削除、添付・成果物の期限をなくす、⑥ 修正チャット（実行記録から始める）、⑦ Sandboxのイメージ（下の確かめの後）。
    - agentセッションの残り：Runの区切り、WAITING_BACKGROUND、発言の渡し方（次の依頼をなくす）、Skill・Connectorの一覧を発言ごとに作り直す、ジョブを親の動きと切り離す、サブエージェント、ワークスペースの保存期限の設定の画面（自動削除はまだ作らない）、アーカイブと論理削除、実行記録からの修正チャット。Runtime Profileのメモリの初期値も見直す。偽のLLMの `${enum:<Tool>.<引数>}`（development.md §6.2）は `skill`・`connector` の引数のenumに頼るので、一覧から名前を取る形に直す。
    - Sandboxのイメージ（design.md §7.6、harness.md §8.5）は、作る前に次を確かめる。試していない。`sandbox/CONTRACT.md` §1 は、入れるPull Requestで契約番号とあわせて直す。

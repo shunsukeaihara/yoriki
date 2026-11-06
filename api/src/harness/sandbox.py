@@ -718,11 +718,13 @@ class SandboxSession:
         return Suspended(stored, storage.backend_id, stopped, outputs, present, finished)
 
     def _save_unread_outputs(self) -> list[dict[str, Any]]:
-        """終わってまだ知らせていないジョブの、読んでいない出力をWorkspaceへ書く。ジョブの出力はAttemptの作業領域に
-        あり、Attemptが変わると `job_output` では読めない"""
+        """終わったジョブのうち、まだ知らせていないか、読んでいない出力があるものの出力をWorkspaceへ書く。ジョブの出力は
+        Attemptの作業領域にあり、Attemptが変わると `job_output` では読めない"""
         finished = []
         for job in self.jobs.values():
-            if job.reported or not job.finished or job.stopped == "suspended":
+            if not job.finished or job.stopped == "suspended":
+                continue
+            if job.reported and job.read_offset >= job.output_size():
                 continue
             path = f"{JOB_OUTPUTS_DIR}/{job.job_id}.txt"
             saved = self.put_job_output(job, path, job.read_offset, job.output_size())

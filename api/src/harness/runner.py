@@ -388,27 +388,30 @@ class Runner:
     def _report_jobs_finished_while_paused(self, checkpoint: Checkpoint) -> None:
         """確認待ちの間に終わったジョブを、回答で動き出すときに知らせる。確認の呼出しと結果の間に記録を挟まないよう、
         Workerを手放すときにはCheckpointに残し、ここで記録する（harness.md §8.3）"""
-        for job in checkpoint.finished_jobs:
-            outcome = _job_outcome(job["stopped"], job["exit_code"], job["timeout_seconds"])
-            where = (
-                f"Its output since your last read is in {job['output']}."
-                if job["output"]
-                else "Its output could not be saved in the sandbox."
-            )
-            text = (
-                f"[Background job {job['job_id']} ({job['description']}) {outcome} while the work was paused. {where}]"
-            )
-            self._record(
-                RunEventKind.JOB_FINISHED,
-                {
-                    "job_id": job["job_id"],
-                    "exit_code": job["exit_code"],
-                    "stopped": job["stopped"],
-                    "text": text,
-                    "checkpoint": checkpoint.uid,
-                },
-                comment=_job_comment(job["description"], job["stopped"], job["exit_code"]),
-            )
+        # 途中で落ちて残りの通知が失われないよう、まとめて記録する
+        with self.run_obj.fenced(self.attempt) as run:
+            for job in checkpoint.finished_jobs:
+                outcome = _job_outcome(job["stopped"], job["exit_code"], job["timeout_seconds"])
+                where = (
+                    f"Its output since your last read is in {job['output']}."
+                    if job["output"]
+                    else "Its output could not be saved in the sandbox."
+                )
+                RunEvent.record(
+                    run,
+                    RunEventKind.JOB_FINISHED,
+                    {
+                        "job_id": job["job_id"],
+                        "exit_code": job["exit_code"],
+                        "stopped": job["stopped"],
+                        "text": (
+                            f"[Background job {job['job_id']} ({job['description']}) {outcome} while the work was "
+                            f"paused. {where}]"
+                        ),
+                        "checkpoint": checkpoint.uid,
+                    },
+                    comment=_job_comment(job["description"], job["stopped"], job["exit_code"]),
+                )
 
     @staticmethod
     def _lost_work(events: list[RunEvent], since: int) -> list[str]:
@@ -829,8 +832,9 @@ class Runner:
             return self._nudge("Your previous response was cut off at the output limit. Continue in smaller pieces.")
         if not response.text.strip():
             return self._nudge("Your previous response was empty. Call a tool or write your reply to the user.")
-        if running := self._running_jobs():
-            return self._reply_with_running_jobs(response.text, running)
+        running = self._running_jobs()
+        if running or (self.session.started and self.session.finished_unreported()):
+            return self._reply_with_jobs(response.text, running)
         if self._result_missing():
             # 業務結果のSchemaがあるのに submit_result を呼ばなかった。1回だけ促す（harness.md §10.5）。
             # 追加の指示で確定した結果を取り消した後は、もう一度促してよい
@@ -851,9 +855,14 @@ class Runner:
     def _running_jobs(self) -> list[Job]:
         return self.session.running_jobs(refresh=True) if self.session.started else []
 
-    def _reply_with_running_jobs(self, text: str, running: list[Job]) -> bool:
-        """親は動き終えたが、ジョブが残っている。応答を会話に載せ、Workerを手放さずに待つ（design.md §5.3）。
-        タスクの実行は、終わる時点でジョブが残らない前提なので、待つか止めるかを1回だけ決めさせる（harness.md §8.3）"""
+    def _reply_with_jobs(self, text: str, running: list[Job]) -> bool:
+        """親は動き終えたが、ジョブが残っているか、応答を待つ間に終わったジョブをまだ見ていない。応答を会話に載せ、
+        終わったジョブは次の区切りで知らせ（最後の確定は親が結果を見た後。design.md §5.3）、動いていればWorkerを手放さずに
+        待つ。タスクの実行は、終わる時点でジョブが残らない前提なので、待つか止めるかを1回だけ決めさせる（harness.md §8.3）"""
+        if not running:
+            with self.run_obj.fenced(self.attempt) as run:
+                self._post_reply(run, text)
+            return True
         if self.run_obj.trigger != RunTrigger.CONVERSATION and not self.warned_running_jobs:
             self.warned_running_jobs = True
             jobs = ", ".join(f"{j.job_id} ({j.description})" for j in running)

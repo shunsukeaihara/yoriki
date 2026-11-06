@@ -17,6 +17,7 @@ from harness.tools.submit_result import execute as submit_result
 from llm.providers.base import ToolCall
 from run.factories import ClarificationRequestFactory
 from run.models import (
+    Checkpoint,
     ClarificationRequest,
     ClarificationStatus,
     ExecutionAttempt,
@@ -219,6 +220,60 @@ def test_message_before_the_reply_ends_does_not_stop_the_job(conversation):
     assert agent_messages(run) == ["ひとまず返します。", "反映しました。"]
     # 完了のときの1回だけ保存する
     assert finished[0].suspends == [True]
+
+
+def test_job_finishing_during_the_final_reply_is_shown_to_the_parent_first(conversation):
+    """モデルの応答を待つ間に終わったジョブの結果を見ないまま完了しない"""
+    run = post(conversation)
+    sessions: list[JobSession] = []
+
+    class FinishesWhileReplying(FakeAdapter):
+        def stream(self, request):
+            sessions[0].finish()
+            yield from super().stream(request)
+
+    def factory(run_obj, attempt_obj, **kwargs):
+        sessions.append(JobSession(run_obj, attempt_obj, tick=lambda _s: None, **kwargs))
+        return sessions[0]
+
+    adapter = FinishesWhileReplying([reply("途中です。"), reply("確かめました。")])
+    run_with(run, adapter, factory)
+    assert run.status == RunStatus.COMPLETED
+    assert any("finished with exit code 0" in m.text for m in adapter.requests[1].messages)
+    assert agent_messages(run) == ["途中です。", "確かめました。"]
+
+
+def test_jobs_finished_while_paused_are_all_reported_after_the_answer(conversation, app_user):
+    run = post(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    Checkpoint.objects.create(
+        run=run,
+        attempt=attempt,
+        sequence=1,
+        storage="test",
+        key="k",
+        size=0,
+        sha256="0",
+        finished_jobs=[
+            {
+                "job_id": f"job_{n}",
+                "description": "変換",
+                "exit_code": 0,
+                "stopped": "",
+                "timeout_seconds": 1800,
+                "output": f"/workspace/work/.yoriki/outputs/job_{n}.txt",
+            }
+            for n in (1, 2)
+        ],
+    )
+    attempt.end()
+    Run.objects.filter(pk=run.pk).update(status=RunStatus.QUEUED)
+    run.refresh_from_db()
+    adapter = FakeAdapter([reply("確かめました。")])
+    run_with(run, adapter, FakeSession)
+    assert RunEvent.objects.filter(run=run, kind=RunEventKind.JOB_FINISHED).count() == 2
+    assert sum("job_" in m.text and "while the work was paused" in m.text for m in adapter.requests[0].messages) == 2
 
 
 def test_cancel_while_waiting_stops_the_job(conversation, app_user):

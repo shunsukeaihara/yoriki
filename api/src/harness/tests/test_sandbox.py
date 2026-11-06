@@ -494,6 +494,27 @@ def test_job_finishing_during_a_question_is_reported_after_the_answer(conversati
     assert answer < notice
 
 
+def test_reported_job_with_unread_output_survives_a_question(conversation, app_user):
+    run = post(conversation)
+    run = execute(
+        run,
+        FakeAdapter(
+            [
+                calls(("c1", "shell", shell("echo unread-output", background=True))),
+                calls(("c2", "shell", shell("sleep 2"))),
+                # 終わったことは知らされたが、job_output で読まないまま尋ねる
+                calls(("c3", "ask_user", QUESTION)),
+            ]
+        ),
+    )
+    assert run.status == RunStatus.WAITING_USER
+    job = Checkpoint.objects.get(run=run).finished_jobs[0]
+    ClarificationRequest.objects.get(run=run).accept_answer([{"selected": ["CSV"], "text": ""}], "", app_user)
+    run.refresh_from_db()
+    run = execute(run, FakeAdapter([calls(("c4", "read", {"path": job["output"]})), reply("読みました")]))
+    assert "unread-output" in text(results(run)["c4"])
+
+
 def test_answer_continues_in_the_same_container_while_the_job_runs(conversation, app_user, monkeypatch):
     run = post(conversation)
     answer = {"sent": False}

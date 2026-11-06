@@ -1,6 +1,6 @@
 # agentセッションの新案
 
-agentセッション、Run、Attempt、ワークスペース、ジョブ、サブエージェント、永続化するものを整理した案。利用者と議論して決めた内容で、設計書へ反映する元にする。今の仕様は、設計書を直すまで design.md・harness.md を正とする。反映したら本書を消す。Sandboxのイメージは [sandbox-proposal.md](sandbox-proposal.md) に書く。
+agentセッション、Run、Attempt、ワークスペース、ジョブ、サブエージェント、永続化するものを整理した案。利用者と議論して決めた内容で、設計書へ反映する元にする。今の仕様は、設計書を直すまで design.md・harness.md を正とする。反映したら本書を消す。Sandboxのイメージは design.md §7.6 に書く。
 
 ---
 

@@ -279,6 +279,25 @@ def test_next_run_replaces_the_previous_snapshot(conversation):
     assert not get_storage().exists(old.key)
 
 
+def test_unverified_snapshot_does_not_replace_the_previous_one(conversation, monkeypatch):
+    """保存先で確かめられなければ確定せず、前のsnapshotを残して別のAttemptでやり直す（design.md §7.9）"""
+    monkeypatch.setattr("harness.runner.enqueue_run", lambda _run: None)
+    first = execute(post(conversation), FakeAdapter([calls(("c1", "shell", shell("echo 1 > a.txt"))), reply("済み")]))
+    previous = Checkpoint.objects.get(run=first)
+    stat = LocalStorage.stat
+
+    def missing_new_snapshot(self, key):
+        return None if key.startswith("snapshots/") and key != previous.key else stat(self, key)
+
+    run = post(conversation, "続けて")
+    with monkeypatch.context() as patch:
+        patch.setattr(LocalStorage, "stat", missing_new_snapshot)
+        run = execute(run, FakeAdapter([calls(("c2", "shell", shell("cat a.txt"))), reply("済み")]))
+    assert run.status == RunStatus.QUEUED
+    assert Checkpoint.objects.get(run__conversation=conversation) == previous
+    assert get_storage().exists(previous.key)
+
+
 def test_task_run_collects_outputs_without_a_snapshot():
     """タスクの実行が終わるときは、成果物を回収するだけで、ワークスペースを保存しない（design.md §7.9）"""
     skill = SkillFactory.create(scope=SkillScope.SYSTEM, name="確認", owner=None)

@@ -720,6 +720,9 @@ class SandboxSession:
                 archive.seek(0)
                 try:
                     stored = storage.put_immutable(key, archive) if snapshot else None
+                    # 保存先で確かめてからCheckpointを確定し、前のsnapshotを消す（design.md §7.9）
+                    if stored is not None and storage.stat(key) != stored:
+                        raise SandboxUnavailable("cannot verify the saved workspace")
                     archive.seek(0)
                     return stored, collect_outputs(archive, storage, known, present)
                 except (OSError, StorageError, tarfile.TarError) as exc:

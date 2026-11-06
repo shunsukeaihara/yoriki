@@ -12,6 +12,7 @@ from conversation.dispatch import MessageMode, post_message
 from conversation.factories import ConversationFactory
 from conversation.models import ConversationMessage, MessageRole
 from harness.runner import ATTEMPT_LIMIT_SECONDS, MAX_STEPS, RUNNING_JOBS_NOTICE, Runner
+from harness.sandbox import Suspended
 from harness.tools.base import ToolContext
 from harness.tools.submit_result import execute as submit_result
 from harness.tools.submit_result import make_submit_result_tool
@@ -359,6 +360,65 @@ def test_new_attempt_after_a_lost_worker_says_the_jobs_are_gone(conversation):
 
     run_with(run, Recording([reply("確かめます。")]), FakeSession)
     assert any("Background jobs from that attempt are not running anymore" in text for text in notice_seen)
+
+
+class SavingSession(JobSession):
+    """止めたジョブ・見ていないジョブを保存の結果として返す"""
+
+    def suspend(self, *, snapshot=True):
+        stopped = [{"job_id": "job_1", "command": "sleep 60"}] if not self.job.finished else []
+        super().suspend(snapshot=snapshot)
+        finished = [
+            {
+                "job_id": "job_2",
+                "description": "集計",
+                "exit_code": 0,
+                "stopped": "",
+                "timeout_seconds": 1800,
+                "output": "/workspace/work/.yoriki/outputs/job_2.txt",
+                "reported": False,
+            }
+        ]
+        return Suspended(None, "test", stopped, [], {}, finished)
+
+
+def test_jobs_stopped_when_a_run_ends_reach_the_next_run(conversation, app_user):
+    """止めたジョブと見ていないジョブの終了は、そのRunの記録に書き、次のRunの文脈に入る"""
+    run = post(conversation)
+
+    def tick(_session):
+        Run.objects.get(pk=run.pk).request_cancel("止めて", app_user)
+
+    run_with(run, FakeAdapter([reply("始めました。")]), lambda r, a, **kw: SavingSession(r, a, tick=tick, **kw))
+    run.refresh_from_db()
+    assert run.status == RunStatus.CANCELLED
+
+    next_run = post(conversation, "続けて")
+    assert next_run.parent_id == run.pk
+    adapter = FakeAdapter([reply("確かめます。")])
+    run_with(next_run, adapter, FakeSession)
+    texts = [m.text for m in adapter.requests[0].messages]
+    assert any("job_1" in t and "stopped when this work ended" in t for t in texts)
+    assert any("job_2" in t and "job_2.txt" in t for t in texts)
+
+
+def test_expired_question_tells_the_next_run_that_the_jobs_are_gone(conversation):
+    run = post(conversation)
+
+    def tick(_session):
+        ClarificationRequest.objects.filter(run=run).update(expires=timezone.now() - timedelta(minutes=1))
+        _expire_clarifications(timezone.now())
+
+    run, _session = execute(run, FakeAdapter([calls(("c1", "ask_user", QUESTION))]), tick)
+    assert run.status == RunStatus.FAILED
+    next_run = post(conversation, "続けて")
+    adapter = FakeAdapter([reply("確かめます。")])
+    run_with(next_run, adapter, FakeSession)
+    messages = adapter.requests[0].messages
+    assert any("question expired while background jobs were running" in m.text for m in messages)
+    # 結果のないまま終わった確認の呼出しには、結果が分からないことを補う
+    index = next(i for i, m in enumerate(messages) if m.tool_calls)
+    assert messages[index + 1].tool_call_id == "c1"
 
 
 def test_cancel_while_waiting_stops_the_job(conversation, app_user):

@@ -90,7 +90,7 @@ from .context import runtime_context as build_runtime_context
 from .prompts import system_prompt
 from .recovery import request_model_switch
 from .result_files import missing_files
-from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, WORKSPACE_ROLLED_BACK, Job, SandboxSession
+from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, WORKSPACE_ROLLED_BACK, Job, SandboxSession, Suspended
 from .script_connectors import ScriptConnectors
 from .skill_edit import revoked_edit
 from .skills import SkillContentSource, explicit_versions, revoked_skill
@@ -223,6 +223,8 @@ class Runner:
         # このAttemptを始めたときのRunEventの最後のsequence。読んだファイルの版の記録を選ぶのに使う
         self.start_sequence = 0
         self.warned_running_jobs = False
+        # 最後に _checkpoint() で保存したときの結果。Runを終えるときに、止めたジョブを記録に書く
+        self.last_saved: Suspended | None = None
         # 親が動き終え、ジョブが残っているのでWorkerを手放さずに待つ（_watch()）
         self.holding = False
         self.tools: tuple[Tool, ...] = ()
@@ -389,34 +391,19 @@ class Runner:
         Workerを手放すときにはCheckpointに残し、ここで記録する（harness.md §8.3）"""
         # 途中で落ちて残りの通知が失われないよう、まとめて記録する
         with self.run_obj.fenced(self.attempt) as run:
-            for job in checkpoint.finished_jobs:
-                if job["reported"]:
-                    # 終わったことはもう知らせた。読んでいない出力の場所だけを伝える
-                    place = job["output"] or "nowhere: it could not be saved in the sandbox"
-                    text = f"[The unread output of background job {job['job_id']} ({job['description']}) is {place}.]"
-                    RunEvent.record(run, RunEventKind.CONTEXT, {"text": text, "finished_jobs": checkpoint.uid})
-                    continue
-                outcome = _job_outcome(job["stopped"], job["exit_code"], job["timeout_seconds"])
-                where = (
-                    f"Its output since your last read is in {job['output']}."
-                    if job["output"]
-                    else "Its output could not be saved in the sandbox."
-                )
-                RunEvent.record(
-                    run,
-                    RunEventKind.JOB_FINISHED,
-                    {
-                        "job_id": job["job_id"],
-                        "exit_code": job["exit_code"],
-                        "stopped": job["stopped"],
-                        "text": (
-                            f"[Background job {job['job_id']} ({job['description']}) {outcome} while the work was "
-                            f"paused. {where}]"
-                        ),
-                        "finished_jobs": checkpoint.uid,
-                    },
-                    comment=_job_comment(job["description"], job["stopped"], job["exit_code"]),
-                )
+            _record_saved_jobs(run, checkpoint.finished_jobs, checkpoint.uid)
+
+    def _record_jobs_at_end(self, run: Run) -> None:
+        """Runを終えるtransactionで呼ぶ。止めたジョブと親が結果を見ていないジョブを記録に書き、次のRunの文脈に入れる
+        （harness.md §5.6）。Checkpointからの知らせは同じRunの中でしか読まない"""
+        saved = self.last_saved
+        if saved is None:
+            return
+        if saved.stopped:
+            jobs = ", ".join(f"{j['job_id']} (`{j['command']}`)" for j in saved.stopped)
+            text = f"[These background jobs were stopped when this work ended: {jobs}. Run them again if needed.]"
+            RunEvent.record(run, RunEventKind.CONTEXT, {"text": text})
+        _record_saved_jobs(run, saved.finished, "")
 
     @staticmethod
     def _lost_work(events: list[RunEvent], since: int) -> list[str]:
@@ -989,6 +976,7 @@ class Runner:
                 }
             if status != RunStatus.COMPLETED:
                 error = error or str(end_reason.label)
+            self._record_jobs_at_end(run)
             run.set_status(status, end_reason=end_reason, error=error)
         return False
 
@@ -1030,11 +1018,13 @@ class Runner:
             ToolInvocation.objects.filter(run=run, status__in=(ToolStatus.REQUESTED, ToolStatus.RUNNING)).update(
                 status=ToolStatus.CANCELLED, ended=timezone.now()
             )
+            self._record_jobs_at_end(run)
             run.set_status(RunStatus.CANCELLED, comment=_("停止しました。"), end_reason=RunEndReason.CANCELLED)
 
     def _fail(self, end_reason: RunEndReason, message: str) -> None:
         self._checkpoint(required=False)
         with self.run_obj.fenced(self.attempt) as run:
+            self._record_jobs_at_end(run)
             if run.status == RunStatus.CANCELLING:
                 run.set_status(RunStatus.CANCELLED, end_reason=RunEndReason.CANCELLED)
             else:
@@ -1055,6 +1045,7 @@ class Runner:
                 raise
             logger.warning("run %s: cannot save the workspace", self.run_obj.uid, exc_info=True)
             return
+        self.last_saved = saved
         if saved is None:
             self.workspace_outputs = {}
             return
@@ -1440,6 +1431,39 @@ class Runner:
                 request_id=response.completed.request_id if response.completed else "",
             )
         return True
+
+
+def _record_saved_jobs(run: Run, jobs: list[dict[str, Any]], checkpoint: str) -> None:
+    """保存した終わったジョブ（Suspended.finished）を記録に書く。`checkpoint` はCheckpointから知らせるときの印"""
+    marker = {"finished_jobs": checkpoint} if checkpoint else {}
+    for job in jobs:
+        if job["reported"]:
+            # 終わったことはもう知らせた。読んでいない出力の場所だけを伝える
+            place = job["output"] or "nowhere: it could not be saved in the sandbox"
+            text = f"[The unread output of background job {job['job_id']} ({job['description']}) is {place}.]"
+            RunEvent.record(run, RunEventKind.CONTEXT, {"text": text, **marker})
+            continue
+        outcome = _job_outcome(job["stopped"], job["exit_code"], job["timeout_seconds"])
+        where = (
+            f"Its output since your last read is in {job['output']}."
+            if job["output"]
+            else "Its output could not be saved in the sandbox."
+        )
+        RunEvent.record(
+            run,
+            RunEventKind.JOB_FINISHED,
+            {
+                "job_id": job["job_id"],
+                "exit_code": job["exit_code"],
+                "stopped": job["stopped"],
+                "text": (
+                    f"[Background job {job['job_id']} ({job['description']}) {outcome} while the work was paused. "
+                    f"{where}]"
+                ),
+                **marker,
+            },
+            comment=_job_comment(job["description"], job["stopped"], job["exit_code"]),
+        )
 
 
 def _job_outcome(stopped: str, exit_code: int | None, timeout_seconds: int) -> str:

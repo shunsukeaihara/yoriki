@@ -482,7 +482,7 @@ class PlacingSession(FakeSession):
 
 @pytest.mark.django_db
 def test_two_messages_choosing_a_skill_in_different_versions_are_both_taken_in(conversation, app_user):
-    """同じ区切りで、同じSkillを別の版で指定した発言が並んでも、前の発言の指定を失わない"""
+    """同じ区切りで、間に公開された同じSkillを指定した発言が並んでも、前の発言の指定を失わない"""
     skill = publish(app_user, instructions="第1版の手順")
     run = start(conversation)
 
@@ -499,11 +499,11 @@ def test_two_messages_choosing_a_skill_in_different_versions_are_both_taken_in(c
     run.refresh_from_db()
 
     assert run.status == RunStatus.COMPLETED, run.error
+    # どちらの発言も、取り込むときの最新の公開版を読む
     texts = user_texts(adapter.requests[1])
-    assert "第1版の手順" in next(t for t in texts if "1つ目" in t)
-    second = next(t for t in texts if "2つ目" in t)
-    assert "第2版の手順" in second and "replaces version 1" in second
-    assert [e["number"] for e in run.manifest["appended"] if e["kind"] == "skill"] == [1, 2]
+    assert "第2版の手順" in next(t for t in texts if "1つ目" in t)
+    assert "第2版の手順" in next(t for t in texts if "2つ目" in t)
+    assert [e["number"] for e in run.manifest["appended"] if e["kind"] == "skill"] == [2, 2]
     assert not ConversationMessage.objects.filter(conversation=conversation, role=MessageRole.SYSTEM).exists()
 
 

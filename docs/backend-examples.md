@@ -493,10 +493,10 @@ Runの状態は、ほとんどがWorkerとRunnerによって進む（design.md �
 | 遷移 | 起こすもの | 例の中の場所 |
 |---|---|---|
 | QUEUED → RUNNING | claim（Worker） | `run/tasks.py` の `claim_run` |
-| RUNNING → WAITING_USER / RETRY_WAIT / COMPLETED / FAILED | 実行結果（Runner） | 省略（fencing tokenを照合してから `set_status` を呼ぶ） |
-| WAITING_USER → QUEUED | 回答（利用者） | `ClarificationAnswerSerializer` → `ClarificationRequest.accept_answer` |
+| RUNNING → WAITING_USER / WAITING_BACKGROUND / RETRY_WAIT / COMPLETED / FAILED、WAITING_BACKGROUND → RUNNING / RETRY_WAIT / FAILED | 実行結果（Runner） | 省略（fencing tokenを照合してから `set_status` を呼ぶ） |
+| WAITING_USER → QUEUED（Attemptを手放していた）/ RUNNING（ジョブが動いていて同じAttempt） | 回答（利用者） | `ClarificationAnswerSerializer` → `ClarificationRequest.accept_answer` |
 | RETRY_WAIT → QUEUED | 再実行（Reconciler） | 省略 |
-| QUEUED / WAITING_USER / RETRY_WAIT → CANCELLED、RUNNING → CANCELLING | 停止の依頼（利用者） | `RunCancelSerializer` → `Run.request_cancel` |
+| QUEUED / WAITING_USER（Attemptを手放していた）/ RETRY_WAIT → CANCELLED、RUNNING / WAITING_BACKGROUND / WAITING_USER（ジョブが動いている）→ CANCELLING | 停止の依頼（利用者） | `RunCancelSerializer` → `Run.request_cancel` |
 | CANCELLING → CANCELLED | 停止の確認（Worker） | 省略 |
 | WAITING_USER → FAILED（回答期限切れ）、RETRY_WAIT → FAILED（上限到達）、CANCELLING → FAILED（停止できない） | システム（Reconciler・Worker） | 省略 |
 
@@ -530,6 +530,7 @@ class RunStatus(models.IntegerChoices):
     WAITING_USER = 3, _("回答待ち")
     RETRY_WAIT = 4, _("再試行待ち")
     CANCELLING = 5, _("停止中")
+    WAITING_BACKGROUND = 6, _("裏で作業を待っています")
     COMPLETED = 10, _("完了")
     FAILED = 20, _("失敗")
     CANCELLED = 30, _("取消")
@@ -537,14 +538,17 @@ class RunStatus(models.IntegerChoices):
 
 ALLOWED_TRANSITIONS: dict[int, set[int]] = {
     RunStatus.QUEUED: {RunStatus.RUNNING, RunStatus.CANCELLED},
-    RunStatus.RUNNING: {RunStatus.WAITING_USER, RunStatus.RETRY_WAIT, RunStatus.COMPLETED,
-                        RunStatus.FAILED, RunStatus.CANCELLING},
-    RunStatus.WAITING_USER: {RunStatus.QUEUED, RunStatus.CANCELLED, RunStatus.FAILED},
+    RunStatus.RUNNING: {RunStatus.WAITING_USER, RunStatus.WAITING_BACKGROUND, RunStatus.RETRY_WAIT,
+                        RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLING},
+    RunStatus.WAITING_USER: {RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.CANCELLING, RunStatus.CANCELLED,
+                             RunStatus.FAILED},
+    RunStatus.WAITING_BACKGROUND: {RunStatus.RUNNING, RunStatus.RETRY_WAIT, RunStatus.CANCELLING, RunStatus.FAILED},
     RunStatus.RETRY_WAIT: {RunStatus.QUEUED, RunStatus.CANCELLED, RunStatus.FAILED},
     RunStatus.CANCELLING: {RunStatus.CANCELLED, RunStatus.FAILED},
 }
 
-CANCELLABLE_STATUSES = (RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.WAITING_USER, RunStatus.RETRY_WAIT)
+CANCELLABLE_STATUSES = (RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.WAITING_USER, RunStatus.WAITING_BACKGROUND,
+                        RunStatus.RETRY_WAIT)
 ACTIVE_STATUSES = CANCELLABLE_STATUSES + (RunStatus.CANCELLING,)
 
 

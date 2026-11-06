@@ -30,6 +30,8 @@ describe('run', () => {
     expect(isCancellable({ status: RunStatus.CANCELLING })).toBe(false)
     expect(isActiveRun({ status: RunStatus.CANCELLING })).toBe(true)
     expect(isCancellable({ status: RunStatus.WAITING_USER })).toBe(true)
+    expect(isCancellable({ status: RunStatus.WAITING_BACKGROUND })).toBe(true)
+    expect(isActiveRun({ status: RunStatus.WAITING_BACKGROUND })).toBe(true)
   })
 
   it('1回の応答で終わった Run には、作業の表示を出さない', () => {

@@ -97,7 +97,7 @@ watch([active, scriptToolResults], ([value], [before]) => {
 // （読むのは差分だけ）
 const { pause, resume } = useIntervalFn(refreshScriptCalls, 5000, { immediate: false })
 watch(
-  () => props.run.status === RunStatus.RUNNING,
+  () => props.run.status === RunStatus.RUNNING || props.run.status === RunStatus.WAITING_BACKGROUND,
   (running) => (running ? resume() : pause()),
   { immediate: true },
 )
@@ -105,11 +105,14 @@ onMounted(() => {
   if (active.value) refreshScriptCalls()
 })
 
-// 最後の応答は、Run が終わって会話のメッセージになるまでここに出す
+// 最後の応答は、Run が終わって会話のメッセージになるまでここに出す。裏の作業を待つときは、その時点で会話のメッセージに
+// なるので、応答の後に状態の変更等が届いたら出さない
 const pendingReply = computed(() => {
   if (!active.value) return ''
-  const last = events.value.findLast((e) => e.type === 'run.message' && e.kind === RunEventKind.ASSISTANT_MESSAGE)
-  return last?.type === 'run.message' && last.toolCalls.length === 0 ? last.text : ''
+  const last = events.value.at(-1)
+  return last?.type === 'run.message' && last.kind === RunEventKind.ASSISTANT_MESSAGE && last.toolCalls.length === 0
+    ? last.text
+    : ''
 })
 const streamingText = computed(() => props.delta || pendingReply.value)
 

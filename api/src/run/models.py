@@ -31,6 +31,7 @@ class RunStatus(models.IntegerChoices):
     WAITING_USER = 3, _("確認待ち")
     RETRY_WAIT = 4, _("再試行待ち")
     CANCELLING = 5, _("停止中")
+    WAITING_BACKGROUND = 6, _("裏で作業を待っています")
     COMPLETED = 10, _("完了")
     FAILED = 20, _("失敗")
     CANCELLED = 30, _("停止済み")
@@ -40,17 +41,37 @@ ALLOWED_TRANSITIONS: dict[int, set[int]] = {
     RunStatus.QUEUED: {RunStatus.RUNNING, RunStatus.CANCELLED},
     RunStatus.RUNNING: {
         RunStatus.WAITING_USER,
+        RunStatus.WAITING_BACKGROUND,
         RunStatus.RETRY_WAIT,
         RunStatus.COMPLETED,
         RunStatus.FAILED,
         RunStatus.CANCELLING,
     },
-    RunStatus.WAITING_USER: {RunStatus.QUEUED, RunStatus.CANCELLED, RunStatus.FAILED},
+    # ジョブが動いている間はAttemptを手放さないので、回答で同じAttemptへ戻る・停止中を経る（design.md §5.3）
+    RunStatus.WAITING_USER: {
+        RunStatus.QUEUED,
+        RunStatus.RUNNING,
+        RunStatus.CANCELLING,
+        RunStatus.CANCELLED,
+        RunStatus.FAILED,
+    },
+    RunStatus.WAITING_BACKGROUND: {
+        RunStatus.RUNNING,
+        RunStatus.RETRY_WAIT,
+        RunStatus.CANCELLING,
+        RunStatus.FAILED,
+    },
     RunStatus.RETRY_WAIT: {RunStatus.QUEUED, RunStatus.CANCELLED, RunStatus.FAILED},
     RunStatus.CANCELLING: {RunStatus.CANCELLED, RunStatus.FAILED},
 }
 
-CANCELLABLE_STATUSES = (RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.WAITING_USER, RunStatus.RETRY_WAIT)
+CANCELLABLE_STATUSES = (
+    RunStatus.QUEUED,
+    RunStatus.RUNNING,
+    RunStatus.WAITING_USER,
+    RunStatus.WAITING_BACKGROUND,
+    RunStatus.RETRY_WAIT,
+)
 ACTIVE_STATUSES = (*CANCELLABLE_STATUSES, RunStatus.CANCELLING)
 TERMINAL_STATUSES = (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED)
 
@@ -243,6 +264,11 @@ class Run(models.Model):
     def can_transit(self, status: int) -> bool:
         return status in ALLOWED_TRANSITIONS.get(self.status, set())
 
+    def has_live_attempt(self) -> bool:
+        """Workerを手放していないAttemptがある（Runの行ロックの中で呼ぶ）。leaseの切れたものはWorkerが落ちたものとして
+        数えない（Reconcilerが閉じる）"""
+        return self.attempts.filter(ended__isnull=True, lease_expires__gt=timezone.now()).exists()
+
     def is_cancellable(self) -> bool:
         return self.status in CANCELLABLE_STATUSES
 
@@ -339,11 +365,14 @@ class Run(models.Model):
     def request_cancel(self, reason: str, actor) -> "RunEvent":
         """停止の依頼を受け付ける。実行中ならWorkerの停止確認を待つため停止中にする"""
         current = Run.locked(self.pk)
-        if current.status == RunStatus.RUNNING:
-            return self.set_status(RunStatus.CANCELLING, comment=reason, actor=actor)
         ClarificationRequest.objects.filter(run=self, status=ClarificationStatus.OPEN).update(
             status=ClarificationStatus.CANCELLED
         )
+        # 確認待ちでも、ジョブが動いていてAttemptを手放していなければ、Workerが止める
+        if current.status in (RunStatus.RUNNING, RunStatus.WAITING_BACKGROUND) or (
+            current.status == RunStatus.WAITING_USER and current.has_live_attempt()
+        ):
+            return self.set_status(RunStatus.CANCELLING, comment=reason, actor=actor)
         return self.set_status(RunStatus.CANCELLED, comment=reason, actor=actor, end_reason=RunEndReason.CANCELLED)
 
     @transaction.atomic
@@ -413,8 +442,14 @@ class ExecutionAttempt(models.Model):
         )
 
     def holds(self, run: Run) -> bool:
-        """このAttemptが最新で、終わっておらず、leaseが切れていない。Runは実行中か停止中"""
-        if run.status not in (RunStatus.RUNNING, RunStatus.CANCELLING):
+        """このAttemptが最新で、終わっておらず、leaseが切れていない。Runは実行中か停止中か、ジョブを見張って
+        待っている（確認待ちはWorkerを手放すときにAttemptを終えるので、終わっていなければ見張っている）"""
+        if run.status not in (
+            RunStatus.RUNNING,
+            RunStatus.CANCELLING,
+            RunStatus.WAITING_USER,
+            RunStatus.WAITING_BACKGROUND,
+        ):
             return False
         latest = run.attempts.aggregate(last=Max("number"))["last"]
         current = ExecutionAttempt.objects.filter(pk=self.pk).values("ended", "lease_expires").first()
@@ -609,6 +644,11 @@ class ClarificationRequest(models.Model):
             if self.kind == ClarificationKind.EVALUATION
             else str(_("確認への回答を受け付けました"))
         )
+        if run.has_live_attempt():
+            # ジョブが動いていてWorkerを手放していない。同じAttempt・同じコンテナで続ける（design.md §5.3）。
+            # Workerが落ちていれば、leaseが切れたときにReconcilerがやり直す
+            run.set_status(RunStatus.RUNNING, comment=str(comment), actor=actor)
+            return
         run.set_status(RunStatus.QUEUED, comment=str(comment), actor=actor)
         enqueue_run(run)
 
@@ -672,6 +712,8 @@ class Checkpoint(models.Model):
     sha256 = models.CharField(_("SHA-256"), max_length=64)
     # 保存の前に止めたバックグラウンドのジョブ（[{"job_id", "command"}]）。再開のときにモデルに知らせる
     stopped_jobs = models.JSONField(_("止めたジョブ"), default=list, blank=True)
+    # 確認待ちの間に終わり、まだモデルに知らせていないジョブ。新しいAttemptで知らせる（harness.md §8.3）
+    finished_jobs = models.JSONField(_("終わったジョブ"), default=list, blank=True)
 
     created = models.DateTimeField(auto_now_add=True)
 

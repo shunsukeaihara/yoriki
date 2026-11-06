@@ -74,6 +74,8 @@ JOB_OUTPUT_LIMIT = 64 * 1024 * 1024
 ATTEMPT_OUTPUT_LIMIT = 512 * 1024 * 1024
 # コマンドが終わった後、出力を受け取り終えるのを待つ上限（秒）。受け取りが止まったときに、待ち続けないため
 OUTPUT_DRAIN_SECONDS = 60
+# Attemptが変わる前に、読んでいないジョブの出力を置く場所（harness.md §8.3）
+JOB_OUTPUTS_DIR = f"{WORK_DIR}/.yoriki/outputs"
 # 長いSandboxの操作（Workspaceの取り出し・戻し）の間に、leaseを延ばす間隔（秒）
 HEARTBEAT_INTERVAL = 15
 JOB_ID_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyz"
@@ -153,6 +155,8 @@ class Suspended:
     # 保存したときに /workspace/output にあった（回収の対象の）ファイルの、パスごとの中身（SHA-256）。回収し直さなかった
     # 変わっていないファイルを含む。業務結果が指すファイルが完了時にあるかを確かめるのに使う
     present: dict[str, str] = field(default_factory=dict)
+    # 終わったが、まだモデルに知らせていないジョブと、その出力を置いた場所。新しいAttemptで知らせる（harness.md §8.3）
+    finished: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -688,6 +692,7 @@ class SandboxSession:
             if not job.finished and not self._mark_stopped(job, "suspended"):
                 raise SandboxUnavailable(f"job {job.job_id} did not stop")
         stopped = [{"job_id": job.job_id, "command": job.command[:200]} for job in running]
+        finished = self._save_unread_outputs() if snapshot else []
         storage = self.storage_factory()
         self.dir.mkdir(parents=True, exist_ok=True)
         key = f"snapshots/runs/{self.run.uid}/{self.attempt.number}-{generate(JOB_ID_ALPHABET, 8)}.tar"
@@ -710,7 +715,32 @@ class SandboxSession:
                     raise SandboxUnavailable(f"cannot save the workspace: {exc}") from exc
 
         stored, outputs = self._keep_lease(save)
-        return Suspended(stored, storage.backend_id, stopped, outputs, present)
+        return Suspended(stored, storage.backend_id, stopped, outputs, present, finished)
+
+    def _save_unread_outputs(self) -> list[dict[str, Any]]:
+        """終わったジョブのうち、まだ知らせていないか、読んでいない出力があるものの出力をWorkspaceへ書く。ジョブの出力は
+        Attemptの作業領域にあり、Attemptが変わると `job_output` では読めない"""
+        finished = []
+        for job in self.jobs.values():
+            if not job.finished or job.stopped == "suspended":
+                continue
+            if job.reported and job.read_offset >= job.output_size():
+                continue
+            path = f"{JOB_OUTPUTS_DIR}/{job.job_id}.txt"
+            saved = self.put_job_output(job, path, job.read_offset, job.output_size())
+            finished.append(
+                {
+                    "job_id": job.job_id,
+                    "description": job.description,
+                    "exit_code": job.exit_code,
+                    "stopped": job.stopped,
+                    "timeout_seconds": job.timeout_seconds,
+                    "output": path if saved else "",
+                    # 終わったことをもう知らせた（読んでいない出力の場所だけを伝える）
+                    "reported": job.reported,
+                }
+            )
+        return finished
 
     def _known_outputs(self) -> dict[str, str]:
         """会話の成果物の、パスごとの最新の中身（SHA-256）。変わっていないファイルは回収し直さない"""

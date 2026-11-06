@@ -5,6 +5,7 @@ export const RunStatus = {
   WAITING_USER: 3,
   RETRY_WAIT: 4,
   CANCELLING: 5,
+  WAITING_BACKGROUND: 6,
   COMPLETED: 10,
   FAILED: 20,
   CANCELLED: 30,
@@ -35,7 +36,13 @@ export const RunLaunch = {
 } as const satisfies Record<string, RunLaunchEnum>
 
 // バックエンドの CANCELLABLE_STATUSES・ACTIVE_STATUSES と同じ
-const CANCELLABLE: RunStatusEnum[] = [RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.WAITING_USER, RunStatus.RETRY_WAIT]
+const CANCELLABLE: RunStatusEnum[] = [
+  RunStatus.QUEUED,
+  RunStatus.RUNNING,
+  RunStatus.WAITING_USER,
+  RunStatus.WAITING_BACKGROUND,
+  RunStatus.RETRY_WAIT,
+]
 const ACTIVE: RunStatusEnum[] = [...CANCELLABLE, RunStatus.CANCELLING]
 
 export const isCancellable = (run: Pick<Run, 'status'>) => CANCELLABLE.includes(run.status)

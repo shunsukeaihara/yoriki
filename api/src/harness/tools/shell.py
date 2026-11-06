@@ -34,7 +34,8 @@ or `ls`. Before deleting or moving files, check the absolute paths.
 - The command waits up to `timeout_seconds` (default 120, max 600). If it has not finished by then, it keeps \
 running as a background job and you get a `job_id`. Start long commands (several minutes or more) with \
 `background: true` and continue with other work; you are notified when a job finishes, so do not poll it with \
-`sleep`. Up to 4 jobs can run at the same time.
+`sleep`. A job keeps running after your reply and while waiting for the user's answer; when you have replied, a \
+finished job calls you again. Stop jobs you no longer need. Up to 4 jobs can run at the same time.
 - Do not change a file with a job while also changing it with `write` or `edit`.
 - Long output is truncated (the end is kept) and saved to a file under /workspace/work/.yoriki/outputs/."""
 
@@ -161,8 +162,8 @@ def _find(session: SandboxSession, job_id: str) -> Job | ToolResult:
         return job
     known = ", ".join(session.jobs) or "none"
     return ToolResult.error(
-        f"No job {job_id} (jobs in this session: {known}). Jobs are stopped when the work pauses, for example "
-        "while waiting for the user's answer; run the command again if needed."
+        f"No job {job_id} (jobs in this session: {known}). Jobs from before the work was interrupted or moved to a new "
+        "attempt no longer exist; run the command again if needed."
     )
 
 

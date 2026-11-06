@@ -59,6 +59,14 @@ def execute(
     schema: dict[str, Any] | None = None,
     recorded: str = RECORDED.format(after=AFTER),
 ) -> ToolResult:
+    # ジョブが残っている間は確定しない。動いているものがファイルを変えうる（design.md §5.3、harness.md §8.3）
+    session = context.session
+    if session is not None and session.started and (running := session.running_jobs(refresh=True)):
+        jobs = ", ".join(job.job_id for job in running)
+        return ToolResult.error(
+            f"Background jobs are still running: {jobs}. Wait for them, or stop them with job_kill, and then call "
+            "submit_result again."
+        )
     # 引数はRunnerが実行の前にSchemaで検証している
     if problem := _file_problem(schema, arguments, context):
         return problem

@@ -13,6 +13,7 @@ from conversation.dispatch import MessageMode, post_message
 from conversation.factories import ConversationFactory
 from conversation.models import ConversationMessage
 from harness.runner import Runner
+from harness.sandbox import SandboxSession
 from llm.providers.base import ImagePart
 from resources.factories import ResourceVersionFactory
 from run.models import (
@@ -440,16 +441,121 @@ def test_background_job_is_reported_when_it_finishes(conversation):
     assert any("finished with exit code 0" in m.text for m in adapter.requests[2].messages)
 
 
-def test_running_job_is_raised_before_the_final_reply(conversation):
+def test_reply_waits_for_the_running_job_in_the_same_container(conversation):
     run = post(conversation)
     adapter = FakeAdapter(
-        [calls(("c1", "shell", shell("sleep 60", background=True))), reply("終わりました"), reply("終わりました")]
+        [
+            calls(("c1", "shell", shell("sleep 2; echo done > /workspace/output/r.txt", background=True))),
+            reply("始めました"),
+            calls(("c2", "read", {"path": "/workspace/output/r.txt"})),
+            reply("終わりました"),
+        ]
     )
     run = execute(run, adapter)
     assert run.status == RunStatus.COMPLETED
-    assert any("still running" in m.text for m in adapter.requests[2].messages)
+    assert run.attempts.count() == 1
+    # 親が話し終えてもジョブは止めず、終わったジョブが親を起こす
+    assert any("finished with exit code 0" in m.text for m in adapter.requests[2].messages)
+    assert "done" in text(results(run)["c2"])
+    assert Checkpoint.objects.filter(run=run).latest("pk").stopped_jobs == []
+    assert containers(run) == []
+
+
+def test_job_finishing_during_a_question_is_reported_after_the_answer(conversation, app_user):
+    run = post(conversation)
+    run = execute(
+        run,
+        FakeAdapter(
+            [
+                calls(("c1", "shell", shell("sleep 1; echo from-the-job", background=True))),
+                calls(("c2", "ask_user", QUESTION)),
+            ]
+        ),
+    )
+    # ジョブが終わるまで見張り、全部止まったら保存してWorkerを手放す
+    assert run.status == RunStatus.WAITING_USER
+    assert containers(run) == []
     checkpoint = Checkpoint.objects.get(run=run)
-    assert [j["command"] for j in checkpoint.stopped_jobs] == ["sleep 60"]
+    assert checkpoint.stopped_jobs == []
+    job = checkpoint.finished_jobs[0]
+    assert job["exit_code"] == 0
+
+    ClarificationRequest.objects.get(run=run).accept_answer([{"selected": ["CSV"], "text": ""}], "", app_user)
+    run.refresh_from_db()
+    assert run.status == RunStatus.QUEUED
+    adapter = FakeAdapter([calls(("c3", "read", {"path": job["output"]})), reply("確かめました")])
+    run = execute(run, adapter)
+    assert run.status == RunStatus.COMPLETED
+    assert "from-the-job" in text(results(run)["c3"])
+    # 確認の呼出しと結果の間に挟まず、回答の後で知らせる
+    messages = adapter.requests[0].messages
+    answer = next(i for i, m in enumerate(messages) if m.tool_call_id == "c2")
+    notice = next(i for i, m in enumerate(messages) if isinstance(m.text, str) and job["output"] in m.text)
+    assert answer < notice
+
+
+def test_answer_continues_in_the_same_container_while_the_job_runs(conversation, app_user, monkeypatch):
+    run = post(conversation)
+    answer = {"sent": False}
+    original = SandboxSession.serve_script_requests
+
+    def serve(self, timeout=0, *, limit=8):
+        # 見張っている間に回答が届く
+        if timeout and not answer["sent"]:
+            current = Run.objects.get(pk=run.pk)
+            if current.status == RunStatus.WAITING_USER:
+                answer["sent"] = True
+                ClarificationRequest.objects.get(run=run).accept_answer(
+                    [{"selected": ["CSV"], "text": ""}], "", app_user
+                )
+        return original(self, timeout, limit=limit)
+
+    monkeypatch.setattr(SandboxSession, "serve_script_requests", serve)
+    adapter = FakeAdapter(
+        [
+            calls(("c1", "shell", shell("echo kept > memo.txt; sleep 3; echo done", background=True))),
+            calls(("c2", "ask_user", QUESTION)),
+            calls(("c3", "job_output", {"job_id": "job_1", "wait": 30})),
+            reply("終わりました"),
+        ]
+    )
+    monkeypatch.setattr("harness.sandbox.new_job_id", lambda: "job_1")
+    run = execute(run, adapter)
+    assert run.status == RunStatus.COMPLETED
+    assert run.attempts.count() == 1
+    assert "done" in text(results(run)["c3"])
+
+
+def test_attempt_limit_keeps_the_files_of_a_task_run(monkeypatch):
+    skill = SkillFactory.create(scope=SkillScope.SYSTEM, name="確認", owner=None)
+    SkillVersionFactory.create(skill=skill, tools=["shell", "read"])
+    admin = grant(UserFactory.create(), AppPermission.MANAGE_SYSTEM_TASKS)
+    task = TaskDefinitionFactory.create(
+        scope=TaskScope.SYSTEM, created_by=admin, revision__skills=[{"skill": skill.uid, "version": 1}]
+    )
+    run = start_task_run(task, inputs={}, actor=admin, launch=RunLaunch.MANUAL)
+    assert not run.is_interactive
+    monkeypatch.setattr("harness.sandbox.new_job_id", lambda: "job_1")
+    # 2回目の区切りで上限に達する
+    original = Runner._attempt_over
+    boundaries = {"count": 0}
+
+    def over(self):
+        boundaries["count"] += 1
+        return boundaries["count"] == 2
+
+    monkeypatch.setattr(Runner, "_attempt_over", over)
+    run = execute(run, FakeAdapter([calls(("c1", "shell", shell("echo kept > memo.txt; sleep 60", background=True)))]))
+    assert run.status == RunStatus.QUEUED
+    checkpoint = Checkpoint.objects.get(run=run)
+    assert [j["job_id"] for j in checkpoint.stopped_jobs] == ["job_1"]
+
+    monkeypatch.setattr(Runner, "_attempt_over", original)
+    adapter = FakeAdapter([calls(("c2", "read", {"path": "/workspace/work/memo.txt"})), reply("続けました")])
+    run = execute(run, adapter)
+    assert run.status == RunStatus.COMPLETED
+    assert "kept" in text(results(run)["c2"])
+    assert any("job_1" in m.text and "stopped" in m.text for m in adapter.requests[0].messages)
 
 
 def test_long_output_is_truncated_and_saved(conversation):

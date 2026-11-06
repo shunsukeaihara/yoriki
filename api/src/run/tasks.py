@@ -92,7 +92,8 @@ def _recover(attempt_id: int) -> None:
     attempt.end(failure="lease_expired")
     if run.status == RunStatus.CANCELLING:
         run.set_status(RunStatus.CANCELLED, comment=_("停止しました。"), end_reason=RunEndReason.CANCELLED)
-    elif run.status == RunStatus.RUNNING:
+    elif run.status in (RunStatus.RUNNING, RunStatus.WAITING_BACKGROUND):
+        # 確認待ちなら、回答が来たときに最後の保存から始める（確認を残す。design.md §5.3）
         failures = run.attempts.exclude(failure="").exclude(failure="superseded").count()
         if failures >= MAX_ATTEMPTS:
             run.set_status(
@@ -131,6 +132,7 @@ def _expire_clarifications(now) -> None:
             clarification.status = ClarificationStatus.EXPIRED
             clarification.save(update_fields=["status"])
             if run.status == RunStatus.WAITING_USER:
+                # ジョブが動いていても待たない。Workerは失敗になったことに気づいてコンテナを片付ける（design.md §5.3）
                 run.set_status(RunStatus.FAILED, end_reason=RunEndReason.EXPIRED, error=_("回答の期限が過ぎました。"))
 
 

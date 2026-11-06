@@ -12,6 +12,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
+from datetime import timedelta
 from functools import partial
 from typing import Any
 
@@ -63,6 +64,7 @@ from run.models import (
     RunKind,
     RunPrompt,
     RunStatus,
+    RunTrigger,
     ToolInvocation,
     ToolStatus,
 )
@@ -88,7 +90,7 @@ from .context import runtime_context as build_runtime_context
 from .prompts import system_prompt
 from .recovery import request_model_switch
 from .result_files import missing_files
-from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, WORKSPACE_ROLLED_BACK, SandboxSession
+from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, WORKSPACE_ROLLED_BACK, Job, SandboxSession
 from .script_connectors import ScriptConnectors
 from .skill_edit import revoked_edit
 from .skills import SkillContentSource, explicit_versions, revoked_skill
@@ -115,6 +117,10 @@ RETRY_DELAYS = (1, 2, 4, 8, 16)
 DELTA_INTERVAL = 0.15
 # モデルの呼出しの間にleaseを延ばす間隔（秒）
 HEARTBEAT_INTERVAL = 20
+# 1つのAttemptの上限（秒）。Q2のtimeout（Q_CLUSTER_TIMEOUT）で切られる前に、保存して移る（harness.md §4.4）
+ATTEMPT_LIMIT_SECONDS = 55 * 60
+# 親が動き終えて待つ間に、ジョブ・発言・回答・停止を確かめる間隔（秒）
+WATCH_INTERVAL = 1
 # 同じ呼出し・同じエラーを繰り返したときに、注意を添える回数と、止める回数（harness.md §11.3）
 REPEAT_WARN, REPEAT_STOP = 3, 5
 # prepare_notification の繰り返し。Runを失敗にせず、このRunではもう出さない
@@ -148,8 +154,9 @@ SAME_ERROR_NOTICE = (
     "\n\n[Repeating the same call will not fix this error. Correct the arguments or change the approach.]"
 )
 RUNNING_JOBS_NOTICE = (
-    "Background jobs are still running: {jobs}. Before you finish, wait for them (job_output with wait) or stop "
-    "them (job_kill). Jobs are stopped when the work ends."
+    "Background jobs are still running: {jobs}. This work must not finish while they run, and submit_result is "
+    "rejected until they end. Decide whether you still need them: stop them with job_kill if not. If you reply "
+    "without stopping them, the work waits for them and you are called again when one finishes."
 )
 RESULT_REQUIRED_NOTICE = (
     "This work must end with submit_result. Check the result, call submit_result with it, and then write your final "
@@ -216,6 +223,8 @@ class Runner:
         # このAttemptを始めたときのRunEventの最後のsequence。読んだファイルの版の記録を選ぶのに使う
         self.start_sequence = 0
         self.warned_running_jobs = False
+        # 親が動き終え、ジョブが残っているのでWorkerを手放さずに待つ（_watch()）
+        self.holding = False
         self.tools: tuple[Tool, ...] = ()
         # Skillで決まるTool（Run開始時に固定したManifestから作る。Runの中では変わらない）
         self.skill_tools: tuple[Tool, ...] | None = None
@@ -237,7 +246,7 @@ class Runner:
     def run(self) -> None:
         try:
             self._resume()
-            while self._step():
+            while self._step() or self._watch():
                 pass
         except LeaseLost:
             logger.info("run %s: attempt %s lost the lease", self.run_obj.uid, self.attempt.number)
@@ -371,6 +380,35 @@ class Runner:
                 "Run them again if you still need them.]"
             )
             self._record(RunEventKind.CONTEXT, {"text": text, "workspace": "jobs_stopped", "checkpoint": own.uid})
+        if own is not None and not any(
+            e.kind == RunEventKind.JOB_FINISHED and e.data.get("checkpoint") == own.uid for e in events
+        ):
+            self._report_jobs_finished_while_paused(own)
+
+    def _report_jobs_finished_while_paused(self, checkpoint: Checkpoint) -> None:
+        """確認待ちの間に終わったジョブを、回答で動き出すときに知らせる。確認の呼出しと結果の間に記録を挟まないよう、
+        Workerを手放すときにはCheckpointに残し、ここで記録する（harness.md §8.3）"""
+        for job in checkpoint.finished_jobs:
+            outcome = _job_outcome(job["stopped"], job["exit_code"], job["timeout_seconds"])
+            where = (
+                f"Its output since your last read is in {job['output']}."
+                if job["output"]
+                else "Its output could not be saved in the sandbox."
+            )
+            text = (
+                f"[Background job {job['job_id']} ({job['description']}) {outcome} while the work was paused. {where}]"
+            )
+            self._record(
+                RunEventKind.JOB_FINISHED,
+                {
+                    "job_id": job["job_id"],
+                    "exit_code": job["exit_code"],
+                    "stopped": job["stopped"],
+                    "text": text,
+                    "checkpoint": checkpoint.uid,
+                },
+                comment=_job_comment(job["description"], job["stopped"], job["exit_code"]),
+            )
 
     @staticmethod
     def _lost_work(events: list[RunEvent], since: int) -> list[str]:
@@ -503,7 +541,26 @@ class Runner:
             return False
         self._apply_instructions()
         self._record_finished_jobs()
+        if self._attempt_over():
+            self._move_to_new_attempt()
+            return False
         return True
+
+    def _attempt_over(self) -> bool:
+        return timezone.now() - self.attempt.started >= timedelta(seconds=ATTEMPT_LIMIT_SECONDS)
+
+    def _move_to_new_attempt(self) -> None:
+        """Attemptの上限に達した。ジョブを止めて保存し、新しいAttemptへ移る。止めたことは新しいAttemptで知らせる。
+        答える人がいないRunでも、続きから動けるように保存する（harness.md §4.4、design.md §7.9）"""
+        self._checkpoint(snapshot=True)
+        with self.run_obj.fenced(self.attempt) as run:
+            if run.status != RunStatus.CANCELLING:
+                self.attempt.end()
+                run.set_status(RunStatus.RETRY_WAIT, comment=_("実行の区切りで、新しい実行に切り替えます。"))
+                run.set_status(RunStatus.QUEUED)
+                enqueue_run(run)
+                return
+        self._finish_cancelled()
 
     def _revoked(self) -> tuple[RunEndReason, str] | None:
         """続けられなくなった理由。タスクの停止・削除・部門の無効化（authorization.md §6・§9）と、Skillの停止・権限の
@@ -525,22 +582,12 @@ class Runner:
         self.session.serve_script_requests()
         for job in self.session.finished_unreported():
             job.reported = True
-            if job.stopped == "timeout":
-                status = f"was stopped because it exceeded the time limit of {job.timeout_seconds} seconds"
-            else:
-                status = f"finished with exit code {job.exit_code}"
-            text = f"[Background job {job.job_id} ({job.description}) {status}. Read its output with job_output.]"
-            if job.stopped == "timeout":
-                comment = _("%(description)s（実行時間の上限で停止）") % {"description": job.description}
-            else:
-                comment = _("%(description)s（終了コード %(code)s）") % {
-                    "description": job.description,
-                    "code": job.exit_code,
-                }
+            outcome = _job_outcome(job.stopped, job.exit_code, job.timeout_seconds)
+            text = f"[Background job {job.job_id} ({job.description}) {outcome}. Read its output with job_output.]"
             self._record(
                 RunEventKind.JOB_FINISHED,
                 {"job_id": job.job_id, "exit_code": job.exit_code, "stopped": job.stopped, "text": text},
-                comment=comment,
+                comment=_job_comment(job.description, job.stopped, job.exit_code),
             )
 
     def _apply_instructions(self) -> bool:
@@ -736,10 +783,11 @@ class Runner:
         if not (error.retryable and self.run_obj.is_interactive):
             self._fail(RunEndReason.PROVIDER, error.message)
             return
-        self._checkpoint()
+        holding = self._prepare_to_wait_for_user()
         with self.run_obj.fenced(self.attempt) as run:
             request_model_switch(run, error.message)
             run.set_status(RunStatus.WAITING_USER, comment=_("モデルの切り替えを確認しています。"))
+            self._hold_or_end(holding)
 
     def _record_response(self, response: ModelResponse, purpose: UsagePurpose, *, images_sent: int = 0) -> None:
         completed = response.completed or Completed(StopReason.OTHER)
@@ -781,13 +829,8 @@ class Runner:
             return self._nudge("Your previous response was cut off at the output limit. Continue in smaller pieces.")
         if not response.text.strip():
             return self._nudge("Your previous response was empty. Call a tool or write your reply to the user.")
-        running = self.session.running_jobs() if self.session.started else []
-        if running and not self.warned_running_jobs:
-            # 最後の応答の前に、動いているジョブを待つか止めるかを1回だけ決めさせる（harness.md §8.3）
-            self.warned_running_jobs = True
-            jobs = ", ".join(f"{j.job_id} ({j.description})" for j in running)
-            self._record(RunEventKind.CONTEXT, {"text": RUNNING_JOBS_NOTICE.format(jobs=jobs)})
-            return True
+        if running := self._running_jobs():
+            return self._reply_with_running_jobs(response.text, running)
         if self._result_missing():
             # 業務結果のSchemaがあるのに submit_result を呼ばなかった。1回だけ促す（harness.md §10.5）。
             # 追加の指示で確定した結果を取り消した後は、もう一度促してよい
@@ -805,6 +848,95 @@ class Runner:
         # 最後の応答の間に追加指示が届いていれば、終えずに取り込んで続ける（harness.md §10.4）
         return self._finish_with_reply(response.text, RunStatus.COMPLETED, RunEndReason.COMPLETED)
 
+    def _running_jobs(self) -> list[Job]:
+        return self.session.running_jobs(refresh=True) if self.session.started else []
+
+    def _reply_with_running_jobs(self, text: str, running: list[Job]) -> bool:
+        """親は動き終えたが、ジョブが残っている。応答を会話に載せ、Workerを手放さずに待つ（design.md §5.3）。
+        タスクの実行は、終わる時点でジョブが残らない前提なので、待つか止めるかを1回だけ決めさせる（harness.md §8.3）"""
+        if self.run_obj.trigger != RunTrigger.CONVERSATION and not self.warned_running_jobs:
+            self.warned_running_jobs = True
+            jobs = ", ".join(f"{j.job_id} ({j.description})" for j in running)
+            self._record(RunEventKind.CONTEXT, {"text": RUNNING_JOBS_NOTICE.format(jobs=jobs)})
+            return True
+        with self.run_obj.fenced(self.attempt) as run:
+            self._post_reply(run, text)
+            if run.status != RunStatus.RUNNING or self._instructed(run):
+                return True
+            run.set_status(RunStatus.WAITING_BACKGROUND, comment=_("裏で動いている作業を待っています。"))
+        self.holding = True
+        return False
+
+    def _watch(self) -> bool:
+        """親が動き終えた後、ジョブが動いている間は同じAttemptで見張る（design.md §5.3、harness.md §8.3）。
+        親を起こすならTrue、Attemptを終えるならFalse"""
+        if not self.holding:
+            return False
+        self.holding = False
+        last_beat = time.monotonic()
+        while True:
+            beat = time.monotonic() - last_beat >= HEARTBEAT_INTERVAL
+            if beat:
+                self.attempt.heartbeat()
+                last_beat = time.monotonic()
+            run = self._refresh()
+            if run.status == RunStatus.RUNNING:
+                # 確認への回答。回答に付いた添付を、動いているSandboxの /workspace/input にも置く
+                self.session.sync_inputs()
+                return True
+            if run.status == RunStatus.CANCELLING:
+                self._finish_cancelled()
+                return False
+            if run.status == RunStatus.WAITING_BACKGROUND:
+                if self._should_wake(run, beat):
+                    return self._wake()
+            elif run.status == RunStatus.WAITING_USER:
+                if self._should_release(beat) and self._release():
+                    return False
+            else:
+                raise LeaseLost(f"run={run.uid} status={run.status}")  # 回答期限切れ等。コンテナを片付ける
+            self.session.serve_script_requests(timeout=WATCH_INTERVAL, limit=1)
+
+    def _should_wake(self, run: Run, beat: bool) -> bool:
+        """裏の作業を待つRunで、親を起こすか。続けられなくなったときと上限も、次の区切りで扱うので起こす"""
+        if self._instructed(run) or self._attempt_over() or (beat and self._revoked()):
+            return True
+        return bool(self.session.finished_unreported()) or not self._running_jobs()
+
+    def _wake(self) -> bool:
+        with self.run_obj.fenced(self.attempt) as run:
+            if run.status == RunStatus.WAITING_BACKGROUND:
+                run.set_status(RunStatus.RUNNING, comment=_("裏の作業の続きを始めます。"))
+        return True
+
+    def _should_release(self, beat: bool) -> bool:
+        """確認待ちのRunで、Workerを手放すか。上限に達した・続けられなくなったときは、ジョブを止めて手放す（続けられ
+        ないことは回答の後の区切りで扱う）"""
+        return not self._running_jobs() or self._attempt_over() or (beat and self._revoked() is not None)
+
+    def _release(self) -> bool:
+        """確認待ちのまま、保存してWorkerを手放す。保存の間に回答や停止が届いていればFalse（見張りへ戻る）"""
+        self._checkpoint()
+        with self.run_obj.fenced(self.attempt) as run:
+            if run.status != RunStatus.WAITING_USER:
+                return False
+            self.attempt.end()
+        return True
+
+    def _prepare_to_wait_for_user(self) -> bool:
+        """確認待ちへ移る前に。ジョブが動いていれば止めずに見張るのでTrue、動いていなければ保存してFalse"""
+        if self._running_jobs():
+            return True
+        self._checkpoint()
+        return False
+
+    def _hold_or_end(self, holding: bool) -> None:
+        """確認待ちへ移るのと同じtransactionで呼ぶ。Workerを手放すならAttemptを終える（回答はコミットの直後にも届き、
+        終わっていないAttemptがあると同じAttemptの続きとして受け付けるため）"""
+        self.holding = holding
+        if not holding:
+            self.attempt.end()
+
     def _result_missing(self) -> bool:
         """業務結果のSchemaがあるRunで、まだ submit_result で確定していない"""
         return any(t.name == SUBMIT_RESULT for t in self.tools) and self.run_obj.result is None
@@ -819,17 +951,16 @@ class Runner:
 
     def _finish_with_reply(self, text: str, status: RunStatus, end_reason: RunEndReason, *, error: str = "") -> bool:
         """応答を会話に載せてRunを終える。完了の前に追加指示が届いていれば、終えずにTrue（続ける）を返す"""
+        if status == RunStatus.COMPLETED:
+            # Attemptを抜けないのに保存してジョブを止めないよう、先に確かめる
+            with self.run_obj.fenced(self.attempt) as run:
+                if self._instructed(run):
+                    self._post_reply(run, text)
+                    return True
         self._checkpoint()
         with self.run_obj.fenced(self.attempt) as run:
-            if text.strip():
-                ConversationMessage.objects.create(
-                    conversation_id=run.conversation_id, run=run, role=MessageRole.AGENT, body=text
-                )
-                type(run.conversation).objects.filter(pk=run.conversation_id).update(last_posted=timezone.now())
-            pending = UserInstruction.objects.filter(
-                run=run, kind=InstructionKind.CURRENT, state=InstructionState.RECEIVED
-            ).exists()
-            if status == RunStatus.COMPLETED and pending:
+            self._post_reply(run, text)
+            if status == RunStatus.COMPLETED and self._instructed(run):
                 return True
             if status == RunStatus.COMPLETED and (missing := self._missing_result_files(run)):
                 # 業務結果が指すファイルを成果物として回収できなかった（回収の上限を超えた等）。出口へ渡す成果物が
@@ -843,6 +974,22 @@ class Runner:
                 error = error or str(end_reason.label)
             run.set_status(status, end_reason=end_reason, error=error)
         return False
+
+    @staticmethod
+    def _post_reply(run: Run, text: str) -> None:
+        if not text.strip():
+            return
+        ConversationMessage.objects.create(
+            conversation_id=run.conversation_id, run=run, role=MessageRole.AGENT, body=text
+        )
+        type(run.conversation).objects.filter(pk=run.conversation_id).update(last_posted=timezone.now())
+
+    @staticmethod
+    def _instructed(run: Run) -> bool:
+        """取り込んでいない追加指示がある"""
+        return UserInstruction.objects.filter(
+            run=run, kind=InstructionKind.CURRENT, state=InstructionState.RECEIVED
+        ).exists()
 
     def _missing_result_files(self, run: Run) -> list[str]:
         """業務結果のファイルの項目が指すのに、完了時に成果物として渡せないファイル。完了の前の回収（_checkpoint()）
@@ -878,14 +1025,14 @@ class Runner:
 
     # --- Sandbox ---
 
-    def _checkpoint(self, *, required: bool = True) -> None:
+    def _checkpoint(self, *, required: bool = True, snapshot: bool | None = None) -> None:
         """Workerを手放す前に、ジョブを止めてWorkspaceを保存する（design.md §7.9）。Sandboxを使っていなければ
         何もしない。答える人がいないRunは続きがないので、成果物の回収だけを行う。
 
         保存できなければ、待ち・完了にはせず、Sandboxの障害として別のAttemptでやり直す（required）
         """
         try:
-            saved = self.session.suspend(snapshot=self.run_obj.is_interactive)
+            saved = self.session.suspend(snapshot=self.run_obj.is_interactive if snapshot is None else snapshot)
         except SandboxUnavailable:
             if required:
                 raise
@@ -908,6 +1055,7 @@ class Runner:
                     size=saved.snapshot.size,
                     sha256=saved.snapshot.sha256,
                     stopped_jobs=saved.stopped,
+                    finished_jobs=saved.finished,
                 )
             # /workspace/output のファイルは、利用者が会話の画面から取得できる成果物にする（design.md §7.4）
             for output in saved.outputs:
@@ -924,6 +1072,8 @@ class Runner:
         failure = f"{OUT_OF_MEMORY_FAILURE}: {error}" if out_of_memory else f"sandbox: {error}"
         with self.run_obj.fenced(self.attempt) as run:
             ExecutionAttempt.objects.filter(pk=self.attempt.pk).update(ended=timezone.now(), failure=failure[:1000])
+            if run.status == RunStatus.WAITING_USER:
+                return  # 確認を残す。回答が来たら最後の保存から始め、失われたものを知らせる（design.md §5.3）
             if run.status == RunStatus.CANCELLING:
                 run.set_status(RunStatus.CANCELLED, comment=_("停止しました。"), end_reason=RunEndReason.CANCELLED)
                 return
@@ -956,7 +1106,7 @@ class Runner:
     def _interrupted(self) -> bool:
         """取消・追加指示が届いた。長く待つTool（shell）は待つのをやめて、区切りへ戻る"""
         status = Run.objects.filter(pk=self.run_obj.pk).values_list("status", flat=True).first()
-        if status == RunStatus.CANCELLING:
+        if status == RunStatus.CANCELLING or self._attempt_over():
             return True
         return UserInstruction.objects.filter(
             run=self.run_obj, kind=InstructionKind.CURRENT, state=InstructionState.RECEIVED
@@ -1193,11 +1343,11 @@ class Runner:
             self._record_tool_result(call.id, call.name, ToolResult.error(text), ToolStatus.CANCELLED)
 
     def _wait_for_user(self, call: ToolCall, rest: list[ToolCall]) -> bool:
-        """ask_user・request_skill_edit・request_task_edit・test_skill_draft の結果は記録せずにWAITING_USERにし、
-        Attemptを終える（harness.md §10.3・§10.9・§10.10）"""
+        """ask_user・request_skill_edit・request_task_edit・test_skill_draft の結果は記録せずにWAITING_USERにする。
+        ジョブが動いていれば同じAttemptで見張り、動いていなければAttemptを終える（harness.md §10.3・§10.9・§10.10）"""
         self._close_calls(rest, "Not executed: waiting for the user's answer. Call again after the answer if needed.")
         invocation = ToolInvocation.objects.get(run=self.run_obj, call_id=call.id)
-        self._checkpoint()
+        holding = self._prepare_to_wait_for_user()
         with self.run_obj.fenced(self.attempt) as run:
             # 確認の作成とWAITING_USERへの遷移を同じtransactionで行う。途中でleaseを失っても、
             # 答えられない確認だけが残ることはない
@@ -1223,6 +1373,7 @@ class Runner:
                 run.set_status(RunStatus.WAITING_USER, comment=_("Draftの評価を待っています。"))
             else:
                 run.set_status(RunStatus.WAITING_USER, comment=_("確認をお願いしています。"))
+            self._hold_or_end(holding)
         return False
 
     # --- 圧縮 ---
@@ -1272,6 +1423,22 @@ class Runner:
                 request_id=response.completed.request_id if response.completed else "",
             )
         return True
+
+
+def _job_outcome(stopped: str, exit_code: int | None, timeout_seconds: int) -> str:
+    if stopped == "timeout":
+        return f"was stopped because it exceeded the time limit of {timeout_seconds} seconds"
+    if stopped:
+        return "was stopped"
+    return f"finished with exit code {exit_code}"
+
+
+def _job_comment(description: str, stopped: str, exit_code: int | None) -> str:
+    if stopped == "timeout":
+        return _("%(description)s（実行時間の上限で停止）") % {"description": description}
+    if stopped:
+        return _("%(description)s（停止）") % {"description": description}
+    return _("%(description)s（終了コード %(code)s）") % {"description": description, "code": exit_code}
 
 
 def _unknown_tool(name: str, tools: dict[str, Tool]) -> str:

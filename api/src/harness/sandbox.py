@@ -404,25 +404,32 @@ class SandboxSession:
             self._place_task_outputs()
 
     def _place_task_outputs(self) -> None:
-        """直前のタスクのRunの成果物。タスクのRunのWorkspaceは残らないので、直すときはここから読む。同じパスは後のもの
-        が残る（pkの順に置くので、Runの中で作り直した版が最後になる）"""
+        """直前のタスクのRunの成果物。タスクのRunのWorkspaceは残らないので、直すときはここから読む。Runの中で作り直した
+        ファイルも回収した版が残っているので、新しいものから順に見て、同じパスや、ファイルとディレクトリが衝突する古いものは
+        置かない（`report` の後に `report/result.csv` を作った等）"""
         outputs = (
             Artifact.objects.filter(
                 run__in=self.run.fix_chat_runs().filter(trigger=RunTrigger.TASK),
                 kind=ArtifactKind.OUTPUT,
                 deleted=False,
             )
-            .exclude(pk__in=self.inputs)
             .select_related("blob")
-            .order_by("pk")
+            .order_by("-pk")
         )
         root = self.input_dir / TASK_OUTPUTS_DIR
+        files: set[Path] = set()
+        directories: set[Path] = set()
         for artifact in outputs:
             path = root / artifact.path
             if root not in path.parents or ".." in Path(artifact.path).parts:
                 logger.warning("run %s: skipping output %s with a bad name", self.run.uid, artifact.uid)
                 continue
-            self._place_input(artifact, path)
+            if path in files or path in directories or not files.isdisjoint(path.parents):
+                continue
+            files.add(path)
+            directories.update(path.parents)
+            if artifact.pk not in self.inputs:
+                self._place_input(artifact, path)
 
     def _place_input(self, artifact: Artifact, path: Path) -> None:
         try:

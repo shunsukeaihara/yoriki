@@ -374,6 +374,31 @@ def test_edit_run_reads_the_outputs_of_the_last_task_run(api_client, manager):
     session.close()
 
 
+@pytest.mark.parametrize(
+    ("older", "newer", "kept"),
+    [("report", "report/r.csv", "report/r.csv"), ("report/r.csv", "report", "report")],
+    ids=["file-then-directory", "directory-then-file"],
+)
+def test_conflicting_outputs_keep_the_newer_one(api_client, manager, older, newer, kept):
+    """作り直しでファイルとディレクトリが衝突しても、編集のRunを止めず、新しいものを置く"""
+    task = _task(manager)
+    first = _fix(api_client, manager, task)
+    Artifact.create_output(first, older, BlobObject.put(io.BytesIO(b"old")))
+    Artifact.create_output(first, newer, BlobObject.put(io.BytesIO(b"new")))
+    Run.objects.filter(pk=first.pk).update(status=RunStatus.COMPLETED)
+    res = _post(api_client, first.conversation)
+    assert res.status_code == 201, res.json()
+    run = ConversationMessage.objects.get(uid=res.json()["id"]).run
+    assert run is not None
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    session = SandboxSession(run, attempt)
+    session.sync_inputs()
+    session.sync_inputs()
+    assert (session.input_dir / "outputs" / kept).read_bytes() == b"new"
+    session.close()
+
+
 def test_edit_run_does_not_restore_files_of_earlier_runs(api_client, manager):
     """直前のタスクのRunがCheckpointを残さなければ、さらに前の実行の作業ファイルではなく空のWorkspaceから始める"""
     task = _task(manager)

@@ -112,11 +112,11 @@ def test_edit_request_starts_a_skill_edit_run_with_the_target_fixed(conversation
 
     assert run.kind == RunKind.SKILL_EDIT
     assert run.manifest["fixed"]["skill_edit"] == {"skill": skill.uid, "name": skill.name}
-    assert run.manifest["fixed"]["skill_catalog"] is None
     names = {t.name for t in adapter.requests[0].tools}
+    assert "skill" in names
     assert {"get_skill", "update_skill_draft", "stage_skill_asset", "publish_skill_draft", "rollback_skill"} <= names
-    # 対象が決まっているので作らない。Skillを使う・提案するToolも出さない
-    assert not names & {"create_skill", "skill", "request_skill_edit", "submit_result"}
+    # 対象が決まっているので作らない。提案のToolも出さない
+    assert not names & {"create_skill", "request_skill_edit", "submit_result"}
     context = next(m.text for m in adapter.requests[0].messages if m.text.startswith("<runtime_context>"))
     assert f'<skill_edit skill="{skill.name}"' in context
     assert 'your_access="publish"' in context
@@ -246,16 +246,16 @@ def test_editor_without_publish_role_saves_a_draft(conversation, app_user):
     adapter = FakeAdapter(
         [
             calls(("c1", "update_skill_draft", {"expected_revision": 0, "tools": ["read", "shell"]})),
-            calls(("c2", "update_skill_draft", {"expected_revision": 0, "description": "B/Lを確認する"})),
-            calls(("c3", "publish_skill_draft", {"expected_revision": 2, "change_reason": "説明を直す"})),
+            calls(("c2", "update_skill_draft", {"expected_revision": 2, "description": "B/Lを確認する"})),
+            calls(("c3", "publish_skill_draft", {"expected_revision": 3, "change_reason": "説明を直す"})),
             reply("変更案を保存しました。"),
         ]
     )
     run = execute(run, adapter)
 
-    # Toolは編集の権限では変えられない（開いたDraftも残さない）
+    # 使うToolは権限ではないので、編集の権限で変えられる
     first = results(run, "update_skill_draft")[0]
-    assert first["is_error"] and "公開の権限" in text_of(first)
+    assert not first["is_error"]
     published = results(run, "publish_skill_draft")[0]
     assert not published["is_error"]
     assert "Not published" in text_of(published)
@@ -263,10 +263,10 @@ def test_editor_without_publish_role_saves_a_draft(conversation, app_user):
     assert skill.version_number == 1
     draft = SkillDraft.objects.get(skill=skill)
     assert draft.description == "B/Lを確認する"
-    assert draft.tools == ["read"]
+    assert draft.tools == ["read", "shell"]
     [summary] = skill_changes(run)
     assert summary["state"] == "draft_saved"
-    assert summary["summary"]["fields"] == ["description"]
+    assert set(summary["summary"]["fields"]) == {"description", "tools"}
 
 
 @pytest.mark.django_db

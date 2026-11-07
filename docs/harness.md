@@ -130,7 +130,7 @@ RunnerはQClusterのプロセスの中で動き、Provider Adapter・Connector�
 | `provider` | 再試行してもモデルにつながらない（答える人がいないRun）か、再試行できないエラー | FAILED |
 | `repeated_errors` | 同じ誤りの繰返し（§11.3）、応答の異常（空の応答・最大出力tokenで切れた）の繰返し（§11.2） | FAILED |
 | `no_result` | 業務結果のSchemaがあるのに `submit_result` を呼ばずに終わった | FAILED |
-| `skill` | Runが使うSkill（`/` で指定した・読み込んだもの）が停止・削除されたか、利用者が使えなくなった（§10.1） | FAILED |
+| `skill` | 機密でない編集のRunで、編集の対象のSkillが機密になった（§10.9） | FAILED |
 | `attempts` | 復旧できる障害の再試行が上限に達した | FAILED |
 | `expired` | 確認の回答期限が切れた | FAILED |
 | `sandbox` | 実行環境（Runtime Profile・Sandbox）を使えない。Sandboxを繰り返し失って再試行の上限に達したときもこれ | FAILED |
@@ -613,9 +613,9 @@ LibreOffice・Node.js・pandoc・poppler-utils・markitdownはこれからイメ
 
 ### 10.1 Skill
 
-**一覧**：`context.snapshot` の `<skills>` に、利用者が使えて、使うモデルの能力を満たし、宣言したConnectorを利用者が使えて（宣言した操作・表をConnectorの今の版が公開していて）、機密の制限に合うSkill（機密のSkillは機密のRunだけ。design.md §4冒頭）の名前と説明だけを並べる（design.md §3.1・§4.8・§4.9.1）。一覧の量は文脈の2%までにし、超えたら説明を短くして「ほかにN件」と書く（Codexの方式）。`skill` の引数 `name` は文字列にする（一覧がRunの中で変わるので、Toolの定義をprompt cacheのために変えない）。一覧の量の上限は見せ方で、アクセス範囲ではないので、省いたものも名前で読み込める（名前が1つに決まるとき。権限は同じように確かめる）。使えない名前は、候補を添えたエラーで返す。
+**一覧**：`context.snapshot` の `<skills>` に、セッションの権限（会話は利用者、タスクはタスクの範囲）で選べるSkill（機密のSkillは機密のRunだけ。design.md §4冒頭）の名前と説明だけを並べる。使うモデルが必要な能力を持たないSkillは外さず、そのことを添える。一覧の量は文脈の2%までにし、超えたら説明を短くして「ほかにN件」と書く（Codexの方式）。`skill` の引数 `name` は文字列にする（一覧がRunの中で変わるので、Toolの定義をprompt cacheのために変えない）。一覧の量の上限は見せ方で、アクセス範囲ではないので、省いたものも名前で読み込める（名前が1つに決まるとき。権限は同じように確かめる）。使えない名前は、候補を添えたエラーで返す。
 
-- 一覧は、Run開始時と発言を取り込むたびに、今の権限（会話は依頼した人、タスクはタスクの範囲）で作り直し、変わった分を `context.snapshot` で知らせる（`<runtime_context>` を今の一覧で記録し直す）。読めるものは読める。編集のRunには一覧を出さない。
+- 一覧は、Run開始時と発言を取り込むたびに、今の権限（会話は依頼した人、タスクはタスクの範囲）で作り直し、変わった分を `context.snapshot` で知らせる（`<runtime_context>` を今の一覧で記録し直す）。読めるものは読める。評価のRunには一覧を出さない。
 - 同じ名前のSkillが範囲（個人・部門・全社）の違いで重なれば、範囲を添えた名前にする（「名寄せ (個人)」）。並びは個人・部門・全社の順。
 
 **使い方の規則**（system promptに入れる）：
@@ -625,7 +625,7 @@ LibreOffice・Node.js・pandoc・poppler-utils・markitdownはこれからイメ
 - どのSkillを使うかを、利用者に1行で伝える。
 - 合うSkillがなければ、Skillなしで進めてよい。
 
-**読込み**：`skill` は業務の会話のRunとタスクのRunに出す（タスクのRunでも、定義で指示したSkill以外を一覧から探して読み込める。authorization.md §5.4）。`skill` が呼ばれたら、RunnerはそのSkillをその時点の最新の公開版へ解決し、権限（タスクはタスクの範囲）・停止・必要な能力・機密の制限を確かめて、Manifestへの追記と `skill.loaded` の記録を同じDB transactionで行う（design.md §3.2）。結果として返すもの：
+**読込み**：`skill` は評価のRunのほかのすべてのRunに出す（タスクのRunでも、定義で指示したSkill以外を一覧から探して読み込める。authorization.md §5.4）。`skill` が呼ばれたら、RunnerはそのSkillをその時点の最新の公開版へ解決し、セッションの権限で選べるか（範囲・停止・機密の制限）を確かめて、Manifestへの追記と `skill.loaded` の記録を同じDB transactionで行う（design.md §3.2）。結果として返すもの：
 
 ```
 <skill name="請求書の照合" version="7">
@@ -653,12 +653,12 @@ LibreOffice・Node.js・pandoc・poppler-utils・markitdownはこれからイメ
 
 同じRunで `skill` でもう一度読み込んでも、追記した版を返す（途中で公開し直されても切り替えない）。利用者が発言で `/` で指定し直したときだけ、その時点の最新の公開版へ切り替え、Manifestに追記して切り替えた時点を記録する。
 
-Runが使うSkill（`/` で指定したものと、読み込んだもの）が停止・削除されたか、利用者が使えなくなったら（権限の失効。宣言したConnectorを使えなくなった、宣言した表をConnectorが公開しなくなった、機密でないRunで機密のSkillになった、も含む）、過去の版でも使わせない（design.md §3.2・§4.9.1）。Runnerは毎ステップの区切りで確かめ、`skill` で終える。モデルの切り替えの候補と、利用者が会話のモデルを変えるときも、Runが使うSkillの必要な能力を持つモデルに限る。
+権限が決めるのは選べるかだけなので、読み込んだSkillが停止・削除された、利用者が使えなくなった、宣言したConnectorを使えなくなった、機密になった、といったことではRunを止めない。新しく選べなくなるだけで、読み込み済みの手順は文脈に残る（authorization.md §1の8）。モデルの切り替えの候補も、Skillの必要な能力では絞らない。
 
 **使うよう指示した場合**（`/` やTask Definition。読み込む手間を省くだけで、Toolの一覧もアクセス範囲も変えない）：Run開始時にSkill Versionへ解決し（使えなければRunを始めず、利用者に理由を返す）、Manifestに固定して（`fixed.skills`）、上と同じ内容を最初の `message.user` に入れる。モデルに `skill` を呼ばせない。
 
 - 1つのメッセージで指定できるSkillは3つまで。
-- 実行中の会話でSkillを指定したメッセージは親へ渡す。発言を受け付けるときに今の権限で確かめ（使えなければ理由を返して受け付けない）、取り込むときに `skill` の読込みと同じ処理（権限の確かめ直しを含む。その時点の最新の公開版）を行い、同じ内容を `message.user` に入れる。すでに読み込んだSkillを指定したら、その時点の最新の公開版を読み込み、前に読んだ版に代わることを明示する。受け付けた後に使えなくなったものは文脈に入れず、会話のシステムのメッセージで画面に示し、モデルには名前を出さずに使えなかったことだけを伝える。確認待ちの間の指定は、再開のときに取り込む（design.md §5.5）。修正チャットでは受け付けない（design.md §11.11）。
+- 実行中の会話でSkillを指定したメッセージは親へ渡す。発言を受け付けるときに今の権限で確かめ（使えなければ理由を返して受け付けない）、取り込むときに `skill` の読込みと同じ処理（権限の確かめ直しを含む。その時点の最新の公開版）を行い、同じ内容を `message.user` に入れる。すでに読み込んだSkillを指定したら、その時点の最新の公開版を読み込み、前に読んだ版に代わることを明示する。受け付けた後に使えなくなったものは文脈に入れず、会話のシステムのメッセージで画面に示し、モデルには名前を出さずに使えなかったことだけを伝える。確認待ちの間の指定は、再開のときに取り込む（design.md §5.5）。修正チャットでも受け付ける（動いているタスクのRunではタスクの範囲で確かめる。編集のRunでは依頼した人の権限）。
 
 **スクリプト**：Skillの資料にスクリプトがあれば、書き直さずに実行するか、コピーして直して使うよう、system promptに書く（Codexの方式）。
 
@@ -744,7 +744,7 @@ Codexの非同期の質問と、Gemini CLIの「承認待ちのTool呼出し」�
 
 **対象**：編集のRunはManifestの `fixed.skill_edit` に対象のSkill（新規なら空）を固定する。新規のときは `create_skill` で1つだけ作り、作ったSkillを `skill_edit` としてManifestへ追記する。Skill管理のToolは引数にSkillを取らず、対象のSkillにだけ働く。
 
-**Tool**：Sandboxの土台のTool、`ask_user`、`todo_write`、使えるConnectorがあれば `datasource_*`（宣言を確かめるため）と、次のSkill管理のTool。`skill`・`submit_result`・`request_skill_edit` は出さない。
+**Tool**：Sandboxの土台のTool、`ask_user`、`todo_write`、`datasource_*`（宣言を確かめるためにも使う）と `skill` と、次のSkill管理のTool。`submit_result`・`request_skill_edit` は出さない。
 
 | Tool | 引数 | 内容 |
 |---|---|---|
@@ -757,12 +757,12 @@ Codexの非同期の質問と、Gemini CLIの「承認待ちのTool呼出し」�
 | `rollback_skill` | `number`、`expected_version`、`change_reason` | 公開中の版を過去の版に戻す（公開の権限を持つ人だけ） |
 | `test_skill_draft` | `cases`（評価ケースの名前。省けば全部。10件まで） | Draftを評価する（design.md §3.7.1）。`ask_user` と同じく単独で呼び、評価が終わるまで編集のRunは確認待ち（確認の種類「Draftの評価」。利用者が答えるものではない）になってAttemptを終える。評価が終わるとサーバーがケースごとの結果（通過か、LLMの判定と理由、Draftの側の最後の応答と業務結果の抜粋）を結果として記録し、Runを再開する。編集のRunを止めたら評価も止める。1つの編集のRunで3回まで |
 
-- 権限は画面のAPIと同じ判定（`Skill.can()`。authorization.md §5.1）を、依頼した人の権限で呼ぶたびにサーバーで確かめる。Toolの変更・公開・切戻しは公開の権限を持つ人だけ。
+- 権限は画面のAPIと同じ判定（`Skill.can()`。authorization.md §5.1）を、依頼した人の権限で呼ぶたびにサーバーで確かめる。公開・切戻しは公開の権限を持つ人だけ。
 - `publish_skill_draft` は、画面と同じ公開の条件（必須の評価ケース。design.md §3.7.1）を確かめる。満たさなければ、足りないケースを示して `test_skill_draft` を呼ぶよう返す。評価ケースはエージェントからは作らない（利用者がSkillの画面で作る）。
 - 公開・切戻しは、ToolInvocationのoperation keyをSkillChangeに渡し、再試行で版を重ねない。SkillChangeには編集のRunを記録する。
 - 結果の `value` に、Skillの名前・範囲・状態（変更案を保存・公開・切戻し）・版・変更点を持たせ、画面はそれを会話に表示し、Skillの画面（版の中身・切戻し）へのリンクを置く（design.md §11.6）。
 - 編集のRunで公開しても、進行中・確認待ちの業務のRunは読み込んだ版を使い続ける。次に読み込むときから新しい版を使う。
-- 機密のSkill（公開中の版かDraftが機密のフラグを持つか、機密のConnectorを宣言しているもの。design.md §4冒頭）は、機密の会話の編集のRunでだけ扱う。機密でないRunでは、編集の依頼を受け付けず、`request_skill_edit` の候補にも名前を出さず、`get_skill` も中身を返さない。編集の途中で機密になったら、読んだ中身を次のモデルの呼出しで送らないように、毎ステップの区切りで止める。機密でない編集のRunでは、機密の版へ切り戻さない。
+- 機密のSkill（公開中の版かDraftが機密のフラグを持つもの。design.md §4冒頭）は、機密の会話の編集のRunでだけ扱う。機密でないRunでは、編集の依頼を受け付けず、`request_skill_edit` の候補にも名前を出さず、`get_skill` も中身を返さない。編集の途中で機密になったら、読んだ中身を次のモデルの呼出しで送らないように、毎ステップの区切りで止める。機密でない編集のRunでは、機密の版へ切り戻さない。
 
 ### 10.10 修正チャットとタスクの編集のRun
 
@@ -782,7 +782,7 @@ Codexの非同期の質問と、Gemini CLIの「承認待ちのTool呼出し」�
 
 **文脈**：編集のRunは、同じ会話の1つ前のRunを親にして文脈を引き継ぐ。タスクのRunは親を持たないので、編集の文脈は直前のタスクのRunから始まる。ワークスペースは、ふつうの会話と同じく最新のsnapshotから戻す（直前のタスクのRunの作業ファイルと `/workspace/output` から続ける）。`/workspace/input` には、直前のタスクのRunから後のRun（そのタスクのRunと、その後の編集のRun）の添付とConnectorの結果だけを置き、最初の発言に添える前の添付の一覧と、回収し直さない既知の成果物も同じ範囲にする（タスクのRunごとに入力の名前が重なりうるため。`Run.fix_chat_runs()`）。編集のRunへの添付の名前は、会話の添付の中で重ならないように決める。Manifestの `fixed.task_edit` に対象のタスクを固定し、`<runtime_context>` に `<task_edit task="..." version="..." />` を置く。モデルは修正チャットのモデル設定（始めたときはタスクのモデル設定。会話の画面で切り替えられるが、Toolを使えるモデルだけ）を使う。編集のRunの依頼の添付は、タスクのRunの添付にせず、名前も会話の添付の中で決める。
 
-**Tool**：Sandboxの土台のTool、`ask_user`、`todo_write` と、次のタスク管理のTool。Skill・Connectorは使わない（`skill`・`submit_result`・`request_*` も出さない）。
+**Tool**：Sandboxの土台のTool、`ask_user`、`todo_write`、`datasource_*`、`skill` と、次のタスク管理のTool。`submit_result`・`request_*` は出さない。
 
 | Tool | 引数 | 内容 |
 |---|---|---|
@@ -801,13 +801,13 @@ Codexの非同期の質問と、Gemini CLIの「承認待ちのTool呼出し」�
 
 **動かし方**：親のLLMが `subagent`（§7.4）を呼ぶ。Runnerは次を順に行い、子のIDをすぐ返す。親は待たない。
 
-1. `model`・`effort` を確かめて固定する。選べるのはagentセッションで使えるものだけ（機密ならローカルLLM）で、既定は親と同じ。タスクのRunでは親と同じモデル（タスクに固定したもの）だけにし、会話では親のRunのSkillの必要な能力を持つモデルに限る。利用者向けの選択の画面は作らない。
+1. `model`・`effort` を確かめて固定する。選べるのはagentセッションで使えるものだけ（機密ならローカルLLM）で、既定は親と同じ。タスクのRunでは親と同じモデル（タスクに固定したもの）だけにする。利用者向けの選択の画面は作らない。
 2. 親のコンテナの中で `/workspace/work`・`/workspace/output` のtarを作り、保存先へ一時的に置く（親のsnapshotとは別の扱い。親のコンテナがなければ最新のsnapshotを使う）。親のコマンドが書き込み中でもその時点のファイルを写し、書き込み中のファイルの中身は保証しない（ジョブが動いていれば、そのことを親への結果と子の指示に添える）。作れなければ親へエラーを返す。
 3. Subagentを記録し、子のAttemptをQ2へ渡す。
 
 **ワークスペース**：親と同じRuntime Profileの版で別のSandboxを起動し、コピーを展開する。`/workspace/input`・`/workspace/master` は親と同じものを読取り専用で置く。コピーは自由に読み書きでき、親の変更は子から見えず、子の変更は親から見えない。
 
-**種類とTool**：種類は組込みの汎用の1つだけ。Toolは、Sandboxの土台のTool（`todo_write` を除く）と `skill`・`datasource_*` のうち、親のRunに出しているToolとの共通部分だけ（§7.5）。呼ぶたびに親の実行許可（authorization.md §6）で確かめる。Skillは読み込んで使えるが変更はできない。親に `skill` を出していないRun（編集のRun等）では子にも出さない。親に使うよう指示したSkillがあれば、その内容を子の最初の発言に入れる。`ask_user`、`submit_result`、`present_files`、`prepare_notification`、`request_*`、`install_python_packages`、`subagent` は出さない。困ったら報告で親へ返すよう指示する。孫は作らない。
+**種類とTool**：種類は組込みの汎用の1つだけ。Toolは、Sandboxの土台のTool（`todo_write` を除く）と `skill`・`datasource_*` のうち、親のRunに出しているToolとの共通部分だけ（§7.5）。呼ぶたびに親の実行許可（authorization.md §6）で確かめる。Skillは読み込んで使えるが変更はできない。親に `skill` を出していないRun（評価のRun）では子にも出さない。親に使うよう指示したSkillがあれば、その内容を子の最初の発言に入れる。`ask_user`、`submit_result`、`present_files`、`prepare_notification`、`request_*`、`install_python_packages`、`subagent` は出さない。困ったら報告で親へ返すよう指示する。孫は作らない。
 
 **親へ返すもの**：テキストとファイルだけ。
 

@@ -52,13 +52,14 @@ def _make_sensitive(connector) -> None:
 
 
 @pytest.mark.django_db
-def test_skill_is_listed_only_when_the_user_can_use_its_connectors(app_user):
+def test_skill_is_listed_even_when_the_user_cannot_use_its_connectors(app_user):
+    """選べるかはセッションの権限とSkillの範囲で決まり、宣言には左右されない（authorization.md §1の8）"""
     usable = ConnectorFactory.create(name="販売管理", version__tables=TABLES)
     other = ConnectorFactory.create(scope=ConnectorScope.DEPARTMENT, department=DepartmentFactory.create())
     _declaring(app_user, usable)
     _declaring(app_user, other, name="他部門の照合")
     run = _start(ConversationFactory.create(owner=app_user))
-    assert _catalog_names(run) == ["取引先の照合"]
+    assert sorted(_catalog_names(run)) == ["他部門の照合", "取引先の照合"]
 
 
 @pytest.mark.django_db
@@ -75,11 +76,11 @@ def test_loaded_skill_shows_its_connectors(app_user):
 
 
 @pytest.mark.django_db
-def test_chosen_skill_needs_its_connectors(app_user):
+def test_chosen_skill_does_not_need_its_connectors(app_user):
     other = ConnectorFactory.create(scope=ConnectorScope.DEPARTMENT, department=DepartmentFactory.create())
-    skill, _version = _declaring(app_user, other)
-    with pytest.raises(CannotStart, match="Connector"):
-        _start(ConversationFactory.create(owner=app_user), skills=[skill])
+    skill, version = _declaring(app_user, other)
+    run = _start(ConversationFactory.create(owner=app_user), skills=[skill])
+    assert run.manifest["fixed"]["skills"][0]["version"] == version.pk
 
 
 @pytest.mark.django_db
@@ -95,13 +96,9 @@ def test_chosen_skill_puts_its_connectors_first_in_the_catalog(app_user, monkeyp
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize("by_connector", [False, True])
-def test_sensitive_skill_is_used_only_in_a_confidential_conversation(app_user, local_model, by_connector):
-    connector = ConnectorFactory.create(name="人事", version__tables=TABLES, version__is_sensitive=by_connector)
-    if by_connector:
-        skill, _version = _declaring(app_user, connector, name="人事の照会")
-    else:
-        skill, _version = publish(app_user, name="人事の照会", is_sensitive=True)
+@pytest.mark.django_db
+def test_sensitive_skill_is_used_only_in_a_confidential_conversation(app_user, local_model):
+    skill, _version = publish(app_user, name="人事の照会", is_sensitive=True)
     plain = ConversationFactory.create(owner=app_user, model_profile=local_model)
     assert "人事の照会" not in _catalog_names(_start(plain))
     with pytest.raises(CannotStart, match="機密"):
@@ -111,28 +108,33 @@ def test_sensitive_skill_is_used_only_in_a_confidential_conversation(app_user, l
 
 
 @pytest.mark.django_db
-def test_run_stops_when_a_declared_connector_becomes_sensitive(app_user):
+def test_declaring_a_sensitive_connector_does_not_make_the_skill_sensitive(app_user, local_model):
+    connector = ConnectorFactory.create(name="人事", version__tables=TABLES, version__is_sensitive=True)
+    _declaring(app_user, connector, name="人事の照会")
+    plain = ConversationFactory.create(owner=app_user, model_profile=local_model)
+    assert "人事の照会" in _catalog_names(_start(plain))
+
+
+@pytest.mark.django_db
+def test_run_continues_when_a_declared_connector_becomes_sensitive(app_user):
+    """機密はSkill自身のフラグで決める。機密のConnectorは操作のときに断る"""
     connector = ConnectorFactory.create(name="販売管理", version__tables=TABLES)
     skill, _version = _declaring(app_user, connector)
     run = _start(ConversationFactory.create(owner=app_user), skills=[skill])
     _make_sensitive(connector)
-    run = execute(run, FakeAdapter([]))
-    assert run.status == RunStatus.FAILED
-    assert run.end_reason == RunEndReason.SKILL
-    assert "機密" in run.error
+    run = execute(run, FakeAdapter([reply("終わりました")]))
+    assert run.status == RunStatus.COMPLETED
 
 
 @pytest.mark.django_db
-def test_run_stops_when_the_user_can_no_longer_use_a_declared_connector(app_user):
+def test_run_continues_when_the_user_can_no_longer_use_a_declared_connector(app_user):
     connector = ConnectorFactory.create(name="販売管理", version__tables=TABLES)
     skill, _version = _declaring(app_user, connector)
     run = _start(ConversationFactory.create(owner=app_user), skills=[skill])
     connector.is_active = False
     connector.save(update_fields=["is_active"])
-    run = execute(run, FakeAdapter([]))
-    assert run.status == RunStatus.FAILED
-    assert run.end_reason == RunEndReason.SKILL
-    assert "Connector" in run.error
+    run = execute(run, FakeAdapter([reply("終わりました")]))
+    assert run.status == RunStatus.COMPLETED
 
 
 @pytest.mark.django_db
@@ -248,16 +250,15 @@ def test_loaded_skill_names_connectors_as_the_run_lists_them(app_user):
 
 
 @pytest.mark.django_db
-def test_skill_whose_declared_table_is_no_longer_published_is_not_used(app_user):
+def test_skill_whose_declared_table_is_no_longer_published_stays_usable(app_user):
     connector = ConnectorFactory.create(name="販売管理", version__tables=TABLES)
     skill, _version = _declaring(app_user, connector)
     run = _start(ConversationFactory.create(owner=app_user), skills=[skill])
     content = {name: getattr(connector.current_version, name) for name in VERSION_FIELDS}
     connector.revise(actor=connector.created_by, expected_version=1, **content | {"tables": []})
-    assert "取引先の照合" not in _catalog_names(_start(ConversationFactory.create(owner=app_user)))
-    run = execute(run, FakeAdapter([]))
-    assert run.status == RunStatus.FAILED
-    assert "公開していません" in run.error
+    assert "取引先の照合" in _catalog_names(_start(ConversationFactory.create(owner=app_user)))
+    run = execute(run, FakeAdapter([reply("終わりました")]))
+    assert run.status == RunStatus.COMPLETED
 
 
 @pytest.mark.django_db

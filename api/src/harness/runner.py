@@ -95,7 +95,7 @@ from .result_files import missing_files
 from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, WORKSPACE_ROLLED_BACK, Job, SandboxSession, Suspended
 from .script_connectors import ScriptConnectors
 from .skill_edit import revoked_edit
-from .skills import explicit_versions, revoked_skill
+from .skills import explicit_versions
 from .task_edit import revoked_task_edit
 from .tools import ALL_TOOLS, SANDBOX_TOOLS, WORKSPACE_WRITING_TOOLS
 from .tools.base import Effect, Tool, ToolContext, ToolResult
@@ -572,7 +572,7 @@ class Runner:
         run = self.run_obj
         if reason := tasks.revoked_task(run) or revoked_task_edit(run):
             return RunEndReason.TASK, reason
-        if reason := revoked_skill(run) or revoked_edit(run):
+        if reason := revoked_edit(run):
             return RunEndReason.SKILL, reason
         return None
 
@@ -750,15 +750,14 @@ class Runner:
         # ConnectorのToolと `skill` はいつも出す。一覧は発言を取り込むときに変わり、指定や定義では絞らない
         # （harness.md §7.5の2・§10.1・§10.2）
         if self.run_obj.kind == RunKind.SKILL_EDIT:
-            # Skillの編集のRun：Skill管理のToolを出し、Skillを使う・提案するToolは出さない（harness.md §10.9）。
+            # Skillの編集のRun：Skill管理のToolも出す。提案のToolは出さない（harness.md §10.9）。
             # 新しいSkillを作る依頼でだけ create_skill を出す
-            tools = (*ALL_TOOLS, *DATASOURCE_TOOLS, *SKILL_ADMIN_TOOLS, TEST_SKILL_DRAFT)
+            tools = (*ALL_TOOLS, *DATASOURCE_TOOLS, SKILL, *SKILL_ADMIN_TOOLS, TEST_SKILL_DRAFT)
             if not ((self.run_obj.manifest or {}).get("fixed") or {}).get("skill_edit", {}).get("skill"):
                 tools += (CREATE_SKILL,)
         elif self.run_obj.kind == RunKind.TASK_EDIT:
-            # タスクの編集のRun：作業ファイルを読み書きするToolと、タスク管理のToolだけ。Skill・Connectorは使わない
-            # （harness.md §10.10）
-            tools = (*ALL_TOOLS, *TASK_ADMIN_TOOLS)
+            # タスクの編集のRun：タスク管理のToolも出す（harness.md §10.10）
+            tools = (*ALL_TOOLS, *DATASOURCE_TOOLS, SKILL, *TASK_ADMIN_TOOLS)
         elif tasks.is_task_run(self.run_obj):
             tools = self._task_run_tools()
         elif self.run_obj.kind == RunKind.EVALUATION:

@@ -97,8 +97,8 @@ def test_message_when_no_task_runs_starts_an_edit_run(api_client, manager):
     request = adapter.requests[0]
     names = {t.name for t in request.tools}
     assert {"get_task", "update_task", "ask_user", "todo_write"} <= names
-    assert not names & {"skill", "submit_result", "request_task_edit", "request_skill_edit", "prepare_notification"}
-    assert not any(name.startswith("datasource") for name in names)
+    assert not names & {"submit_result", "request_task_edit", "request_skill_edit", "prepare_notification"}
+    assert {"skill", "datasource_query"} <= names
     context = next(m.text for m in request.messages if m.role == "user" and "<runtime_context>" in m.text)
     assert '<task_edit task="請求書チェック" version="1" />' in context
     # 直前のタスクのRunの文脈を引き継ぐ

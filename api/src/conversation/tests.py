@@ -333,17 +333,12 @@ class TestMessage:
             assert field in res.data
         assert not Run.objects.filter(conversation=conversation).exists()
 
-    def test_model_without_the_capabilities_of_the_skills_in_use_is_rejected(self, api_client, app_user):
+    def test_model_switch_is_not_limited_by_the_skills_in_use(self, api_client, app_user):
         conversation = ConversationFactory.create(owner=app_user)
-        model_version = conversation.model_profile.current_version
-        assert model_version is not None
-        model_version.supports_images = True
-        model_version.save()
         version = SkillVersionFactory.create(skill__created_by=app_user, requires=[SkillRequirement.IMAGE_INPUT])
         api_client.post(self.url(conversation), {"body": "依頼", "skills": [version.skill.uid]}, format="json")
         other = ModelProfileFactory.create(version__supports_tools=True)
         res = api_client.patch(
             f"/api/app/v1/conversations/{conversation.uid}/", {"model_profile": other.uid}, format="json"
         )
-        assert res.status_code == 400
-        assert "model_profile" in res.data
+        assert res.status_code == 200, res.json()

@@ -16,14 +16,12 @@ from . import tasks
 from .connectors import build_catalog as build_connector_catalog
 from .connectors import catalog_of as connector_catalog_of
 from .connectors import is_allowed_for
-from .connectors import usable_uids as usable_connector_uids
 from .skills import (
     build_catalog,
     catalog_connectors,
     catalog_of,
     declared_connectors,
     loaded_entries,
-    restrict_catalog,
 )
 
 
@@ -31,22 +29,13 @@ def build_catalogs(
     user, model_version, *, sensitive: bool, list_skills: bool, explicit: list[dict[str, Any]]
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """（Skillの一覧、Connectorの一覧）。Toolを使えないモデルにはどちらも出さない。`explicit` は `@` で指定したものと
-    Skillが宣言したもので、数の上限で外れないように先に並べる。一覧のSkillが宣言したものも同じ。
-    Skillの一覧には、宣言したConnectorをこのRunで使えるものだけを出す（design.md §4.9.1）"""
+    Skillが宣言したもので、数の上限で外れないように先に並べる。一覧のSkillが宣言したものも同じ"""
     if not model_version.supports_tools:
         return None, None
-    catalog = (
-        build_catalog(
-            user, model_version, sensitive=sensitive, connectors=usable_connector_uids(user, sensitive=sensitive)
-        )
-        if list_skills
-        else None
-    )
+    catalog = build_catalog(user, model_version, sensitive=sensitive) if list_skills else None
     connector_catalog = build_connector_catalog(
         user, sensitive=sensitive, explicit=[*explicit, *catalog_connectors(catalog)]
     )
-    if catalog is not None:
-        catalog = restrict_catalog(catalog, {e["connector"] for e in (connector_catalog or {}).get("connectors", [])})
     return catalog, connector_catalog
 
 
@@ -69,31 +58,24 @@ def build_task_catalogs(
     if not model_version.supports_tools:
         return None, None
     skills, allowed_connectors = _task_scope(task, launcher)
-    catalog = catalog_of(
-        skills,
-        model_version,
-        lambda runnable: [
-            s for s in runnable if not checks.declaration_problem(task, s.current_version, sensitive=sensitive)
-        ],
-    )
+    catalog = catalog_of(skills, model_version, sensitive=sensitive)
     connectors = [
         c
         for c in allowed_connectors.select_related("current_version").order_by("name", "pk")
         if c.current_version and is_allowed_for(c.current_version, sensitive=sensitive)
     ]
     connector_catalog = connector_catalog_of(connectors, [*explicit, *catalog_connectors(catalog)])
-    catalog = restrict_catalog(catalog, {e["connector"] for e in (connector_catalog or {}).get("connectors", [])})
     return catalog, connector_catalog
 
 
 def refreshes_catalogs(run: Run) -> bool:
-    """発言を取り込むときに一覧を作り直すRunか。タスクの編集のRunはSkill・Connectorを使わない"""
-    return run.kind in (RunKind.WORK, RunKind.SKILL_EDIT)
+    """発言を取り込むときに一覧を作り直すRunか。評価のRunには発言が届かない"""
+    return run.kind != RunKind.EVALUATION
 
 
 def lists_skills(run: Run) -> bool:
-    """エージェントが探して使うSkillの一覧を出すRunか。業務のRun（会話・タスク）には、指定にかかわらず出す"""
-    return run.kind == RunKind.WORK
+    """エージェントが探して使うSkillの一覧を出すRunか。評価のRun（1つのSkillを確かめる）のほかは、すべてのRunに出す"""
+    return run.kind != RunKind.EVALUATION
 
 
 def rebuild_catalogs(
@@ -149,7 +131,7 @@ def unlisted_skill(run: Run, name: str) -> str | None:
     """一覧の量の上限で省いたSkillのID。一覧は見せ方で、アクセス範囲を狭めない（harness.md §10.1）"""
     scope = _run_scope(run)[0]
     # 一覧と同じ名前の割当てで引く（同じ名前のSkillは「名前 (個人)」等で区別する）
-    named = catalog_of(scope, run.model_version, lambda runnable: runnable, trim=False)["skills"]
+    named = catalog_of(scope, run.model_version, sensitive=run.handles_sensitive_data, trim=False)["skills"]
     found = next((e["skill"] for e in named if e["name"] == name), None)
     return found or _only_uid(scope, name)
 

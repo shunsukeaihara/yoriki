@@ -15,7 +15,8 @@ from conversation.models import ConversationMessage
 from run.models import Run
 from skill.models import Skill, SkillVersion
 
-from .connectors import ConnectorUnavailable
+from . import tasks
+from .connectors import ConnectorUnavailable, is_allowed_for
 from .connectors import resolve_explicit as resolve_explicit_connectors
 from .skills import loaded_entries, manifest_entry
 
@@ -62,11 +63,12 @@ def _take_skills(run: Run, message: ConversationMessage, chosen: Chosen) -> None
     loaded = {e["skill"]: e for e in loaded_entries(run)}
     for choice in message.skills:
         skill = skills.get(choice["id"])
-        reason = (
-            skill.unusable_reason(run.owner, run.model_version, sensitive=run.handles_sensitive_data)
-            if skill is not None
-            else str(_("削除されました"))
-        )
+        if skill is None:
+            reason = str(_("削除されました"))
+        elif tasks.is_task_run(run):
+            reason = str(tasks.skill_problem(run, skill, skill.current_version))
+        else:
+            reason = skill.unusable_reason(run.owner, sensitive=run.handles_sensitive_data)
         if skill is None or reason:
             chosen.unusable.append(_("%(name)s：%(reason)s") % {"name": choice["name"], "reason": reason})
             continue
@@ -91,6 +93,17 @@ def _take_connectors(run: Run, message: ConversationMessage, chosen: Chosen) -> 
         connector = connectors.get(choice["id"])
         if connector is None:
             chosen.unusable.append(_("%(name)s：削除されました") % {"name": choice["name"]})
+            continue
+        if tasks.is_task_run(run):
+            version = connector.current_version
+            if (
+                version is None
+                or not tasks.connector_permitted(run, connector)
+                or not is_allowed_for(version, sensitive=run.handles_sensitive_data)
+            ):
+                chosen.unusable.append(_("%(name)s：このタスクでは使えません") % {"name": connector.name})
+                continue
+            chosen.connectors.append({"connector": connector.uid, "name": connector.name, "version": version.pk})
             continue
         try:
             chosen.connectors += resolve_explicit_connectors(

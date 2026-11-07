@@ -360,10 +360,9 @@ UPDATE_DRAFT_DESCRIPTION = """Change the draft of the skill you are editing. Onl
 published version. If the draft changed meanwhile, the call fails: call get_skill and apply your change again.
 - Change only what the user asked for, and keep the rest of the text as it is: pass the whole new text of a field.
 - input_schema and output_schema are JSON Schemas written as a JSON string; an empty string clears them.
-- Changing tools needs the publish role.
 - connectors: the connectors the skill uses, by the names in <connectors>, with the operations (tools) and the \
 tables it reads (empty: any table the connector publishes). Pass the whole list; an empty list removes them. Add the \
-operations to tools as well. A user who cannot use a declared connector cannot use the skill.
+operations to tools as well. Declarations only tell the agent what to use.
 - is_sensitive: true when the skill's own files hold personal or confidential data. It can only be set, not \
 cleared, here."""
 

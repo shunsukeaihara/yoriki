@@ -458,9 +458,7 @@ def _fixed_skills(
         skill, skill_version = skills.get(entry["skill"], (None, None))
         if skill is None or skill_version is None:
             raise CannotRun(_("固定したSkillの版がありません。タスクの定義を確かめてください。"))
-        reason = checks.skill_problem(task, skill, skill_version, sensitive=sensitive) or skill_version.unsupported_by(
-            version
-        )
+        reason = checks.skill_problem(task, skill, skill_version, sensitive=sensitive)
         if reason:
             raise CannotRun(_("Skill「%(name)s」を使えません（%(reason)s）。") % {"name": skill.name, "reason": reason})
         entries.append(manifest_entry(skill, skill_version))

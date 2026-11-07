@@ -7,7 +7,6 @@ Manifestに固定し、途中で読み込んだSkillと発言で指定したSkil
 """
 
 import re
-from collections.abc import Callable
 from typing import Any
 
 from django.db.models import Case, IntegerField, Value, When
@@ -18,15 +17,12 @@ from run.models import Run
 from skill import connectors as skill_connectors
 from skill.models import (
     Skill,
-    SkillAction,
     SkillAssetBinding,
     SkillEvaluation,
     SkillEvaluationAsset,
     SkillScope,
     SkillVersion,
 )
-
-from . import tasks
 
 # Runが使うSkillの中身。公開した版か、Draftの評価に写したDraftの中身（design.md §3.7.1）
 SkillContentSource = SkillVersion | SkillEvaluation
@@ -68,32 +64,16 @@ def _one_line(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
-def build_catalog(user, model_version, *, sensitive: bool, connectors: set[str]) -> dict[str, Any]:
-    """エージェントに見せる一覧：利用者が使え、使うモデルが必要な能力を持ち、宣言したConnectorがこのRunの一覧
-    （`connectors`）にあり、機密の制限に合う（機密のSkillは機密のRunだけ）Skillの名前と説明（harness.md §10.1）。
-
-    一覧の量は文脈の2%までにし、超えたら説明を短くして、それでも入らない分は数だけを示す。同じ名前のSkillが
-    範囲（個人・部門・全社）の違いで重なれば、範囲を添えて分ける（`skill` の引数で名前を指すため）
-    """
-
-    def usable(runnable: list[Skill]) -> list[Skill]:
-        declared = skill_connectors.load(s.current_version for s in runnable)
-        return [
-            s
-            for s in runnable
-            if not skill_connectors.unusable_reason(
-                s.current_version, user, sensitive=sensitive, available=connectors, connectors=declared
-            )
-        ]
-
-    return catalog_of(Skill.objects.usable_by(user), model_version, usable)
+def build_catalog(user, model_version, *, sensitive: bool) -> dict[str, Any]:
+    """エージェントに見せる一覧：セッションの権限で選べるSkill（機密のSkillは機密のセッションだけ）の名前と説明
+    （harness.md §10.1）。一覧の量は文脈の2%までにし、超えたら説明を短くして、それでも入らない分は数だけを示す"""
+    return catalog_of(Skill.objects.usable_by(user), model_version, sensitive=sensitive)
 
 
-def catalog_of(
-    queryset, model_version, keep: Callable[[list[Skill]], list[Skill]], *, trim: bool = True
-) -> dict[str, Any]:
-    """Skillの一覧：使うモデルが必要な能力を持ち、`keep` が残すもの。本人のものを先に（同じ名前なら、より身近な範囲の
-    ものを先に見せる）"""
+def catalog_of(queryset, model_version, *, sensitive: bool, trim: bool = True) -> dict[str, Any]:
+    """Skillの一覧。本人のものを先に（同じ名前なら、より身近な範囲のものを先に見せる）。同じ名前のSkillが範囲（個人・部門・
+    全社）の違いで重なれば、範囲を添えて分ける（`skill` の引数で名前を指すため）。モデルが必要な能力を持たなくても
+    外さず、案内だけを添える"""
     skills = (
         queryset.select_related("current_version", "department")
         .annotate(
@@ -106,7 +86,7 @@ def catalog_of(
         )
         .order_by("order", "name", "pk")
     )
-    usable = keep([s for s in skills if s.current_version and not s.current_version.unsupported_by(model_version)])
+    usable = [s for s in skills if s.current_version and (sensitive or not s.current_version.is_sensitive)]
     counts: dict[str, int] = {}
     for skill in usable:
         counts[skill.name] = counts.get(skill.name, 0) + 1
@@ -125,8 +105,10 @@ def catalog_of(
             "name": name,
             "description": version.description if version else "",
         }
+        if version is not None and (note := version.unsupported_by(model_version)):
+            entry["note"] = note
         if version is not None and version.connectors:
-            # Connectorの一覧に、宣言したConnectorを先に並べるため（restrict_catalog()）
+            # Connectorの一覧に、宣言したConnectorを先に並べるため
             entry["connectors"] = skill_connectors.declared_uids(version)
         entries.append(entry)
     if not trim:
@@ -155,24 +137,19 @@ def catalog_connectors(catalog: dict[str, Any] | None) -> list[dict[str, Any]]:
     return [{"connector": uid} for e in (catalog or {}).get("skills", []) for uid in e.get("connectors", [])]
 
 
-def restrict_catalog(catalog: dict[str, Any], listed: set[str]) -> dict[str, Any]:
-    """宣言したConnectorがRunのConnectorの一覧にないSkillを外す（Connectorが多すぎて一覧に載らなかったとき）"""
-    kept = [e for e in catalog["skills"] if all(uid in listed for uid in e.get("connectors", []))]
-    return {"skills": kept, "omitted": catalog.get("omitted", 0) + len(catalog["skills"]) - len(kept)}
-
-
 def catalog_text(catalog: dict[str, Any]) -> str:
     """`<runtime_context>` の中の `<skills>`"""
     lines = ["  <skills>"]
     for entry in catalog["skills"]:
-        lines.append(f'    <skill name="{_escape(entry["name"])}">{_escape(entry["description"])}</skill>')
+        note = f' note="{_escape(entry["note"])}"' if entry.get("note") else ""
+        lines.append(f'    <skill name="{_escape(entry["name"])}"{note}>{_escape(entry["description"])}</skill>')
     if catalog.get("omitted"):
         lines.append(f"    ({catalog['omitted']} more skills are not listed. You can still load them by exact name.)")
     lines.append("  </skills>")
     return "\n".join(lines)
 
 
-def resolve_explicit(skills: list[Skill], user, model_version, *, sensitive: bool) -> list[dict[str, Any]]:
+def resolve_explicit(skills: list[Skill], user, *, sensitive: bool) -> list[dict[str, Any]]:
     """入力欄の `/` で指定したSkillを公開中の版へ解決する（design.md §3.2）。使えなければ SkillUnavailable。
 
     返すのはManifestに固定する内容（本文は発言に入れる）
@@ -181,7 +158,7 @@ def resolve_explicit(skills: list[Skill], user, model_version, *, sensitive: boo
         raise SkillUnavailable(_("指定できるSkillは%(limit)s個までです") % {"limit": MAX_EXPLICIT_SKILLS})
     resolved = []
     for skill in skills:
-        if reason := skill.unusable_reason(user, model_version, sensitive=sensitive):
+        if reason := skill.unusable_reason(user, sensitive=sensitive):
             raise SkillUnavailable(_("%(name)s：%(reason)s") % {"name": skill.name, "reason": reason})
         assert skill.current_version_id is not None  # unusable_reason() が確かめた
         version = SkillVersion.objects.prefetch_related("assets__resource_version").get(pk=skill.current_version_id)
@@ -245,56 +222,6 @@ def explicit_versions(run: Run) -> list[SkillContentSource]:
     entries = list(((run.manifest or {}).get("fixed") or {}).get("skills", []))
     contents = load_contents(entries)
     return [contents[key] for e in entries if (key := content_key(e)) in contents]
-
-
-def loaded_skills(run: Run) -> list[tuple[dict[str, Any], Skill | None, SkillContentSource | None]]:
-    """Runが使うSkill（Manifestの記録、今のSkill、固定した版）。Skillが消えていればNone"""
-    entries = loaded_entries(run)
-    skills = {
-        s.uid: s
-        for s in Skill.objects.filter(uid__in=[e["skill"] for e in entries]).select_related(
-            "department", "current_version"
-        )
-    }
-    contents = load_contents(entries)
-    return [(e, skills.get(e["skill"]), contents.get(content_key(e))) for e in entries]
-
-
-def revoked_skill(run: Run) -> str:
-    """Runが使うSkillのうち、停止・削除されたか、利用者が使えなくなったか（宣言したConnectorを使えなくなったものも）、
-    機密でないRunで機密のSkillになった（宣言したConnectorに機密のフラグが付いた）ものがあれば、その理由。過去の版でも、
-    実行時には拒否する（design.md §3.2・§4冒頭・§4.9.1）。タスクのRunでは、タスクの範囲で判定する"""
-    for entry, skill, version in loaded_skills(run):
-        if tasks.is_task_run(run):
-            # タスクのRunは、起動した人ではなくタスクの範囲で判定する（authorization.md §6）
-            if not (reason := tasks.skill_problem(run, skill, version)):
-                continue
-        elif skill is None or skill.deleted:
-            reason = _("削除されました")
-        elif skill.suspended:
-            reason = _("停止中です")
-        elif not skill.can(run.owner, SkillAction.VIEW):
-            reason = _("使う権限がありません")
-        elif version is not None and (
-            problem := skill_connectors.unusable_reason(version, run.owner, sensitive=run.handles_sensitive_data)
-        ):
-            reason = problem
-        else:
-            continue
-        return _("Skill「%(name)s」を使えなくなったので、作業を止めました（%(reason)s）。") % {
-            "name": entry["name"],
-            "reason": reason,
-        }
-    return ""
-
-
-def unsupported_skills(run: Run, model_version) -> list[str]:
-    """Runが使うSkillのうち、モデル設定の版が必要な能力を持たないものの名前（モデルの切り替えの条件。design.md §4.8）"""
-    return [
-        entry["name"]
-        for entry, _skill, version in loaded_skills(run)
-        if version is not None and version.unsupported_by(model_version)
-    ]
 
 
 def render(

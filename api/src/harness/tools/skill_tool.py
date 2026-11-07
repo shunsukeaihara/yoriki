@@ -74,12 +74,10 @@ def execute(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
 
 
 def _problem(run, skill: Skill) -> str:
-    """このRunで今読み込めない理由（読み込めれば空文字）。会話は依頼した人、タスクはタスクの範囲で判定する"""
+    """このセッションの権限で今選べない理由（選べれば空文字）。会話は依頼した人、タスクはタスクの範囲で判定する"""
     if tasks.is_task_run(run):
-        version = skill.current_version
-        reason = tasks.skill_problem(run, skill, version)
-        return reason or (version.unsupported_by(run.model_version) if version else "")
-    return skill.unusable_reason(run.owner, run.model_version, sensitive=run.handles_sensitive_data)
+        return tasks.skill_problem(run, skill, skill.current_version)
+    return skill.unusable_reason(run.owner, sensitive=run.handles_sensitive_data)
 
 
 def _load_again(skill: Skill, loaded: dict[str, Any], name: str, context: ToolContext) -> ToolResult:

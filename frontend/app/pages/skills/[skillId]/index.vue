@@ -301,7 +301,7 @@ const onDelete = async () => {
                   v-model="draft"
                   :skill-id="skillId"
                   :skill="skill"
-                  :can-change-tools="canPublish"
+                  :can-publish="canPublish"
                   @failed="onFailed"
                 />
                 <SkillDraftAssetList

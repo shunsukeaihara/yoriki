@@ -1,7 +1,7 @@
 """タスクのアクセス範囲（authorization.md §5.4）と、タスクのRunの実行許可（authorization.md §6）。
 
-- 保存するとき（`content_errors()`）：定義で使うよう指示するSkill・Connectorがタスクの範囲の中にあるか、Skillが宣言した
-  Connectorが範囲の中にあるか、機密の区分とモデル設定が合うか、プロンプトのテンプレートが入力の項目だけを使うか。
+- 保存するとき（`content_errors()`）：定義で使うよう指示するSkill・Connectorがタスクの範囲の中にあるか、
+  機密の区分とモデル設定が合うか、プロンプトのテンプレートが入力の項目だけを使うか。
 - 実行するとき（`skill_problem()`・`connector_permitted()`・`task_problem()`）：受付時、実行の区切りごと、Connectorの
   操作のたびに、今も有効でタスクの範囲の中にあるかを確かめ直す。定義で指示したかは見ない（指示はアクセス範囲ではない）。
   個人のタスクは本人の今の権限で判定する。
@@ -183,11 +183,6 @@ def _check_connectors(task: TaskLike, content: dict[str, Any], errors: Errors) -
             )
 
 
-def skill_tools(skills: dict[str, tuple[Skill, SkillVersion | None]]) -> set[str]:
-    """定義で指示したSkillが使うToolを合わせたもの（モデルがToolを使えるかの確かめに使う）"""
-    return {t for _s, v in skills.values() if v is not None for t in v.tools}
-
-
 def _check_skills(
     task: TaskLike, content: dict[str, Any], skills: dict[str, tuple[Skill, SkillVersion | None]], errors: Errors
 ) -> None:
@@ -205,32 +200,21 @@ def _check_skills(
             errors.add(field, _("Skill「%(name)s」は、このタスクでは使えません") % {"name": skill.name})
         else:
             schemas += 1 if version.output_schema else 0
-            _check_declarations(task, skill, version, content, errors, field=field)
+            _check_sensitive(skill, version, content, errors, field=field)
     if schemas > 1 and not content["output_schema"]:
         errors.add(
             "output_schema", _("業務結果の形を決めているSkillが複数あります。タスクの業務結果のSchemaを決めてください")
         )
 
 
-def _check_declarations(
-    task: TaskLike, skill: Skill, version: SkillVersion, content: dict[str, Any], errors: Errors, *, field: str
+def _check_sensitive(
+    skill: Skill, version: SkillVersion, content: dict[str, Any], errors: Errors, *, field: str
 ) -> None:
-    """Skillが宣言したConnectorがタスクの範囲の中にあり、宣言した操作・表が境界の中にあるか（③bの宣言）"""
-    declared = skill_connectors.load([version])
-    if not content["handles_sensitive_data"] and skill_connectors.is_sensitive(version, declared):
+    if not content["handles_sensitive_data"] and skill_connectors.is_sensitive(version):
         errors.add(
             field,
             _("Skill「%(name)s」は機密なので、個人情報・機密情報を扱うタスクにしてください") % {"name": skill.name},
         )
-    for declaration in version.connectors or []:
-        connector = declared.get(declaration["connector"])
-        names = {"skill": skill.name, "name": connector.name if connector else declaration["connector"]}
-        if connector is None or not connector_allowed(task, connector):
-            errors.add(field, _("Skill「%(skill)s」が使うConnector「%(name)s」は、このタスクでは使えません") % names)
-        elif skill_connectors.out_of_bounds(declaration, connector):
-            errors.add(
-                field, _("Skill「%(skill)s」が使う表・操作を、Connector「%(name)s」が今は公開していません") % names
-            )
 
 
 def _check_notification(task: TaskLike, content: dict[str, Any], errors: Errors) -> None:
@@ -285,11 +269,6 @@ def _check_model(content: dict[str, Any], skills: dict[str, tuple[Skill, SkillVe
         errors.add("model_profile", _("業務結果のSchemaがあるタスクには、Toolを使えるモデルを選んでください"))
     elif content["notification_instructions"] and not version.supports_tools:
         errors.add("model_profile", _("通知の書き方を決めたタスクには、Toolを使えるモデルを選んでください"))
-    elif skill_tools(skills) and not version.supports_tools:
-        errors.add("model_profile", _("このモデルはToolを使えません。Toolを使わないか、別のモデルを選んでください"))
-    for _skill, skill_version in skills.values():
-        if skill_version is not None and (reason := skill_version.unsupported_by(version)):
-            errors.add("model_profile", reason)
 
 
 # --- 実行するとき ---
@@ -310,29 +289,15 @@ def task_problem(task, *, allow_suspended: bool = False) -> str:
 
 
 def skill_problem(task, skill: Skill | None, version: Any, *, sensitive: bool) -> str:
-    """タスクのRunがこのSkillを今も使えない理由（使えれば空文字）。宣言したConnectorも、今も有効で範囲の中にあり、
-    境界の中にあることを確かめる"""
+    """タスクのRunがこのSkillを今も選べない理由（選べれば空文字）。宣言したConnectorは見ない"""
     if skill is None or skill.deleted:
         return _("削除されました")
     if skill.suspended:
         return _("停止中です")
     if not skill_allowed(task, skill):
         return _("このタスクでは使えなくなりました")
-    return declaration_problem(task, version, sensitive=sensitive) if version else ""
-
-
-def declaration_problem(task, version: Any, *, sensitive: bool) -> str:
-    declared = skill_connectors.load([version])
-    if not sensitive and skill_connectors.is_sensitive(version, declared):
+    if version is not None and version.is_sensitive and not sensitive:
         return _("機密のSkillは、個人情報・機密情報を扱うタスクでだけ使えます")
-    for declaration in version.connectors or []:
-        connector = declared.get(declaration["connector"])
-        if connector is None or not connector_allowed(task, connector):
-            return _("このSkillが使うConnectorを使えません")
-        if skill_connectors.out_of_bounds(declaration, connector):
-            return _("このSkillが使う表・操作を、Connector「%(name)s」が今は公開していません") % {
-                "name": connector.name
-            }
     return ""
 
 

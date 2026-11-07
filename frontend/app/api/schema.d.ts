@@ -5491,8 +5491,8 @@ export interface components {
             readonly sensitive: boolean;
             /** @description 公開中の版かDraftが機密のSkillか（機密の会話でだけ編集できる） */
             readonly edit_sensitive: boolean;
-            /** @description 公開中の版が宣言したConnectorを、利用者がすべて使え、宣言した操作・表をConnectorが今も公開しているか（でなければ会話で使えない） */
-            readonly connectors_usable: boolean;
+            /** @description 公開中の版の必要な能力。選べるかには関わらない（画面の案内に使う） */
+            readonly requires: number[];
             /** @description 開いているDraftのID。なければnull。Draftを編集できる人にだけ出す */
             readonly draft: string | null;
             /** @description Draftを変更できるか（本文・資料・評価ケース） */

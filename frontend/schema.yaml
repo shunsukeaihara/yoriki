@@ -13586,10 +13586,12 @@ components:
           type: boolean
           readOnly: true
           description: 公開中の版かDraftが機密のSkillか（機密の会話でだけ編集できる）
-        connectors_usable:
-          type: boolean
+        requires:
+          type: array
+          items:
+            type: integer
           readOnly: true
-          description: 公開中の版が宣言したConnectorを、利用者がすべて使え、宣言した操作・表をConnectorが今も公開しているか（でなければ会話で使えない）
+          description: 公開中の版の必要な能力。選べるかには関わらない（画面の案内に使う）
         draft:
           type: string
           nullable: true
@@ -13614,7 +13616,6 @@ components:
       required:
       - can_edit
       - can_publish
-      - connectors_usable
       - created
       - department_info
       - description
@@ -13623,6 +13624,7 @@ components:
       - id
       - name
       - owner_info
+      - requires
       - scope
       - scope_display
       - sensitive

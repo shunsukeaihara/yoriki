@@ -119,31 +119,11 @@ def start_evaluation(
         draft = SkillDraft.objects.select_for_update().filter(skill=skill).prefetch_related("assets").first()
         if draft is None:
             raise CannotEvaluate(_("評価するDraftがありません。"))
-        if reason := draft.unsupported_by(model_version):
-            raise CannotEvaluate(reason)
         # 機密のSkill（公開中の版かDraft）は、ローカルLLMのモデルで、機密のRunとして評価する（design.md §3.7.1）
         sensitive = skill_connectors.skill_is_sensitive(skill)
         if sensitive and not model_version.is_local:
             raise CannotEvaluate(_("機密のSkillは、ローカルLLMのモデルで評価してください。"))
-        if skill_connectors.declares_system_connector(draft):
-            # システムのConnectorは会話のRunから使えないので、評価のRunでも使えない（システムのタスクの段階で扱う）
-            raise CannotEvaluate(_("システムのConnectorを使うSkillは、まだ評価できません。"))
-        if reason := skill_connectors.unusable_reason(draft, actor, sensitive=sensitive):
-            raise CannotEvaluate(reason)
-        # Skillの範囲に合わないConnector（部門のSkillに別の部門のもの等）は、評価のRunでも読ませない。評価の結果は
-        # そのSkillを編集できる人が見るので（公開と同じ範囲の検証。design.md §4.9.1）
-        if skill_connectors.out_of_scope(draft, skill):
-            raise CannotEvaluate(_("このSkillの範囲では使えないConnectorを宣言しています。"))
-        # 公開中の版を評価する人が動かせなければ（使えなくなったConnector、システムのConnector、Skillの範囲に
-        # 合わなくなったConnectorを宣言している）、最初の公開の前と同じくDraftだけで評価する（その宣言を外した
-        # Draftを評価して公開できるように）
         base = skill.current_version
-        if base is not None and (
-            skill_connectors.declares_system_connector(base)
-            or skill_connectors.unusable_reason(base, actor, sensitive=sensitive)
-            or skill_connectors.out_of_scope(base, skill)
-        ):
-            base = None
         runtime_version = RuntimeProfile.default_version()
         if runtime_version is None:
             raise CannotEvaluate(

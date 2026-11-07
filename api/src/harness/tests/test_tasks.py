@@ -9,7 +9,6 @@ from harness import connectors as connectors_module
 from harness import skills as skills_module
 from harness import tasks
 from harness.catalogs import build_task_catalogs
-from harness.runner import Runner
 from harness.tests.test_connectors import TABLES, execute, fixture_fake_datasource, results, text_of
 from llm.factories import ModelProfileFactory
 from run.models import Run, RunEndReason, RunEvent, RunEventKind, RunLaunch, RunStatus
@@ -144,41 +143,18 @@ def test_deleting_a_task_stops_its_runs(api_client, admin):
     assert run.status == RunStatus.CANCELLED
 
 
-def test_remaining_calls_are_not_run_after_the_skill_is_suspended(admin, fake_datasource, monkeypatch):
-    connector = ConnectorFactory.create(name="経理DB", scope=ConnectorScope.SYSTEM, version__tables=TABLES)
-    skill = _system_skill(tools=["datasource_query"])
-    task = TaskDefinitionFactory.create(
-        scope=TaskScope.SYSTEM,
-        created_by=admin,
-        revision__skills=[{"skill": skill.uid, "version": 1}],
-        revision__connectors=[connector.uid],
-    )
-    run = _start(task, admin)
-    original = Runner._run_tool
-
-    def run_then_suspend(self, tool, call):
-        result = original(self, tool, call)
-        skill.set_suspended(True, actor=admin)  # 1つ目の呼出しの後にSkillを止める
-        return result
-
-    monkeypatch.setattr(Runner, "_run_tool", run_then_suspend)
-    query = {"connector": "経理DB", "sql": "SELECT 1"}
-    run = execute(run, FakeAdapter([calls(("c1", "datasource_query", query), ("c2", "datasource_query", query))]))
-    assert len([c for c in fake_datasource.calls if c[0] == "query"]) == 1
-    second = results(run, "datasource_query")[1]
-    assert "Not executed" in text_of(second)
-    assert (run.status, run.end_reason) == (RunStatus.FAILED, RunEndReason.SKILL)
-
-
-def test_suspended_skill_stops_the_task_run(admin):
+def test_task_run_continues_when_the_instructed_skill_is_suspended(admin):
+    """始めた後の停止ではRunを止めない。次の受付からは始めない"""
     skill = _system_skill()
     task = TaskDefinitionFactory.create(
         scope=TaskScope.SYSTEM, created_by=admin, revision__skills=[{"skill": skill.uid, "version": 1}]
     )
     run = _start(task, admin)
     skill.set_suspended(True, actor=admin)
-    run = execute(run, FakeAdapter([]))
-    assert (run.status, run.end_reason) == (RunStatus.FAILED, RunEndReason.SKILL)
+    run = execute(run, FakeAdapter([reply("終わりました")]))
+    assert run.status == RunStatus.COMPLETED
+    with pytest.raises(CannotRun):
+        _start(task, admin)
 
 
 def test_task_run_is_not_refused_when_the_launcher_loses_the_permission(admin):

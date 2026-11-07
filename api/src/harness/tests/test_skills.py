@@ -139,14 +139,16 @@ def test_suspended_skill_cannot_be_loaded(conversation, app_user):
 
 
 @pytest.mark.django_db
-def test_catalog_excludes_skills_the_model_cannot_run(app_user):
+def test_catalog_notes_skills_the_model_cannot_run(app_user):
+    """必要な能力は案内だけで、一覧から外さない"""
     conversation = ConversationFactory.create(owner=app_user)
     version = conversation.model_profile.current_version
     assert version is not None
     publish(app_user, name="画像のSkill", requires=[SkillRequirement.IMAGE_INPUT])
     publish(app_user, name="文章のSkill")
-    names = [e["name"] for e in build_catalog(app_user, version, sensitive=False, connectors=set())["skills"]]
-    assert names == ["文章のSkill"]
+    entries = {e["name"]: e for e in build_catalog(app_user, version, sensitive=False)["skills"]}
+    assert set(entries) == {"画像のSkill", "文章のSkill"}
+    assert "note" in entries["画像のSkill"] and "note" not in entries["文章のSkill"]
 
 
 @pytest.mark.django_db
@@ -157,16 +159,16 @@ def test_catalog_separates_same_names_and_shortens_to_the_budget(app_user):
     publish(app_user, name="名寄せ")
     company = SkillFactory.create(name="名寄せ", scope=SkillScope.COMPANY, owner=None, created_by=app_user)
     SkillVersionFactory.create(skill=company)
-    names = [e["name"] for e in build_catalog(app_user, version, sensitive=False, connectors=set())["skills"]]
+    names = [e["name"] for e in build_catalog(app_user, version, sensitive=False)["skills"]]
     assert names == ["名寄せ (個人)", "名寄せ (全社)"]
     publish(app_user, name="名寄せ (個人)")  # 範囲を添えた名前と同じ名前のSkill
-    names = [e["name"] for e in build_catalog(app_user, version, sensitive=False, connectors=set())["skills"]]
+    names = [e["name"] for e in build_catalog(app_user, version, sensitive=False)["skills"]]
     assert sorted(names) == ["名寄せ (個人)", "名寄せ (個人) (2)", "名寄せ (全社)"]
 
     for n in range(39):
         publish(app_user, name=f"Skill{n:02d}", description="説明" * 200)
     version.max_input_tokens = 50_000  # 一覧は1000文字まで
-    catalog = build_catalog(app_user, version, sensitive=False, connectors=set())
+    catalog = build_catalog(app_user, version, sensitive=False)
     assert catalog["omitted"] > 0
     assert all(len(e["description"]) <= 40 for e in catalog["skills"])
     assert len(catalog["skills"]) + catalog["omitted"] == 42
@@ -375,18 +377,19 @@ def test_schema_problem_accepts_only_what_every_provider_takes():
 
 
 @pytest.mark.django_db
-def test_run_stops_when_a_skill_in_use_is_suspended(conversation, app_user):
+def test_run_continues_when_a_skill_in_use_is_suspended(conversation, app_user):
+    """停止は新しく選べなくするだけで、読み込み済みのRunは止めない"""
     skill, _version = publish(app_user, tools=["todo_write"])
     run = start(conversation, skills=[skill])
     skill.set_suspended(True, actor=app_user)
-    run = execute(run, FakeAdapter([]))
-    assert run.status == RunStatus.FAILED
-    assert run.end_reason == RunEndReason.SKILL
-    assert "停止中" in run.error
+    run = execute(run, FakeAdapter([reply("終わりました")]))
+    assert run.status == RunStatus.COMPLETED
+    with pytest.raises(CannotStart, match="停止中"):
+        start(conversation, skills=[skill])
 
 
 @pytest.mark.django_db
-def test_run_stops_when_the_user_leaves_the_department_of_the_skill(conversation, app_user):
+def test_run_continues_when_the_user_leaves_the_department_of_the_skill(conversation, app_user):
     department = DepartmentFactory.create()
     membership = DepartmentMembershipFactory.create(department=department, user=app_user)
     skill = SkillFactory.create(scope=SkillScope.DEPARTMENT, department=department, created_by=app_user)
@@ -395,38 +398,23 @@ def test_run_stops_when_the_user_leaves_the_department_of_the_skill(conversation
 
     class RemoveMembership(FakeAdapter):
         def stream(self, request):
-            # 1回目の応答の間に所属が外された。次の区切りで、読み直した利用者で確かめる
-            membership.delete()
+            if not self.requests:
+                membership.delete()
             yield from super().stream(request)
 
     adapter = RemoveMembership([calls(("c1", "todo_write", {"todos": []})), reply("ok")])
     run = execute(run, adapter)
-    assert run.status == RunStatus.FAILED
-    assert run.end_reason == RunEndReason.SKILL
-    assert len(adapter.requests) == 1
+    assert run.status == RunStatus.COMPLETED
+    assert len(adapter.requests) == 2
 
 
 @pytest.mark.django_db
-def test_result_schema_needs_a_model_that_calls_tools(app_user):
-    conversation = ConversationFactory.create(owner=app_user, model_profile__version__supports_tools=False)
-    skill, _version = publish(app_user, tools=[], output_schema=RESULT_SCHEMA)
-    with pytest.raises(CannotStart, match="Tool呼出し"):
-        start(conversation, skills=[skill])
-
-
-@pytest.mark.django_db
-def test_model_switch_keeps_to_models_the_skills_in_use_can_run(conversation, app_user):
+def test_model_switch_is_not_limited_by_the_skills_in_use(conversation, app_user):
     skill, _version = publish(app_user, requires=[SkillRequirement.IMAGE_INPUT])
-    model_version = conversation.model_profile.current_version
-    assert model_version is not None
-    model_version.supports_images = True
-    model_version.save()
-    with_images = ModelProfileFactory.create(
-        name="画像あり", version__supports_tools=True, version__supports_images=True
-    )
+    ModelProfileFactory.create(name="画像あり", version__supports_tools=True, version__supports_images=True)
     ModelProfileFactory.create(name="画像なし", version__supports_tools=True)
     run = start(conversation, skills=[skill])
-    assert [p.name for p in switch_candidates(run)] == [with_images.name]
+    assert {"画像あり", "画像なし"} <= {p.name for p in switch_candidates(run)}
 
 
 @pytest.mark.django_db

@@ -24,6 +24,7 @@ from run.models import (
     RunEventKind,
     RunKind,
     RunStatus,
+    RunTrigger,
 )
 from runtime.models import RuntimeProfile
 from skill.connectors import skill_is_sensitive
@@ -130,7 +131,7 @@ def post_message(
         if sent is not None:
             return sent  # 再送。二重に受け付けない
     if conversation.is_task_fix:
-        _check_fix_message(conversation, separate=bool(skills or connectors or skill_edit))
+        _check_fix_message(conversation, skill_edit=bool(skill_edit))
     if (skills or connectors) and not skill_edit:
         _check_chosen(conversation, skills or [], connectors or [])
     message = ConversationMessage.objects.create(
@@ -218,14 +219,30 @@ def _check_chosen(conversation: Conversation, skills: list[Skill], connectors: l
     if run is None or run.status == RunStatus.CANCELLING:
         return  # 新しいRunで始めるので、start_run() が確かめる
     owner, version, sensitive = conversation.owner, run.model_version, run.handles_sensitive_data
+    if run.trigger == RunTrigger.TASK:
+        _check_chosen_for_task(run, skills, connectors)
+        return
     try:
-        resolve_explicit(skills, owner, version, sensitive=sensitive)
+        resolve_explicit(skills, owner, sensitive=sensitive)
     except SkillUnavailable as exc:
         raise CannotStart(_("指定したSkillを使えません。%(reason)s") % {"reason": exc}) from exc
     try:
         resolve_explicit_connectors(connectors, owner, version, sensitive=sensitive)
     except ConnectorUnavailable as exc:
         raise CannotStart(_("指定したConnectorを使えません。%(reason)s") % {"reason": exc}) from exc
+
+
+def _check_chosen_for_task(run: Run, skills: list[Skill], connectors: list[Connector]) -> None:
+    """修正チャットで動いているタスクのRunへの指定は、タスクの範囲で確かめる（authorization.md §6）"""
+    from harness import tasks  # noqa: PLC0415  harness.tasksがtaskをimportするため
+
+    for skill in skills:
+        if reason := tasks.skill_problem(run, skill, skill.current_version):
+            names = {"name": skill.name, "reason": reason}
+            raise CannotStart(_("指定したSkillを使えません。%(name)s：%(reason)s") % names)
+    for connector in connectors:
+        if not tasks.connector_permitted(run, connector):
+            raise CannotStart(_("指定したConnectorを使えません。%(name)s") % {"name": connector.name})
 
 
 def _task_run_instructed(conversation: Conversation) -> Run | None:
@@ -239,12 +256,12 @@ def _task_run_instructed(conversation: Conversation) -> Run | None:
     return run
 
 
-def _check_fix_message(conversation: Conversation, *, separate: bool) -> None:
-    """修正チャット（design.md §11.11）では、Skill・Connectorの指定と、Skillの編集の依頼は受け付けない（タスクを
-    今も管理できるかは post_message() が先に確かめる）。動いているRunへのメッセージは追加の指示か回答、動いていない
-    ときのメッセージは、タスクの編集の依頼になる（start_run()）"""
-    if separate:
-        raise CannotStart(_("修正チャットでは、SkillやConnectorを指定できません。"))
+def _check_fix_message(conversation: Conversation, *, skill_edit: bool) -> None:
+    """修正チャット（design.md §11.11）では、Skillの編集の依頼は受け付けない（タスクを今も管理できるかは
+    post_message() が先に確かめる）。動いているRunへのメッセージは追加の指示か回答、動いていないときのメッセージは、
+    タスクの編集の依頼になる（start_run()）。Skill・Connectorの指定はセッションの権限で確かめる"""
+    if skill_edit:
+        raise CannotStart(_("修正チャットでは、Skillの編集を依頼できません。"))
 
 
 def accept_skill_edit(clarification: ClarificationRequest, actor) -> None:
@@ -374,12 +391,9 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
         raise CannotStart(
             _("コマンドを動かす環境（Runtime Profile）が登録されていません。基盤管理者に問い合わせてください。")
         )
-    if conversation.is_task_fix:
-        # 修正チャットのタスクのRunは task.dispatch.start_task_run() で始める。ここで始めるのは、タスクの編集のRun
-        # （動いていないときのメッセージと、承認した編集の依頼。タスクのRunが終わる直前に届いて取り込めなかった発言も）
-        return _start_task_edit(
-            conversation, message, actor, version=version, effort=effort, runtime_version=runtime_version
-        )
+    # 修正チャットのタスクのRunは task.dispatch.start_task_run() で始める。ここで始めるのは、タスクの編集のRun
+    # （動いていないときのメッセージと、承認した編集の依頼。タスクのRunが終わる直前に届いて取り込めなかった発言も）
+    task_edit = resolve_task_edit(conversation, conversation.owner, version) if conversation.is_task_fix else None
     # Skillの編集の依頼は、対象のSkillを固定した編集のRunにする（harness.md §10.9）。それ以外では、`/` で指定した
     # Skillをその時点の公開中の版へ解決して読み込む（呼び出せる範囲は変わらない。harness.md §7.5・§10.1）
     # 機密のConnectorとSkillは、機密の会話のRunにだけ出す（design.md §4冒頭）
@@ -389,9 +403,7 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
     )
     try:
         skills = (
-            resolve_explicit(chosen_skills(message), conversation.owner, version, sensitive=sensitive)
-            if not skill_edit
-            else []
+            resolve_explicit(chosen_skills(message), conversation.owner, sensitive=sensitive) if not skill_edit else []
         )
     except SkillUnavailable as exc:
         raise CannotStart(_("指定したSkillを使えません。%(reason)s") % {"reason": exc}) from exc
@@ -402,7 +414,7 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
         conversation.owner,
         version,
         sensitive=sensitive,
-        list_skills=skill_edit is None,
+        list_skills=True,
         explicit=[*connectors, *declared_connectors(skills)],
     )
     fixed: dict[str, object] = {
@@ -417,6 +429,8 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
     }
     if skill_edit is not None:
         fixed["skill_edit"] = skill_edit
+    if task_edit is not None:
+        fixed["task_edit"] = task_edit
     if parent is None:
         # 同じ会話の前のRun。作業ファイルは会話の最新のCheckpointから引き継ぐ（design.md §7.9）
         parent = Run.objects.filter(conversation=conversation).order_by("-created", "-pk").first()
@@ -424,7 +438,7 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
         conversation=conversation,
         parent=parent,
         owner=conversation.owner,
-        kind=RunKind.WORK if skill_edit is None else RunKind.SKILL_EDIT,
+        kind=RunKind.TASK_EDIT if task_edit else RunKind.SKILL_EDIT if skill_edit is not None else RunKind.WORK,
         model_version=version,
         effort=effort,
         runtime_version=runtime_version,
@@ -444,43 +458,6 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
         result_tool=False,
     )
     RunEvent.record(run, RunEventKind.USER_MESSAGE, data, actor=actor)
-    enqueue_run(run)
-    return run
-
-
-def _start_task_edit(
-    conversation: Conversation, message: ConversationMessage, actor, *, version, effort, runtime_version
-):
-    """修正チャットのタスクの編集のRun（harness.md §10.10）。同じ会話の1つ前のRunを親にして文脈を引き継ぎ（タスクの
-    Runは親を持たないので、直前のタスクのRunから始まる）、作業ファイルは会話の最新のCheckpointから戻す。
-    Skill・Connectorは使わない"""
-    task_edit = resolve_task_edit(conversation, conversation.owner, version)
-    fixed: dict[str, object] = {
-        "model_version": version.pk,
-        "effort": effort,
-        "runtime_version": runtime_version.pk,
-        "handles_sensitive_data": conversation.handles_sensitive_data,
-        "skills": [],
-        "skill_catalog": None,
-        "connectors": [],
-        "connector_catalog": None,
-        "task_edit": task_edit,
-    }
-    run = Run.objects.create(
-        conversation=conversation,
-        parent=Run.objects.filter(conversation=conversation).order_by("-created", "-pk").first(),
-        owner=conversation.owner,
-        kind=RunKind.TASK_EDIT,
-        model_version=version,
-        effort=effort,
-        runtime_version=runtime_version,
-        handles_sensitive_data=conversation.handles_sensitive_data,
-        manifest={"fixed": fixed, "appended": []},
-    )
-    message.run = run
-    message.save(update_fields=["run"])
-    RunEvent.record(run, RunEventKind.STATUS, {"status": RunStatus.QUEUED}, actor=actor)
-    RunEvent.record(run, RunEventKind.USER_MESSAGE, user_message_data(message, message.body, first=True), actor=actor)
     enqueue_run(run)
     return run
 

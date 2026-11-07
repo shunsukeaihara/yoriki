@@ -9,7 +9,7 @@
  * 編集の依頼は別の Run で行うので、使う Skill とは一緒に選べず、実行中なら今の作業の後に始める。
  * 使う Connector は、ボタンか、行の始めか空白の後で `@` を打つと開く一覧から選ぶ（harness.md §10.2）。
  * `/` の一覧でタスクを選ぶと、呼び出し側が入力のダイアログを開いて起動する（入力欄の本文は送らない）。
- * タスクの修正チャット（`fixChat`。design.md §11.11）では、Skill・Connector・タスクの一覧を出さない。動いている作業
+ * タスクの修正チャット（`fixChat`。design.md §11.11）では、Skill の編集とタスクの起動を出さない。動いている作業
  * には追加の指示か回答を送れ、作業が動いていないときのメッセージは、タスクを直す依頼（直前の実行について尋ねるだけ
  * でもよい）になる。
  */
@@ -33,6 +33,8 @@ const props = defineProps<{
   disabled?: boolean
   /** タスクの修正チャット */
   fixChat?: boolean
+  /** 今のモデル */
+  model?: AppModelProfile | null
 }>()
 const text = defineModel<string>({ required: true })
 const selectedSkills = defineModel<Skill[]>('selectedSkills', { default: () => [] })
@@ -64,7 +66,7 @@ const connectorPickerOpen = ref(false)
 const connectorSearch = ref('')
 // 行の始めか空白の後に `/`・`@` を打ったら、その文字を消して Skill・Connector の一覧を開く
 watch(text, (value, old) => {
-  if (props.disabled || props.fixChat || value.length !== (old?.length ?? 0) + 1) return
+  if (props.disabled || value.length !== (old?.length ?? 0) + 1) return
   const trigger = /(^|\s)([/@])$/.exec(value)?.[2]
   if (!trigger) return
   text.value = value.slice(0, -1)
@@ -211,7 +213,6 @@ const onSubmit = () => {
           @click="picker.open()"
         />
         <ConversationSkillPicker
-          v-if="!fixChat"
           v-model:open="skillPickerOpen"
           v-model:search-term="skillSearch"
           :skills="skills ?? []"
@@ -219,7 +220,9 @@ const onSubmit = () => {
           :selected="selectedSkills.map((s) => s.id)"
           :sensitive="sensitive ?? false"
           :full="skillsFull"
-          :tasks="tasks ?? []"
+          :tasks="fixChat ? [] : (tasks ?? [])"
+          :model="model"
+          :no-edit="fixChat"
           :disabled="disabled"
           @select="selectSkill"
           @edit="chooseEdit"
@@ -227,7 +230,6 @@ const onSubmit = () => {
           @launch="emit('launch', $event)"
         />
         <ConversationConnectorPicker
-          v-if="!fixChat"
           v-model:open="connectorPickerOpen"
           v-model:search-term="connectorSearch"
           :connectors="connectors ?? []"

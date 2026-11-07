@@ -160,9 +160,9 @@ class TestCreate:
         assert res.status_code == 201, res.json()
         assert res.json()["department_info"]["id"] == department.uid
         assert _abilities(res.json()) == (True, False)
-        # 編集の権限ではToolを決められない（authorization.md §5.1）
+        # 使うToolは権限ではないので、編集の権限で決められる（authorization.md §5.1）
         res = api_client.post(SKILLS, {**body, "name": "別のSkill", "tools": ["shell"]}, format="json")
-        assert res.status_code == 403
+        assert res.status_code == 201, res.json()
 
     @pytest.mark.django_db
     def test_company_needs_permission(self, api_client, app_user):
@@ -325,17 +325,15 @@ class TestDepartmentPermissions:
         assert api_client.post(_url(department_skill, "suspend/"), {}, format="json").status_code == 403
 
     @pytest.mark.django_db
-    def test_editor_edits_but_cannot_publish_or_change_tools(self, api_client, app_user, department_skill):
+    def test_editor_edits_and_changes_tools_but_cannot_publish(self, api_client, app_user, department_skill):
         api_client.force_login(_department_editor(app_user, department_skill.department))
         draft = api_client.post(_url(department_skill, "drafts/"), {}, format="json").json()
         url = _url(department_skill, f"drafts/{draft['id']}/")
         res = api_client.patch(url, {"revision": draft["revision"], "instructions": "直した"}, format="json")
         assert res.status_code == 200
         res = api_client.patch(url, {"revision": res.json()["revision"], "tools": ["shell"]}, format="json")
-        assert res.status_code == 403
-        # 同じToolを送るだけなら変更ではない
-        same = api_client.patch(url, {"revision": draft["revision"] + 1, "tools": []}, format="json")
-        assert same.status_code == 200
+        assert res.status_code == 200
+        same = res
         assert _publish(api_client, department_skill.uid, same.json()).status_code == 403
         assert api_client.patch(_url(department_skill), {"name": "改名"}, format="json").status_code == 403
         assert api_client.delete(_url(department_skill)).status_code == 403

@@ -483,6 +483,7 @@ const menuItems = computed(() => [
             :sending="sending"
             :stopping="stopping"
             :fix-chat="Boolean(fixTask)"
+            :model="conversation?.modelProfileInfo"
             :disabled="Boolean(fixTask?.deleted)"
             class="sticky bottom-0 z-10 rounded-b-none"
             @submit="send"

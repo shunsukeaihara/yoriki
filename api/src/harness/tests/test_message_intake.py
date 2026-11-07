@@ -15,10 +15,16 @@ from harness import runner as runner_module
 from harness import skills as skills_module
 from harness.intake import Chosen
 from harness.runner import Runner
-from run.models import ClarificationRequest, ClarificationStatus, Run, RunEvent, RunEventKind, RunStatus
+from llm.factories import ModelProfileFactory
+from run.models import ClarificationRequest, ClarificationStatus, Run, RunEvent, RunEventKind, RunLaunch, RunStatus
 from run.tasks import claim_run
 from skill.factories import SkillFactory, SkillVersionFactory
 from skill.models import SkillScope
+from task.dispatch import start_task_run
+from task.factories import TaskDefinitionFactory
+from task.models import TaskScope
+from user.factories import DepartmentFactory, DepartmentMembershipFactory, UserFactory, grant
+from utils.permissions import AppPermission
 
 from .fakes import FakeAdapter, FakeSession, calls, reply
 
@@ -525,3 +531,31 @@ def test_an_omitted_skill_with_a_shared_name_is_found_by_its_listed_name(convers
     results = {e.data["call_id"]: e.data for e in RunEvent.objects.filter(run=run, kind=RunEventKind.TOOL_RESULT)}
     assert "個人の手順" in str(results["c1"]["content"])
     assert results["c2"]["is_error"]  # 1つに決まらない
+
+
+@pytest.mark.django_db
+def test_fix_chat_accepts_choices_within_the_scope_of_the_task(api_client):
+    """修正チャットでも使用の指示を受け付け、動いているタスクのRunではタスクの範囲で確かめる"""
+    department = DepartmentFactory.create()
+    manager = grant(UserFactory.create(), AppPermission.MANAGE_DEPARTMENT_TASKS)
+    DepartmentMembershipFactory.create(department=department, user=manager)
+    task = TaskDefinitionFactory.create(
+        scope=TaskScope.DEPARTMENT,
+        department=department,
+        created_by=manager,
+        revision__model_profile=ModelProfileFactory.create(version__supports_tools=True),
+    )
+    inside = SkillFactory.create(scope=SkillScope.COMPANY, owner=None, name="全社の手順")
+    SkillVersionFactory.create(skill=inside, instructions="全社の手順の本文")
+    outside = SkillFactory.create(scope=SkillScope.DEPARTMENT, department=DepartmentFactory.create(), name="他部門")
+    SkillVersionFactory.create(skill=outside)
+    run = start_task_run(task, inputs={}, actor=manager, launch=RunLaunch.FIX)
+    with pytest.raises(CannotStart):
+        post_message(run.conversation, body="これも", client_message_id="", actor=manager, skills=[outside])
+
+    adapter = DuringFirstReply(
+        [calls(("c1", "todo_write", TODOS)), reply("終わりました。")],
+        lambda: post_message(run.conversation, body="これも", client_message_id="", actor=manager, skills=[inside]),
+    )
+    execute(run, adapter)
+    assert any("全社の手順の本文" in t for t in user_texts(adapter.requests[1]))

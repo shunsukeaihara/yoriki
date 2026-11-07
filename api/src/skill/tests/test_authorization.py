@@ -219,8 +219,9 @@ class TestAPI:
         api_client.force_login(_users(world)["company_publisher"])
         assert api_client.post(SKILLS, body, format="json").status_code == 403
         api_client.force_login(grant(UserFactory.create(), P.EDIT_SYSTEM_SKILLS))
-        # 編集の権限ではToolを決められない
-        assert api_client.post(SKILLS, body, format="json").status_code == 403
+        # 使うToolは権限ではないので、編集の権限で決められる
+        assert api_client.post(SKILLS, body, format="json").status_code == 201
+        body = {**body, "name": "別の照合"}
         api_client.force_login(_users(world)["system_admin"])
         res = api_client.post(SKILLS, body, format="json")
         assert res.status_code == 201, res.json()

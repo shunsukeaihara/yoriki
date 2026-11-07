@@ -192,22 +192,16 @@ def test_system_task_uses_department_connectors_of_any_department(api_client, mo
     assert "このタスクでは使えません" in res.json()["connectors"][0]
 
 
-def test_skill_declared_connector_must_be_in_the_scope_of_the_task(api_client, model):
-    """定義で選んでいなくても、タスクの範囲の中にあればよい"""
+def test_skill_declared_connector_does_not_limit_the_task(api_client, model):
+    """宣言は使用の指示で、定義にも範囲にも条件を課さない"""
     admin = grant(UserFactory.create(), AppPermission.MANAGE_COMPANY_TASKS)
-    connector = ConnectorFactory.create(name="販売管理", version__tables=TABLES)
+    connector = ConnectorFactory.create(
+        name="販売管理", scope=ConnectorScope.DEPARTMENT, department=DepartmentFactory.create(), version__tables=TABLES
+    )
     declaration = {"connector": connector.uid, "operations": ["datasource_query"], "tables": ["public.vendors"]}
     skill = _company_skill(connectors=[declaration])
     body = {"scope": TaskScope.COMPANY, "skills": [{"skill": skill.uid, "version": 1}]}
-
-    res = _create(api_client, admin, model, **body)
-    assert res.status_code == 201, res.json()
-    connector.scope = ConnectorScope.DEPARTMENT
-    connector.department = DepartmentFactory.create()
-    connector.save(update_fields=["scope", "department"])
-    res = _create(api_client, admin, model, name="別の名前", **body)
-    assert res.status_code == 400
-    assert "販売管理" in res.json()["skills"][0]
+    assert _create(api_client, admin, model, **body).status_code == 201
 
 
 def test_sensitive_connector_needs_a_sensitive_task_with_a_local_model(api_client, model):

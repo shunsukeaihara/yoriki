@@ -37,7 +37,7 @@ PLACEHOLDER_RE = re.compile(r"\{\{\s*inputs\.([A-Za-z0-9_]+)\s*\}\}")
 SCOPE_SKILLS: dict[int, tuple[int, ...]] = {
     TaskScope.DEPARTMENT: (SkillScope.DEPARTMENT, SkillScope.COMPANY),
     TaskScope.COMPANY: (SkillScope.COMPANY,),
-    TaskScope.SYSTEM: (SkillScope.SYSTEM,),
+    TaskScope.SYSTEM: (SkillScope.SYSTEM, SkillScope.DEPARTMENT, SkillScope.COMPANY),
 }
 SCOPE_CONNECTORS: dict[int, tuple[int, ...]] = {
     TaskScope.DEPARTMENT: (ConnectorScope.DEPARTMENT, ConnectorScope.COMPANY),
@@ -64,7 +64,9 @@ def skill_allowed(task: TaskLike, skill: Skill) -> bool:
         return False
     if skill.scope == SkillScope.DEPARTMENT and (skill.department is None or skill.department.deleted):
         return False  # 無効にした部門のものは新しく使わない（authorization.md §9）
-    return not (skill.scope == SkillScope.DEPARTMENT and skill.department_id != task.department_id)
+    if task.scope == TaskScope.DEPARTMENT and skill.scope == SkillScope.DEPARTMENT:
+        return skill.department_id == task.department_id
+    return True
 
 
 def connector_allowed(task: TaskLike, connector: Connector) -> bool:
@@ -89,7 +91,10 @@ def allowed_skills(task: TaskLike) -> QuerySet[Skill]:
     scopes = SCOPE_SKILLS.get(task.scope, ())
     condition = Q(scope__in=[s for s in scopes if s != SkillScope.DEPARTMENT])
     if SkillScope.DEPARTMENT in scopes:
-        condition |= Q(scope=SkillScope.DEPARTMENT, department_id=task.department_id, department__deleted=False)
+        department = Q(scope=SkillScope.DEPARTMENT, department__deleted=False)
+        if task.scope == TaskScope.DEPARTMENT:
+            department &= Q(department_id=task.department_id)
+        condition |= department
     return Skill.objects.filter(condition, deleted=False, suspended=False, current_version__isnull=False)
 
 

@@ -4,7 +4,7 @@
 import pytest
 
 from connector.factories import ConnectorFactory
-from connector.models import ConnectorScope
+from connector.models import Connector, ConnectorAction, ConnectorScope
 from harness import connectors as connectors_module
 from harness import skills as skills_module
 from harness import tasks
@@ -13,6 +13,7 @@ from harness.tests.test_connectors import TABLES, execute, fixture_fake_datasour
 from llm.factories import ModelProfileFactory
 from run.models import Run, RunEndReason, RunEvent, RunEventKind, RunLaunch, RunStatus
 from run.tasks import claim_run
+from skill import connectors as skill_connectors
 from skill.factories import SkillFactory, SkillVersionFactory
 from skill.models import SkillScope
 from task import checks
@@ -499,3 +500,42 @@ def test_what_the_catalog_omits_is_still_usable_in_the_scope_of_the_task(monkeyp
     loaded, refused = results(run, "skill")
     assert not loaded["is_error"], text_of(loaded)
     assert refused["is_error"]
+
+
+def test_system_task_can_use_skills_and_connectors_of_every_scope(admin):
+    department = DepartmentFactory.create()
+    _scope_world_in(department)
+    task = TaskDefinitionFactory.create(scope=TaskScope.SYSTEM, created_by=admin)
+    version = ModelProfileFactory.create(version__supports_tools=True).current_version
+    skills, connectors = _names(build_task_catalogs(task, version, sensitive=False, explicit=[]))
+    assert {"全社のSkill", "他部門のSkill"} <= skills
+    assert {"全社のConnector", "他部門のConnector"} <= connectors
+
+
+def test_declarations_of_a_skill_a_session_can_choose_are_usable_in_that_session():
+    """Skillの範囲の全員に見えるConnectorだけを宣言できるので、選べるSkillの宣言はそのセッションで使える
+    （authorization.md §5.1）。すべてのタスクの範囲と、Skill・Connectorの組合せで確かめる"""
+    owner = UserFactory.create()
+    department = _scope_world(owner)
+    DepartmentMembershipFactory.create(department=department, user=owner)
+    owner = type(owner).objects.get(pk=owner.pk)
+    manager = grant(UserFactory.create(), AppPermission.MANAGE_DEPARTMENT_TASKS)
+    tasks_by_scope = [
+        TaskDefinitionFactory.create(scope=TaskScope.PERSONAL, created_by=owner),
+        TaskDefinitionFactory.create(scope=TaskScope.DEPARTMENT, department=department, created_by=manager),
+        TaskDefinitionFactory.create(scope=TaskScope.COMPANY, created_by=manager),
+        TaskDefinitionFactory.create(scope=TaskScope.SYSTEM, created_by=manager),
+    ]
+    every_connector = list(Connector.objects.select_related("connection", "department", "current_version"))
+    checked = 0
+    for task in tasks_by_scope:
+        usable = set(checks.allowed_connectors(task).values_list("pk", flat=True))
+        for skill in checks.allowed_skills(task).select_related("department", "owner"):
+            for connector in every_connector:
+                declarable = skill_connectors.scope_allows(skill, connector) and (
+                    skill.scope != SkillScope.PERSONAL or connector.can(skill.owner, ConnectorAction.USE)
+                )
+                if declarable:
+                    assert connector.pk in usable, (task.scope, skill.name, connector.name)
+                    checked += 1
+    assert checked  # 空の確かめにしない

@@ -10,6 +10,7 @@ from connector.models import VERSION_FIELDS, ConnectorScope
 from skill.factories import SkillDraftFactory, SkillFactory, SkillVersionFactory
 from skill.models import Skill, SkillScope
 from user.factories import DepartmentFactory, grant
+from utils.permissions import AppPermission
 
 from .test_api import SKILLS, _create, _department_editor, _draft, _publish
 
@@ -169,3 +170,18 @@ def test_system_connectors_are_offered_only_to_those_who_can_view_them(api_clien
     # `@` の候補（scopeを付けない一覧）には出さない
     assert [c["name"] for c in api_client.get("/api/app/v1/connectors/").json()["results"]] == ["全社の接続"]
     assert api_client.get(f"/api/app/v1/connectors/{system.uid}/").status_code == 200
+
+
+@pytest.mark.django_db
+def test_a_skill_cannot_publish_a_connector_its_scope_cannot_see(api_client, app_user):
+    """宣言はSkillの中身なので、Skillの範囲の全員に見えるConnectorだけを宣言して公開できる（authorization.md §5.1）"""
+    department = DepartmentFactory.create()
+    _department_editor(app_user, department, publish=True)
+    grant(app_user, AppPermission.EDIT_COMPANY_SKILLS, AppPermission.PUBLISH_COMPANY_SKILLS)
+    connector = ConnectorFactory.create(scope=ConnectorScope.DEPARTMENT, department=department, version__tables=TABLES)
+    skill = _create(api_client, app_user, scope=SkillScope.COMPANY, instructions="照合する", tools=["datasource_query"])
+    draft = _draft(api_client, skill["id"])
+    draft = _patch(api_client, skill["id"], draft, connectors=[_declaration(connector, tables=())]).json()
+    res = _publish(api_client, skill["id"], draft)
+    assert res.status_code == 400
+    assert "見えない" in str(res.json())

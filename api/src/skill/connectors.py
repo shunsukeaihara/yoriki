@@ -2,8 +2,9 @@
 
 Skillの中身（Draft・版・評価に写したDraft）の `connectors` は、使うConnectorと操作・表の宣言で、
 `[{"connector": "<ConnectorのID>", "operations": ["datasource_query"], "tables": ["public.vendors"]}]` の形にする。
-表を省けば、そのConnectorの公開する表のどれでも使う。宣言は使用の指示で、Skillを選べるかにも、使える範囲にも関わらない。
-Connectorを使えるか、表と操作の境界は、操作のたびにセッションの権限とConnectorのその時点の版で判定する。
+表を省けば、そのConnectorの公開する表のどれでも使う。宣言は使用の指示で、Runのアクセス範囲に関わらない。Connectorを
+使えるか、表と操作の境界は、操作のたびにセッションの権限とConnectorのその時点の版で判定する。宣言はSkillの中身なので、
+Skillの範囲の全員に見えるConnectorだけを宣言して公開できる（`scope_errors()`。authorization.md §5.1）。
 
 機密のSkillは、機密のフラグを付けたもの。フラグはSkill自身のもので、宣言したConnectorからは決めない。
 """
@@ -102,6 +103,25 @@ def declaration_problems(content: Any, skill, actor) -> list[str]:
             errors.append(
                 _("Connector「%(name)s」は、表「%(tables)s」を公開していません")
                 % {"name": name, "tables": "、".join(missing)}
+            )
+    return errors
+
+
+def scope_errors(content: Any, skill) -> list[str]:
+    """Skillの範囲の全員に見えないConnectorの宣言（公開・切戻しを止める。authorization.md §5.1）"""
+    connectors = load([content])
+    errors = []
+    for uid in declared_uids(content):
+        connector = connectors.get(uid)
+        if connector is None or connector.deleted:
+            continue  # 消えたものは名前が見えない
+        visible = scope_allows(skill, connector)
+        if visible and skill.scope == SkillScope.PERSONAL:
+            visible = skill.owner is not None and connector.can(skill.owner, ConnectorAction.USE)
+        if not visible:
+            errors.append(
+                _("Connector「%(name)s」は、このSkillの範囲（%(scope)s）の全員には見えないので宣言できません")
+                % {"name": connector.name, "scope": skill.get_scope_display()}
             )
     return errors
 

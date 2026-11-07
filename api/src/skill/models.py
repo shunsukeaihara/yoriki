@@ -405,6 +405,10 @@ class Skill(models.Model):
         if draft.base_version_id != current.current_version_id:
             raise VersionConflict("another version was published after the draft was opened")
         draft.check_publishable()
+        from .connectors import scope_errors  # noqa: PLC0415  skill.connectorsがこのモジュールを使うため
+
+        if errors := scope_errors(draft, current):
+            raise InvalidDraft("／".join(errors))
         draft.check_evaluated()
 
         previous = current.current_version
@@ -485,6 +489,10 @@ class Skill(models.Model):
             raise InvalidDraft(_("公開中の版には切り戻せません"))
         if not allow_sensitive and source.is_sensitive:
             raise InvalidDraft(_("機密の版には、個人情報・機密情報を扱う会話でだけ切り戻せます"))
+        from .connectors import scope_errors  # noqa: PLC0415  skill.connectorsがこのモジュールを使うため
+
+        if errors := scope_errors(source, current):
+            raise InvalidDraft("／".join(errors))
 
         previous = current.current_version
         version = SkillVersion.objects.create(

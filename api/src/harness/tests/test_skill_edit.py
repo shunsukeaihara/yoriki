@@ -1,5 +1,3 @@
-from harness import connectors as connectors_module
-
 """会話からのSkill更新（harness.md §10.9、design.md §11.6）。編集のRunの始め方、Skill管理のTool、提案の確認"""
 
 from typing import Any
@@ -10,6 +8,7 @@ from connector.factories import ConnectorFactory
 from conversation.dispatch import post_message
 from conversation.factories import ConversationFactory
 from conversation.models import ConversationMessage, InstructionKind, MessageRole, UserInstruction
+from harness import connectors as connectors_module
 from harness.runner import Runner
 from harness.sandbox import SandboxSession
 from resources.factories import ResourceVersionFactory

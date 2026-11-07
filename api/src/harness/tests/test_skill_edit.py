@@ -1,9 +1,12 @@
+from harness import connectors as connectors_module
+
 """会話からのSkill更新（harness.md §10.9、design.md §11.6）。編集のRunの始め方、Skill管理のTool、提案の確認"""
 
 from typing import Any
 
 import pytest
 
+from connector.factories import ConnectorFactory
 from conversation.dispatch import post_message
 from conversation.factories import ConversationFactory
 from conversation.models import ConversationMessage, InstructionKind, MessageRole, UserInstruction
@@ -485,3 +488,21 @@ def test_removed_asset_drops_its_earlier_diff_counts(conversation, app_user):
     [summary] = skill_changes(run)
     assert summary["summary"] == {"assets_replaced": ["a", "b"], "assets_removed": ["a"]}
     assert summary["asset_diffs"] == {}
+
+
+@pytest.mark.django_db
+def test_a_connector_the_catalog_omits_can_still_be_declared(conversation, app_user, monkeypatch):
+    """一覧の数の上限はアクセス範囲ではないので、省かれたConnectorも名前で宣言できる"""
+    monkeypatch.setattr(connectors_module, "MAX_CATALOG_CONNECTORS", 0)
+    ConnectorFactory.create(name="販売管理", version__tables=[{"name": "vendors", "schema": "public", "columns": []}])
+    skill = publish(app_user)
+    declared = {"name": "販売管理", "operations": ["datasource_query"], "tables": []}
+    adapter = FakeAdapter(
+        [
+            calls(("c1", "update_skill_draft", {"expected_revision": 0, "connectors": [declared]})),
+            reply("宣言しました。"),
+        ]
+    )
+    run = execute(post(conversation, skill_edit=edit(skill)), adapter)
+    [result] = results(run, "update_skill_draft")
+    assert not result["is_error"], text_of(result)

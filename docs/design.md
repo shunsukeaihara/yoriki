@@ -934,7 +934,7 @@ agentセッション（履歴、入力）
 ### 5.2 実行の流れ
 
 1. Trigger Adapterがチャット・Webhook等を認証・正規化し、タスクまたは会話設定から共通の実行要求を組み立てる。追加指示・確認回答は既存Runの会話処理へ渡す。
-2. APIが認証、権限、添付上限、同時実行数、予算、TriggerReceiptの重複を検証し、Run・Manifest・起動・対話・通知・モデル（ModelProfileの版）・Connectorの固定（タスクのRunだけ。会話のRunは発言を取り込むたびに今の権限で一覧を作り直す。harness.md §10.2）・予算予約を作成する（初期の実装は予算の検証・予約・精算をせず、利用量を記録するだけ。§9）。
+2. APIが認証、権限、添付上限、同時実行数、予算、TriggerReceiptの重複を検証し、Run・Manifest・起動・対話・通知・モデル（ModelProfileの版）の固定・予算予約を作成する。Connectorは固定せず、発言を取り込むたびに今の権限（タスクはタスクの範囲）で一覧を作り直す（harness.md §10.2）（初期の実装は予算の検証・予約・精算をせず、利用量を記録するだけ。§9）。
 3. 同じDB transactionでOutboxを記録する。DispatcherがQClusterへRun IDを通知する。
 4. WorkerがRunを原子的にclaimし、Attemptとleaseを作成する。
 5. 固定されたSkillと必要な内容を読み込む。コマンド処理が必要な場合は、許可された添付・資料と実行環境を復元してSandboxを起動する。

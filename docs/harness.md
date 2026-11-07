@@ -750,7 +750,7 @@ Codexの非同期の質問と、Gemini CLIの「承認待ちのTool呼出し」�
 |---|---|---|
 | `get_skill` | なし | 公開中の版とDraft（あれば）の中身・revision・資料を返し、資料を `/workspace/master` に置く（公開中の版は `skills/{skill_id}/{key}/{ファイル名}`、Draftは `drafts/{skill_id}/r{revision}/{key}/{ファイル名}`） |
 | `create_skill` | `name`、`scope`（`personal`・`department`・`company`）、`department`、`description`、`instructions` | 新しいSkillとDraftを作る（新規の依頼のときだけ） |
-| `update_skill_draft` | `expected_revision`、変える項目（`description`・`instructions`・`requires`・`input_schema`・`output_schema`・`tools`・`connectors`（宣言するConnectorの名前・操作・表。このRunの `<connectors>` にあるものだけ）・`is_sensitive`（機密のフラグ。付けることだけでき、付けられるのは機密の会話の編集のRunだけ）） | Draftを変える。Draftがなければ公開中の版から開く（`expected_revision` は0） |
+| `update_skill_draft` | `expected_revision`、変える項目（`description`・`instructions`・`requires`・`input_schema`・`output_schema`・`tools`・`connectors`（宣言するConnectorの名前・操作・表。このRunで使えるものだけ）・`is_sensitive`（機密のフラグ。付けることだけでき、付けられるのは機密の会話の編集のRunだけ）） | Draftを変える。Draftがなければ公開中の版から開く（`expected_revision` は0） |
 | `stage_skill_asset` | `expected_revision`、`key`、`path`（Sandboxの中のファイル）、`role`、`description`、`checks`（CSVの検証の条件。変えるのは公開の権限を持つ人だけ） | Sandboxのファイルを、Draftの資料として追加・置換する（原本のbytesのまま。添付の `/workspace/input` のファイルもそのまま置換に使える）。形式ごとに検証し、結果に誤りと公開中の版との差分（MDの本文、CSVの行、PPTXのスライドごとのテキストと構造）を返す（design.md §3.9）。`/workspace/input` 以外のファイルは、エージェントが編集した候補として検証する |
 | `remove_skill_asset` | `expected_revision`、`key` | Draftから資料を外す |
 | `publish_skill_draft` | `expected_revision`、`change_reason` | Draftを公開する。公開の権限がなければ公開せず「変更案を保存」と返す |

@@ -34,6 +34,7 @@ from skill.serializers import ASSET_KEY_RE, AssetChecksSerializer, SkillCreateSe
 from user.models import Department
 from utils.exceptions import Conflict
 
+from ..catalogs import unlisted_connector
 from ..connectors import catalog as connector_catalog
 from ..sandbox import workspace_path
 from ..skill_edit import access_label, edit_entry, edit_target
@@ -424,6 +425,10 @@ def _declaration_changes(arguments: dict[str, Any], context: ToolContext) -> dic
     data: dict[str, Any] = {}
     if "connectors" in arguments:
         listed = {e["name"]: e["connector"] for e in connector_catalog(context.run).get("connectors", [])}
+        # 一覧の数の上限で省いたものも名前で宣言できる（一覧は見せ方で、アクセス範囲ではない）
+        for declared in arguments["connectors"]:
+            if declared["name"] not in listed and (uid := unlisted_connector(context.run, declared["name"])):
+                listed[declared["name"]] = uid
         unknown = [c["name"] for c in arguments["connectors"] if c["name"] not in listed]
         if unknown:
             names = ", ".join(f'"{name}"' for name in listed) or "none"

@@ -3,10 +3,8 @@
 
 from typing import Any
 
-from django.utils.translation import gettext as _
-
 from run.models import RunEvent, RunEventKind
-from skill.models import Skill, SkillAction, SkillVersion
+from skill.models import Skill, SkillVersion
 
 from .. import tasks
 from ..catalogs import unlisted_skill
@@ -43,19 +41,22 @@ PARAMETERS = {
 def execute(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     run = context.run
     skills = skill_catalog(run).get("skills", [])
-    uid = next((e["skill"] for e in skills if e["name"] == arguments["name"]), None)
+    loaded_here = loaded_entries(run)
+    uid = next((e["skill"] for e in loaded_here if e["name"] == arguments["name"]), None)
+    uid = uid or next((e["skill"] for e in skills if e["name"] == arguments["name"]), None)
     uid = uid or unlisted_skill(run, arguments["name"])
     if uid is None:
         candidates = ", ".join(e["name"] for e in skills[:MAX_CANDIDATES]) or "(none)"
         return ToolResult.error(f'No skill named "{arguments["name"]}" is available. Available skills: {candidates}.')
 
     skill = Skill.objects.select_related("current_version", "department").filter(uid=uid).first()
-    if skill is None or skill.deleted:
+    if skill is None:
         return ToolResult.error("This skill was deleted. Continue without it, and tell the user.")
-
-    loaded = next((e for e in loaded_entries(run) if e["skill"] == skill.uid), None)
+    loaded = next((e for e in loaded_here if e["skill"] == skill.uid), None)
     if loaded is not None:
         return _load_again(skill, loaded, arguments["name"], context)
+    if skill.deleted:
+        return ToolResult.error("This skill was deleted. Continue without it, and tell the user.")
     if reason := _problem(run, skill):
         return _unusable(reason)
     assert skill.current_version_id is not None  # unusable_reason() が確かめた
@@ -81,15 +82,8 @@ def _problem(run, skill: Skill) -> str:
 
 
 def _load_again(skill: Skill, loaded: dict[str, Any], name: str, context: ToolContext) -> ToolResult:
-    """同じRunでは追記した版を返す（途中で公開し直されても切り替えない）。停止や権限の失効は確かめ直す"""
-    run = context.run
-    revoked = (
-        tasks.skill_problem(run, skill, None)
-        if tasks.is_task_run(run)
-        else not skill.can(run.owner, SkillAction.VIEW) or skill.suspended
-    )
-    if revoked:
-        return _unusable(_("このSkillは使えなくなりました"))
+    """同じRunでは追記した版を返す（途中で公開し直されても切り替えない）。権限が決めるのは新しく選べるかだけなので、停止・
+    失効した後も読み直せる（圧縮の後に手順を読み直すため。harness.md §10.1）"""
     version = SkillVersion.objects.prefetch_related("assets__resource_version").get(pk=loaded["version"])
     return _loaded(skill, version, name, context)
 

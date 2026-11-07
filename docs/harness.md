@@ -374,7 +374,7 @@ class ToolResult:
 1. Runの種類：業務のRun、Skillの編集のRun、タスクの編集のRun、Draftの評価のRun（design.md §3.6・§3.7・§11.11）。Skill管理のToolはSkillの編集のRunだけ、タスク管理のToolはタスクの編集のRunだけ、Skill公開のToolは評価のRunには出さない。評価のRunは、評価するSkill（公開中の版か、評価に写したDraft）を使うよう指示して動かす。Toolは絞らず、業務結果のSchemaがあれば `submit_result` を加え、`skill`・`request_skill_edit` は出さない（design.md §3.7.1）。
 2. Skill：Skillの指定（`/`、タスクの定義）と `tools` は使用の指示で、Toolの一覧を変えない（authorization.md §1の8）。会話のRunとタスクのRunに、Runの権限で使えるToolの全体と `skill` を出す。答える人がいる会話のRunには `request_skill_edit` も出す（編集を提案するだけで、作業の権限を増やさないため）。タスクに業務結果のSchemaがあれば `submit_result` を加える。タスクに通知の書き方があれば `prepare_notification` も加える（design.md §4.3）。
 3. 実行許可（authorization.md §6）：Connector・Skillの一覧は、会話では依頼した人がアクセスできるもの（本人の個人、使える部門の部門、全社）、タスクのRunではタスクの範囲でアクセスできるもの（authorization.md §5.4）。システムのConnector・Skillは、システムタスクのRunにだけ出す。
-4. モデルの能力：Tool呼出しに対応しないモデルでは、Toolを出さない（Skillも、Toolが要るものは候補にしない。design.md §4.8）。
+4. モデルの能力：Tool呼出しに対応しないモデルでは、Toolを出さない。Skillは候補から外さず、必要な能力がないことを案内する（§10.1）。
 5. 確認の相手：`ask_user` は、答える人がいるRun（会話、修正チャットのタスクのRun、または対話Bindingのあるタスク）だけに出す。修正チャットのタスクのRunでは `request_task_edit` も加える（作業の権限を増やさないため）。
 6. Sandbox：Runtime Profileは Run の単位で決まり、既定がなければRunを始めない（design.md §7.3）。Sandboxは最初にSandboxのToolが呼ばれた時点で起動する（design.md §4）。
 
@@ -653,7 +653,7 @@ LibreOffice・Node.js・pandoc・poppler-utils・markitdownはこれからイメ
 
 同じRunで `skill` でもう一度読み込んでも、追記した版を返す（途中で公開し直されても切り替えない）。利用者が発言で `/` で指定し直したときだけ、その時点の最新の公開版へ切り替え、Manifestに追記して切り替えた時点を記録する。
 
-権限が決めるのは選べるかだけなので、読み込んだSkillが停止・削除された、利用者が使えなくなった、宣言したConnectorを使えなくなった、機密になった、といったことではRunを止めない。新しく選べなくなるだけで、読み込み済みの手順は文脈に残る（authorization.md §1の8）。モデルの切り替えの候補も、Skillの必要な能力では絞らない。
+権限が決めるのは選べるかだけなので、読み込んだSkillが停止・削除された、利用者が使えなくなった、宣言したConnectorを使えなくなった、機密になった、といったことではRunを止めない。新しく選べなくなるだけで、読み込み済みの手順は文脈に残り、`skill` で読み直せば同じ版を返す（authorization.md §1の8）。モデルの切り替えの候補も、Skillの必要な能力では絞らない。
 
 **使うよう指示した場合**（`/` やTask Definition。読み込む手間を省くだけで、Toolの一覧もアクセス範囲も変えない）：Run開始時にSkill Versionへ解決し（使えなければRunを始めず、利用者に理由を返す）、Manifestに固定して（`fixed.skills`）、上と同じ内容を最初の `message.user` に入れる。モデルに `skill` を呼ばせない。
 
@@ -704,7 +704,7 @@ Codexの非同期の質問と、Gemini CLIの「承認待ちのTool呼出し」�
 
 - 成果物は `/workspace/output` に置かせる。完了時にRunnerがすべて回収・検証して永続化する（design.md §7.4）。
 - `present_files` は、主な成果物と説明を示すだけ（ファイルの中身はコピーしない。DeepSeek Harnessの方式）。画面の「添付と成果物」で、示した成果物を先に出す。存在しないパスは、直し方を添えたエラーにする。
-- **業務結果のSchema**があるRun（SkillかTask Definitionが出力のSchemaを持つ。例：契約書レビューの判定・理由・指摘箇所）では、`submit_result` の引数をそのSchemaにする。Runnerは検証し、通れば業務結果として保存し（`Run.result`。もう一度呼べば置き換える）、最後の応答を書かせて完了の手順（design.md §5.2の7）に進む。確定した後に今の作業への追加の指示を取り込んだら、業務結果を取り消して、指示を反映した結果で確定し直させる。Schemaがあるのに `submit_result` を呼ばずに最後の応答を返したら、1回だけ呼ぶよう促し、それでも呼ばなければ `no_result` で終える（Gemini CLIの方式）。
+- **業務結果のSchema**があるRun（SkillかTask Definitionが出力のSchemaを持つ。例：契約書レビューの判定・理由・指摘箇所）では、`submit_result` の引数をそのSchemaにする。Runnerは検証し、通れば業務結果として保存し（`Run.result`。もう一度呼べば置き換える）、最後の応答を書かせて完了の手順（design.md §5.2の7）に進む。確定した後に今の作業への追加の指示か、回答に添えたSkill・Connectorの指定を取り込んだら、業務結果を取り消して、指示を反映した結果で確定し直させる。Schemaがあるのに `submit_result` を呼ばずに最後の応答を返したら、1回だけ呼ぶよう促し、それでも呼ばなければ `no_result` で終える（Gemini CLIの方式）。
 - 業務結果のSchemaのルートの項目には、ファイルの項目（`{"type": "string", "format": "file"}`、または `items` をそれにした配列）を書ける。値は `/workspace/output` の中のファイルのパスで、タスクの出口へ渡す成果物はこの項目で指したものだけになる（design.md §4.4）。モデルへは `format` を外して置き場所を説明に書いたSchemaを渡し（§7.3。プロバイダごとの違いを避ける）、`submit_result` のときに指したファイルが `/workspace/output` の通常のファイル（隠しファイル・symlinkでない）であることをSandboxで確かめる。完了の前（成果物の回収の後）にも、指したファイルが完了時の `/workspace/output` にあり、今の中身と同じ成果物として回収できたかを確かめ、できなければ `no_result` で失敗にする（`submit_result` の後に消した、回収の上限を超えた等で、出口へ渡す成果物が黙って欠けたり、同じ会話の前のRunの古いファイルを渡したりしないように）。ルートの項目以外の `format: file`（`patternProperties`・`$defs` 等の中を含む）は、Skill・タスクの保存で断る。
 - 最後の応答の本文は、会話のメッセージとして保存する。
 

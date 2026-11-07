@@ -461,3 +461,32 @@ def test_instruction_after_the_result_asks_to_submit_it_again(conversation, app_
     assert any(RESULT_RESET_NOTICE in m.text for m in adapter.requests[3].messages)
     assert run.status == RunStatus.COMPLETED
     assert run.result == {"verdict": "ok", "reason": "問題なし"}
+
+
+@pytest.mark.django_db
+def test_a_loaded_skill_can_be_read_again_after_it_is_suspended(conversation, app_user):
+    """権限が決めるのは新しく選べるかだけ。読み込み済みの版は、停止の後も読み直せる（圧縮の後に手順を読み直すため）"""
+    skill, _version = publish(app_user, instructions="手順の本文", tools=[])
+    other, _other = publish(app_user, name="別のSkill", tools=[])
+    run = start(conversation)
+
+    class Suspend(FakeAdapter):
+        def stream(self, request):
+            if len(self.requests) == 1:
+                skill.set_suspended(True, actor=app_user)
+                other.set_suspended(True, actor=app_user)
+            yield from super().stream(request)
+
+    adapter = Suspend(
+        [
+            calls(("c1", "skill", {"name": skill.name})),
+            calls(("c2", "skill", {"name": skill.name}), ("c3", "skill", {"name": other.name})),
+            reply("終わりました"),
+        ]
+    )
+    run = execute(run, adapter)
+    assert run.status == RunStatus.COMPLETED
+    first, again, refused = results(run, "skill")
+    assert "手順の本文" in first["content"][0]["text"]
+    assert not again["is_error"] and "手順の本文" in again["content"][0]["text"]
+    assert refused["is_error"]

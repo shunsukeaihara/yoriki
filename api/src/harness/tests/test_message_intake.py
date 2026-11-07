@@ -559,3 +559,34 @@ def test_fix_chat_accepts_choices_within_the_scope_of_the_task(api_client):
     )
     execute(run, adapter)
     assert any("全社の手順の本文" in t for t in user_texts(adapter.requests[1]))
+
+
+@pytest.mark.django_db
+def test_choices_with_an_answer_clear_the_submitted_result_in_a_fix_chat():
+    """修正チャットの回答に添えた指定は作業の条件を変えるので、確定した業務結果を確定し直させる"""
+    department = DepartmentFactory.create()
+    manager = grant(UserFactory.create(), AppPermission.MANAGE_DEPARTMENT_TASKS)
+    DepartmentMembershipFactory.create(department=department, user=manager)
+    task = TaskDefinitionFactory.create(
+        scope=TaskScope.DEPARTMENT,
+        department=department,
+        created_by=manager,
+        revision__output_schema=SCHEMA,
+        revision__model_profile=ModelProfileFactory.create(version__supports_tools=True),
+    )
+    added = SkillFactory.create(scope=SkillScope.COMPANY, owner=None, name="追加の基準")
+    SkillVersionFactory.create(skill=added, instructions="追加の基準の本文")
+    run = start_task_run(task, inputs={}, actor=manager, launch=RunLaunch.FIX)
+    run = execute(
+        run, FakeAdapter([calls(("c1", "submit_result", {"verdict": "ok"})), calls(("q1", "ask_user", QUESTION))])
+    )
+    assert run.status == RunStatus.WAITING_USER
+    assert run.result == {"verdict": "ok"}
+
+    post_message(run.conversation, body="大阪支店です", client_message_id="", actor=manager, skills=[added])
+    adapter = FakeAdapter([calls(("c2", "submit_result", {"verdict": "ng"})), reply("判定し直しました。")])
+    run = execute(run, adapter)
+
+    assert any("追加の基準の本文" in t for t in user_texts(adapter.requests[0]))
+    assert RunEvent.objects.filter(run=run, kind=RunEventKind.CONTEXT, data__result_reset=True).exists()
+    assert run.result == {"verdict": "ng"}

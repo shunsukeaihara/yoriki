@@ -628,7 +628,9 @@ class Runner:
             chosen = self._recheck_chosen(run, instruction.message)
             self._refresh_catalogs(run, connectors=chosen.connectors, skills=[s.entry for s in chosen.skills])
             self._apply_instruction(run, instruction, chosen)
-            if run.result is not None and not instruction.is_answer:
+            # 回答の本文はToolの結果で渡したが、Skill・Connectorの指定を取り込んだなら作業の条件が変わっている
+            changed = not instruction.is_answer or chosen.skills or chosen.connectors
+            if run.result is not None and changed:
                 # 確定した業務結果は、取り込んだ指示を反映していない。確定し直させる（harness.md §10.4・§10.5）。
                 # 通知の候補も前の業務結果から作ったものなので消す
                 Run.objects.filter(pk=run.pk).update(result=None, notification=None, updated=timezone.now())

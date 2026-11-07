@@ -147,17 +147,17 @@ def test_launch_needs_an_own_conversation_and_the_current_version(api_client, ap
     assert not Run.objects.exists()
 
 
-def test_launch_is_refused_when_the_launcher_cannot_use_a_fixed_connector(api_client, app_user):
+def test_launch_is_refused_when_an_instructed_connector_left_the_scope(api_client, app_user):
     department = DepartmentFactory.create()
     DepartmentMembershipFactory.create(department=department, user=app_user)
     connector = ConnectorFactory.create(name="経理DB", scope=ConnectorScope.DEPARTMENT, department=department)
     task = _task(TaskScope.DEPARTMENT, department=department, connectors=[connector.uid])
-    # 定義の後で、Connectorを別の部門のものにした（起動した人は使えない）
+    # 定義の後で、Connectorを別の部門のものにした（タスクの範囲の外）
     connector.department = DepartmentFactory.create()
     connector.save(update_fields=["department"])
     res = _launch(api_client, app_user, task)
     assert res.status_code == 400
-    assert "Connector「経理DB」を使う権限がない" in res.json()["non_field_errors"][0]
+    assert "Connector「経理DB」を使えません" in res.json()["non_field_errors"][0]
 
 
 def test_launch_is_refused_for_a_task_without_the_mark(api_client, app_user):
@@ -283,7 +283,7 @@ def test_resending_the_same_launch_returns_the_first_run(api_client, app_user):
     assert Run.objects.filter(task=task).count() == 2
 
 
-def test_delivery_is_not_sent_after_the_launcher_lost_a_fixed_connector(api_client, app_user):
+def test_delivery_is_not_sent_after_the_launcher_left_the_department(api_client, app_user):
     department = DepartmentFactory.create()
     membership = DepartmentMembershipFactory.create(department=department, user=app_user)
     connector = ConnectorFactory.create(name="経理DB", scope=ConnectorScope.DEPARTMENT, department=department)
@@ -304,14 +304,6 @@ def test_delivery_is_not_sent_after_the_launcher_lost_a_fixed_connector(api_clie
         destination_revision=run.destination_revision,
         payload={},
     )
-    assert send_problem(delivery) == ""
-    # 部門の所属は残したまま、固定したConnectorを起動した人が使えなくなった
-    connector.department = DepartmentFactory.create()
-    connector.save(update_fields=["department"])
-    DepartmentMembershipFactory.create(department=connector.department, user=UserFactory.create())
-    assert send_problem(delivery) != ""
-    connector.department = department
-    connector.save(update_fields=["department"])
     assert send_problem(delivery) == ""
     membership.delete()  # 起動した後に部門を離れた
     assert "部門から外れました" in send_problem(delivery)

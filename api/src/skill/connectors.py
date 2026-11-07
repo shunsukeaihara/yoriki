@@ -2,11 +2,11 @@
 
 Skillの中身（Draft・版・評価に写したDraft）の `connectors` は、使うConnectorと操作・表の宣言で、
 `[{"connector": "<ConnectorのID>", "operations": ["datasource_query"], "tables": ["public.vendors"]}]` の形にする。
-表を省けば、そのConnectorの公開する表のどれでも使う。宣言は要件で、使える範囲を広げも狭めもしない。宣言した
-Connectorを使えない利用者には、そのSkillを出さない。表と操作の境界は、操作のたびにConnectorのその時点の版で強制する。
+表を省けば、そのConnectorの公開する表のどれでも使う。宣言は使用の指示で、Runのアクセス範囲に関わらない。Connectorを
+使えるか、表と操作の境界は、操作のたびにセッションの権限とConnectorのその時点の版で判定する。宣言はSkillの中身なので、
+Skillの範囲の全員に見えるConnectorだけを宣言して公開できる（`scope_errors()`。authorization.md §5.1）。
 
-機密のSkillは、機密のフラグを付けたものと、機密のConnectorを宣言したもの。宣言による機密は、宣言したConnectorの
-今の版で決める（後でConnectorに機密のフラグが付けば、Skillも機密になる）。
+機密のSkillは、機密のフラグを付けたもの。フラグはSkill自身のもので、宣言したConnectorからは決めない。
 """
 
 from collections.abc import Iterable
@@ -48,44 +48,9 @@ def load(contents: Iterable[Any]) -> dict[str, Connector]:
     return {c.uid: c for c in connectors}
 
 
-def is_sensitive(content: Any, connectors: dict[str, Connector] | None = None) -> bool:
-    """機密のSkillか：機密のフラグか、宣言したConnectorの今の版の機密のフラグ"""
-    if content.is_sensitive:
-        return True
-    if not content.connectors:
-        return False
-    connectors = load([content]) if connectors is None else connectors
-    return any(
-        (c := connectors.get(uid)) is not None and c.current_version is not None and c.current_version.is_sensitive
-        for uid in declared_uids(content)
-    )
-
-
-def unusable_reason(
-    content: Any,
-    user,
-    *,
-    sensitive: bool,
-    available: set[str] | None = None,
-    connectors: dict[str, Connector] | None = None,
-) -> str:
-    """利用者がこのRunでこの中身を使えない理由（使えれば空文字）。宣言したConnectorを使えないか、宣言した操作・表が
-    Connectorの今の版にない（公開した後に外された）か、機密のSkillを機密でないRunで使おうとしたとき。`available` は、
-    このRunのConnectorの一覧のID（宣言したものがなければ使えない）"""
-    connectors = load([content]) if connectors is None else connectors
-    if not sensitive and is_sensitive(content, connectors):
-        return _("機密のSkillは、個人情報・機密情報を扱う会話でだけ使えます")
-    for declaration in content.connectors or []:
-        connector = connectors.get(declaration["connector"])
-        if connector is None or not connector.can(user, ConnectorAction.USE):
-            return _("このSkillが使うConnectorを使えません")
-        if available is not None and connector.uid not in available:
-            return _("このSkillが使うConnector「%(name)s」を、この依頼では使えません") % {"name": connector.name}
-        if out_of_bounds(declaration, connector):
-            return _("このSkillが使う表・操作を、Connector「%(name)s」が今は公開していません") % {
-                "name": connector.name
-            }
-    return ""
+def is_sensitive(content: Any) -> bool:
+    """機密のSkillか（Skill自身のフラグ）"""
+    return bool(content.is_sensitive)
 
 
 def out_of_bounds(declaration: dict[str, Any], connector: Connector) -> list[str]:
@@ -96,9 +61,9 @@ def out_of_bounds(declaration: dict[str, Any], connector: Connector) -> list[str
     return operations + [t for t in declaration.get("tables", []) if t not in exposed]
 
 
-def publish_errors(content: Any, skill, actor) -> list[str]:
-    """公開するときに確かめる：宣言したConnectorが有効で公開する人が使えること、Skillの範囲に合うこと、宣言した操作と
-    表がConnectorの今の版の境界の中にあること、操作のToolがSkillの「使ってよいTool」にあること（design.md §4.9.1）"""
+def declaration_problems(content: Any, skill, actor) -> list[str]:
+    """宣言の気になる点（Connectorが無効、権限がない、範囲に合わない、公開していない等）。画面で知らせるだけで、公開も実行も
+    止めない。宣言は使用の指示で、使えるかは操作のときにセッションの権限で判定するため（design.md §4.9.1）"""
     errors: list[str] = []
     connectors = load([content])
     for declaration in content.connectors or []:
@@ -128,7 +93,7 @@ def publish_errors(content: Any, skill, actor) -> list[str]:
                 )
             elif operation not in content.tools:
                 errors.append(
-                    _("Connector「%(name)s」の操作「%(operation)s」を使うには、使ってよいToolに加えてください")
+                    _("Connector「%(name)s」の操作「%(operation)s」を使うには、使うToolに加えてください")
                     % {"name": name, "operation": operation}
                 )
         assert connector.current_version is not None  # in_service() が確かめた
@@ -138,6 +103,25 @@ def publish_errors(content: Any, skill, actor) -> list[str]:
             errors.append(
                 _("Connector「%(name)s」は、表「%(tables)s」を公開していません")
                 % {"name": name, "tables": "、".join(missing)}
+            )
+    return errors
+
+
+def scope_errors(content: Any, skill) -> list[str]:
+    """Skillの範囲の全員に見えないConnectorの宣言（公開・切戻しを止める。authorization.md §5.1）"""
+    connectors = load([content])
+    errors = []
+    for uid in declared_uids(content):
+        connector = connectors.get(uid)
+        if connector is None or connector.deleted:
+            continue  # 消えたものは名前が見えない
+        visible = scope_allows(skill, connector)
+        if visible and skill.scope == SkillScope.PERSONAL:
+            visible = skill.owner is not None and connector.can(skill.owner, ConnectorAction.USE)
+        if not visible:
+            errors.append(
+                _("Connector「%(name)s」は、このSkillの範囲（%(scope)s）の全員には見えないので宣言できません")
+                % {"name": connector.name, "scope": skill.get_scope_display()}
             )
     return errors
 
@@ -166,20 +150,4 @@ def skill_is_sensitive(skill) -> bool:
     contents: list[Any] = list(skill.drafts.all())
     if skill.current_version is not None:
         contents.append(skill.current_version)
-    connectors = load(contents)
-    return any(is_sensitive(c, connectors) for c in contents)
-
-
-def declares_system_connector(content: Any) -> bool:
-    connectors = load([content])
-    return any(
-        (c := connectors.get(uid)) is not None and c.scope == ConnectorScope.SYSTEM for uid in declared_uids(content)
-    )
-
-
-def out_of_scope(content: Any, skill) -> list[Connector]:
-    """宣言したConnectorのうち、Skillの範囲では宣言できないもの（公開した後に部門が付け替えられたもの等）"""
-    connectors = load([content])
-    return [
-        c for uid in declared_uids(content) if (c := connectors.get(uid)) is not None and not scope_allows(skill, c)
-    ]
+    return any(is_sensitive(c) for c in contents)

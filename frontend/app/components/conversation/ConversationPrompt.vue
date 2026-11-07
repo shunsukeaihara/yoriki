@@ -1,18 +1,17 @@
 <script setup lang="ts">
 /**
- * 会話の入力欄。実行中も使える（design.md §11.4）：今の作業への追加の指示（確認待ちなら回答）か、
- * 今の作業の後に始める次の依頼かを選んで送る。実行中なら停止のボタンも出す。
+ * 会話の入力欄。実行中も使える（design.md §11.4）：送った発言は動いている作業へ渡す（確認待ちなら回答）。発言の
+ * 種類は選ばせない。実行中なら停止のボタンも出す。
  * ファイルはクリップのボタンか、入力欄へのドロップで添付する（アップロードは呼び出し側）。
- * 使う Skill は、ボタンか、行の始めか空白の後で `/` を打つと開く一覧から選ぶ（design.md §11.2）。Skill を指定した
- * 依頼は、Skill の版を依頼を始めるときに決めるので、実行中なら今の作業の後に始める。
+ * 使う Skill は、ボタンか、行の始めか空白の後で `/` を打つと開く一覧から選ぶ（design.md §11.2）。実行中に指定すると、
+ * 動いている作業がその時点の最新の公開版を読み込む。
  * 同じ一覧で Skill の「編集」か「新しい Skill を作る」を選ぶと、Skill の編集の依頼になる（design.md §11.6）。
  * 編集の依頼は別の Run で行うので、使う Skill とは一緒に選べず、実行中なら今の作業の後に始める。
- * 使う Connector は、ボタンか、行の始めか空白の後で `@` を打つと開く一覧から選ぶ（harness.md §10.2）。使える
- * Connector の一覧も依頼を始めるときに決めるので、実行中なら今の作業の後に始める。
+ * 使う Connector は、ボタンか、行の始めか空白の後で `@` を打つと開く一覧から選ぶ（harness.md §10.2）。
  * `/` の一覧でタスクを選ぶと、呼び出し側が入力のダイアログを開いて起動する（入力欄の本文は送らない）。
- * タスクの修正チャット（`fixChat`。design.md §11.11）では、Skill・Connector・タスクの一覧を出さない。動いている作業
- * には追加の指示か回答、次の依頼を送れ、作業が動いていないときのメッセージと次の依頼は、タスクを直す依頼（直前の
- * 実行について尋ねるだけでもよい）になる。
+ * タスクの修正チャット（`fixChat`。design.md §11.11）では、Skill の編集とタスクの起動を出さない。動いている作業
+ * には追加の指示か回答を送れ、作業が動いていないときのメッセージは、タスクを直す依頼（直前の実行について尋ねるだけ
+ * でもよい）になる。
  */
 const props = defineProps<{
   activeRun?: Run | null
@@ -34,9 +33,10 @@ const props = defineProps<{
   disabled?: boolean
   /** タスクの修正チャット */
   fixChat?: boolean
+  /** 今のモデル */
+  model?: AppModelProfile | null
 }>()
 const text = defineModel<string>({ required: true })
-const mode = defineModel<string>('mode', { default: MessageMode.AUTO })
 const selectedSkills = defineModel<Skill[]>('selectedSkills', { default: () => [] })
 const skillEdit = defineModel<SkillEditChoice | null>('skillEdit', { default: null })
 const selectedConnectors = defineModel<AppConnector[]>('selectedConnectors', { default: () => [] })
@@ -66,7 +66,7 @@ const connectorPickerOpen = ref(false)
 const connectorSearch = ref('')
 // 行の始めか空白の後に `/`・`@` を打ったら、その文字を消して Skill・Connector の一覧を開く
 watch(text, (value, old) => {
-  if (props.disabled || props.fixChat || value.length !== (old?.length ?? 0) + 1) return
+  if (props.disabled || value.length !== (old?.length ?? 0) + 1) return
   const trigger = /(^|\s)([/@])$/.exec(value)?.[2]
   if (!trigger) return
   text.value = value.slice(0, -1)
@@ -95,38 +95,23 @@ const selectConnector = (connector: AppConnector) => {
 const removeConnector = (id: string) => {
   selectedConnectors.value = selectedConnectors.value.filter((c) => c.id !== id)
 }
-// Skill・Connector を指定した依頼は、実行中なら今の作業の後に始める
-const separateRequest = computed(
-  () => selectedSkills.value.length > 0 || selectedConnectors.value.length > 0 || skillEdit.value !== null,
-)
-
 const attachmentsReady = computed(() => (props.attachments ?? []).every((a) => a.artifact))
-// Skill の編集の依頼では、どう変えるかの本文が要る
+// Skill の編集の依頼では、どう変えるかの本文が要る。確認待ちでは、Skill の指定だけでは回答にならない
 const hasContent = computed(() =>
   skillEdit.value
     ? Boolean(text.value.trim())
-    : Boolean(text.value.trim()) || Boolean(props.attachments?.length) || selectedSkills.value.length > 0,
+    : Boolean(text.value.trim()) ||
+      Boolean(props.attachments?.length) ||
+      (selectedSkills.value.length > 0 && !props.hasOpenQuestion),
 )
-
-const modeItems = computed(() => [
-  { value: MessageMode.AUTO, title: props.hasOpenQuestion ? t('回答として送る') : t('今の作業に追加') },
-  { value: MessageMode.NEXT, title: t('次の依頼にする') },
-])
 
 const placeholder = computed(() => {
   if (skillEdit.value?.skill) return t('Skillをどう変えるかを入力してください（添付したファイルを資料にもできます）')
   if (skillEdit.value) return t('どんなSkillを作るかを入力してください（この会話の手順をSkillにする等）')
-  if (props.activeRun && selectedSkills.value.length)
-    return t('今の作業が終わった後に、Skillを使って始める依頼を入力してください')
-  if (props.activeRun && selectedConnectors.value.length)
-    return t('今の作業が終わった後に、Connectorを使って始める依頼を入力してください')
   if (props.fixChat && !props.activeRun)
     return t('タスクをどう直すか、前の実行について尋ねたいことを入力してください（動かすのは「もう一度動かす」）')
-  if (props.fixChat && mode.value === MessageMode.NEXT && !props.hasOpenQuestion)
-    return t('今の作業が終わった後の、タスクを直す依頼を入力してください')
   // `@` は vue-i18n のリンクの記法なので、文字として出すには {'@'} と書く
   if (!props.activeRun) return t("依頼を入力してください（/ でSkill・タスク、{'@'} でConnectorを指定）")
-  if (mode.value === MessageMode.NEXT) return t('今の作業が終わった後に始める依頼を入力してください')
   if (props.hasOpenQuestion) return t('質問への回答を入力してください')
   return t('今の作業への追加の指示を入力してください')
 })
@@ -228,7 +213,6 @@ const onSubmit = () => {
           @click="picker.open()"
         />
         <ConversationSkillPicker
-          v-if="!fixChat"
           v-model:open="skillPickerOpen"
           v-model:search-term="skillSearch"
           :skills="skills ?? []"
@@ -236,7 +220,9 @@ const onSubmit = () => {
           :selected="selectedSkills.map((s) => s.id)"
           :sensitive="sensitive ?? false"
           :full="skillsFull"
-          :tasks="tasks ?? []"
+          :tasks="fixChat ? [] : (tasks ?? [])"
+          :model="model"
+          :no-edit="fixChat"
           :disabled="disabled"
           @select="selectSkill"
           @edit="chooseEdit"
@@ -244,7 +230,6 @@ const onSubmit = () => {
           @launch="emit('launch', $event)"
         />
         <ConversationConnectorPicker
-          v-if="!fixChat"
           v-model:open="connectorPickerOpen"
           v-model:search-term="connectorSearch"
           :connectors="connectors ?? []"
@@ -253,14 +238,6 @@ const onSubmit = () => {
           :full="connectorsFull"
           :disabled="disabled"
           @select="selectConnector"
-        />
-        <DSelectButton
-          v-if="activeRun && !separateRequest"
-          v-model="mode"
-          :label="$t('送り方')"
-          :show-label="false"
-          :items="modeItems"
-          size="xs"
         />
       </div>
       <div class="flex items-center gap-2">

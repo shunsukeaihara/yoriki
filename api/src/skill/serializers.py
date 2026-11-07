@@ -11,7 +11,7 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 from rest_framework.exceptions import PermissionDenied
 
-from connector.models import Connector, ConnectorAction, Operation
+from connector.models import Connector, Operation
 from harness.result_files import file_format_problem
 from harness.tools import SKILL_TOOLS
 from harness.tools.base import schema_problem
@@ -273,7 +273,7 @@ class SkillContentSerializer(serializers.ModelSerializer):
         child=serializers.ChoiceField(choices=TOOL_CHOICES),
         required=False,
         max_length=50,
-        help_text=_("使ってよいTool。空ならコマンド不要のSkill"),
+        help_text=_("使うTool。空ならコマンド不要のSkill"),
     )
     requires = serializers.ListField(
         child=serializers.ChoiceField(choices=SkillRequirement.choices), required=False, max_length=10
@@ -414,11 +414,8 @@ class SkillSerializer(serializers.ModelSerializer):
     edit_sensitive = serializers.SerializerMethodField(
         help_text=_("公開中の版かDraftが機密のSkillか（機密の会話でだけ編集できる）")
     )
-    connectors_usable = serializers.SerializerMethodField(
-        help_text=_(
-            "公開中の版が宣言したConnectorを、利用者がすべて使え、宣言した操作・表をConnectorが今も公開しているか"
-            "（でなければ会話で使えない）"
-        )
+    requires = serializers.SerializerMethodField(
+        help_text=_("公開中の版の必要な能力。選べるかには関わらない（画面の案内に使う）")
     )
 
     class Meta:
@@ -435,7 +432,7 @@ class SkillSerializer(serializers.ModelSerializer):
             "suspended",
             "sensitive",
             "edit_sensitive",
-            "connectors_usable",
+            "requires",
             "draft",
             "can_edit",
             "can_publish",
@@ -467,26 +464,14 @@ class SkillSerializer(serializers.ModelSerializer):
 
     def get_sensitive(self, obj: Skill) -> bool:
         version = obj.current_version
-        return version is not None and skill_connectors.is_sensitive(version, self._declared(obj, [version]))
+        return version is not None and skill_connectors.is_sensitive(version)
 
     def get_edit_sensitive(self, obj: Skill) -> bool:
-        contents = self._contents(obj)
-        declared = self._declared(obj, contents)
-        return any(skill_connectors.is_sensitive(content, declared) for content in contents)
+        return any(skill_connectors.is_sensitive(content) for content in self._contents(obj))
 
-    def get_connectors_usable(self, obj: Skill) -> bool:
-        version = obj.current_version
-        request = self.context.get("request")
-        if version is None or request is None or not version.connectors:
-            return True
-        declared = self._declared(obj, [version])
-        # 宣言した操作・表をConnectorの今の版が公開しなくなったものも、会話では使えない
-        return all(
-            (c := declared.get(d["connector"])) is not None
-            and c.can(request.user, ConnectorAction.USE)
-            and not skill_connectors.out_of_bounds(d, c)
-            for d in version.connectors
-        )
+    @extend_schema_field(serializers.ListField(child=serializers.IntegerField()))
+    def get_requires(self, obj: Skill) -> list[int]:
+        return list(obj.current_version.requires) if obj.current_version else []
 
     def get_draft(self, obj: Skill) -> str | None:
         """開いているDraftのID。なければnull。Draftを編集できる人にだけ出す"""
@@ -563,8 +548,6 @@ class SkillCreateSerializer(SkillContentSerializer):
         new = Skill(scope=scope, owner=user if scope == SkillScope.PERSONAL else None, department=department)
         if not new.can(user, SkillAction.EDIT):
             raise PermissionDenied(_("この範囲にSkillを作る権限がありません"))
-        if attrs.get("tools") and not new.can(user, SkillAction.PUBLISH):
-            raise PermissionDenied(_("使ってよいToolを決めるには、この範囲の公開の権限が要ります"))
         attrs["name"] = name
         attrs["department"] = department
         return attrs
@@ -906,7 +889,7 @@ class SkillDraftSerializer(SkillContentSerializer):
         request = self.context.get("request")
         if request is None or not obj.connectors:
             return []
-        return skill_connectors.publish_errors(obj, obj.skill, request.user)
+        return skill_connectors.declaration_problems(obj, obj.skill, request.user)
 
     def validate(self, attrs):
         draft = self.instance
@@ -914,13 +897,6 @@ class SkillDraftSerializer(SkillContentSerializer):
         if "revision" not in attrs:
             # 部分更新（PATCH）では必須の項目も省けるので、ここで確かめる
             raise serializers.ValidationError({"revision": _("編集を始めた時点のrevisionを送ってください")})
-        if (
-            "tools" in attrs
-            and attrs["tools"] != draft.tools
-            and not _can(draft.skill, self.context, SkillAction.PUBLISH)
-        ):
-            # 本文を編集できても、Toolは増やせない（design.md §3.6）
-            raise PermissionDenied(_("使ってよいToolを変えるには、この範囲の公開の権限が要ります"))
         if (
             draft.is_sensitive
             and not attrs.get("is_sensitive", True)

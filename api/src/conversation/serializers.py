@@ -10,7 +10,7 @@ from artifact.models import Artifact, ArtifactKind
 from artifact.serializers import ArtifactSerializer
 from connector.models import Connector
 from harness.connectors import MAX_EXPLICIT_CONNECTORS
-from harness.skills import MAX_EXPLICIT_SKILLS, unsupported_skills
+from harness.skills import MAX_EXPLICIT_SKILLS
 from llm.models import ModelProfile
 from llm.serializers import AppModelProfileSerializer
 from run.models import ACTIVE_STATUSES, Run, RunEndReason, RunStatus, RunTrigger
@@ -18,7 +18,7 @@ from run.serializers import RunSerializer
 from skill.models import Skill, SkillAction
 from utils.fields import NormalizedTextField
 
-from .dispatch import CannotStart, MessageMode, post_message
+from .dispatch import CannotStart, post_message
 from .models import Conversation, ConversationMessage, InstructionKind, InstructionState, MessageRole
 
 
@@ -126,17 +126,6 @@ class ConversationSerializer(serializers.ModelSerializer):
             effort = attrs["effort"] = ""  # モデルを変えたら、そのモデルの既定から始める
         if effort and effort not in version.effort_values:
             raise serializers.ValidationError({"effort": _("このモデルが受け付けるeffortの値から選んでください")})
-        if self.instance is not None and "model_profile" in attrs:
-            # 実行中のRunも切り替わるので、そのRunが使うSkillの必要な能力を持つモデルに限る（design.md §4.8）。
-            # タスクのRun（修正チャット）はタスクのモデル設定のまま動かすので切り替えない
-            run = self.instance.runs.filter(status__in=ACTIVE_STATUSES).exclude(trigger=RunTrigger.TASK).first()
-            if run is not None and (names := unsupported_skills(run, version)):
-                raise serializers.ValidationError(
-                    {
-                        "model_profile": _("このモデルは、使っているSkill（%(names)s）に必要な能力を持ちません")
-                        % {"names": "、".join(names)}
-                    }
-                )
         return attrs
 
     def update(self, instance: Conversation, validated_data) -> Conversation:
@@ -324,12 +313,6 @@ class MessageSerializer(serializers.ModelSerializer):
     )
     skill_edit = serializers.SerializerMethodField()
     client_message_id = serializers.CharField(max_length=64, required=False, allow_blank=True, write_only=True)
-    mode = serializers.ChoiceField(
-        choices=[(MessageMode.AUTO, _("自動")), (MessageMode.NEXT, _("次の依頼"))],
-        default=MessageMode.AUTO,
-        write_only=True,
-        help_text=_("auto：実行中なら今の作業への追加指示、確認待ちなら回答。next：今の作業の後に始める"),
-    )
     instruction = InstructionInfoSerializer(read_only=True, allow_null=True)
     task_run = LaunchedTaskRunSerializer(
         read_only=True, allow_null=True, help_text=_("チャットから起動したタスクのRun（カードとして出すメッセージ）")
@@ -353,7 +336,6 @@ class MessageSerializer(serializers.ModelSerializer):
             "create_skill",
             "skill_edit",
             "client_message_id",
-            "mode",
             "instruction",
             "task_run",
             "created",
@@ -459,7 +441,6 @@ class MessageSerializer(serializers.ModelSerializer):
                 validated_data["conversation"],
                 body=validated_data["body"],
                 client_message_id=validated_data.get("client_message_id", ""),
-                mode=validated_data["mode"],
                 actor=validated_data["sender"],
                 attachments=validated_data.get("attachments", []),
                 skills=validated_data.get("skills", []),

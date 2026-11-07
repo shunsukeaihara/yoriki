@@ -59,7 +59,6 @@ const { onSubmit, loading, errors } = createSubmit({
         attachments: attachments.ids.value,
         createSkill: false,
         clientMessageId: crypto.randomUUID(),
-        mode: MessageMode.AUTO,
       })
       return { conversation, message, error: null }
     } catch (error) {

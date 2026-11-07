@@ -20,14 +20,6 @@ export const InstructionState = {
   DISCARDED: 9,
 } as const satisfies Record<string, InstructionStateEnum>
 
-// メッセージの送り方（MessageSerializer.mode）
-export const MessageMode = {
-  // 実行中なら今の作業への追加指示、確認待ちなら回答、それ以外は新しい依頼
-  AUTO: 'auto',
-  // 実行中なら、今の作業が終わった後に始める次の依頼
-  NEXT: 'next',
-} as const satisfies Record<string, NonNullable<MessageWrite['mode']>>
-
 /** 先行の作業の後に始めるのを待っている次の依頼 */
 export const isWaitingNextRequest = (message: Message) =>
   message.instruction?.kind === InstructionKind.NEXT && message.instruction.state === InstructionState.RECEIVED

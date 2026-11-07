@@ -1,7 +1,6 @@
 <script setup lang="ts">
 /**
  * SkillのDraft（編集中の中身）の編集。保存では編集を始めた時点の revision を送り、その間に他の人が変えていたら409になる。
- * 使ってよいToolは、公開の権限がある人だけが変えられる（design.md §3.6。サーバーでも確かめる）。
  * 機密のフラグは、編集の権限で付けられ、外すのは公開の権限がある人だけ（authorization.md §5.1）。
  *
  * 資料の追加・置換でも Draft の revision が増えるので、revision は v-model の Draft に合わせ続け、入力中の文は残す。
@@ -9,7 +8,7 @@
  */
 const props = defineProps<{
   skillId: string
-  canChangeTools: boolean
+  canPublish: boolean
   /** Skill の範囲と部門（宣言できる Connector の候補を絞る） */
   skill?: Pick<Skill, 'scope' | 'departmentInfo'>
 }>()
@@ -74,7 +73,7 @@ const { onSubmit, loading, errors } = createSubmit({
         connectors: data.connectors,
         isSensitive: data.isSensitive,
         // 公開の権限がなければ送らない（同じ値でも、送ると権限を確かめられる）
-        ...(props.canChangeTools ? { tools: data.tools as ToolName[] } : {}),
+        tools: data.tools as ToolName[],
       }),
   onSuccess: (result) => {
     modelValue.value = result
@@ -118,15 +117,10 @@ defineExpose({ onSubmit, loading, canPost, dirty, reset })
     />
     <DCheckboxGroup
       v-model="form.tools"
-      :label="$t('使ってよいTool')"
-      :hint="
-        canChangeTools
-          ? $t('何も選ばなければ、コマンドを使わないSkillになります')
-          : $t('Toolを変えるには、この範囲の公開の権限が要ります')
-      "
+      :label="$t('使うTool')"
+      :hint="$t('手順が使うToolを示します。実際に使えるToolは、Skillでは変わりません')"
       :items="skillToolItems(t)"
       orientation="horizontal"
-      :disabled="!canChangeTools"
       :error-messages="errors.tools"
     />
     <DSelect
@@ -152,7 +146,7 @@ defineExpose({ onSubmit, loading, canPost, dirty, reset })
           '資料に個人情報・機密情報を含むときに付けます。機密のSkillは、個人情報・機密情報を扱う会話でだけ使えます。機密のConnectorを使うSkillは、付けなくても機密になります',
         )
       "
-      :disabled="Boolean(modelValue?.isSensitive) && !canChangeTools"
+      :disabled="Boolean(modelValue?.isSensitive) && !canPublish"
       :error-messages="errors.isSensitive"
     />
     <DFormSection :title="$t('入出力のSchema')" :description="$t('JSON Schemaで書きます。空なら決めません')">

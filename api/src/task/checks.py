@@ -1,12 +1,13 @@
-"""タスクに登録できるもの（authorization.md §5.4）と、タスクのRunの実行許可（authorization.md §6）。
+"""タスクのアクセス範囲（authorization.md §5.4）と、タスクのRunの実行許可（authorization.md §6）。
 
-- 保存するとき（`content_errors()`）：Skill・Connectorがタスクの範囲で登録できるか、Skillが
-  宣言したConnectorと操作がタスクに入っているか、機密の区分とモデル設定が合うか、プロンプトのテンプレートが入力の項目だけを使うか。
+- 保存するとき（`content_errors()`）：定義で使うよう指示するSkill・Connectorがタスクの範囲の中にあるか、
+  機密の区分とモデル設定が合うか、プロンプトのテンプレートが入力の項目だけを使うか。
 - 実行するとき（`skill_problem()`・`connector_permitted()`・`task_problem()`）：受付時、実行の区切りごと、Connectorの
-  操作のたびに、固定したものが今も有効でタスクの範囲の中にあるかを確かめ直す。部門・全社・システムのタスクは、
-  起動した人ではなくタスクの範囲で判定する（人が指示を出せない起動のため）。個人のタスクは本人の今の権限でも判定する。
-- チャットから起動したRun（`launcher_problem()`・`launcher_skill_problem()`・`launcher_connector_permitted()`）：
-  それに加えて、起動した人の今の権限でも判定する（タスクの版の一覧 ∩ 起動した人の今の権限）。
+  操作のたびに、今も有効でタスクの範囲の中にあるかを確かめ直す。定義で指示したかは見ない（指示はアクセス範囲ではない）。
+  個人のタスクは本人の今の権限で判定する。
+- チャットから起動したRun（`launcher_scope_problem()`・`launcher_skill_problem()`・`launcher_connector_permitted()`）：
+  それに加えて、起動した人の今の権限でも判定する（タスクの範囲 ∩ 起動した人の今の権限）。起動できる人はタスクより狭い
+  権限を持たないので、起動できる間は、これはタスクの範囲と同じになる（テストで確かめる）。
 """
 
 import re
@@ -15,7 +16,7 @@ from typing import Any, Protocol
 from django.db.models import Q, QuerySet
 from django.utils.translation import gettext as _
 
-from connector.models import Connector, ConnectorAction, ConnectorScope, Operation
+from connector.models import Connector, ConnectorAction, ConnectorScope
 from delivery.models import Destination, NotifyContent, NotifyEvent
 from skill import connectors as skill_connectors
 from skill.models import Skill, SkillAction, SkillScope, SkillVersion
@@ -30,14 +31,13 @@ MAX_INPUTS = 30
 # 入力の項目の名前。テンプレートの `{{ inputs.名前 }}` に使う
 INPUT_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,49}$")
 PLACEHOLDER_RE = re.compile(r"\{\{\s*inputs\.([A-Za-z0-9_]+)\s*\}\}")
-DATASOURCE_TOOLS = set(Operation.values)
 
-# タスクの範囲ごとに登録できるSkill・Connectorの範囲（authorization.md §5.4）。個人のタスクは本人が使えるもの。
+# タスクの範囲ごとに使えるSkill・Connectorの範囲（authorization.md §5.4）。個人のタスクは本人が使えるもの。
 # 部門のタスクの部門のものは、同じ部門のものだけ
 SCOPE_SKILLS: dict[int, tuple[int, ...]] = {
     TaskScope.DEPARTMENT: (SkillScope.DEPARTMENT, SkillScope.COMPANY),
     TaskScope.COMPANY: (SkillScope.COMPANY,),
-    TaskScope.SYSTEM: (SkillScope.SYSTEM,),
+    TaskScope.SYSTEM: (SkillScope.SYSTEM, SkillScope.DEPARTMENT, SkillScope.COMPANY),
 }
 SCOPE_CONNECTORS: dict[int, tuple[int, ...]] = {
     TaskScope.DEPARTMENT: (ConnectorScope.DEPARTMENT, ConnectorScope.COMPANY),
@@ -55,7 +55,7 @@ class TaskLike(Protocol):
 
 
 def skill_allowed(task: TaskLike, skill: Skill) -> bool:
-    """このタスクの範囲に登録できるSkillで、今も使える（公開中で停止していない）か"""
+    """このタスクの範囲の中にあるSkillで、今も使える（公開中で停止していない）か"""
     if skill.deleted or skill.suspended or skill.current_version_id is None:
         return False
     if task.scope == TaskScope.PERSONAL:
@@ -64,11 +64,13 @@ def skill_allowed(task: TaskLike, skill: Skill) -> bool:
         return False
     if skill.scope == SkillScope.DEPARTMENT and (skill.department is None or skill.department.deleted):
         return False  # 無効にした部門のものは新しく使わない（authorization.md §9）
-    return not (skill.scope == SkillScope.DEPARTMENT and skill.department_id != task.department_id)
+    if task.scope == TaskScope.DEPARTMENT and skill.scope == SkillScope.DEPARTMENT:
+        return skill.department_id == task.department_id
+    return True
 
 
 def connector_allowed(task: TaskLike, connector: Connector) -> bool:
-    """このタスクの範囲に登録できるConnectorで、今も有効か"""
+    """このタスクの範囲の中にあるConnectorで、今も有効か"""
     if not connector.in_service():
         return False
     if task.scope == TaskScope.PERSONAL:
@@ -83,18 +85,21 @@ def connector_allowed(task: TaskLike, connector: Connector) -> bool:
 
 
 def allowed_skills(task: TaskLike) -> QuerySet[Skill]:
-    """このタスクの範囲に登録できるSkill（`skill_allowed()` と同じ規則のSQL）。編集画面の候補に使う"""
+    """範囲の中にあるSkill（`skill_allowed()` と同じ規則のSQL）。編集画面の候補とRunの一覧に使う"""
     if task.scope == TaskScope.PERSONAL:
         return Skill.objects.usable_by(task.owner) if task.owner is not None else Skill.objects.none()
     scopes = SCOPE_SKILLS.get(task.scope, ())
     condition = Q(scope__in=[s for s in scopes if s != SkillScope.DEPARTMENT])
     if SkillScope.DEPARTMENT in scopes:
-        condition |= Q(scope=SkillScope.DEPARTMENT, department_id=task.department_id, department__deleted=False)
+        department = Q(scope=SkillScope.DEPARTMENT, department__deleted=False)
+        if task.scope == TaskScope.DEPARTMENT:
+            department &= Q(department_id=task.department_id)
+        condition |= department
     return Skill.objects.filter(condition, deleted=False, suspended=False, current_version__isnull=False)
 
 
 def allowed_connectors(task: TaskLike) -> QuerySet[Connector]:
-    """このタスクの範囲に登録できるConnector（`connector_allowed()` と同じ規則のSQL）。編集画面の候補に使う"""
+    """範囲の中にあるConnector（`connector_allowed()` と同じ規則のSQL）。編集画面の候補とRunの一覧に使う"""
     if task.scope == TaskScope.PERSONAL:
         return Connector.objects.usable_by(task.owner) if task.owner is not None else Connector.objects.none()
     scopes = SCOPE_CONNECTORS.get(task.scope, ())
@@ -183,11 +188,6 @@ def _check_connectors(task: TaskLike, content: dict[str, Any], errors: Errors) -
             )
 
 
-def skill_tools(skills: dict[str, tuple[Skill, SkillVersion | None]]) -> set[str]:
-    """固定したSkillの「使ってよいTool」を合わせたもの。タスクのRunはこれだけを使う"""
-    return {t for _s, v in skills.values() if v is not None for t in v.tools}
-
-
 def _check_skills(
     task: TaskLike, content: dict[str, Any], skills: dict[str, tuple[Skill, SkillVersion | None]], errors: Errors
 ) -> None:
@@ -205,45 +205,21 @@ def _check_skills(
             errors.add(field, _("Skill「%(name)s」は、このタスクでは使えません") % {"name": skill.name})
         else:
             schemas += 1 if version.output_schema else 0
-            _check_declarations(skill, version, content, errors, field)
-    # タスクのRunのToolは、固定したSkillの「使ってよいTool」を合わせたもの。Connectorの操作を許すSkillがなければ、
-    # 登録したConnectorを使えない
-    if content["connectors"] and not skill_tools(skills) & DATASOURCE_TOOLS:
-        errors.add(
-            "connectors",
-            _(
-                "登録したConnectorを使えるSkillがありません。Connectorの操作（datasource_describe・datasource_query）を"
-                "使ってよいToolに持つSkillを登録してください"
-            ),
-        )
+            _check_sensitive(skill, version, content, errors, field=field)
     if schemas > 1 and not content["output_schema"]:
         errors.add(
             "output_schema", _("業務結果の形を決めているSkillが複数あります。タスクの業務結果のSchemaを決めてください")
         )
 
 
-def _check_declarations(
-    skill: Skill, version: SkillVersion, content: dict[str, Any], errors: Errors, field: str
+def _check_sensitive(
+    skill: Skill, version: SkillVersion, content: dict[str, Any], errors: Errors, *, field: str
 ) -> None:
-    """Skillが宣言したConnectorと操作が、タスクのConnectorとToolに入っていて、境界の中にあるか（③bの宣言）"""
-    declared = skill_connectors.load([version])
-    if not content["handles_sensitive_data"] and skill_connectors.is_sensitive(version, declared):
+    if not content["handles_sensitive_data"] and skill_connectors.is_sensitive(version):
         errors.add(
             field,
             _("Skill「%(name)s」は機密なので、個人情報・機密情報を扱うタスクにしてください") % {"name": skill.name},
         )
-    for declaration in version.connectors or []:
-        connector = declared.get(declaration["connector"])
-        names = {"skill": skill.name, "name": connector.name if connector else declaration["connector"]}
-        if declaration["connector"] not in content["connectors"]:
-            errors.add(
-                "connectors",
-                _("Skill「%(skill)s」が使うConnector「%(name)s」を、使うConnectorに加えてください") % names,
-            )
-        elif connector is not None and skill_connectors.out_of_bounds(declaration, connector):
-            errors.add(
-                field, _("Skill「%(skill)s」が使う表・操作を、Connector「%(name)s」が今は公開していません") % names
-            )
 
 
 def _check_notification(task: TaskLike, content: dict[str, Any], errors: Errors) -> None:
@@ -298,11 +274,6 @@ def _check_model(content: dict[str, Any], skills: dict[str, tuple[Skill, SkillVe
         errors.add("model_profile", _("業務結果のSchemaがあるタスクには、Toolを使えるモデルを選んでください"))
     elif content["notification_instructions"] and not version.supports_tools:
         errors.add("model_profile", _("通知の書き方を決めたタスクには、Toolを使えるモデルを選んでください"))
-    elif skill_tools(skills) and not version.supports_tools:
-        errors.add("model_profile", _("このモデルはToolを使えません。Toolを使わないか、別のモデルを選んでください"))
-    for _skill, skill_version in skills.values():
-        if skill_version is not None and (reason := skill_version.unsupported_by(version)):
-            errors.add("model_profile", reason)
 
 
 # --- 実行するとき ---
@@ -322,41 +293,23 @@ def task_problem(task, *, allow_suspended: bool = False) -> str:
     return ""
 
 
-def skill_problem(task, skill: Skill | None, version: Any, *, connectors: list[str], sensitive: bool) -> str:
-    """タスクのRunがこのSkillを今も使えない理由（使えれば空文字）。`connectors` はタスクに固定したConnectorのID。
-    宣言したConnectorも、固定したものに入っていて、今も有効で範囲の中にあり、境界の中にあることを確かめる"""
+def skill_problem(task, skill: Skill | None, version: Any, *, sensitive: bool) -> str:
+    """タスクのRunがこのSkillを今も選べない理由（選べれば空文字）。宣言したConnectorは見ない"""
     if skill is None or skill.deleted:
         return _("削除されました")
     if skill.suspended:
         return _("停止中です")
     if not skill_allowed(task, skill):
         return _("このタスクでは使えなくなりました")
-    return declaration_problem(task, version, connectors=connectors, sensitive=sensitive) if version else ""
-
-
-def declaration_problem(task, version: Any, *, connectors: list[str], sensitive: bool) -> str:
-    declared = skill_connectors.load([version])
-    if not sensitive and skill_connectors.is_sensitive(version, declared):
+    if version is not None and version.is_sensitive and not sensitive:
         return _("機密のSkillは、個人情報・機密情報を扱うタスクでだけ使えます")
-    for declaration in version.connectors or []:
-        connector = declared.get(declaration["connector"])
-        if connector is None or declaration["connector"] not in connectors or not connector_allowed(task, connector):
-            return _("このSkillが使うConnectorを使えません")
-        if skill_connectors.out_of_bounds(declaration, connector):
-            return _("このSkillが使う表・操作を、Connector「%(name)s」が今は公開していません") % {
-                "name": connector.name
-            }
     return ""
 
 
-def connector_permitted(task, connector: Connector, *, connectors: list[str], allow_suspended: bool = False) -> bool:
-    """タスクのRunがこのConnectorを今使えるか：タスクに固定したもので、今も有効で範囲の中にある。修正チャットのRunは
-    停止中かを見ない（`allow_suspended`。task_problem() と同じ）"""
-    return (
-        connector.uid in connectors
-        and task_problem(task, allow_suspended=allow_suspended) == ""
-        and connector_allowed(task, connector)
-    )
+def connector_permitted(task, connector: Connector, *, allow_suspended: bool = False) -> bool:
+    """タスクのRunがこのConnectorを今使えるか：今も有効で、タスクの範囲の中にある。修正チャットのRunは停止中かを
+    見ない（`allow_suspended`。task_problem() と同じ）"""
+    return task_problem(task, allow_suspended=allow_suspended) == "" and connector_allowed(task, connector)
 
 
 # --- チャットから起動したRun（authorization.md §6） ---
@@ -400,23 +353,3 @@ def launcher_skill_problem(user, skill: Skill) -> str:
 
 def launcher_connector_permitted(user, connector: Connector) -> bool:
     return connector.can(user, ConnectorAction.USE)
-
-
-def launcher_problem(user, revision: Any) -> str:
-    """チャットから起動する人が、タスクの版に固定したSkill・Connectorをすべて使えなければ理由（起動の前に断る。
-    authorization.md §6）。出口は起動した人とは照らし合わせない（タスクの範囲で判定する）"""
-    if reason := launcher_inactive(user):
-        return reason
-    skills = load_skills([entry for _field, entry in skill_entries(revision)])
-    for skill, _version in skills.values():
-        if launcher_skill_problem(user, skill):
-            return _("Skill「%(name)s」を使う権限がないので、このタスクを起動できません。") % {"name": skill.name}
-    connectors = load_connectors(revision.connectors)
-    for uid in revision.connectors:
-        connector = connectors.get(uid)
-        if connector is None or not launcher_connector_permitted(user, connector):
-            name = connector.name if connector else uid
-            return _("Connector「%(name)s」を使う権限がないので、このタスクを起動できません。") % {"name": name}
-    if len(skills) < len(revision.skills):
-        return _("固定したSkillの版がありません。タスクの定義を確かめてください。")
-    return ""

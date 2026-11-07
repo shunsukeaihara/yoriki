@@ -9,9 +9,10 @@ from connector.factories import ConnectorFactory
 from connector.models import VERSION_FIELDS, ConnectorScope
 from skill.factories import SkillDraftFactory, SkillFactory, SkillVersionFactory
 from skill.models import Skill, SkillScope
-from user.factories import DepartmentFactory, DepartmentMembershipFactory, grant
+from user.factories import DepartmentFactory, grant
+from utils.permissions import AppPermission
 
-from .test_api import SKILLS, _create, _department_editor, _draft, _publish, _skill_publisher
+from .test_api import SKILLS, _create, _department_editor, _draft, _publish
 
 TABLES = [
     {"schema": "public", "name": "vendors", "description": "取引先"},
@@ -66,39 +67,6 @@ def test_connector_the_editor_cannot_use_is_not_declared(api_client, app_user):
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize(
-    ("declaration", "tools", "message"),
-    [
-        ({"tables": ["public.secret"]}, ["datasource_query"], "公開していません"),
-        ({}, [], "使ってよいToolに加えて"),
-    ],
-)
-def test_publish_checks_the_boundary_and_tools(api_client, app_user, declaration, tools, message):
-    connector = ConnectorFactory.create(version__tables=TABLES)
-    skill = _create(api_client, app_user, instructions="照合する", tools=tools)
-    draft = _draft(api_client, skill["id"])
-    draft = _patch(api_client, skill["id"], draft, connectors=[_declaration(connector, **declaration)]).json()
-    assert any(message in p for p in draft["connector_problems"])
-    res = _publish(api_client, skill["id"], draft)
-    assert res.status_code == 400
-    assert message in res.json()["non_field_errors"][0]
-
-
-@pytest.mark.django_db
-def test_company_skill_cannot_declare_a_department_connector(api_client, app_user):
-    department = DepartmentFactory.create()
-    DepartmentMembershipFactory.create(department=department, user=app_user)
-    connector = ConnectorFactory.create(scope=ConnectorScope.DEPARTMENT, department=department, version__tables=TABLES)
-    _skill_publisher(app_user)
-    skill = _create(api_client, app_user, scope=SkillScope.COMPANY, instructions="照合する", tools=["datasource_query"])
-    draft = _draft(api_client, skill["id"])
-    draft = _patch(api_client, skill["id"], draft, connectors=[_declaration(connector)]).json()
-    res = _publish(api_client, skill["id"], draft)
-    assert res.status_code == 400
-    assert "範囲" in res.json()["non_field_errors"][0]
-
-
-@pytest.mark.django_db
 def test_department_skill_declares_its_department_connector(api_client, app_user):
     department = DepartmentFactory.create()
     _department_editor(app_user, department, publish=True)
@@ -135,29 +103,17 @@ def test_editor_sets_the_sensitive_flag_but_only_a_publisher_clears_it(api_clien
 
 
 @pytest.mark.django_db
-def test_skill_declaring_a_sensitive_connector_is_sensitive(api_client, app_user):
+def test_skill_declaring_a_sensitive_connector_is_not_sensitive(api_client, app_user):
+    """機密はSkill自身のフラグだけで決める"""
     connector = ConnectorFactory.create(version__tables=TABLES)
     skill = SkillFactory.create(created_by=app_user)
     SkillVersionFactory.create(skill=skill, tools=["datasource_query"], connectors=[_declaration(connector)])
     api_client.force_login(app_user)
-    [item] = api_client.get(SKILLS).json()["results"]
-    assert not item["sensitive"] and item["connectors_usable"]
-    # 公開した後にConnectorに機密のフラグが付けば、Skillも機密になる
     version = connector.current_version
     content = {name: getattr(version, name) for name in VERSION_FIELDS}
     connector.revise(actor=app_user, expected_version=1, **{**content, "is_sensitive": True})
     [item] = api_client.get(SKILLS).json()["results"]
-    assert item["sensitive"]
-    # 宣言した表を公開しなくなったら、会話で使えないことを示す
-    connector.revise(actor=app_user, expected_version=2, **{**content, "is_sensitive": True, "tables": TABLES[1:]})
-    [item] = api_client.get(SKILLS).json()["results"]
-    assert not item["connectors_usable"]
-    connector.revise(actor=app_user, expected_version=3, **{**content, "is_sensitive": True})
-    # 使えなくなったら、会話で使えないことを示す
-    connector.is_active = False
-    connector.save()
-    [item] = api_client.get(SKILLS).json()["results"]
-    assert not item["connectors_usable"]
+    assert not item["sensitive"]
 
 
 @pytest.mark.django_db
@@ -192,21 +148,6 @@ def test_connector_detail_returns_published_tables_to_users_who_can_use_it(api_c
 
 
 @pytest.mark.django_db
-def test_rollback_checks_the_declarations_of_the_old_version(api_client, app_user):
-    connector = ConnectorFactory.create(version__tables=TABLES)
-    skill = SkillFactory.create(created_by=app_user)
-    SkillVersionFactory.create(skill=skill, tools=["datasource_query"], connectors=[_declaration(connector)])
-    SkillVersionFactory.create(skill=skill, number=2)
-    # 第1版が使う表を、Connectorが公開しなくなった
-    content = {name: getattr(connector.current_version, name) for name in VERSION_FIELDS}
-    connector.revise(actor=app_user, expected_version=1, **{**content, "tables": TABLES[1:]})
-    api_client.force_login(app_user)
-    res = api_client.post(f"{SKILLS}{skill.uid}/rollback/", {"number": 1, "expected_version": 2}, format="json")
-    assert res.status_code == 400
-    assert "切り戻せません" in str(res.json())
-
-
-@pytest.mark.django_db
 def test_skill_with_a_sensitive_draft_is_edited_only_in_confidential_work(api_client, app_user):
     skill = SkillFactory.create(created_by=app_user)
     SkillVersionFactory.create(skill=skill)
@@ -229,3 +170,18 @@ def test_system_connectors_are_offered_only_to_those_who_can_view_them(api_clien
     # `@` の候補（scopeを付けない一覧）には出さない
     assert [c["name"] for c in api_client.get("/api/app/v1/connectors/").json()["results"]] == ["全社の接続"]
     assert api_client.get(f"/api/app/v1/connectors/{system.uid}/").status_code == 200
+
+
+@pytest.mark.django_db
+def test_a_skill_cannot_publish_a_connector_its_scope_cannot_see(api_client, app_user):
+    """宣言はSkillの中身なので、Skillの範囲の全員に見えるConnectorだけを宣言して公開できる（authorization.md §5.1）"""
+    department = DepartmentFactory.create()
+    _department_editor(app_user, department, publish=True)
+    grant(app_user, AppPermission.EDIT_COMPANY_SKILLS, AppPermission.PUBLISH_COMPANY_SKILLS)
+    connector = ConnectorFactory.create(scope=ConnectorScope.DEPARTMENT, department=department, version__tables=TABLES)
+    skill = _create(api_client, app_user, scope=SkillScope.COMPANY, instructions="照合する", tools=["datasource_query"])
+    draft = _draft(api_client, skill["id"])
+    draft = _patch(api_client, skill["id"], draft, connectors=[_declaration(connector, tables=())]).json()
+    res = _publish(api_client, skill["id"], draft)
+    assert res.status_code == 400
+    assert "見えない" in str(res.json())

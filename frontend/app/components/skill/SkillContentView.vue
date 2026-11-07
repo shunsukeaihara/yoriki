@@ -18,7 +18,7 @@ const requirementLabel = (value: number) => skillRequirementItems(t).find((i) =>
       }}</pre>
     </section>
     <section class="grid gap-1">
-      <h3 class="text-sm font-semibold text-muted">{{ $t('使ってよいTool') }}</h3>
+      <h3 class="text-sm font-semibold text-muted">{{ $t('使うTool') }}</h3>
       <div v-if="version.tools.length" class="flex flex-wrap gap-1">
         <UBadge v-for="tool in version.tools" :key="tool" color="neutral" variant="subtle" class="font-mono">
           {{ tool }}

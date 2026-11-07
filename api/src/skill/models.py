@@ -1,7 +1,7 @@
 """Skill（design.md §3）。
 
 Skillは可変の入れ物で、範囲（個人・部門・全社・システム）と、公開中の版（current_version）を持つ。中身（説明、手順、
-使ってよいTool、必要な能力、入出力のSchema、資料）は、編集中のSkillDraftと、公開した不変のSkillVersionが持つ。
+使うTool、必要な能力、入出力のSchema、資料）は、編集中のSkillDraftと、公開した不変のSkillVersionが持つ。
 DraftはSkillごとに1つで、revisionで同時の編集を検出し、公開すると閉じる（design.md §3.7）。
 公開・切戻し・停止はSkillChangeに記録し、operation keyで再送による重複を防ぐ。
 
@@ -120,8 +120,8 @@ class SkillContent(models.Model):
     # エージェントと社員がSkillを選ぶための説明（何をするか、どんな依頼のときに使うか）
     description = models.TextField(_("説明"), blank=True)
     instructions = models.TextField(_("手順"), blank=True)
-    # 使ってよいTool。空ならコマンド不要のSkill（design.md §3.4）。利用者の権限を超えるToolは与えない
-    tools = ArrayField(models.CharField(max_length=100), verbose_name=_("使ってよいTool"), default=list, blank=True)
+    # 使うTool。空ならコマンド不要のSkill（design.md §3.4）。利用者の権限を超えるToolは与えない
+    tools = ArrayField(models.CharField(max_length=100), verbose_name=_("使うTool"), default=list, blank=True)
     requires = ArrayField(
         models.PositiveSmallIntegerField(choices=SkillRequirement.choices),
         verbose_name=_("必要な能力"),
@@ -307,10 +307,9 @@ class Skill(models.Model):
     def _in_service(self) -> bool:
         return self.current_version_id is not None and not self.suspended
 
-    def unusable_reason(self, user, model_version, *, sensitive: bool, connectors: set[str] | None = None) -> str:
-        """利用者がこのモデル設定の版で使えない理由（使えれば空文字）。Run開始時とエージェントが読み込むときに、
-        その時点の公開中の版で確かめる（design.md §3.2・§4.8）。`sensitive` はRunが機密か、`connectors` はRunの
-        Connectorの一覧のID（宣言したConnectorがなければ使えない。design.md §4.9.1）"""
+    def unusable_reason(self, user, *, sensitive: bool) -> str:
+        """セッションの権限でこのSkillを選べない理由（選べれば空文字）。発言を受け付けるときとエージェントが読み込むときに、
+        その時点の公開中の版で確かめる（design.md §3.2）。`sensitive` はセッションが機密か"""
         if self.scope not in CONVERSATION_SCOPES or not self.can(user, SkillAction.VIEW):
             return str(_("このSkillを使う権限がありません"))
         if self.suspended:
@@ -320,11 +319,9 @@ class Skill(models.Model):
             return str(_("このSkillはまだ公開されていません"))
         if not self.can(user, SkillAction.USE):
             return str(_("このSkillを使う権限がありません"))
-        if reason := version.unsupported_by(model_version):
-            return reason
-        from .connectors import unusable_reason  # noqa: PLC0415  skill.connectorsがこのモジュールを使うため
-
-        return unusable_reason(version, user, sensitive=sensitive, available=connectors)
+        if version.is_sensitive and not sensitive:
+            return str(_("機密のSkillは、個人情報・機密情報を扱う会話でだけ使えます"))
+        return ""
 
     @property
     def version_number(self) -> int:
@@ -408,7 +405,10 @@ class Skill(models.Model):
         if draft.base_version_id != current.current_version_id:
             raise VersionConflict("another version was published after the draft was opened")
         draft.check_publishable()
-        draft.check_connectors(actor)
+        from .connectors import scope_errors  # noqa: PLC0415  skill.connectorsがこのモジュールを使うため
+
+        if errors := scope_errors(draft, current):
+            raise InvalidDraft("／".join(errors))
         draft.check_evaluated()
 
         previous = current.current_version
@@ -487,16 +487,12 @@ class Skill(models.Model):
             raise InvalidDraft(_("切り戻す版がありません"))
         if source.pk == current.current_version_id:
             raise InvalidDraft(_("公開中の版には切り戻せません"))
-        # 過去の版の宣言も、今のConnectorの境界と切り戻す人の権限で確かめる（公開と同じ。design.md §4.9.1）
-        from .connectors import is_sensitive, publish_errors  # noqa: PLC0415  skill.connectorsがこのモジュールを使うため
-
-        if not allow_sensitive and is_sensitive(source):
+        if not allow_sensitive and source.is_sensitive:
             raise InvalidDraft(_("機密の版には、個人情報・機密情報を扱う会話でだけ切り戻せます"))
+        from .connectors import scope_errors  # noqa: PLC0415  skill.connectorsがこのモジュールを使うため
 
-        if errors := publish_errors(source, current, actor):
-            raise InvalidDraft(
-                _("この版が使うConnectorに問題があるので、切り戻せません：%(errors)s") % {"errors": "／".join(errors)}
-            )
+        if errors := scope_errors(source, current):
+            raise InvalidDraft("／".join(errors))
 
         previous = current.current_version
         version = SkillVersion.objects.create(
@@ -859,13 +855,6 @@ class SkillDraft(SkillContent):
             raise InvalidDraft(
                 _("資料「%(key)s」に検証の誤りがあります：%(errors)s") % {"key": asset.key, "errors": "／".join(errors)}
             )
-
-    def check_connectors(self, actor) -> None:
-        """宣言したConnectorが、公開する人の権限とSkillの範囲とConnectorの今の版の境界に合うか（design.md §4.9.1）"""
-        from .connectors import publish_errors  # noqa: PLC0415  skill.connectorsがこのモジュールを使うため
-
-        if errors := publish_errors(self, self.skill, actor):
-            raise InvalidDraft("／".join(errors))
 
     def unevaluated_cases(self) -> list["SkillEvaluationCase"]:
         """公開の前に必須の評価ケースのうち、今のrevisionで通過していないもの（design.md §3.7.1）。

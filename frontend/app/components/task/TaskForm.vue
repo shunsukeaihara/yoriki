@@ -220,7 +220,7 @@ defineExpose({ onSubmit, loading, canPost, dirty, reset })
       :title="$t('使うもの')"
       :description="
         $t(
-          'エージェントは、ここで選んだSkillとConnectorだけを使い、ほかのものを探して使いません。Toolは、登録したSkillの「使ってよいTool」を使います',
+          'ここで選んだSkillとConnectorを使うよう、エージェントに指示します。エージェントが使える範囲はタスクの範囲で決まり、必要ならほかのものも探して使います',
         )
       "
     >
@@ -235,7 +235,7 @@ defineExpose({ onSubmit, loading, canPost, dirty, reset })
       <DSelect
         v-model="form.connectors"
         :label="$t('Connector')"
-        :hint="$t('Skillが使うConnectorは、ここにも選びます。Connectorの操作を使ってよいToolに持つSkillが要ります')"
+        :hint="$t('使うよう指示するConnectorを選びます。タスクの範囲のConnectorは、選ばなくても使えます')"
         :items="connectorItems"
         multiple
         clearable

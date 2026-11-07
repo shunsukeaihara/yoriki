@@ -10156,16 +10156,6 @@ components:
           type: string
           writeOnly: true
           maxLength: 64
-        mode:
-          allOf:
-          - $ref: '#/components/schemas/ModeEnum'
-          writeOnly: true
-          default: auto
-          description: |-
-            auto：実行中なら今の作業への追加指示、確認待ちなら回答。next：今の作業の後に始める
-
-            * `auto` - 自動
-            * `next` - 次の依頼
     MessageRoleEnum:
       enum:
       - 1
@@ -10447,14 +10437,6 @@ components:
       - display_name
       - email
       - id
-    ModeEnum:
-      enum:
-      - auto
-      - next
-      type: string
-      description: |-
-        * `auto` - 自動
-        * `next` - 次の依頼
     ModelProfile:
       type: object
       description: |-
@@ -12138,7 +12120,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ToolsEnum'
-          description: 使ってよいTool。空ならコマンド不要のSkill
+          description: 使うTool。空ならコマンド不要のSkill
           maxItems: 50
         requires:
           type: array
@@ -13604,10 +13586,12 @@ components:
           type: boolean
           readOnly: true
           description: 公開中の版かDraftが機密のSkillか（機密の会話でだけ編集できる）
-        connectors_usable:
-          type: boolean
+        requires:
+          type: array
+          items:
+            type: integer
           readOnly: true
-          description: 公開中の版が宣言したConnectorを、利用者がすべて使え、宣言した操作・表をConnectorが今も公開しているか（でなければ会話で使えない）
+          description: 公開中の版の必要な能力。選べるかには関わらない（画面の案内に使う）
         draft:
           type: string
           nullable: true
@@ -13632,7 +13616,6 @@ components:
       required:
       - can_edit
       - can_publish
-      - connectors_usable
       - created
       - department_info
       - description
@@ -13641,6 +13624,7 @@ components:
       - id
       - name
       - owner_info
+      - requires
       - scope
       - scope_display
       - sensitive
@@ -13793,7 +13777,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ToolsEnum'
-          description: 使ってよいTool。空ならコマンド不要のSkill
+          description: 使うTool。空ならコマンド不要のSkill
           maxItems: 50
         requires:
           type: array
@@ -13833,7 +13817,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ToolsEnum'
-          description: 使ってよいTool。空ならコマンド不要のSkill
+          description: 使うTool。空ならコマンド不要のSkill
           maxItems: 50
         requires:
           type: array
@@ -14044,7 +14028,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ToolsEnum'
-          description: 使ってよいTool。空ならコマンド不要のSkill
+          description: 使うTool。空ならコマンド不要のSkill
           maxItems: 50
         requires:
           type: array
@@ -14469,7 +14453,7 @@ components:
             type: string
             maxLength: 100
           readOnly: true
-          title: 使ってよいTool
+          title: 使うTool
         requires:
           type: array
           items:

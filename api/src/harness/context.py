@@ -27,6 +27,8 @@ from .task_edit import runtime_text as task_edit_text
 logger = logging.getLogger(__name__)
 
 ADDITIONAL_INSTRUCTION_PREFIX = "[Additional instruction during the work]"
+# 確認への回答に添えて指定したSkill・Connectorを取り込むときの本文（回答は ask_user の結果に入っている）
+CHOSEN_WITH_ANSWER = "[The user chose these together with the answer above]"
 RUNTIME_CONTEXT_TAG = "<runtime_context>"
 
 
@@ -197,6 +199,8 @@ def _build(key: dict[str, str], events: Iterable[RunEvent], items: list[Item]) -
                     text = f"{text}\n\n{data['skills_text']}".strip()
                 if data.get("connectors_text"):
                     text = f"{text}\n\n{data['connectors_text']}".strip()
+                if data.get("notes_text"):
+                    text = f"{text}\n\n{data['notes_text']}".strip()
                 if data.get("attachments"):
                     text = f"{text}\n\n{attachments_text(data['attachments'])}".strip()
                 if data.get("earlier_attachments"):
@@ -295,13 +299,13 @@ def runtime_context(run: Run, *, user_name: str) -> str:
         ),
         f"  <confidential>{'true' if run.handles_sensitive_data else 'false'}</confidential>",
     ]
-    # エージェントが選べるSkillの一覧（Run開始時に固定したもの。`/` で指定したRunにはない）
-    catalog = ((run.manifest or {}).get("fixed") or {}).get("skill_catalog")
-    if catalog and catalog.get("skills"):
+    # エージェントが選べるSkillの一覧（今のもの。`/` で指定して始めたRunにはない。harness.md §10.1）
+    catalog = run.current_catalog("skill_catalog")
+    if catalog and (catalog.get("skills") or catalog.get("omitted")):
         lines.append(catalog_text(catalog))
-    # エージェントが使えるConnectorの一覧（Run開始時に固定したもの。harness.md §10.2）
-    connectors = ((run.manifest or {}).get("fixed") or {}).get("connector_catalog")
-    if connectors and connectors.get("connectors"):
+    # エージェントが使えるConnectorの一覧（今のもの。harness.md §10.2）
+    connectors = run.current_catalog("connector_catalog")
+    if connectors and (connectors.get("connectors") or connectors.get("omitted")):
         lines.append(connector_catalog_text(connectors))
     # Skillの編集のRunの対象（harness.md §10.9）
     if edit := skill_edit_text(run):

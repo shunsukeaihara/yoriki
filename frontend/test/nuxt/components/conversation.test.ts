@@ -63,7 +63,7 @@ describe('ConversationStartForm', () => {
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(createConversation).toHaveBeenCalledWith({ handlesSensitiveData: true, modelProfile: 'local' })
-    expect(createMessage).toHaveBeenCalledWith(expect.objectContaining({ body: '名寄せして', mode: MessageMode.AUTO }))
+    expect(createMessage).toHaveBeenCalledWith(expect.objectContaining({ body: '名寄せして' }))
     expect(wrapper.emitted('started')?.[0]?.[0]).toEqual({ id: 'c1' })
   })
 })
@@ -201,12 +201,25 @@ describe('ConversationPrompt', () => {
     expect((wrapper.vm as unknown as { connectorPickerOpen: boolean }).connectorPickerOpen).toBe(true)
   })
 
-  it('Connectorを指定した依頼は、実行中なら送り方を選ばずに次の依頼にする', async () => {
+  it('確認待ちでは、Skillの指定だけでは送れない', async () => {
+    const wrapper = await mountSuspended(ConversationPrompt, {
+      props: {
+        modelValue: '',
+        hasOpenQuestion: true,
+        selectedSkills: [{ id: 's1', name: '照合' } as unknown as Skill],
+      },
+    })
+    expect((wrapper.vm as unknown as { canSubmit: boolean }).canSubmit).toBe(false)
+    await wrapper.setProps({ modelValue: '大阪支店です' })
+    expect((wrapper.vm as unknown as { canSubmit: boolean }).canSubmit).toBe(true)
+  })
+
+  it('実行中も発言の種類は選ばせず、Connectorを指定できる', async () => {
     const run = { id: 'r1', status: 2 } as unknown as Run
     const wrapper = await mountSuspended(ConversationPrompt, {
       props: { modelValue: '取引先', activeRun: run, selectedConnectors: [connector('sales')] },
     })
-    expect((wrapper.vm as unknown as { separateRequest: boolean }).separateRequest).toBe(true)
+    expect(wrapper.text()).not.toContain('次の依頼にする')
     expect(wrapper.text()).toContain('sales')
   })
 })

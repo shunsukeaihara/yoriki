@@ -2,7 +2,8 @@
 
 import pytest
 
-from conversation.dispatch import CannotStart, MessageMode, post_message
+from artifact.models import BlobObject
+from conversation.dispatch import CannotStart, post_message
 from conversation.factories import ConversationFactory
 from conversation.models import InstructionKind, UserInstruction
 from harness import runner as runner_module
@@ -13,8 +14,9 @@ from harness.skills import build_catalog
 from harness.tools.base import schema_problem
 from llm.factories import ModelProfileFactory
 from resources.factories import ResourceVersionFactory
-from run.models import Run, RunEndReason, RunEvent, RunEventKind, RunStatus
+from run.models import Run, RunEndReason, RunEvent, RunEventKind, RunKind, RunStatus
 from run.tasks import claim_run
+from runtime.launcher import SandboxUnavailable
 from skill.factories import SkillFactory, SkillVersionFactory
 from skill.models import SkillAssetBinding, SkillAssetRole, SkillRequirement, SkillScope
 from user.factories import DepartmentFactory, DepartmentMembershipFactory, UserFactory
@@ -43,10 +45,16 @@ def publish(owner, name="請求書の照合", **content):
 
 
 def start(conversation, body="請求書を確認して", skills=None) -> Run:
-    post_message(
-        conversation, body=body, client_message_id="", mode=MessageMode.AUTO, actor=conversation.owner, skills=skills
-    )
+    post_message(conversation, body=body, client_message_id="", actor=conversation.owner, skills=skills)
     return Run.objects.filter(conversation=conversation).latest("pk")
+
+
+def start_with_result(conversation, skill, body="請求書を確認して") -> Run:
+    """submit_result のあるRun。会話のRunにはないので、評価のRunとして動かす（harness.md §7.5の1）"""
+    run = start(conversation, body=body, skills=[skill])
+    Run.objects.filter(pk=run.pk).update(kind=RunKind.EVALUATION)
+    run.refresh_from_db()
+    return run
 
 
 def execute(run: Run, adapter: FakeAdapter) -> Run:
@@ -83,7 +91,7 @@ def test_agent_sees_usable_skills_and_loads_one(conversation, app_user):
     assert run.status == RunStatus.COMPLETED
     first = adapter.requests[0]
     skill_tool = next(t for t in first.tools if t.name == "skill")
-    assert skill_tool.parameters["properties"]["name"]["enum"] == ["請求書の照合"]
+    assert "enum" not in skill_tool.parameters["properties"]["name"]
     context = next(m.text for m in first.messages if m.role == "user" and "<runtime_context>" in m.text)
     assert '<skill name="請求書の照合">請求書と発注を照合する</skill>' in context
     [result] = results(run, "skill")
@@ -131,26 +139,16 @@ def test_suspended_skill_cannot_be_loaded(conversation, app_user):
 
 
 @pytest.mark.django_db
-def test_skill_needing_tools_missing_in_this_run_is_not_loaded(conversation, app_user):
-    skill, _version = publish(app_user, tools=["shell"])
-    run = start(conversation)
-    Run.objects.filter(pk=run.pk).update(runtime_version=None)  # Sandboxを使わないRun
-    adapter = FakeAdapter([calls(("c1", "skill", {"name": skill.name})), reply("できませんでした")])
-    run = execute(run, adapter)
-    [result] = results(run, "skill")
-    assert result["is_error"]
-    assert "shell" in result["content"][0]["text"]
-
-
-@pytest.mark.django_db
-def test_catalog_excludes_skills_the_model_cannot_run(app_user):
+def test_catalog_notes_skills_the_model_cannot_run(app_user):
+    """必要な能力は案内だけで、一覧から外さない"""
     conversation = ConversationFactory.create(owner=app_user)
     version = conversation.model_profile.current_version
     assert version is not None
     publish(app_user, name="画像のSkill", requires=[SkillRequirement.IMAGE_INPUT])
     publish(app_user, name="文章のSkill")
-    names = [e["name"] for e in build_catalog(app_user, version, sensitive=False, connectors=set())["skills"]]
-    assert names == ["文章のSkill"]
+    entries = {e["name"]: e for e in build_catalog(app_user, version, sensitive=False)["skills"]}
+    assert set(entries) == {"画像のSkill", "文章のSkill"}
+    assert "note" in entries["画像のSkill"] and "note" not in entries["文章のSkill"]
 
 
 @pytest.mark.django_db
@@ -161,49 +159,49 @@ def test_catalog_separates_same_names_and_shortens_to_the_budget(app_user):
     publish(app_user, name="名寄せ")
     company = SkillFactory.create(name="名寄せ", scope=SkillScope.COMPANY, owner=None, created_by=app_user)
     SkillVersionFactory.create(skill=company)
-    names = [e["name"] for e in build_catalog(app_user, version, sensitive=False, connectors=set())["skills"]]
+    names = [e["name"] for e in build_catalog(app_user, version, sensitive=False)["skills"]]
     assert names == ["名寄せ (個人)", "名寄せ (全社)"]
     publish(app_user, name="名寄せ (個人)")  # 範囲を添えた名前と同じ名前のSkill
-    names = [e["name"] for e in build_catalog(app_user, version, sensitive=False, connectors=set())["skills"]]
+    names = [e["name"] for e in build_catalog(app_user, version, sensitive=False)["skills"]]
     assert sorted(names) == ["名寄せ (個人)", "名寄せ (個人) (2)", "名寄せ (全社)"]
 
     for n in range(39):
         publish(app_user, name=f"Skill{n:02d}", description="説明" * 200)
     version.max_input_tokens = 50_000  # 一覧は1000文字まで
-    catalog = build_catalog(app_user, version, sensitive=False, connectors=set())
+    catalog = build_catalog(app_user, version, sensitive=False)
     assert catalog["omitted"] > 0
     assert all(len(e["description"]) <= 40 for e in catalog["skills"])
     assert len(catalog["skills"]) + catalog["omitted"] == 42
 
 
 @pytest.mark.django_db
-def test_chosen_skill_is_given_with_the_first_message_and_limits_the_tools(conversation, app_user):
+def test_chosen_skill_is_given_with_the_first_message_and_does_not_limit_the_tools(conversation, app_user):
     skill, version = publish(app_user, instructions="手順の本文", tools=["read", "todo_write"])
     run = start(conversation, body="この3件を確認して", skills=[skill])
     assert run.manifest["fixed"]["skills"] == [
         {"skill": skill.uid, "name": skill.name, "version": version.pk, "number": version.number}
     ]
-    assert run.manifest["fixed"]["skill_catalog"] is None
+    assert [e["name"] for e in run.manifest["fixed"]["skill_catalog"]["skills"]] == [skill.name]
     adapter = FakeAdapter([reply("確認しました")])
     run = execute(run, adapter)
 
     request = adapter.requests[0]
-    assert tool_names(request) == ["read", "todo_write", "request_skill_edit"]
+    # 指定は使うものを明示するだけで、呼び出せる範囲は変わらない（authorization.md §6）
+    assert {"read", "shell", "datasource_query", "skill", "request_skill_edit"} <= set(tool_names(request))
     message = next(m.text for m in request.messages if m.role == "user" and m.text.startswith("この3件を確認して"))
     assert "手順の本文" in message
     assert f'<skill name="{skill.name}" version="{version.number}">' in message
     context = next(m.text for m in request.messages if "<runtime_context>" in m.text)
-    assert "<skills>" not in context
+    assert "<skills>" in context
 
 
 @pytest.mark.django_db
-def test_chosen_skill_without_tools_gets_no_work_tools(conversation, app_user):
+def test_chosen_skill_without_tools_keeps_the_work_tools(conversation, app_user):
     skill, _version = publish(app_user, tools=[])
     run = start(conversation, skills=[skill])
     adapter = FakeAdapter([reply("回答案です")])
     execute(run, adapter)
-    # Skillの編集の提案だけは出す（作業の権限を増やさない。harness.md §7.5）
-    assert tool_names(adapter.requests[0]) == ["request_skill_edit"]
+    assert {"read", "shell", "request_skill_edit"} <= set(tool_names(adapter.requests[0]))
 
 
 @pytest.mark.django_db
@@ -215,21 +213,19 @@ def test_unusable_chosen_skill_does_not_start_the_run(conversation, app_user):
 
 
 @pytest.mark.django_db
-def test_message_with_a_skill_during_a_run_becomes_the_next_request(conversation, app_user):
+def test_message_with_a_skill_during_a_run_goes_to_the_parent(conversation, app_user):
     skill, _version = publish(app_user)
     start(conversation)
-    post_message(
-        conversation, body="次はこれ", client_message_id="", mode=MessageMode.AUTO, actor=app_user, skills=[skill]
-    )
+    post_message(conversation, body="次はこれ", client_message_id="", actor=app_user, skills=[skill])
     instruction = UserInstruction.objects.get(message__body="次はこれ")
-    assert instruction.kind == InstructionKind.NEXT
+    assert instruction.kind == InstructionKind.CURRENT
     assert instruction.message.skills == [{"id": skill.uid, "name": skill.name}]
 
 
 @pytest.mark.django_db
 def test_submit_result_records_the_business_result(conversation, app_user):
     skill, _version = publish(app_user, tools=[], output_schema=RESULT_SCHEMA)
-    run = start(conversation, body="契約書を確認して", skills=[skill])
+    run = start_with_result(conversation, skill, body="契約書を確認して")
     adapter = FakeAdapter(
         [
             calls(("c1", "submit_result", {"verdict": "maybe"})),
@@ -238,8 +234,7 @@ def test_submit_result_records_the_business_result(conversation, app_user):
         ]
     )
     run = execute(run, adapter)
-    assert tool_names(adapter.requests[0]) == ["submit_result", "request_skill_edit"]
-    assert adapter.requests[0].tools[0].parameters == RESULT_SCHEMA
+    assert next(t for t in adapter.requests[0].tools if t.name == "submit_result").parameters == RESULT_SCHEMA
     invalid, recorded = results(run, "submit_result")
     assert invalid["is_error"]
     assert not recorded["is_error"]
@@ -250,7 +245,7 @@ def test_submit_result_records_the_business_result(conversation, app_user):
 @pytest.mark.django_db
 def test_reply_without_submit_result_is_nudged_once_then_ends_with_no_result(conversation, app_user):
     skill, _version = publish(app_user, tools=[], output_schema=RESULT_SCHEMA)
-    run = start(conversation, skills=[skill])
+    run = start_with_result(conversation, skill)
     adapter = FakeAdapter([reply("確認しました"), reply("確認しました")])
     run = execute(run, adapter)
     assert run.status == RunStatus.FAILED
@@ -270,15 +265,20 @@ def test_loaded_skill_with_a_result_schema_asks_for_the_result_in_the_reply(conv
     assert run.status == RunStatus.COMPLETED
     assert "submit_result" not in tool_names(adapter.requests[1])
     [result] = results(run, "skill")
-    assert "submit_result is not available" in result["content"][0]["text"]
+    assert "no submit_result for this skill" in result["content"][0]["text"]
 
 
 @pytest.mark.django_db
-def test_two_chosen_skills_with_result_schemas_are_refused(conversation, app_user):
+def test_chosen_skill_with_a_result_schema_is_the_same_as_a_loaded_one(conversation, app_user):
+    """`/` は使えと指示するだけ。業務結果はSchemaの形で最後の応答に書かせ、書かなくても失敗にしない"""
     first, _v1 = publish(app_user, name="A", output_schema=RESULT_SCHEMA)
     second, _v2 = publish(app_user, name="B", output_schema=RESULT_SCHEMA)
-    with pytest.raises(CannotStart, match="業務結果"):
-        start(conversation, skills=[first, second])
+    run = start(conversation, skills=[first, second])
+    adapter = FakeAdapter([reply("判定：ok")])
+    run = execute(run, adapter)
+    assert run.status == RunStatus.COMPLETED
+    assert "submit_result" not in tool_names(adapter.requests[0])
+    assert any("no submit_result for this skill" in m.text for m in adapter.requests[0].messages)
 
 
 @pytest.mark.django_db
@@ -303,6 +303,71 @@ def test_skill_assets_are_placed_under_master(conversation, app_user, settings, 
     session.close()
 
 
+@pytest.mark.django_db
+def test_switching_assets_keeps_the_previous_version_on_failure(
+    conversation, app_user, settings, tmp_path, monkeypatch
+):
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path / "workspaces")
+    skill, first = publish(app_user)
+    SkillAssetBinding.objects.create(
+        version=first,
+        key="master",
+        role=SkillAssetRole.MASTER,
+        resource_version=ResourceVersionFactory.create(name="old.csv", content=b"old"),
+    )
+    run = start(conversation, skills=[skill])
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    session = SandboxSession(run, attempt)
+    session.sync_skill_assets()
+    second = SkillVersionFactory.create(skill=skill)
+    SkillAssetBinding.objects.create(
+        version=second,
+        key="master",
+        role=SkillAssetRole.MASTER,
+        resource_version=ResourceVersionFactory.create(name="new.csv", content=b"new"),
+    )
+    placed = session.master_dir / "skills" / skill.uid / "master"
+
+    def broken(_self, *_args, **_kwargs):
+        raise OSError("storage is down")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(BlobObject, "open", broken)
+        with pytest.raises(SandboxUnavailable):
+            session.place_skill_assets(skill, second)
+    assert (placed / "old.csv").read_bytes() == b"old"
+    assert not session.has_skill_assets(skill, second)
+
+    # 置けた新しい版がManifestになければ、合わせるときに前の版へ戻す
+    session.place_skill_assets(skill, second)
+    assert (placed / "new.csv").read_bytes() == b"new" and not (placed / "old.csv").exists()
+    session.sync_skill_assets()
+    assert (placed / "old.csv").read_bytes() == b"old" and not (placed / "new.csv").exists()
+    session.close()
+
+
+@pytest.mark.django_db
+def test_assets_of_a_skill_not_taken_in_are_removed(conversation, app_user, settings, tmp_path):
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path / "workspaces")
+    skill, version = publish(app_user)
+    SkillAssetBinding.objects.create(
+        version=version,
+        key="master",
+        role=SkillAssetRole.MASTER,
+        resource_version=ResourceVersionFactory.create(name="a.csv", content=b"a"),
+    )
+    run = start(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    session = SandboxSession(run, attempt)
+    session.place_skill_assets(skill, version)
+    assert (session.master_dir / "skills" / skill.uid).exists()
+    session.sync_skill_assets()
+    assert not (session.master_dir / "skills" / skill.uid).exists()
+    session.close()
+
+
 def test_schema_problem_accepts_only_what_every_provider_takes():
     assert schema_problem(RESULT_SCHEMA) == ""
     assert schema_problem({"type": "array"}) == 'the root must be {"type": "object"}'
@@ -312,18 +377,19 @@ def test_schema_problem_accepts_only_what_every_provider_takes():
 
 
 @pytest.mark.django_db
-def test_run_stops_when_a_skill_in_use_is_suspended(conversation, app_user):
+def test_run_continues_when_a_skill_in_use_is_suspended(conversation, app_user):
+    """停止は新しく選べなくするだけで、読み込み済みのRunは止めない"""
     skill, _version = publish(app_user, tools=["todo_write"])
     run = start(conversation, skills=[skill])
     skill.set_suspended(True, actor=app_user)
-    run = execute(run, FakeAdapter([]))
-    assert run.status == RunStatus.FAILED
-    assert run.end_reason == RunEndReason.SKILL
-    assert "停止中" in run.error
+    run = execute(run, FakeAdapter([reply("終わりました")]))
+    assert run.status == RunStatus.COMPLETED
+    with pytest.raises(CannotStart, match="停止中"):
+        start(conversation, skills=[skill])
 
 
 @pytest.mark.django_db
-def test_run_stops_when_the_user_leaves_the_department_of_the_skill(conversation, app_user):
+def test_run_continues_when_the_user_leaves_the_department_of_the_skill(conversation, app_user):
     department = DepartmentFactory.create()
     membership = DepartmentMembershipFactory.create(department=department, user=app_user)
     skill = SkillFactory.create(scope=SkillScope.DEPARTMENT, department=department, created_by=app_user)
@@ -332,45 +398,30 @@ def test_run_stops_when_the_user_leaves_the_department_of_the_skill(conversation
 
     class RemoveMembership(FakeAdapter):
         def stream(self, request):
-            # 1回目の応答の間に所属が外された。次の区切りで、読み直した利用者で確かめる
-            membership.delete()
+            if not self.requests:
+                membership.delete()
             yield from super().stream(request)
 
     adapter = RemoveMembership([calls(("c1", "todo_write", {"todos": []})), reply("ok")])
     run = execute(run, adapter)
-    assert run.status == RunStatus.FAILED
-    assert run.end_reason == RunEndReason.SKILL
-    assert len(adapter.requests) == 1
+    assert run.status == RunStatus.COMPLETED
+    assert len(adapter.requests) == 2
 
 
 @pytest.mark.django_db
-def test_result_schema_needs_a_model_that_calls_tools(app_user):
-    conversation = ConversationFactory.create(owner=app_user, model_profile__version__supports_tools=False)
-    skill, _version = publish(app_user, tools=[], output_schema=RESULT_SCHEMA)
-    with pytest.raises(CannotStart, match="Tool呼出し"):
-        start(conversation, skills=[skill])
-
-
-@pytest.mark.django_db
-def test_model_switch_keeps_to_models_the_skills_in_use_can_run(conversation, app_user):
+def test_model_switch_is_not_limited_by_the_skills_in_use(conversation, app_user):
     skill, _version = publish(app_user, requires=[SkillRequirement.IMAGE_INPUT])
-    model_version = conversation.model_profile.current_version
-    assert model_version is not None
-    model_version.supports_images = True
-    model_version.save()
-    with_images = ModelProfileFactory.create(
-        name="画像あり", version__supports_tools=True, version__supports_images=True
-    )
+    ModelProfileFactory.create(name="画像あり", version__supports_tools=True, version__supports_images=True)
     ModelProfileFactory.create(name="画像なし", version__supports_tools=True)
     run = start(conversation, skills=[skill])
-    assert [p.name for p in switch_candidates(run)] == [with_images.name]
+    assert {"画像あり", "画像なし"} <= {p.name for p in switch_candidates(run)}
 
 
 @pytest.mark.django_db
 def test_result_can_be_submitted_just_before_the_step_limit(conversation, app_user, monkeypatch):
     monkeypatch.setattr(runner_module, "MAX_STEPS", 2)
     skill, _version = publish(app_user, tools=["todo_write"], output_schema=RESULT_SCHEMA)
-    run = start(conversation, skills=[skill])
+    run = start_with_result(conversation, skill)
     todos = {"todos": [{"content": "読む", "status": "in_progress"}]}
     adapter = FakeAdapter(
         [
@@ -388,14 +439,12 @@ def test_result_can_be_submitted_just_before_the_step_limit(conversation, app_us
 @pytest.mark.django_db
 def test_instruction_after_the_result_asks_to_submit_it_again(conversation, app_user):
     skill, _version = publish(app_user, tools=[], output_schema=RESULT_SCHEMA)
-    run = start(conversation, skills=[skill])
+    run = start_with_result(conversation, skill)
 
     class Script(FakeAdapter):
         def stream(self, request):
             if len(self.requests) == 2:
-                post_message(
-                    conversation, body="理由も書いて", client_message_id="", mode=MessageMode.AUTO, actor=app_user
-                )
+                post_message(conversation, body="理由も書いて", client_message_id="", actor=app_user)
             yield from super().stream(request)
 
     adapter = Script(
@@ -412,3 +461,32 @@ def test_instruction_after_the_result_asks_to_submit_it_again(conversation, app_
     assert any(RESULT_RESET_NOTICE in m.text for m in adapter.requests[3].messages)
     assert run.status == RunStatus.COMPLETED
     assert run.result == {"verdict": "ok", "reason": "問題なし"}
+
+
+@pytest.mark.django_db
+def test_a_loaded_skill_can_be_read_again_after_it_is_suspended(conversation, app_user):
+    """権限が決めるのは新しく選べるかだけ。読み込み済みの版は、停止の後も読み直せる（圧縮の後に手順を読み直すため）"""
+    skill, _version = publish(app_user, instructions="手順の本文", tools=[])
+    other, _other = publish(app_user, name="別のSkill", tools=[])
+    run = start(conversation)
+
+    class Suspend(FakeAdapter):
+        def stream(self, request):
+            if len(self.requests) == 1:
+                skill.set_suspended(True, actor=app_user)
+                other.set_suspended(True, actor=app_user)
+            yield from super().stream(request)
+
+    adapter = Suspend(
+        [
+            calls(("c1", "skill", {"name": skill.name})),
+            calls(("c2", "skill", {"name": skill.name}), ("c3", "skill", {"name": other.name})),
+            reply("終わりました"),
+        ]
+    )
+    run = execute(run, adapter)
+    assert run.status == RunStatus.COMPLETED
+    first, again, refused = results(run, "skill")
+    assert "手順の本文" in first["content"][0]["text"]
+    assert not again["is_error"] and "手順の本文" in again["content"][0]["text"]
+    assert refused["is_error"]

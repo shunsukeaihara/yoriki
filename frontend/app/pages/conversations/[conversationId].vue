@@ -210,7 +210,6 @@ const instructionLabel = (message: Message) => {
 // --- 操作 ---
 
 const text = ref('')
-const mode = ref<string>(MessageMode.AUTO)
 const selectedSkills = ref<Skill[]>([])
 const skillEdit = ref<SkillEditChoice | null>(null)
 const selectedConnectors = ref<AppConnector[]>([])
@@ -240,11 +239,9 @@ const send = async () => {
         editSkill: skillEdit.value?.skill?.id ?? null,
         createSkill: skillEdit.value !== null && skillEdit.value.skill === null,
         clientMessageId,
-        mode: mode.value as MessageWrite['mode'],
       })
     clientMessageId = crypto.randomUUID()
     text.value = ''
-    mode.value = MessageMode.AUTO
     selectedSkills.value = []
     skillEdit.value = null
     selectedConnectors.value = []
@@ -472,7 +469,6 @@ const menuItems = computed(() => [
 
           <ConversationPrompt
             v-model="text"
-            v-model:mode="mode"
             v-model:selected-skills="selectedSkills"
             v-model:skill-edit="skillEdit"
             v-model:selected-connectors="selectedConnectors"
@@ -487,6 +483,7 @@ const menuItems = computed(() => [
             :sending="sending"
             :stopping="stopping"
             :fix-chat="Boolean(fixTask)"
+            :model="conversation?.modelProfileInfo"
             :disabled="Boolean(fixTask?.deleted)"
             class="sticky bottom-0 z-10 rounded-b-none"
             @submit="send"

@@ -125,7 +125,8 @@ def test_without_connectors_in_the_run_scripts_cannot_use_them(conversation):
     attempt = claim_run(run.pk)
     handler = make(attempt)
 
-    assert not handler.available()
+    # 一覧は発言を取り込むときに変わるので、中継は始める（harness.md §10.2）
+    assert handler.available()
     assert handler.handle({"op": "describe", "connector": "販売管理"})["error"]["code"] == "unavailable"
 
 

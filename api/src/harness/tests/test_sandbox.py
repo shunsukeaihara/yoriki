@@ -9,7 +9,7 @@ import pytest
 
 from artifact.models import Artifact, ArtifactKind
 from artifact.storage import LocalStorage, get_storage
-from conversation.dispatch import MessageMode, post_message
+from conversation.dispatch import post_message
 from conversation.factories import ConversationFactory
 from conversation.models import ConversationMessage
 from harness.runner import Runner
@@ -52,7 +52,7 @@ def fixture_conversation(app_user):
 
 
 def post(conversation, body="作業して") -> Run:
-    post_message(conversation, body=body, client_message_id="", mode=MessageMode.AUTO, actor=conversation.owner)
+    post_message(conversation, body=body, client_message_id="", actor=conversation.owner)
     return Run.objects.filter(conversation=conversation).latest("pk")
 
 
@@ -687,7 +687,6 @@ def test_attachments_are_read_only_inputs_and_outputs_become_artifacts(conversat
         conversation,
         body="集計して",
         client_message_id="",
-        mode=MessageMode.AUTO,
         actor=conversation.owner,
         attachments=[attachment],
     )
@@ -741,7 +740,6 @@ def test_attachments_are_read_only_inputs_and_outputs_become_artifacts(conversat
                 conversation,
                 body="これも",
                 client_message_id="",
-                mode=MessageMode.AUTO,
                 actor=conversation.owner,
                 attachments=[later],
             )
@@ -772,9 +770,7 @@ def test_skill_files_are_readable_under_master(conversation, app_user):
 
     chosen = skill_with_file("指定したSkill", b"chosen\n")
     loaded = skill_with_file("読み込むSkill", b"loaded\n")
-    post_message(
-        conversation, body="作業して", client_message_id="", mode=MessageMode.AUTO, actor=app_user, skills=[chosen]
-    )
+    post_message(conversation, body="作業して", client_message_id="", actor=app_user, skills=[chosen])
     run = Run.objects.get(conversation=conversation)
     # 指定したRunには `skill` を出さないので、途中の読込みは同じ会話の次の依頼で確かめる
     adapter = FakeAdapter(

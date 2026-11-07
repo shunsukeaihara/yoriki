@@ -80,7 +80,7 @@ export const skillRequirementItems = (t: T) =>
     { value: 4, title: t('構造化出力') },
   ] satisfies { value: SkillRequirementEnum; title: string }[]
 
-/** 使ってよいToolの選択肢（バックエンドの harness.tools.SKILL_TOOLS） */
+/** 使うToolの選択肢（バックエンドの harness.tools.SKILL_TOOLS） */
 export const skillToolItems = (t: T) =>
   [
     { value: 'read', title: 'read', description: t('ファイルを読む') },
@@ -102,7 +102,7 @@ export const skillFieldLabel = (name: string, t: T): string => {
   const labels: Record<string, string> = {
     description: t('説明'),
     instructions: t('手順'),
-    tools: t('使ってよいTool'),
+    tools: t('使うTool'),
     requires: t('必要な能力'),
     input_schema: t('入力のSchema'),
     output_schema: t('業務結果のSchema'),
@@ -117,7 +117,7 @@ export type SkillChangeSummary = Partial<
   Record<'fields' | 'assetsAdded' | 'assetsReplaced' | 'assetsChanged' | 'assetsRemoved', readonly string[]>
 >
 
-/** 変更点の行（「手順・使ってよいTool」「資料の追加：vendor-master」等） */
+/** 変更点の行（「手順・使うTool」「資料の追加：vendor-master」等） */
 export const skillChangeLines = (summary: SkillChangeSummary | null | undefined, t: T): string[] => {
   if (!summary) return []
   const lines: string[] = []

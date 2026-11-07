@@ -28,9 +28,10 @@ from run.errors import LeaseLost
 from run.models import SCRIPT_CALL_PREFIX, ExecutionAttempt, Run, ToolInvocation, ToolStatus
 from runtime.launcher import RELAY_MAX_RESPONSE, SandboxUnavailable
 
+from .catalogs import unlisted_connector
 from .connectors import DATASOURCE_TOOL_NAMES, catalog_names
 from .tools.base import ToolContext, ToolResult
-from .tools.datasource import Described, Queried, describe_tables, make_datasource_tools, run_query
+from .tools.datasource import DATASOURCE_TOOLS, Described, Queried, describe_tables, run_query
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ class ScriptConnectors:
 
     def available(self) -> bool:
         """このRunでスクリプトからConnectorを呼べるか（中継を始めるかの判断）"""
-        return bool(catalog_names(self.run)) and bool(set(DATASOURCE_TOOL_NAMES) & self.exposed())
+        return bool(set(DATASOURCE_TOOL_NAMES) & self.exposed())
 
     def handle(self, request: dict[str, Any]) -> dict[str, Any]:
         """要求を処理して、スクリプトへ返す応答を作る。頻度の上限は、断る要求も含めて数える（中継はSandboxの
@@ -101,9 +102,11 @@ class ScriptConnectors:
         if len(json.dumps(arguments, ensure_ascii=False).encode()) > MAX_ARGUMENT_BYTES:
             # 引数は記録に残すので、Sandboxから大きな引数を送られても記録を大きくしない
             return _error("invalid_argument", f"The SQL and parameters must be at most {MAX_ARGUMENT_BYTES} bytes.")
-        tool = next(t for t in make_datasource_tools(names) if t.name == name)
+        tool = next(t for t in DATASOURCE_TOOLS if t.name == name)
         if problem := tool.validate(arguments):
             return _error("invalid_argument", problem)
+        if arguments["connector"] not in names and unlisted_connector(self.run, arguments["connector"]) is None:
+            return _error("invalid_argument", f"No such connector. Available connectors: {', '.join(names[:20])}.")
         return name, arguments
 
     def _rate_limit(self) -> dict[str, Any] | None:

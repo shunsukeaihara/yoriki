@@ -5,6 +5,7 @@
 """
 
 import hashlib
+import html
 import json
 import re
 import threading
@@ -54,6 +55,7 @@ class Turn:
     result: str  # 今の依頼の最後のToolの結果
     texts: str  # 今の依頼のすべての文。`match` の対象
     key: str  # 要求の中身のhash。同じ要求の再試行を数える
+    context: str = ""  # 最後の実行時の文脈（`<runtime_context>`）
 
     @classmethod
     def parse(cls, body: dict[str, Any]) -> "Turn":
@@ -72,7 +74,9 @@ class Turn:
             for t in body.get("tools") or []
             if t.get("type") == "function"
         }
+        contexts = [_text(m.get("content")) for m in messages if "<runtime_context>" in _text(m.get("content"))]
         return cls(
+            context=contexts[-1] if contexts else "",
             model=str(body.get("model", "")),
             system=system,
             prompt="\n".join(prompts),
@@ -95,12 +99,17 @@ class Turn:
             "called": self.called,
             "result": self.result[:1000],
             "model": self.model,
+            **self.listed(),
         }
 
-    def enum(self, tool: str, parameter: str) -> str | None:
-        """Toolの引数のenumの最初の値（Skillの名前、Connectorの名前）"""
-        values = (self.tools.get(tool, {}).get("properties") or {}).get(parameter, {}).get("enum") or []
-        return str(values[0]) if values else None
+    def listed(self) -> dict[str, str]:
+        """文脈の今の一覧の最初の名前（`skill`：Skill、`connector`：Connector）"""
+        found = {}
+        for variable, tag in (("skill", "skills"), ("connector", "connectors")):
+            names = re.search(rf'<{tag}>\s*<{variable} name="([^"]*)"', self.context)
+            if names:
+                found[variable] = html.unescape(names[1])
+        return found
 
 
 def _text(content: Any) -> str:
@@ -217,12 +226,7 @@ def substitute(value: Any, turn: Turn, captured: dict[str, str]) -> Any:
         known = turn.variables() | captured
 
         def replace(found: re.Match[str]) -> str:
-            name = found[1]
-            if name.startswith("enum:") and "." in name:
-                tool, parameter = name.removeprefix("enum:").split(".", 1)
-                resolved = turn.enum(tool, parameter)
-                return found[0] if resolved is None else resolved
-            return known.get(name, found[0])
+            return known.get(found[1], found[0])
 
         return VARIABLE.sub(replace, value)
     if isinstance(value, list):

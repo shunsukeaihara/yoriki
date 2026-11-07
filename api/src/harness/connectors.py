@@ -1,9 +1,9 @@
 """会話でConnectorを使う（harness.md §10.2、design.md §4.9.1）。
 
-エージェントに見せるConnectorの一覧と、入力欄の `@` で指定したConnectorは、Run開始時に決めてManifestに固定する
-（Toolの一覧と `connector` の引数のenumをRunの中で変えないため）。一覧は依頼した人が使えるもので、機密のフラグの
-付いたものはローカルLLMのモデルのときだけ載せる。使えるか（範囲・所属・停止・機密）は、操作のたびに確かめ直す
-（authorization.md §6）。
+エージェントに見せるConnectorの一覧は、Run開始時と発言を取り込むたびに作り直してManifestに残す（harness/catalogs.py）。
+Toolの定義は変えず、`connector` の引数は文字列にする（prompt cacheを保つため）。一覧は依頼した人が使えるもので、
+機密のフラグの付いたものはローカルLLMのモデルのときだけ載せる。使えるか（範囲・所属・停止・機密）は、操作のたびに
+確かめ直す（authorization.md §6）。
 """
 
 import re
@@ -59,7 +59,11 @@ def build_catalog(user, *, sensitive: bool, explicit: Sequence[dict[str, Any]] =
     """エージェントに見せる一覧：依頼した人が使えるConnector（部門・全社）の名前と説明。機密のConnectorは機密の
     Runのときだけ（`sensitive`）。なければNone。`@` で指定したものと `/` で指定したSkillが宣言したもの（`explicit`）は、
     数の上限で外れないように先に並べる"""
-    usable = _usable(user, sensitive=sensitive)
+    return catalog_of(_usable(user, sensitive=sensitive), explicit)
+
+
+def catalog_of(usable: list[Connector], explicit: Sequence[dict[str, Any]] = ()) -> dict[str, Any] | None:
+    """使えるConnectorの一覧。使うよう指示されたもの（`explicit`）を、数の上限で外れないように先に並べる。なければNone"""
     chosen = [e["connector"] for e in explicit]
     usable.sort(key=lambda c: chosen.index(c.uid) if c.uid in chosen else len(chosen))
     if not usable:
@@ -75,24 +79,8 @@ def build_catalog(user, *, sensitive: bool, explicit: Sequence[dict[str, Any]] =
     return {"connectors": entries, "omitted": len(usable) - len(entries)}
 
 
-def fixed_catalog(connectors: Sequence[Connector]) -> dict[str, Any] | None:
-    """タスクのRunの一覧：タスクに固定したConnector（使えるかは呼び出し側で確かめたもの）。なければNone。
-    タスクのRunでは、エージェントはこの一覧の外のConnectorを探して使わない（authorization.md §5.4）"""
-    if not connectors:
-        return None
-    entries = [
-        {
-            "connector": c.uid,
-            "name": c.name,
-            "description": _one_line(c.current_version.description, DESCRIPTION_LIMIT) if c.current_version else "",
-        }
-        for c in connectors
-    ]
-    return {"connectors": entries, "omitted": 0}
-
-
 def catalog(run: Run) -> dict[str, Any]:
-    return ((run.manifest or {}).get("fixed") or {}).get("connector_catalog") or {}
+    return run.current_catalog("connector_catalog") or {}
 
 
 def catalog_names(run: Run) -> list[str]:
@@ -105,7 +93,7 @@ def catalog_text(value: dict[str, Any]) -> str:
     for entry in value["connectors"]:
         lines.append(f'    <connector name="{_escape(entry["name"])}">{_escape(entry["description"])}</connector>')
     if value.get("omitted"):
-        lines.append(f"    ({value['omitted']} more connectors are not listed)")
+        lines.append(f"    ({value['omitted']} more connectors are not listed. You can still use them by exact name.)")
     lines.append("  </connectors>")
     return "\n".join(lines)
 
@@ -160,7 +148,7 @@ def explicit_text(entries: list[dict[str, Any]]) -> str:
         lines.append("</connector>")
         blocks.append("\n".join(lines))
     head = (
-        "The user chose these connectors for this request. Check the columns with datasource_describe, then read "
+        "Use these connectors for this request. Check the columns with datasource_describe, then read "
         "the data with datasource_query:"
     )
     return head + "\n" + "\n\n".join(blocks)

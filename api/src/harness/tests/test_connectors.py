@@ -14,7 +14,7 @@ from connector.adapters.base import ColumnInfo, QueryResult, TableInfo
 from connector.errors import ConnectorError, ConnectorErrorKind
 from connector.factories import ConnectorFactory
 from connector.models import VERSION_FIELDS, ConnectionLease, ConnectorScope
-from conversation.dispatch import CannotStart, MessageMode, post_message
+from conversation.dispatch import CannotStart, post_message
 from conversation.factories import ConversationFactory
 from conversation.models import InstructionKind, UserInstruction
 from harness.connectors import build_catalog, explicit_text, resolve_explicit
@@ -101,9 +101,7 @@ def fixture_conversation(app_user):
 
 
 def start(conversation, body="取引先を調べて", **kwargs) -> Run:
-    post_message(
-        conversation, body=body, client_message_id="", mode=MessageMode.AUTO, actor=conversation.owner, **kwargs
-    )
+    post_message(conversation, body=body, client_message_id="", actor=conversation.owner, **kwargs)
     return Run.objects.filter(conversation=conversation).latest("pk")
 
 
@@ -162,7 +160,7 @@ def test_agent_sees_usable_connectors_and_reads_with_them(conversation, app_user
     assert run.status == RunStatus.COMPLETED
     first = adapter.requests[0]
     query_tool = next(t for t in first.tools if t.name == "datasource_query")
-    assert query_tool.parameters["properties"]["connector"]["enum"] == ["経理", "販売管理"]
+    assert "enum" not in query_tool.parameters["properties"]["connector"]
     context = next(m.text for m in first.messages if m.role == "user" and "<runtime_context>" in m.text)
     assert '<connector name="販売管理">受注と取引先</connector>' in context
     assert "datasource_describe" in first.messages[0].text  # system promptの使い方
@@ -195,13 +193,15 @@ def test_agent_sees_usable_connectors_and_reads_with_them(conversation, app_user
 
 
 @pytest.mark.django_db
-def test_no_connector_tools_without_usable_connectors(conversation):
+def test_connector_tools_are_exposed_without_usable_connectors(conversation):
+    """一覧は発言を取り込むときに変わるので、今は使えなくてもToolを出す（harness.md §10.2）"""
     run = start(conversation)
     assert run.manifest["fixed"]["connector_catalog"] is None
-    adapter = FakeAdapter([reply("できません")])
-    execute(run, adapter)
+    adapter = FakeAdapter([calls(("c1", "datasource_describe", {"connector": "販売管理"})), reply("できません")])
+    run = execute(run, adapter)
     names = [t.name for t in adapter.requests[0].tools]
-    assert "datasource_query" not in names and "datasource_describe" not in names
+    assert "datasource_query" in names and "datasource_describe" in names
+    assert 'No connector named "販売管理"' in text_of(results(run, "datasource_describe")[0])
 
 
 @pytest.mark.django_db
@@ -433,27 +433,29 @@ def test_chosen_connector_that_was_disabled_does_not_start_the_run(conversation)
 
 
 @pytest.mark.django_db
-def test_chosen_connector_with_a_skill_that_does_not_query_is_refused(conversation, app_user):
-    connector = ConnectorFactory.create(name="販売管理")
+def test_chosen_connector_with_a_skill_that_does_not_query_is_accepted(conversation, app_user):
+    """Skillの「使うTool」は、会話で呼び出せる範囲を変えない（authorization.md §6）"""
+    connector = ConnectorFactory.create(name="販売管理", version__tables=TABLES)
     skill = SkillFactory.create(created_by=app_user)
     SkillVersionFactory.create(skill=skill, tools=["read"])
-    with pytest.raises(CannotStart, match="ConnectorのTool"):
-        start(conversation, skills=[skill], connectors=[connector])
+    run = start(conversation, skills=[skill], connectors=[connector])
+    assert run.manifest["fixed"]["connectors"][0]["connector"] == connector.uid
 
 
 @pytest.mark.django_db
-def test_message_with_a_connector_during_a_run_becomes_the_next_request(conversation):
+def test_message_with_a_connector_during_a_run_goes_to_the_parent(conversation):
     connector = ConnectorFactory.create(name="販売管理")
     run = start(conversation)
     start(conversation, body="こちらも", connectors=[connector])
     instruction = UserInstruction.objects.get(message__body="こちらも")
-    assert instruction.kind == InstructionKind.NEXT
+    assert instruction.kind == InstructionKind.CURRENT
     assert Run.objects.filter(conversation=conversation).count() == 1
     assert run.status == RunStatus.QUEUED
 
 
 @pytest.mark.django_db
-def test_chosen_skill_limits_the_connector_tools(conversation, app_user):
+def test_chosen_skill_does_not_limit_the_connector_tools(conversation, app_user, monkeypatch):
+    monkeypatch.setattr(datasource_module, "_can_read_files", lambda _context: False)
     ConnectorFactory.create(name="販売管理", version__tables=TABLES)
     skill = SkillFactory.create(created_by=app_user)
     SkillVersionFactory.create(skill=skill, tools=["datasource_query"])
@@ -464,7 +466,7 @@ def test_chosen_skill_limits_the_connector_tools(conversation, app_user):
     run = execute(run, adapter)
 
     names = [t.name for t in adapter.requests[0].tools]
-    assert "datasource_query" in names and "datasource_describe" not in names and "read" not in names
+    assert "datasource_query" in names and "datasource_describe" in names and "read" in names
     # ファイルを読めないRunでは、上限の中の結果を表として見せる
     [result] = results(run, "datasource_query")
     text = text_of(result)
@@ -477,6 +479,7 @@ def test_chosen_skill_limits_the_connector_tools(conversation, app_user):
 def test_truncated_inline_rows_keep_the_untrusted_content_closed(conversation, app_user, monkeypatch):
     """囲んだ行の途中で切っても、囲みを閉じ、切ったことの案内を囲みの外に書く"""
     monkeypatch.setattr(datasource_module, "limit_for", lambda _context: 120)
+    monkeypatch.setattr(datasource_module, "_can_read_files", lambda _context: False)
     ConnectorFactory.create(name="販売管理", version__tables=TABLES)
     skill = SkillFactory.create(created_by=app_user)
     SkillVersionFactory.create(skill=skill, tools=["datasource_query"])

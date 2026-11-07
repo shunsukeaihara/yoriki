@@ -10,7 +10,7 @@ import pytest
 from django.db import DatabaseError, connection
 
 from artifact.storage import LocalStorage, StorageError, StoredObject, get_storage
-from conversation.dispatch import MessageMode, post_message
+from conversation.dispatch import post_message
 from conversation.factories import ConversationFactory
 from harness.runner import Runner
 from harness.sandbox import (
@@ -56,7 +56,7 @@ def fixture_conversation(app_user):
 
 
 def post(conversation, body="作業して") -> Run:
-    post_message(conversation, body=body, client_message_id="", mode=MessageMode.AUTO, actor=conversation.owner)
+    post_message(conversation, body=body, client_message_id="", actor=conversation.owner)
     return Run.objects.filter(conversation=conversation).latest("pk")
 
 

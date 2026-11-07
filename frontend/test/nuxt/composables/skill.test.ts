@@ -30,7 +30,7 @@ describe('skillChangeLines', () => {
   it('変わった項目と資料の key を行にする', () => {
     expect(
       skillChangeLines({ fields: ['instructions', 'tools'], assetsReplaced: ['vendor-master'], assetsAdded: [] }, tp),
-    ).toEqual(['手順・使ってよいTool', '資料の置換：vendor-master'])
+    ).toEqual(['手順・使うTool', '資料の置換：vendor-master'])
     expect(skillChangeLines(null, tp)).toEqual([])
   })
 })
@@ -44,7 +44,7 @@ describe('skillOwnerLabel', () => {
     suspended: false,
     sensitive: false,
     editSensitive: false,
-    connectorsUsable: true,
+    requires: [],
     draft: null,
     canEdit: false,
     canPublish: false,

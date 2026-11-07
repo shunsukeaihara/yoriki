@@ -1,14 +1,15 @@
-"""Skillを読み込む（harness.md §10.1）。引数の名前は、Run開始時に固定した一覧（Manifest）のenumにする"""
+"""Skillを読み込む（harness.md §10.1）。引数の名前は文字列で、今の一覧にある名前だけを受け付ける（一覧がRunの中で
+変わるので、Toolの定義をprompt cacheのために変えない）"""
 
 from typing import Any
 
-from django.utils.translation import gettext as _
-
 from run.models import RunEvent, RunEventKind
-from skill.models import Skill, SkillAction, SkillVersion
+from skill.models import Skill, SkillVersion
 
+from .. import tasks
+from ..catalogs import unlisted_skill
 from ..connectors import catalog as connector_catalog
-from ..skills import loaded_entries, manifest_entry, render
+from ..skills import loaded_entries, manifest_entry, render, skill_catalog
 from .base import Effect, Tool, ToolContext, ToolResult
 from .submit_result import NAME as SUBMIT_RESULT
 
@@ -26,61 +27,63 @@ the skill uses, and the result schema if it has one. Loading the same skill agai
 version."""
 
 
-def make_skill_tool(names: list[str]) -> Tool:
-    parameters = {
-        "type": "object",
-        "properties": {
-            "name": {"type": "string", "enum": names, "description": "The skill name, exactly as listed in <skills>."}
-        },
-        "required": ["name"],
-        "additionalProperties": False,
-    }
-    # 読み込みはManifestへの追記とRunEventの記録を伴うので、Runnerのスレッドで1つずつ実行する（並べない）
-    return Tool(NAME, DESCRIPTION, parameters, execute, Effect.READ, replay_safe=True)
+# 一覧にない名前のエラーに添える候補の数
+MAX_CANDIDATES = 20
+
+PARAMETERS = {
+    "type": "object",
+    "properties": {"name": {"type": "string", "description": "The skill name, exactly as listed in <skills>."}},
+    "required": ["name"],
+    "additionalProperties": False,
+}
 
 
 def execute(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     run = context.run
-    catalog = ((run.manifest or {}).get("fixed") or {}).get("skill_catalog") or {}
-    entry = next((e for e in catalog.get("skills", []) if e["name"] == arguments["name"]), None)
-    if entry is None:
-        return ToolResult.error(f'No skill named "{arguments["name"]}" is available. Use a name listed in <skills>.')
-    skill = Skill.objects.select_related("current_version", "department").filter(uid=entry["skill"]).first()
-    if skill is None or skill.deleted:
-        return ToolResult.error("This skill was deleted. Continue without it, and tell the user.")
-    user, model_version = run.owner, run.model_version
+    skills = skill_catalog(run).get("skills", [])
+    loaded_here = loaded_entries(run)
+    uid = next((e["skill"] for e in loaded_here if e["name"] == arguments["name"]), None)
+    uid = uid or next((e["skill"] for e in skills if e["name"] == arguments["name"]), None)
+    uid = uid or unlisted_skill(run, arguments["name"])
+    if uid is None:
+        candidates = ", ".join(e["name"] for e in skills[:MAX_CANDIDATES]) or "(none)"
+        return ToolResult.error(f'No skill named "{arguments["name"]}" is available. Available skills: {candidates}.')
 
-    loaded = next((e for e in loaded_entries(run) if e["skill"] == skill.uid), None)
+    skill = Skill.objects.select_related("current_version", "department").filter(uid=uid).first()
+    if skill is None:
+        return ToolResult.error("This skill was deleted. Continue without it, and tell the user.")
+    loaded = next((e for e in loaded_here if e["skill"] == skill.uid), None)
     if loaded is not None:
-        return _load_again(skill, loaded, entry["name"], context)
-    available = {e["connector"] for e in connector_catalog(run).get("connectors", [])}
-    if reason := skill.unusable_reason(user, model_version, sensitive=run.handles_sensitive_data, connectors=available):
+        return _load_again(skill, loaded, arguments["name"], context)
+    if skill.deleted:
+        return ToolResult.error("This skill was deleted. Continue without it, and tell the user.")
+    if reason := _problem(run, skill):
         return _unusable(reason)
     assert skill.current_version_id is not None  # unusable_reason() が確かめた
     version = SkillVersion.objects.prefetch_related("assets__resource_version").get(pk=skill.current_version_id)
-    missing = [name for name in version.tools if name not in context.exposed]
-    if missing:
-        return ToolResult.error(
-            f"This skill needs tools that are not available in this work: {', '.join(missing)}. Do not load it now. "
-            "Tell the user to start a new request that names the skill with /."
-        )
     # 資料を置けたことを確かめてから追記する。置けなければ追記しない（harness.md §10.1）。
     # Sandboxをまだ起動していなければ、起動するときにManifestの全Skillの資料を置く
     if context.session is not None and context.session.started:
         context.session.place_skill_assets(skill, version)
-    value = manifest_entry(skill, version, entry["name"])
+    value = manifest_entry(skill, version, arguments["name"])
     with run.fenced(context.attempt) as current:
         current.append_manifest("skill", value)
         current.save(update_fields=["manifest", "updated"])
         RunEvent.record(current, RunEventKind.SKILL_LOADED, value, comment=skill.name)
         run.manifest = current.manifest
-    return _loaded(skill, version, entry["name"], context)
+    return _loaded(skill, version, arguments["name"], context)
+
+
+def _problem(run, skill: Skill) -> str:
+    """このセッションの権限で今選べない理由（選べれば空文字）。会話は依頼した人、タスクはタスクの範囲で判定する"""
+    if tasks.is_task_run(run):
+        return tasks.skill_problem(run, skill, skill.current_version)
+    return skill.unusable_reason(run.owner, sensitive=run.handles_sensitive_data)
 
 
 def _load_again(skill: Skill, loaded: dict[str, Any], name: str, context: ToolContext) -> ToolResult:
-    """同じRunでは追記した版を返す（途中で公開し直されても切り替えない）。停止や権限の失効は確かめ直す"""
-    if not skill.can(context.run.owner, SkillAction.VIEW) or skill.suspended:
-        return _unusable(_("このSkillは使えなくなりました"))
+    """同じRunでは追記した版を返す（途中で公開し直されても切り替えない）。権限が決めるのは新しく選べるかだけなので、停止・
+    失効した後も読み直せる（圧縮の後に手順を読み直すため。harness.md §10.1）"""
     version = SkillVersion.objects.prefetch_related("assets__resource_version").get(pk=loaded["version"])
     return _loaded(skill, version, name, context)
 
@@ -91,7 +94,8 @@ def _loaded(skill: Skill, version: SkillVersion, name: str, context: ToolContext
             skill,
             version,
             name=name,
-            result_tool=SUBMIT_RESULT in context.exposed,
+            # submit_result の形はタスクの定義で決まる。一覧から読み込んだSkillの形は最後の応答に書かせる
+            result_tool=SUBMIT_RESULT in context.exposed and _instructed(context.run, skill),
             connector_names={e["connector"]: e["name"] for e in connector_catalog(context.run).get("connectors", [])},
         ),
         value={"skill": skill.uid, "version": version.number},
@@ -99,5 +103,13 @@ def _loaded(skill: Skill, version: SkillVersion, name: str, context: ToolContext
     )
 
 
+def _instructed(run, skill: Skill) -> bool:
+    return any(e["skill"] == skill.uid for e in ((run.manifest or {}).get("fixed") or {}).get("skills", []))
+
+
 def _unusable(reason: str) -> ToolResult:
     return ToolResult.error(f"This skill cannot be used now ({reason}). Continue without it, and tell the user.")
+
+
+# 読み込みはManifestへの追記とRunEventの記録を伴うので、Runnerのスレッドで1つずつ実行する（並べない）
+SKILL = Tool(NAME, DESCRIPTION, PARAMETERS, execute, Effect.READ, replay_safe=True)

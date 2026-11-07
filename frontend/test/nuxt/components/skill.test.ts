@@ -103,9 +103,9 @@ describe('SkillDraftForm', () => {
       )
   })
 
-  it('編集を始めた時点の revision を送り、公開の権限がなければ Tool を送らない', async () => {
+  it('編集を始めた時点の revision を送り、公開の権限がなくても Tool を送る', async () => {
     const wrapper = await mountSuspended(SkillDraftForm, {
-      props: { modelValue: draft, skillId: 's1', canChangeTools: false },
+      props: { modelValue: draft, skillId: 's1', canPublish: false },
     })
     const vm = wrapper.vm as unknown as Form
     expect(vm.canPost).toBe(false) // 変更がなければ保存しない
@@ -119,14 +119,14 @@ describe('SkillDraftForm', () => {
       description: '請求書と発注書を確認する',
       outputSchema: { type: 'object' },
     })
-    expect(data).not.toHaveProperty('tools')
+    expect(data).toHaveProperty('tools')
     // 保存した後は、応答の中身で入れ直す
     expect(vm.dirty).toBe(false)
   })
 
   it('使うConnectorと機密のフラグを送る', async () => {
     const wrapper = await mountSuspended(SkillDraftForm, {
-      props: { modelValue: draft, skillId: 's1', canChangeTools: false },
+      props: { modelValue: draft, skillId: 's1', canPublish: false },
     })
     const vm = wrapper.vm as unknown as Form
     vm.form.connectors = [{ connector: 'c1', operations: ['datasource_query'], tables: ['public.vendors'] }]
@@ -140,19 +140,18 @@ describe('SkillDraftForm', () => {
   })
 
   it('機密のフラグは、公開の権限がなければ外せない', async () => {
-    // 選んだ Tool（公開の権限がないので変えられない）のほかに、機密のフラグも変えられなくなる
     const lockedChecks = async (isSensitive: boolean) => {
       const wrapper = await mountSuspended(SkillDraftForm, {
-        props: { modelValue: { ...draft, isSensitive }, skillId: 's1', canChangeTools: false },
+        props: { modelValue: { ...draft, isSensitive }, skillId: 's1', canPublish: false },
       })
       return wrapper.findAll('button[role="checkbox"][data-state="checked"][disabled]').length
     }
     expect(await lockedChecks(true)).toBe((await lockedChecks(false)) + 1)
   })
 
-  it('公開の権限があれば Tool も送る', async () => {
+  it('選んだ Tool を送る', async () => {
     const wrapper = await mountSuspended(SkillDraftForm, {
-      props: { modelValue: draft, skillId: 's1', canChangeTools: true },
+      props: { modelValue: draft, skillId: 's1', canPublish: true },
     })
     const vm = wrapper.vm as unknown as Form
     vm.form.tools = ['shell', 'read']
@@ -162,7 +161,7 @@ describe('SkillDraftForm', () => {
 
   it('Schema が JSON として読めなければ保存できない', async () => {
     const wrapper = await mountSuspended(SkillDraftForm, {
-      props: { modelValue: draft, skillId: 's1', canChangeTools: true },
+      props: { modelValue: draft, skillId: 's1', canPublish: true },
     })
     const vm = wrapper.vm as unknown as Form
     vm.form.outputSchema = '{"type": '
@@ -173,7 +172,7 @@ describe('SkillDraftForm', () => {
 
   it('資料の操作で revision が増えても、入力中の文は残す', async () => {
     const wrapper = await mountSuspended(SkillDraftForm, {
-      props: { modelValue: draft, skillId: 's1', canChangeTools: false },
+      props: { modelValue: draft, skillId: 's1', canPublish: false },
     })
     const vm = wrapper.vm as unknown as Form
     vm.form.description = '入力中'
@@ -193,7 +192,7 @@ describe('SkillDraftForm', () => {
     })
     patch.mockReset().mockRejectedValue(conflict)
     const wrapper = await mountSuspended(SkillDraftForm, {
-      props: { modelValue: draft, skillId: 's1', canChangeTools: false },
+      props: { modelValue: draft, skillId: 's1', canPublish: false },
     })
     const vm = wrapper.vm as unknown as Form
     vm.form.description = '変更'

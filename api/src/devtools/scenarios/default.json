@@ -30,7 +30,7 @@
     {
       "name": "Skillを読み込む",
       "when": {"prompt": "[skill]", "tools": "skill", "step": 0},
-      "reply": {"text": "Skillを読み込みます。", "tool_calls": [{"name": "skill", "arguments": {"name": "${enum:skill.name}"}}]}
+      "reply": {"text": "Skillを読み込みます。", "tool_calls": [{"name": "skill", "arguments": {"name": "${skill}"}}]}
     },
     {
       "name": "Skillの資料を読む",
@@ -86,7 +86,7 @@
       "reply": {
         "text": "Skillの編集を提案します。",
         "tool_calls": [
-          {"name": "request_skill_edit", "arguments": {"skill": "${enum:skill.name}", "summary": "[skill-edit] 説明を直す"}}
+          {"name": "request_skill_edit", "arguments": {"skill": "${skill}", "summary": "[skill-edit] 説明を直す"}}
         ]
       }
     },
@@ -169,7 +169,7 @@
         "tool_calls": [
           {
             "name": "datasource_query",
-            "arguments": {"connector": "${enum:datasource_query.connector}", "sql": "SELECT code, name FROM vendors ORDER BY code"}
+            "arguments": {"connector": "${connector}", "sql": "SELECT code, name FROM vendors ORDER BY code"}
           }
         ]
       }

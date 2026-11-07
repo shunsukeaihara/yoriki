@@ -3818,14 +3818,6 @@ export interface components {
              */
             create_skill: boolean;
             client_message_id?: string;
-            /**
-             * @description auto：実行中なら今の作業への追加指示、確認待ちなら回答。next：今の作業の後に始める
-             *
-             *     * `auto` - 自動
-             *     * `next` - 次の依頼
-             * @default auto
-             */
-            mode: components["schemas"]["ModeEnum"];
         };
         /**
          * @description * `1` - ユーザー
@@ -3935,12 +3927,6 @@ export interface components {
             /** 表示名 */
             readonly display_name: string;
         };
-        /**
-         * @description * `auto` - 自動
-         *     * `next` - 次の依頼
-         * @enum {string}
-         */
-        ModeEnum: "auto" | "next";
         /**
          * @description モデル設定。中身（接続、モデル名、上限、単価、能力）は現在の版の値を平らに出す。
          *
@@ -4913,7 +4899,7 @@ export interface components {
             revision?: number;
             description?: string;
             instructions?: string;
-            /** @description 使ってよいTool。空ならコマンド不要のSkill */
+            /** @description 使うTool。空ならコマンド不要のSkill */
             tools?: components["schemas"]["ToolsEnum"][];
             requires?: components["schemas"]["SkillRequirementEnum"][];
             input_schema?: unknown;
@@ -5505,8 +5491,8 @@ export interface components {
             readonly sensitive: boolean;
             /** @description 公開中の版かDraftが機密のSkillか（機密の会話でだけ編集できる） */
             readonly edit_sensitive: boolean;
-            /** @description 公開中の版が宣言したConnectorを、利用者がすべて使え、宣言した操作・表をConnectorが今も公開しているか（でなければ会話で使えない） */
-            readonly connectors_usable: boolean;
+            /** @description 公開中の版の必要な能力。選べるかには関わらない（画面の案内に使う） */
+            readonly requires: number[];
             /** @description 開いているDraftのID。なければnull。Draftを編集できる人にだけ出す */
             readonly draft: string | null;
             /** @description Draftを変更できるか（本文・資料・評価ケース） */
@@ -5572,7 +5558,7 @@ export interface components {
             name: string;
             description?: string;
             instructions?: string;
-            /** @description 使ってよいTool。空ならコマンド不要のSkill */
+            /** @description 使うTool。空ならコマンド不要のSkill */
             tools?: components["schemas"]["ToolsEnum"][];
             requires?: components["schemas"]["SkillRequirementEnum"][];
             input_schema?: unknown;
@@ -5587,7 +5573,7 @@ export interface components {
             revision: number;
             description?: string;
             instructions?: string;
-            /** @description 使ってよいTool。空ならコマンド不要のSkill */
+            /** @description 使うTool。空ならコマンド不要のSkill */
             tools?: components["schemas"]["ToolsEnum"][];
             requires?: components["schemas"]["SkillRequirementEnum"][];
             input_schema?: unknown;
@@ -5669,7 +5655,7 @@ export interface components {
             revision: number;
             description?: string;
             instructions?: string;
-            /** @description 使ってよいTool。空ならコマンド不要のSkill */
+            /** @description 使うTool。空ならコマンド不要のSkill */
             tools?: components["schemas"]["ToolsEnum"][];
             requires?: components["schemas"]["SkillRequirementEnum"][];
             input_schema?: unknown;
@@ -5837,7 +5823,7 @@ export interface components {
             readonly description: string;
             /** 手順 */
             readonly instructions: string;
-            /** 使ってよいTool */
+            /** 使うTool */
             readonly tools: string[];
             /** 必要な能力 */
             readonly requires: components["schemas"]["SkillRequirementEnum"][];

@@ -26,8 +26,9 @@ from llm.providers.openai import TOOL_IMAGES_LABEL
 
 MASTER_FILE = r"(?P<file>/workspace/master/[^\n]+?) \("
 ASSETS = "<assets>\n  /workspace/master/skills/s1/k/{} (参照, version 1)"
-SKILL_TOOL = ToolDefinition(
-    "skill", "Skillを読み込む", {"type": "object", "properties": {"name": {"type": "string", "enum": ["請求書の照合"]}}}
+SKILL_TOOL = ToolDefinition("skill", "Skillを読み込む", {"type": "object", "properties": {"name": {"type": "string"}}})
+RUNTIME_CONTEXT = (
+    '<runtime_context>\n  <skills>\n    <skill name="請求書の照合">説明</skill>\n  </skills>\n</runtime_context>'
 )
 READ_TOOL = ToolDefinition("read", "読む", {"type": "object", "properties": {"path": {"type": "string"}}})
 
@@ -92,14 +93,16 @@ def test_rules_match_in_order_and_fill_variables(tmp_path):
                 {
                     "name": "読み込む",
                     "when": {"prompt": "[skill]", "step": 0, "tools": ["skill"]},
-                    "reply": {"tool_calls": [{"name": "skill", "arguments": {"name": "${enum:skill.name}"}}]},
+                    "reply": {"tool_calls": [{"name": "skill", "arguments": {"name": "${skill}"}}]},
                 },
             ],
             "default": {"text": "既定：${prompt}"},
         },
     )
     skill = {"type": "function", "function": {"name": "skill", "parameters": SKILL_TOOL.parameters}}
-    first = body([{"role": "user", "content": "[skill] 照合して"}]) | {"tools": [skill]}
+    first = body([{"role": "user", "content": "[skill] 照合して"}, {"role": "user", "content": RUNTIME_CONTEXT}]) | {
+        "tools": [skill]
+    }
     assert responder.choose(first)[0::2] == (
         "読み込む",
         {"tool_calls": [{"name": "skill", "arguments": {"name": "請求書の照合"}}]},
@@ -189,7 +192,11 @@ def test_adapter_streams_text_and_tool_calls(fake_llm):
     assert text.startswith("（偽のLLM）「こんにちは」を受け取りました。")
     assert isinstance(events[-1], Completed) and events[-1].stop_reason == StopReason.END
 
-    request = ChatRequest(model="fake", messages=[Message("user", "[skill] 照合して")], tools=[SKILL_TOOL, READ_TOOL])
+    request = ChatRequest(
+        model="fake",
+        messages=[Message("user", "[skill] 照合して"), Message("user", RUNTIME_CONTEXT)],
+        tools=[SKILL_TOOL, READ_TOOL],
+    )
     events = list(adapter.stream(request))
     calls = [e.call for e in events if isinstance(e, ToolCallRequested)]
     assert [(c.name, c.arguments) for c in calls] == [("skill", {"name": "請求書の照合"})]

@@ -2,7 +2,7 @@
 
 import pytest
 
-from conversation.dispatch import MessageMode, post_message
+from conversation.dispatch import post_message
 from conversation.factories import ConversationFactory
 from conversation.models import ConversationMessage, InstructionState, MessageRole, UserInstruction
 from harness import runner as runner_module
@@ -30,6 +30,9 @@ from .fakes import FakeAdapter, calls, reply
 # Runを始めるには既定のRuntime Profileが要る
 pytestmark = pytest.mark.usefixtures("default_runtime")
 
+# 新しいSkillを作る依頼（今のRunが終わってから始める）
+NEW_SKILL = {"id": "", "name": ""}
+
 QUESTION = {
     "questions": [
         {
@@ -47,7 +50,7 @@ def fixture_conversation(app_user):
 
 
 def start(conversation, body="請求書を確認して") -> Run:
-    post_message(conversation, body=body, client_message_id="", mode=MessageMode.AUTO, actor=conversation.owner)
+    post_message(conversation, body=body, client_message_id="", actor=conversation.owner)
     return Run.objects.get(conversation=conversation)
 
 
@@ -83,6 +86,9 @@ def test_reply_completes_the_run(conversation):
     assert {t.name for t in request.tools} == {
         "ask_user",
         "request_skill_edit",
+        "skill",
+        "datasource_describe",
+        "datasource_query",
         "todo_write",
         "read",
         "write",
@@ -143,7 +149,7 @@ def test_ask_user_waits_and_resumes_with_the_answer(conversation, app_user):
 def test_free_text_message_answers_the_open_question(conversation, app_user):
     run = start(conversation)
     run = execute(run, FakeAdapter([calls(("call_q", "ask_user", QUESTION))]))
-    post_message(conversation, body="大阪支店です", client_message_id="", mode=MessageMode.AUTO, actor=app_user)
+    post_message(conversation, body="大阪支店です", client_message_id="", actor=app_user)
 
     clarification = ClarificationRequest.objects.get(run=run)
     assert clarification.status == ClarificationStatus.ANSWERED
@@ -173,9 +179,7 @@ def test_additional_instruction_is_applied_at_the_next_step(conversation, app_us
         def stream(self, request):
             if len(self.requests) == 0:
                 # 1つ目の応答の途中で、利用者が追加の指示を送る
-                post_message(
-                    conversation, body="支店は別にして", client_message_id="", mode=MessageMode.AUTO, actor=app_user
-                )
+                post_message(conversation, body="支店は別にして", client_message_id="", actor=app_user)
             yield from super().stream(request)
 
     adapter = InstructingAdapter([calls(("call_1", "todo_write", todos)), reply("支店を分けました。")])
@@ -191,7 +195,7 @@ def test_additional_instruction_is_applied_at_the_next_step(conversation, app_us
 @pytest.mark.django_db
 def test_next_request_starts_after_completion(conversation, app_user):
     run = start(conversation)
-    post_message(conversation, body="次はこれ", client_message_id="", mode=MessageMode.NEXT, actor=app_user)
+    post_message(conversation, body="次はこれ", client_message_id="", actor=app_user, skill_edit=NEW_SKILL)
     run = execute(run, FakeAdapter([reply("完了")]))
 
     assert run.status == RunStatus.COMPLETED
@@ -204,8 +208,8 @@ def test_next_request_starts_after_completion(conversation, app_user):
 def test_next_requests_that_cannot_start_are_discarded_with_the_reason(conversation, app_user, default_runtime):
     # 投稿の後に既定のRuntime Profileがなくなったら、次の依頼は始めず、理由を会話に残す（黙って捨てない）
     run = start(conversation)
-    post_message(conversation, body="次はこれ", client_message_id="", mode=MessageMode.NEXT, actor=app_user)
-    post_message(conversation, body="その次はこれ", client_message_id="", mode=MessageMode.NEXT, actor=app_user)
+    post_message(conversation, body="次はこれ", client_message_id="", actor=app_user, skill_edit=NEW_SKILL)
+    post_message(conversation, body="その次はこれ", client_message_id="", actor=app_user, skill_edit=NEW_SKILL)
     RuntimeProfile.objects.filter(pk=default_runtime.pk).update(is_default=False)
     run = execute(run, FakeAdapter([reply("完了")]))
 
@@ -325,11 +329,11 @@ def test_next_request_inherits_the_context_of_the_earlier_requests(conversation,
     """同じ会話の次の依頼は、前の依頼の文脈（発言・Tool呼出し・応答）をそのまま引き継ぐ（design.md §5.1）"""
     todos = {"todos": [{"content": "読む", "status": "completed"}]}
     first = execute(start(conversation), FakeAdapter([calls(("c1", "todo_write", todos)), reply("1件目の結果です")]))
-    post_message(conversation, body="2件目も", client_message_id="", mode=MessageMode.AUTO, actor=app_user)
+    post_message(conversation, body="2件目も", client_message_id="", actor=app_user)
     second = Run.objects.exclude(pk=first.pk).get(conversation=conversation)
     adapter = FakeAdapter([reply("2件目の結果です")])
     execute(second, adapter)
-    post_message(conversation, body="3件目も", client_message_id="", mode=MessageMode.AUTO, actor=app_user)
+    post_message(conversation, body="3件目も", client_message_id="", actor=app_user)
     third = Run.objects.exclude(pk__in=[first.pk, second.pk]).get(conversation=conversation)
     adapter = FakeAdapter([reply("3件目の結果です")])
     execute(third, adapter)
@@ -355,7 +359,7 @@ def test_inherited_calls_without_results_are_closed(conversation, app_user):
         )
         locked.set_status(RunStatus.FAILED, end_reason=RunEndReason.INTERNAL)
     attempt.end()
-    post_message(conversation, body="続けて", client_message_id="", mode=MessageMode.AUTO, actor=app_user)
+    post_message(conversation, body="続けて", client_message_id="", actor=app_user)
     second = Run.objects.exclude(pk=first.pk).get(conversation=conversation)
     adapter = FakeAdapter([reply("確かめます")])
     execute(second, adapter)
@@ -428,9 +432,7 @@ def test_instruction_during_the_final_reply_continues_the_run(conversation, app_
     class LateInstructionAdapter(FakeAdapter):
         def stream(self, request):
             if len(self.requests) == 0:
-                post_message(
-                    conversation, body="やっぱり支店別に", client_message_id="", mode=MessageMode.AUTO, actor=app_user
-                )
+                post_message(conversation, body="やっぱり支店別に", client_message_id="", actor=app_user)
             yield from super().stream(request)
 
     adapter = LateInstructionAdapter([reply("完了しました。"), reply("支店別にしました。")])
@@ -445,7 +447,7 @@ def test_instruction_during_the_final_reply_continues_the_run(conversation, app_
 def test_unapplied_instruction_becomes_the_next_request_when_the_run_ends(conversation, app_user):
     run = start(conversation)
     claim_run(run.pk)
-    post_message(conversation, body="追加でこれも", client_message_id="", mode=MessageMode.AUTO, actor=app_user)
+    post_message(conversation, body="追加でこれも", client_message_id="", actor=app_user)
     Run.objects.get(pk=run.pk).request_cancel("", actor=app_user)
     run.refresh_from_db()
     run.set_status(RunStatus.CANCELLED)

@@ -162,7 +162,7 @@ class InstructionState(models.IntegerChoices):
 
 
 class UserInstruction(models.Model):
-    """実行中に届いた依頼。今の作業への追加指示はRunnerが安全な区切りで取り込み、次の依頼は先行Runの後に始める"""
+    """実行中に届いた依頼。親へ渡す発言はRunnerが安全な区切りで取り込み、編集のRunの依頼は先行Runの後に始める"""
 
     uid = NanoidField(unique=True)
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="instructions")
@@ -176,6 +176,8 @@ class UserInstruction(models.Model):
         _("反映状態"), choices=InstructionState.choices, default=InstructionState.RECEIVED
     )
     applied = models.DateTimeField(_("反映日時"), null=True, blank=True)
+    # 本文と添付は確認への回答として渡した。指定したSkill・Connectorだけを取り込む（design.md §5.5）
+    is_answer = models.BooleanField(_("確認への回答"), default=False)
 
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)

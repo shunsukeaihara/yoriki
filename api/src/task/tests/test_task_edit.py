@@ -97,8 +97,8 @@ def test_message_when_no_task_runs_starts_an_edit_run(api_client, manager):
     request = adapter.requests[0]
     names = {t.name for t in request.tools}
     assert {"get_task", "update_task", "ask_user", "todo_write"} <= names
-    assert not names & {"skill", "submit_result", "request_task_edit", "request_skill_edit", "prepare_notification"}
-    assert not any(name.startswith("datasource") for name in names)
+    assert not names & {"submit_result", "request_task_edit", "request_skill_edit", "prepare_notification"}
+    assert {"skill", "datasource_query"} <= names
     context = next(m.text for m in request.messages if m.role == "user" and "<runtime_context>" in m.text)
     assert '<task_edit task="請求書チェック" version="1" />' in context
     # 直前のタスクのRunの文脈を引き継ぐ
@@ -109,7 +109,7 @@ def test_edit_run_needs_a_manager_when_it_starts(api_client, manager):
     """承認した編集の依頼も、始めるときに依頼した人がタスクを管理できるかを確かめる"""
     task = _task(manager)
     run = _fix(api_client, manager, task)
-    res = _post(api_client, run.conversation, mode="next")
+    res = _post(api_client, run.conversation)
     assert res.status_code == 201, res.json()
     manager.user_permissions.clear()
     run.set_status(RunStatus.CANCELLED)
@@ -425,13 +425,14 @@ def test_fix_chat_model_needs_tools(api_client, manager):
 
 
 def test_attachments_of_the_next_request_are_not_the_task_runs(api_client, manager):
-    """タスクのRunの実行中に送った次の依頼（タスクの編集の依頼）の添付は、タスクのRunの添付にしない"""
+    """タスクのRunの停止中に送った発言（タスクの編集の依頼になる）の添付は、タスクのRunの添付にしない"""
     from artifact.factories import ArtifactFactory  # noqa: PLC0415
 
     task = _task(manager)
     run = _fix(api_client, manager, task)
     attachment = ArtifactFactory.create(owner=manager, conversation=run.conversation, kind=ArtifactKind.ATTACHMENT)
-    res = _post(api_client, run.conversation, "この表の形に合わせて直して", mode="next", attachments=[attachment.uid])
+    Run.objects.filter(pk=run.pk).update(status=RunStatus.CANCELLING)
+    res = _post(api_client, run.conversation, "この表の形に合わせて直して", attachments=[attachment.uid])
     assert res.status_code == 201, res.json()
     attachment.refresh_from_db()
     assert attachment.run is None

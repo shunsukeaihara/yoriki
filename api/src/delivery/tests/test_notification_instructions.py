@@ -83,7 +83,7 @@ def test_the_instructions_prepare_the_message_sent_on_completion(manager):
 
     assert run.status == RunStatus.COMPLETED, run.error
     first = adapter.requests[0]
-    assert sorted(t.name for t in first.tools) == ["prepare_notification", "submit_result"]
+    assert {"prepare_notification", "submit_result"} <= {t.name for t in first.tools}
     # submit_result の説明と結果も、確定した後に prepare_notification を呼ぶよう伝える（ほかのToolを禁じる文と矛盾
     # させない）
     submit = next(t for t in first.tools if t.name == "submit_result")

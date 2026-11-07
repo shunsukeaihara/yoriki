@@ -3,8 +3,8 @@
  * 入力欄の `/` の一覧（design.md §11.2「Skill の指定」、§11.6）。ボタンか、入力欄で `/` を打つと開き、名前と説明で
  * 絞り込める。使う Skill（公開中で停止していないもの）を選ぶほか、編集できる Skill の「編集」と「新しい Skill を作る」
  * を選ぶと、そのメッセージは Skill の編集の依頼になる（別の Run で行う）。
- * 機密の Skill は個人情報・機密情報を扱う会話でだけ、宣言した Connector を使えない Skill は使えないので、理由を添えて
- * 選べない項目として出す（design.md §4冒頭・§4.9.1）。
+ * 機密の Skill は個人情報・機密情報を扱う会話でだけ使えるので、理由を添えて選べない項目として出す（design.md §4冒頭）。
+ * 今のモデルが必要な能力を持たない Skill は、そのことを添えるだけで選べる（design.md §3.2）。
  * チャットから起動できるタスクも出し、選ぶと入力のダイアログを開く（authorization.md §5.3・§6。タスクの Run は会話の
  * 文脈を引き継がず、別の作業として動く）。
  */
@@ -17,6 +17,10 @@ const props = defineProps<{
   selected: string[]
   /** 個人情報・機密情報を扱う会話 */
   sensitive: boolean
+  /** 今のモデル（必要な能力の案内に使う） */
+  model?: AppModelProfile | null
+  /** Skill の編集・作成を出さない（タスクの修正チャット） */
+  noEdit?: boolean
   /** 使う Skill をこれ以上選べない */
   full?: boolean
   /** チャットから起動できるタスク */
@@ -35,8 +39,22 @@ const scopeLabel = (skill: Skill) => {
 /** 使えない理由。使えれば null */
 const unusableReason = (skill: Skill) => {
   if (skill.sensitive && !props.sensitive) return t('機密のSkillは、個人情報・機密情報を扱う会話でだけ使えます')
-  if (!skill.connectorsUsable) return t('このSkillが使うConnectorを使えません')
   return null
+}
+
+/** 今のモデルが持たない能力があれば案内 */
+const modelHint = (skill: Skill) => {
+  const model = props.model
+  if (!model) return null
+  // skillRequirementItems の値：1 Tool呼出し、2 画像入力、3 文書入力
+  const capable: Record<number, boolean> = {
+    1: model.supportsTools,
+    2: model.supportsImages,
+    3: model.supportsDocuments,
+  }
+  return skill.requires.some((r) => capable[r] === false)
+    ? t('今のモデルには、このSkillに必要な能力がありません')
+    : null
 }
 
 const choose = (action: () => void) => () => {
@@ -59,7 +77,7 @@ const groups = computed(() => [
               id: `use-${skill.id}`,
               label: skill.name,
               suffix: scopeLabel(skill),
-              description: reason ?? skill.description ?? undefined,
+              description: reason ?? modelHint(skill) ?? skill.description ?? undefined,
               icon: skill.sensitive ? 'i-lucide-shield' : 'i-lucide-sparkles',
               disabled: Boolean(reason),
               onSelect: choose(() => emit('select', skill)),
@@ -69,31 +87,33 @@ const groups = computed(() => [
   {
     id: 'edit',
     label: t('編集する（今後の依頼に反映）'),
-    items: [
-      ...props.editable.map((skill) => {
-        // 機密の Skill（公開中の版か Draft が機密）は、機密の会話でだけ編集する（harness.md §10.9）
-        const blocked = skill.editSensitive && !props.sensitive
-        return {
-          id: `edit-${skill.id}`,
-          label: skill.name,
-          suffix: scopeLabel(skill),
-          description: blocked
-            ? t('機密のSkillは、個人情報・機密情報を扱う会話で編集します')
-            : skill.version
-              ? t('第{number}版を元に編集', { number: skill.version })
-              : t('未公開'),
-          icon: 'i-lucide-pencil',
-          disabled: blocked,
-          onSelect: choose(() => emit('edit', skill)),
-        }
-      }),
-      {
-        id: 'create',
-        label: t('新しいSkillを作る'),
-        icon: 'i-lucide-plus',
-        onSelect: choose(() => emit('create')),
-      },
-    ],
+    items: props.noEdit
+      ? []
+      : [
+          ...props.editable.map((skill) => {
+            // 機密の Skill（公開中の版か Draft が機密）は、機密の会話でだけ編集する（harness.md §10.9）
+            const blocked = skill.editSensitive && !props.sensitive
+            return {
+              id: `edit-${skill.id}`,
+              label: skill.name,
+              suffix: scopeLabel(skill),
+              description: blocked
+                ? t('機密のSkillは、個人情報・機密情報を扱う会話で編集します')
+                : skill.version
+                  ? t('第{number}版を元に編集', { number: skill.version })
+                  : t('未公開'),
+              icon: 'i-lucide-pencil',
+              disabled: blocked,
+              onSelect: choose(() => emit('edit', skill)),
+            }
+          }),
+          {
+            id: 'create',
+            label: t('新しいSkillを作る'),
+            icon: 'i-lucide-plus',
+            onSelect: choose(() => emit('create')),
+          },
+        ],
   },
   {
     id: 'task',

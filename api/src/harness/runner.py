@@ -75,9 +75,10 @@ from stream.notifier import notify_delta
 from usage.models import UsageLedger, UsagePurpose
 
 from . import compaction, tasks
-from .connectors import catalog_names as connector_names
+from .catalogs import rebuild_catalogs, refreshes_catalogs
 from .context import (
     ADDITIONAL_INSTRUCTION_PREFIX,
+    CHOSEN_WITH_ANSWER,
     RUNTIME_CONTEXT_TAG,
     Item,
     build_items,
@@ -87,22 +88,23 @@ from .context import (
     provider_key,
 )
 from .context import runtime_context as build_runtime_context
+from .intake import UNUSABLE_NOTE, Chosen, take_chosen
 from .prompts import system_prompt
 from .recovery import request_model_switch
 from .result_files import missing_files
 from .sandbox import OUT_OF_MEMORY_FAILURE, OUT_OF_MEMORY_NOTICE, WORKSPACE_ROLLED_BACK, Job, SandboxSession, Suspended
 from .script_connectors import ScriptConnectors
 from .skill_edit import revoked_edit
-from .skills import SkillContentSource, explicit_versions, revoked_skill
+from .skills import explicit_versions
 from .task_edit import revoked_task_edit
-from .tools import ALL_TOOLS, ASK_USER, SANDBOX_TOOLS, WORKSPACE_WRITING_TOOLS
+from .tools import ALL_TOOLS, SANDBOX_TOOLS, WORKSPACE_WRITING_TOOLS
 from .tools.base import Effect, Tool, ToolContext, ToolResult
-from .tools.datasource import make_datasource_tools
+from .tools.datasource import DATASOURCE_TOOLS
 from .tools.prepare_notification import PREPARE_NOTIFICATION
 from .tools.request_skill_edit import REQUEST_SKILL_EDIT
 from .tools.request_task_edit import REQUEST_TASK_EDIT
 from .tools.skill_admin import CREATE_SKILL, SKILL_ADMIN_TOOLS
-from .tools.skill_tool import make_skill_tool
+from .tools.skill_tool import SKILL
 from .tools.submit_result import NAME as SUBMIT_RESULT
 from .tools.submit_result import make_submit_result_tool, original_schema
 from .tools.task_admin import TASK_ADMIN_TOOLS
@@ -328,8 +330,7 @@ class Runner:
             self._record_tool_result(call["id"], call["name"], ToolResult.error(text), ToolStatus.UNKNOWN)
         self._out_of_memory_notice()
         self._workspace_notices(self._events())
-        user = self.run_obj.owner
-        context = build_runtime_context(self.run_obj, user_name=user.display_name or user.email)
+        context = self._runtime_context()
         last = next(
             (
                 e
@@ -340,6 +341,10 @@ class Runner:
         )
         if last is None or last.data.get("text") != context:
             self._record(RunEventKind.CONTEXT, {"text": context})
+
+    def _runtime_context(self) -> str:
+        user = self.run_obj.owner
+        return build_runtime_context(self.run_obj, user_name=user.display_name or user.email)
 
     def _out_of_memory_notice(self) -> None:
         """前のAttemptのSandboxがメモリの上限を超えて止まったなら、モデルに知らせる（同じことを繰り返させない）"""
@@ -567,7 +572,7 @@ class Runner:
         run = self.run_obj
         if reason := tasks.revoked_task(run) or revoked_task_edit(run):
             return RunEndReason.TASK, reason
-        if reason := revoked_skill(run) or revoked_edit(run):
+        if reason := revoked_edit(run):
             return RunEndReason.SKILL, reason
         return None
 
@@ -588,39 +593,136 @@ class Runner:
             )
 
     def _apply_instructions(self) -> bool:
-        """届いている追加指示を、受付順に利用者の発言として取り込む。取り込んだらTrue"""
-        applied = False
-        with self.run_obj.fenced(self.attempt) as run:
-            instructions = (
-                UserInstruction.objects.select_for_update(of=("self",))
-                .filter(run=run, kind=InstructionKind.CURRENT, state=InstructionState.RECEIVED)
-                .select_related("message")
-                .order_by("pk")
+        """届いている発言を、受付順に取り込む。指定したSkill・Connectorは今の権限で確かめ直す（資料はSandboxの外から
+        置くので、transactionの外で先に置く。harness.md §10.1）。取り込んだらTrue"""
+        pending = list(
+            UserInstruction.objects.filter(
+                run=self.run_obj, kind=InstructionKind.CURRENT, state=InstructionState.RECEIVED
             )
-            for instruction in instructions:
-                text = f"{ADDITIONAL_INSTRUCTION_PREFIX}\n{instruction.message.body}"
-                RunEvent.record(run, RunEventKind.USER_MESSAGE, user_message_data(instruction.message, text))
-                instruction.state = InstructionState.APPLIED
-                instruction.applied = timezone.now()
-                instruction.save(update_fields=["state", "applied", "updated"])
-                applied = True
-            if applied and run.result is not None:
+            .select_related("message")
+            .order_by("pk")
+        )
+        if not pending:
+            return False
+        # 1件ずつ置いて確かめて記録する（同じSkillを別の版で指定した発言が並んでも、前の発言の指定を失わないように）
+        applied = [self._apply_one_instruction(instruction) for instruction in pending]
+        if self.session.started and any(i.message.skills for i in pending):
+            self._settle_chosen_assets()
+        if any(applied) and self.session.started:
+            # 追加指示に付いた添付を、動いているSandboxの /workspace/input にも置く
+            self.session.sync_inputs()
+        return any(applied)
+
+    def _apply_one_instruction(self, pending: UserInstruction) -> bool:
+        self._place_chosen_assets(take_chosen(self.run_obj, pending.message))
+        with self.run_obj.fenced(self.attempt) as run:
+            instruction = (
+                UserInstruction.objects.select_for_update(of=("self",))
+                .filter(pk=pending.pk, state=InstructionState.RECEIVED)
+                .select_related("message")
+                .first()
+            )
+            if instruction is None:
+                return False
+            # 資料を置く間に権限が変わりうるので、記録の直前にもう一度確かめる
+            chosen = self._recheck_chosen(run, instruction.message)
+            self._refresh_catalogs(run, connectors=chosen.connectors, skills=[s.entry for s in chosen.skills])
+            self._apply_instruction(run, instruction, chosen)
+            # 回答の本文はToolの結果で渡したが、Skill・Connectorの指定を取り込んだなら作業の条件が変わっている
+            changed = not instruction.is_answer or chosen.skills or chosen.connectors
+            if run.result is not None and changed:
                 # 確定した業務結果は、取り込んだ指示を反映していない。確定し直させる（harness.md §10.4・§10.5）。
                 # 通知の候補も前の業務結果から作ったものなので消す
                 Run.objects.filter(pk=run.pk).update(result=None, notification=None, updated=timezone.now())
                 self.run_obj.result = None
                 self.run_obj.notification = None
                 RunEvent.record(run, RunEventKind.CONTEXT, {"text": RESULT_RESET_NOTICE, "result_reset": True})
-        if applied and self.session.started:
-            # 追加指示に付いた添付を、動いているSandboxの /workspace/input にも置く
-            self.session.sync_inputs()
-        return applied
+            self.run_obj.manifest = run.manifest
+        return True
+
+    def _place_chosen_assets(self, chosen: Chosen) -> None:
+        """動いているSandboxへ、指定したSkillの資料を置く（transactionの外で）。置けなかったものは、記録の直前に確かめる"""
+        if not self.session.started:
+            return
+        for item in chosen.skills:
+            try:
+                self.session.place_skill_assets(item.skill, item.version)
+            except SandboxUnavailable as exc:
+                logger.warning("run %s: cannot place skill assets: %s", self.run_obj.uid, exc)
+
+    def _settle_chosen_assets(self) -> None:
+        """先に置いた資料をManifestに合わせる（取り込まなかったSkillの資料を除き、前の版へ戻す）"""
+        try:
+            self.session.sync_skill_assets()
+        except SandboxUnavailable as exc:
+            logger.warning("run %s: cannot settle skill assets: %s", self.run_obj.uid, exc)
+
+    def _recheck_chosen(self, run: Run, message: ConversationMessage) -> Chosen:
+        """記録の直前に今の権限で確かめる。動いているSandboxに資料を置けていないSkill（置けなかった、確かめる間に公開し
+        直された）は読み込まない（harness.md §10.1）"""
+        chosen = take_chosen(run, message)
+        if self.session.started:
+            for item in list(chosen.skills):
+                if not self.session.has_skill_assets(item.skill, item.version):
+                    chosen.drop_skill(item, _("資料を置けませんでした"))
+        return chosen
+
+    def _apply_instruction(self, run: Run, instruction: UserInstruction, chosen: Chosen) -> None:
+        """発言を `message.user` として記録する。指定したSkillはManifestへ追記する（同じtransaction）"""
+        message = instruction.message
+        entries = [item.entry for item in chosen.skills]
+        for entry in entries:
+            run.append_manifest("skill", entry)
+            RunEvent.record(run, RunEventKind.SKILL_LOADED, entry, comment=entry["name"])
+        for entry in chosen.connectors:
+            run.append_manifest("connector", entry)
+        if entries or chosen.connectors:
+            run.save(update_fields=["manifest", "updated"])
+        text = CHOSEN_WITH_ANSWER if instruction.is_answer else f"{ADDITIONAL_INSTRUCTION_PREFIX}\n{message.body}"
+        data = user_message_data(
+            message,
+            text,
+            skills=entries,
+            connectors=chosen.connectors,
+            connector_catalog=run.current_catalog("connector_catalog"),
+            with_attachments=not instruction.is_answer,  # 本文と添付は回答として渡した
+            result_tool=False,
+        )
+        if chosen.unusable:
+            data["notes_text"] = UNUSABLE_NOTE
+        RunEvent.record(run, RunEventKind.USER_MESSAGE, data)
+        if chosen.unusable:
+            ConversationMessage.objects.create(
+                conversation_id=run.conversation_id,
+                run=run,
+                role=MessageRole.SYSTEM,
+                body=_("指定したものの一部を使えませんでした（%(items)s）。") % {"items": "、".join(chosen.unusable)},
+            )
+        instruction.state = InstructionState.APPLIED
+        instruction.applied = timezone.now()
+        instruction.save(update_fields=["state", "applied", "updated"])
+
+    def _refresh_catalogs(self, run: Run, **chosen: list[dict[str, Any]]) -> None:
+        """発言を取り込むときに、Skill・Connectorの一覧を依頼した人の今の権限で作り直す。変わったらManifestに残し、
+        今の一覧を `context.snapshot` で知らせる（harness.md §10.1・§10.2）。発言より先に記録する"""
+        if not refreshes_catalogs(run):
+            return
+        skills, connectors = rebuild_catalogs(run, **chosen)
+        changed = False
+        for kind, value in (("skill_catalog", skills), ("connector_catalog", connectors)):
+            if (run.current_catalog(kind) or None) != value:
+                run.append_manifest(kind, {"value": value})
+                changed = True
+        if not changed:
+            return
+        run.save(update_fields=["manifest", "updated"])
+        self.run_obj.manifest = run.manifest
+        RunEvent.record(run, RunEventKind.CONTEXT, {"text": self._runtime_context()})
 
     def _exposed_tools(self) -> tuple[Tool, ...]:
         """Runに出すToolの一覧（harness.md §7.5）。Tool呼出しに対応しないモデルには出さない。
 
-        `/` でSkillを指定したRunでは、そのSkillの使ってよいToolに限り、業務結果のSchemaがあれば submit_result を
-        加える。指定がなければ、利用者が使えるToolの全体と、Skillを読み込む `skill` を出す
+        会話・タスクのRunでは、指定や定義にかかわらず、使えるToolの全体と、Skillを読み込む `skill` を出す
         """
         if not self.run_obj.model_version.supports_tools:
             return ()
@@ -647,43 +749,34 @@ class Runner:
         if self.skill_tools is not None:
             return self.skill_tools
         explicit = explicit_versions(self.run_obj)
-        # Run開始時に固定した、依頼した人が使えるConnector。なければConnectorのToolは出さない（harness.md §7.5の3）
-        names = connector_names(self.run_obj)
-        datasource = make_datasource_tools(names) if names else ()
+        # ConnectorのToolと `skill` はいつも出す。一覧は発言を取り込むときに変わり、指定や定義では絞らない
+        # （harness.md §7.5の2・§10.1・§10.2）
         if self.run_obj.kind == RunKind.SKILL_EDIT:
-            # Skillの編集のRun：Skill管理のToolを出し、Skillを使う・提案するToolは出さない（harness.md §10.9）。
+            # Skillの編集のRun：Skill管理のToolも出す。提案のToolは出さない（harness.md §10.9）。
             # 新しいSkillを作る依頼でだけ create_skill を出す
-            tools = (*ALL_TOOLS, *datasource, *SKILL_ADMIN_TOOLS, TEST_SKILL_DRAFT)
+            tools = (*ALL_TOOLS, *DATASOURCE_TOOLS, SKILL, *SKILL_ADMIN_TOOLS, TEST_SKILL_DRAFT)
             if not ((self.run_obj.manifest or {}).get("fixed") or {}).get("skill_edit", {}).get("skill"):
                 tools += (CREATE_SKILL,)
         elif self.run_obj.kind == RunKind.TASK_EDIT:
-            # タスクの編集のRun：作業ファイルを読み書きするToolと、タスク管理のToolだけ。Skill・Connectorは使わない
-            # （harness.md §10.10）
-            tools = (*ALL_TOOLS, *TASK_ADMIN_TOOLS)
+            # タスクの編集のRun：タスク管理のToolも出す（harness.md §10.10）
+            tools = (*ALL_TOOLS, *DATASOURCE_TOOLS, SKILL, *TASK_ADMIN_TOOLS)
         elif tasks.is_task_run(self.run_obj):
-            tools = self._task_run_tools(explicit, datasource)
-        elif explicit:
-            allowed = {name for version in explicit for name in version.tools}
-            tools = tuple(t for t in (*ALL_TOOLS, *datasource) if t.name in allowed)
+            tools = self._task_run_tools()
+        elif self.run_obj.kind == RunKind.EVALUATION:
+            # Draftの評価のRun：評価するSkillを使うよう指示して動かす。Toolは絞らない（design.md §3.7.1）
+            tools = (*ALL_TOOLS, *DATASOURCE_TOOLS)
             schema = next((v.output_schema for v in explicit if v.output_schema), None)
             if schema:
                 tools += (make_submit_result_tool(schema),)
-            # Skillの編集の提案は作業の権限を増やさないので、Skillの指定にかかわらず出す（harness.md §7.5）
-            tools += (REQUEST_SKILL_EDIT,)
         else:
-            tools = (*ALL_TOOLS, *datasource)
-            catalog = ((self.run_obj.manifest or {}).get("fixed") or {}).get("skill_catalog") or {}
-            if names := [e["name"] for e in catalog.get("skills", [])]:
-                tools += (make_skill_tool(names),)
-            tools += (REQUEST_SKILL_EDIT,)
+            tools = (*ALL_TOOLS, *DATASOURCE_TOOLS, SKILL, REQUEST_SKILL_EDIT)
         self.skill_tools = tools
         return tools
 
-    def _task_run_tools(self, explicit: list[SkillContentSource], datasource: tuple[Tool, ...]) -> tuple[Tool, ...]:
-        """タスクのRun：固定したSkillの「使ってよいTool」を合わせたものだけ。
-        業務結果のSchemaはタスクのもの（なければSkillのもの）。`skill` は出さない（authorization.md §5.4）"""
-        allowed = tasks.allowed_tools(self.run_obj, {name for version in explicit for name in version.tools})
-        tools = tuple(t for t in (*ALL_TOOLS, *datasource) if t.name in allowed)
+    def _task_run_tools(self) -> tuple[Tool, ...]:
+        """タスクのRun：Toolは絞らず、タスクの範囲の一覧から `skill` で読み込める（authorization.md §5.4）。
+        業務結果のSchemaはタスクのもの（なければ定義で指示したSkillのもの）"""
+        tools = (*ALL_TOOLS, *DATASOURCE_TOOLS, SKILL)
         # 通知の書き方に従って、通知の文章と渡すファイルを決める（design.md §4.3）。通知Skillを固定していた頃に
         # 受け付けたRunも同じ
         entry = tasks.task_entry(self.run_obj)
@@ -693,10 +786,8 @@ class Runner:
         if notification:
             tools += (PREPARE_NOTIFICATION,)
         if self.run_obj.is_task_fix:
-            # 修正チャットでは、タスクを管理する人が答える。尋ねても、定義を直す提案をしても、作業の権限は
-            # 増えない（harness.md §7.5の5・§10.10）
-            if ASK_USER not in tools:
-                tools += (ASK_USER,)
+            # 修正チャットでは、タスクを管理する人が答える。定義を直す提案をしても、作業の権限は増えない
+            # （harness.md §7.5の5・§10.10）
             tools += (REQUEST_TASK_EDIT,)
         return tools
 

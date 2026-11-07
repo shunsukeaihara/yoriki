@@ -5,8 +5,6 @@ from django.utils.translation import gettext as _
 from llm.models import ModelProfile, ProviderKind
 from run.models import ClarificationKind, ClarificationRequest, Run, RunEvent, RunEventKind, RunTrigger
 
-from .skills import unsupported_skills
-
 RETRY_VALUE = "retry"
 
 
@@ -30,7 +28,7 @@ def switch_candidates(run: Run) -> list[ModelProfile]:
     )
     if run.handles_sensitive_data:
         profiles = profiles.filter(current_version__connection__kind=ProviderKind.LOCAL)
-    usable = [p for p in profiles if p.current_version and not unsupported_skills(run, p.current_version)]
+    usable = [p for p in profiles if p.current_version]
     return usable[:3]
 
 

@@ -203,7 +203,11 @@ describe('ConversationPrompt', () => {
 
   it('確認待ちでは、Skillの指定だけでは送れない', async () => {
     const wrapper = await mountSuspended(ConversationPrompt, {
-      props: { modelValue: '', hasOpenQuestion: true, selectedSkills: [{ id: 's1', name: '照合' } as unknown as Skill] },
+      props: {
+        modelValue: '',
+        hasOpenQuestion: true,
+        selectedSkills: [{ id: 's1', name: '照合' } as unknown as Skill],
+      },
     })
     expect((wrapper.vm as unknown as { canSubmit: boolean }).canSubmit).toBe(false)
     await wrapper.setProps({ modelValue: '大阪支店です' })

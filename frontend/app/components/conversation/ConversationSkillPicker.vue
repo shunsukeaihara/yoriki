@@ -52,7 +52,9 @@ const modelHint = (skill: Skill) => {
     2: model.supportsImages,
     3: model.supportsDocuments,
   }
-  return skill.requires.some((r) => capable[r] === false) ? t('今のモデルには、このSkillに必要な能力がありません') : null
+  return skill.requires.some((r) => capable[r] === false)
+    ? t('今のモデルには、このSkillに必要な能力がありません')
+    : null
 }
 
 const choose = (action: () => void) => () => {
@@ -85,31 +87,33 @@ const groups = computed(() => [
   {
     id: 'edit',
     label: t('編集する（今後の依頼に反映）'),
-    items: props.noEdit ? [] : [
-      ...props.editable.map((skill) => {
-        // 機密の Skill（公開中の版か Draft が機密）は、機密の会話でだけ編集する（harness.md §10.9）
-        const blocked = skill.editSensitive && !props.sensitive
-        return {
-          id: `edit-${skill.id}`,
-          label: skill.name,
-          suffix: scopeLabel(skill),
-          description: blocked
-            ? t('機密のSkillは、個人情報・機密情報を扱う会話で編集します')
-            : skill.version
-              ? t('第{number}版を元に編集', { number: skill.version })
-              : t('未公開'),
-          icon: 'i-lucide-pencil',
-          disabled: blocked,
-          onSelect: choose(() => emit('edit', skill)),
-        }
-      }),
-      {
-        id: 'create',
-        label: t('新しいSkillを作る'),
-        icon: 'i-lucide-plus',
-        onSelect: choose(() => emit('create')),
-      },
-    ],
+    items: props.noEdit
+      ? []
+      : [
+          ...props.editable.map((skill) => {
+            // 機密の Skill（公開中の版か Draft が機密）は、機密の会話でだけ編集する（harness.md §10.9）
+            const blocked = skill.editSensitive && !props.sensitive
+            return {
+              id: `edit-${skill.id}`,
+              label: skill.name,
+              suffix: scopeLabel(skill),
+              description: blocked
+                ? t('機密のSkillは、個人情報・機密情報を扱う会話で編集します')
+                : skill.version
+                  ? t('第{number}版を元に編集', { number: skill.version })
+                  : t('未公開'),
+              icon: 'i-lucide-pencil',
+              disabled: blocked,
+              onSelect: choose(() => emit('edit', skill)),
+            }
+          }),
+          {
+            id: 'create',
+            label: t('新しいSkillを作る'),
+            icon: 'i-lucide-plus',
+            onSelect: choose(() => emit('create')),
+          },
+        ],
   },
   {
     id: 'task',

@@ -882,6 +882,7 @@ class Runner:
                         response.usage = event
                     case Completed():
                         response.completed = event
+                self._check_streaming()
                 now = time.monotonic()
                 if pending and now - last_flush >= DELTA_INTERVAL:
                     self._notify_delta(step, pending)
@@ -897,6 +898,9 @@ class Runner:
         if pending:
             self._notify_delta(step, pending)
         return response
+
+    def _check_streaming(self) -> None:
+        """応答を受け取る間の確認（サブエージェントの実行時間の上限。SubagentRunner）"""
 
     def _notify_delta(self, step: int, text: str) -> None:
         notify_delta(self.run_obj.uid, step, text)

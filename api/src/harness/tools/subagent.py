@@ -11,6 +11,7 @@ from run.models import LIVE_SUBAGENT_STATUSES, RunEvent, RunEventKind, Subagent,
 from runtime.launcher import SandboxUnavailable
 
 from .. import subagents
+from ..skills import loaded_entries
 from .base import Effect, Tool, ToolContext, ToolResult
 
 SUBAGENT_DESCRIPTION = """Start a subagent: another agent that works on a copy of your workspace, in its own sandbox, \
@@ -75,6 +76,7 @@ def execute_subagent(arguments: dict[str, Any], context: ToolContext) -> ToolRes
         copy_storage=backend if stored else "",
         copy_key=stored.key if stored else "",
         baseline=baseline,
+        skills=loaded_entries(run),
     )
     try:
         with run.fenced(context.attempt) as current:

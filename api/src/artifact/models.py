@@ -213,6 +213,15 @@ class Artifact(models.Model):
     run = models.ForeignKey(
         "run.Run", on_delete=models.CASCADE, null=True, blank=True, related_name="artifacts", verbose_name=_("実行")
     )
+    # サブエージェントがConnectorで読んだ結果なら、その子。親の /workspace/input には置かない（harness.md §10.11）
+    subagent = models.ForeignKey(
+        "run.Subagent",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("サブエージェント"),
+    )
     blob = models.ForeignKey(BlobObject, on_delete=models.PROTECT, related_name="+", verbose_name=_("中身"))
     kind = models.PositiveSmallIntegerField(_("種別"), choices=ArtifactKind.choices)
     name = models.CharField(_("ファイル名"), max_length=255)
@@ -313,7 +322,7 @@ class Artifact(models.Model):
         )
 
     @classmethod
-    def create_connector_result(cls, run, path: str, name: str, blob: BlobObject) -> "Artifact":
+    def create_connector_result(cls, run, path: str, name: str, blob: BlobObject, subagent=None) -> "Artifact":
         """Connectorで読んだ結果を記録する。`path` は /workspace/input からの相対パス（connectors/ の下）で、
         サーバーが決めた値"""
         name = clean_filename(name)
@@ -323,6 +332,7 @@ class Artifact(models.Model):
             run=run,
             blob=blob,
             kind=ArtifactKind.CONNECTOR_RESULT,
+            subagent=subagent,
             name=name,
             path=path,
             content_type=guess_content_type(name),

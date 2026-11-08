@@ -25,6 +25,7 @@ from typing import IO, Any, Protocol, TypeVar
 
 from django.conf import settings
 from django.db import DatabaseError, connection, transaction
+from django.db.models import Q
 from django.utils import timezone
 from nanoid import generate
 
@@ -310,7 +311,8 @@ class SandboxSession:
         self.master_dir.mkdir(parents=True, exist_ok=True)
         self.master_dir.chmod(0o755)
         run = Run.objects.only("manifest").get(pk=self.run.pk)
-        loaded = loaded_entries(run)
+        subagent = Subagent.objects.get(pk=self.subagent.pk) if self.subagent is not None else None
+        loaded = loaded_entries(run, subagent)
         # 置いたがManifestへ追記しなかった（取り込む前に使えなくなった）Skillの資料は残さない
         for uid in set(self.skill_versions) - {e["skill"] for e in loaded}:
             shutil.rmtree(self.master_dir / "skills" / uid, ignore_errors=True)
@@ -418,6 +420,11 @@ class SandboxSession:
         conversation_id = self.run.conversation_id
         # 保持期限の切れたConnectorの結果は置かない（会話で照会を重ねても、置くものが増え続けないように）
         results = Artifact.objects.connector_results(conversation_id).filter(expires__gt=timezone.now())
+        # サブエージェントが読んだ結果は、その子にだけ置く。親へ返すのはテキストとファイルだけ（harness.md §10.11）
+        visible = Q(subagent__isnull=True)
+        if self.subagent is not None:
+            visible |= Q(subagent=self.subagent)
+        results = results.filter(visible)
         # サブエージェントが返したファイルは subagents/<子のID>/ の下に置く（harness.md §10.11）
         returned = Artifact.objects.subagent_results(conversation_id)
         sent = Artifact.objects.sent_inputs(conversation_id)

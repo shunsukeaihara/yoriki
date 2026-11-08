@@ -13,7 +13,7 @@ from django.db.models import Case, IntegerField, Value, When
 from django.utils.translation import gettext as _
 
 from connector.models import Operation
-from run.models import Run
+from run.models import Run, Subagent
 from skill import connectors as skill_connectors
 from skill.models import (
     Skill,
@@ -206,11 +206,15 @@ def load_contents(entries: list[dict[str, Any]]) -> dict[str, SkillContentSource
     return contents
 
 
-def loaded_entries(run: Run) -> list[dict[str, Any]]:
-    """Runが使うSkill（`/` で指定して固定したものと、エージェントが読み込んで追記したもの）。同じSkillは最後のもの"""
-    manifest = run.manifest or {}
-    entries = list((manifest.get("fixed") or {}).get("skills", []))
-    entries += [e for e in manifest.get("appended", []) if e.get("kind") == "skill"]
+def loaded_entries(run: Run, subagent: Subagent | None = None) -> list[dict[str, Any]]:
+    """Runが使うSkill（`/` で指定して固定したものと、エージェントが読み込んで追記したもの）。同じSkillは最後のもの。
+    サブエージェントは、起動したときに写した親の読込みと、子が読み込んだもの（`Subagent.skills`）"""
+    if subagent is not None:
+        entries = list(subagent.skills)
+    else:
+        manifest = run.manifest or {}
+        entries = list((manifest.get("fixed") or {}).get("skills", []))
+        entries += [e for e in manifest.get("appended", []) if e.get("kind") == "skill"]
     latest: dict[str, dict[str, Any]] = {}
     for entry in entries:
         latest[entry["skill"]] = entry

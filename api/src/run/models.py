@@ -507,6 +507,9 @@ class Subagent(models.Model):
     # 親のワークスペースの一時のコピー（work・outputのtar）。子が終わったら消して空にする
     copy_storage = models.CharField(_("コピーの保存先"), max_length=100, blank=True)
     copy_key = models.CharField(_("コピーの保存先のkey"), max_length=300, blank=True)
+    # 子が使うSkill（Manifestの項目の形）。起動したときの親の読込みを写し、子が `skill` で読み込んだものを足す。
+    # 親のManifestには追記しない（harness.md §10.11）
+    skills = models.JSONField(_("使うSkill"), default=list, blank=True)
     # コピーの時点の /workspace/output のファイルと中身（SHA-256）。増えた・変わったものだけを返す
     baseline = models.JSONField(_("コピーの時点の成果物"), default=dict, blank=True)
     result_text = models.TextField(_("返すテキスト"), blank=True)

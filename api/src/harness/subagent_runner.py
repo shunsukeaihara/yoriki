@@ -16,7 +16,16 @@ from django.utils import timezone
 
 from artifact.models import Artifact, BlobObject
 from run.errors import LeaseLost
-from run.models import Run, RunEndReason, RunEventKind, RunStatus, Subagent, SubagentStatus
+from run.models import (
+    Run,
+    RunEndReason,
+    RunEventKind,
+    RunStatus,
+    Subagent,
+    SubagentStatus,
+    ToolInvocation,
+    ToolStatus,
+)
 from runtime.launcher import SandboxUnavailable
 
 from . import subagents
@@ -34,6 +43,10 @@ JOBS_AT_END_NOTICE = (
     "Background jobs are still running: {jobs}. They are stopped when you write your final reply. Wait for them with "
     "job_output if you need their results, or stop them with job_kill, and then write your final reply."
 )
+
+
+class TimedOut(Exception):
+    """子の実行時間の上限を、モデルの応答を受け取る間に超えた"""
 
 
 class SubagentRunner(Runner):
@@ -63,6 +76,8 @@ class SubagentRunner(Runner):
             logger.info("subagent %s of run %s stopped", self.subagent.uid, self.run_obj.uid)
         except RepeatedErrors:
             self._end(SubagentStatus.FAILED, error="it repeated the same failing call")
+        except TimedOut:
+            self._end(SubagentStatus.FAILED, error=self._timeout_error())
         except SandboxUnavailable as exc:
             logger.warning("subagent %s: sandbox unavailable: %s", self.subagent.uid, exc)
             self._end(SubagentStatus.FAILED, error="its sandbox stopped")
@@ -88,6 +103,12 @@ class SubagentRunner(Runner):
                     Subagent.objects.filter(pk=subagent.pk).update(
                         status=SubagentStatus.CANCELLED, reported=True, finished=timezone.now()
                     )
+                subagent.refresh_from_db(fields=["status"])
+            # 途中で止まったToolの呼出しを閉じる（子のAttemptはこれで終わり、やり直さない）
+            stopped = ToolStatus.CANCELLED if subagent.status == SubagentStatus.CANCELLED else ToolStatus.UNKNOWN
+            ToolInvocation.objects.filter(
+                run=run, subagent=subagent, status__in=(ToolStatus.REQUESTED, ToolStatus.RUNNING)
+            ).update(status=stopped, ended=timezone.now())
             run.settle_cancelling()
         subagents.discard_copy(subagent)
 
@@ -138,8 +159,7 @@ class SubagentRunner(Runner):
             return False
         self._record_finished_jobs()
         if self._timed_out():
-            minutes = self._timeout_seconds() // 60
-            self._end(SubagentStatus.FAILED, error=f"it exceeded the time limit of {minutes} minutes")
+            self._end(SubagentStatus.FAILED, error=self._timeout_error())
             return False
         return True
 
@@ -153,6 +173,14 @@ class SubagentRunner(Runner):
         seconds = version.subagent_timeout_seconds if version is not None else DEFAULT_TIMEOUT_SECONDS
         # 子は新しいAttemptへ移らないので、Attemptの上限を超えない（harness.md §4.4）
         return min(seconds, ATTEMPT_LIMIT_SECONDS)
+
+    def _timeout_error(self) -> str:
+        return f"it exceeded the time limit of {self._timeout_seconds() // 60} minutes"
+
+    def _check_streaming(self) -> None:
+        """応答が届くたびに上限を確かめる（最初の応答が届くまでの待ちは、接続のtimeoutまで切れない）"""
+        if self._timed_out():
+            raise TimedOut()
 
     def _timed_out(self) -> bool:
         started = self.subagent.started or self.attempt.started
@@ -169,8 +197,7 @@ class SubagentRunner(Runner):
         self._check_alive(run)
         if self._timed_out():
             self._close_calls(remaining, "Not executed: the time limit was reached.")
-            minutes = self._timeout_seconds() // 60
-            self._end(SubagentStatus.FAILED, error=f"it exceeded the time limit of {minutes} minutes")
+            self._end(SubagentStatus.FAILED, error=self._timeout_error())
             return False
         return None
 

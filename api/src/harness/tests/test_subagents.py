@@ -9,12 +9,13 @@ import pytest
 from django.test import override_settings
 from django.utils import timezone
 
-from artifact.models import ArtifactKind
+from artifact.models import Artifact, ArtifactKind, BlobObject
 from artifact.storage import get_storage
 from conversation.dispatch import post_message
 from conversation.factories import ConversationFactory
 from harness.runner import Runner
-from harness.sandbox import CollectedOutput, collect_outputs, output_hashes
+from harness.sandbox import CollectedOutput, SandboxSession, collect_outputs, output_hashes
+from harness.skills import loaded_entries
 from harness.subagent_runner import SubagentRunner
 from harness.tools.base import ToolContext
 from harness.tools.submit_result import execute as submit_result
@@ -34,6 +35,7 @@ from run.models import (
     ToolStatus,
 )
 from run.tasks import _discard_subagent_copies, _recover, claim_run, claim_subagent
+from skill.factories import SkillFactory, SkillVersionFactory
 from usage.models import UsageLedger
 
 from .fakes import FakeAdapter, FakeSession, calls, reply
@@ -292,6 +294,9 @@ def test_stopped_subagent_stops_at_its_next_step_without_waking_the_parent(conve
     assert subagent.status == SubagentStatus.CANCELLED
     run.refresh_from_db()
     assert run.status == RunStatus.WAITING_BACKGROUND
+    # 止めたので、子は呼出しの結果を記録せず、Workerを空ける
+    assert not RunEvent.objects.filter(run=run, subagent=subagent, kind=RunEventKind.TOOL_RESULT).exists()
+    assert not subagent.attempts.filter(ended__isnull=True).exists()
 
 
 def test_cancel_waits_for_the_running_subagent(conversation, app_user):
@@ -469,3 +474,53 @@ def test_only_new_or_changed_output_files_are_returned():
     baseline = output_hashes(io.BytesIO(_tar({"output/same.txt": b"same", "output/changed.txt": b"old"})))
     collected = collect_outputs(archive, get_storage(), baseline)
     assert sorted(c.path for c in collected) == ["changed.txt", "new.txt"]
+
+
+def test_skill_loaded_by_a_subagent_is_not_loaded_for_the_parent(conversation, app_user):
+    skill = SkillFactory.create(name="請求書の照合", created_by=app_user)
+    SkillVersionFactory.create(skill=skill, instructions="1. 突き合わせる")
+    run, subagent = start_and_wait(conversation)
+    child = FakeAdapter([calls(("c1", "skill", {"name": "請求書の照合"})), reply("照合しました。")])
+    run_child(subagent, child)
+
+    assert subagent.status == SubagentStatus.COMPLETED
+    assert (
+        "1. 突き合わせる"
+        in RunEvent.objects.get(run=run, subagent=subagent, data__call_id="c1").data["content"][0]["text"]
+    )
+    assert [e["skill"] for e in subagent.skills] == [skill.uid]
+    run.refresh_from_db()
+    assert not [e for e in run.manifest.get("appended", []) if e["kind"] == "skill"]
+    assert loaded_entries(run) == []
+
+
+def test_connector_results_of_a_subagent_are_not_placed_for_the_parent(conversation, settings, tmp_path):
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path)
+    run, subagent = start_and_wait(conversation)
+    blob = BlobObject.put(io.BytesIO(b"a\n1\n"))
+    Artifact.create_connector_result(run, "connectors/p/result.csv", "p.csv", blob)
+    Artifact.create_connector_result(run, "connectors/c/result.csv", "c.csv", blob, subagent=subagent)
+    parent_attempt = ExecutionAttempt.start(run)
+    parent = SandboxSession(run, parent_attempt)
+    parent.sync_inputs()
+    assert (parent.input_dir / "connectors/p/result.csv").exists()
+    assert not (parent.input_dir / "connectors/c").exists()
+
+    child_attempt = claim_subagent(subagent.pk)
+    assert child_attempt is not None
+    child = SandboxSession(run, child_attempt, subagent=subagent)
+    child.sync_inputs()
+    assert (child.input_dir / "connectors/p/result.csv").exists()
+    assert (child.input_dir / "connectors/c/result.csv").exists()
+
+
+def test_time_limit_is_checked_while_the_model_answers(conversation, monkeypatch):
+    _run, subagent = start_and_wait(conversation)
+    # 区切りでは上限の前で、応答を受け取り始めた後に上限を超える
+    answers = iter([False])
+    monkeypatch.setattr(SubagentRunner, "_timed_out", lambda self: next(answers, True))
+
+    run_child(subagent, FakeAdapter([reply("まだ途中です。")]))
+    assert subagent.status == SubagentStatus.FAILED
+    assert "time limit" in subagent.error
+    assert subagent.result_text == ""

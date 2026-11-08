@@ -9,7 +9,7 @@ from typing import Any
 
 from django.utils import timezone
 
-from run.models import Run
+from run.models import LIVE_SUBAGENT_STATUSES, Run, Subagent
 
 from ..result_files import OUTPUT_DIR, file_fields, model_schema, output_path, result_files
 from .base import Effect, Tool, ToolContext, ToolResult
@@ -65,6 +65,12 @@ def execute(
         jobs = ", ".join(job.job_id for job in running)
         return ToolResult.error(
             f"Background jobs are still running: {jobs}. Wait for them, or stop them with job_kill, and then call "
+            "submit_result again."
+        )
+    # サブエージェントが残っている間も確定しない（design.md §5.3）
+    if live := Subagent.objects.filter(run=context.run, status__in=LIVE_SUBAGENT_STATUSES).count():
+        return ToolResult.error(
+            f"{live} subagents are still running. Wait for them, or stop them with subagent_kill, and then call "
             "submit_result again."
         )
     # 引数はRunnerが実行の前にSchemaで検証している

@@ -278,8 +278,10 @@ Q_CLUSTER = {
     "retry": 3660,
     "max_attempts": 1,
 }
-# 1つのqclusterで同時に動かすRunの数。workerを1つは配信等の軽い処理のために残す
+# 1つのqclusterで同時に動かすAttempt（親とサブエージェント）の数。workerを1つは配信等の軽い処理のために残す
 YORIKI_RUNS_PER_QCLUSTER = int(os.getenv("YORIKI_RUNS_PER_QCLUSTER", str(max(1, Q_CLUSTER_WORKERS - 1))))
+# 1つのRunで同時に動かすサブエージェントの数（harness.md §4.4）
+YORIKI_SUBAGENTS_PER_RUN = int(os.getenv("YORIKI_SUBAGENTS_PER_RUN", "4"))
 
 # --- 社内SSO（django-allauth） ---
 # パスワード・メールでのアカウント作成とログインは使わず、SSOだけにする（§6.2）

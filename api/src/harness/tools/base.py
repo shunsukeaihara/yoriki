@@ -10,7 +10,7 @@ import jsonschema
 from llm.providers.base import Part, TextPart, ToolCall, ToolDefinition
 
 if TYPE_CHECKING:
-    from run.models import ExecutionAttempt, Run
+    from run.models import ExecutionAttempt, Run, Subagent
 
     from ..sandbox import SandboxSession
 
@@ -46,6 +46,8 @@ class ToolContext:
     exposed: frozenset[str] = frozenset()
     # 出力を退避したSandboxの中のファイル。Runnerが結果のmetaに記録し、障害で消えたときに知らせる
     spilled: list[str] = field(default_factory=list)
+    # サブエージェントのToolなら、その子。記録（RunEvent）を子のものにする（harness.md §10.11）
+    subagent: "Subagent | None" = None
 
     def sandbox_session(self) -> "SandboxSession":
         if self.session is None:

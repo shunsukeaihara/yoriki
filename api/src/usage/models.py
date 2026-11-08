@@ -20,6 +20,8 @@ class UsageLedger(models.Model):
 
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
     run = models.ForeignKey("run.Run", on_delete=models.PROTECT, related_name="usages")
+    # サブエージェントの呼出しなら、その子（harness.md §10.11）。合計は親のRun・agentセッションで見る
+    subagent = models.ForeignKey("run.Subagent", on_delete=models.PROTECT, null=True, blank=True, related_name="+")
     model_version = models.ForeignKey("llm.ModelProfileVersion", on_delete=models.PROTECT, related_name="+")
     purpose = models.PositiveSmallIntegerField(_("用途"), choices=UsagePurpose.choices)
     input_tokens = models.PositiveIntegerField(_("入力token"))
@@ -40,7 +42,9 @@ class UsageLedger(models.Model):
         return f"{self.run_id}:{self.cost}"
 
     @classmethod
-    def record(cls, *, run, model_version, purpose: UsagePurpose, usage, request_id: str = "") -> "UsageLedger":
+    def record(
+        cls, *, run, model_version, purpose: UsagePurpose, usage, request_id: str = "", subagent=None
+    ) -> "UsageLedger":
         uncached = max(usage.input_tokens - usage.cached_input_tokens, 0)
         cost = (
             uncached * model_version.input_price
@@ -50,6 +54,7 @@ class UsageLedger(models.Model):
         return cls.objects.create(
             owner_id=run.owner_id,
             run=run,
+            subagent=subagent,
             model_version=model_version,
             purpose=purpose,
             input_tokens=usage.input_tokens,

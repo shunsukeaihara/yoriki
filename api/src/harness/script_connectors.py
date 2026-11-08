@@ -151,6 +151,7 @@ class ScriptConnectors:
         with self.run.fenced(self.attempt) as run:
             invocation = ToolInvocation.objects.create(
                 run=run,
+                subagent_id=self.attempt.subagent_id,
                 attempt=self.attempt,
                 call_id=call.id,
                 name=name,
@@ -159,7 +160,13 @@ class ScriptConnectors:
                 value=origin,
             )
         context = ToolContext(
-            self.run, self.attempt, call, invocation=invocation.uid, session=self.session, exposed=self.exposed()
+            self.run,
+            self.attempt,
+            call,
+            invocation=invocation.uid,
+            session=self.session,
+            exposed=self.exposed(),
+            subagent=self.attempt.subagent if self.attempt.subagent_id else None,
         )
         outcome: Described | Queried | ToolResult
         try:

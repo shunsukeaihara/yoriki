@@ -2,7 +2,7 @@ from django.contrib import admin
 
 from utils.admin import ReadOnlyAdmin
 
-from .models import ClarificationRequest, ExecutionAttempt, Run, RunEvent, ToolInvocation
+from .models import ClarificationRequest, ExecutionAttempt, Run, RunEvent, Subagent, ToolInvocation
 
 
 @admin.register(Run)
@@ -15,16 +15,24 @@ class RunAdmin(ReadOnlyAdmin):
     search_fields = ("uid",)
 
 
+@admin.register(Subagent)
+class SubagentAdmin(ReadOnlyAdmin):
+    readonly_fields = ("uid", "run", "model_version", "created", "started", "finished")
+    list_display = ("id", "uid", "run", "description", "status", "step_count", "created", "finished")
+    list_filter = ("status",)
+    search_fields = ("uid",)
+
+
 @admin.register(ExecutionAttempt)
 class ExecutionAttemptAdmin(ReadOnlyAdmin):
-    readonly_fields = ("run",)
-    list_display = ("id", "run", "number", "worker", "lease_expires", "started", "ended", "failure")
+    readonly_fields = ("run", "subagent")
+    list_display = ("id", "run", "subagent", "number", "worker", "lease_expires", "started", "ended", "failure")
 
 
 @admin.register(RunEvent)
 class RunEventAdmin(ReadOnlyAdmin):
-    readonly_fields = ("run", "actor", "created")
-    list_display = ("id", "run", "sequence", "kind", "created")
+    readonly_fields = ("run", "subagent", "actor", "created")
+    list_display = ("id", "run", "subagent", "sequence", "kind", "created")
     list_filter = ("kind",)
 
 
@@ -37,6 +45,6 @@ class ClarificationRequestAdmin(ReadOnlyAdmin):
 
 @admin.register(ToolInvocation)
 class ToolInvocationAdmin(ReadOnlyAdmin):
-    readonly_fields = ("uid", "run", "attempt", "created", "ended")
+    readonly_fields = ("uid", "run", "subagent", "attempt", "created", "ended")
     list_display = ("id", "uid", "run", "name", "status", "created", "ended")
     list_filter = ("name", "status")

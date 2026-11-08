@@ -80,7 +80,8 @@ class AppRunViewSet(ReadOnlyModelViewSet):
 @extend_schema_view(list=extend_schema(responses=RunEventSchema))
 class AppRunEventViewSet(MyRunMixin, ListModelMixin, GenericViewSet):
     permission_classes = [AppUser]
-    queryset = RunEvent.objects.all()
+    # サブエージェントの記録は、作業の記録に入れ子で見せるまで出さない（harness.md §10.11）
+    queryset = RunEvent.objects.filter(subagent__isnull=True)
     serializer_class = RunEventSerializer
     ordering = "sequence"  # Runの中で一意
 
@@ -103,7 +104,7 @@ class AppScriptCallViewSet(MyRunMixin, ListModelMixin, GenericViewSet):
     authorization.md §7.1）。呼出しはモデルの文脈（RunEvent）に入れないので、作業の記録のAPIとは別に返す"""
 
     permission_classes = [AppUser]
-    queryset = ToolInvocation.objects.filter(call_id__startswith=SCRIPT_CALL_PREFIX)
+    queryset = ToolInvocation.objects.filter(call_id__startswith=SCRIPT_CALL_PREFIX, subagent__isnull=True)
     serializer_class = ScriptCallSerializer
     filterset_class = ScriptCallFilter
     ordering = ("created", "pk")

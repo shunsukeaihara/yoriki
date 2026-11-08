@@ -69,7 +69,7 @@ def execute(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     with run.fenced(context.attempt) as current:
         current.append_manifest("skill", value)
         current.save(update_fields=["manifest", "updated"])
-        RunEvent.record(current, RunEventKind.SKILL_LOADED, value, comment=skill.name)
+        RunEvent.record(current, RunEventKind.SKILL_LOADED, value, comment=skill.name, subagent=context.subagent)
         run.manifest = current.manifest
     return _loaded(skill, version, arguments["name"], context)
 

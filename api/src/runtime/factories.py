@@ -28,6 +28,7 @@ def version_fields(**overrides) -> dict:
         "env_mb": 512,
         "command_timeout_seconds": 600,
         "job_timeout_seconds": 1800,
+        "subagent_timeout_seconds": 1800,
     } | overrides
 
 

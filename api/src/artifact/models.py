@@ -29,6 +29,8 @@ MAX_NAME_LENGTH = 200
 MAX_NAME_BYTES = 230
 # Connectorの結果を置く /workspace/input の中のディレクトリ（harness.md §10.2）
 CONNECTOR_RESULTS_DIR = "connectors"
+# サブエージェントが返したファイルを置く /workspace/input の中のディレクトリ（harness.md §10.11）
+SUBAGENT_RESULTS_DIR = "subagents"
 
 
 def clean_filename(name: str) -> str:
@@ -57,7 +59,7 @@ def _cut_bytes(text: str, limit: int) -> str:
 def input_paths(names: list[str], used: set[str]) -> list[str]:
     """添付を置く /workspace/input の中の名前。`used` は会話で既に使った名前。同じ名前があれば「名前 (2).拡張子」の
     ようにする（前の添付を置き換えない）。Connectorの結果を置くディレクトリと同じ名前にしない"""
-    used = {*used, CONNECTOR_RESULTS_DIR}
+    used = {*used, CONNECTOR_RESULTS_DIR, SUBAGENT_RESULTS_DIR}
     paths = []
     for name in names:
         stem, ext = posixpath.splitext(name)
@@ -147,6 +149,9 @@ class ArtifactKind(models.IntegerChoices):
     OUTPUT = 2, _("成果物")
     # エージェントがConnectorで読んだ結果（datasource_query のCSV。design.md §4.9.1）。/workspace/input に置く
     CONNECTOR_RESULT = 3, _("Connectorの結果")
+    # サブエージェントが返したファイル（harness.md §10.11）。親の /workspace/input/subagents/ に置く。
+    # 画面の成果物には出さない
+    SUBAGENT_RESULT = 4, _("サブエージェントの結果")
 
 
 class ArtifactQuerySet(models.QuerySet):
@@ -177,6 +182,10 @@ class ArtifactQuerySet(models.QuerySet):
             outputs = outputs.filter(run=run)
         latest = outputs.order_by("-created", "-pk").first()
         return cast("Artifact | None", latest)
+
+    def subagent_results(self, conversation_id: int) -> Self:
+        """会話のRunのサブエージェントが返したファイル（/workspace/input/subagents/ に置くもの）"""
+        return self.filter(conversation_id=conversation_id, kind=ArtifactKind.SUBAGENT_RESULT, deleted=False)
 
     def connector_results(self, conversation_id: int) -> Self:
         """会話のRunがConnectorで読んだ結果（/workspace/input/connectors/ に置くもの）。同じ会話の次の依頼でも読める
@@ -280,6 +289,23 @@ class Artifact(models.Model):
             run=run,
             blob=blob,
             kind=ArtifactKind.OUTPUT,
+            name=name,
+            path=path,
+            content_type=guess_content_type(name),
+            expires=cls.default_expires(),
+        )
+
+    @classmethod
+    def create_subagent_result(cls, run, path: str, blob: BlobObject) -> "Artifact":
+        """サブエージェントが返したファイルを記録する。`path` は /workspace/input からの相対パス
+        （subagents/<子のID>/ の下）"""
+        name = clean_filename(posixpath.basename(path))
+        return cls.objects.create(
+            owner=run.owner,
+            conversation_id=run.conversation_id,
+            run=run,
+            blob=blob,
+            kind=ArtifactKind.SUBAGENT_RESULT,
             name=name,
             path=path,
             content_type=guess_content_type(name),

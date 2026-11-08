@@ -23,6 +23,7 @@ RESOURCE_FIELDS = (
     "env_mb",
     "command_timeout_seconds",
     "job_timeout_seconds",
+    "subagent_timeout_seconds",
 )
 # Sandboxのコマンド・環境に残しておくメモリ（tmpfsの合計はメモリの上限からこれを引いた分まで）
 RESERVED_MEMORY_MB = 512
@@ -92,6 +93,10 @@ class RuntimeProfileSerializer(serializers.ModelSerializer):
     )
     job_timeout_seconds = serializers.IntegerField(
         source="current_version.job_timeout_seconds", min_value=60, max_value=86400, required=False
+    )
+    # 子は新しいAttemptへ移らないので、Attemptの上限（55分）より短くする（harness.md §4.4）
+    subagent_timeout_seconds = serializers.IntegerField(
+        source="current_version.subagent_timeout_seconds", min_value=60, max_value=3000, required=False
     )
     change_reason = serializers.CharField(max_length=500, required=False, allow_blank=True, write_only=True)
     created_by: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(slug_field="uid", read_only=True)

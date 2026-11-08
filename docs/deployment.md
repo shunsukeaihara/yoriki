@@ -157,7 +157,7 @@ services:
 ```
 
 - Django Q2のクラスタは1つにする。どのqclusterも、エージェントの実行（Runner・Sandbox）と、配信・Outbox・清掃などの軽い処理の両方を受け持つ。処理の量は、qclusterを立てる数とworker数で調整する。
-- Runは確認待ちまで長く動き、その間workerを1つ占有する。軽い処理が待たされないよう、1つのqclusterで同時に動かすRunの数を `YORIKI_RUNS_PER_QCLUSTER`（既定は worker数 − 1）までにする。上限に達しているqclusterはRunをclaimせず、ReconcilerがRunの実行を送り直す。
+- Runは確認待ちまで長く動き、その間workerを1つ占有する。軽い処理が待たされないよう、1つのqclusterで同時に動かすAttempt（親とサブエージェントのもの。どちらもworkerとSandboxを1つ使う）の数を `YORIKI_RUNS_PER_QCLUSTER`（既定は worker数 − 1）までにする。上限に達しているqclusterはclaimせず、Reconcilerが実行を送り直す。サブエージェントの実行時間の上限は、claimされて動き始めてから数える（harness.md §4.4）。
 - qclusterはSandboxを起動するので、どこで動かす場合もDockerソケットとworkspacesのmountを渡す。アプリサーバーでqclusterを動かさず、Workerサーバーだけで動かしてもよい（その場合、アプリサーバーにはDockerソケットが要らない）。
 - WorkerサーバーはDB・S3に直接接続するので、アプリサーバーと同じ `yoriki.env` を使い、同じ私設ネットワークに置く。ファイルの保存先はS3等の共有のものにする（Localは使えない）。
 - 台数は実行枠に合わせて増減する。RunのclaimとleaseがDBで行われるので、何台あっても同じRunを二重に実行しない。

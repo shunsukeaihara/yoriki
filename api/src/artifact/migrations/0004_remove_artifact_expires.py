@@ -4,14 +4,13 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('artifact', '0003_artifact_subagent_alter_artifact_kind'),
+        ("artifact", "0003_artifact_subagent_alter_artifact_kind"),
     ]
 
     operations = [
         migrations.RemoveField(
-            model_name='artifact',
-            name='expires',
+            model_name="artifact",
+            name="expires",
         ),
     ]

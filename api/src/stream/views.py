@@ -77,9 +77,11 @@ def _still_visible(user_pk: int, run_pk: int) -> bool:
 
 @sync_to_async
 def _events_after(run_pk: int, run_uid: str, after: int) -> list[tuple[int, str, dict[str, Any]]]:
-    events = RunEvent.objects.filter(run_id=run_pk, subagent__isnull=True, sequence__gt=after).order_by("sequence")[
-        :PAGE_SIZE
-    ]
+    events = (
+        RunEvent.objects.filter(run_id=run_pk, sequence__gt=after)
+        .select_related("subagent")
+        .order_by("sequence")[:PAGE_SIZE]
+    )
     return [(e.sequence, *_typed(serialize_event(e, run_uid))) for e in events]
 
 

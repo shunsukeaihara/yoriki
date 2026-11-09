@@ -9,6 +9,7 @@ from llm.factories import ModelProfileFactory
 
 from .factories import ClarificationRequestFactory, RunFactory
 from .models import (
+    SCRIPT_CALL_PREFIX,
     ClarificationKind,
     ClarificationStatus,
     ExecutionAttempt,
@@ -17,6 +18,9 @@ from .models import (
     RunEvent,
     RunEventKind,
     RunStatus,
+    Subagent,
+    SubagentStatus,
+    ToolInvocation,
 )
 from .tasks import claim_run, reconcile_runs
 
@@ -121,6 +125,62 @@ class TestEvents:
         assert types == ["run.status", "run.message"]
         assert res.data["results"][1]["text"] == "確認します"
         assert "provider_state" not in res.data["results"][1]
+        assert res.data["results"][1]["subagent"] == ""
+
+
+def make_subagent(run: Run, **kwargs) -> Subagent:
+    return Subagent.objects.create(
+        run=run,
+        tool_call_id="call_1",
+        description="表を集計する",
+        prompt="集計してください",
+        model_version=run.model_version,
+        **kwargs,
+    )
+
+
+@pytest.mark.django_db
+class TestSubagents:
+    """子の記録・照会・状態は、親の作業の記録の中に入れ子で見せる（harness.md §10.11）"""
+
+    def test_child_events_are_listed_with_the_subagent(self, api_client, run):
+        subagent = make_subagent(run, status=SubagentStatus.RUNNING)
+        RunEvent.record(run, RunEventKind.ASSISTANT_MESSAGE, {"text": "", "tool_calls": []})
+        RunEvent.record(run, RunEventKind.USER_MESSAGE, {"text": "集計してください"}, subagent=subagent)
+        res = api_client.get(f"/api/app/v1/runs/{run.uid}/events/")
+        assert [(e["sequence"], e["subagent"]) for e in res.data["results"]] == [(1, ""), (2, subagent.uid)]
+
+    def test_child_script_calls_are_listed_with_the_subagent(self, api_client, run):
+        subagent = make_subagent(run)
+        attempt = ExecutionAttempt.objects.create(run=run, subagent=subagent, number=1, lease_expires=timezone.now())
+        for child in (None, subagent):
+            ToolInvocation.objects.create(
+                run=run,
+                subagent=child,
+                attempt=attempt,
+                call_id=f"{SCRIPT_CALL_PREFIX}1",
+                name="datasource_query",
+                arguments={"connector": "販売DB", "sql": "SELECT 1"},
+            )
+        res = api_client.get(f"/api/app/v1/runs/{run.uid}/script_calls/")
+        assert [c["subagent"] for c in res.data["results"]] == ["", subagent.uid]
+
+    def test_subagents_are_listed(self, api_client, run):
+        subagent = make_subagent(run, status=SubagentStatus.FAILED, error="時間の上限を超えました", step_count=3)
+        res = api_client.get(f"/api/app/v1/runs/{run.uid}/subagents/")
+        assert res.status_code == 200
+        [item] = res.data["results"]
+        assert item["id"] == subagent.uid
+        assert item["tool_call_id"] == "call_1"
+        assert item["status"] == SubagentStatus.FAILED
+        assert item["error"] == "時間の上限を超えました"
+        assert item["step_count"] == 3
+        assert item["model_profile_name"] == run.model_version.profile.name
+
+    def test_other_users_subagents_are_not_found(self, api_client, other_user):
+        run = RunFactory.create(conversation=ConversationFactory.create(owner=other_user))
+        make_subagent(run)
+        assert api_client.get(f"/api/app/v1/runs/{run.uid}/subagents/").status_code == 404
 
 
 @pytest.mark.django_db

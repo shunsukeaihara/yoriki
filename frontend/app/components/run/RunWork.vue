@@ -80,6 +80,44 @@ const refreshScriptCalls = async () => {
     loadingScriptCalls = false
   }
 }
+// サブエージェントの状態（harness.md §10.11）。子の数は多くないので、毎回すべて読む。起動・停止の呼出しの結果、
+// 終わった知らせ、知らない子の記録が届いたときと、Run が終わったときに読み直す。子が動いている間は5秒ごとにも読む
+// （順番待ちから作業中へ・作業中から終わりへの変化は、親の記録に出るまでに間があるため）
+const subagents = ref<Subagent[]>([])
+const subagentsFailed = ref(false)
+const refreshSubagents = async () => {
+  if (!props.showLog) return
+  try {
+    let page = await api.runs(props.run.id).subagents().list({ pageSize: 200 })
+    let all = page.results
+    while (page.next) {
+      page = await api.http.get<Paginated<Subagent>, Paginated<Subagent>>(page.next)
+      all = all.concat(page.results)
+    }
+    subagents.value = all
+    subagentsFailed.value = false
+  } catch {
+    subagentsFailed.value = true
+  }
+}
+const liveSubagents = computed(() => (active.value ? subagents.value.filter(isLiveSubagent).length : 0))
+const subagentSignal = computed(() => {
+  const known = new Set(subagents.value.map((s) => s.id))
+  let n = 0
+  const unknown = new Set<string>()
+  for (const e of events.value) {
+    if (e.type === 'run.delta') continue
+    if (e.subagent) {
+      if (!known.has(e.subagent)) unknown.add(e.subagent)
+    } else if (e.type === 'run.message' && e.toolResult && SUBAGENT_TOOLS.includes(e.toolResult.name)) n += 1
+    else if (e.type === 'run.event' && e.kind === RunEventKind.SUBAGENT_FINISHED) n += 1
+  }
+  return `${n}-${[...unknown].sort().join(',')}`
+})
+watch(subagentSignal, (value, before) => {
+  if (value !== before && (open.value || active.value)) refreshSubagents()
+})
+
 const scriptToolResults = computed(
   () =>
     events.value.filter(
@@ -87,29 +125,54 @@ const scriptToolResults = computed(
     ).length,
 )
 watch(open, (value) => {
-  if (value) refreshScriptCalls()
+  if (value) {
+    refreshScriptCalls()
+    refreshSubagents()
+  }
 })
 watch([active, scriptToolResults], ([value], [before]) => {
   // 実行中は記録を開いているので、Tool の結果が届くたびと、Run が終わったときに読み直す
   if (value || before) refreshScriptCalls()
 })
-// 要求はコマンドを待つ間のほか、ステップの区切りでも処理されるので、動いている間はいつも読み直す
-// （読むのは差分だけ）
-const { pause, resume } = useIntervalFn(refreshScriptCalls, 5000, { immediate: false })
-watch(
+watch(active, (value, before) => {
+  if (before && !value) refreshSubagents()
+})
+// 要求はコマンドを待つ間のほか、ステップの区切りでも処理されるので、親が動いている間はいつも読み直す
+// （読むのは差分だけ）。サブエージェントは確認待ちの間も動くので、子が動いている間も読み直す
+const parentRunning = computed(
   () => props.run.status === RunStatus.RUNNING || props.run.status === RunStatus.WAITING_BACKGROUND,
+)
+const { pause, resume } = useIntervalFn(
+  () => {
+    if (parentRunning.value || liveSubagents.value) refreshScriptCalls()
+    if (liveSubagents.value) refreshSubagents()
+  },
+  5000,
+  { immediate: false },
+)
+watch(
+  () => parentRunning.value || liveSubagents.value > 0,
   (running) => (running ? resume() : pause()),
   { immediate: true },
 )
 onMounted(() => {
-  if (active.value) refreshScriptCalls()
+  if (active.value) {
+    refreshScriptCalls()
+    refreshSubagents()
+  }
 })
+// 記録の一部（照会・サブエージェント）を読めなかったら、記録の中に「読み直す」を出す
+const partFailed = computed(() => scriptCallsFailed.value || subagentsFailed.value)
+const refreshParts = () => {
+  if (scriptCallsFailed.value) refreshScriptCalls()
+  if (subagentsFailed.value) refreshSubagents()
+}
 
 // 最後の応答は、Run が終わって会話のメッセージになるまでここに出す。裏の作業を待つときは、その時点で会話のメッセージに
 // なるので、応答の後に状態の変更等が届いたら出さない
 const pendingReply = computed(() => {
   if (!active.value) return ''
-  const last = events.value.at(-1)
+  const last = events.value.findLast((e) => e.type === 'run.delta' || !e.subagent)
   return last?.type === 'run.message' && last.kind === RunEventKind.ASSISTANT_MESSAGE && last.toolCalls.length === 0
     ? last.text
     : ''
@@ -140,6 +203,10 @@ const unsentNotice = computed(() => {
         {{ $t('タスク「{name}」・版 {number}', { name: run.taskInfo.name, number: run.taskInfo.number }) }}
       </UBadge>
       <UChatShimmer v-if="run.status === RunStatus.RUNNING && !streamingText" :text="$t('作業しています')" />
+      <!-- 裏の作業（design.md §11.2）。1つずつ止める操作は置かない -->
+      <UBadge v-if="liveSubagents" color="primary" variant="outline" size="sm" icon="i-lucide-bot">
+        {{ $t('サブエージェント {n}件が作業中', { n: liveSubagents }) }}
+      </UBadge>
       <span class="text-xs text-dimmed"
         >{{ run.modelProfileName }}<template v-if="run.effort"> · {{ run.effort }}</template></span
       >
@@ -174,17 +241,17 @@ const unsentNotice = computed(() => {
 
     <template v-if="showLog">
       <template v-if="active">
-        <RunEventLog :events="events" :script-calls="scriptCalls" active />
+        <RunEventLog :events="events" :script-calls="scriptCalls" :subagents="subagents" active />
         <DBtn
-          v-if="scriptCallsFailed"
+          v-if="partFailed"
           variant="link"
           color="warning"
           size="xs"
           class="px-0"
           icon="i-lucide-refresh-cw"
-          @click="refreshScriptCalls"
+          @click="refreshParts"
         >
-          {{ $t('スクリプトからの照会の記録を読めませんでした。読み直す') }}
+          {{ $t('作業の記録の一部を読めませんでした。読み直す') }}
         </DBtn>
       </template>
       <UCollapsible v-else v-model:open="open">
@@ -201,17 +268,17 @@ const unsentNotice = computed(() => {
           <div class="mt-2 border-l-2 border-default pl-3">
             <USkeleton v-if="loading && !events.length" class="h-6 w-48" />
             <template v-else>
-              <RunEventLog :events="events" :script-calls="scriptCalls" />
+              <RunEventLog :events="events" :script-calls="scriptCalls" :subagents="subagents" />
               <DBtn
-                v-if="scriptCallsFailed"
+                v-if="partFailed"
                 variant="link"
                 color="warning"
                 size="xs"
                 class="px-0"
                 icon="i-lucide-refresh-cw"
-                @click="refreshScriptCalls"
+                @click="refreshParts"
               >
-                {{ $t('スクリプトからの照会の記録を読めませんでした。読み直す') }}
+                {{ $t('作業の記録の一部を読めませんでした。読み直す') }}
               </DBtn>
             </template>
           </div>

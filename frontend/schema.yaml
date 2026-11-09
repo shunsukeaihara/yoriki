@@ -1309,6 +1309,52 @@ paths:
               schema:
                 $ref: '#/components/schemas/PaginatedScriptCallList'
           description: ''
+  /api/app/v1/runs/{run}/subagents/:
+    get:
+      operationId: app_v1_runs_subagents_list
+      description: サブエージェントの状態
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: path
+        name: run
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - app/run/subagent
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSubagentList'
+          description: ''
   /api/app/v1/runs/{uid}/:
     get:
       operationId: app_v1_runs_retrieve
@@ -7451,6 +7497,9 @@ components:
           type: string
           format: date-time
           readOnly: true
+        subagent:
+          type: string
+          readOnly: true
         clarification:
           type: string
           readOnly: true
@@ -7464,6 +7513,7 @@ components:
       - kind
       - run
       - sequence
+      - subagent
       - type
     ClarificationKindEnum:
       enum:
@@ -11541,6 +11591,25 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Skill'
+    PaginatedSubagentList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Subagent'
     PaginatedTaskDefinitionList:
       type: object
       required:
@@ -12645,6 +12714,9 @@ components:
           type: string
           format: date-time
           readOnly: true
+        subagent:
+          type: string
+          readOnly: true
         kind:
           allOf:
           - $ref: '#/components/schemas/RunEventKindEnum'
@@ -12667,6 +12739,7 @@ components:
       - kind
       - run
       - sequence
+      - subagent
       - text
       - tool_calls
       - tool_result
@@ -12704,6 +12777,9 @@ components:
           type: string
           format: date-time
           readOnly: true
+        subagent:
+          type: string
+          readOnly: true
         kind:
           allOf:
           - $ref: '#/components/schemas/RunEventKindEnum'
@@ -12721,6 +12797,7 @@ components:
       - kind_display
       - run
       - sequence
+      - subagent
       - type
     RunSkill:
       type: object
@@ -12882,6 +12959,9 @@ components:
           type: string
           format: date-time
           readOnly: true
+        subagent:
+          type: string
+          readOnly: true
         status:
           allOf:
           - $ref: '#/components/schemas/RunStatusEnum'
@@ -12906,6 +12986,7 @@ components:
       - sequence
       - status
       - status_display
+      - subagent
       - type
     RunStreamEvent:
       oneOf:
@@ -13480,6 +13561,10 @@ components:
         id:
           type: string
           readOnly: true
+        subagent:
+          type: string
+          readOnly: true
+          description: サブエージェントからの呼出しなら、その子のID（親は空）
         during:
           type: string
           readOnly: true
@@ -13552,6 +13637,7 @@ components:
       - sql
       - status
       - status_display
+      - subagent
       - tables
       - truncated
     Session:
@@ -14578,6 +14664,85 @@ components:
       - layout_before
       - slide
       - texts
+    Subagent:
+      type: object
+      description: サブエージェントの状態（harness.md §10.11）。作業の記録で、起動した `subagent` の呼出しの下に出す
+      properties:
+        id:
+          type: string
+          readOnly: true
+        tool_call_id:
+          type: string
+          readOnly: true
+          description: 起動した `subagent` の呼出しのID
+        description:
+          type: string
+          readOnly: true
+          title: 説明
+        status:
+          allOf:
+          - $ref: '#/components/schemas/SubagentStatusEnum'
+          readOnly: true
+        status_display:
+          type: string
+          readOnly: true
+        model_profile_name:
+          type: string
+          readOnly: true
+        effort:
+          type: string
+          readOnly: true
+        step_count:
+          type: integer
+          readOnly: true
+          title: ステップ数
+        error:
+          type: string
+          readOnly: true
+          title: 失敗の理由
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        started:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 開始日時
+        finished:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: 終了日時
+      required:
+      - created
+      - description
+      - effort
+      - error
+      - finished
+      - id
+      - model_profile_name
+      - started
+      - status
+      - status_display
+      - step_count
+      - tool_call_id
+    SubagentStatusEnum:
+      enum:
+      - 1
+      - 2
+      - 10
+      - 20
+      - 30
+      type: integer
+      description: |-
+        * `1` - 順番待ち
+        * `2` - 作業中
+        * `10` - 完了
+        * `20` - 失敗
+        * `30` - 停止
     TaskChatLaunchRequest:
       type: object
       properties:

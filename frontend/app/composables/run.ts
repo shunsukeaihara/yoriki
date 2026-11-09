@@ -126,6 +126,34 @@ export const ToolStatus = {
   UNKNOWN: 40,
 } as const satisfies Record<string, ToolStatusEnum>
 
+// バックエンドの run.models.SubagentStatus と同じ値。表示はサーバーの statusDisplay を使う
+export const SubagentStatus = {
+  QUEUED: 1,
+  RUNNING: 2,
+  COMPLETED: 10,
+  FAILED: 20,
+  CANCELLED: 30,
+} as const satisfies Record<string, SubagentStatusEnum>
+
+export const isLiveSubagent = (subagent: Pick<Subagent, 'status'>) =>
+  subagent.status === SubagentStatus.QUEUED || subagent.status === SubagentStatus.RUNNING
+
+export const subagentStatusColor = (status: SubagentStatusEnum) => {
+  switch (status) {
+    case SubagentStatus.COMPLETED:
+      return 'success'
+    case SubagentStatus.FAILED:
+      return 'error'
+    case SubagentStatus.CANCELLED:
+      return 'neutral'
+    default:
+      return 'primary'
+  }
+}
+
+// サブエージェントを起動・停止する Tool。結果が届いたら、子の状態を読み直す
+export const SUBAGENT_TOOLS = ['subagent', 'subagent_kill']
+
 // Skill のスクリプトから Connector を呼べる Tool。Runner はこれらの終わりを待つ間に要求を処理する
 // （harness.md §10.2）
 export const SCRIPT_WAITING_TOOLS = ['shell', 'job_output']
@@ -202,6 +230,10 @@ export const toolLabel = (
       return t('タスクの定義を読む')
     case 'update_task':
       return t('タスクの新しい版を保存')
+    case 'subagent':
+      return t('サブエージェントに任せる：{description}', { description: arg('description') })
+    case 'subagent_kill':
+      return t('サブエージェントを止める')
     default:
       return call.name
   }

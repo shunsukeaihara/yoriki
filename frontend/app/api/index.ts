@@ -275,6 +275,11 @@ const createAPI = () => {
         list: (params?: ListParams) =>
           http.get<Paginated<ScriptCall>, Paginated<ScriptCall>>(`app/v1/runs/${id}/script_calls/`, { params }),
       }),
+      // AppSubagentViewSet は list だけ
+      subagents: () => ({
+        list: (params?: ListParams) =>
+          http.get<Paginated<Subagent>, Paginated<Subagent>>(`app/v1/runs/${id}/subagents/`, { params }),
+      }),
       // Runの添付と成果物（タスクのRunのファイルは、会話のAPIではなくここで取得する）
       artifacts: (aid?: string) => ({
         ...readOnlyResource<Artifact, ArtifactListParams>(http, `app/v1/runs/${id}/artifacts`, aid),

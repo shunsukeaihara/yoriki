@@ -555,6 +555,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/app/v1/runs/{run}/subagents/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description サブエージェントの状態 */
+        get: operations["app_v1_runs_subagents_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/app/v1/runs/{uid}/": {
         parameters: {
             query?: never;
@@ -2631,6 +2648,7 @@ export interface components {
             readonly sequence: number;
             /** Format: date-time */
             readonly created: string;
+            readonly subagent: string;
             readonly clarification: string;
             readonly kind: components["schemas"]["ClarificationKindEnum"];
         };
@@ -4578,6 +4596,19 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["Skill"][];
         };
+        PaginatedSubagentList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["Subagent"][];
+        };
         PaginatedTaskDefinitionList: {
             /**
              * Format: uri
@@ -5133,6 +5164,7 @@ export interface components {
             readonly sequence: number;
             /** Format: date-time */
             readonly created: string;
+            readonly subagent: string;
             readonly kind: components["schemas"]["RunEventKindEnum"];
             readonly text: string;
             readonly tool_calls: components["schemas"]["ToolCallInfo"][];
@@ -5154,6 +5186,7 @@ export interface components {
             readonly sequence: number;
             /** Format: date-time */
             readonly created: string;
+            readonly subagent: string;
             readonly kind: components["schemas"]["RunEventKindEnum"];
             readonly kind_display: string;
             readonly comment: string;
@@ -5224,6 +5257,7 @@ export interface components {
             readonly sequence: number;
             /** Format: date-time */
             readonly created: string;
+            readonly subagent: string;
             readonly status: components["schemas"]["RunStatusEnum"];
             readonly status_display: string;
             readonly end_reason: (components["schemas"]["RunEndReasonEnum"] | components["schemas"]["NullEnum"]) | null;
@@ -5450,6 +5484,8 @@ export interface components {
          */
         ScriptCall: {
             readonly id: string;
+            /** @description サブエージェントからの呼出しなら、その子のID（親は空） */
+            readonly subagent: string;
             /** @description そのときに実行していたToolの呼出しのID（なければ空） */
             readonly during: string;
             readonly operation: components["schemas"]["ConnectorOperationEnum"];
@@ -5861,6 +5897,43 @@ export interface components {
             texts: components["schemas"]["TextDiff"][];
             elements: components["schemas"]["ElementDiff"][];
         };
+        /** @description サブエージェントの状態（harness.md §10.11）。作業の記録で、起動した `subagent` の呼出しの下に出す */
+        Subagent: {
+            readonly id: string;
+            /** @description 起動した `subagent` の呼出しのID */
+            readonly tool_call_id: string;
+            /** 説明 */
+            readonly description: string;
+            readonly status: components["schemas"]["SubagentStatusEnum"];
+            readonly status_display: string;
+            readonly model_profile_name: string;
+            readonly effort: string;
+            /** ステップ数 */
+            readonly step_count: number;
+            /** 失敗の理由 */
+            readonly error: string;
+            /** Format: date-time */
+            readonly created: string;
+            /**
+             * 開始日時
+             * Format: date-time
+             */
+            readonly started: string | null;
+            /**
+             * 終了日時
+             * Format: date-time
+             */
+            readonly finished: string | null;
+        };
+        /**
+         * @description * `1` - 順番待ち
+         *     * `2` - 作業中
+         *     * `10` - 完了
+         *     * `20` - 失敗
+         *     * `30` - 停止
+         * @enum {integer}
+         */
+        SubagentStatusEnum: 1 | 2 | 10 | 20 | 30;
         TaskChatLaunchRequest: {
             /** @description チャットから起動できるようにするか */
             chat_launchable: boolean;
@@ -7791,6 +7864,36 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PaginatedScriptCallList"];
+                };
+            };
+        };
+    };
+    app_v1_runs_subagents_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path: {
+                run: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedSubagentList"];
                 };
             };
         };

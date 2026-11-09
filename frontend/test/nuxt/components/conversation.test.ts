@@ -8,6 +8,7 @@ import {
   ConversationStartForm,
   RunClarificationForm,
   RunEventLog,
+  RunSubagent,
 } from '#components'
 
 const { createConversation, createMessage, answer } = vi.hoisted(() => ({
@@ -225,19 +226,32 @@ describe('ConversationPrompt', () => {
 })
 
 describe('RunEventLog', () => {
-  const message = (sequence: number, created: string, toolCalls: ToolCallInfo[]): RunStreamEvent => ({
+  const message = (
+    sequence: number,
+    created: string,
+    toolCalls: ToolCallInfo[],
+    { subagent = '', text = '' } = {},
+  ): RunStreamEvent => ({
     type: 'run.message',
     run: 'r1',
     sequence,
     created,
+    subagent,
     kind: RunEventKind.ASSISTANT_MESSAGE,
-    text: '',
+    text,
     toolCalls,
     toolResult: null,
   })
-  const scriptCall = (id: string, during: string, created: string, status: ToolStatusEnum = ToolStatus.SUCCEEDED) =>
+  const scriptCall = (
+    id: string,
+    during: string,
+    created: string,
+    status: ToolStatusEnum = ToolStatus.SUCCEEDED,
+    subagent = '',
+  ) =>
     ({
       id,
+      subagent,
       during,
       operation: 'datasource_query',
       connector: '販売管理',
@@ -289,5 +303,64 @@ describe('RunEventLog', () => {
     })
     const entries = (wrapper.vm as unknown as { entries: { kind: string }[] }).entries
     expect(entries.map((e) => e.kind)).toEqual(['scripts', 'tool'])
+  })
+
+  const child: Subagent = {
+    id: 'sa1',
+    toolCallId: 'c1',
+    description: '表を集計する',
+    status: SubagentStatus.COMPLETED,
+    statusDisplay: '完了',
+    modelProfileName: 'cloud',
+    effort: '',
+    stepCount: 2,
+    error: '',
+    created: '2026-11-02T00:00:01Z',
+    started: '2026-11-02T00:00:02Z',
+    finished: '2026-11-02T00:01:00Z',
+  }
+  // 子の呼出しのIDは、プロバイダが付けるので親と重なりうる（c1）
+  const childEvents = [
+    message(2, '2026-11-02T00:00:03Z', [{ id: 'c1', name: 'read', arguments: { path: 'a.csv' } }], {
+      subagent: 'sa1',
+    }),
+    message(3, '2026-11-02T00:00:50Z', [], { subagent: 'sa1', text: '集計しました' }),
+  ]
+
+  it('サブエージェントの記録と照会は、起動した呼出しの下に入れ子で出す', async () => {
+    const wrapper = await mountSuspended(RunEventLog, {
+      props: {
+        events: [
+          message(1, '2026-11-02T00:00:00Z', [
+            { id: 'c1', name: 'subagent', arguments: { description: '表を集計する' } },
+          ]),
+          ...childEvents,
+          message(4, '2026-11-02T00:02:00Z', [{ id: 'c2', name: 'read', arguments: { path: 'b.csv' } }]),
+        ],
+        scriptCalls: [scriptCall('s1', 'c1', '2026-11-02T00:00:10Z', ToolStatus.SUCCEEDED, 'sa1')],
+        subagents: [child],
+      },
+    })
+    const entries = (
+      wrapper.vm as unknown as { entries: { kind: string; scripts?: ScriptCall[]; subagent?: Subagent | null }[] }
+    ).entries
+    expect(entries.map((e) => [e.kind, (e.scripts ?? []).length, e.subagent?.id ?? null])).toEqual([
+      ['tool', 0, 'sa1'],
+      ['tool', 0, null],
+    ])
+    const nested = wrapper.findComponent(RunSubagent)
+    expect(nested.exists()).toBe(true)
+    expect(nested.props('events')!.map((e: RunStreamEvent) => ('sequence' in e ? e.sequence : 0))).toEqual([2, 3])
+    expect(nested.props('scriptCalls')!.map((c: ScriptCall) => c.id)).toEqual(['s1'])
+    expect(wrapper.text()).toContain('サブエージェント「表を集計する」')
+  })
+
+  it('子の記録では、最後の応答（親への報告）も出す', async () => {
+    const wrapper = await mountSuspended(RunEventLog, {
+      props: { events: childEvents, scriptCalls: [], subagent: child },
+    })
+    const entries = (wrapper.vm as unknown as { entries: { kind: string }[] }).entries
+    expect(entries.map((e) => e.kind)).toEqual(['tool', 'text'])
+    expect(wrapper.text()).toContain('集計しました')
   })
 })

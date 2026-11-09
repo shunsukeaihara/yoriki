@@ -119,6 +119,7 @@ export function useMessages(fetchPage: (params: ListParams) => Promise<Paginated
 }
 
 export type RunLiveHandlers = {
+  /** 親の記録が届いたとき。サブエージェントの記録は Run・会話の表示を変えないので呼ばない */
   onEvent?: (event: RunStreamEvent) => void
   /** 切断の後に接続し直したとき（切れていた間の LLM の出力の差分は送り直されない） */
   onReconnect?: () => void
@@ -149,10 +150,12 @@ export function useRunLive(runId: Ref<string | null>, { onEvent, onReconnect }: 
       }
       const last = events.value.at(-1)
       if (last && 'sequence' in last && last.sequence >= event.sequence) return // 再接続で重なった分
-      if (event.type === 'run.message' && event.kind === RunEventKind.ASSISTANT_MESSAGE) delta.value = ''
+      // サブエージェントの応答（subagent が空でない）は親の書きかけではないので、消さない
+      if (event.type === 'run.message' && event.kind === RunEventKind.ASSISTANT_MESSAGE && !event.subagent)
+        delta.value = ''
       if (event.type === 'run.status' && !isActiveRun(event)) delta.value = ''
       events.value.push(event)
-      onEvent?.(event)
+      if (!event.subagent) onEvent?.(event)
     },
   })
 

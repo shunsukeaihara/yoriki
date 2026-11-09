@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-11-09（agentセッションの実装の④サブエージェントの画面（#92）まで。次は⑤ワークスペースの保存期限の設定、アーカイブと論理削除、添付・成果物の期限をなくす）
+- 最終更新：2026-11-09（agentセッションの実装の⑤のA、添付・成果物の期限をなくす、まで。次は⑤のB、会話のアーカイブと論理削除）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -45,6 +45,7 @@
 | #86 | Runの区切りと `WAITING_BACKGROUND`（design.md 0.50 §5.3、harness.md §4.3・§4.4・§8.3）：親が話し終えても確認待ちでもジョブを止めず、同じAttemptで見張って親を起こす。Attemptの55分の上限 |
 | #91 | サブエージェントのバックエンド（harness.md §10.11、design.md §5.3・§7.9）：`subagent`・`subagent_kill`、子のRunner（親のワークスペースのコピーの上で別のAttempt・別のSandbox）、返すテキストとファイル（`/workspace/input/subagents/<子のID>/`）、子だけを待つ間はWorkerを手放す `WAITING_BACKGROUND`、停止・Workerの喪失・実行時間の上限・機密への切替え。画面は親の呼出しと `subagent.finished` だけを出す |
 | #92 | サブエージェントの画面（harness.md §10.11、realtime.md §3）：作業の記録・SSE・照会のAPIで子の記録も返し（`subagent` に子のID）、子の状態のAPI（`/runs/{id}/subagents/`）を足した。作業の記録で `subagent` の呼出しの下に子の状態と記録を入れ子で出し、動いている子の数を出す。子の途中経過は流さない。偽のLLMの台本に `[subagent]` |
+| （⑤のA） | 添付・成果物の期限をなくした（design.md 0.52 §8）：`Artifact.expires`・`YORIKI_ARTIFACT_RETENTION_DAYS` を消し、Connectorの結果は取得した会話にだけ残して期限で絞らない。アーカイブの見せ方とConnectorの結果の扱いを設計書に書いた |
 | #87 | 発言の渡し方（design.md 0.51 §5.5・§11.4、harness.md §7.5・§10.1・§10.2・§10.4）：発言の種類の選択をなくし、`/`・`@` を指定した発言も親へ渡す。Skill・Connectorの一覧を発言ごとに作り直し、`skill`・`connector` の引数を文字列にする。Runがアクセスできるものを権限モデルだけで決め、`/`・`@`、タスクの定義、Skillの宣言と `tools` は使用の指示にする（タスク・評価のRunも絞らない） |
 
 各PRの中身は、Pull Requestの説明と設計書を見る。
@@ -91,7 +92,7 @@
 - 外部のSkillの取り込みで後回しにしたもの（2026-11-02、利用者と決めた）：外部のSkill（`SKILL.md` と `scripts/`・`references/` 等のフォルダ）の取り込み（frontmatterと本文・資料をYorikiのSkillへどう写すか、Draft → 評価 → 公開を通すか、誰が取り込めるか）。いったん検討の外。必要な道具はイメージに入れる（design.md §7.6）。
 - Sandboxで後回しにしたもの：`install_python_packages` と `/packages`（PackageBundle・EnvironmentRevision）、snapshotの保持期限での削除（1つ前より古いsnapshotは新しいものを確定した後に、答える人がいないRunのものは終わるときに消す。消せなかったものは行が残り、同じ会話で次に消すときにやり直す。答える人がいないRunの会話には次がないので、消せなかったものは定期の回収を作るまで残る）、確定する前に落ちたsnapshotの実体の回収、非公開のレジストリからのpullの認証。
 - 引き継いだ文脈が、それだけでモデルの文脈に収まらないほど大きいとき（前の依頼が文脈の上限で失敗した等）は、要約の要求も収まらず、次の依頼も失敗する。前の依頼の中で圧縮が働くので通常は起きない。
-- 成果物とファイルで後回しにしたもの：Storage Backendの `validate_config`・`healthcheck`（セットアップ時の確認。design.md §7.8）、既存のファイルを新しい保存先へ移すコマンド（design.md §7.10。以前の保存先を読む設定 `YORIKI_STORAGE_PREVIOUS` はある）、WorkspaceSnapshotのModel（今はCheckpointが保存先・key・hashを持つ）、ワークスペースの保存期限での自動削除（`cleanup_workspaces`）、添付と成果物の個別の削除、`Artifact.expires` と `YORIKI_ARTIFACT_RETENTION_DAYS` をなくす（実装で行う。design.md §8）、DBに記録する前に失敗した参照のないobjectの回収、S3の期限付きURL（今はapiが読んで返す）、送らずに残った添付の削除、画像のプレビュー、エージェントの `present_files`（harness.md §10.5）。
+- 成果物とファイルで後回しにしたもの：Storage Backendの `validate_config`・`healthcheck`（セットアップ時の確認。design.md §7.8）、既存のファイルを新しい保存先へ移すコマンド（design.md §7.10。以前の保存先を読む設定 `YORIKI_STORAGE_PREVIOUS` はある）、WorkspaceSnapshotのModel（今はCheckpointが保存先・key・hashを持つ）、ワークスペースの保存期限での自動削除（`cleanup_workspaces`）、添付と成果物の個別の削除、DBに記録する前に失敗した参照のないobjectの回収、S3の期限付きURL（今はapiが読んで返す）、送らずに残った添付の削除、画像のプレビュー、エージェントの `present_files`（harness.md §10.5）。
 - gVisorで後回しにしたもの：rootless Dockerとの組み合わせ（確かめていない。gVisorではuserns-remapを使う）、メモリの超過でSandboxごと止まるのを避ける方法（gVisorの中の上限をホストのcgroupより先に効かせる設定は、runscの外から指定できなかった）、プロセス数の換算（×2＋64）の見直し（試験の値から決めた）。
 - `read` の画像で後回しにしたもの：上限（1回の要求で20枚、長辺1568px、`read` の1回で5ページ）をモデル設定の値にする（harness.md §12。上限の小さいローカルLLMで要るとき）、画面の作業の記録でTool結果の画像を見せる、Tool結果の画像のBlobObjectの清掃（Runを消すときや保持期限。今は残り続ける）。
 - 補助コマンドが返すパス（symlinkを辿った先）と、モデルが指定したパスが違うと、読んだ版の記録が見つからず `edit` が「まだ読んでいない」になる（symlinkを使うときだけ）。
@@ -109,10 +110,10 @@
 
 ## 4 次の作業
 
-**今の状態（2026-11-03）**：design.md §12の第1段階のうち、Skill（①〜⑤）と、Connector・タスク・配信（①〜⑦、Connectorの④a・④b）は終わった（#72・#73まで）。今は、業務（下の「第1段階の順番」の3）を作る前の整理を、利用者と決めた次の順で進めている。文書の整理は #74 と、その残り（design.md・harness.md の突き合わせ。#75）で、テストの高速化は #76 で行った（バックエンドのテスト全体は、手元（8コア）で約5分から約35秒に、4並列でも約45秒になった）。#74 では、status.md の終わった段階の「決めたこと・判断した点」を設計書と突き合わせ、設計書になかった今の動きに関わるものを design.md・authorization.md・harness.md・frontend-conventions.md・sandbox/CONTRACT.md へ移してから消した（経過・レビュー・確かめたことは消した。各PRの説明に残っている）。§1 はPRごとの短い一覧にした。確認用の道具は #77 で入れた（偽のLLM `fake_llm`、確認用のデータ `seed_dev`、ログイン済みのセッション `dev_session`。development.md §6）。 2026-11-06 に、agentセッションとSandboxのイメージの案を設計書へ反映した。実装は下の④（サブエージェント）まで進み（#92）、⑤以降は design.md 0.45 の動きのまま。後回し：タスクの実行の論理削除の画面、物理削除の管理コマンド、監査ログの画面。
+**今の状態（2026-11-03）**：design.md §12の第1段階のうち、Skill（①〜⑤）と、Connector・タスク・配信（①〜⑦、Connectorの④a・④b）は終わった（#72・#73まで）。今は、業務（下の「第1段階の順番」の3）を作る前の整理を、利用者と決めた次の順で進めている。文書の整理は #74 と、その残り（design.md・harness.md の突き合わせ。#75）で、テストの高速化は #76 で行った（バックエンドのテスト全体は、手元（8コア）で約5分から約35秒に、4並列でも約45秒になった）。#74 では、status.md の終わった段階の「決めたこと・判断した点」を設計書と突き合わせ、設計書になかった今の動きに関わるものを design.md・authorization.md・harness.md・frontend-conventions.md・sandbox/CONTRACT.md へ移してから消した（経過・レビュー・確かめたことは消した。各PRの説明に残っている）。§1 はPRごとの短い一覧にした。確認用の道具は #77 で入れた（偽のLLM `fake_llm`、確認用のデータ `seed_dev`、ログイン済みのセッション `dev_session`。development.md §6）。 2026-11-06 に、agentセッションとSandboxのイメージの案を設計書へ反映した。実装は下の⑤のA（添付・成果物の期限をなくす）まで進み、⑤のB以降は design.md 0.45 の動きのまま。後回し：タスクの実行の論理削除の画面、物理削除の管理コマンド、監査ログの画面。
 
-**次の作業**（#92 のマージを確かめてから）：
-1. 設計書（design.md 0.46・0.47、harness.md §5.6・§8・§10.11）に合わせて実装を直す。1つの目的ごとのPull Requestに分け、次の順に進める（2026-11-06 に利用者と確かめた）。① snapshotを確定した2世代にし、Workerを手放す前に保存する（済み。保存するかは答える人がいるかで決め、修正チャットはふつうの会話と同じ扱いにした）、② Runの区切りと `WAITING_BACKGROUND`、ジョブを親の動きと切り離す（済み）、③ 発言の渡し方と、Skill・Connectorの一覧を発言ごとに作り直す（済み）、④ サブエージェント（済み。バックエンドは #91、画面は #92）、⑤ ワークスペースの保存期限の設定、アーカイブと論理削除、添付・成果物の期限をなくす、⑥ 修正チャット（実行記録から始める）、⑦ Sandboxのイメージ（下の確かめの後）。
+**次の作業**（⑤のAのPRのマージを確かめてから）：
+1. 設計書（design.md 0.46・0.47、harness.md §5.6・§8・§10.11）に合わせて実装を直す。1つの目的ごとのPull Requestに分け、次の順に進める（2026-11-06 に利用者と確かめた）。① snapshotを確定した2世代にし、Workerを手放す前に保存する（済み。保存するかは答える人がいるかで決め、修正チャットはふつうの会話と同じ扱いにした）、② Runの区切りと `WAITING_BACKGROUND`、ジョブを親の動きと切り離す（済み）、③ 発言の渡し方と、Skill・Connectorの一覧を発言ごとに作り直す（済み）、④ サブエージェント（済み。バックエンドは #91、画面は #92）、⑤ ワークスペースの保存期限の設定、アーカイブと論理削除、添付・成果物の期限をなくす（Aの期限をなくすことは済み）、⑥ 修正チャット（実行記録から始める）、⑦ Sandboxのイメージ（下の確かめの後）。
    - ②で利用者と決めたこと（2026-11-06。design.md §5.3 に反映した）：回答期限が切れたら、ジョブが動いていても待たずに失敗にする（回答がなければ作業を進められないため）。回答を待つ間にWorkerが落ちても確認を残し、回答で最後の保存から再開する。Attemptの上限で移るときは、答える人がいないRunでも保存する（実装のときに決めた。§7.9）。
    - ②で利用者と決めたこと（続き）：ステップ数の上限で、ジョブが残っているか親が結果を見ていないジョブがあれば、止めて失敗にする（ステップ数はRun全体で数えるので、新しいAttemptでは解消しない。会話では次の発言の新しいRunで続ける）。Runを終えるときに止めたジョブと見ていないジョブは、そのRunの記録に書いて次のRunの文脈に入れる（harness.md §5.6）。
    - ②で入れなかったもの：サブエージェント（`WAITING_BACKGROUND` の「Attemptを手放していた」経路は④で足す）、発言の種類の選択をなくすこと（③）。実行時間（1つのRunの合計60分。harness.md §4.4）の上限はまだ守らせていない（今回入れたのはAttemptの上限だけ）。Attemptの上限はモデルの呼出しやToolの途中では判定しないので、55分の直前に始まった呼出しが5分を超えるとQ2に切られ、障害として最後の保存からやり直す（Codexの指摘。余裕の5分と障害の復旧で足りると判断して直していない。接続のtimeoutは3600秒まで設定できる）。
@@ -132,12 +133,12 @@
    - ④で試していないこと：実際のプロバイダのLLMでの `subagent` の使い方（いつ使うか、指示の書き方、差分の返し方）、子が複数同時に動くときの画面（偽のLLMの台本の `[subagent]` は1つだけ）。#92 で、`fake_llm`（`[subagent]`）・qcluster・Sandbox（runc）で親と子を動かし、実行中と終わった後の作業の記録をPlaywrightで確かめた。偽のLLMとSandboxで、コピーの上で動くこと・増えた／変わったファイルだけ返ること・親が `/workspace/input/subagents/` から読めることを確かめた（`harness/tests/test_subagents_sandbox.py`。手元は runc、#91 のCIの `sandbox-runner` で gVisor）。
    - #87 で利用者が確かめた進め方（2026-11-08）：**仕様の文書が正**。文書を正しく更新し、実装が合っていればPRを作ってよい。議論は仕様のレベルで行い、コードの都合に引っ張られない。アクセス範囲を狭める案を先回りして出さない。Codexのレビューは細かく繰り返さず、敵対的なレビューは使わない。
    - #87 に入っている、話に出ていなかった判断：Skill・タスクの編集のRunにも `skill` とConnectorのToolを出す。Draftの評価は範囲に合わない宣言でも始める（評価の結果に別の部門のデータが出うる）。評価のRunだけは `skill` を出さない。削除済みConnectorの宣言は公開を止めない。
-   - ⑤（**次はここから**）の範囲（2026-11-09 に利用者と決めた。design.md 0.52 §8）：A（添付・成果物の期限をなくす。`Artifact.expires`・`Artifact.default_expires()`・`YORIKI_ARTIFACT_RETENTION_DAYS` を消す）→ B（会話と修正チャットのアーカイブと論理削除、監査ログのModel、画面）の順に、別のPRで進める。C（ワークスペースの保存期限の基盤の設定のModelと管理画面）は、設定だけでは何にも効かないので、自動の削除と一緒に作るまで後に回す。タスクの実行の論理削除は後回しのまま。
+   - ⑤（**次はBから**）の範囲（2026-11-09 に利用者と決めた。design.md 0.52 §8）：A（添付・成果物の期限をなくす。済み。`Artifact.expires`・`Artifact.default_expires()`・`YORIKI_ARTIFACT_RETENTION_DAYS` を消し、Connectorの結果を期限で絞らず会話のものを全部置く）→ B（会話と修正チャットのアーカイブと論理削除、監査ログのModel、画面）の順に、別のPRで進める。C（ワークスペースの保存期限の基盤の設定のModelと管理画面）は、設定だけでは何にも効かないので、自動の削除と一緒に作るまで後に回す。タスクの実行の論理削除は後回しのまま。
      - 利用者と決めたこと：Connectorの結果は、取得したagentセッション（会話・タスクの実行）にだけ残り、期限を持たない（同じ会話の次の依頼でも置く。直近のRunのものだけに絞る案は取らず、量が問題になったら見直す）。アーカイブ・論理削除できるのは持ち主で、操作した時点で一覧から外して停止を依頼し、全部止まってからワークスペース（snapshot）を消す。アーカイブした会話はアーカイブの一覧に出し、発言するとアーカイブを解除して空のワークスペースで再開し、LLMに前のファイルがないことを伝える（今ある、snapshotが見つからないときの知らせを使う）。操作は監査ログに記録する（監査ログの画面は後回し）。
      - Bの読むもの：design.md §8（消えるものの表）、§5.1 のModelの表（Conversation の「アーカイブ・論理削除の日時」、監査ログ）、authorization.md §7（修正チャットの持ち主の削除）。
-     - 今のコードとの差（2026-11-09 に確かめた）：`Conversation` は `deleted`（真偽値）だけで、アーカイブも日時もない（`conversation/models.py`）。成果物には期限がある（`Artifact.expires`・`Artifact.default_expires()`、設定 `YORIKI_ARTIFACT_RETENTION_DAYS`（既定90日）。`artifact/models.py`、`task/dispatch.py` の入力ファイル）ので、なくす（§3 の「成果物とファイルで後回しにしたもの」にもある）。基盤の設定（保存期限を管理画面で変える）のModelと画面、監査ログのModelはまだない。snapshotの削除は Checkpoint の2世代の入替えと、答える人がいないRunの終わりだけ（`run/models.py` の Checkpoint、§3 の「Sandboxで後回しにしたもの」）。
+     - 今のコードとの差（2026-11-09 に確かめた）：`Conversation` は `deleted`（真偽値）だけで、アーカイブも日時もない（`conversation/models.py`）。基盤の設定（保存期限を管理画面で変える）のModelと画面、監査ログのModelはまだない。snapshotの削除は Checkpoint の2世代の入替えと、答える人がいないRunの終わりだけ（`run/models.py` の Checkpoint、§3 の「Sandboxで後回しにしたもの」）。
      - 物理削除の管理コマンドと監査ログの画面は後回しと決めている（上の「今の状態」）。
-   - agentセッションの残り：ワークスペースの保存期限の設定の画面（自動削除はまだ作らない）、アーカイブと論理削除、実行記録からの修正チャット。Runtime Profileのメモリの初期値も見直す。
+   - agentセッションの残り：アーカイブと論理削除（⑤のB）、実行記録からの修正チャット、ワークスペースの保存期限の設定の画面（自動の削除と一緒に作る）。Runtime Profileのメモリの初期値も見直す。
    - Sandboxのイメージ（design.md §7.6、harness.md §8.5）は、作る前に次を確かめる。試していない。`sandbox/CONTRACT.md` §1 は、入れるPull Requestで契約番号とあわせて直す。
      - gVisorでLibreOfficeが動くか。公開されているスキルの説明には、素の `soffice` がそのサンドボックスでは止まるので専用のスクリプトを使う、とある。runc・gVisorの両方で試す。
      - LibreOfficeの設定の置き場所。`HOME` は `/workspace/work/.home` なので、そのままだと設定がsnapshotに入る。別の場所へ向けるかを決める。

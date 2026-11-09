@@ -10,7 +10,6 @@ import mimetypes
 import posixpath
 import re
 import unicodedata
-from datetime import timedelta
 from typing import IO, Self, cast
 
 from django.conf import settings
@@ -229,7 +228,6 @@ class Artifact(models.Model):
     # 成果物は /workspace/output からの相対パス、Connectorの結果は /workspace/input からの相対パス
     path = models.CharField(_("パス"), max_length=1000, blank=True)
     content_type = models.CharField(_("形式"), max_length=200)
-    expires = models.DateTimeField(_("保持期限"), null=True, blank=True)
 
     created = models.DateTimeField(auto_now_add=True, db_index=True)
     deleted = models.BooleanField(default=False)
@@ -252,10 +250,6 @@ class Artifact(models.Model):
     def sha256(self) -> str:
         return self.blob.sha256
 
-    @staticmethod
-    def default_expires():
-        return timezone.now() + timedelta(days=settings.YORIKI_ARTIFACT_RETENTION_DAYS)
-
     @classmethod
     def upload(cls, src: IO[bytes], name: str, *, owner, conversation) -> "Artifact":
         """会話に添付するファイルを保存する。Sandboxの中の名前は、メッセージで送ったときに決める（attach()）"""
@@ -268,7 +262,6 @@ class Artifact(models.Model):
             kind=ArtifactKind.ATTACHMENT,
             name=name,
             content_type=guess_content_type(name),
-            expires=cls.default_expires(),
         )
 
     @classmethod
@@ -301,7 +294,6 @@ class Artifact(models.Model):
             name=name,
             path=path,
             content_type=guess_content_type(name),
-            expires=cls.default_expires(),
         )
 
     @classmethod
@@ -318,7 +310,6 @@ class Artifact(models.Model):
             name=name,
             path=path,
             content_type=guess_content_type(name),
-            expires=cls.default_expires(),
         )
 
     @classmethod
@@ -336,7 +327,6 @@ class Artifact(models.Model):
             name=name,
             path=path,
             content_type=guess_content_type(name),
-            expires=cls.default_expires(),
         )
 
     def describe(self) -> dict[str, object]:

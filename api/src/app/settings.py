@@ -370,8 +370,6 @@ YORIKI_STORAGE = {"DEFAULT": _storage_id, "BACKENDS": _storage_configs}
 YORIKI_UPLOAD_MAX_MB = int(os.getenv("YORIKI_UPLOAD_MAX_MB", "50"))
 # 1つのメッセージに付けられる添付の数
 YORIKI_ATTACHMENTS_PER_MESSAGE = int(os.getenv("YORIKI_ATTACHMENTS_PER_MESSAGE", "20"))
-# 添付と成果物の保持期間（日。design.md §8の初期案）
-YORIKI_ARTIFACT_RETENTION_DAYS = int(os.getenv("YORIKI_ARTIFACT_RETENTION_DAYS", "90"))
 
 # --- 結果の配信（design.md §4.4） ---
 # 出口（Webhook・Zapier）の送り先に許す社内のネットワーク（CIDR。カンマ区切り）。既定では、名前を引いた先が

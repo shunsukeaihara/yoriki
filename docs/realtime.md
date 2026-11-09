@@ -62,6 +62,7 @@ data: {"type":"run.delta","run":"8sJ2...","message":"Qw9...","text":"了解し�
 ```
 
 - `data` はSerializerの出力（snake_case）。フロントエンドで他のAPIと同じくcamelCaseに変換する。
+- 保存するイベント（`id:` を付けるもの）は `subagent` を持つ。サブエージェントの記録ならその子のID、親の記録なら空（harness.md §10.11）。`run.delta` は親のものだけを送る。
 - `event` と `data.type` は同じ値にする。
 - 15秒ごとにコメント行（`: keep-alive`）を送り、プロキシに切断されないようにする。
 

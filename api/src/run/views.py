@@ -12,13 +12,14 @@ from rest_framework.viewsets import GenericViewSet, ReadOnlyModelViewSet
 from stream.serializers import RunEventSchema, RunEventSerializer
 from utils.permissions import AppUser
 
-from .models import SCRIPT_CALL_PREFIX, ClarificationRequest, Run, RunEvent, ToolInvocation
+from .models import SCRIPT_CALL_PREFIX, ClarificationRequest, Run, RunEvent, Subagent, ToolInvocation
 from .serializers import (
     ClarificationAnswerSerializer,
     ClarificationRequestSerializer,
     RunCancelSerializer,
     RunSerializer,
     ScriptCallSerializer,
+    SubagentSerializer,
 )
 
 CONFLICT = OpenApiResponse(description="他の処理と競合した")
@@ -80,8 +81,8 @@ class AppRunViewSet(ReadOnlyModelViewSet):
 @extend_schema_view(list=extend_schema(responses=RunEventSchema))
 class AppRunEventViewSet(MyRunMixin, ListModelMixin, GenericViewSet):
     permission_classes = [AppUser]
-    # サブエージェントの記録は、作業の記録に入れ子で見せるまで出さない（harness.md §10.11）
-    queryset = RunEvent.objects.filter(subagent__isnull=True)
+    # サブエージェントの記録も返し、画面が親の記録の中に入れ子で出す（harness.md §10.11）
+    queryset = RunEvent.objects.select_related("subagent")
     serializer_class = RunEventSerializer
     ordering = "sequence"  # Runの中で一意
 
@@ -104,9 +105,19 @@ class AppScriptCallViewSet(MyRunMixin, ListModelMixin, GenericViewSet):
     authorization.md §7.1）。呼出しはモデルの文脈（RunEvent）に入れないので、作業の記録のAPIとは別に返す"""
 
     permission_classes = [AppUser]
-    queryset = ToolInvocation.objects.filter(call_id__startswith=SCRIPT_CALL_PREFIX, subagent__isnull=True)
+    queryset = ToolInvocation.objects.filter(call_id__startswith=SCRIPT_CALL_PREFIX).select_related("subagent")
     serializer_class = ScriptCallSerializer
     filterset_class = ScriptCallFilter
+    ordering = ("created", "pk")
+
+
+@extend_schema(description="サブエージェントの状態", tags=["app/run/subagent"])
+class AppSubagentViewSet(MyRunMixin, ListModelMixin, GenericViewSet):
+    """作業の記録と同じく、Runの結果とログを見られる人だけ（authorization.md §7.1）。子の記録は作業の記録のAPIで返す"""
+
+    permission_classes = [AppUser]
+    queryset = Subagent.objects.select_related("model_version__profile")
+    serializer_class = SubagentSerializer
     ordering = ("created", "pk")
 
 

@@ -212,6 +212,38 @@
       "name": "通知を用意して答える",
       "when": {"prompt": "[notify]", "called": "prepare_notification"},
       "reply": {"text": "通知の用意の結果です。\n\n${result}"}
+    },
+    {
+      "name": "サブエージェント：作業領域を調べる",
+      "when": {"system": "You are a subagent of Yoriki", "prompt": "[subagent-child]", "tools": "shell", "step": 0},
+      "reply": {
+        "delay": 2,
+        "text": "作業領域を調べます。",
+        "tool_calls": [{"name": "shell", "arguments": {"description": "作業領域を一覧する", "command": "sleep 5; ls -la /workspace/work /workspace/output"}}]
+      }
+    },
+    {
+      "name": "サブエージェント：親へ報告する",
+      "when": {"system": "You are a subagent of Yoriki", "prompt": "[subagent-child]", "called": "shell"},
+      "reply": {"delay": 2, "text": "作業領域を調べました。\n\n```\n${result}\n```"}
+    },
+    {
+      "name": "サブエージェントに任せる",
+      "when": {"prompt": "[subagent]", "tools": "subagent", "step": 0},
+      "reply": {
+        "text": "作業領域の確認をサブエージェントに任せます。",
+        "tool_calls": [{"name": "subagent", "arguments": {"description": "作業領域を調べる", "prompt": "[subagent-child] /workspace の work と output の中身を調べて報告してください。"}}]
+      }
+    },
+    {
+      "name": "サブエージェントを待つ",
+      "when": {"prompt": "[subagent]", "called": "subagent"},
+      "reply": {"text": "サブエージェントに任せました。報告が届いたらお知らせします。"}
+    },
+    {
+      "name": "サブエージェントの報告で答える",
+      "when": {"prompt": ["[Subagent ", "Its report:"]},
+      "reply": {"text": "サブエージェントの報告を受け取りました。作業の記録で、子の作業と報告を確かめてください。"}
     }
   ],
   "default": {

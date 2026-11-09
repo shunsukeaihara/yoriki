@@ -169,6 +169,9 @@ export type ClarificationAnswer = Api<'ClarificationAnswerRequest'>
 export type ClarificationAnswerItem = Api<'ClarificationAnswerItemRequest'>
 // Skill のスクリプトからの Connector の呼出し（作業の記録で、そのときの shell・job_output の下に出す）
 export type ScriptCall = Api<'ScriptCall'>
+// サブエージェントの状態（作業の記録で、起動した subagent の呼出しの下に出す）
+export type Subagent = Api<'Subagent'>
+export type SubagentStatusEnum = Schemas['SubagentStatusEnum']
 export type ToolStatusEnum = Schemas['ToolStatusEnum']
 
 // SSE のイベント（realtime.md §3）。type で判別できる union 型

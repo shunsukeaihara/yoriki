@@ -206,6 +206,7 @@ OpenAI互換の `POST /v1/chat/completions`（ストリーミングだけ）と 
 | `[query]` | `datasource_query` で、使えるConnectorの最初の1つの `vendors` を照会する（会話では `@` で「確認用DB（seed_dev）」を指定する） |
 | `[script]` | `shell` のスクリプトから `yoriki_connector` で「確認用DB（seed_dev）」を照会する（会話では `@` で指定する） |
 | `[notify]` | `prepare_notification` で通知を用意し、結果を答える（タスクの依頼文に書く）。業務結果のSchemaのあるタスクでは先に `submit_result` が要り、引数がSchemaで決まるので、台本を書く |
+| `[subagent]` | `subagent` で作業領域の確認を子に任せて待つ。子は2秒待ってから、5秒かかる `shell` で作業領域を一覧して報告し、親は報告を受けて答える（作業の記録の子の入れ子の確認） |
 | `[slow]` | 2秒待ってから、少しずつ答える |
 | `[error]`・`[429]` | 同じ要求に、最初の2回は500、1回は429を返す（Runnerの再試行の確認） |
 

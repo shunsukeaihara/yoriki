@@ -23,6 +23,8 @@ from .models import (
     RunLaunch,
     RunStatus,
     RunTrigger,
+    Subagent,
+    SubagentStatus,
     ToolInvocation,
     ToolStatus,
 )
@@ -301,6 +303,7 @@ class ScriptCallSerializer(serializers.ModelSerializer):
     下に出す"""
 
     id = serializers.CharField(source="uid", read_only=True)
+    subagent = serializers.SerializerMethodField(help_text="サブエージェントからの呼出しなら、その子のID（親は空）")
     during = serializers.SerializerMethodField(help_text="そのときに実行していたToolの呼出しのID（なければ空）")
     operation = serializers.ChoiceField(source="name", choices=Operation.choices, read_only=True)
     connector = serializers.SerializerMethodField(help_text="Connectorの名前（スクリプトが指定したもの）")
@@ -317,6 +320,7 @@ class ScriptCallSerializer(serializers.ModelSerializer):
         model = ToolInvocation
         fields = [
             "id",
+            "subagent",
             "during",
             "operation",
             "connector",
@@ -341,6 +345,9 @@ class ScriptCallSerializer(serializers.ModelSerializer):
     @staticmethod
     def _argument(obj: ToolInvocation, name: str) -> Any:
         return obj.arguments.get(name) if isinstance(obj.arguments, dict) else None
+
+    def get_subagent(self, obj: ToolInvocation) -> str:
+        return obj.subagent.uid if obj.subagent is not None else ""
 
     def get_during(self, obj: ToolInvocation) -> str:
         return str(self._value(obj).get("during") or "")
@@ -372,6 +379,34 @@ class ScriptCallSerializer(serializers.ModelSerializer):
 
     def get_error_code(self, obj: ToolInvocation) -> str:
         return str(self._value(obj).get("error") or "")
+
+
+class SubagentSerializer(serializers.ModelSerializer):
+    """サブエージェントの状態（harness.md §10.11）。作業の記録で、起動した `subagent` の呼出しの下に出す"""
+
+    id = serializers.CharField(source="uid", read_only=True)
+    tool_call_id = serializers.CharField(read_only=True, help_text="起動した `subagent` の呼出しのID")
+    status = serializers.ChoiceField(choices=SubagentStatus.choices, read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    model_profile_name = serializers.CharField(source="model_version.profile.name", read_only=True)
+
+    class Meta:
+        model = Subagent
+        fields = [
+            "id",
+            "tool_call_id",
+            "description",
+            "status",
+            "status_display",
+            "model_profile_name",
+            "effort",
+            "step_count",
+            "error",
+            "created",
+            "started",
+            "finished",
+        ]
+        read_only_fields = fields
 
 
 class RunCancelSerializer(serializers.Serializer):

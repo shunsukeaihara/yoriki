@@ -28,6 +28,9 @@ class BaseEventSerializer(serializers.Serializer):
     run = serializers.CharField(read_only=True)
     sequence = serializers.IntegerField(read_only=True)
     created = serializers.DateTimeField(read_only=True)
+    # サブエージェントの記録なら、その子のID（親の記録は空）。画面は起動した `subagent` の呼出しの下に入れ子で出す
+    # （harness.md §10.11）
+    subagent = serializers.CharField(read_only=True)
 
 
 class RunStatusEventSerializer(BaseEventSerializer):
@@ -107,10 +110,17 @@ def event_type(event: RunEvent) -> str:
 
 
 def serialize_event(event: RunEvent, run_uid: str) -> dict[str, Any]:
-    """RunEventを画面へ送る形にする。モデル用の内容（推論の途中経過等）は出さない"""
+    """RunEventを画面へ送る形にする。モデル用の内容（推論の途中経過等）は出さない。サブエージェントの記録は
+    `subagent` を select_related して渡す"""
     data = event.data
     kind = event_type(event)
-    base = {"type": kind, "run": run_uid, "sequence": event.sequence, "created": event.created}
+    base = {
+        "type": kind,
+        "run": run_uid,
+        "sequence": event.sequence,
+        "created": event.created,
+        "subagent": event.subagent.uid if event.subagent is not None else "",
+    }
     match kind:
         case "run.status":
             status = data.get("status")

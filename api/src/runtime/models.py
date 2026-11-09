@@ -34,6 +34,7 @@ VERSION_FIELDS = (
     "env_mb",
     "command_timeout_seconds",
     "job_timeout_seconds",
+    "subagent_timeout_seconds",
 )
 
 
@@ -159,6 +160,8 @@ class RuntimeProfileVersion(models.Model):
     # shellの1回の待ち時間の上限と、バックグラウンドのジョブの実行時間の上限（harness.md §7.8、§8.3）
     command_timeout_seconds = models.PositiveIntegerField(_("コマンドの待ち時間の上限（秒）"), default=600)
     job_timeout_seconds = models.PositiveIntegerField(_("ジョブの実行時間の上限（秒）"), default=1800)
+    # サブエージェントの実行時間の上限。子は新しいAttemptへ移らないので、Attemptの上限より短くする（harness.md §4.4）
+    subagent_timeout_seconds = models.PositiveIntegerField(_("サブエージェントの実行時間の上限（秒）"), default=1800)
     change_reason = models.CharField(_("変更理由"), max_length=500, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+", verbose_name=_("作成者")

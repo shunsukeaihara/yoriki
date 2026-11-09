@@ -283,10 +283,12 @@ paths:
           - 1
           - 2
           - 3
+          - 4
         description: |-
           * `1` - 添付
           * `2` - 成果物
           * `3` - Connectorの結果
+          * `4` - サブエージェントの結果
       - name: ordering
         required: false
         in: query
@@ -985,10 +987,12 @@ paths:
           - 1
           - 2
           - 3
+          - 4
         description: |-
           * `1` - 添付
           * `2` - 成果物
           * `3` - Connectorの結果
+          * `4` - サブエージェントの結果
       - name: ordering
         required: false
         in: query
@@ -7079,11 +7083,13 @@ components:
       - 1
       - 2
       - 3
+      - 4
       type: integer
       description: |-
         * `1` - 添付
         * `2` - 成果物
         * `3` - Connectorの結果
+        * `4` - サブエージェントの結果
     ArtifactRequest:
       type: object
       description: |-
@@ -12043,6 +12049,10 @@ components:
           type: integer
           maximum: 86400
           minimum: 60
+        subagent_timeout_seconds:
+          type: integer
+          maximum: 3000
+          minimum: 60
         change_reason:
           type: string
           writeOnly: true
@@ -12574,6 +12584,7 @@ components:
       - 50
       - 51
       - 60
+      - 23
       - 90
       type: integer
       description: |-
@@ -12591,6 +12602,7 @@ components:
         * `50` - 確認の質問
         * `51` - 確認への回答
         * `60` - モデルの再試行
+        * `23` - サブエージェントの終了
         * `90` - 実行の終了
     RunKindEnum:
       enum:
@@ -13096,6 +13108,10 @@ components:
           type: integer
           maximum: 86400
           minimum: 60
+        subagent_timeout_seconds:
+          type: integer
+          maximum: 3000
+          minimum: 60
         created_by:
           type: string
           readOnly: true
@@ -13178,6 +13194,10 @@ components:
         job_timeout_seconds:
           type: integer
           maximum: 86400
+          minimum: 60
+        subagent_timeout_seconds:
+          type: integer
+          maximum: 3000
           minimum: 60
         change_reason:
           type: string
@@ -13263,6 +13283,10 @@ components:
           type: integer
           readOnly: true
           title: ジョブの実行時間の上限（秒）
+        subagent_timeout_seconds:
+          type: integer
+          readOnly: true
+          title: サブエージェントの実行時間の上限（秒）
         change_reason:
           type: string
           readOnly: true
@@ -13294,6 +13318,7 @@ components:
       - platform_digests
       - platforms
       - python_version
+      - subagent_timeout_seconds
       - tmp_mb
       - work_mb
     SSOProvider:

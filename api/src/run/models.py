@@ -55,10 +55,14 @@ ALLOWED_TRANSITIONS: dict[int, set[int]] = {
         RunStatus.CANCELLED,
         RunStatus.FAILED,
     },
+    # サブエージェントだけを待つ間はAttemptを手放すので、発言・子の完了で順番待ちへ戻る・そのまま停止する
+    # （design.md §5.3）
     RunStatus.WAITING_BACKGROUND: {
+        RunStatus.QUEUED,
         RunStatus.RUNNING,
         RunStatus.RETRY_WAIT,
         RunStatus.CANCELLING,
+        RunStatus.CANCELLED,
         RunStatus.FAILED,
     },
     RunStatus.RETRY_WAIT: {RunStatus.QUEUED, RunStatus.CANCELLED, RunStatus.FAILED},
@@ -265,9 +269,37 @@ class Run(models.Model):
         return status in ALLOWED_TRANSITIONS.get(self.status, set())
 
     def has_live_attempt(self) -> bool:
-        """Workerを手放していないAttemptがある（Runの行ロックの中で呼ぶ）。leaseの切れたものはWorkerが落ちたものとして
-        数えない（Reconcilerが閉じる）"""
-        return self.attempts.filter(ended__isnull=True, lease_expires__gt=timezone.now()).exists()
+        """親がWorkerを手放していないAttemptがある（Runの行ロックの中で呼ぶ）。leaseの切れたものはWorkerが落ちたものとして
+        数えない（Reconcilerが閉じる）。サブエージェントのAttemptは数えない（`has_live_subagents()`）"""
+        return self.attempts.filter(
+            subagent__isnull=True, ended__isnull=True, lease_expires__gt=timezone.now()
+        ).exists()
+
+    def has_live_subagents(self) -> bool:
+        """動いている・動き出すサブエージェントがある（Runの行ロックの中で呼ぶ）。止めた子も、Workerが止まったことを
+        確かめるまで（子のAttemptが終わるまで）は動いているものとして数える（design.md §5.3）"""
+        if self.subagents.filter(status__in=LIVE_SUBAGENT_STATUSES).exists():
+            return True
+        return self.attempts.filter(
+            subagent__isnull=False, ended__isnull=True, lease_expires__gt=timezone.now()
+        ).exists()
+
+    def settle_cancelling(self) -> None:
+        """停止中で、親もサブエージェントも全部止まったなら、停止済みにする（Runの行ロックの中で呼ぶ。
+        design.md §5.3）"""
+        if self.status == RunStatus.CANCELLING and not self.has_live_attempt() and not self.has_live_subagents():
+            self.set_status(RunStatus.CANCELLED, comment=str(_("停止しました。")), end_reason=RunEndReason.CANCELLED)
+
+    def wake_for_background(self) -> None:
+        """サブエージェントが終わった・発言が届いた（Runの行ロックの中で呼ぶ）。サブエージェントだけを待ってWorkerを
+        手放した親を、順番待ちに戻して起こす。手放していない親は、見張りの中で気づく（design.md §5.3）"""
+        from .dispatch import enqueue_run  # noqa: PLC0415  dispatchがこのModelをimportするため
+
+        if self.status == RunStatus.WAITING_BACKGROUND and not self.has_live_attempt():
+            self.set_status(RunStatus.QUEUED, comment=str(_("裏の作業の続きを始めます。")))
+            enqueue_run(self)
+        elif self.status == RunStatus.CANCELLING:
+            self.settle_cancelling()
 
     def is_cancellable(self) -> bool:
         return self.status in CANCELLABLE_STATUSES
@@ -331,6 +363,8 @@ class Run(models.Model):
             self.error = error
             fields += ["finished", "end_reason", "error"]
         self.save(update_fields=fields)
+        if status in TERMINAL_STATUSES:
+            self._close_subagents()
         event = RunEvent.record(
             self,
             RunEventKind.STATUS,
@@ -364,6 +398,20 @@ class Run(models.Model):
                 transaction.on_commit(lambda: Checkpoint.discard_through(self))
         return event
 
+    def _close_subagents(self) -> None:
+        """Runが終わる。親が受け取っていない子の結果と、止めることになる子を記録に書き、次のRunの文脈に入れる
+        （harness.md §5.6）。動いている子は次の区切りで止まる（書込みは親のRunの状態を確かめて断る）。一時のコピーは、
+        子のWorkerかReconcilerが消す（harness.md §10.11）"""
+        from harness.subagents import record_finished, unreported  # noqa: PLC0415  harnessがrunのModelを使うため
+
+        for subagent in unreported(self):
+            record_finished(self, subagent)
+        live = Subagent.objects.filter(run=self, status__in=LIVE_SUBAGENT_STATUSES)
+        if names := ", ".join(f"{s.uid} ({s.description})" for s in live.order_by("pk")):
+            text = f"[These subagents were stopped when this work ended: {names}. Start them again if needed.]"
+            RunEvent.record(self, RunEventKind.CONTEXT, {"text": text})
+        live.update(status=SubagentStatus.CANCELLED, finished=timezone.now(), reported=True)
+
     @transaction.atomic
     def request_cancel(self, reason: str, actor) -> "RunEvent":
         """停止の依頼を受け付ける。実行中ならWorkerの停止確認を待つため停止中にする"""
@@ -371,9 +419,15 @@ class Run(models.Model):
         ClarificationRequest.objects.filter(run=self, status=ClarificationStatus.OPEN).update(
             status=ClarificationStatus.CANCELLED
         )
-        # 確認待ちでも、ジョブが動いていてAttemptを手放していなければ、Workerが止める
-        if current.status in (RunStatus.RUNNING, RunStatus.WAITING_BACKGROUND) or (
-            current.status == RunStatus.WAITING_USER and current.has_live_attempt()
+        # 動き出す前のサブエージェントは、ここで止める（Workerはclaimしない）
+        Subagent.objects.filter(run=self, status=SubagentStatus.QUEUED).update(
+            status=SubagentStatus.CANCELLED, finished=timezone.now(), reported=True
+        )
+        # 確認待ち・裏の作業の待ちでも、ジョブかサブエージェントが動いていれば、全部止まったことを確かめてから停止済みに
+        # する（design.md §5.3）
+        if current.status == RunStatus.RUNNING or (
+            current.status in (RunStatus.WAITING_USER, RunStatus.WAITING_BACKGROUND)
+            and (current.has_live_attempt() or current.has_live_subagents())
         ):
             return self.set_status(RunStatus.CANCELLING, comment=reason, actor=actor)
         return self.set_status(RunStatus.CANCELLED, comment=reason, actor=actor, end_reason=RunEndReason.CANCELLED)
@@ -422,10 +476,79 @@ class Run(models.Model):
             yield current
 
 
+class SubagentStatus(models.IntegerChoices):
+    QUEUED = 1, _("順番待ち")
+    RUNNING = 2, _("作業中")
+    COMPLETED = 10, _("完了")
+    FAILED = 20, _("失敗")
+    CANCELLED = 30, _("停止")
+
+
+LIVE_SUBAGENT_STATUSES = (SubagentStatus.QUEUED, SubagentStatus.RUNNING)
+
+
+class Subagent(models.Model):
+    """親のワークスペースのコピーの上で、別のAttemptとして動く子（harness.md §10.11）。返すのはテキストと
+    ファイルだけで、親は終わった子を `subagent.finished` として受け取る"""
+
+    uid = NanoidField(unique=True)
+    run = models.ForeignKey(Run, on_delete=models.CASCADE, related_name="subagents", verbose_name=_("親の実行"))
+    # 起動した `subagent` の呼出し
+    tool_call_id = models.CharField(_("Tool呼出しのID"), max_length=200)
+    description = models.CharField(_("説明"), max_length=200)
+    prompt = models.TextField(_("指示"))
+    # 起動したときに固定したモデル設定の版とeffort
+    model_version = models.ForeignKey(
+        "llm.ModelProfileVersion", on_delete=models.PROTECT, related_name="+", verbose_name=_("モデル設定の版")
+    )
+    effort = models.CharField(_("effort"), max_length=50, blank=True)
+    status = models.PositiveSmallIntegerField(_("状態"), choices=SubagentStatus.choices, default=SubagentStatus.QUEUED)
+    step_count = models.PositiveIntegerField(_("ステップ数"), default=0)
+    # 親のワークスペースの一時のコピー（work・outputのtar）。子が終わったら消して空にする
+    copy_storage = models.CharField(_("コピーの保存先"), max_length=100, blank=True)
+    copy_key = models.CharField(_("コピーの保存先のkey"), max_length=300, blank=True)
+    # 子が使うSkill（Manifestの項目の形）。起動したときの親の読込みを写し、子が `skill` で読み込んだものを足す。
+    # 親のManifestには追記しない（harness.md §10.11）
+    skills = models.JSONField(_("使うSkill"), default=list, blank=True)
+    # コピーの時点の /workspace/output のファイルと中身（SHA-256）。増えた・変わったものだけを返す
+    baseline = models.JSONField(_("コピーの時点の成果物"), default=dict, blank=True)
+    result_text = models.TextField(_("返すテキスト"), blank=True)
+    # 返すファイル（[{"path", "artifact"}]。path は親の /workspace/input/subagents/<子のID>/ からの相対パス）
+    result_files = models.JSONField(_("返すファイル"), default=list, blank=True)
+    error = models.TextField(_("失敗の理由"), blank=True)
+    # 親に終わったことを知らせた（subagent.finished を記録した、または親が自分で止めた）
+    reported = models.BooleanField(_("親に知らせた"), default=False)
+
+    created = models.DateTimeField(auto_now_add=True)
+    started = models.DateTimeField(_("開始日時"), null=True, blank=True)
+    finished = models.DateTimeField(_("終了日時"), null=True, blank=True)
+
+    class Meta:
+        verbose_name = _("サブエージェント")
+        verbose_name_plural = verbose_name
+        indexes = [models.Index(fields=["run", "status"])]
+
+    def __str__(self):
+        return self.uid
+
+    @property
+    def is_live(self) -> bool:
+        return self.status in LIVE_SUBAGENT_STATUSES
+
+
 class ExecutionAttempt(models.Model):
-    """Runを1つのWorkerで実行する試み。numberがfencing tokenを兼ねる（design.md §6.3）"""
+    """Run（親）かサブエージェントを1つのWorkerで実行する試み。numberがfencing tokenを兼ねる（design.md §6.3）。
+    番号は親とサブエージェントごとに数える"""
 
     run = models.ForeignKey(Run, on_delete=models.CASCADE, related_name="attempts")
+    subagent = models.ForeignKey(
+        Subagent,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="attempts",
+        verbose_name=_("サブエージェント"),
+    )
     number = models.PositiveIntegerField(_("試行番号"))
     worker = models.CharField(_("Worker"), max_length=200, blank=True)
     lease_expires = models.DateTimeField(_("leaseの期限"))
@@ -439,7 +562,11 @@ class ExecutionAttempt(models.Model):
     class Meta:
         verbose_name = _("実行の試み")
         verbose_name_plural = verbose_name
-        constraints = [models.UniqueConstraint(fields=["run", "number"], name="uniq_attempt_number")]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["run", "subagent", "number"], name="uniq_attempt_number", nulls_distinct=False
+            )
+        ]
 
     def __str__(self):
         return f"{self.run_id}#{self.number}"
@@ -447,15 +574,30 @@ class ExecutionAttempt(models.Model):
     @classmethod
     def start(cls, run: Run, worker: str = "") -> "ExecutionAttempt":
         """claimの中（Runの行ロックの中）で呼ぶ"""
-        last = run.attempts.aggregate(last=Max("number"))["last"] or 0
-        cls.objects.filter(run=run, ended__isnull=True).update(ended=timezone.now(), failure="superseded")
+        parents = run.attempts.filter(subagent__isnull=True)
+        last = parents.aggregate(last=Max("number"))["last"] or 0
+        parents.filter(ended__isnull=True).update(ended=timezone.now(), failure="superseded")
         return cls.objects.create(
             run=run, number=last + 1, worker=worker, lease_expires=timezone.now() + timedelta(seconds=LEASE_SECONDS)
         )
 
+    @classmethod
+    def start_subagent(cls, subagent: Subagent, worker: str = "") -> "ExecutionAttempt":
+        """サブエージェントのclaimの中（Runの行ロックの中）で呼ぶ。子は自動で再試行しないので、Attemptは1つだけ"""
+        return cls.objects.create(
+            run_id=subagent.run_id,
+            subagent=subagent,
+            number=1,
+            worker=worker,
+            lease_expires=timezone.now() + timedelta(seconds=LEASE_SECONDS),
+        )
+
     def holds(self, run: Run) -> bool:
         """このAttemptが最新で、終わっておらず、leaseが切れていない。Runは実行中か停止中か、ジョブを見張って
-        待っている（確認待ちはWorkerを手放すときにAttemptを終えるので、終わっていなければ見張っている）"""
+        待っている（確認待ちはWorkerを手放すときにAttemptを終えるので、終わっていなければ見張っている）。
+        サブエージェントのAttemptは `_holds_subagent()`"""
+        if self.subagent_id is not None:
+            return self._holds_subagent(run)
         if run.status not in (
             RunStatus.RUNNING,
             RunStatus.CANCELLING,
@@ -463,14 +605,20 @@ class ExecutionAttempt(models.Model):
             RunStatus.WAITING_BACKGROUND,
         ):
             return False
-        latest = run.attempts.aggregate(last=Max("number"))["last"]
+        latest = run.attempts.filter(subagent__isnull=True).aggregate(last=Max("number"))["last"]
+        return latest == self.number and self._alive()
+
+    def _holds_subagent(self, run: Run) -> bool:
+        """子が動いていて（止められていない）、親のRunが続いている。停止中・終わったRunでは、子の操作と結果を断る
+        （design.md §5.3）"""
+        if run.status not in (RunStatus.RUNNING, RunStatus.WAITING_USER, RunStatus.WAITING_BACKGROUND):
+            return False
+        status = Subagent.objects.filter(attempts=self).values_list("status", flat=True).first()
+        return status == SubagentStatus.RUNNING and self._alive()
+
+    def _alive(self) -> bool:
         current = ExecutionAttempt.objects.filter(pk=self.pk).values("ended", "lease_expires").first()
-        return (
-            latest == self.number
-            and current is not None
-            and current["ended"] is None
-            and current["lease_expires"] > timezone.now()
-        )
+        return current is not None and current["ended"] is None and current["lease_expires"] > timezone.now()
 
     def heartbeat(self) -> None:
         """leaseを延ばす。切れていたら LeaseLost"""
@@ -501,6 +649,7 @@ class RunEventKind(models.IntegerChoices):
     CLARIFICATION_REQUESTED = 50, _("確認の質問")
     CLARIFICATION_ANSWERED = 51, _("確認への回答")
     LLM_RETRY = 60, _("モデルの再試行")
+    SUBAGENT_FINISHED = 23, _("サブエージェントの終了")
     RUN_FINISHED = 90, _("実行の終了")
 
 
@@ -508,6 +657,16 @@ class RunEvent(models.Model):
     """Runの記録。追記だけで、作成後に変更・削除しない。モデルへの入力はここから組み立てる"""
 
     run = models.ForeignKey(Run, on_delete=models.CASCADE, related_name="events")
+    # サブエージェントの記録なら、その子。sequenceは親と通しで、子の文脈は子の記録だけから組み立てる
+    # （harness.md §10.11）
+    subagent = models.ForeignKey(
+        Subagent,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="events",
+        verbose_name=_("サブエージェント"),
+    )
     sequence = models.PositiveIntegerField(_("順序"))
     kind = models.PositiveSmallIntegerField(_("種別"), choices=RunEventKind.choices)
     # モデル用の内容と、表示に使う内容（種類ごとの形は harness/context.py が読む）
@@ -683,6 +842,9 @@ class ToolInvocation(models.Model):
 
     uid = NanoidField(unique=True)
     run = models.ForeignKey(Run, on_delete=models.CASCADE, related_name="tool_invocations")
+    subagent = models.ForeignKey(
+        Subagent, on_delete=models.CASCADE, null=True, blank=True, related_name="+", verbose_name=_("サブエージェント")
+    )
     attempt = models.ForeignKey(ExecutionAttempt, on_delete=models.PROTECT, related_name="+")
     call_id = models.CharField(_("呼出しのID"), max_length=200)
     name = models.CharField(_("Tool"), max_length=100)
@@ -699,7 +861,12 @@ class ToolInvocation(models.Model):
     class Meta:
         verbose_name = _("Toolの呼出し")
         verbose_name_plural = verbose_name
-        constraints = [models.UniqueConstraint(fields=["run", "call_id"], name="uniq_tool_call_id")]
+        # 呼出しのIDはプロバイダが付けるので、親と子で重なりうる
+        constraints = [
+            models.UniqueConstraint(
+                fields=["run", "subagent", "call_id"], name="uniq_tool_call_id", nulls_distinct=False
+            )
+        ]
 
     def __str__(self):
         return f"{self.name}({self.call_id})"

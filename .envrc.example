@@ -25,9 +25,11 @@ export YORIKI_DATABASE_PORT=5432
 # export YORIKI_SECRET_ENCRYPTION_KEYS=
 
 # --- Django Q2（qcluster） ---
-# qclusterのworker数と、1つのqclusterで同時に動かすRunの数（既定は worker数 − 1。deployment.md §3.2）
+# qclusterのworker数と、1つのqclusterで同時に動かすAttempt（親とサブエージェント）の数（既定は worker数 − 1。deployment.md §3.2）
 # export YORIKI_Q_WORKERS=4
 # export YORIKI_RUNS_PER_QCLUSTER=3
+# 1つのRunで同時に動かすサブエージェントの数（harness.md §4.4）
+# export YORIKI_SUBAGENTS_PER_RUN=4
 # macOSでは、forkしたworkerがHTTPの接続（システムのライブラリ）を使うと落ちるので、確認を止める（Linuxでは不要）
 export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
 

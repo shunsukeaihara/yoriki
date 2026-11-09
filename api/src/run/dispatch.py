@@ -9,7 +9,7 @@ from django.db import transaction
 from django.utils import timezone
 from django_q.tasks import async_task
 
-from .models import Run, RunDispatch
+from .models import Run, RunDispatch, Subagent
 
 
 def enqueue_run(run: Run) -> RunDispatch:
@@ -36,3 +36,13 @@ def dispatch_pending(older_than_seconds: int = 30) -> int:
     for pk in ids:
         send_dispatch(pk)
     return len(ids)
+
+
+def enqueue_subagent(subagent: Subagent) -> None:
+    """サブエージェントを作ったtransactionの中で呼ぶ。commitした後にQ2へ送る。送れずに残ったものは、Reconcilerが順番待ちの
+    子として送り直す（重複はclaimで吸収する）"""
+    transaction.on_commit(lambda: send_subagent(subagent.pk))
+
+
+def send_subagent(subagent_id: int) -> None:
+    async_task("run.tasks.execute_subagent", subagent_id, task_name=f"subagent-{subagent_id}")

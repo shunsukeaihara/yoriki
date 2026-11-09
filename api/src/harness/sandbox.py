@@ -25,13 +25,14 @@ from typing import IO, Any, Protocol, TypeVar
 
 from django.conf import settings
 from django.db import DatabaseError, connection, transaction
+from django.db.models import Q
 from django.utils import timezone
 from nanoid import generate
 
-from artifact.models import CONNECTOR_RESULTS_DIR, Artifact, ArtifactKind, BlobObject
+from artifact.models import CONNECTOR_RESULTS_DIR, SUBAGENT_RESULTS_DIR, Artifact, ArtifactKind, BlobObject
 from artifact.storage import StorageBackend, StorageError, StoredObject, get_storage, hash_stream
 from run.errors import LeaseLost
-from run.models import Checkpoint, ExecutionAttempt, Run, RunKind
+from run.models import Checkpoint, ExecutionAttempt, Run, RunKind, Subagent
 from runtime.launcher import (
     ATTEMPT_LABEL,
     DATABASE_LABEL,
@@ -220,16 +221,19 @@ class SandboxSession:
         launcher_factory: Callable[[], Launcher] = Launcher,
         storage_factory: Callable[..., StorageBackend] = get_storage,
         heartbeat: Callable[[], None] = lambda: None,
+        subagent: Subagent | None = None,
     ):
         self.run = run
         self.attempt = attempt
+        # サブエージェントのSandboxなら、その子。Workspaceは親のコピーから戻し、保存しない（harness.md §10.11）
+        self.subagent = subagent
         self.launcher_factory = launcher_factory
         self.storage_factory = storage_factory
         self.heartbeat = heartbeat
         self.sandbox: Sandbox | None = None
         self.jobs: dict[str, Job] = {}
         # Attemptの作業領域（ジョブの出力）。Sandboxには見せない
-        self.dir = Path(settings.YORIKI_WORKSPACES_DIR) / "attempts" / f"{run.uid}-{attempt.number}"
+        self.dir = Path(settings.YORIKI_WORKSPACES_DIR) / "attempts" / self._name()
         # 戻したCheckpoint。このRunのものなら、その時点までの読んだファイルの版の記録を使える（harness.md §11.1）
         self.restored: Checkpoint | None = None
         # /workspace/input に置いた添付（ArtifactのID）と、/workspace/master に置いたSkillの中身（content_key()）
@@ -250,6 +254,11 @@ class SandboxSession:
     @property
     def started(self) -> bool:
         return self.sandbox is not None
+
+    def _name(self) -> str:
+        if self.subagent is not None:
+            return f"{self.run.uid}-{self.subagent.uid}-{self.attempt.number}"
+        return f"{self.run.uid}-{self.attempt.number}"
 
     # --- 起動と復元 ---
 
@@ -275,7 +284,7 @@ class SandboxSession:
             ExecutionAttempt.objects.filter(pk=self.attempt.pk).update(
                 sandbox_platform=platform, sandbox_image=spec.image
             )
-        name = f"yoriki-sandbox-{self.run.uid}-{self.attempt.number}"
+        name = f"yoriki-sandbox-{self._name()}"
         # イメージのpullで、Attemptのleaseより長くかかることがある
         sandbox = self._keep_lease(lambda: launcher.start(spec, name), on_abandon=Sandbox.remove)
         try:
@@ -302,7 +311,8 @@ class SandboxSession:
         self.master_dir.mkdir(parents=True, exist_ok=True)
         self.master_dir.chmod(0o755)
         run = Run.objects.only("manifest").get(pk=self.run.pk)
-        loaded = loaded_entries(run)
+        subagent = Subagent.objects.get(pk=self.subagent.pk) if self.subagent is not None else None
+        loaded = loaded_entries(run, subagent)
         # 置いたがManifestへ追記しなかった（取り込む前に使えなくなった）Skillの資料は残さない
         for uid in set(self.skill_versions) - {e["skill"] for e in loaded}:
             shutil.rmtree(self.master_dir / "skills" / uid, ignore_errors=True)
@@ -410,19 +420,28 @@ class SandboxSession:
         conversation_id = self.run.conversation_id
         # 保持期限の切れたConnectorの結果は置かない（会話で照会を重ねても、置くものが増え続けないように）
         results = Artifact.objects.connector_results(conversation_id).filter(expires__gt=timezone.now())
+        # サブエージェントが読んだ結果は、その子にだけ置く。親へ返すのはテキストとファイルだけ（harness.md §10.11）
+        visible = Q(subagent__isnull=True)
+        if self.subagent is not None:
+            visible |= Q(subagent=self.subagent)
+        results = results.filter(visible)
+        # サブエージェントが返したファイルは subagents/<子のID>/ の下に置く（harness.md §10.11）
+        returned = Artifact.objects.subagent_results(conversation_id)
         sent = Artifact.objects.sent_inputs(conversation_id)
         if self.run.isolated_workspace:
             # タスクのRunは、このRunの添付（最初の発言と追加指示のもの）とConnectorの結果だけ（修正チャットの
             # 前の実行のものを置かない。harness.md §10.10）
             sent = sent.filter(pk__in=Artifact.objects.filter(messages__run=self.run).values("pk"))
             results = results.filter(run=self.run)
+            returned = returned.filter(run=self.run)
         elif self.run.kind == RunKind.TASK_EDIT:
             # 修正チャットのタスクの編集のRunは、直前のタスクのRunから後のものだけ（タスクのRunごとに名前が重なり
             # うるため。harness.md §10.10）
             runs = self.run.fix_chat_runs()
             sent = sent.filter(pk__in=Artifact.objects.filter(messages__run__in=runs).values("pk"))
             results = results.filter(run__in=runs)
-        inputs = (sent | results).exclude(pk__in=self.inputs).select_related("blob").order_by("pk")
+            returned = returned.filter(run__in=runs)
+        inputs = (sent | results | returned).exclude(pk__in=self.inputs).select_related("blob").order_by("pk")
         self.input_dir.mkdir(parents=True, exist_ok=True)
         # userns-remap・gVisorのSandboxの利用者からも読めるようにする（書けるのはWorkerだけ）
         self.input_dir.chmod(0o755)
@@ -444,8 +463,17 @@ class SandboxSession:
             self.inputs.add(artifact.pk)
 
     def _input_path_ok(self, artifact: Artifact, path: Path) -> bool:
-        """添付は /workspace/input の直下、Connectorの結果は connectors/ の下だけに置く。Connectorの結果の
-        ディレクトリと同じ名前の添付（その名前を避けるようにする前に送ったもの）は置かない"""
+        """添付は /workspace/input の直下、Connectorの結果は connectors/ の下、サブエージェントが返したファイルは
+        subagents/<子のID>/ の下だけに置く。Connectorの結果のディレクトリと同じ名前の添付（その名前を避けるように
+        する前に送ったもの）は置かない"""
+        if artifact.kind == ArtifactKind.SUBAGENT_RESULT:
+            parts = Path(artifact.path).parts
+            return (
+                len(parts) >= 3
+                and parts[0] == SUBAGENT_RESULTS_DIR
+                and all(p not in ("", ".", "..") for p in parts)
+                and self.input_dir in path.parents
+            )
         if artifact.kind == ArtifactKind.CONNECTOR_RESULT:
             parts = Path(artifact.path).parts
             return (
@@ -454,10 +482,14 @@ class SandboxSession:
                 and all(p not in ("", ".", "..") for p in parts)
                 and self.input_dir in path.parents
             )
-        return path.parent == self.input_dir and artifact.path != CONNECTOR_RESULTS_DIR
+        return path.parent == self.input_dir and artifact.path not in (CONNECTOR_RESULTS_DIR, SUBAGENT_RESULTS_DIR)
 
     def _restore(self, sandbox: Sandbox) -> None:
-        """新しい世代から順に、戻せるものから戻す。どれも戻せなければ空のWorkspaceで続ける（design.md §7.9）"""
+        """新しい世代から順に、戻せるものから戻す。どれも戻せなければ空のWorkspaceで続ける（design.md §7.9）。
+        サブエージェントは親のコピーから戻す"""
+        if self.subagent is not None:
+            self._restore_copy(sandbox, self.subagent)
+            return
         checkpoints = list(Checkpoint.restorable_for(self.run))
         for index, checkpoint in enumerate(checkpoints):
             if self._restore_from(sandbox, checkpoint):
@@ -489,6 +521,75 @@ class SandboxSession:
             raise SandboxUnavailable(f"cannot read the snapshot: {exc}") from exc
         self.restored = checkpoint
         return True
+
+    def _restore_copy(self, sandbox: Sandbox, subagent: Subagent) -> None:
+        """親のワークスペースのコピーを展開する。コピーがない（親が何も作っていなかった）なら空のまま。読めなければ
+        SandboxUnavailable（子は再試行しないので、失敗として親へ伝える。harness.md §10.11）"""
+        if not subagent.copy_key:
+            return
+        try:
+            storage = self.storage_factory(subagent.copy_storage)
+            with storage.open_read(subagent.copy_key) as src:
+                self._keep_lease(lambda: sandbox.restore(src))
+        except (LeaseLost, SandboxUnavailable):
+            raise
+        except Exception as exc:
+            raise SandboxUnavailable(f"cannot read the copy of the workspace: {exc}", retryable=False) from exc
+
+    def copy_workspace(self, key: str) -> tuple[StoredObject | None, str, dict[str, str]]:
+        """サブエージェントに渡す、今のワークスペース（work・output）のコピーを保存先へ置く（harness.md §10.11）。
+        Sandboxが動いていればその中からtarを作り（書き込み中のファイルの中身は保証しない）、動いていなければこのRunが戻す
+        最新のsnapshotを写す。どちらもなければ空（None）。保存したもの、保存先、コピーの時点の /workspace/output の
+        ファイルと中身（SHA-256）を返す"""
+        storage = self.storage_factory()
+        self.dir.mkdir(parents=True, exist_ok=True)
+        checkpoint = None if self.sandbox is not None else Checkpoint.latest_for(self.run)
+        if self.sandbox is None and checkpoint is None:
+            return None, storage.backend_id, {}
+        sandbox = self.sandbox
+
+        def save() -> tuple[StoredObject, dict[str, str]]:
+            with tempfile.TemporaryFile(dir=self.dir) as archive:
+                try:
+                    if sandbox is not None:
+                        sandbox.archive(SNAPSHOT_PATHS, archive)
+                    else:
+                        assert checkpoint is not None
+                        with self.storage_factory(checkpoint.storage).open_read(checkpoint.key) as src:
+                            shutil.copyfileobj(src, archive, 1024 * 1024)
+                    archive.seek(0)
+                    stored = storage.put_immutable(key, archive)
+                    archive.seek(0)
+                    return stored, output_hashes(archive)
+                except (OSError, StorageError, tarfile.TarError) as exc:
+                    raise SandboxUnavailable(f"cannot copy the workspace: {exc}") from exc
+
+        stored, baseline = self._keep_lease(save)
+        return stored, storage.backend_id, baseline
+
+    def collect_returned(self, baseline: dict[str, str]) -> tuple[str, list[CollectedOutput]]:
+        """サブエージェントが親へ返すファイルを保存する。動いているものを止め、/workspace/output のうち、コピーの時点
+        （`baseline`）から増えた・変わったものだけ（harness.md §10.11）。Sandboxを起動していなければ何も返さない"""
+        storage = self.storage_factory()
+        if self.sandbox is None:
+            return storage.backend_id, []
+        self._stop_relay()
+        for job in self.running_jobs(refresh=True):
+            self.kill(job, reason="suspended")
+        self.helper("kill", {"all": True, "signal": "KILL"})
+        self.dir.mkdir(parents=True, exist_ok=True)
+        sandbox = self.sandbox
+
+        def save() -> list[CollectedOutput]:
+            with tempfile.TemporaryFile(dir=self.dir) as archive:
+                sandbox.archive(OUTPUT_PATHS, archive)
+                archive.seek(0)
+                try:
+                    return collect_outputs(archive, storage, baseline)
+                except (OSError, StorageError, tarfile.TarError) as exc:
+                    raise SandboxUnavailable(f"cannot save the returned files: {exc}") from exc
+
+        return storage.backend_id, self._keep_lease(save)
 
     def take_notice(self) -> str:
         notice, self.notice = self.notice, ""
@@ -829,10 +930,8 @@ def collect_outputs(
     collected: list[CollectedOutput] = []
     with tarfile.open(fileobj=archive, mode="r:") as tar:
         for member in tar:
-            if not member.isfile() or not member.name.startswith("output/"):
-                continue
-            path = posixpath.normpath(member.name.removeprefix("output/"))
-            if path.startswith(("/", "..")) or any(part.startswith(".") for part in path.split("/")):
+            path = _output_path(member)
+            if path is None:
                 continue
             if len(collected) >= MAX_OUTPUT_FILES:
                 logger.warning("too many files in /workspace/output; collected the first %d", MAX_OUTPUT_FILES)
@@ -850,6 +949,35 @@ def collect_outputs(
             src.seek(0)
             collected.append(CollectedOutput(path, storage.put_immutable(BlobObject.new_key(), src)))
     return collected
+
+
+def output_hashes(archive: IO[bytes]) -> dict[str, str]:
+    """Workspaceのtarの /workspace/output の通常のファイルの、パスごとの中身（SHA-256）。回収の対象と同じものだけ
+    （collect_outputs()）"""
+    hashes: dict[str, str] = {}
+    with tarfile.open(fileobj=archive, mode="r:") as tar:
+        for member in tar:
+            path = _output_path(member)
+            if path is None:
+                continue
+            src = tar.extractfile(member)
+            if src is None:
+                continue
+            digest = hashlib.sha256()
+            while chunk := src.read(1024 * 1024):
+                digest.update(chunk)
+            hashes[path] = digest.hexdigest()
+    return hashes
+
+
+def _output_path(member: tarfile.TarInfo) -> str | None:
+    """回収の対象の /workspace/output のファイルなら、output/ からのパス。symlink・特殊なファイル・隠しファイルはNone"""
+    if not member.isfile() or not member.name.startswith("output/"):
+        return None
+    path = posixpath.normpath(member.name.removeprefix("output/"))
+    if path.startswith(("/", "..")) or any(part.startswith(".") for part in path.split("/")):
+        return None
+    return path
 
 
 def database_label() -> str:

@@ -83,6 +83,7 @@ export const RunEventKind = {
   ASSISTANT_MESSAGE: 11,
   TOOL_RESULT: 21,
   JOB_FINISHED: 22,
+  SUBAGENT_FINISHED: 23,
   COMPACTION: 32,
   MODEL_SWITCHED: 40,
   LLM_RETRY: 60,
@@ -92,6 +93,7 @@ export const RunEventKind = {
 // 確認への回答は、Run の状態の変更の説明（run.status の comment）に出る
 export const NOTABLE_EVENT_KINDS: RunEventKindEnum[] = [
   RunEventKind.JOB_FINISHED,
+  RunEventKind.SUBAGENT_FINISHED,
   RunEventKind.COMPACTION,
   RunEventKind.MODEL_SWITCHED,
   RunEventKind.LLM_RETRY,

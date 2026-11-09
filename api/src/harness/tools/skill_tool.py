@@ -3,7 +3,7 @@
 
 from typing import Any
 
-from run.models import RunEvent, RunEventKind
+from run.models import RunEvent, RunEventKind, Subagent
 from skill.models import Skill, SkillVersion
 
 from .. import tasks
@@ -41,7 +41,7 @@ PARAMETERS = {
 def execute(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
     run = context.run
     skills = skill_catalog(run).get("skills", [])
-    loaded_here = loaded_entries(run)
+    loaded_here = loaded_entries(run, _current(context.subagent))
     uid = next((e["skill"] for e in loaded_here if e["name"] == arguments["name"]), None)
     uid = uid or next((e["skill"] for e in skills if e["name"] == arguments["name"]), None)
     uid = uid or unlisted_skill(run, arguments["name"])
@@ -67,11 +67,21 @@ def execute(arguments: dict[str, Any], context: ToolContext) -> ToolResult:
         context.session.place_skill_assets(skill, version)
     value = manifest_entry(skill, version, arguments["name"])
     with run.fenced(context.attempt) as current:
-        current.append_manifest("skill", value)
-        current.save(update_fields=["manifest", "updated"])
-        RunEvent.record(current, RunEventKind.SKILL_LOADED, value, comment=skill.name)
-        run.manifest = current.manifest
+        if context.subagent is not None:
+            # 子が読み込んだものは子にだけ足す。親や別の子の読込みにしない（harness.md §10.11）
+            subagent = Subagent.objects.select_for_update().get(pk=context.subagent.pk)
+            subagent.skills = [*subagent.skills, value]
+            subagent.save(update_fields=["skills"])
+        else:
+            current.append_manifest("skill", value)
+            current.save(update_fields=["manifest", "updated"])
+            run.manifest = current.manifest
+        RunEvent.record(current, RunEventKind.SKILL_LOADED, value, comment=skill.name, subagent=context.subagent)
     return _loaded(skill, version, arguments["name"], context)
+
+
+def _current(subagent: Subagent | None) -> Subagent | None:
+    return Subagent.objects.get(pk=subagent.pk) if subagent is not None else None
 
 
 def _problem(run, skill: Skill) -> str:

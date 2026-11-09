@@ -186,12 +186,19 @@ def post_message(
     if question is not None and run.status == RunStatus.WAITING_USER and not skill_edit:
         _answer_question(question, message, actor, chosen=bool(skills or connectors))
         return message
-    # 停止中の発言は親が読まないので、終わった後の新しいRunで始める
-    kind = InstructionKind.NEXT if run.status == RunStatus.CANCELLING or skill_edit else InstructionKind.CURRENT
+    _instruct(conversation, message, run, next_request=run.status == RunStatus.CANCELLING or bool(skill_edit))
+    return message
+
+
+def _instruct(conversation: Conversation, message: ConversationMessage, run: Run, *, next_request: bool) -> None:
+    """動いているRunへの発言を受け付ける。停止中の発言とSkillの編集の依頼は親が読まないので、終わった後の新しいRunで
+    始める（`next_request`）。サブエージェントだけを待ってWorkerを手放した親は、発言で起こす（design.md §5.3）"""
+    kind = InstructionKind.NEXT if next_request else InstructionKind.CURRENT
     UserInstruction.objects.create(
         conversation=conversation, message=message, run=run if kind == InstructionKind.CURRENT else None, kind=kind
     )
-    return message
+    if kind == InstructionKind.CURRENT:
+        Run.locked(run.pk).wake_for_background()
 
 
 def _answer_question(question: ClarificationRequest, message: ConversationMessage, actor, *, chosen: bool) -> None:

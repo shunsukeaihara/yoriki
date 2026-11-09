@@ -98,6 +98,8 @@ def test_reply_completes_the_run(conversation):
         "shell",
         "job_output",
         "job_kill",
+        "subagent",
+        "subagent_kill",
     }
 
 

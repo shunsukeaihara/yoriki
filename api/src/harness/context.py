@@ -160,7 +160,8 @@ def _ancestor_items(run: Run, key: dict[str, str]) -> list[Item]:
     parent = run.parent
     if parent is None:
         return []
-    events = list(RunEvent.objects.filter(run=parent).order_by("sequence"))
+    # サブエージェントの記録は親の文脈に入れない（harness.md §10.11）
+    events = list(RunEvent.objects.filter(run=parent, subagent__isnull=True).order_by("sequence"))
     # 親が引き継いだ部分をまるごと圧縮していれば、さらに前は読まなくてよい
     covered = any(e.kind == RunEventKind.COMPACTION and e.data["from"] <= INHERITED_SEQUENCE for e in events)
     above = [] if covered else [replace(i, sequence=INHERITED_SEQUENCE) for i in _ancestor_items(parent, key)]
@@ -207,7 +208,7 @@ def _build(key: dict[str, str], events: Iterable[RunEvent], items: list[Item]) -
                     text = f"{text}\n\n{attachments_text(data['earlier_attachments'], earlier=True)}".strip()
                 quotes = (data["text"],) if data["text"].strip() else ()
                 items.append(Item(event.sequence, event.kind, Message("user", text), quotes))
-            case RunEventKind.CONTEXT | RunEventKind.JOB_FINISHED:
+            case RunEventKind.CONTEXT | RunEventKind.JOB_FINISHED | RunEventKind.SUBAGENT_FINISHED:
                 items.append(Item(event.sequence, event.kind, Message("user", data["text"])))
             case RunEventKind.ASSISTANT_MESSAGE:
                 calls = tuple(ToolCall(c["id"], c["name"], c["arguments"]) for c in data.get("tool_calls", []))

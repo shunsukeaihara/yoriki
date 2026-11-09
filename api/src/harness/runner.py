@@ -65,6 +65,7 @@ from run.models import (
     RunPrompt,
     RunStatus,
     RunTrigger,
+    Subagent,
     ToolInvocation,
     ToolStatus,
 )
@@ -74,7 +75,7 @@ from skill.models import SkillEvaluation
 from stream.notifier import notify_delta
 from usage.models import UsageLedger, UsagePurpose
 
-from . import compaction, tasks
+from . import compaction, subagents, tasks
 from .catalogs import rebuild_catalogs, refreshes_catalogs
 from .context import (
     ADDITIONAL_INSTRUCTION_PREFIX,
@@ -105,6 +106,7 @@ from .tools.request_skill_edit import REQUEST_SKILL_EDIT
 from .tools.request_task_edit import REQUEST_TASK_EDIT
 from .tools.skill_admin import CREATE_SKILL, SKILL_ADMIN_TOOLS
 from .tools.skill_tool import SKILL
+from .tools.subagent import SUBAGENT_TOOLS
 from .tools.submit_result import NAME as SUBMIT_RESULT
 from .tools.submit_result import make_submit_result_tool, original_schema
 from .tools.task_admin import TASK_ADMIN_TOOLS
@@ -156,9 +158,10 @@ SAME_ERROR_NOTICE = (
     "\n\n[Repeating the same call will not fix this error. Correct the arguments or change the approach.]"
 )
 RUNNING_JOBS_NOTICE = (
-    "Background jobs are still running: {jobs}. This work must not finish while they run, and submit_result is "
-    "rejected until they end. Decide whether you still need them: stop them with job_kill if not. If you reply "
-    "without stopping them, the work waits for them and you are called again when one finishes."
+    "Background jobs or subagents are still running: {jobs}. This work must not finish while they run, and "
+    "submit_result is rejected until they end. Decide whether you still need them: stop them with job_kill or "
+    "subagent_kill if not. If you reply without stopping them, the work waits for them and you are called again when "
+    "one finishes."
 )
 RESULT_REQUIRED_NOTICE = (
     "This work must end with submit_result. Check the result, call submit_result with it, and then write your final "
@@ -210,7 +213,10 @@ class Runner:
         ).get(pk=attempt.run_id)
         self.adapter_factory = adapter_factory
         self.sleep = sleep
-        self.session = session_factory(self.run_obj, attempt, heartbeat=attempt.heartbeat)
+        # サブエージェントのAttemptなら、その子（SubagentRunner）。記録はすべて子のものにする（harness.md §10.11）
+        self.subagent: Subagent | None = attempt.subagent
+        extra = {"subagent": self.subagent} if self.subagent is not None else {}
+        self.session = session_factory(self.run_obj, attempt, heartbeat=attempt.heartbeat, **extra)
         # 今実行しているToolの呼出しのID（Runnerのスレッドのもの）。スクリプトからの呼出しの記録に添える
         self.current_call_id = ""
         self.owner_thread = threading.get_ident()
@@ -272,10 +278,11 @@ class Runner:
 
     def _record(self, kind: RunEventKind, data: dict[str, Any], comment: str = "") -> RunEvent:
         with self.run_obj.fenced(self.attempt) as run:
-            return RunEvent.record(run, kind, data, comment=comment)
+            return RunEvent.record(run, kind, data, comment=comment, subagent=self.subagent)
 
     def _events(self) -> list[RunEvent]:
-        return list(RunEvent.objects.filter(run=self.run_obj).order_by("sequence"))
+        """このRunner（親か子）の記録だけ。子の文脈は親のものと混ぜない（harness.md §5.6・§10.11）"""
+        return list(RunEvent.objects.filter(run=self.run_obj, subagent=self.subagent).order_by("sequence"))
 
     def _refresh(self) -> Run:
         run = Run.objects.select_related("owner", "model_version__connection", "model_version__profile").get(
@@ -306,7 +313,10 @@ class Runner:
         # スクリプトはもうないので、結果不明として閉じる
         with self.run_obj.fenced(self.attempt) as run:
             ToolInvocation.objects.filter(
-                run=run, call_id__startswith=SCRIPT_CALL_PREFIX, status__in=(ToolStatus.REQUESTED, ToolStatus.RUNNING)
+                run=run,
+                subagent=self.subagent,
+                call_id__startswith=SCRIPT_CALL_PREFIX,
+                status__in=(ToolStatus.REQUESTED, ToolStatus.RUNNING),
             ).exclude(attempt=self.attempt).update(status=ToolStatus.UNKNOWN, ended=timezone.now())
         # 実行中のRunに回答待ちの確認が残っていれば、前のAttemptが待ちに移る前に止まったもの。答えられないので閉じる
         ClarificationRequest.objects.filter(
@@ -348,7 +358,11 @@ class Runner:
 
     def _out_of_memory_notice(self) -> None:
         """前のAttemptのSandboxがメモリの上限を超えて止まったなら、モデルに知らせる（同じことを繰り返させない）"""
-        previous = self.run_obj.attempts.filter(number__lt=self.attempt.number).order_by("-number").first()
+        previous = (
+            self.run_obj.attempts.filter(subagent__isnull=True, number__lt=self.attempt.number)
+            .order_by("-number")
+            .first()
+        )
         version = self.run_obj.runtime_version
         if previous is None or version is None or not previous.failure.startswith(OUT_OF_MEMORY_FAILURE):
             return
@@ -453,6 +467,7 @@ class Runner:
             RunEvent.objects.filter(
                 run__conversation_id=self.run_obj.conversation_id,
                 run_id__gte=restored.run_id,
+                subagent__isnull=True,
                 kind=RunEventKind.TOOL_RESULT,
             )
             .exclude(run_id=restored.run_id, sequence__lte=restored.sequence)
@@ -476,7 +491,7 @@ class Runner:
         if run.step_count == MAX_STEPS - 1 and self._result_missing():
             # 上限の前に1回だけ、今ある結果で業務結果を確定する猶予を与える（harness.md §4.4）
             self._record(RunEventKind.CONTEXT, {"text": RESULT_GRACE_NOTICE})
-        system = system_prompt(self.tools)
+        system = self._system_prompt()
         prompt = RunPrompt.store(system, [self._tool_json(t) for t in self.tools])
         events = self._events()
         self._record_header(prompt, events)
@@ -495,11 +510,19 @@ class Runner:
             return self._handle_reply(result)
         return self._execute_calls(result.calls)
 
+    def _system_prompt(self) -> str:
+        return system_prompt(self.tools)
+
     def _finish_at_step_limit(self, text: str) -> bool:
         """ステップ数の上限の最後のまとめの応答で終える。業務結果を確定していて、ジョブの結果もすべて親が見ていれば完了に
         する（その間に追加の指示が届いていれば、取り込んで続ける）。ジョブが残っているか、結果を見ていないジョブがあれば、
         もう親を起こせないので上限の失敗にする（design.md §5.3）"""
-        jobs_left = self._running_jobs() or (self.session.started and self.session.finished_unreported())
+        jobs_left = (
+            self._running_jobs()
+            or (self.session.started and self.session.finished_unreported())
+            or self._live_subagents()
+            or subagents.unreported(self.run_obj)
+        )
         if any(t.name == SUBMIT_RESULT for t in self.tools) and not self._result_missing() and not jobs_left:
             return self._finish_with_reply(text, RunStatus.COMPLETED, RunEndReason.COMPLETED)
         self._finish_with_reply(text, RunStatus.FAILED, RunEndReason.STEP_LIMIT)
@@ -543,6 +566,7 @@ class Runner:
             return False
         self._apply_instructions()
         self._record_finished_jobs()
+        self._record_finished_subagents()
         if self._attempt_over():
             self._move_to_new_attempt()
             return False
@@ -591,6 +615,17 @@ class Runner:
                 {"job_id": job.job_id, "exit_code": job.exit_code, "stopped": job.stopped, "text": text},
                 comment=_job_comment(job.description, job.stopped, job.exit_code),
             )
+
+    def _record_finished_subagents(self) -> None:
+        """終わったサブエージェントを subagent.finished として記録し、親に知らせる（harness.md §10.11）。
+        返したファイルを先に /workspace/input/subagents/ へ置く"""
+        if not subagents.unreported(self.run_obj):
+            return
+        if self.session.started:
+            self.session.sync_inputs()
+        with self.run_obj.fenced(self.attempt) as run:
+            for subagent in subagents.unreported(run):
+                subagents.record_finished(run, subagent)
 
     def _apply_instructions(self) -> bool:
         """届いている発言を、受付順に取り込む。指定したSkill・Connectorは今の権限で確かめ直す（資料はSandboxの外から
@@ -735,6 +770,10 @@ class Runner:
             )
         if PREPARE_NOTIFICATION in tools and self._notification_closed():
             tools = tuple(t for t in tools if t is not PREPARE_NOTIFICATION)
+        if self.run_obj.runtime_version_id is not None:
+            # サブエージェントは親のワークスペースのコピーの上で動くので、Sandboxを使えるRunにだけ出す
+            # （harness.md §7.4）
+            tools += SUBAGENT_TOOLS
         return tools
 
     def _notification_closed(self) -> bool:
@@ -843,9 +882,10 @@ class Runner:
                         response.usage = event
                     case Completed():
                         response.completed = event
+                self._check_streaming()
                 now = time.monotonic()
                 if pending and now - last_flush >= DELTA_INTERVAL:
-                    notify_delta(self.run_obj.uid, step, pending)
+                    self._notify_delta(step, pending)
                     pending, last_flush = "", now
                 if now - last_beat >= HEARTBEAT_INTERVAL:
                     self.attempt.heartbeat()
@@ -856,8 +896,14 @@ class Runner:
                 self._record(RunEventKind.ASSISTANT_ATTEMPT, {"step": step, "text": response.text})
             raise
         if pending:
-            notify_delta(self.run_obj.uid, step, pending)
+            self._notify_delta(step, pending)
         return response
+
+    def _check_streaming(self) -> None:
+        """応答を受け取る間の確認（サブエージェントの実行時間の上限。SubagentRunner）"""
+
+    def _notify_delta(self, step: int, text: str) -> None:
+        notify_delta(self.run_obj.uid, step, text)
 
     def _wait(self, seconds: float) -> None:
         remaining = seconds
@@ -898,16 +944,21 @@ class Runner:
             "images_sent": images_sent,
         }
         with self.run_obj.fenced(self.attempt) as run:
-            RunEvent.record(run, RunEventKind.ASSISTANT_MESSAGE, data)
-            Run.objects.filter(pk=run.pk).update(step_count=run.step_count + 1, updated=timezone.now())
-            self.run_obj.step_count = run.step_count + 1
+            RunEvent.record(run, RunEventKind.ASSISTANT_MESSAGE, data, subagent=self.subagent)
+            self._count_step(run)
             UsageLedger.record(
                 run=run,
                 model_version=self.run_obj.model_version,
                 purpose=purpose,
                 usage=usage,
                 request_id=completed.request_id,
+                subagent=self.subagent,
             )
+
+    def _count_step(self, run: Run) -> None:
+        """ステップ数はRun全体で数える（harness.md §4.4）。fenced() の中で呼ぶ"""
+        Run.objects.filter(pk=run.pk).update(step_count=run.step_count + 1, updated=timezone.now())
+        self.run_obj.step_count = run.step_count + 1
 
     # --- 最後の応答 ---
 
@@ -918,7 +969,8 @@ class Runner:
         if not response.text.strip():
             return self._nudge("Your previous response was empty. Call a tool or write your reply to the user.")
         running = self._running_jobs()
-        if running or (self.session.started and self.session.finished_unreported()):
+        jobs_unreported = self.session.started and self.session.finished_unreported()
+        if running or jobs_unreported or self._live_subagents() or subagents.unreported(self.run_obj):
             return self._reply_with_jobs(response.text, running)
         if self._result_missing():
             # 業務結果のSchemaがあるのに submit_result を呼ばなかった。1回だけ促す（harness.md §10.5）。
@@ -940,26 +992,50 @@ class Runner:
     def _running_jobs(self) -> list[Job]:
         return self.session.running_jobs(refresh=True) if self.session.started else []
 
+    def _live_subagents(self) -> list[Subagent]:
+        return list(Subagent.objects.filter(run=self.run_obj, status__in=subagents.LIVE_SUBAGENT_STATUSES))
+
     def _reply_with_jobs(self, text: str, running: list[Job]) -> bool:
-        """親は動き終えたが、ジョブが残っているか、応答を待つ間に終わったジョブをまだ見ていない。応答を会話に載せ、
-        終わったジョブは次の区切りで知らせ（最後の確定は親が結果を見た後。design.md §5.3）、動いていれば
-        Workerを手放さずに待つ。タスクの実行は、終わる時点でジョブが残らない前提なので、待つか止めるかを1回だけ
-        決めさせる（harness.md §8.3）"""
-        if not running:
+        """親は動き終えたが、ジョブかサブエージェントが残っているか、応答を待つ間に終わったものをまだ見ていない。応答を
+        会話に載せ、終わったものは次の区切りで知らせ（最後の確定は親が結果を見た後。design.md §5.3）、ジョブが動いて
+        いればWorkerを手放さずに待ち、サブエージェントだけならWorkerを手放して待つ。タスクの実行は、終わる時点で
+        ジョブとサブエージェントが残らない前提なので、待つか止めるかを1回だけ決めさせる（harness.md §8.3）"""
+        live = self._live_subagents()
+        if not running and not live:
             with self.run_obj.fenced(self.attempt) as run:
                 self._post_reply(run, text)
             return True
         if self.run_obj.trigger != RunTrigger.CONVERSATION and not self.warned_running_jobs:
             self.warned_running_jobs = True
-            jobs = ", ".join(f"{j.job_id} ({j.description})" for j in running)
-            self._record(RunEventKind.CONTEXT, {"text": RUNNING_JOBS_NOTICE.format(jobs=jobs)})
+            items = [f"{j.job_id} ({j.description})" for j in running]
+            items += [f"subagent {s.uid} ({s.description})" for s in live]
+            self._record(RunEventKind.CONTEXT, {"text": RUNNING_JOBS_NOTICE.format(jobs=", ".join(items))})
             return True
         with self.run_obj.fenced(self.attempt) as run:
             self._post_reply(run, text)
-            if run.status != RunStatus.RUNNING or self._instructed(run):
+            if run.status != RunStatus.RUNNING or self._instructed(run) or subagents.unreported(run):
+                return True
+            if running:
+                run.set_status(RunStatus.WAITING_BACKGROUND, comment=_("裏で動いている作業を待っています。"))
+                self.holding = True
+                return False
+        return self._release_for_subagents()
+
+    def _release_for_subagents(self) -> bool:
+        """サブエージェントだけを待つ。保存してWorkerを手放し、子が終わったら新しいAttemptで親を起こす（design.md
+        §5.3）。答える人がいないRunでも、続きから動けるよう保存する（design.md §7.9）。保存の間に子が終わった・発言が
+        届いた・子がいなくなったなら、手放さずに続ける（True）"""
+        self._checkpoint(snapshot=True)
+        with self.run_obj.fenced(self.attempt) as run:
+            if (
+                run.status != RunStatus.RUNNING
+                or self._instructed(run)
+                or subagents.unreported(run)
+                or not subagents.live_count(run)
+            ):
                 return True
             run.set_status(RunStatus.WAITING_BACKGROUND, comment=_("裏で動いている作業を待っています。"))
-        self.holding = True
+            self.attempt.end()
         return False
 
     def _watch(self) -> bool:
@@ -995,6 +1071,8 @@ class Runner:
     def _should_wake(self, run: Run, beat: bool) -> bool:
         """裏の作業を待つRunで、親を起こすか。続けられなくなったときと上限も、次の区切りで扱うので起こす"""
         if self._instructed(run) or self._attempt_over() or (beat and self._revoked()):
+            return True
+        if subagents.unreported(run):
             return True
         return bool(self.session.finished_unreported()) or not self._running_jobs()
 
@@ -1106,18 +1184,24 @@ class Runner:
         # 停止を優先する。Workspaceを保存できなくても止める（design.md §7.9）
         self._checkpoint(required=False)
         with self.run_obj.fenced(self.attempt) as run:
-            ToolInvocation.objects.filter(run=run, status__in=(ToolStatus.REQUESTED, ToolStatus.RUNNING)).update(
-                status=ToolStatus.CANCELLED, ended=timezone.now()
-            )
+            ToolInvocation.objects.filter(
+                run=run, subagent__isnull=True, status__in=(ToolStatus.REQUESTED, ToolStatus.RUNNING)
+            ).update(status=ToolStatus.CANCELLED, ended=timezone.now())
             self._record_jobs_at_end(run)
-            run.set_status(RunStatus.CANCELLED, comment=_("停止しました。"), end_reason=RunEndReason.CANCELLED)
+            self._end_cancelled(run)
+
+    def _end_cancelled(self, run: Run) -> None:
+        """停止中のRunで、親が止まった。サブエージェントが動いていれば、全部止まったことを確かめてから停止済みにする
+        （最後に止まった子が移す。design.md §5.3）"""
+        self.attempt.end()
+        run.settle_cancelling()
 
     def _fail(self, end_reason: RunEndReason, message: str) -> None:
         self._checkpoint(required=False)
         with self.run_obj.fenced(self.attempt) as run:
             self._record_jobs_at_end(run)
             if run.status == RunStatus.CANCELLING:
-                run.set_status(RunStatus.CANCELLED, end_reason=RunEndReason.CANCELLED)
+                self._end_cancelled(run)
             else:
                 run.set_status(RunStatus.FAILED, end_reason=end_reason, error=message)
 
@@ -1174,9 +1258,11 @@ class Runner:
             if run.status == RunStatus.WAITING_USER:
                 return  # 確認を残す。回答が来たら最後の保存から始め、失われたものを知らせる（design.md §5.3）
             if run.status == RunStatus.CANCELLING:
-                run.set_status(RunStatus.CANCELLED, comment=_("停止しました。"), end_reason=RunEndReason.CANCELLED)
+                run.settle_cancelling()
                 return
-            failures = run.attempts.exclude(failure="").exclude(failure="superseded").count()
+            failures = (
+                run.attempts.filter(subagent__isnull=True).exclude(failure="").exclude(failure="superseded").count()
+            )
             if failures >= MAX_ATTEMPTS:
                 if out_of_memory:
                     error_text = _("コマンドがメモリの上限を超えて、コマンドを動かす環境が繰り返し止まりました。")
@@ -1193,7 +1279,9 @@ class Runner:
         このAttemptの記録と、戻したCheckpoint（このRunのもの）の時点までの記録"""
         restored = self.session.restored
         limit = restored.sequence if restored is not None and restored.run_id == self.run_obj.pk else 0
-        results = RunEvent.objects.filter(run=self.run_obj, kind=RunEventKind.TOOL_RESULT).order_by("-sequence")
+        results = RunEvent.objects.filter(
+            run=self.run_obj, subagent=self.subagent, kind=RunEventKind.TOOL_RESULT
+        ).order_by("-sequence")
         for sequence, data in results.values_list("sequence", "data").iterator():
             if limit < sequence <= self.start_sequence:
                 continue
@@ -1334,6 +1422,7 @@ class Runner:
         with self.run_obj.fenced(self.attempt) as run:
             invocation, _created = ToolInvocation.objects.update_or_create(
                 run=run,
+                subagent=self.subagent,
                 call_id=call.id,
                 defaults={
                     "attempt": self.attempt,
@@ -1355,6 +1444,7 @@ class Runner:
             file_version=self._file_version,
             interrupted=self._interrupted,
             exposed=frozenset(t.name for t in self.tools),
+            subagent=self.subagent,
         )
         owner = threading.get_ident() == self.owner_thread
         if owner:
@@ -1429,13 +1519,15 @@ class Runner:
             "meta": result.meta,
         }
         with self.run_obj.fenced(self.attempt) as run:
-            RunEvent.record(run, RunEventKind.TOOL_RESULT, data)
+            RunEvent.record(run, RunEventKind.TOOL_RESULT, data, subagent=self.subagent)
             if invocation is not None:
                 ToolInvocation.objects.filter(pk=invocation.pk).update(
                     status=status, value=result.value, ended=timezone.now()
                 )
             elif status == ToolStatus.UNKNOWN:
-                ToolInvocation.objects.filter(run=run, call_id=call_id).update(status=status, ended=timezone.now())
+                ToolInvocation.objects.filter(run=run, subagent=self.subagent, call_id=call_id).update(
+                    status=status, ended=timezone.now()
+                )
 
     def _close_calls(self, calls: list[ToolCall], text: str) -> None:
         for call in calls:
@@ -1445,7 +1537,7 @@ class Runner:
         """ask_user・request_skill_edit・request_task_edit・test_skill_draft の結果は記録せずにWAITING_USERにする。
         ジョブが動いていれば同じAttemptで見張り、動いていなければAttemptを終える（harness.md §10.3・§10.9・§10.10）"""
         self._close_calls(rest, "Not executed: waiting for the user's answer. Call again after the answer if needed.")
-        invocation = ToolInvocation.objects.get(run=self.run_obj, call_id=call.id)
+        invocation = ToolInvocation.objects.get(run=self.run_obj, subagent__isnull=True, call_id=call.id)
         holding = self._prepare_to_wait_for_user()
         with self.run_obj.fenced(self.attempt) as run:
             # 確認の作成とWAITING_USERへの遷移を同じtransactionで行う。途中でleaseを失っても、
@@ -1513,6 +1605,7 @@ class Runner:
                     # 次の圧縮で、この原文の引用を引き継ぐ
                     "quotes": chosen.user_texts,
                 },
+                subagent=self.subagent,
             )
             UsageLedger.record(
                 run=run,
@@ -1520,6 +1613,7 @@ class Runner:
                 purpose=UsagePurpose.COMPACTION,
                 usage=response.usage or Usage(0, 0),
                 request_id=response.completed.request_id if response.completed else "",
+                subagent=self.subagent,
             )
         return True
 

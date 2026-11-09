@@ -2433,9 +2433,10 @@ export interface components {
          * @description * `1` - 添付
          *     * `2` - 成果物
          *     * `3` - Connectorの結果
+         *     * `4` - サブエージェントの結果
          * @enum {integer}
          */
-        ArtifactKindEnum: 1 | 2 | 3;
+        ArtifactKindEnum: 1 | 2 | 3 | 4;
         /**
          * @description 会話の添付と成果物。添付は `file` を送って作る（multipart/form-data）。メッセージに付けて送るまでは、
          *     一覧に出ない
@@ -4864,6 +4865,7 @@ export interface components {
             env_mb?: number;
             command_timeout_seconds?: number;
             job_timeout_seconds?: number;
+            subagent_timeout_seconds?: number;
             change_reason?: string;
         };
         /** @description SSOの設定の更新。種別は変えられないので、読み取り専用にする */
@@ -5099,10 +5101,11 @@ export interface components {
          *     * `50` - 確認の質問
          *     * `51` - 確認への回答
          *     * `60` - モデルの再試行
+         *     * `23` - サブエージェントの終了
          *     * `90` - 実行の終了
          * @enum {integer}
          */
-        RunEventKindEnum: 1 | 10 | 11 | 12 | 21 | 22 | 30 | 31 | 32 | 40 | 41 | 50 | 51 | 60 | 90;
+        RunEventKindEnum: 1 | 10 | 11 | 12 | 21 | 22 | 30 | 31 | 32 | 40 | 41 | 50 | 51 | 60 | 23 | 90;
         /**
          * @description * `1` - 業務
          *     * `2` - Skillの編集
@@ -5299,6 +5302,7 @@ export interface components {
             env_mb?: number;
             command_timeout_seconds?: number;
             job_timeout_seconds?: number;
+            subagent_timeout_seconds?: number;
             readonly created_by: string;
             /** Format: date-time */
             readonly created: string;
@@ -5330,6 +5334,7 @@ export interface components {
             env_mb?: number;
             command_timeout_seconds?: number;
             job_timeout_seconds?: number;
+            subagent_timeout_seconds?: number;
             change_reason?: string;
         };
         RuntimeProfileVersion: {
@@ -5370,6 +5375,8 @@ export interface components {
             readonly command_timeout_seconds: number;
             /** ジョブの実行時間の上限（秒） */
             readonly job_timeout_seconds: number;
+            /** サブエージェントの実行時間の上限（秒） */
+            readonly subagent_timeout_seconds: number;
             /** 変更理由 */
             readonly change_reason: string;
             readonly created_by: string;
@@ -6990,8 +6997,9 @@ export interface operations {
                  * @description * `1` - 添付
                  *     * `2` - 成果物
                  *     * `3` - Connectorの結果
+                 *     * `4` - サブエージェントの結果
                  */
-                kind?: 1 | 2 | 3;
+                kind?: 1 | 2 | 3 | 4;
                 /** @description Which field to use when ordering the results. */
                 ordering?: string;
                 /** @description Number of results to return per page. */
@@ -7558,8 +7566,9 @@ export interface operations {
                  * @description * `1` - 添付
                  *     * `2` - 成果物
                  *     * `3` - Connectorの結果
+                 *     * `4` - サブエージェントの結果
                  */
-                kind?: 1 | 2 | 3;
+                kind?: 1 | 2 | 3 | 4;
                 /** @description Which field to use when ordering the results. */
                 ordering?: string;
                 /** @description Number of results to return per page. */

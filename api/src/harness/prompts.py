@@ -111,7 +111,8 @@ SCRIPT_CONNECTORS = (
 )
 
 
-def system_prompt(tools: tuple[Tool, ...]) -> str:
+def system_prompt(tools: tuple[Tool, ...], *, template_name: str = "system.md") -> str:
+    """`template_name` は、サブエージェントでは subagent.md（harness.md §10.11）"""
     sections = dict(TOOL_GUIDANCE)
     names = {t.name for t in tools}
     if "prepare_notification" in names:
@@ -120,5 +121,5 @@ def system_prompt(tools: tuple[Tool, ...]) -> str:
         sections["datasource_query"] += "\n" + SCRIPT_CONNECTORS
     lines = [sections[t.name] for t in tools if t.name in sections]
     guidance = ("# Tools\n- Call independent tools together in one response.\n" + "\n".join(lines)) if lines else ""
-    template = (PROMPT_DIR / "system.md").read_text()
+    template = (PROMPT_DIR / template_name).read_text()
     return template.replace("{tool_guidance}", guidance).strip()

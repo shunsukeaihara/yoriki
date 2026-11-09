@@ -327,7 +327,9 @@ def run_query(arguments: dict[str, Any], context: ToolContext, *, keep: int) -> 
         out.detach()
     path = f"{CONNECTOR_RESULTS_DIR}/{context.invocation or context.call.id}/result.csv"
     with context.run.fenced(context.attempt):
-        artifact = Artifact.create_connector_result(context.run, path, f"{connector.name}.csv", blob)
+        artifact = Artifact.create_connector_result(
+            context.run, path, f"{connector.name}.csv", blob, subagent=context.subagent
+        )
     if context.session is not None and context.session.started:
         # 動いているSandboxの /workspace/input にも置く（bind mountなので、そのまま見える）
         context.session.sync_inputs()

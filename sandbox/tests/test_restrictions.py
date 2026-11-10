@@ -113,13 +113,14 @@ def test_document_macros_do_not_run(sandbox):
         f"mkdir -p {profile}/user && cat > {profile}/user/registrymodifications.xcu <<'XML'\n{LOW_MACRO_SECURITY}XML\n"
         f"cat > macro.fodt <<'XML'\n{MACRO_DOCUMENT}XML"
     )
-    # 開くだけ（変換しない）だとLibreOfficeは終わらないので、時間で切る
-    sandbox.exec(
-        f"timeout 20 soffice -env:UserInstallation=file://{profile} --headless --norestore macro.fodt;"
-        " pkill -f soffice.bin; true",
-        timeout=60,
+    # 開くだけ（変換しない）だとLibreOfficeは終わらないので、時間で切る。timeout が止めるのは起動の
+    # oosplash だけで、子の soffice.bin は残るので、出力を開いたままにしないようにして、名前で止める
+    opened = sandbox.exec(
+        f"timeout -k 5 20 soffice -env:UserInstallation=file://{profile} --headless --norestore macro.fodt"
+        " </dev/null >/dev/null 2>&1; pkill -9 -x soffice.bin; pkill -9 -x oosplash; sleep 1; ps -eo pid,comm",
+        timeout=90,
     )
-    assert sandbox.exec("test -e macro-ran").exit_code != 0
+    assert sandbox.exec("test -e macro-ran").exit_code != 0, opened.output
 
 
 def test_docker_socket_is_not_visible(sandbox):

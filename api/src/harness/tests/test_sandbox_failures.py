@@ -14,6 +14,7 @@ from conversation.dispatch import post_message
 from conversation.factories import ConversationFactory
 from harness.runner import Runner
 from harness.sandbox import (
+    WORKSPACE_DISCARDED,
     WORKSPACE_LOST,
     WORKSPACE_ROLLED_BACK,
     Job,
@@ -507,6 +508,76 @@ def test_snapshot_of_a_finished_task_run_is_discarded(conversation, django_captu
         run.set_status(RunStatus.CANCELLED)
     assert not Checkpoint.objects.filter(run=run).exists()
     assert not get_storage().exists(stored.key)
+
+
+def test_closed_conversation_discards_its_snapshots_after_the_runs_stop(
+    conversation, django_capture_on_commit_callbacks
+):
+    """アーカイブ・削除では、動いているRunが止まってから、その前に始めたRunのsnapshotを消す（design.md §8）"""
+    run = post(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    checkpoint = _checkpoint(run, attempt, 1, b"tar")
+
+    with django_capture_on_commit_callbacks(execute=True):
+        conversation.close(delete=False, actor=conversation.owner)
+    run.refresh_from_db()
+    assert run.status == RunStatus.CANCELLING
+    # まだ止まっていないので残す。戻すものからは外す
+    assert Checkpoint.objects.filter(pk=checkpoint.pk).exists()
+    assert Checkpoint.latest_for(run) is None
+
+    with django_capture_on_commit_callbacks(execute=True):
+        run.set_status(RunStatus.CANCELLED)
+    assert not Checkpoint.objects.filter(pk=checkpoint.pk).exists()
+    assert not get_storage().exists(checkpoint.key)
+
+
+def test_conversation_without_active_runs_discards_its_snapshots_at_once(
+    conversation, django_capture_on_commit_callbacks
+):
+    run = post(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    checkpoint = _checkpoint(run, attempt, 1, b"tar")
+    Run.objects.filter(pk=run.pk).update(status=RunStatus.COMPLETED)
+
+    with django_capture_on_commit_callbacks(execute=True):
+        conversation.close(delete=True, actor=conversation.owner)
+    assert not Checkpoint.objects.filter(pk=checkpoint.pk).exists()
+
+
+def test_restored_conversation_starts_with_an_empty_workspace(
+    conversation, settings, tmp_path, monkeypatch, django_capture_on_commit_callbacks
+):
+    """アーカイブを解除した会話の次の依頼は、消せずに残ったsnapshotがあっても戻さず、空から始めることを伝える"""
+    settings.YORIKI_WORKSPACES_DIR = str(tmp_path)
+    run = post(conversation)
+    attempt = claim_run(run.pk)
+    assert attempt is not None
+    _checkpoint(run, attempt, 1, b"old")
+    Run.objects.filter(pk=run.pk).update(status=RunStatus.COMPLETED)
+    monkeypatch.setattr(Checkpoint, "_discard", classmethod(lambda cls, rows: None))
+    with django_capture_on_commit_callbacks(execute=True):
+        conversation.close(delete=False, actor=conversation.owner)
+
+    following = post(conversation, "続き")
+    attempt = claim_run(following.pk)
+    assert attempt is not None
+    session = SandboxSession(following, attempt)
+    sandbox = RecordingSandbox()
+    session._restore(sandbox)  # type: ignore[arg-type]
+
+    assert sandbox.restored == []
+    assert session.take_notice() == WORKSPACE_DISCARDED
+
+    # 新しいsnapshotを確定した後は、それを戻して知らせない
+    _checkpoint(following, attempt, 2, b"new")
+    session = SandboxSession(following, attempt)
+    sandbox = RecordingSandbox()
+    session._restore(sandbox)  # type: ignore[arg-type]
+    assert sandbox.restored == [b"new"]
+    assert session.take_notice() == ""
 
 
 def test_long_sandbox_operations_keep_the_lease(conversation, monkeypatch, settings, tmp_path):

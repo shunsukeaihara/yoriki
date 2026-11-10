@@ -400,7 +400,7 @@ class AppConversationMessageViewSet(MyConversationMixin, ListModelMixin, CreateM
 - `queryset` はクラス属性に書き、論理削除の除外、`select_related`、`prefetch_xxx()` までを含める。利用者ごとの絞り込みは `get_queryset()` で `super().get_queryset().filter(...)` として追加する。
 - `ordering` を必ず指定する（カーソル方式のページングに必要）。カーソル方式では並び順が一意に決まる必要があるため、最後の項目は一意な項目にする（例：`("-last_posted", "-pk")`、`("name", "pk")`、`("-created", "-pk")`）。`"-pk"` や `"sequence"`（親の中で一意）のように、それだけで一意な場合は1項目でよい。
 - 一覧の検索条件は、原則として `django_filters.FilterSet` で定義する。FilterSetは同じ `views.py` の、使うViewSetより上に置き、`filterset_class` に指定する。完全一致だけの単純な絞り込み（`status` 等）に限り、`filterset_fields` で済ませてよい。
-- 論理削除するModelは、`utils.views.SoftDeleteMixin` を使って `perform_destroy` で `deleted=True` にする。
+- 論理削除するModelは、`utils.views.SoftDeleteMixin` を使って `perform_destroy` で `deleted=True` にする。削除にほかの処理が伴うModel（会話：停止の依頼、待っている依頼の取消し、ワークスペースの削除。design.md §8）は、Mixinを使わず、`perform_destroy` からModelのメソッド（`Conversation.close()`）を呼ぶ。
 
 ### 4.2 利用者別のViewSet
 

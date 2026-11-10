@@ -274,6 +274,29 @@ const onUpdated = (value: Conversation) => {
   listStore.upsert(value)
 }
 
+const archiving = ref(false)
+const onArchive = async () => {
+  const ok = await confirm({
+    title: t('会話をアーカイブしますか？'),
+    description: [
+      activeRun.value ? t('実行中の作業は停止します。') : '',
+      t('作業ファイルは消えます。履歴・添付・成果物は残り、発言するとアーカイブを解除して再開します。'),
+    ].join(''),
+    confirmLabel: t('アーカイブ'),
+  })
+  if (!ok) return
+  archiving.value = true
+  try {
+    onUpdated(await api.conversations(conversationId).archive())
+    toast.add({ title: t('アーカイブしました'), color: 'success' })
+    sync()
+  } catch (err) {
+    toast.add({ title: t('エラー'), description: makeErrorMsg(err), color: 'error' })
+  } finally {
+    archiving.value = false
+  }
+}
+
 const onDelete = async () => {
   const ok = await confirm({
     title: t('会話を削除しますか？'),
@@ -303,6 +326,9 @@ const toggleFiles = () => {
 }
 
 const menuItems = computed(() => [
+  conversation.value?.archived
+    ? []
+    : [{ label: t('アーカイブ'), icon: 'i-lucide-archive', disabled: archiving.value, onSelect: onArchive }],
   [{ label: t('会話を削除'), icon: 'i-lucide-trash-2', color: 'error' as const, onSelect: onDelete }],
 ])
 </script>
@@ -367,6 +393,16 @@ const menuItems = computed(() => [
 
       <template #body>
         <UContainer class="flex max-w-3xl flex-1 flex-col gap-4 pt-4 sm:gap-6">
+          <UAlert
+            v-if="conversation?.archived"
+            icon="i-lucide-archive"
+            color="neutral"
+            variant="subtle"
+            :title="$t('アーカイブした会話です')"
+            :description="
+              $t('作業ファイルは消えています。発言するとアーカイブを解除し、空の作業ファイルから再開します。')
+            "
+          />
           <div v-if="messages.hasOlder.value" class="flex justify-center">
             <DBtn variant="ghost" color="neutral" :loading="messages.loadingOlder.value" @click="messages.loadOlder()">
               {{ $t('以前のメッセージを表示') }}

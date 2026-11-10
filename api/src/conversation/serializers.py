@@ -62,12 +62,13 @@ class ConversationSerializer(serializers.ModelSerializer):
             "handles_sensitive_data",
             "title",
             "last_posted",
+            "archived",
             "active_run",
             "task",
             "created",
             "updated",
         ]
-        read_only_fields = ["last_posted", "created", "updated"]
+        read_only_fields = ["last_posted", "archived", "created", "updated"]
 
     def get_fields(self):
         fields = super().get_fields()

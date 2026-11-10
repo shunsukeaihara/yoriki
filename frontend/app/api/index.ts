@@ -40,6 +40,8 @@ const createAPI = () => {
     },
     conversations: (id?: string) => ({
       ...resource<Conversation, ConversationWrite, ConversationListParams>(http, 'app/v1/conversations', id),
+      // アーカイブする（発言するとアーカイブを解除する。design.md §8）
+      archive: () => http.post<Conversation, Conversation>(`app/v1/conversations/${id}/archive/`),
       // AppConversationMessageViewSet は list と create だけ
       messages: () => ({
         list: (params?: ListParams) =>

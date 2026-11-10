@@ -24,10 +24,34 @@ useUserEvents(
 )
 
 const currentId = computed(() => route.params.conversationId as string | undefined)
+
+const toggleArchived = async () => {
+  try {
+    await store.showArchived(!store.archived)
+  } catch (err) {
+    toast.add({ title: t('会話の一覧を読めませんでした'), description: makeErrorMsg(err), color: 'error' })
+  }
+}
 </script>
 
 <template>
   <div v-if="!collapsed" class="grid gap-0.5">
+    <div class="flex min-w-0 items-center justify-between gap-2 px-2 pt-2 pb-1">
+      <span class="text-xs font-medium whitespace-nowrap text-muted">{{
+        store.archived ? $t('アーカイブ') : $t('会話')
+      }}</span>
+      <DBtn
+        size="xs"
+        variant="link"
+        color="neutral"
+        :icon="store.archived ? 'i-lucide-arrow-left' : 'i-lucide-archive'"
+        :label="store.archived ? $t('戻る') : $t('アーカイブ')"
+        @click="toggleArchived"
+      />
+    </div>
+    <p v-if="store.archived && !store.loading && store.items.length === 0" class="px-2 py-1.5 text-sm text-muted">
+      {{ $t('アーカイブした会話はありません') }}
+    </p>
     <NuxtLink
       v-for="conversation in store.items"
       :key="conversation.id"

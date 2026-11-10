@@ -1,4 +1,5 @@
 import pytest
+from auditlog.models import LogEntry
 from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
@@ -13,7 +14,7 @@ from skill.models import SkillRequirement, SkillScope
 from user.factories import DepartmentFactory, DepartmentMembershipFactory
 
 from .factories import ConversationFactory
-from .models import Conversation, InstructionKind, UserInstruction
+from .models import Conversation, InstructionKind, InstructionState, UserInstruction
 from .serializers import ConversationSerializer
 
 # Runを始めるには既定のRuntime Profileが要る
@@ -97,6 +98,80 @@ class TestConversation:
         assert api_client.delete(f"/api/app/v1/conversations/{conversation.uid}/").status_code == 204
         run.refresh_from_db()
         assert run.status == RunStatus.CANCELLED
+
+    def test_archived_conversation_moves_to_the_archive_list(self, api_client, app_user):
+        conversation = ConversationFactory.create(owner=app_user)
+        run = RunFactory.create(conversation=conversation, status=RunStatus.QUEUED)
+        res = api_client.post(f"/api/app/v1/conversations/{conversation.uid}/archive/")
+        assert res.status_code == 200, res.data
+        assert res.data["archived"] is not None
+        run.refresh_from_db()
+        assert run.status == RunStatus.CANCELLED
+        listed = [c["id"] for c in api_client.get("/api/app/v1/conversations/").data["results"]]
+        archived = [c["id"] for c in api_client.get("/api/app/v1/conversations/?archived=true").data["results"]]
+        assert conversation.uid not in listed
+        assert archived == [conversation.uid]
+        # アーカイブした会話も開ける
+        assert api_client.get(f"/api/app/v1/conversations/{conversation.uid}/").status_code == 200
+        # 操作は監査ログに残る
+        entries = [
+            e
+            for e in LogEntry.objects.get_for_object(conversation)
+            if e.action == LogEntry.Action.UPDATE and "archived" in e.changes_dict
+        ]
+        assert [e.actor for e in entries] == [app_user]
+
+    def test_archiving_does_not_start_the_waiting_requests(self, api_client, app_user):
+        conversation = ConversationFactory.create(owner=app_user)
+        RunFactory.create(conversation=conversation, status=RunStatus.RUNNING)
+        res = api_client.post(f"/api/app/v1/conversations/{conversation.uid}/messages/", {"body": "次"}, format="json")
+        assert res.status_code == 201, res.data
+        Run.objects.filter(conversation=conversation).update(status=RunStatus.WAITING_USER)
+        assert api_client.post(f"/api/app/v1/conversations/{conversation.uid}/archive/").status_code == 200
+        assert list(Run.objects.filter(conversation=conversation).values_list("status", flat=True)) == [
+            RunStatus.CANCELLED
+        ]
+        assert UserInstruction.objects.get(conversation=conversation).state == InstructionState.DISCARDED
+
+    def test_posting_to_an_archived_conversation_restores_it(self, api_client, app_user):
+        conversation = ConversationFactory.create(owner=app_user)
+        api_client.post(f"/api/app/v1/conversations/{conversation.uid}/archive/")
+        res = api_client.post(
+            f"/api/app/v1/conversations/{conversation.uid}/messages/", {"body": "続き"}, format="json"
+        )
+        assert res.status_code == 201, res.data
+        conversation.refresh_from_db()
+        assert conversation.archived is None
+        assert conversation.workspace_discarded is not None
+        listed = [c["id"] for c in api_client.get("/api/app/v1/conversations/").data["results"]]
+        assert conversation.uid in listed
+        entries = [
+            e.changes_dict["archived"][1]
+            for e in LogEntry.objects.get_for_object(conversation)
+            if e.action == LogEntry.Action.UPDATE and "archived" in e.changes_dict and e.actor == app_user
+        ]
+        assert len(entries) == 2 and "None" in entries
+
+    def test_deleted_conversation_is_hidden_and_logged(self, api_client, app_user):
+        conversation = ConversationFactory.create(owner=app_user)
+        assert api_client.delete(f"/api/app/v1/conversations/{conversation.uid}/").status_code == 204
+        conversation.refresh_from_db()
+        assert conversation.deleted
+        assert conversation.workspace_discarded is not None
+        assert api_client.get(f"/api/app/v1/conversations/{conversation.uid}/").status_code == 404
+        assert api_client.post(f"/api/app/v1/conversations/{conversation.uid}/archive/").status_code == 404
+        entries = [
+            e
+            for e in LogEntry.objects.get_for_object(conversation)
+            if e.action == LogEntry.Action.UPDATE and "deleted" in e.changes_dict
+        ]
+        assert [e.actor for e in entries] == [app_user]
+
+    def test_other_users_conversation_cannot_be_archived(self, api_client, other_user):
+        conversation = ConversationFactory.create(owner=other_user)
+        assert api_client.post(f"/api/app/v1/conversations/{conversation.uid}/archive/").status_code == 404
+        conversation.refresh_from_db()
+        assert conversation.archived is None
 
     def test_conversation_can_become_confidential_but_not_back(self, api_client, app_user, local_profile):
         conversation = ConversationFactory.create(owner=app_user)

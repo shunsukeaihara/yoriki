@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from auditlog.context import set_actor
 from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
@@ -160,13 +161,7 @@ def post_message(
         # （直前のタスクのRunのものと重ねない）
         Artifact.attach(conversation, unsent, run=_task_run_instructed(conversation))
         message.attachments.set(unsent)
-    conversation.last_posted = timezone.now()
-    fields = ["last_posted", "updated"]
-    if not conversation.title:
-        first_line = body.strip().splitlines()[0] if body.strip() else ""
-        conversation.title = (first_line or ", ".join(a.name for a in attachments or []))[:50]
-        fields.append("title")
-    conversation.save(update_fields=fields)
+    _touch(conversation, body, attachments or [], actor)
 
     run = active_run(conversation)
     if run is None:
@@ -188,6 +183,22 @@ def post_message(
         return message
     _instruct(conversation, message, run, next_request=run.status == RunStatus.CANCELLING or bool(skill_edit))
     return message
+
+
+def _touch(conversation: Conversation, body: str, attachments: list[Artifact], actor) -> None:
+    """発言を受け付けた会話の最終投稿日時を進め、アーカイブを解除し、タイトルがなければ最初の発言から付ける"""
+    conversation.last_posted = timezone.now()
+    fields = ["last_posted", "updated"]
+    if conversation.archived is not None:
+        # アーカイブした会話は、発言で解除して同じ会話のまま再開する。ワークスペースは空から（design.md §8）
+        conversation.archived = None
+        fields.append("archived")
+    if not conversation.title:
+        first_line = body.strip().splitlines()[0] if body.strip() else ""
+        conversation.title = (first_line or ", ".join(a.name for a in attachments))[:50]
+        fields.append("title")
+    with set_actor(actor):  # アーカイブの解除を監査ログに残す
+        conversation.save(update_fields=fields)
 
 
 def _instruct(conversation: Conversation, message: ConversationMessage, run: Run, *, next_request: bool) -> None:

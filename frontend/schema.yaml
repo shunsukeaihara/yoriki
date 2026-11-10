@@ -197,6 +197,11 @@ paths:
       operationId: app_v1_conversations_list
       description: 自分の会話に関するAPI
       parameters:
+      - in: query
+        name: archived
+        schema:
+          type: boolean
+        description: trueならアーカイブした会話だけ。既定はアーカイブしていない会話
       - name: cursor
         required: false
         in: query
@@ -546,6 +551,27 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/app/v1/conversations/{uid}/archive/:
+    post:
+      operationId: app_v1_conversations_archive_create
+      description: アーカイブする。会話の一覧から外し、動いている作業を止めて、作業ファイルを消す。履歴・添付・成果物は残る。発言するとアーカイブを解除して再開する
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/conversation
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Conversation'
+          description: ''
   /api/app/v1/destinations/:
     get:
       operationId: app_v1_destinations_list
@@ -8304,6 +8330,12 @@ components:
           readOnly: true
           nullable: true
           title: 最終投稿日時
+        archived:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          title: アーカイブ日時
         active_run:
           allOf:
           - $ref: '#/components/schemas/Run'
@@ -8325,6 +8357,7 @@ components:
           readOnly: true
       required:
       - active_run
+      - archived
       - created
       - id
       - last_posted

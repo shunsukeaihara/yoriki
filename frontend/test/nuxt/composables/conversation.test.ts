@@ -1,8 +1,11 @@
 import { mockNuxtImport } from '@nuxt/test-utils/runtime'
+import { createPinia, setActivePinia } from 'pinia'
 import { describe, expect, it, vi } from 'vitest'
 
-const { mockList } = vi.hoisted(() => ({ mockList: vi.fn() }))
-mockNuxtImport('useAPI', () => () => ({ conversations: () => ({ messages: () => ({ list: mockList }) }) }))
+const { mockList, mockConversations } = vi.hoisted(() => ({ mockList: vi.fn(), mockConversations: vi.fn() }))
+mockNuxtImport('useAPI', () => () => ({
+  conversations: () => ({ list: mockConversations, messages: () => ({ list: mockList }) }),
+}))
 
 const message = (id: string, role: MessageRoleEnum, run: string | null, instruction: Message['instruction'] = null) =>
   ({
@@ -80,5 +83,57 @@ describe('useConversationMessages', () => {
     pages[0]!({ results: [received], next: null, previous: null })
     await first
     expect(messages.items.value[0]!.instruction?.state).toBe(InstructionState.APPLIED)
+  })
+})
+
+describe('useConversationListStore', () => {
+  const conversation = (id: string, archived: string | null) =>
+    ({ id, archived, lastPosted: '2026-11-10T00:00:00Z' }) as Conversation
+
+  it('アーカイブの一覧に切り替えると、アーカイブした会話を読む', async () => {
+    setActivePinia(createPinia())
+    mockConversations.mockResolvedValue({ results: [conversation('c1', '2026-11-10T00:00:00Z')], next: null })
+    const store = useConversationListStore()
+
+    await store.showArchived(true)
+
+    expect(mockConversations).toHaveBeenLastCalledWith({ pageSize: 30, archived: true })
+    expect(store.items.map((c) => c.id)).toEqual(['c1'])
+  })
+
+  it('今の一覧に入らない会話は、反映するときに外す', async () => {
+    setActivePinia(createPinia())
+    mockConversations.mockResolvedValue({
+      results: [conversation('c1', null), conversation('c2', null)],
+      next: null,
+    })
+    const store = useConversationListStore()
+    await store.reload()
+
+    // アーカイブした会話は、会話の一覧から外す
+    store.upsert(conversation('c1', '2026-11-10T00:00:00Z'))
+    expect(store.items.map((c) => c.id)).toEqual(['c2'])
+
+    // アーカイブの一覧では、発言してアーカイブを解除した会話を外す
+    mockConversations.mockResolvedValue({ results: [conversation('c1', '2026-11-10T00:00:00Z')], next: null })
+    await store.showArchived(true)
+    store.upsert(conversation('c1', null))
+    expect(store.items).toEqual([])
+  })
+
+  it('切り替える前に始めた読込みの結果は使わない', async () => {
+    setActivePinia(createPinia())
+    let resolveFirst: (value: unknown) => void = () => {}
+    mockConversations.mockReturnValueOnce(new Promise((resolve) => (resolveFirst = resolve)))
+    mockConversations.mockResolvedValueOnce({ results: [conversation('a1', '2026-11-10T00:00:00Z')], next: null })
+    const store = useConversationListStore()
+
+    const first = store.reload()
+    await store.showArchived(true)
+    resolveFirst({ results: [conversation('c1', null)], next: null })
+    await first
+
+    expect(store.items.map((c) => c.id)).toEqual(['a1'])
+    expect(store.loading).toBe(false)
   })
 })

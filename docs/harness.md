@@ -513,7 +513,7 @@ Docker操作はLauncher（design.md §7.3、`runtime/launcher.py`）にまとめ
 - SandboxはAttemptごとに1つで、最初にSandboxのToolが呼ばれた時点で起動し、agentセッションの最新のsnapshotからワークスペースを戻す（修正チャットのタスクのRunは空から。design.md §7.9、§10.10）。親もジョブも動いていなければ片付ける。
 - Workerを手放すとき（ジョブが動いていない確認待ち・完了・停止・失敗）は、`kill` の `all` で残ったプロセスを止めた後に `/workspace/work`・`/workspace/output` をSandboxの中のtarで取り出して保存し（tmpfsは `docker cp` で読めない）、Checkpointを記録してから状態を変え、最後に `docker rm -f` で消す。保存できなければ再試行し、それでも駄目なら失敗にする（黙って進めない）。答える人がいないRun（Webhook・手動実行・チャットから起動したタスクの実行、Draftの評価）では、完了・停止・失敗のどれでも `/workspace/output` だけをtarで取り出して成果物を回収し、snapshotを作らない。途中で保存したものがあれば、終わるときに消す。
 - 同じtarから `/workspace/output` の通常のファイルを取り出し、成果物（Artifact）として保存する（design.md §7.4）。symlink・特殊なファイル・隠しファイルは回収せず、会話の同じパスの最新の成果物と中身が同じファイルも回収し直さない。1回に200個まで。
-- 保存先はArtifactと同じStorage Backend（`artifact/storage.py`。design.md §7.8）。S3にすれば、別のWorkerでも最後のCheckpointから戻せる。保存したものは全部読み戻して確かめてからCheckpointを確定し、その1つ前より古いものを消す（2世代を残す）。戻すときは新しい世代から見て、見つからないものは飛ばす。どの世代もなければ空で続け、作業環境が失われて作り直すことを利用者へ伝えるようモデルに知らせる（design.md §7.9）。
+- 保存先はArtifactと同じStorage Backend（`artifact/storage.py`。design.md §7.8）。S3にすれば、別のWorkerでも最後のCheckpointから戻せる。保存したものは全部読み戻して確かめてからCheckpointを確定し、その1つ前より古いものを消す（2世代を残す）。戻すときは新しい世代から見て、見つからないものは飛ばす。どの世代もなければ空で続け、作業環境が失われて作り直すことを利用者へ伝えるようモデルに知らせる（design.md §7.9）。アーカイブ・削除でワークスペースを消した会話では、その前のRunのsnapshotを戻さず、前のファイルがないことをモデルに知らせる（design.md §8）。
 - 会話の添付は、Workerの作業領域のAttemptごとのディレクトリに置き、`/workspace/input` に読取り専用のbind mountで見せる。実行中に届いた追加指示の添付も、同じディレクトリに足せばそのまま見える。
 
 ### 8.2 コマンドの環境

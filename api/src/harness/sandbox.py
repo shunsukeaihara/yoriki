@@ -88,6 +88,11 @@ OUT_OF_MEMORY_NOTICE = (
     "previous attempt was interrupted. Use less memory: process large files in parts or stream them instead of "
     "loading everything at once, and run fewer processes at the same time.]"
 )
+WORKSPACE_DISCARDED = (
+    "[The files from earlier work in this conversation were deleted when the conversation was archived or deleted, so "
+    "/workspace/work and /workspace/output are empty. The files in /workspace/input are still there. If you need files "
+    "from the earlier work, tell the user that they are gone, and recreate them before continuing.]"
+)
 WORKSPACE_LOST = (
     "[The files saved from the previous work could not be restored on this worker, so /workspace/work and "
     "/workspace/output are empty. Tell the user that the working environment was lost and that you are rebuilding it "
@@ -498,6 +503,9 @@ class SandboxSession:
                 return
         if checkpoints:
             self.notice = WORKSPACE_LOST
+        elif not self.run.isolated_workspace and self.run.conversation.workspace_discarded is not None:
+            # アーカイブ・削除でワークスペースを消した会話。新しいsnapshotを確定するまで、空から始めることを伝える
+            self.notice = WORKSPACE_DISCARDED
 
     def _restore_from(self, sandbox: Sandbox, checkpoint: Checkpoint) -> bool:
         """このWorkerで見つからないものはFalse（別のWorkerのローカルディスクに保存した等）"""

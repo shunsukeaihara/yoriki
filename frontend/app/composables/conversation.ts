@@ -168,21 +168,33 @@ const CONVERSATION_PAGE_SIZE = 30
 /**
  * サイドバーの会話の一覧（新しく投稿した順）。会話の画面で作成・変更・削除したら upsert()・remove() で反映し、
  * ログインユーザー宛ての通知（Run の状態の変更）を受けたら、その会話を読み直す。
+ * `archived` で、アーカイブした会話の一覧に切り替える（design.md §8）。
  */
 export const useConversationListStore = defineStore('conversationList', () => {
   const items = ref<Conversation[]>([])
   const next = ref<string | null>(null)
   const loading = ref(false)
+  const archived = ref(false)
 
   const reload = async () => {
     loading.value = true
     try {
-      const page = await useAPI().conversations().list({ pageSize: CONVERSATION_PAGE_SIZE })
+      const page = await useAPI()
+        .conversations()
+        .list({ pageSize: CONVERSATION_PAGE_SIZE, archived: archived.value || undefined })
       items.value = page.results
       next.value = page.next
     } finally {
       loading.value = false
     }
+  }
+
+  /** 会話の一覧とアーカイブの一覧を切り替える */
+  const showArchived = async (value: boolean) => {
+    archived.value = value
+    items.value = []
+    next.value = null
+    await reload()
   }
 
   const loadMore = async () => {
@@ -198,8 +210,12 @@ export const useConversationListStore = defineStore('conversationList', () => {
     }
   }
 
-  /** 会話を一覧に反映する。新しく投稿した会話は先頭へ移す */
+  /** 会話を一覧に反映する。新しく投稿した会話は先頭へ移す。今の一覧に入らない会話（アーカイブの有無が違う）は外す */
   const upsert = (conversation: Conversation) => {
+    if (Boolean(conversation.archived) !== archived.value) {
+      remove(conversation.id)
+      return
+    }
     const rest = items.value.filter((c) => c.id !== conversation.id)
     const index = items.value.findIndex((c) => c.id === conversation.id)
     const moved = index !== 0 && conversation.lastPosted !== items.value[index]?.lastPosted
@@ -223,5 +239,16 @@ export const useConversationListStore = defineStore('conversationList', () => {
     }
   }
 
-  return { items, loading, hasMore: computed(() => Boolean(next.value)), reload, loadMore, upsert, remove, refreshOne }
+  return {
+    items,
+    loading,
+    archived,
+    hasMore: computed(() => Boolean(next.value)),
+    reload,
+    loadMore,
+    showArchived,
+    upsert,
+    remove,
+    refreshOne,
+  }
 })

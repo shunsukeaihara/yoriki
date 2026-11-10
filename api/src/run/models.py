@@ -396,6 +396,10 @@ class Run(models.Model):
                 on_run_finished(self)
             if not self.is_interactive:
                 transaction.on_commit(lambda: Checkpoint.discard_through(self))
+            elif self.conversation.workspace_discarded is not None:
+                # アーカイブ・削除した会話のRunが止まった。全部止まっていれば、ワークスペースを消す（design.md §8）
+                conversation_id = self.conversation_id
+                transaction.on_commit(lambda: Checkpoint.discard_closed(conversation_id))
         return event
 
     def _close_subagents(self) -> None:
@@ -911,17 +915,22 @@ class Checkpoint(models.Model):
     @classmethod
     def restorable_for(cls, run: Run) -> models.QuerySet["Checkpoint"]:
         """このRunが戻せるCheckpointを新しい順に。Sandboxを使わなかったRunにはCheckpointがないので、会話の中でこのRun
-        までのRunを探す"""
+        までのRunを探す。アーカイブ・削除でワークスペースを消すと決めた後は、その前に始めたRunのものを戻さない（消せずに
+        行が残っていても。design.md §8）"""
         if run.isolated_workspace:
             # タスクのRunは、ほかのRunのWorkspaceを引き継がない（修正チャットの前の実行のものも）
-            return cls.objects.filter(run=run).order_by("-sequence", "-pk")
-        if run.kind == RunKind.TASK_EDIT:
+            rows = cls.objects.filter(run=run).order_by("-sequence", "-pk")
+        elif run.kind == RunKind.TASK_EDIT:
             # 修正チャットのタスクの編集のRunは、直前のタスクのRunから後のものだけ（直前のタスクのRunがCheckpointを
             # 残さなければ、さらに前の実行のものではなく空のWorkspaceから始める。harness.md §10.10）
-            return cls.objects.filter(run__in=run.fix_chat_runs()).order_by("-run_id", "-sequence", "-pk")
-        return cls.objects.filter(run__conversation_id=run.conversation_id, run_id__lte=run.pk).order_by(
-            "-run_id", "-sequence", "-pk"
-        )
+            rows = cls.objects.filter(run__in=run.fix_chat_runs()).order_by("-run_id", "-sequence", "-pk")
+        else:
+            rows = cls.objects.filter(run__conversation_id=run.conversation_id, run_id__lte=run.pk).order_by(
+                "-run_id", "-sequence", "-pk"
+            )
+        if (discarded := run.conversation.workspace_discarded) is not None:
+            rows = rows.filter(run__created__gt=discarded)
+        return rows
 
     @classmethod
     def discard_older(cls, checkpoint: "Checkpoint", *, restored: "Checkpoint | None" = None) -> None:
@@ -936,6 +945,20 @@ class Checkpoint(models.Model):
     def discard_through(cls, run: Run) -> None:
         """Workspaceを保存しないRunが終わったときに、そのRunまでのsnapshotを消す（design.md §8）"""
         cls._discard(cls.objects.filter(run__conversation_id=run.conversation_id, run_id__lte=run.pk))
+
+    @classmethod
+    def discard_closed(cls, conversation_id: int) -> None:
+        """アーカイブ・削除した会話のワークスペースを消す（design.md §8）。その時点より前に始めたRunが全部止まってから
+        消す。止まっていなければ、最後のRunが終わるときに呼び直す（Run.set_status()）"""
+        from conversation.models import Conversation  # noqa: PLC0415  conversationのModelがrunを参照するため
+
+        discarded = Conversation.objects.filter(pk=conversation_id).values_list("workspace_discarded", flat=True).get()
+        if discarded is None:
+            return
+        runs = Run.objects.filter(conversation_id=conversation_id, created__lte=discarded)
+        if runs.exclude(status__in=TERMINAL_STATUSES).exists():
+            return
+        cls._discard(cls.objects.filter(run__in=runs))
 
     @classmethod
     def _discard(cls, checkpoints: models.QuerySet["Checkpoint"]) -> None:

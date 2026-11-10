@@ -215,6 +215,23 @@ export interface paths {
         patch: operations["app_v1_conversations_partial_update"];
         trace?: never;
     };
+    "/api/app/v1/conversations/{uid}/archive/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description アーカイブする。会話の一覧から外し、動いている作業を止めて、作業ファイルを消す。履歴・添付・成果物は残る。発言するとアーカイブを解除して再開する */
+        post: operations["app_v1_conversations_archive_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/app/v1/destinations/": {
         parameters: {
             query?: never;
@@ -3012,6 +3029,11 @@ export interface components {
              * Format: date-time
              */
             readonly last_posted: string | null;
+            /**
+             * アーカイブ日時
+             * Format: date-time
+             */
+            readonly archived: string | null;
             readonly active_run: components["schemas"]["Run"] | null;
             /** @description 修正チャットで直すタスク（ふつうの会話では空） */
             readonly task: components["schemas"]["ConversationTask"] | null;
@@ -7011,6 +7033,8 @@ export interface operations {
     app_v1_conversations_list: {
         parameters: {
             query?: {
+                /** @description trueならアーカイブした会話だけ。既定はアーカイブしていない会話 */
+                archived?: boolean;
                 /** @description The pagination cursor value. */
                 cursor?: string;
                 /** @description Which field to use when ordering the results. */
@@ -7282,6 +7306,27 @@ export interface operations {
                 "multipart/form-data": components["schemas"]["PatchedConversationRequest"];
             };
         };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Conversation"];
+                };
+            };
+        };
+    };
+    app_v1_conversations_archive_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             200: {
                 headers: {

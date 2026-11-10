@@ -1,15 +1,14 @@
-from django.db import transaction
 from django.db.models import Prefetch, Q
-from django.utils.translation import gettext_lazy as _
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_view
+from rest_framework.decorators import action
 from rest_framework.generics import get_object_or_404
 from rest_framework.mixins import CreateModelMixin, ListModelMixin
+from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet, ModelViewSet
 
 from artifact.models import Artifact
-from run.models import CANCELLABLE_STATUSES, Run, RunTrigger
+from run.models import Run, RunTrigger
 from utils.permissions import AppUser
-from utils.views import SoftDeleteMixin
 
 from .models import OWNED_PURPOSES, Conversation, ConversationMessage
 from .serializers import ConversationSerializer, MessageSerializer
@@ -33,8 +32,17 @@ class MyConversationMixin:
         return super().get_queryset().filter(conversation=self.conversation)  # type: ignore[misc]
 
 
+@extend_schema_view(
+    list=extend_schema(
+        parameters=[
+            OpenApiParameter(
+                "archived", bool, description="trueならアーカイブした会話だけ。既定はアーカイブしていない会話"
+            )
+        ]
+    )
+)
 @extend_schema(description="自分の会話に関するAPI", tags=["app/conversation"])
-class AppConversationViewSet(SoftDeleteMixin, ModelViewSet):
+class AppConversationViewSet(ModelViewSet):
     permission_classes = [AppUser]
     lookup_field = "uid"
     queryset = Conversation.objects.filter(deleted=False).select_related(
@@ -46,7 +54,11 @@ class AppConversationViewSet(SoftDeleteMixin, ModelViewSet):
     http_method_names = ["get", "post", "patch", "delete", "head", "options"]  # PUTは使わない
 
     def get_queryset(self):
-        return super().get_queryset().filter(owner=self.request.user, purpose__in=OWNED_PURPOSES)
+        qs = super().get_queryset().filter(owner=self.request.user, purpose__in=OWNED_PURPOSES)
+        if self.action == "list":
+            # アーカイブした会話は、会話の一覧から外してアーカイブの一覧に出す（design.md §8）
+            qs = qs.filter(archived__isnull=self.request.query_params.get("archived") != "true")
+        return qs
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
@@ -55,12 +67,22 @@ class AppConversationViewSet(SoftDeleteMixin, ModelViewSet):
         # 実行中のRunへの切り替えは ConversationSerializer.update() の transaction で行う
         serializer.save(actor=self.request.user)
 
-    @transaction.atomic
     def perform_destroy(self, instance: Conversation):
-        # 削除した会話のRunは画面から止められなくなるので、実行中のRunは先に止める
-        for run in Run.objects.filter(conversation=instance, status__in=CANCELLABLE_STATUSES):
-            run.request_cancel(str(_("会話を削除しました")), actor=self.request.user)
-        super().perform_destroy(instance)
+        # 論理削除。削除した会話のRunは画面から止められなくなるので、動いているRunは止める（design.md §8）
+        instance.close(delete=True, actor=self.request.user)
+
+    @extend_schema(
+        description="アーカイブする。会話の一覧から外し、動いている作業を止めて、作業ファイルを消す。履歴・添付・成果物は"
+        "残る。発言するとアーカイブを解除して再開する",
+        request=None,
+        responses=ConversationSerializer,
+    )
+    @action(detail=True, methods=["post"])
+    def archive(self, request, *args, **kwargs):
+        conversation = self.get_object()
+        if conversation.archived is None:
+            conversation.close(delete=False, actor=request.user)
+        return Response(self.get_serializer(conversation).data)
 
 
 @extend_schema(description="会話のメッセージに関するAPI", tags=["app/conversation/message"])

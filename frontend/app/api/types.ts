@@ -256,7 +256,8 @@ export type TriggerPreviewOutcomeEnum = Schemas['TriggerPreviewOutcomeEnum']
 export type TriggerPreviewRequest = Api<'TriggerPreviewRequest'>
 export type TriggerBindingListParams = ListParams & { search?: string; suspended?: boolean }
 
-export type ConversationListParams = ListParams
+// archived：trueならアーカイブした会話だけ（既定はアーカイブしていない会話）
+export type ConversationListParams = ListParams & { archived?: boolean }
 export type ArtifactListParams = ListParams & { kind?: ArtifactKindEnum }
 export type RunListParams = ListParams & { status?: RunStatusEnum; conversation?: string }
 export type ClarificationListParams = ListParams & { status?: ClarificationStatusEnum }

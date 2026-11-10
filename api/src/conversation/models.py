@@ -6,9 +6,11 @@
 
 from typing import Self
 
+from auditlog.context import set_actor
 from auditlog.registry import auditlog
 from django.conf import settings
-from django.db import models
+from django.db import models, transaction
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from utils.fields import NanoidField
@@ -36,6 +38,7 @@ OWNED_PURPOSES = (ConversationPurpose.CHAT, ConversationPurpose.TASK_FIX)
 
 class ConversationQuerySet(models.QuerySet):
     def owned_by(self, user) -> Self:
+        """持ち主が開ける会話。アーカイブした会話も含む（発言するとアーカイブを解除する。design.md §8）"""
         return self.filter(owner=user, deleted=False, purpose__in=OWNED_PURPOSES)
 
 
@@ -65,6 +68,11 @@ class Conversation(models.Model):
         verbose_name=_("修正するタスク"),
     )
     last_posted = models.DateTimeField(_("最終投稿日時"), null=True, blank=True)
+    # アーカイブした日時。会話の一覧から外し、アーカイブの一覧に出す。発言すると空に戻す（design.md §8）
+    archived = models.DateTimeField(_("アーカイブ日時"), null=True, blank=True)
+    # アーカイブ・削除でワークスペースを消すと決めた日時。これより前に始めたRunのsnapshotは戻さず、全部止まったら消す
+    # （Checkpoint.discard_closed()）。次の依頼は空のワークスペースで始め、前のファイルがないことをモデルに伝える
+    workspace_discarded = models.DateTimeField(_("ワークスペースを消した日時"), null=True, blank=True)
 
     created = models.DateTimeField(auto_now_add=True, db_index=True)
     updated = models.DateTimeField(auto_now=True)
@@ -90,6 +98,31 @@ class Conversation(models.Model):
     @property
     def is_task_fix(self) -> bool:
         return self.purpose == ConversationPurpose.TASK_FIX
+
+    @transaction.atomic
+    def close(self, *, delete: bool, actor) -> None:
+        """アーカイブ（`delete` がFalse）か論理削除をする（design.md §8）。会話の一覧から外して動いているRunに停止を
+        依頼し、全部止まったらワークスペースを消す。履歴・入力・成果物は残す。操作は監査ログ（auditlog）に残る"""
+        from run.models import CANCELLABLE_STATUSES, Checkpoint, Run  # noqa: PLC0415  runがconversationを参照するため
+
+        # ロックの順序は 会話 → Run（Run.locked()）
+        locked = Conversation.objects.select_for_update().get(pk=self.pk)
+        reason = _("会話を削除しました") if delete else _("会話をアーカイブしました")
+        for run in Run.objects.filter(conversation=locked, status__in=CANCELLABLE_STATUSES):
+            run.request_cancel(str(reason), actor=actor)
+        now = timezone.now()
+        self.workspace_discarded = now
+        fields = ["workspace_discarded", "updated"]
+        if delete:
+            self.deleted = True
+            fields.append("deleted")
+        else:
+            self.archived = now
+            fields.append("archived")
+        with set_actor(actor):
+            self.save(update_fields=fields)
+        pk = self.pk
+        transaction.on_commit(lambda: Checkpoint.discard_closed(pk))
 
 
 class ConversationMessage(models.Model):

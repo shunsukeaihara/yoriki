@@ -11,6 +11,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from auditlog.context import set_actor
 from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
@@ -430,6 +431,11 @@ def _fix_chat(
                 "このタスクは個人情報・機密情報を扱うようになりました。タスクの画面から新しい修正チャットを始めてください"
             )
         )
+    if conversation.archived is not None:
+        # アーカイブした修正チャットで動かすと、発言と同じくアーカイブを解除する（design.md §8）
+        conversation.archived = None
+        with set_actor(actor):
+            conversation.save(update_fields=["archived", "updated"])
     return conversation
 
 

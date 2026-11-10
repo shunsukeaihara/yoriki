@@ -204,7 +204,8 @@ export type TaskChatLaunch = Api<'TaskChatLaunchRequest'>
 export type LaunchableTask = Api<'LaunchableTask'>
 export type LaunchedTaskRun = Api<'LaunchedTaskRun'>
 export type DestinationKindEnum = Schemas['DestinationKindEnum']
-// 手動実行の入力の値。キーは項目の名前（変換しない）。型がファイルの項目は File
+// 手動実行の入力の値。キーは項目の名前（変換しない）。型がファイルの項目は File か、修正チャットで引き継ぐ元の実行の
+// ファイルのパス（文字）
 export type TaskRunInputs = Record<string, string | number | boolean | File | null>
 export type TaskListParams = ListParams & {
   name?: string

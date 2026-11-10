@@ -20,7 +20,7 @@ from connector.serializers import AppConnectorSerializer
 from conversation.models import Conversation, ConversationMessage, ConversationPurpose, MessageRole
 from conversation.serializers import MessageSerializer
 from delivery.models import Delivery
-from run.models import Run, RunLaunch, RunQuerySet, logs_visible
+from run.models import Run, RunKind, RunLaunch, RunQuerySet, RunTrigger, logs_visible
 from run.serializers import RunCancelSerializer, RunSerializer, prefetch_todos
 from skill.models import SkillVersion
 from user.models import Department
@@ -250,6 +250,13 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
                 "conversation", str, description="動かし直す修正チャットのID（このタスクの、自分の修正チャット）"
             ),
             OpenApiParameter(
+                "from_run",
+                str,
+                description="元の実行のID（実行記録から始める・もう一度動かす。ログを見られる、このタスクのRun）。"
+                "型がファイルの項目の値に元の実行でのパス（実行の `inputs` の値）を送ると、同じファイルを渡す。"
+                "項目でないファイル（入口の本文等）も引き継ぎ、元の実行が機密なら修正チャットも機密にする",
+            ),
+            OpenApiParameter(
                 "client_request_id",
                 str,
                 required=True,
@@ -277,9 +284,7 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
             raise Conflict(str(exc)) from exc
         if existing is not None:
             return Response(RunSerializer(existing, context=self.get_serializer_context()).data)
-        conversation = None
-        if uid := request.query_params.get("conversation"):
-            conversation = get_object_or_404(Conversation.objects.owned_by(request.user).filter(task=task), uid=uid)
+        conversation, source = self._fix_targets(task)
         version = request.query_params.get("version")
         if version is not None and not version.isdigit():
             raise ValidationError({"version": [_("版の番号を指定してください")]})
@@ -296,6 +301,7 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
                 expected_version=int(version) if version is not None else None,
                 conversation=conversation,
                 client_request_id=client_request_id,
+                source=source,
             )
         except AlreadyStarted as exc:
             return Response(RunSerializer(exc.run, context=self.get_serializer_context()).data)
@@ -311,6 +317,20 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
         except CannotRun as exc:
             raise ValidationError({"non_field_errors": [str(exc)]}) from exc
         return Response(RunSerializer(run, context=self.get_serializer_context()).data, status=status.HTTP_201_CREATED)
+
+    def _fix_targets(self, task: TaskDefinition) -> tuple[Conversation | None, Run | None]:
+        """修正チャットで動かすときの、動かし直す修正チャットと元の実行（クエリの conversation・from_run）"""
+        user = self.request.user
+        params = self.request.query_params
+        conversation = source = None
+        if uid := params.get("conversation"):
+            conversation = get_object_or_404(Conversation.objects.owned_by(user).filter(task=task), uid=uid)
+        if uid := params.get("from_run"):
+            # 始められるのは、元の実行のログを見られて、今のタスクも管理できる人（authorization.md §7.1）
+            source = get_object_or_404(
+                Run.objects.visible_to(user).filter(task=task, trigger=RunTrigger.TASK, kind=RunKind.WORK), uid=uid
+            )
+        return conversation, source
 
     def _choice_task(self) -> TaskDefinition:
         """候補を求める範囲（クエリの scope・department）の、保存していないタスク。その範囲のタスクを管理できなければ

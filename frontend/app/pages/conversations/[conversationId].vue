@@ -137,8 +137,10 @@ const fixTask = computed(() => conversation.value?.task ?? null)
 const fixOpen = ref(false)
 const fixTaskDetail = ref<TaskDetail | null>(null)
 const fixInitialValues = ref<TaskRunInputs | undefined>()
+const fixFromRunId = ref<string | undefined>()
 const openingFix = ref(false)
-// タスクの今の定義（入力の項目）を読み、前の実行の入力を初期値にしてダイアログを開く（ファイルの項目は選び直す）
+// タスクの今の定義（入力の項目）を読み、前の実行の入力を初期値にしてダイアログを開く（ファイルと入口の本文は、前の
+// 実行と同じものを渡す。design.md §11.11）
 const openFix = async () => {
   if (!fixTask.value) return
   openingFix.value = true
@@ -148,13 +150,11 @@ const openFix = async () => {
     let values: TaskRunInputs | undefined
     if (last) {
       const taskRun = await api.tasks(detail.id).runs(last.id).get()
-      const kept = new Set((detail.inputs ?? []).filter((i) => i.type !== TaskInputType.FILE).map((i) => i.name))
-      values = Object.fromEntries(
-        taskRun.inputs.filter((i) => kept.has(i.name)).map((i) => [i.name, i.value as TaskRunInputs[string]]),
-      )
+      values = Object.fromEntries(taskRun.inputs.map((i) => [i.name, i.value as TaskRunInputs[string]]))
     }
     fixTaskDetail.value = detail
     fixInitialValues.value = values
+    fixFromRunId.value = last?.id
     fixOpen.value = true
   } catch (err) {
     toast.add({ title: t('タスクを読めませんでした'), description: makeErrorMsg(err), color: 'error' })
@@ -543,6 +543,7 @@ const menuItems = computed(() => [
             :task="fixTaskDetail"
             :conversation-id="conversationId"
             :initial-values="fixInitialValues"
+            :from-run-id="fixFromRunId"
             @started="syncNow"
             @unknown="syncNow"
             @conflicted="syncNow"

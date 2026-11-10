@@ -19,7 +19,7 @@ from harness.result_files import file_format_problem
 from harness.tools.base import schema_problem
 from llm.models import ModelProfile
 from llm.serializers import AppModelProfileSerializer
-from run.models import Run, RunEndReason, RunLaunch, RunStatus
+from run.models import Run, RunEndReason, RunKind, RunLaunch, RunStatus
 from run.serializers import RunSerializer
 from skill.models import Skill
 from user.models import Department
@@ -1258,6 +1258,12 @@ class TaskRunSerializer(RunSerializer):
         )
     )
 
+    can_fix_chat = serializers.SerializerMethodField(
+        help_text=_(
+            "この実行の入力で修正チャットを始められるか（ログを見られて、今のタスクも管理できる。design.md §11.11）"
+        )
+    )
+
     class Meta(RunSerializer.Meta):
         fields = [
             *RunSerializer.Meta.fields,
@@ -1271,12 +1277,20 @@ class TaskRunSerializer(RunSerializer):
             "inputs",
             "deliveries_info",
             "can_view_logs",
+            "can_fix_chat",
         ]
         read_only_fields = fields
 
     def get_can_view_logs(self, obj: Run) -> bool:
         # 一覧はタスクを管理できる人だけなので、注釈のない一覧では真
         return getattr(obj, "logs_visible", True)
+
+    def get_can_fix_chat(self, obj: Run) -> bool:
+        request = self.context.get("request")
+        task = obj.task
+        if request is None or task is None or obj.kind != RunKind.WORK or not self.get_can_view_logs(obj):
+            return False
+        return task.current_revision_id is not None and task.can(request.user, TaskAction.MANAGE)
 
     def to_representation(self, instance: Run) -> dict[str, Any]:
         data = super().to_representation(instance)

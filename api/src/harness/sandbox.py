@@ -418,8 +418,8 @@ class SandboxSession:
         読取り専用でmountする）に置く。まだ置いていないものだけを足す。bind mountなので、動いているSandboxにも
         そのまま見える。Connectorの結果は connectors/<呼出し>/ の下に置く（harness.md §10.2）"""
         conversation_id = self.run.conversation_id
-        # 保持期限の切れたConnectorの結果は置かない（会話で照会を重ねても、置くものが増え続けないように）
-        results = Artifact.objects.connector_results(conversation_id).filter(expires__gt=timezone.now())
+        # Connectorの結果は期限を持たず、取得した会話にだけ残る（design.md §8）
+        results = Artifact.objects.connector_results(conversation_id)
         # サブエージェントが読んだ結果は、その子にだけ置く。親へ返すのはテキストとファイルだけ（harness.md §10.11）
         visible = Q(subagent__isnull=True)
         if self.subagent is not None:

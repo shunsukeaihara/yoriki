@@ -551,7 +551,6 @@ def _place_files(
             kind=ArtifactKind.ATTACHMENT,
             name=clean_filename(file.name),
             content_type=guess_content_type(clean_filename(file.name)),
-            expires=Artifact.default_expires(),
         )
         for file in placed
     ]

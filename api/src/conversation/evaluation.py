@@ -229,7 +229,6 @@ def _start_run(
                 kind=ArtifactKind.ATTACHMENT,
                 name=f.name,
                 content_type=f.content_type,
-                expires=Artifact.default_expires(),
             )
             for f in files
         ]

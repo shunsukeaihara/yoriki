@@ -357,6 +357,9 @@ def test_fix_chat_from_a_webhook_run_keeps_the_payload(api_client, manager):
         files=[InputFile("payload.json", b'{"vendor": "A"}')],
     )
     _finish(source)
+    # Webhook由来の印がないRun（印を足す前のもの）も、起動のしかたで分かる
+    del source.manifest["fixed"]["task"]["webhook"]
+    source.save(update_fields=["manifest"])
     res = _fix(api_client, manager, task, from_run=source.uid)
     assert res.status_code == 201, res.json()
     run = Run.objects.get(uid=res.json()["id"])

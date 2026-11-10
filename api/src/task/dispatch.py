@@ -289,7 +289,9 @@ def _start(
     )
     sensitive = revision.handles_sensitive_data or sensitive
     # Webhookで起動した実行は、修正チャットで動かし直しても、payloadのファイルをデータとして読ませる
-    webhook = launch == RunLaunch.WEBHOOK or bool(source and _fixed_task(source).get("webhook"))
+    webhook = launch == RunLaunch.WEBHOOK or bool(
+        source and (source.launch == RunLaunch.WEBHOOK or _fixed_task(source).get("webhook"))
+    )
     if conversation is None:
         conversation = Conversation.objects.create(
             owner=actor,

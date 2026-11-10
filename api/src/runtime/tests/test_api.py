@@ -32,7 +32,7 @@ def fixture_inspected(monkeypatch):
         digest = value.rsplit("@", 1)[1]
         return InspectedImage(
             reference=ImageReference("docker.io", "yoriki/yoriki-sandbox-docs", digest),
-            contract=2,
+            contract=3,
             platforms=["linux/amd64", "linux/arm64"],
             platform_digests={"linux/amd64": "sha256:" + "b" * 64, "linux/arm64": "sha256:" + "c" * 64},
             python_version="3.13.16",
@@ -55,7 +55,7 @@ class TestRuntimeProfile:
         assert res.status_code == 201, res.data
         assert inspected == [IMAGE]
         assert res.data["image"] == f"docker.io/yoriki/yoriki-sandbox-docs@{DIGEST}"
-        assert res.data["contract"] == 2
+        assert res.data["contract"] == 3
         assert res.data["platforms"] == ["linux/amd64", "linux/arm64"]
         assert res.data["version"] == 1
         assert res.data["memory_mb"] == 2048

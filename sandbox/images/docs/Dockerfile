@@ -4,12 +4,21 @@
 #   docker build -f sandbox/images/docs/Dockerfile -t yoriki-sandbox-docs:dev sandbox
 # 公開Docker Hubに置くので、秘密情報や社内向けの設定を入れない（design.md §10.1）。
 
+# Node.jsのパッケージは、版とhashを固定したlockから入れる（design.md §7.6）。Sandboxではnpm installできないので、
+# イメージのルートの /node_modules に置き、どこのスクリプトからも require・import で読めるようにする。
+# Nodeの版は mise.toml に合わせる（frontend/Dockerfile と同じベースイメージ）。本体とパッケージだけを下の段へコピーする
+FROM node:26-slim@sha256:0d1e33586362bb9e608c4e751e7a9e7edb55c9ac11461ed5666af696cc461dd4 AS node
+WORKDIR /opt/node-packages
+COPY images/docs/node/package.json images/docs/node/package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+
 # Pythonの版は mise.toml に合わせる（本体の api/Dockerfile と同じベースイメージ）
 FROM python:3.13-slim@sha256:70729b46c69b4f1e97c4822c1af3df53a1476cf5ddc6c087c0c10bc3a5678c2f
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-# エージェントが使うコマンド（harness.md §8.5）。sudo・apt は Sandbox の中では使わせない（ビルド時だけ入れる）
+# エージェントが使うコマンド（harness.md §8.5）と文書処理の道具（design.md §7.6。LibreOfficeはヘッドレスで、
+# Writer・Calc・Impressだけ）。sudo・apt は Sandbox の中では使わせない（ビルド時だけ入れる）
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         bc \
@@ -22,6 +31,11 @@ RUN apt-get update \
         gawk \
         jq \
         less \
+        libreoffice-calc-nogui \
+        libreoffice-impress-nogui \
+        libreoffice-writer-nogui \
+        pandoc \
+        poppler-utils \
         procps \
         ripgrep \
         tree \
@@ -29,6 +43,11 @@ RUN apt-get update \
         xz-utils \
         zip \
     && rm -rf /var/lib/apt/lists/*
+
+# 信頼しない文書を開くので、文書のマクロを動かさない設定を固定する。フォントは総称と、よくあるフォント名を
+# Noto CJKへ向ける（design.md §7.6）
+COPY images/docs/libreoffice/yoriki.xcd /usr/lib/libreoffice/share/registry/yoriki.xcd
+COPY images/docs/fonts/local.conf /etc/fonts/local.conf
 
 # 頻出ライブラリは、全依存の版とhashを固定したlockから、イメージのPythonへ入れる（design.md §7.6）。
 # rootfsは読取り専用なので、Sandboxの中からは変えられない。Run専用の環境 /workspace/env は、
@@ -42,6 +61,9 @@ RUN pip download --no-cache-dir --disable-pip-version-check --no-deps --only-bin
     && rm -rf /tmp/wheels \
     && python -c "import matplotlib.font_manager as f; f.fontManager" \
     && fc-cache -f
+
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /opt/node-packages/node_modules /node_modules
 
 COPY helper/yoriki_sandbox /opt/yoriki/lib/yoriki_sandbox
 COPY helper/bin/yoriki-sandbox /opt/yoriki/bin/yoriki-sandbox
@@ -60,10 +82,10 @@ RUN python -m compileall -q /opt/yoriki/lib /opt/yoriki/python \
 ENV LANG=C.UTF-8 \
     PATH=/workspace/env/bin:/opt/yoriki/bin:/usr/local/bin:/usr/bin:/bin
 
-LABEL org.yoriki.sandbox-contract="2" \
+LABEL org.yoriki.sandbox-contract="3" \
       org.yoriki.sandbox-profile="docs" \
       org.opencontainers.image.title="yoriki-sandbox-docs" \
-      org.opencontainers.image.description="Yoriki sandbox for document processing (Python, PDF, Office)" \
+      org.opencontainers.image.description="Yoriki sandbox for document processing (Python, Node.js, LibreOffice, PDF, Office)" \
       org.opencontainers.image.licenses="MIT"
 
 USER 10001:10001

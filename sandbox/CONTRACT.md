@@ -1,6 +1,6 @@
 # Sandboxの契約
 
-契約番号：**2**
+契約番号：**3**
 
 Runner（`api/` のLauncherとTool）とSandboxイメージの取り決め。イメージはラベル `org.yoriki.sandbox-contract` に、この番号を記録する。Runnerは対応する契約番号のイメージだけを、Runtime Profileとして登録させる（deployment.md §2.1）。
 
@@ -20,7 +20,10 @@ Runner（`api/` のLauncherとTool）とSandboxイメージの取り決め。イ
 | lock | `/opt/yoriki/requirements.lock`（イメージに入れたpackageの全依存の版とSHA-256）。追加するpackageの依存を解くときに使う |
 | `yoriki_connector` | Skillのスクリプトが社内DB等のConnectorを使うPythonのライブラリ（`/opt/yoriki/python`。イメージのPythonの `site-packages` の `.pth` で読めるようにする）。`query(connector, sql, params)`（`columns` はSQLのとおりの列名、`rows` は列名をキーにした行で、値はすべて文字列（NULLは空文字）。同じ名前の列は2つめから `名前_2`）・`describe(connector)`。`rate_limited`（`retry_after` の秒）と `busy` では、ライブラリが待ってやり直す。要求は §4.9 の中継のソケットへ送り、結果のCSVはRunnerが `/workspace/input/connectors/` に置いたものを読む |
 | `/packages` | 空のディレクトリ。追加するpackageのbundle（wheelとlock）を、Launcherが読取り専用でmountする |
-| 入っているもの | harness.md §8.5のGNUのツールとPython、`images/<profile>/requirements.in` のライブラリ、日本語のフォント（Noto CJK） |
+| 入っているもの | harness.md §8.5のGNUのツールとPython、`images/<profile>/requirements.in` のライブラリ、日本語のフォント（Noto CJK）。`docs` は、LibreOffice（ヘッドレスのWriter・Calc・Impress）、pandoc、poppler-utils、Node.js（mise.tomlの版）と `images/docs/node/package.json` のパッケージも持つ（design.md §7.6） |
+| Node.jsのパッケージ | `/node_modules`（版とhashを固定したlockから入れたもの）。Nodeは親のディレクトリを順に探すので、どこのスクリプトからも `require`・`import` で読める。`npm install` はできない |
+| フォント | fontconfig（`/etc/fonts/local.conf`）で、総称（`sans-serif`・`serif`・`monospace`）とよくあるフォント名をNoto CJKの日本語の字形へ向ける。言語の指定が中国語・韓国語なら、そちらの字形にする |
+| LibreOffice | 設定（プロファイル）は既定の `$HOME/.config/libreoffice`。文書のマクロは動かない（マクロのセキュリティを「非常に高」にし、信頼する場所を置かず、どちらもユーザーのプロファイルからは変えられない）。アプリケーションのマクロは止めない |
 | 入れないもの | 秘密情報、社内向けの設定、`sudo`。パッケージの追加（apt・ネットワークからのpip）はSandboxの中ではできない |
 
 ## 2 起動の制限

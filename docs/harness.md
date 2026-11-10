@@ -551,13 +551,13 @@ Runnerは、shell以外のToolの処理もSandboxの中で行う。ファイル�
 エージェントは多くの種類のコマンドを使う。Sandboxの制限（読取り専用のrootfs、`10001` のユーザー、ネットワークなし、tmpfs）の下で、次が確実に動くことを要件にし、契約テストで確かめる。
 
 - GNUのツール：coreutils、findutils、grep、sed、gawk、diffutils、file、tar、gzip・xz・zip・unzip、bc、jq、ripgrep。
-- Python（mise.tomlの版）と、頻出のライブラリ（pandas、openpyxl、xlsxwriter、pypdf、pdfplumber、pypdfium2、python-docx、python-pptx、rapidfuzz、charset-normalizer、matplotlib 等。design.md §7.6。一覧は `sandbox/images/docs/requirements.in`）。文字コードの判定は、LGPLの chardet ではなくMITの charset-normalizer を使う。
+- Python（mise.tomlの版）と、頻出のライブラリ（pandas、openpyxl、xlsxwriter、pypdf、pdfplumber、pypdfium2、python-docx、python-pptx、rapidfuzz、charset-normalizer、matplotlib、markitdown、defusedxml、reportlab 等。design.md §7.6。一覧は `sandbox/images/docs/requirements.in`）。文字コードの判定は、LGPLの chardet ではなくMITの charset-normalizer を使う。
 - 文書の変換：LibreOffice（ヘッドレスのWriter・Calc・Impress）、pandoc、poppler-utils（`pdftoppm`）、markitdown。
 - Node.jsと、版とhashを固定したlockから入れたパッケージ（`docx`、`pptxgenjs`、`react`、`react-dom`、`react-icons`、`sharp`。`npm install` はできない。`/node_modules` に置き、`/workspace/work` のスクリプトから `require`・`import` で読めることを契約テストで確かめる。design.md §7.6）。
 - 日本語：UTF-8のファイル名、Shift_JISのCSVの読み書き、日本語のフォント（Noto Sans CJK・Noto Serif CJKのRegular・Bold。OFL。よくあるフォントの名前はfontconfigでこれらへ向ける。design.md §7.6）。
 - 契約テストは、代表的なコマンドの一覧（`sandbox/tests/commands.toml`。数百を目標に、Skillで使われたコマンドから増やす）を実際の制限の下で実行し、終了コードと出力を確かめる。
 
-LibreOffice・Node.js・pandoc・poppler-utils・markitdownはこれからイメージに入れる（`sandbox/CONTRACT.md` §1は、入れるPull Requestで契約番号とあわせて直す。docs/status.md §4）。契約テストの代表的なコマンドにも、入れるときに足す。
+- LibreOfficeは素の `soffice --headless` で動き、文書のマクロは動かない（design.md §7.6）。契約テストで、プロファイルでマクロのセキュリティを下げても、開いた文書のマクロが動かないことを確かめる。
 
 契約テストは、runcとgVisor（runsc。既定。design.md §7.2の5）の両方で動かす（CIの `sandbox`・`sandbox-gvisor`）。文書処理の所要時間は `sandbox/benchmarks/docs.py` で比べる（`sandbox-gvisor` のsummaryに出る）。
 

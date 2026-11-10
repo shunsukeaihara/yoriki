@@ -15,7 +15,7 @@ def version_fields(**overrides) -> dict:
     return {
         "image_repository": "docker.io/yoriki/yoriki-sandbox-docs",
         "image_digest": DIGEST,
-        "contract": 2,
+        "contract": 3,
         "platforms": ["linux/amd64", "linux/arm64"],
         "platform_digests": {"linux/amd64": "sha256:" + "b" * 64, "linux/arm64": "sha256:" + "c" * 64},
         "python_version": "3.13.16",

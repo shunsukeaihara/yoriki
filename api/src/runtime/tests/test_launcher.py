@@ -196,7 +196,7 @@ class TestSandbox:
         info = sandbox.api.inspect_container(sandbox.container_id)
         s = spec(image=info["Config"]["Image"], runtime=settings.YORIKI_SANDBOX_RUNTIME)
         assert verify_container(info, s) == []
-        assert sandbox.helper("version", {}) | {"python": ""} == {"ok": True, "contract": 2, "python": ""}
+        assert sandbox.helper("version", {}) | {"python": ""} == {"ok": True, "contract": 3, "python": ""}
 
     def test_relay_passes_requests_from_scripts_and_returns_responses(self, sandbox, tmp_path):
         received = []

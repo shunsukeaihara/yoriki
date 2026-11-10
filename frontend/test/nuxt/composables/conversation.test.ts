@@ -120,4 +120,20 @@ describe('useConversationListStore', () => {
     store.upsert(conversation('c1', null))
     expect(store.items).toEqual([])
   })
+
+  it('切り替える前に始めた読込みの結果は使わない', async () => {
+    setActivePinia(createPinia())
+    let resolveFirst: (value: unknown) => void = () => {}
+    mockConversations.mockReturnValueOnce(new Promise((resolve) => (resolveFirst = resolve)))
+    mockConversations.mockResolvedValueOnce({ results: [conversation('a1', '2026-11-10T00:00:00Z')], next: null })
+    const store = useConversationListStore()
+
+    const first = store.reload()
+    await store.showArchived(true)
+    resolveFirst({ results: [conversation('c1', null)], next: null })
+    await first
+
+    expect(store.items.map((c) => c.id)).toEqual(['a1'])
+    expect(store.loading).toBe(false)
+  })
 })

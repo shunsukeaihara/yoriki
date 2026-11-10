@@ -14,7 +14,7 @@ from skill.models import SkillRequirement, SkillScope
 from user.factories import DepartmentFactory, DepartmentMembershipFactory
 
 from .factories import ConversationFactory
-from .models import Conversation, InstructionKind, UserInstruction
+from .models import Conversation, InstructionKind, InstructionState, UserInstruction
 from .serializers import ConversationSerializer
 
 # Runを始めるには既定のRuntime Profileが要る
@@ -120,6 +120,18 @@ class TestConversation:
             if e.action == LogEntry.Action.UPDATE and "archived" in e.changes_dict
         ]
         assert [e.actor for e in entries] == [app_user]
+
+    def test_archiving_does_not_start_the_waiting_requests(self, api_client, app_user):
+        conversation = ConversationFactory.create(owner=app_user)
+        RunFactory.create(conversation=conversation, status=RunStatus.RUNNING)
+        res = api_client.post(f"/api/app/v1/conversations/{conversation.uid}/messages/", {"body": "次"}, format="json")
+        assert res.status_code == 201, res.data
+        Run.objects.filter(conversation=conversation).update(status=RunStatus.WAITING_USER)
+        assert api_client.post(f"/api/app/v1/conversations/{conversation.uid}/archive/").status_code == 200
+        assert list(Run.objects.filter(conversation=conversation).values_list("status", flat=True)) == [
+            RunStatus.CANCELLED
+        ]
+        assert UserInstruction.objects.get(conversation=conversation).state == InstructionState.DISCARDED
 
     def test_posting_to_an_archived_conversation_restores_it(self, api_client, app_user):
         conversation = ConversationFactory.create(owner=app_user)

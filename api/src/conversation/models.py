@@ -108,6 +108,10 @@ class Conversation(models.Model):
         # ロックの順序は 会話 → Run（Run.locked()）
         locked = Conversation.objects.select_for_update().get(pk=self.pk)
         reason = _("会話を削除しました") if delete else _("会話をアーカイブしました")
+        # 待っている次の依頼と、まだ取り込んでいない発言は取り消す（止めたRunの終わりで新しいRunを始めない）
+        UserInstruction.objects.filter(conversation=locked, state=InstructionState.RECEIVED).update(
+            state=InstructionState.DISCARDED, updated=timezone.now()
+        )
         for run in Run.objects.filter(conversation=locked, status__in=CANCELLABLE_STATUSES):
             run.request_cancel(str(reason), actor=actor)
         now = timezone.now()

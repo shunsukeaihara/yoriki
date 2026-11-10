@@ -176,16 +176,21 @@ export const useConversationListStore = defineStore('conversationList', () => {
   const loading = ref(false)
   const archived = ref(false)
 
+  // 読込みの世代。一覧を切り替えたら、切り替える前に始めた読込みの結果を使わない
+  let generation = 0
+
   const reload = async () => {
+    const request = ++generation
     loading.value = true
     try {
       const page = await useAPI()
         .conversations()
         .list({ pageSize: CONVERSATION_PAGE_SIZE, archived: archived.value || undefined })
+      if (request !== generation) return
       items.value = page.results
       next.value = page.next
     } finally {
-      loading.value = false
+      if (request === generation) loading.value = false
     }
   }
 
@@ -199,9 +204,11 @@ export const useConversationListStore = defineStore('conversationList', () => {
 
   const loadMore = async () => {
     if (!next.value) return
+    const request = generation
     loading.value = true
     try {
       const page = await useAPI().http.get<Paginated<Conversation>, Paginated<Conversation>>(next.value)
+      if (request !== generation) return
       const known = new Set(items.value.map((c) => c.id))
       items.value = items.value.concat(page.results.filter((c) => !known.has(c.id)))
       next.value = page.next

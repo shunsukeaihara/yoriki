@@ -3,7 +3,9 @@
  * タスクの Run（design.md §11.9「自動実行の履歴」）。起動のしかたと起動元、受付時の版と入力、処理の状態、作業の記録と
  * 応答（会話の表示を読むだけで使う）、業務結果、添付と成果物、通知の配信の状態を出す。見られるのは Run の結果とログを
  * 見られる人（タスクを管理できる人。authorization.md §7.1）。「処理完了・通知失敗」でも結果は残り、「通知を再試行」は
- * 保存した内容を送り直すだけで、処理はやり直さない（処理の再実行はまだない）。
+ * 保存した内容を送り直すだけで、処理はやり直さない（処理の再実行はまだない）。失敗した・出力がおかしかった実行は、
+ * 「修正チャットで直す」から、この実行の入力（ファイルと入口の本文も同じもの）で修正チャットを始めて直す（ログを見られて、
+ * 今のタスクも管理できる人。design.md §11.11）。
  *
  * チャットから起動した人は、結果（状態・自分の入力・応答・業務結果・成果物）だけを見る（`canViewLogs` が偽）。最初の
  * 依頼（タスクの依頼文から作る）、作業の記録、配信、Runのストリームはログなので出さない
@@ -112,6 +114,35 @@ const launchedBy = computed(() => {
 
 // --- 操作 ---
 
+// 修正チャット（design.md §11.11）。タスクの今の定義（入力の項目）を読み、この実行の入力を初期値にしてダイアログを開く
+const fixOpen = ref(false)
+const fixTask = ref<TaskDetail | null>(null)
+const openingFix = ref(false)
+const fixInitialValues = computed<TaskRunInputs>(() =>
+  Object.fromEntries((run.value?.inputs ?? []).map((i) => [i.name, i.value as TaskRunInputs[string]])),
+)
+const reloadFixTask = async () => {
+  openingFix.value = true
+  try {
+    fixTask.value = await api.tasks(taskId).get()
+    return true
+  } catch (err) {
+    toast.add({ title: t('タスクを読めませんでした'), description: makeErrorMsg(err), color: 'error' })
+    return false
+  } finally {
+    openingFix.value = false
+  }
+}
+const openFix = async () => {
+  if (await reloadFixTask()) fixOpen.value = true
+}
+// 修正チャットを始めたら、その会話を開く
+const listStore = useConversationListStore()
+const onFixStarted = async (started: Run) => {
+  listStore.reload().catch(() => {})
+  await navigateTo(`/conversations/${started.conversation}`)
+}
+
 const stopping = ref(false)
 const stop = async () => {
   const ok = await confirm({
@@ -150,6 +181,29 @@ const stop = async () => {
           <DBtn color="neutral" variant="ghost" icon="i-lucide-refresh-cw" :aria-label="$t('読み直す')" @click="reload">
             <span class="hidden sm:inline">{{ $t('読み直す') }}</span>
           </DBtn>
+          <UTooltip
+            v-if="run?.canFixChat"
+            :text="$t('この実行の入力で修正チャットを始め、作業を見ながら直します（結果は通知先に送りません）')"
+          >
+            <DBtn
+              icon="i-lucide-messages-square"
+              variant="outline"
+              :loading="openingFix"
+              :aria-label="$t('修正チャットで直す')"
+              @click="openFix"
+            >
+              <span class="hidden sm:inline">{{ $t('修正チャットで直す') }}</span>
+            </DBtn>
+          </UTooltip>
+          <TaskFixChatDialog
+            v-if="run?.canFixChat"
+            v-model:open="fixOpen"
+            :task="fixTask"
+            :initial-values="fixInitialValues"
+            :from-run-id="runId"
+            @started="onFixStarted"
+            @conflicted="reloadFixTask"
+          />
           <DBtn
             v-if="run && isCancellable(run)"
             color="error"

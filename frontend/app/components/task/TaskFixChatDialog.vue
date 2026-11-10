@@ -2,7 +2,8 @@
 /**
  * タスクの修正チャット（design.md §11.11）でタスクを動かすダイアログ。タスクの画面からは新しい修正チャットを始め、
  * 修正チャットの「もう一度動かす」からは同じ会話で動かし直す（`conversationId`。前の入力を初期値にする）。
- * タスクの範囲で動かし、出口へは送らない
+ * 実行記録の画面からは、その実行の入力で新しい修正チャットを始める（`fromRunId`）。元の実行（もう一度動かすときは前の
+ * 実行）のファイルと入口の本文は、同じものを渡す。タスクの範囲で動かし、出口へは送らない
  */
 import TaskRunForm from './TaskRunForm.vue'
 import DDialog from '../common/DDialog.vue'
@@ -13,6 +14,8 @@ const props = defineProps<{
   conversationId?: string
   /** 入力の初期値（前の実行の入力） */
   initialValues?: TaskRunInputs
+  /** 元の実行（ファイルと入口の本文を引き継ぐ） */
+  fromRunId?: string
 }>()
 const open = defineModel<boolean>('open', { default: false })
 const emit = defineEmits<{ started: [value: Run]; conflicted: []; unknown: [] }>()
@@ -32,6 +35,11 @@ watch(open, (value) => {
   requestId.value = crypto.randomUUID()
 })
 const initialValues = computed(() => unknownValues.value ?? props.initialValues)
+// 元の実行の入力のうち、タスクの今の版にない項目（値は渡さない）
+const droppedInputs = computed(() => {
+  const names = new Set((props.task?.inputs ?? []).map((i) => i.name))
+  return Object.keys(props.initialValues ?? {}).filter((name) => !names.has(name))
+})
 
 const started = (value: Run | TaskRun) => {
   unknownValues.value = undefined
@@ -77,6 +85,12 @@ const unknown = (values: TaskRunInputs) => {
           <li>{{ $t('作業の記録が会話に出ます。作業中に追加の指示を出したり、質問に答えたりできます') }}</li>
           <li>{{ $t('結果は通知先に送りません。送るはずだった通知を会話に出します') }}</li>
           <li v-if="props.conversationId">{{ $t('前の実行の作業ファイルは引き継がず、新しく始めます') }}</li>
+          <li v-if="props.fromRunId">
+            {{ $t('前の実行の入力のファイルと入口の本文は、同じものを渡します。外したファイルは付け直してください') }}
+          </li>
+          <li v-if="droppedInputs.length">
+            {{ $t('今の版にない項目（{names}）の値は渡しません', { names: droppedInputs.join('、') }) }}
+          </li>
           <li v-if="props.task.suspended">{{ $t('タスクは停止中ですが、修正チャットでは動かせます') }}</li>
         </ul>
         <p v-if="unknownValues" class="mb-2 text-sm text-warning">
@@ -90,6 +104,7 @@ const unknown = (values: TaskRunInputs) => {
           :task="props.task"
           fix
           :fix-conversation-id="props.conversationId"
+          :from-run-id="props.fromRunId"
           :client-request-id="requestId"
           :initial-values="initialValues"
           @started="started"

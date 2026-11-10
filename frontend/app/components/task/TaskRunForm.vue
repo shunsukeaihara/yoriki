@@ -4,7 +4,9 @@ import { AxiosError } from 'axios'
 /**
  * タスクの手動実行とチャットからの起動（authorization.md §6）。タスクの今の版で、決めた入力の項目の値だけを渡す（自由な
  * 依頼文は受けない）。手動実行でもチャットからの起動（`conversationId` を渡す）でも、部門・全社・システムのタスクはタスクの
- * 範囲で動く（チャットから起動できる人はタスクより狭い権限を持たない）。修正チャット（`fix`。design.md §11.11）では、タスクの範囲で動かし、出口へは送らない。型と必須はサーバーが確かめ、項目ごとに返す
+ * 範囲で動く（チャットから起動できる人はタスクより狭い権限を持たない）。修正チャット（`fix`。design.md §11.11）では、タスクの範囲で動かし、出口へは送らない。型と必須はサーバーが確かめ、項目ごとに返す。
+ * 修正チャットを元の実行から始める・動かし直すとき（`fromRunId`）は、型がファイルの項目の初期値に元の実行でのパスを
+ * 入れ、同じファイルを渡す（外せば付け直せる）
  */
 const props = defineProps<{
   task: TaskDetail | LaunchableTask
@@ -18,6 +20,8 @@ const props = defineProps<{
   fix?: boolean
   /** 動かし直す修正チャット（省くと新しい修正チャットを作る） */
   fixConversationId?: string
+  /** 修正チャットの元の実行（実行記録から始める・もう一度動かす） */
+  fromRunId?: string
 }>()
 const api = useAPI()
 const toast = useToast()
@@ -59,6 +63,11 @@ const fields = inputs.map((input) => ({
     set: (value: boolean) => (form.value[input.name] = value),
   }),
   file: modelOf<File>(input.name),
+  // 元の実行から引き継ぐファイル（元の実行での /workspace/input のパス）
+  inherited: computed(() => {
+    const value = form.value[input.name]
+    return props.fromRunId && typeof value === 'string' && value ? value : null
+  }),
   choice: modelOf<boolean>(input.name),
 }))
 
@@ -69,7 +78,13 @@ const { onSubmit, loading, errors } = createSubmit({
     props.fix
       ? api
           .tasks(props.task.id)
-          .fixChat(props.task.version ?? 0, props.clientRequestId ?? crypto.randomUUID(), data, props.fixConversationId)
+          .fixChat(
+            props.task.version ?? 0,
+            props.clientRequestId ?? crypto.randomUUID(),
+            data,
+            props.fixConversationId,
+            props.fromRunId,
+          )
       : props.conversationId
         ? api
             .launchableTasks(props.task.id)
@@ -139,7 +154,7 @@ defineExpose({ onSubmit, loading, canPost })
   <DFormStack>
     <DFormAlert :errors="generalErrors" />
     <p v-if="!fields.length" class="text-sm text-muted">{{ $t('このタスクには入力の項目がありません') }}</p>
-    <template v-for="{ input, text, number, flag, file, choice } in fields" :key="input.name">
+    <template v-for="{ input, text, number, flag, file, choice, inherited } in fields" :key="input.name">
       <DSelect
         v-if="input.type === TaskInputType.BOOLEAN && !input.required"
         v-model="choice.value"
@@ -184,6 +199,27 @@ defineExpose({ onSubmit, loading, canPost })
         :clearable="!input.required"
         :error-messages="errorsOf(input.name)"
       />
+      <DFormField
+        v-else-if="input.type === TaskInputType.FILE && inherited.value"
+        :label="input.label"
+        :hint="input.description"
+        :required="input.required"
+        :error-messages="errorsOf(input.name)"
+      >
+        <div class="flex items-center gap-2 rounded-md border border-default px-3 py-2 text-sm">
+          <UIcon name="i-lucide-file" class="size-4 shrink-0 text-muted" />
+          <span class="min-w-0 flex-1 truncate">{{ inherited.value.split('/').pop() }}</span>
+          <span class="shrink-0 text-xs text-muted">{{ $t('前の実行のファイル') }}</span>
+          <DBtn
+            size="xs"
+            color="neutral"
+            variant="ghost"
+            icon="i-lucide-x"
+            :aria-label="$t('外す')"
+            @click="form[input.name] = null"
+          />
+        </div>
+      </DFormField>
       <DFileInputField
         v-else-if="input.type === TaskInputType.FILE"
         v-model="file.value"

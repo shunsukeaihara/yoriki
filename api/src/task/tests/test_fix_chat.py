@@ -34,10 +34,12 @@ from run.models import (
     RunTrigger,
 )
 from run.tasks import claim_run
-from task.dispatch import FIX_NOTE, NO_RESPONDER_NOTE
+from task.dispatch import FIX_NOTE, NO_RESPONDER_NOTE, WEBHOOK_NOTE, start_task_run
 from task.factories import TaskDefinitionFactory
+from task.inputs import InputFile
 from task.models import TaskScope
 from user.factories import DepartmentFactory, UserFactory, grant
+from user.models import system_user
 from utils.permissions import AppPermission
 
 pytestmark = [pytest.mark.django_db, pytest.mark.usefixtures("default_runtime")]
@@ -271,6 +273,169 @@ def test_tasks_are_not_launched_from_a_fix_chat(api_client, manager):
         format="json",
     )
     assert res.status_code == 404
+
+
+# --- 実行記録から始める（design.md §11.11） ---
+
+FILE_INPUTS = [
+    *INPUTS,
+    {"name": "invoice", "label": "請求書", "type": "file", "required": True},
+    {"name": "note", "label": "メモ", "type": "file"},
+]
+
+
+def _manual(api_client, user, task, **files):
+    api_client.force_login(user)
+    body = {"inputs": json.dumps({"vendor": "A商事"}), **{k: SimpleUploadedFile(*v) for k, v in files.items()}}
+    res = api_client.post(f"/api/app/v1/tasks/{task.uid}/run/", body)
+    assert res.status_code == 201, res.json()
+    return _finish(Run.objects.get(uid=res.json()["id"]))
+
+
+def _attachments(run: Run) -> dict[str, Artifact]:
+    return {a.name: a for a in run.messages.get(role=MessageRole.USER).attachments.all()}
+
+
+def test_fix_chat_starts_from_a_run_with_its_files(api_client, manager):
+    task = _task(manager, inputs=FILE_INPUTS)
+    source = _manual(api_client, manager, task, invoice=("請求書.pdf", b"%PDF"), note=("メモ.txt", b"memo"))
+    values = source.manifest["fixed"]["task"]["inputs"]
+    # 値を直し、請求書は前の実行のものを、メモは外して送る
+    res = _fix(
+        api_client,
+        manager,
+        task,
+        from_run=source.uid,
+        inputs={"vendor": "B物産", "invoice": values["invoice"]},
+    )
+    assert res.status_code == 201, res.json()
+    run = Run.objects.get(uid=res.json()["id"])
+    assert run.launch == RunLaunch.FIX
+    assert run.manifest["fixed"]["task"]["source_run"] == source.uid
+    assert run.manifest["fixed"]["task"]["inputs"] == {"vendor": "B物産", "invoice": "/workspace/input/請求書.pdf"}
+    # 中身は複製せず、同じものを参照する
+    [attachment] = _attachments(run).values()
+    assert attachment.blob == _attachments(source)["請求書.pdf"].blob
+    assert (attachment.run, attachment.conversation) == (run, run.conversation)
+    assert BlobObject.objects.count() == 2
+    # 元の実行にないファイルは、付け直してもらう
+    res = _fix(api_client, manager, task, from_run=source.uid, inputs={"vendor": "B物産", "invoice": "/x.pdf"})
+    assert res.status_code == 400
+    assert "invoice" in res.json()["inputs"]
+
+
+def test_rerun_in_the_fix_chat_inherits_the_files(api_client, manager):
+    """「もう一度動かす」も、前の実行のファイルを引き継ぐ"""
+    task = _task(manager, inputs=FILE_INPUTS)
+    source = _manual(api_client, manager, task, invoice=("請求書.pdf", b"%PDF"))
+    path = source.manifest["fixed"]["task"]["inputs"]["invoice"]
+    first = Run.objects.get(
+        uid=_fix(api_client, manager, task, from_run=source.uid, inputs={"vendor": "A", "invoice": path}).json()["id"]
+    )
+    _finish(first)
+    res = _fix(
+        api_client,
+        manager,
+        task,
+        conversation=first.conversation,
+        from_run=first.uid,
+        inputs={"vendor": "A", "invoice": first.manifest["fixed"]["task"]["inputs"]["invoice"]},
+    )
+    assert res.status_code == 201, res.json()
+    second = Run.objects.get(uid=res.json()["id"])
+    assert second.conversation == first.conversation
+    assert _attachments(second)["請求書.pdf"].blob == _attachments(source)["請求書.pdf"].blob
+
+
+def test_fix_chat_from_a_webhook_run_keeps_the_payload(api_client, manager):
+    task = _task(manager)
+    source = start_task_run(
+        task,
+        inputs={"vendor": "A商事"},
+        actor=system_user(),
+        launch=RunLaunch.WEBHOOK,
+        files=[InputFile("payload.json", b'{"vendor": "A"}')],
+    )
+    _finish(source)
+    # Webhook由来の印がないRun（印を足す前のもの）も、起動のしかたで分かる
+    del source.manifest["fixed"]["task"]["webhook"]
+    source.save(update_fields=["manifest"])
+    res = _fix(api_client, manager, task, from_run=source.uid)
+    assert res.status_code == 201, res.json()
+    run = Run.objects.get(uid=res.json()["id"])
+    # 項目でないファイル（入口の本文）も引き継ぎ、本番と同じくデータとして読ませる
+    assert _attachments(run)["payload.json"].blob == _attachments(source)["payload.json"].blob
+    text = run.events.get(sequence=2).data["text"]
+    assert WEBHOOK_NOTE in text
+    assert FIX_NOTE in text
+    assert run.manifest["fixed"]["task"]["webhook"]
+    # 動かし直しても、引き継ぐ
+    _finish(run)
+    again = _fix(api_client, manager, task, conversation=run.conversation, from_run=run.uid)
+    assert again.status_code == 201, again.json()
+    rerun = Run.objects.get(uid=again.json()["id"])
+    assert "payload.json" in _attachments(rerun)
+    assert WEBHOOK_NOTE in rerun.events.get(sequence=2).data["text"]
+
+
+def test_fix_chat_from_a_run_needs_its_logs_and_the_task(api_client, manager):
+    task = _task(manager)
+    source = _manual(api_client, manager, task)
+    # ほかのタスクのRunからは始めない
+    other = TaskDefinitionFactory.create(scope=TaskScope.COMPANY, created_by=manager, revision__inputs=INPUTS)
+    assert _fix(api_client, manager, other, from_run=source.uid).status_code == 404
+    # 元の実行のログを見られない（実行したときの範囲を管理できない）
+    department = DepartmentFactory.create()
+    Run.objects.filter(pk=source.pk).update(task_scope=TaskScope.DEPARTMENT, task_department=department)
+    assert _fix(api_client, manager, task, from_run=source.uid).status_code == 404
+    # 実行記録の画面で、始められるかを示す
+    Run.objects.filter(pk=source.pk).update(task_scope=TaskScope.COMPANY, task_department=None)
+    api_client.force_login(manager)
+    detail = api_client.get(f"/api/app/v1/tasks/{task.uid}/runs/{source.uid}/").json()
+    assert detail["can_fix_chat"]
+    task.soft_delete(actor=manager)
+    detail = api_client.get(f"/api/app/v1/tasks/{task.uid}/runs/{source.uid}/").json()
+    assert not detail["can_fix_chat"]
+
+
+def test_fix_chat_from_a_sensitive_run_is_sensitive(api_client, manager):
+    """元の実行が機密なら、修正チャットも機密にし、タスクのモデルがローカルLLMのときだけ動かす"""
+    local = ModelProfileFactory.create(
+        version__connection=LLMConnectionFactory.create(kind=ProviderKind.LOCAL), version__supports_tools=True
+    )
+    task = _task(manager, model_profile=local)
+    source = _manual(api_client, manager, task)
+    Run.objects.filter(pk=source.pk).update(handles_sensitive_data=True)
+    res = _fix(api_client, manager, task, from_run=source.uid)
+    assert res.status_code == 201, res.json()
+    run = Run.objects.get(uid=res.json()["id"])
+    assert run.conversation.handles_sensitive_data
+    assert run.handles_sensitive_data
+    # 機密でない修正チャットでは動かさない
+    plain = _finish(Run.objects.get(uid=_fix(api_client, manager, task).json()["id"]))
+    res = _fix(api_client, manager, task, conversation=plain.conversation, from_run=source.uid)
+    assert res.status_code == 400
+    assert "新しい修正チャット" in str(res.json())
+    # 機密の修正チャットでは、タスクのモデルがクラウドなら動かさない
+    _finish(run)
+    revision = task.current_revision
+    task.revise(
+        actor=manager,
+        expected_version=1,
+        **{name: getattr(revision, name) for name in ("description", "prompt_template", "skills", "connectors")},
+        model_profile=ModelProfileFactory.create(version__supports_tools=True),
+        effort="",
+        handles_sensitive_data=False,
+        inputs=revision.inputs,
+        output_schema=None,
+        destination=None,
+        notify_events=[],
+        notify_content="status_and_result",
+        notification_instructions="",
+    )
+    res = _fix(api_client, manager, task, conversation=run.conversation)
+    assert res.status_code == 400
+    assert "ローカルLLM" in str(res.json())
 
 
 # --- 会話でのやり取り ---

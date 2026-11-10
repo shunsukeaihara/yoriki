@@ -38,6 +38,7 @@ from .models import (
     TaskAction,
     TaskDefinition,
     TaskDefinitionRevision,
+    TaskInputType,
     TaskScope,
     TriggerBinding,
     TriggerBindingRevision,
@@ -90,6 +91,7 @@ def start_task_run(
     expected_version: int | None = None,
     conversation: Conversation | None = None,
     client_request_id: str = "",
+    source: Run | None = None,
 ) -> Run:
     """タスクの今の版でRunを始める。始められなければ CannotRun（入力の誤りは InvalidInputs）。
     `expected_version` を渡すと、今の版がそれと違えば VersionConflict（画面で確かめた版と違う定義で動かさない）。
@@ -106,7 +108,10 @@ def start_task_run(
     修正チャットを作る（Runの `conversation` で返す）。動かせるのはタスクを管理できる人で、停止中のタスクも動かせる。
     出口へは送らない（design.md §11.11）。`client_request_id` は最初の依頼の `client_message_id` にし、同じ人の
     このタスクの修正チャットで同じIDの要求が受け付け済みなら、AlreadyStarted でそのRunを知らせる（応答が失われた後の
-    再送で二重に動かさない。タスクの行のロックの中で確かめる）"""
+    再送で二重に動かさない。タスクの行のロックの中で確かめる）。`source` は修正チャットの元の実行（実行記録から
+    始める・もう一度動かす。呼び出し側が、ログを見られるこのタスクのRunかを確かめる）で、型がファイルの項目の値に
+    元の実行でのパスを送ると、その添付と同じ中身を参照して渡す。項目でないファイル（入口の本文等）も引き継ぐ。元の
+    実行が機密なら、修正チャットも機密にする（design.md §11.11）"""
     # 保存先への書き込みは、タスクの行をロックする前に行う（保存先が遅くても、同じタスクの受付や更新を待たせない）
     sent = inputs.values() if isinstance(inputs, dict) else ()
     written = store_files([*files, *(v for v in sent if isinstance(v, InputFile))])
@@ -133,20 +138,26 @@ def start_task_run(
             revision = task.current_revision
             assert revision is not None  # can()・in_service() が確かめた
             values = inputs(revision) if callable(inputs) else inputs
+            inherited: list[InputFile] = []
+            if source is not None:
+                values, inherited = _inherit_files(source, revision, values)
             cleaned, errors = clean_inputs(revision.inputs, values)
             if errors:
                 raise InvalidInputs(errors)
             if launch == RunLaunch.FIX:
-                fix_chat = _fix_chat(task, revision, actor=actor, conversation=conversation)
+                sensitive = revision.handles_sensitive_data or bool(source and source.handles_sensitive_data)
+                fix_chat = _fix_chat(task, revision, actor=actor, conversation=conversation, sensitive=sensitive)
                 return _start(
                     task,
                     revision,
                     cleaned,
                     actor=actor,
                     launch=launch,
-                    files=files,
+                    files=[*files, *inherited],
                     conversation=fix_chat,
                     client_request_id=client_request_id,
+                    sensitive=fix_chat.handles_sensitive_data,
+                    source=source,
                 )
             run = _start(task, revision, cleaned, actor=actor, launch=launch, files=files)
             if conversation is not None:
@@ -189,19 +200,26 @@ class RunPlan:
 
 
 def plan_run(
-    task: TaskDefinition, revision: TaskDefinitionRevision, *, lock: bool = True, deliver: bool = True, launcher=None
+    task: TaskDefinition,
+    revision: TaskDefinitionRevision,
+    *,
+    lock: bool = True,
+    deliver: bool = True,
+    launcher=None,
+    sensitive: bool = False,
 ) -> RunPlan:
     """タスクの今の版でRunを始められるかを確かめ、Runに固定するものを決める。始められなければ CannotRun。
 
     何も作らない。受付（_start()）は `lock` で通知先の行をロックする（transactionの中で呼ぶ）。入口の画面でサンプルを
     試すとき（受付と同じ判定を見せる）は `lock=False` で読むだけにし、受付を待たせない。`deliver` が偽（修正チャット）
     なら通知先を固定せず、使えるかも確かめない（出口へ送らない）。Connectorは停止中のタスクでも使えるとする。
-    `launcher` はチャットから起動した人で、一覧はその人の権限との共通部分にする（authorization.md §6）"""
+    `launcher` はチャットから起動した人で、一覧はその人の権限との共通部分にする（authorization.md §6）。`sensitive` は
+    タスクの版のほかに機密として扱う理由があるとき（機密の修正チャット。design.md §11.11）"""
     profile = revision.model_profile
     version = profile.current_version
     if version is None or not profile.is_active or profile.deleted:
         raise CannotRun(_("このタスクのモデル設定は使えません。タスクのモデル設定を選び直してください。"))
-    sensitive = revision.handles_sensitive_data
+    sensitive = revision.handles_sensitive_data or sensitive
     if sensitive and not version.is_local:
         raise CannotRun(_("個人情報や機密情報を扱うタスクでは、ローカルLLMのモデルを選んでください。"))
     effort = revision.effort if revision.effort in version.effort_values else version.default_effort
@@ -260,12 +278,20 @@ def _start(
     files: Sequence[InputFile],
     conversation: Conversation | None = None,
     client_request_id: str = "",
+    sensitive: bool = False,
+    source: Run | None = None,
 ) -> Run:
     """Runを作る。`conversation` は修正チャット（なければRunごとの会話を作る）。`client_request_id` は修正チャットの
-    最初の依頼の `client_message_id`"""
+    最初の依頼の `client_message_id`。`sensitive` は機密の修正チャット、`source` は修正チャットの元の実行"""
     fixing = launch == RunLaunch.FIX
-    plan = plan_run(task, revision, deliver=not fixing, launcher=actor if launch == RunLaunch.CHAT else None)
-    sensitive = revision.handles_sensitive_data
+    plan = plan_run(
+        task, revision, deliver=not fixing, launcher=actor if launch == RunLaunch.CHAT else None, sensitive=sensitive
+    )
+    sensitive = revision.handles_sensitive_data or sensitive
+    # Webhookで起動した実行は、修正チャットで動かし直しても、payloadのファイルをデータとして読ませる
+    webhook = launch == RunLaunch.WEBHOOK or bool(
+        source and (source.launch == RunLaunch.WEBHOOK or _fixed_task(source).get("webhook"))
+    )
     if conversation is None:
         conversation = Conversation.objects.create(
             owner=actor,
@@ -305,6 +331,8 @@ def _start(
             "output_schema": plan.output_schema,
             "inputs": inputs,
             "notification_instructions": plan.notification,
+            "webhook": webhook,
+            "source_run": source.uid if source else "",
         },
     }
     run = Run.objects.create(
@@ -336,7 +364,7 @@ def _start(
         RunEventKind.USER_MESSAGE,
         user_message_data(
             message,
-            _first_message(text, inputs, launch, notification=plan.notification),
+            _first_message(text, inputs, launch, notification=plan.notification, webhook=webhook),
             skills=plan.entries,
             connectors=plan.connectors,
             connector_catalog=plan.connector_catalog,
@@ -399,10 +427,16 @@ def launched_run(conversation: Conversation, client_request_id: str, task_uid: s
 
 
 def _fix_chat(
-    task: TaskDefinition, revision: TaskDefinitionRevision, *, actor, conversation: Conversation | None
+    task: TaskDefinition,
+    revision: TaskDefinitionRevision,
+    *,
+    actor,
+    conversation: Conversation | None,
+    sensitive: bool,
 ) -> Conversation:
     """修正チャットの会話。`conversation` がなければ新しく作る。あれば、行をロックして、このタスクの、動かす人の
-    修正チャットで、動いているRunがなく、タスクの今の版の機密の区分で動かせるかを確かめる（タスクの行の後に取る）"""
+    修正チャットで、動いているRunがなく、機密の区分で動かせるかを確かめる（タスクの行の後に取る）。`sensitive` は
+    タスクの今の版か元の実行が機密か（design.md §11.11）"""
     if conversation is None:
         return Conversation.objects.create(
             owner=actor,
@@ -410,7 +444,7 @@ def _fix_chat(
             effort=revision.effort,
             purpose=ConversationPurpose.TASK_FIX,
             task=task,
-            handles_sensitive_data=revision.handles_sensitive_data,
+            handles_sensitive_data=sensitive,
             title=task.name[:200],
             last_posted=timezone.now(),
         )
@@ -429,6 +463,12 @@ def _fix_chat(
         raise CannotRun(
             _(
                 "このタスクは個人情報・機密情報を扱うようになりました。タスクの画面から新しい修正チャットを始めてください"
+            )
+        )
+    if sensitive and not conversation.handles_sensitive_data:
+        raise CannotRun(
+            _(
+                "元の実行は個人情報・機密情報を扱うので、この修正チャットでは動かせません。新しい修正チャットで始めてください"
             )
         )
     if conversation.archived is not None:
@@ -492,7 +532,9 @@ def _destination_revision(
     return destination.current_revision
 
 
-def _first_message(text: str, inputs: dict[str, Any], launch: RunLaunch, *, notification: str = "") -> str:
+def _first_message(
+    text: str, inputs: dict[str, Any], launch: RunLaunch, *, notification: str = "", webhook: bool = False
+) -> str:
     """モデルに渡す最初の発言。テンプレートを埋めた依頼文に、入力の値と、通知の書き方と、答える人がいないこと
     （修正チャットでは、答える人がいること）を添える"""
     parts = [text.strip()]
@@ -501,7 +543,7 @@ def _first_message(text: str, inputs: dict[str, Any], launch: RunLaunch, *, noti
         parts.append("The inputs of this run:\n" + untrusted(json.dumps(inputs, ensure_ascii=False), "task_inputs"))
     if notification:
         parts.append(NOTIFICATION_NOTE.format(instructions=notification))
-    if launch == RunLaunch.WEBHOOK:
+    if webhook:
         parts.append(WEBHOOK_NOTE)
     parts.append(FIX_NOTE if launch == RunLaunch.FIX else NO_RESPONDER_NOTE)
     return "\n\n".join(parts)
@@ -512,7 +554,7 @@ def store_files(files: Sequence[InputFile]) -> list[InputFile]:
     written: list[InputFile] = []
     try:
         for file in files:
-            if file.stored is None:
+            if file.stored is None and file.blob is None:
                 file.stored = BlobObject.write(file.open())
                 written.append(file)
     except BaseException:
@@ -553,7 +595,7 @@ def _place_files(
         Artifact.objects.create(
             owner=actor,
             conversation=conversation,
-            blob=BlobObject.register(*file.stored) if file.stored else BlobObject.put(file.open()),
+            blob=file.blob or (BlobObject.register(*file.stored) if file.stored else BlobObject.put(file.open())),
             kind=ArtifactKind.ATTACHMENT,
             name=clean_filename(file.name),
             content_type=guess_content_type(clean_filename(file.name)),
@@ -566,6 +608,50 @@ def _place_files(
     paths = {id(file): artifact.describe()["path"] for file, artifact in zip(placed, artifacts, strict=True)}
     values = {name: paths[id(v)] if isinstance(v, InputFile) else v for name, v in inputs.items()}
     return artifacts, values
+
+
+def _fixed_task(run: Run) -> dict[str, Any]:
+    return ((run.manifest or {}).get("fixed") or {}).get("task") or {}
+
+
+def source_files(run: Run) -> tuple[dict[str, InputFile], list[InputFile]]:
+    """修正チャットの元の実行（design.md §11.11）の添付を、同じ中身を参照するファイルにする。（/workspace/input の
+    パスから、型がファイルの項目の値だったファイル、項目でないファイル（入口の本文等））。消した添付は引き継がない"""
+    message = ConversationMessage.objects.filter(run=run, role=MessageRole.USER).order_by("pk").first()
+    if message is None:
+        return {}, []
+    used = {v for v in (_fixed_task(run).get("inputs") or {}).values() if isinstance(v, str)}
+    by_path: dict[str, InputFile] = {}
+    extras: list[InputFile] = []
+    for artifact in message.attachments.filter(deleted=False).select_related("blob").order_by("pk"):
+        file = InputFile(name=artifact.name, blob=artifact.blob)
+        path = str(artifact.describe()["path"])
+        if path in used:
+            by_path[path] = file
+        else:
+            extras.append(file)
+    return by_path, extras
+
+
+def _inherit_files(
+    source: Run, revision: TaskDefinitionRevision, values: dict[str, Any]
+) -> tuple[dict[str, Any], list[InputFile]]:
+    """型がファイルの項目に元の実行でのパスが送られたら、その添付と同じ中身を参照するファイルにする。（値、引き継ぐ
+    項目でないファイル）。元の実行にないパスは InvalidInputs（付け直してもらう）"""
+    by_path, extras = source_files(source)
+    file_items = {d["name"] for d in revision.inputs if d["type"] == TaskInputType.FILE}
+    values = dict(values)
+    errors: dict[str, str] = {}
+    for name, value in values.items():
+        if name not in file_items or not isinstance(value, str) or not value:
+            continue
+        if (file := by_path.get(value)) is None:
+            errors[name] = _("前の実行のファイルが見つかりません。ファイルを付け直してください")
+        else:
+            values[name] = file
+    if errors:
+        raise InvalidInputs(errors)
+    return values, extras
 
 
 def receive_webhook(

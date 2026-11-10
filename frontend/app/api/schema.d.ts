@@ -6354,6 +6354,8 @@ export interface components {
             readonly deliveries_info: components["schemas"]["TaskRunDeliveryState"][];
             /** @description ログ（作業の記録、最初の依頼、配信）も見られるか。偽なら、チャットから起動した人として結果だけを見ている（作業の計画・使ったSkill・モデル設定・配信・失敗の理由の本文・ステップ数は空にする。authorization.md §7.1） */
             readonly can_view_logs: boolean;
+            /** @description この実行の入力で修正チャットを始められるか（ログを見られて、今のタスクも管理できる。design.md §11.11） */
+            readonly can_fix_chat: boolean;
         };
         /**
          * @description 手動実行の入力。型がファイルの項目があれば multipart/form-data で送り、`inputs` はJSONの文字列にして、
@@ -9907,6 +9909,8 @@ export interface operations {
                 client_request_id: string;
                 /** @description 動かし直す修正チャットのID（このタスクの、自分の修正チャット） */
                 conversation?: string;
+                /** @description 元の実行のID（実行記録から始める・もう一度動かす。ログを見られる、このタスクのRun）。型がファイルの項目の値に元の実行でのパス（実行の `inputs` の値）を送ると、同じファイルを渡す。項目でないファイル（入口の本文等）も引き継ぎ、元の実行が機密なら修正チャットも機密にする */
+                from_run?: string;
                 /** @description 画面で確かめた版（任意）。今の版と違えば409にし、確かめていない定義では動かさない */
                 version?: number;
             };

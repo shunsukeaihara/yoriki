@@ -15,6 +15,7 @@ from typing import IO, Any
 
 from django.utils.translation import gettext as _
 
+from artifact.models import BlobObject
 from artifact.storage import StoredObject
 from harness.untrusted import untrusted
 
@@ -30,7 +31,8 @@ MAX_NUMBER = 10**15
 class InputFile:
     """送られたファイル（手動実行・Webhookのmultipart）。`name` は送り元が付けた名前。中身は `content`（Webhook。
     本文は入口の上限までなのでメモリに持つ）か `upload`（手動実行。大きなファイルは一時ファイルのまま保存先へ流す）。
-    `path` は /workspace/input の中の名前（Webhookでpayloadのファイルに書くために、受付時に先に決める）"""
+    `path` は /workspace/input の中の名前（Webhookでpayloadのファイルに書くために、受付時に先に決める）。`blob` は
+    前の実行の添付の中身（修正チャットで引き継ぐ。design.md §11.11）で、保存先に書かずに同じものを参照する"""
 
     name: str
     content: bytes = b""
@@ -38,6 +40,7 @@ class InputFile:
     path: str = ""
     # 保存先に書いたもの（BlobObject.write()）。タスク・入口の行ロックを持つ前に書く（task/dispatch.py）
     stored: tuple[StoredObject, str] | None = None
+    blob: BlobObject | None = None
 
     @cached_property
     def sha256(self) -> str:

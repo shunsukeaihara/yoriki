@@ -186,11 +186,18 @@ const createAPI = () => {
         }),
       // 修正チャット（design.md §11.11）でタスクを動かす。conversation を省くと新しい修正チャットを作る（応答のRunの
       // conversation が修正チャット）。手動実行と同じく multipart で送る。clientRequestId は要求ごとに画面が作るIDで、
-      // 応答が失われた後の再送では、前に動かしたRunが返る
-      fixChat: (version: number, clientRequestId: string, inputs: TaskRunInputs, conversation?: string) =>
+      // 応答が失われた後の再送では、前に動かしたRunが返る。fromRun は元の実行（実行記録から始める・もう一度動かす）で、
+      // 型がファイルの項目に元の実行でのパスを入れると、同じファイルを渡す。項目でないファイル（入口の本文等）も引き継ぐ
+      fixChat: (
+        version: number,
+        clientRequestId: string,
+        inputs: TaskRunInputs,
+        conversation?: string,
+        fromRun?: string,
+      ) =>
         http.post<Run, Run>(`app/v1/tasks/${id}/fix_chat/`, taskRunForm(inputs), {
           timeout: UPLOAD_TIMEOUT,
-          params: { version, conversation, client_request_id: clientRequestId },
+          params: { version, conversation, from_run: fromRun, client_request_id: clientRequestId },
         }),
       // チャットから起動できるかの切り替え（版を作らない）
       chatLaunch: (data: TaskChatLaunch) => http.post<TaskDetail, TaskDetail>(`app/v1/tasks/${id}/chat_launch/`, data),

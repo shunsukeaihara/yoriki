@@ -50,16 +50,16 @@ def test_settings_need_the_budget_permissions(api_client, app_user):
     res = api_client.get(SETTINGS)
     assert res.status_code == 200
     assert res.json()["department_monthly_limit"] is None
-    assert api_client.patch(SETTINGS, {"company_monthly_limit": "50"}, format="json").status_code == 403
+    assert api_client.patch(SETTINGS, {"system_monthly_limit": "50"}, format="json").status_code == 403
 
     manager = grant(viewer, "usage.change_budget")
     api_client.force_login(manager)
-    spend(Budget.company(), "12.5")
-    res = api_client.patch(SETTINGS, {"company_monthly_limit": "50", "department_monthly_limit": "20"}, format="json")
+    spend(Budget.system(), "12.5")
+    res = api_client.patch(SETTINGS, {"system_monthly_limit": "50", "department_monthly_limit": "20"}, format="json")
     assert res.status_code == 200, res.json()
-    assert res.json()["company"] == {"limit": "50.00", "spent": "12.5000", "remaining": "37.5000"}
+    assert res.json()["system"] == {"limit": "50.00", "spent": "12.5000", "remaining": "37.5000"}
     assert BudgetSettings.load().department_monthly_limit == Decimal(20)
-    assert api_client.patch(SETTINGS, {"company_monthly_limit": "-1"}, format="json").status_code == 400
+    assert api_client.patch(SETTINGS, {"system_monthly_limit": "-1"}, format="json").status_code == 400
 
 
 def test_department_override(api_client, app_user):
@@ -95,7 +95,7 @@ def test_my_budgets_show_joined_and_manageable_departments(api_client, app_user)
     DepartmentFactory.create(name="経理")
     api_client.force_login(app_user)
     res = api_client.get(MY).json()
-    assert [(r["department"]["name"], r["joined"]) for r in res] == [("営業", True)]  # 全社の枠は出さない
+    assert [(r["department"]["name"], r["joined"]) for r in res] == [("営業", True)]  # システムの枠は出さない
     assert res[0]["status"]["limit"] is None
 
     admin = grant(app_user, AppPermission.MANAGE_ALL_DEPARTMENTS, AppPermission.MANAGE_COMPANY_TASKS)
@@ -109,7 +109,7 @@ def test_my_budgets_show_joined_and_manageable_departments(api_client, app_user)
     assert joined.pk
 
 
-def test_user_without_departments_sees_the_company_budget(api_client, app_user):
+def test_user_without_departments_sees_the_system_budget(api_client, app_user):
     api_client.force_login(app_user)
     assert [r["kind"] for r in api_client.get(MY).json()] == [2]
 

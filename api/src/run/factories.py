@@ -14,7 +14,7 @@ class RunFactory(DjangoModelFactory[Run]):
     conversation = factory.SubFactory(ConversationFactory)
     owner = factory.SelfAttribute("conversation.owner")
     model_version = factory.LazyAttribute(lambda o: o.conversation.model_profile.current_version)
-    budget = factory.LazyFunction(Budget.company)
+    budget = factory.LazyFunction(Budget.system)
     status = RunStatus.QUEUED
 
 

@@ -41,17 +41,19 @@ class BudgetSettingsSerializer(serializers.ModelSerializer):
     """既定の月の上限（design.md §9.1）。空なら無制限"""
 
     department_monthly_limit = limit_field(_("部門の月の上限（米ドル）。部門ごとに上書きできる"))
-    company_monthly_limit = limit_field(_("全社の枠の月の上限（米ドル）。全社・システムのタスクと、所属のない人の利用"))
-    company = serializers.SerializerMethodField(help_text=_("全社の枠の今月の利用額・上限・残額"))
+    system_monthly_limit = limit_field(
+        _("システムの枠の月の上限（米ドル）。全社・システムのタスクと、所属のない人の利用")
+    )
+    system = serializers.SerializerMethodField(help_text=_("システムの枠の今月の利用額・上限・残額"))
 
     class Meta:
         model = BudgetSettings
-        fields = ["department_monthly_limit", "company_monthly_limit", "company", "updated"]
+        fields = ["department_monthly_limit", "system_monthly_limit", "system", "updated"]
         read_only_fields = ["updated"]
 
     @extend_schema_field(BudgetStatusSerializer)
-    def get_company(self, obj: BudgetSettings) -> dict[str, Any]:
-        return _status(self, Budget.company())
+    def get_system(self, obj: BudgetSettings) -> dict[str, Any]:
+        return _status(self, Budget.system())
 
 
 class DepartmentBudgetSerializer(serializers.Serializer):
@@ -86,7 +88,7 @@ def department_budget(department: Department) -> Budget | None:
 
 
 class MyBudgetSerializer(serializers.Serializer):
-    """利用者が見られる予算（所属している部門・管理できる部門・全社の枠）"""
+    """利用者が見られる予算（所属している部門・管理できる部門・システムの枠）"""
 
     kind = serializers.ChoiceField(choices=BudgetKind.choices, read_only=True)
     department = MinimumDepartmentSerializer(read_only=True, allow_null=True)

@@ -67,7 +67,7 @@ class Conversation(models.Model):
         related_name="fix_chats",
         verbose_name=_("修正するタスク"),
     )
-    # 予算を計上する部門。空なら、所属が1つならその部門、所属がなければ全社の枠。修正チャットとタスク・評価のRunの
+    # 予算を計上する部門。空なら、所属が1つならその部門、所属がなければシステムの枠。修正チャットとタスク・評価のRunの
     # 会話では使わない（タスク・Skillの計上先を使う。design.md §9.1）
     budget_department = models.ForeignKey(
         "user.Department",

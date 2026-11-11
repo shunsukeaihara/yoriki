@@ -358,7 +358,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description 自分が見られる予算の今月の利用額・上限・残額。所属している部門と管理できる部門、全社・システムのタスクを管理できる人には全社の枠（design.md §9.1） */
+        /** @description 自分が見られる予算の今月の利用額・上限・残額。所属している部門と管理できる部門、全社・システムのタスクを管理できる人にはシステムの枠（design.md §9.1） */
         get: operations["app_v1_my_budgets_list"];
         put?: never;
         post?: never;
@@ -1608,14 +1608,14 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description 予算の既定の上限と、全社の枠の今月の利用額（design.md §9.1） */
+        /** @description 予算の既定の上限と、システムの枠の今月の利用額（design.md §9.1） */
         get: operations["v1_budgets_settings_retrieve"];
         put?: never;
         post?: never;
         delete?: never;
         options?: never;
         head?: never;
-        /** @description 予算の既定の上限と、全社の枠の今月の利用額（design.md §9.1） */
+        /** @description 予算の既定の上限と、システムの枠の今月の利用額（design.md §9.1） */
         patch: operations["v1_budgets_settings_partial_update"];
         trace?: never;
     };
@@ -2715,11 +2715,11 @@ export interface components {
             department_monthly_limit: string | null;
             /**
              * Format: decimal
-             * @description 全社の枠の月の上限（米ドル）。全社・システムのタスクと、所属のない人の利用
+             * @description システムの枠の月の上限（米ドル）。全社・システムのタスクと、所属のない人の利用
              */
-            company_monthly_limit: string | null;
-            /** @description 全社の枠の今月の利用額・上限・残額 */
-            readonly company: components["schemas"]["BudgetStatus"];
+            system_monthly_limit: string | null;
+            /** @description システムの枠の今月の利用額・上限・残額 */
+            readonly system: components["schemas"]["BudgetStatus"];
             /** Format: date-time */
             readonly updated: string;
         };
@@ -3153,7 +3153,7 @@ export interface components {
             readonly active_run: components["schemas"]["Run"] | null;
             /** @description 修正チャットで直すタスク（ふつうの会話では空） */
             readonly task: components["schemas"]["ConversationTask"] | null;
-            /** @description 予算を計上する部門（所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。修正チャットではタスクの計上先を使う。design.md §9.1） */
+            /** @description 予算を計上する部門（所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。修正チャットではタスクの計上先を使う。design.md §9.1） */
             budget_department?: string | null;
             readonly budget_department_info: components["schemas"]["MinimumDepartment"] | null;
             /** Format: date-time */
@@ -3170,7 +3170,7 @@ export interface components {
             handles_sensitive_data?: boolean;
             /** タイトル */
             title?: string;
-            /** @description 予算を計上する部門（所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。修正チャットではタスクの計上先を使う。design.md §9.1） */
+            /** @description 予算を計上する部門（所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。修正チャットではタスクの計上先を使う。design.md §9.1） */
             budget_department?: string | null;
         };
         /** @description 修正チャットで直すタスク（今の名前と範囲。design.md §11.11） */
@@ -4286,7 +4286,7 @@ export interface components {
             /** Format: date-time */
             readonly created: string;
         };
-        /** @description 利用者が見られる予算（所属している部門・管理できる部門・全社の枠） */
+        /** @description 利用者が見られる予算（所属している部門・管理できる部門・システムの枠） */
         MyBudget: {
             readonly kind: components["schemas"]["MyBudgetKindEnum"];
             readonly department: components["schemas"]["MinimumDepartment"] | null;
@@ -4296,7 +4296,7 @@ export interface components {
         };
         /**
          * @description * `1` - 部門
-         *     * `2` - 全社の枠
+         *     * `2` - システムの枠
          * @enum {integer}
          */
         MyBudgetKindEnum: 1 | 2;
@@ -4919,9 +4919,9 @@ export interface components {
             department_monthly_limit?: string | null;
             /**
              * Format: decimal
-             * @description 全社の枠の月の上限（米ドル）。全社・システムのタスクと、所属のない人の利用
+             * @description システムの枠の月の上限（米ドル）。全社・システムのタスクと、所属のない人の利用
              */
-            company_monthly_limit?: string | null;
+            system_monthly_limit?: string | null;
         };
         /** @description Connectorの更新。使うDB接続と範囲・部門は変えられないので、読み取り専用にする */
         PatchedConnectorUpdateRequest: {
@@ -4961,7 +4961,7 @@ export interface components {
             handles_sensitive_data?: boolean;
             /** タイトル */
             title?: string;
-            /** @description 予算を計上する部門（所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。修正チャットではタスクの計上先を使う。design.md §9.1） */
+            /** @description 予算を計上する部門（所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。修正チャットではタスクの計上先を使う。design.md §9.1） */
             budget_department?: string | null;
         };
         /** @description DB接続の更新。種別は変えられない（SQLの方言と既定のスキーマの意味が変わるため） */
@@ -5195,7 +5195,7 @@ export interface components {
         /** @description タスクの更新。範囲と部門は変えられないので、読み取り専用にする */
         PatchedTaskDefinitionUpdateRequest: {
             name?: string;
-            /** @description 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。版の外。design.md §9.1） */
+            /** @description 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。版の外。design.md §9.1） */
             budget_department?: string | null;
             /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
             version?: number;
@@ -6194,7 +6194,7 @@ export interface components {
             readonly suspended: boolean;
             /** チャットから起動できる */
             readonly chat_launchable: boolean;
-            /** @description 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。版の外。design.md §9.1） */
+            /** @description 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。版の外。design.md §9.1） */
             budget_department?: string | null;
             readonly budget_department_info: components["schemas"]["MinimumDepartment"] | null;
             /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
@@ -6275,7 +6275,7 @@ export interface components {
             readonly suspended: boolean;
             /** チャットから起動できる */
             readonly chat_launchable: boolean;
-            /** @description 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。版の外。design.md §9.1） */
+            /** @description 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。版の外。design.md §9.1） */
             budget_department?: string | null;
             readonly budget_department_info: components["schemas"]["MinimumDepartment"] | null;
             /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
@@ -6356,7 +6356,7 @@ export interface components {
             /** @description 部門の範囲では必須。作成した後は変えられない */
             department?: string | null;
             name: string;
-            /** @description 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。版の外。design.md §9.1） */
+            /** @description 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。版の外。design.md §9.1） */
             budget_department?: string | null;
             /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
             version?: number;
@@ -6436,7 +6436,7 @@ export interface components {
         /** @description タスクの更新。範囲と部門は変えられないので、読み取り専用にする */
         TaskDefinitionUpdateRequest: {
             name?: string;
-            /** @description 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。版の外。design.md §9.1） */
+            /** @description 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。版の外。design.md §9.1） */
             budget_department?: string | null;
             /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
             version?: number;

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * 今のDraftを評価する（design.md §3.7.1）。選んだケースごとに、公開中の版とDraftで評価のRunを1つずつ動かす。
- * モデルは評価のたびに選ぶ。利用量は、部門のSkillはその部門、全社・システムのSkillは全社の枠、個人のSkillは自分の部門
+ * モデルは評価のたびに選ぶ。利用量は、部門のSkillはその部門、全社・システムのSkillはシステムの枠、個人のSkillは自分の部門
  * の予算に入る（所属が2つ以上なら選ぶ。design.md §9.1）
  */
 import DDialog from '../common/DDialog.vue'

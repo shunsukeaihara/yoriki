@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
- * 予算（design.md §9.1）。既定の月の上限（部門・全社の枠）と、部門ごとの上書き、今月の利用額を扱う。
- * 予算は部門ごとと全社の枠で持ち、個人の予算は持たない
+ * 予算（design.md §9.1）。既定の月の上限（部門・システムの枠）と、部門ごとの上書き、今月の利用額を扱う。
+ * 予算は部門ごととシステムの枠で持ち、個人の予算は持たない
  */
 import type { TableColumn } from '@nuxt/ui'
 
@@ -44,7 +44,7 @@ const onSettings = (value: BudgetSettings) => {
         :title="$t('予算')"
         :description="
           $t(
-            'LLMの利用額の月の上限です。会話は会話で選んだ部門、タスクはタスクの部門（全社・システムのタスクは全社の枠）に入ります。上限に達すると、新しい依頼を受け付けず、動いている作業もまとめて止めます。月の区切りは組織のタイムゾーンです',
+            'LLMの利用額の月の上限です。会話は会話で選んだ部門、タスクはタスクの部門（全社・システムのタスクはシステムの枠）に入ります。上限に達すると、新しい依頼を受け付けず、動いている作業もまとめて止めます。月の区切りは組織のタイムゾーンです',
           )
         "
       />
@@ -58,9 +58,9 @@ const onSettings = (value: BudgetSettings) => {
         </UCard>
         <UCard>
           <template #header>
-            <span class="font-semibold">{{ $t('全社の枠') }}</span>
+            <span class="font-semibold">{{ $t('システムの枠') }}</span>
           </template>
-          <BudgetStatusView :status="settings.company" />
+          <BudgetStatusView :status="settings.system" />
           <DBtn variant="ghost" color="neutral" size="sm" icon="i-lucide-refresh-cw" class="mt-2" @click="refresh()">
             {{ $t('読み直す') }}
           </DBtn>

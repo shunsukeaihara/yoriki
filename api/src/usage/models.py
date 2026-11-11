@@ -22,7 +22,7 @@ class UsagePurpose(models.IntegerChoices):
 
 class BudgetKind(models.IntegerChoices):
     DEPARTMENT = 1, _("部門")
-    COMPANY = 2, _("全社の枠")
+    SYSTEM = 2, _("システムの枠")
 
 
 def month_start(now: datetime | None = None) -> datetime:
@@ -37,8 +37,8 @@ class BudgetSettings(models.Model):
     department_monthly_limit = models.DecimalField(
         _("部門の月の上限（米ドル）"), max_digits=14, decimal_places=2, null=True, blank=True
     )
-    company_monthly_limit = models.DecimalField(
-        _("全社の枠の月の上限（米ドル）"), max_digits=14, decimal_places=2, null=True, blank=True
+    system_monthly_limit = models.DecimalField(
+        _("システムの枠の月の上限（米ドル）"), max_digits=14, decimal_places=2, null=True, blank=True
     )
 
     updated = models.DateTimeField(auto_now=True)
@@ -58,7 +58,7 @@ class BudgetSettings(models.Model):
 
 
 class Budget(models.Model):
-    """予算の計上先（部門か全社の枠）。Runを受け付けるときに決めてRunに固定し、予約はこの行をロックして行う。
+    """予算の計上先（部門かシステムの枠）。Runを受け付けるときに決めてRunに固定し、予約はこの行をロックして行う。
     部門の行は、上限を上書きするか、初めて計上するときに作る"""
 
     uid = NanoidField(unique=True)
@@ -66,7 +66,7 @@ class Budget(models.Model):
     department = models.OneToOneField(
         "user.Department", on_delete=models.PROTECT, null=True, blank=True, related_name="budget"
     )
-    # 部門の上限の上書き。空なら既定に従い、0ならその部門では使わせない。全社の枠では使わない（既定の値だけ）
+    # 部門の上限の上書き。空なら既定に従い、0ならその部門では使わせない。システムの枠では使わない（既定の値だけ）
     monthly_limit = models.DecimalField(_("月の上限（米ドル）"), max_digits=14, decimal_places=2, null=True, blank=True)
 
     created = models.DateTimeField(auto_now_add=True)
@@ -79,18 +79,18 @@ class Budget(models.Model):
         constraints = [
             models.CheckConstraint(
                 condition=Q(kind=BudgetKind.DEPARTMENT, department__isnull=False)
-                | Q(kind=BudgetKind.COMPANY, department__isnull=True, monthly_limit__isnull=True),
+                | Q(kind=BudgetKind.SYSTEM, department__isnull=True, monthly_limit__isnull=True),
                 name="budget_kind_department",
             ),
-            models.UniqueConstraint(fields=["kind"], condition=Q(kind=BudgetKind.COMPANY), name="uniq_company_budget"),
+            models.UniqueConstraint(fields=["kind"], condition=Q(kind=BudgetKind.SYSTEM), name="uniq_system_budget"),
         ]
 
     def __str__(self):
-        return str(self.department) if self.department_id else str(_("全社の枠"))
+        return str(self.department) if self.department_id else str(_("システムの枠"))
 
     @classmethod
-    def company(cls) -> "Budget":
-        obj, _created = cls.objects.get_or_create(kind=BudgetKind.COMPANY)
+    def system(cls) -> "Budget":
+        obj, _created = cls.objects.get_or_create(kind=BudgetKind.SYSTEM)
         return obj
 
     @classmethod
@@ -100,8 +100,8 @@ class Budget(models.Model):
 
     def limit(self, defaults: BudgetSettings | None = None) -> Decimal | None:
         defaults = defaults or BudgetSettings.load()
-        if self.kind == BudgetKind.COMPANY:
-            return defaults.company_monthly_limit
+        if self.kind == BudgetKind.SYSTEM:
+            return defaults.system_monthly_limit
         return self.monthly_limit if self.monthly_limit is not None else defaults.department_monthly_limit
 
     def spent(self, since: datetime | None = None) -> Decimal:

@@ -829,7 +829,7 @@ paths:
   /api/app/v1/my/budgets/:
     get:
       operationId: app_v1_my_budgets_list
-      description: 自分が見られる予算の今月の利用額・上限・残額。所属している部門と管理できる部門、全社・システムのタスクを管理できる人には全社の枠（design.md
+      description: 自分が見られる予算の今月の利用額・上限・残額。所属している部門と管理できる部門、全社・システムのタスクを管理できる人にはシステムの枠（design.md
         §9.1）
       tags:
       - app/budget
@@ -4520,7 +4520,7 @@ paths:
   /api/v1/budgets/settings/:
     get:
       operationId: v1_budgets_settings_retrieve
-      description: 予算の既定の上限と、全社の枠の今月の利用額（design.md §9.1）
+      description: 予算の既定の上限と、システムの枠の今月の利用額（design.md §9.1）
       tags:
       - manage/budget
       security:
@@ -4534,7 +4534,7 @@ paths:
           description: ''
     patch:
       operationId: v1_budgets_settings_partial_update
-      description: 予算の既定の上限と、全社の枠の今月の利用額（design.md §9.1）
+      description: 予算の既定の上限と、システムの枠の今月の利用額（design.md §9.1）
       tags:
       - manage/budget
       requestBody:
@@ -7670,25 +7670,25 @@ components:
           pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
           nullable: true
           description: 部門の月の上限（米ドル）。部門ごとに上書きできる
-        company_monthly_limit:
+        system_monthly_limit:
           type: string
           format: decimal
           pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
           nullable: true
-          description: 全社の枠の月の上限（米ドル）。全社・システムのタスクと、所属のない人の利用
-        company:
+          description: システムの枠の月の上限（米ドル）。全社・システムのタスクと、所属のない人の利用
+        system:
           allOf:
           - $ref: '#/components/schemas/BudgetStatus'
           readOnly: true
-          description: 全社の枠の今月の利用額・上限・残額
+          description: システムの枠の今月の利用額・上限・残額
         updated:
           type: string
           format: date-time
           readOnly: true
       required:
-      - company
-      - company_monthly_limit
       - department_monthly_limit
+      - system
+      - system_monthly_limit
       - updated
     BudgetStatus:
       type: object
@@ -8653,7 +8653,7 @@ components:
         budget_department:
           type: string
           nullable: true
-          description: 予算を計上する部門（所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。修正チャットではタスクの計上先を使う。design.md
+          description: 予算を計上する部門（所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。修正チャットではタスクの計上先を使う。design.md
             §9.1）
         budget_department_info:
           allOf:
@@ -8700,7 +8700,7 @@ components:
           type: string
           minLength: 1
           nullable: true
-          description: 予算を計上する部門（所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。修正チャットではタスクの計上先を使う。design.md
+          description: 予算を計上する部門（所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。修正チャットではタスクの計上先を使う。design.md
             §9.1）
     ConversationTask:
       type: object
@@ -11228,7 +11228,7 @@ components:
       - supports_video
     MyBudget:
       type: object
-      description: 利用者が見られる予算（所属している部門・管理できる部門・全社の枠）
+      description: 利用者が見られる予算（所属している部門・管理できる部門・システムの枠）
       properties:
         kind:
           allOf:
@@ -11259,7 +11259,7 @@ components:
       type: integer
       description: |-
         * `1` - 部門
-        * `2` - 全社の枠
+        * `2` - システムの枠
     MyDepartment:
       type: object
       description: 表示専用のModelSerializer。すべての項目を読み取り専用にする
@@ -12224,12 +12224,12 @@ components:
           pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
           nullable: true
           description: 部門の月の上限（米ドル）。部門ごとに上書きできる
-        company_monthly_limit:
+        system_monthly_limit:
           type: string
           format: decimal
           pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
           nullable: true
-          description: 全社の枠の月の上限（米ドル）。全社・システムのタスクと、所属のない人の利用
+          description: システムの枠の月の上限（米ドル）。全社・システムのタスクと、所属のない人の利用
     PatchedConnectorUpdateRequest:
       type: object
       description: Connectorの更新。使うDB接続と範囲・部門は変えられないので、読み取り専用にする
@@ -12304,7 +12304,7 @@ components:
           type: string
           minLength: 1
           nullable: true
-          description: 予算を計上する部門（所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。修正チャットではタスクの計上先を使う。design.md
+          description: 予算を計上する部門（所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。修正チャットではタスクの計上先を使う。design.md
             §9.1）
     PatchedDatabaseConnectionUpdateRequest:
       type: object
@@ -12770,7 +12770,7 @@ components:
           type: string
           minLength: 1
           nullable: true
-          description: 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。版の外。design.md
+          description: 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。版の外。design.md
             §9.1）
         version:
           type: integer
@@ -15304,7 +15304,7 @@ components:
         budget_department:
           type: string
           nullable: true
-          description: 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。版の外。design.md
+          description: 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。版の外。design.md
             §9.1）
         budget_department_info:
           allOf:
@@ -15477,7 +15477,7 @@ components:
         budget_department:
           type: string
           nullable: true
-          description: 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。版の外。design.md
+          description: 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。版の外。design.md
             §9.1）
         budget_department_info:
           allOf:
@@ -15652,7 +15652,7 @@ components:
           type: string
           minLength: 1
           nullable: true
-          description: 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。版の外。design.md
+          description: 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。版の外。design.md
             §9.1）
         version:
           type: integer
@@ -15850,7 +15850,7 @@ components:
           type: string
           minLength: 1
           nullable: true
-          description: 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。版の外。design.md
+          description: 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。版の外。design.md
             §9.1）
         version:
           type: integer

@@ -8,7 +8,7 @@ const { t } = useI18n()
 
 const toForm = (value: BudgetSettings) => ({
   departmentMonthlyLimit: value.departmentMonthlyLimit,
-  companyMonthlyLimit: value.companyMonthlyLimit,
+  systemMonthlyLimit: value.systemMonthlyLimit,
 })
 const form = ref(toForm(props.settings))
 const saved = ref(JSON.stringify(form.value))
@@ -45,13 +45,13 @@ const { onSubmit, loading, errors } = createSubmit({
       :error-messages="errors.departmentMonthlyLimit"
     />
     <DDecimalField
-      v-model="form.companyMonthlyLimit"
-      :label="$t('全社の枠の月の上限（米ドル）')"
+      v-model="form.systemMonthlyLimit"
+      :label="$t('システムの枠の月の上限（米ドル）')"
       :hint="$t('全社・システムのタスクと、所属のない人の利用が入ります。空なら無制限です')"
       :decimal-places="2"
       :min="0"
       :disabled="readonly"
-      :error-messages="errors.companyMonthlyLimit"
+      :error-messages="errors.systemMonthlyLimit"
     />
     <div v-if="!readonly">
       <DBtn :disabled="!dirty" :loading="loading" @click="onSubmit">{{ $t('保存') }}</DBtn>

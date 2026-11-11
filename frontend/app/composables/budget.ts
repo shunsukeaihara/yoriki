@@ -16,7 +16,7 @@ export const budgetUsedPercent = (status: BudgetStatus): number | null => {
 
 /**
  * 会話・個人タスク・個人のSkillの評価で、予算を計上する部門の選択肢（所属している部門）。所属が2つ以上のときだけ選ばせる
- * （1つならサーバーがその部門にし、なければ全社の枠に入る。design.md §9.1）
+ * （1つならサーバーがその部門にし、なければシステムの枠に入る。design.md §9.1）
  */
 export const useBudgetDepartments = () => {
   const account = useAccountStore()

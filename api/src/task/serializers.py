@@ -231,7 +231,7 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
         allow_null=True,
         help_text=_(
             "個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。"
-            "空で所属がなければ全社の枠。版の外。design.md §9.1）"
+            "空で所属がなければシステムの枠。版の外。design.md §9.1）"
         ),
     )
     budget_department_info = MinimumDepartmentSerializer(source="budget_department", read_only=True, allow_null=True)

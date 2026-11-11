@@ -1,17 +1,17 @@
 import django.db.models.deletion
 from django.db import migrations, models
 
-COMPANY = 2
+SYSTEM = 2
 
 
 def fill(apps, schema_editor):
-    """予算より前の利用量は、全社の枠に計上したことにする"""
+    """予算より前の利用量は、システムの枠に計上したことにする"""
     Budget = apps.get_model("usage", "Budget")
     UsageLedger = apps.get_model("usage", "UsageLedger")
     if not UsageLedger.objects.filter(budget__isnull=True).exists():
         return
-    company, _created = Budget.objects.get_or_create(kind=COMPANY)
-    UsageLedger.objects.filter(budget__isnull=True).update(budget=company)
+    system, _created = Budget.objects.get_or_create(kind=SYSTEM)
+    UsageLedger.objects.filter(budget__isnull=True).update(budget=system)
 
 
 class Migration(migrations.Migration):

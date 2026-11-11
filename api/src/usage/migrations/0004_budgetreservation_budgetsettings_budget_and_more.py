@@ -39,13 +39,13 @@ class Migration(migrations.Migration):
                     ),
                 ),
                 (
-                    "company_monthly_limit",
+                    "system_monthly_limit",
                     models.DecimalField(
                         blank=True,
                         decimal_places=2,
                         max_digits=14,
                         null=True,
-                        verbose_name="全社の枠の月の上限（米ドル）",
+                        verbose_name="システムの枠の月の上限（米ドル）",
                     ),
                 ),
                 ("updated", models.DateTimeField(auto_now=True)),
@@ -66,7 +66,10 @@ class Migration(migrations.Migration):
                         default=utils.fields.generate_uid, editable=False, max_length=22, unique=True
                     ),
                 ),
-                ("kind", models.PositiveSmallIntegerField(choices=[(1, "部門"), (2, "全社の枠")], verbose_name="種類")),
+                (
+                    "kind",
+                    models.PositiveSmallIntegerField(choices=[(1, "部門"), (2, "システムの枠")], verbose_name="種類"),
+                ),
                 (
                     "monthly_limit",
                     models.DecimalField(
@@ -136,7 +139,7 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name="budget",
             constraint=models.UniqueConstraint(
-                condition=models.Q(("kind", 2)), fields=("kind",), name="uniq_company_budget"
+                condition=models.Q(("kind", 2)), fields=("kind",), name="uniq_system_budget"
             ),
         ),
     ]

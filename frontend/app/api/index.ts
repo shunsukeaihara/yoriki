@@ -355,7 +355,7 @@ const createAPI = () => {
         versions: (number?: number) =>
           readOnlyResource<ModelProfileVersion>(http, `v1/model_profiles/${id}/versions`, number?.toString()),
       }),
-      // 予算の既定の上限（全社の枠の今月の利用額も返す）と、部門ごとの上書き
+      // 予算の既定の上限（システムの枠の今月の利用額も返す）と、部門ごとの上書き
       budgetSettings: {
         get: () => http.get<BudgetSettings, BudgetSettings>('v1/budgets/settings/'),
         patch: (data: BudgetSettingsWrite) => http.patch<BudgetSettings, BudgetSettings>('v1/budgets/settings/', data),

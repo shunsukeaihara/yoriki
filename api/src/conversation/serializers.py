@@ -61,7 +61,7 @@ class ConversationSerializer(serializers.ModelSerializer):
         allow_null=True,
         help_text=_(
             "予算を計上する部門（所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ"
-            "全社の枠。修正チャットではタスクの計上先を使う。design.md §9.1）"
+            "システムの枠。修正チャットではタスクの計上先を使う。design.md §9.1）"
         ),
     )
     budget_department_info = MinimumDepartmentSerializer(source="budget_department", read_only=True, allow_null=True)

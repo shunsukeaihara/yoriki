@@ -191,7 +191,7 @@ def test_judge_is_skipped_without_budget(app_user, model, monkeypatch):
     execute(result.draft_run, submit(True))
     # 判定の見積もり（最大出力tokenを含む）が残額に収まらない（design.md §9.1）
     defaults = BudgetSettings.load()
-    defaults.company_monthly_limit = Decimal(0)
+    defaults.system_monthly_limit = Decimal(0)
     defaults.save()
     adapter = judge(monkeypatch)
     progress_evaluation(evaluation.pk)

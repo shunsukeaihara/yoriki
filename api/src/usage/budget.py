@@ -25,7 +25,7 @@ class BudgetExhausted(Exception):
 
 def for_member(user, department: Department | None) -> Budget:
     """会話・個人タスクの計上先。選んだ部門に今も所属していればその部門、選んでいなければ所属が1つならその部門、
-    所属がなければ全社の枠"""
+    所属がなければシステムの枠"""
     joined = list(Department.objects.joined_by(user))
     if department is not None:
         if department not in joined:
@@ -35,7 +35,7 @@ def for_member(user, department: Department | None) -> Budget:
             )
         return Budget.for_department(department)
     if not joined:
-        return Budget.company()
+        return Budget.system()
     if len(joined) == 1:
         return Budget.for_department(joined[0])
     raise BudgetUnavailable(_("予算を計上する部門を選んでください。"))
@@ -54,7 +54,7 @@ def for_task(task) -> Budget:
         return for_member(task.owner, task.budget_department)
     if task.scope == TaskScope.DEPARTMENT:
         return Budget.for_department(task.department)
-    return Budget.company()
+    return Budget.system()
 
 
 def for_conversation(conversation) -> Budget:
@@ -65,14 +65,14 @@ def for_conversation(conversation) -> Budget:
 
 
 def for_skill(skill, user, department: Department | None) -> Budget:
-    """Draftの評価の計上先。部門のSkillはその部門、全社・システムのSkillは全社の枠、個人のSkillは依頼した人の部門"""
+    """Draftの評価の計上先。部門のSkillはその部門、全社・システムのSkillはシステムの枠、個人のSkillは依頼した人の部門"""
     from skill.models import SkillScope  # noqa: PLC0415  skillのアプリがusageをimportしうるため
 
     if skill.scope == SkillScope.PERSONAL:
         return for_member(user, department)
     if skill.scope == SkillScope.DEPARTMENT:
         return Budget.for_department(skill.department)
-    return Budget.company()
+    return Budget.system()
 
 
 def check(budget: Budget) -> Budget:

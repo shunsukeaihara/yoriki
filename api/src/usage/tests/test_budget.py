@@ -37,13 +37,13 @@ def fixture_conversation(app_user):
     return ConversationFactory.create(owner=app_user, model_profile=profile)
 
 
-@pytest.fixture(name="company_limit")
-def fixture_company_limit(db):
-    """所属のない人の会話は全社の枠に入る。その上限を決める"""
+@pytest.fixture(name="system_limit")
+def fixture_system_limit(db):
+    """所属のない人の会話はシステムの枠に入る。その上限を決める"""
 
     def set_limit(value: str | None) -> None:
         defaults = BudgetSettings.load()
-        defaults.company_monthly_limit = None if value is None else Decimal(value)
+        defaults.system_monthly_limit = None if value is None else Decimal(value)
         defaults.save()
 
     return set_limit
@@ -81,7 +81,7 @@ def spend(budget: Budget, amount: str) -> None:
 
 @pytest.mark.django_db
 def test_member_budget_follows_the_departments(app_user):
-    assert budgets.for_member(app_user, None) == Budget.company()  # 所属がなければ全社の枠
+    assert budgets.for_member(app_user, None) == Budget.system()  # 所属がなければシステムの枠
 
     first = DepartmentMembershipFactory.create(user=app_user).department
     assert budgets.for_member(app_user, None).department == first  # 所属が1つならその部門
@@ -105,8 +105,8 @@ def test_task_budget_follows_the_scope(app_user):
     assert budgets.for_task(TaskDefinitionFactory.create(scope=TaskScope.DEPARTMENT, department=department)) == (
         Budget.for_department(department)
     )
-    assert budgets.for_task(TaskDefinitionFactory.create(scope=TaskScope.COMPANY)) == Budget.company()
-    assert budgets.for_task(TaskDefinitionFactory.create(scope=TaskScope.SYSTEM)) == Budget.company()
+    assert budgets.for_task(TaskDefinitionFactory.create(scope=TaskScope.COMPANY)) == Budget.system()
+    assert budgets.for_task(TaskDefinitionFactory.create(scope=TaskScope.SYSTEM)) == Budget.system()
     joined = DepartmentMembershipFactory.create(user=app_user).department
     personal = TaskDefinitionFactory.create(created_by=app_user)
     assert budgets.for_task(personal) == Budget.for_department(joined)
@@ -126,9 +126,9 @@ def test_skill_evaluation_budget(app_user):
     assert budgets.for_skill(
         SkillFactory.create(scope=SkillScope.DEPARTMENT, department=department), app_user, None
     ) == (Budget.for_department(department))
-    assert budgets.for_skill(SkillFactory.create(scope=SkillScope.COMPANY), app_user, None) == Budget.company()
+    assert budgets.for_skill(SkillFactory.create(scope=SkillScope.COMPANY), app_user, None) == Budget.system()
     personal = SkillFactory.create(created_by=app_user)
-    assert budgets.for_skill(personal, app_user, None) == Budget.company()
+    assert budgets.for_skill(personal, app_user, None) == Budget.system()
 
 
 # --- 残額と予約 ---
@@ -150,9 +150,9 @@ def test_department_limit_override_and_default():
 
 
 @pytest.mark.django_db
-def test_remaining_counts_this_month_and_live_reservations(company_limit):
-    company_limit("10")
-    budget = Budget.company()
+def test_remaining_counts_this_month_and_live_reservations(system_limit):
+    system_limit("10")
+    budget = Budget.system()
     spend(budget, "3")
     old = RunFactory.create(budget=budget)
     UsageLedger.objects.create(
@@ -178,9 +178,9 @@ def test_remaining_counts_this_month_and_live_reservations(company_limit):
 
 
 @pytest.mark.django_db
-def test_reserve_keeps_a_margin(company_limit):
-    company_limit("2.5")
-    run = RunFactory.create(budget=Budget.company())
+def test_reserve_keeps_a_margin(system_limit):
+    system_limit("2.5")
+    run = RunFactory.create(budget=Budget.system())
     attempt = ExecutionAttempt.start(run)
     reservation = budgets.reserve(run, attempt, Decimal(1), margin=Decimal(1))
     with pytest.raises(budgets.BudgetExhausted):
@@ -192,7 +192,7 @@ def test_reserve_keeps_a_margin(company_limit):
 
 @pytest.mark.django_db
 def test_unlimited_budget_is_not_reserved():
-    run = RunFactory.create(budget=Budget.company())
+    run = RunFactory.create(budget=Budget.system())
     assert budgets.reserve(run, ExecutionAttempt.start(run), Decimal(1_000_000)) is None
 
 
@@ -214,29 +214,29 @@ def test_usage_cost_counts_cache_writes():
 
 
 @pytest.mark.django_db
-def test_conversation_is_not_accepted_without_budget(conversation, company_limit):
-    company_limit("1")
-    spend(Budget.company(), "1")
-    with pytest.raises(CannotStart, match="全社の枠"):
+def test_conversation_is_not_accepted_without_budget(conversation, system_limit):
+    system_limit("1")
+    spend(Budget.system(), "1")
+    with pytest.raises(CannotStart, match="システムの枠"):
         start(conversation)
 
 
 @pytest.mark.django_db
-def test_run_is_charged_to_the_fixed_budget(conversation, company_limit):
+def test_run_is_charged_to_the_fixed_budget(conversation, system_limit):
     # 見積もりは最大出力token（16,000）で数えるので、上限は大きくする
-    company_limit("10000")
+    system_limit("10000")
     run = start(conversation)
-    assert run.budget == Budget.company()
+    assert run.budget == Budget.system()
     run = execute(run, FakeAdapter([reply("終わりました。")]))
     ledger = UsageLedger.objects.get(run=run)
-    assert (ledger.budget, ledger.cost) == (Budget.company(), Decimal("1.2"))
+    assert (ledger.budget, ledger.cost) == (Budget.system(), Decimal("1.2"))
     assert not BudgetReservation.objects.exists()  # 精算した
 
 
 @pytest.mark.django_db
-def test_exhausted_budget_ends_with_a_summary_without_tools(conversation, company_limit, monkeypatch):
+def test_exhausted_budget_ends_with_a_summary_without_tools(conversation, system_limit, monkeypatch):
     monkeypatch.setattr(runner_module, "estimate_cost", lambda _version, _tokens: Decimal(1))
-    company_limit("3")
+    system_limit("3")
     run = start(conversation)
     todos = {"todos": [{"content": "読む", "status": "pending"}]}
     adapter = FakeAdapter([calls(("c1", "todo_write", todos)), reply("ここまでの結果です。")])
@@ -251,9 +251,9 @@ def test_exhausted_budget_ends_with_a_summary_without_tools(conversation, compan
 
 
 @pytest.mark.django_db
-def test_budget_without_room_for_a_summary_fails_without_calling(conversation, company_limit, monkeypatch):
+def test_budget_without_room_for_a_summary_fails_without_calling(conversation, system_limit, monkeypatch):
     monkeypatch.setattr(runner_module, "estimate_cost", lambda _version, _tokens: Decimal(1))
-    company_limit("0.5")
+    system_limit("0.5")
     run = start(conversation)
     adapter = FakeAdapter([reply("呼ばれない")])
     run = execute(run, adapter)
@@ -262,10 +262,10 @@ def test_budget_without_room_for_a_summary_fails_without_calling(conversation, c
 
 
 @pytest.mark.django_db
-def test_low_budget_is_noticed_once(conversation, company_limit, monkeypatch):
+def test_low_budget_is_noticed_once(conversation, system_limit, monkeypatch):
     monkeypatch.setattr(runner_module, "estimate_cost", lambda _version, _tokens: Decimal("0.1"))
-    company_limit("6")
-    spend(Budget.company(), "4")
+    system_limit("6")
+    spend(Budget.system(), "4")
     run = start(conversation)
     todos = {"todos": [{"content": "読む", "status": "pending"}]}
     adapter = FakeAdapter([calls(("c1", "todo_write", todos)), reply("終わりました。")])
@@ -278,10 +278,10 @@ def test_low_budget_is_noticed_once(conversation, company_limit, monkeypatch):
 
 
 @pytest.mark.django_db
-def test_detached_reservation_counts_for_an_hour(company_limit):
+def test_detached_reservation_counts_for_an_hour(system_limit):
     """Runが終わった後の呼出し（評価の判定）の予約はAttemptを持たず、精算できずに残っても1時間で数えなくなる"""
-    company_limit("10")
-    budget = Budget.company()
+    system_limit("10")
+    budget = Budget.system()
     run = RunFactory.create(budget=budget)
     reservation = budgets.reserve(run, None, Decimal(4))
     assert budget.remaining() == Decimal(6)

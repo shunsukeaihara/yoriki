@@ -271,6 +271,12 @@ const createAPI = () => {
       list: (params: TaskChoiceParams) =>
         http.get<Paginated<DestinationChoice>, Paginated<DestinationChoice>>('app/v1/destinations/', { params }),
     },
+    // タスクをまたいだ実行の履歴（本番の実行のうち結果を見られるもの。修正チャットのRunは出さない）。1つのRunは
+    // tasks(id).runs(rid) で読む
+    taskRuns: {
+      list: (params?: TaskRunHistoryParams) =>
+        http.get<Paginated<TaskRun>, Paginated<TaskRun>>('app/v1/task_runs/', { params }),
+    },
     runs: (id?: string) => ({
       ...readOnlyResource<Run, RunListParams>(http, 'app/v1/runs', id),
       cancel: (data: RunCancel) => http.post<Run, Run>(`app/v1/runs/${id}/cancel/`, data),

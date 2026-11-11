@@ -39,6 +39,15 @@ const { links: manageLinks } = useManageMenu()
           block
           :class="collapsed ? undefined : 'justify-start'"
         />
+        <DBtn
+          to="/runs"
+          icon="i-lucide-history"
+          :label="collapsed ? undefined : $t('実行履歴')"
+          variant="ghost"
+          color="neutral"
+          block
+          :class="collapsed ? undefined : 'justify-start'"
+        />
         <NotificationBell :collapsed="collapsed" />
         <ConversationList :collapsed="collapsed" />
       </template>

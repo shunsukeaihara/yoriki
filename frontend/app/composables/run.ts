@@ -35,6 +35,28 @@ export const RunLaunch = {
   FIX: 4,
 } as const satisfies Record<string, RunLaunchEnum>
 
+type T = (key: string, params?: Record<string, unknown>) => string
+
+/** 状態の検索条件の選択肢（run.models.RunStatus の表示名と同じ。design.md §11.5）。一覧の表示はサーバーの statusDisplay を使う */
+export const runStatusItems = (t: T) => [
+  { value: RunStatus.QUEUED, title: t('順番待ち') },
+  { value: RunStatus.RUNNING, title: t('作業中') },
+  { value: RunStatus.WAITING_USER, title: t('確認待ち') },
+  { value: RunStatus.WAITING_BACKGROUND, title: t('裏で作業を待っています') },
+  { value: RunStatus.RETRY_WAIT, title: t('再試行待ち') },
+  { value: RunStatus.CANCELLING, title: t('停止中') },
+  { value: RunStatus.COMPLETED, title: t('完了') },
+  { value: RunStatus.FAILED, title: t('失敗') },
+  { value: RunStatus.CANCELLED, title: t('停止済み') },
+]
+
+/** 本番のタスクの実行の起動のしかたの検索条件の選択肢（修正チャットは本番の実行の一覧に出ないので除く） */
+export const taskRunLaunchItems = (t: T) => [
+  { value: RunLaunch.MANUAL, title: t('タスクの画面からの手動実行') },
+  { value: RunLaunch.WEBHOOK, title: t('Webhook') },
+  { value: RunLaunch.CHAT, title: t('チャットからの起動') },
+]
+
 // バックエンドの CANCELLABLE_STATUSES・ACTIVE_STATUSES と同じ
 const CANCELLABLE: RunStatusEnum[] = [
   RunStatus.QUEUED,

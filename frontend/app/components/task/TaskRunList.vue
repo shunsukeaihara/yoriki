@@ -1,15 +1,18 @@
 <script setup lang="ts">
 /**
  * タスクのRunの履歴（結果とログを見られるもの。authorization.md §7.1）。起動のしかた、処理の状態、通知の配信の状態を
- * 並べ、受付の日時からRunの画面（中身・配信の詳細・通知の再試行）へ移る
+ * 並べ、受付の日時からRunの画面（中身・配信の詳細・通知の再試行）へ移る。taskId がなければ、タスクをまたいだ実行の
+ * 履歴（/runs。結果を見られるもの。design.md §11.9）にし、タスクの名前と版の列を足す
  */
 import type { TableColumn } from '@nuxt/ui'
 
-const props = defineProps<{ taskId: string }>()
+const props = withDefaults(defineProps<{ taskId?: string; params?: TaskRunHistoryParams }>(), {
+  taskId: undefined,
+  params: () => ({}),
+})
 const reloadKey = defineModel<number>('reloadKey', { default: 0 })
 const api = useAPI()
 const { t } = useI18n()
-const params = ref<TaskRunListParams>({})
 const reload = () => (reloadKey.value = Date.now())
 // 自分が手動実行したRunの状態の変化はログインユーザー宛ての通知で届くので、読み直す（ほかの人・入口からのRunは
 // 届かないので、読み直すボタンでも読む）
@@ -20,8 +23,12 @@ useUserEvents(
   { onReconnect: reload },
 )
 
+const fetch = (params: TaskRunHistoryParams) =>
+  props.taskId ? api.tasks(props.taskId).runs().list(params) : api.taskRuns.list(params)
+
 const columns: TableColumn<TaskRun>[] = [
   { accessorKey: 'created', header: t('受付') },
+  ...(props.taskId ? [] : [{ accessorKey: 'taskName', header: t('タスク') }]),
   { accessorKey: 'launch', header: t('起動') },
   { accessorKey: 'status', header: t('状態') },
   { accessorKey: 'deliveriesInfo', header: t('通知') },
@@ -37,16 +44,17 @@ const launchedBy = (run: TaskRun) =>
   <div class="mb-2 flex justify-end">
     <DBtn color="neutral" variant="ghost" icon="i-lucide-refresh-cw" @click="reload">{{ $t('読み直す') }}</DBtn>
   </div>
-  <DDataTable
-    v-model:reload-key="reloadKey"
-    :columns="columns"
-    :fetch="api.tasks(props.taskId).runs().list"
-    :params="params"
-  >
+  <DDataTable v-model:reload-key="reloadKey" :columns="columns" :fetch="fetch" :params="props.params">
     <template #created-cell="{ row }">
-      <NuxtLink :to="`/tasks/${props.taskId}/runs/${row.original.id}`" class="text-primary">
+      <NuxtLink :to="`/tasks/${row.original.task}/runs/${row.original.id}`" class="text-primary">
         {{ formatDatetime(row.original.created) }}
       </NuxtLink>
+    </template>
+    <template #taskName-cell="{ row }">
+      <div class="flex flex-col">
+        <span class="text-sm">{{ row.original.taskName }}</span>
+        <span class="text-xs text-muted">{{ $t('版 {number}', { number: row.original.taskVersion }) }}</span>
+      </div>
     </template>
     <template #launch-cell="{ row }">
       <div class="flex flex-col">
@@ -78,6 +86,10 @@ const launchedBy = (run: TaskRun) =>
         </li>
       </ul>
       <span v-else class="text-dimmed">—</span>
+    </template>
+    <template #modelProfileName-cell="{ row }">
+      <!-- 結果だけを見られる行（チャットから起動した人）では、モデル設定はログなので空 -->
+      {{ row.original.modelProfileName || '—' }}
     </template>
     <template #finished-cell="{ row }">
       {{ row.original.finished ? formatDatetime(row.original.finished) : '—' }}

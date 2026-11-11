@@ -216,6 +216,8 @@ export type TaskListParams = ListParams & {
 // 編集画面の候補（Skill・Connector・出口）を求める範囲
 export type TaskChoiceParams = ListParams & { scope: SkillScopeEnum; department?: string | null }
 export type TaskRunListParams = ListParams & { status?: RunStatusEnum; launch?: RunLaunchEnum }
+// タスクの名前は受付時のもの（部分一致）
+export type TaskRunHistoryParams = TaskRunListParams & { taskName?: string }
 // タスクのRun（起動のしかた、受付時の版と入力、配信の状態を足したもの）と、配信の履歴（タスクを管理できる人）
 export type RunLaunchEnum = Schemas['RunLaunchEnum']
 export type RunTriggerEnum = Schemas['RunTriggerEnum']

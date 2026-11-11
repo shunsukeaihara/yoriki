@@ -997,6 +997,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/app/v1/task_runs/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description タスクをまたいだ実行の履歴（design.md §11.9）。本番の実行（入口・手動実行・チャットからの起動）のうち、Runの結果を見られるもの（実行したときの範囲と部門で判定する。チャットから起動した人には自分が起動したRunの結果だけ。authorization.md §7.1）。修正チャットのRunは出さない */
+        get: operations["app_v1_task_runs_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/app/v1/tasks/": {
         parameters: {
             query?: never;
@@ -9059,6 +9076,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Skill"];
+                };
+            };
+        };
+    };
+    app_v1_task_runs_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /**
+                 * @description 起動のしかた
+                 *
+                 *     * `1` - タスクの画面からの手動実行
+                 *     * `2` - Webhook
+                 *     * `3` - チャットからの起動
+                 *     * `4` - 修正チャット
+                 */
+                launch?: 1 | 2 | 3 | 4 | null;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+                /**
+                 * @description 状態
+                 *
+                 *     * `1` - 順番待ち
+                 *     * `2` - 作業中
+                 *     * `3` - 確認待ち
+                 *     * `4` - 再試行待ち
+                 *     * `5` - 停止中
+                 *     * `6` - 裏で作業を待っています
+                 *     * `10` - 完了
+                 *     * `20` - 失敗
+                 *     * `30` - 停止済み
+                 */
+                status?: 1 | 10 | 2 | 20 | 3 | 30 | 4 | 5 | 6;
+                /** @description タスクの名前（受付時のもの） */
+                task_name?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedTaskRunList"];
                 };
             };
         };

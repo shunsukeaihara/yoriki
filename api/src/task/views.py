@@ -20,7 +20,7 @@ from connector.serializers import AppConnectorSerializer
 from conversation.models import Conversation, ConversationMessage, ConversationPurpose, MessageRole
 from conversation.serializers import MessageSerializer
 from delivery.models import Delivery
-from run.models import Run, RunKind, RunLaunch, RunQuerySet, RunTrigger, logs_visible
+from run.models import Run, RunKind, RunLaunch, RunQuerySet, RunStatus, RunTrigger, logs_visible
 from run.serializers import RunCancelSerializer, RunSerializer, prefetch_todos
 from skill.models import SkillVersion
 from user.models import Department
@@ -547,7 +547,9 @@ class AppTaskRunViewSet(TaskMixin, ReadOnlyModelViewSet):
     def get_queryset(self):
         user = self.request.user
         if self.action == "list":
-            return super().get_queryset().filter(pk__in=Run.objects.visible_to(user).values("pk"), task=self.task)
+            # 修正チャットのRunは修正チャットの持ち物で、本番の実行の一覧には出さない（design.md §11.11）
+            runs = Run.objects.visible_to(user).exclude(launch=RunLaunch.FIX)
+            return super().get_queryset().filter(pk__in=runs.values("pk"), task=self.task)
         qs = cast(RunQuerySet, super().get_queryset())
         return qs.filter(
             pk__in=Run.objects.results_visible_to(user).values("pk"), task__uid=self.kwargs["task"]
@@ -565,6 +567,38 @@ class AppTaskRunViewSet(TaskMixin, ReadOnlyModelViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save(actor=request.user)
         return Response(TaskRunSerializer(self.get_object(), context=self.get_serializer_context()).data)
+
+
+class TaskRunHistoryFilter(filters.FilterSet):
+    status = filters.ChoiceFilter(label=_("状態"), choices=RunStatus.choices)
+    launch = filters.ChoiceFilter(label=_("起動のしかた"), choices=RunLaunch.choices)
+    task_name = filters.CharFilter(
+        label=_("タスクの名前（受付時のもの）"), field_name="manifest__fixed__task__name", lookup_expr="icontains"
+    )
+
+    class Meta:
+        model = Run
+        fields = ["status", "launch", "task_name"]
+
+
+@extend_schema(
+    description="タスクをまたいだ実行の履歴（design.md §11.9）。本番の実行（入口・手動実行・チャットからの起動）の"
+    "うち、Runの結果を見られるもの（実行したときの範囲と部門で判定する。チャットから起動した人には自分が起動したRunの"
+    "結果だけ。authorization.md §7.1）。修正チャットのRunは出さない",
+    tags=["app/task/run"],
+)
+class AppTaskRunHistoryViewSet(mixins.ListModelMixin, GenericViewSet):
+    permission_classes = [AppUser]
+    queryset = AppTaskRunViewSet.queryset
+    serializer_class = TaskRunSerializer
+    filterset_class = TaskRunHistoryFilter
+    ordering = ("-created", "-pk")
+
+    def get_queryset(self):
+        user = self.request.user
+        runs = Run.objects.results_visible_to(user).filter(trigger=RunTrigger.TASK).exclude(launch=RunLaunch.FIX)
+        qs = cast(RunQuerySet, super().get_queryset())
+        return qs.filter(pk__in=runs.values("pk")).with_logs_visible(user)
 
 
 @extend_schema(

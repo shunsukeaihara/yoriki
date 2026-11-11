@@ -471,6 +471,7 @@ pages/
 ├── skills/index.vue              # Skillの一覧と作成
 ├── skills/[skillId]/index.vue    # 公開中の版・Draftの編集と公開・版の履歴・変更の記録（ページ全体）
 ├── skills/[skillId]/evaluations/[evaluationId].vue  # Draftの評価の結果
+├── runs.vue                      # タスクをまたいだ実行の履歴（本番の実行のうち結果を見られるもの。design.md §11.9）
 ├── tasks/index.vue               # 管理できるタスクの一覧と作成
 ├── tasks/[taskId]/index.vue      # 設定の編集（保存のたびに版）・入口の一覧・手動実行・実行の履歴・版の履歴（ページ全体）
 ├── tasks/[taskId]/runs/[runId].vue  # タスクのRunの画面（結果・作業の記録・配信の状態。画面の通知からも開く）

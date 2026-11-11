@@ -52,7 +52,7 @@ def samples(sandbox):
 
 def test_version(sandbox):
     version = sandbox.helper("version", {})
-    assert (version["ok"], version["contract"]) == (True, 2)
+    assert (version["ok"], version["contract"]) == (True, 3)
     assert version["python"].startswith("3.13.")
 
 

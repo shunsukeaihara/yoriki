@@ -317,7 +317,7 @@ output = "カブシキガイシャ"
 run = "python -c 'import matplotlib.pyplot as plt; plt.rcParams[\"font.family\"] = \"Noto Sans CJK JP\"; plt.title(\"売上\"); plt.savefig(\"g.png\")' 2>&1 && test -s g.png && echo ok"
 output = "ok"
 [[command]]
-run = "python -c 'import pypdf, pdfplumber, pypdfium2, docx, pptx, openpyxl, PIL, lxml; print(\"ok\")'"
+run = "python -c 'import pypdf, pdfplumber, pypdfium2, docx, pptx, openpyxl, PIL, lxml, defusedxml, reportlab, markitdown; print(\"ok\")'"
 output = "ok"
 [[command]]
 run = "python -c 'import sqlite3; c = sqlite3.connect(\":memory:\"); print(c.execute(\"select 1+1\").fetchone()[0])'"
@@ -348,3 +348,68 @@ output = "1"
 run = "python -c 'input()'"
 exit = 1
 output = "EOFError"
+
+# --- 文書処理（design.md §7.6）：LibreOffice・pandoc・poppler-utils・markitdown・Node.js・フォント ---
+[[command]]
+run = "fc-match -f '%{family[0]}' sans-serif"
+output = "Noto Sans CJK JP"
+[[command]]
+run = "fc-match -f '%{family[0]}' serif"
+output = "Noto Serif CJK JP"
+[[command]]
+run = "fc-match -f '%{family[0]}' monospace"
+output = "Noto Sans Mono CJK JP"
+[[command]]
+run = "fc-match -f '%{family[0]}' 'メイリオ'"
+output = "Noto Sans CJK JP"
+[[command]]
+run = "fc-match -f '%{family[0]}' 'ＭＳ 明朝'"
+output = "Noto Serif CJK JP"
+[[command]]
+run = "fc-match -f '%{family[0]}' 'Courier New'"
+output = "Noto Sans Mono CJK JP"
+[[command]]
+run = "fc-match -f '%{family[0]}' 'sans-serif:lang=zh-cn'"
+output = "Noto Sans CJK SC"
+[[command]]
+run = '''
+python -c 'import docx; d = docx.Document(); d.add_paragraph("請求書の確認"); d.save("lo.docx")'
+soffice --headless --convert-to pdf lo.docx >/dev/null 2>&1 && pdftotext lo.pdf - && pdffonts lo.pdf'''
+output = "請求書の確認"
+[[command]]
+run = '''
+python -c 'import docx; d = docx.Document(); d.add_paragraph("請求書の確認"); d.save("lo2.docx")'
+soffice --headless --convert-to pdf lo2.docx >/dev/null 2>&1 && pdffonts lo2.pdf'''
+output = "CJKjp"
+[[command]]
+run = '''
+python -c 'import openpyxl; wb = openpyxl.Workbook(); ws = wb.active; ws.append([2, 3, "=A1*B1"]); wb.save("calc.xlsx")'
+soffice --headless --convert-to xlsx --outdir recalc calc.xlsx >/dev/null 2>&1
+python -c 'import openpyxl; print("C1 =", openpyxl.load_workbook("recalc/calc.xlsx", data_only=True).active["C1"].value)' '''
+output = "C1 = 6"
+[[command]]
+run = '''
+cat > deck.mjs <<'JS'
+import pptxgen from "pptxgenjs";
+import sharp from "sharp";
+const png = await sharp({ create: { width: 64, height: 64, channels: 3, background: "#336699" } }).png().toBuffer();
+const pres = new pptxgen();
+const slide = pres.addSlide();
+slide.addText("売上の報告", { x: 1, y: 0.5, fontSize: 28 });
+slide.addImage({ data: "image/png;base64," + png.toString("base64"), x: 1, y: 1.5, w: 1, h: 1 });
+await pres.writeFile({ fileName: "deck.pptx" });
+JS
+node deck.mjs && soffice --headless --convert-to pdf deck.pptx >/dev/null 2>&1 && pdftoppm -r 50 -png deck.pdf deck && ls deck-1.png && pdftotext deck.pdf -'''
+output = "売上の報告"
+[[command]]
+run = '''node -e 'const { Document, Packer, Paragraph } = require("docx"); Packer.toBuffer(new Document({ sections: [{ children: [new Paragraph("見積書")] }] })).then((b) => require("fs").writeFileSync("n.docx", b))' && markitdown n.docx'''
+output = "見積書"
+[[command]]
+run = '''node -e 'const React = require("react"); const { renderToStaticMarkup } = require("react-dom/server"); const { FaCheck } = require("react-icons/fa"); console.log(renderToStaticMarkup(React.createElement(FaCheck)).startsWith("<svg"))' '''
+output = "true"
+[[command]]
+run = "printf '# 見出し\\n\\n本文\\n' | pandoc -f markdown -t docx -o p.docx && pandoc p.docx -t plain"
+output = "本文"
+[[command]]
+run = "pdftoppm -v 2>&1 | head -1"
+output = "pdftoppm version"

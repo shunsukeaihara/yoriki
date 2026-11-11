@@ -75,7 +75,7 @@ class FakeRegistry:
         )
 
 
-LABELS = {"org.yoriki.sandbox-contract": "2", "org.yoriki.sandbox-profile": "docs"}
+LABELS = {"org.yoriki.sandbox-contract": "3", "org.yoriki.sandbox-profile": "docs"}
 
 
 class TestParseReference:
@@ -103,7 +103,7 @@ class TestInspect:
     def test_multi_platform_index(self):
         registry = FakeRegistry({"linux/amd64": LABELS, "linux/arm64": LABELS})
         image = registry.inspect()
-        assert image.contract == 2
+        assert image.contract == 3
         assert image.platforms == ["linux/amd64", "linux/arm64"]
         assert set(image.platform_digests) == {"linux/amd64", "linux/arm64"}
         assert image.python_version == "3.13.16"

@@ -10,7 +10,10 @@ sandbox/
 ├── images/<profile>/        # 用途別のイメージ（今は docs だけ）
 │   ├── Dockerfile
 │   ├── requirements.in      # 入れるPythonのライブラリ
-│   └── requirements.lock    # 全依存の版とSHA-256（requirements.in から作る。イメージのPythonに入れる）
+│   ├── requirements.lock    # 全依存の版とSHA-256（requirements.in から作る。イメージのPythonに入れる）
+│   ├── node/                # Node.jsのパッケージ（package.json と package-lock.json。/node_modules に入れる）
+│   ├── fonts/local.conf     # fontconfigの置換え（/etc/fonts/local.conf）
+│   └── libreoffice/         # LibreOfficeの固定の設定（文書のマクロを動かさない）
 ├── tests/                   # 契約テスト（ホストで動かし、制限付きのSandboxを起動して確かめる）
 └── benchmarks/              # 実行環境（runc・gVisor）ごとの文書処理の所要時間の比較
 ```
@@ -51,6 +54,16 @@ uv pip compile requirements.in --universal --python-version 3.13 --generate-hash
 
 - ライセンスは、MIT・BSD・Apache等のものを優先する。AGPL・GPL・LGPL等のものは、入れる前に相談する（design.md §7.6。例：文字コードの判定は、LGPLの chardet ではなく MIT の charset-normalizer を使う）。
 - ライブラリはイメージのPythonに入る。イメージは大きくなるが、Runごとの `/workspace/env` は大きくならない（CONTRACT.md §2）。
+
+Node.jsのパッケージ（`images/docs/node/package.json`）を変えたら、Linuxのコンテナで lock を作り直す。版は固定で書き、公開から2週間以内の版は使わない（`--before` に2週間前の日付を指定する）。
+
+```bash
+cd sandbox/images/docs/node
+docker run --rm -v "$PWD:/w" -w /w node:26-slim npm install --package-lock-only --ignore-scripts --before=<2週間前の日付>
+```
+
+- macOSで作ると、Linuxの `sharp` のバイナリ（`@img/sharp-linux-*`）がlockから落ちることがあるので、コンテナで作る。
+- ライセンスはPythonと同じ方針で選ぶ（`sharp` が同梱するlibvipsはLGPL-3.0、`react-icons` の一部のアイコンはCC BY・CC BY-SA）。
 
 ## コマンドを足す
 

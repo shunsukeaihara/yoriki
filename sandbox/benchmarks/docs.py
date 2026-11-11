@@ -86,6 +86,18 @@ CASES = [
         "python -c \"from rapidfuzz import process, fuzz; a = [f'株式会社テスト{i}' for i in range(2000)]; "
         'print(process.cdist(a, a, scorer=fuzz.ratio).shape)"',
     ),
+    (
+        "Word→PDF（LibreOffice、python-docxの500段落）",
+        "python -c \"import docx; d = docx.Document(); [d.add_paragraph(f'段落 {i} 請求書') for i in range(500)]; "
+        "d.save('/tmp/l.docx')\" && soffice --headless --convert-to pdf --outdir /tmp /tmp/l.docx >/dev/null 2>&1",
+    ),
+    (
+        "Excelの再計算（LibreOffice、数式つき1万行）",
+        'python -c "import openpyxl; wb = openpyxl.Workbook(); ws = wb.active; '
+        "[ws.append([i, i * 2, f'=A{i}*B{i}']) for i in range(1, 10001)]; wb.save('/tmp/c.xlsx')\" "
+        "&& soffice --headless --convert-to xlsx --outdir /tmp/r /tmp/c.xlsx >/dev/null 2>&1",
+    ),
+    ("Node.jsの起動とpptxgenjsの読込み", "node -e 'require(\"pptxgenjs\")'"),
     ("並べ替え（sort、200万行）", "sort -n big.txt | tail -1"),
     ("文字列の検索（rg、5000ファイル）", "rg -c 請求 many | wc -l"),
     ("ファイルの一覧（find、5000ファイル）", "find many -type f | wc -l"),

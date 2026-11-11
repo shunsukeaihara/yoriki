@@ -2,7 +2,7 @@
 
 作成日：2026年10月2日  
 更新日：2026年11月10日  
-版：0.52 設計案  
+版：0.53 設計案  
 対象：サービス企画、開発、運用担当
 
 プロダクト名はYoriki（よりき）とする（0.16でYuhitsuから変更）。同名の製品・サービスがあることは承知の上で、検索での見つけやすさは重視しない。名称の商標・ドメイン等の確認は本設計の対象外とする。
@@ -1229,17 +1229,21 @@ Sandboxのイメージは1つ（`yoriki-sandbox-docs`）にし、文書処理を
 
 | 種類 | 入れるもの |
 |---|---|
-| Python | pypdf・pdfplumber（PDF）、openpyxl（Excel）、python-docx（Word）、python-pptx（PowerPoint）、pandas（表）、markitdown 等 |
+| Python | pypdf・pdfplumber（PDF）、openpyxl（Excel）、python-docx（Word）、python-pptx（PowerPoint）、pandas（表）、markitdown（文書からMarkdown）、defusedxml・reportlab（公開されているSkillのスクリプトが使う）等 |
 | LibreOffice | ヘッドレスで、Writer・Calc・Impressの変換と計算に要るものだけ |
-| Node.js | 本体と、Skillが使うパッケージ（`docx`、`pptxgenjs`、`react`、`react-dom`、`react-icons`、`sharp`。一覧は作るときに現物で確かめる） |
+| Node.js | 本体（mise.tomlの版）と、Skillが使うパッケージ（`docx`、`pptxgenjs`、`react`、`react-dom`、`react-icons`、`sharp`） |
 | 変換の道具 | pandoc、poppler-utils（`pdftoppm`） |
 | フォント | Noto Sans CJKとNoto Serif CJKの、RegularとBold（`fonts-noto-cjk`）。アラビア文字、絵文字、タイ文字等のほかの文字は入れない |
 
 Sandboxにネットワークがないこと、rootfsが読取り専用であることは変えない。`npm install` はできないので、Node.jsのパッケージもPythonと同じく、版とhashを固定したlockからイメージに入れる。置き場所はイメージのルートの `/node_modules` にする。Nodeは親のディレクトリを順に探すので、`/workspace/work` 等のどこのスクリプトからも、`require` でも `import` でも読める（`NODE_PATH` は `import` に効かないので使わない）。
 
-PDFへの変換はデザインの確認に使う。きれいなPDFは利用者が手元で作る。fontconfigで、`sans` はNoto Sans CJK JP、`serif` はNoto Serif CJK JP、`monospace` はNoto Sans Mono CJK JPへ向け、メイリオ、游ゴシック、MSゴシック、Arial、Calibri等はSansへ、MS明朝、Times New Roman等はSerifへ向ける。文書の言語の指定が中国語や韓国語なら、そちらの字形を優先する。元のフォントと文字の幅が違うので、改行やレイアウトはずれることがある。
+PDFへの変換はデザインの確認に使う。きれいなPDFは利用者が手元で作る。fontconfigで、`sans` はNoto Sans CJK JP、`serif` はNoto Serif CJK JP、`monospace` はNoto Sans Mono CJK JPへ向け、メイリオ、游ゴシック、MSゴシック、Arial、Calibri等はSansへ、MS明朝、Times New Roman等はSerifへ向ける。文書の言語の指定が中国語や韓国語なら、そちらの字形を優先する。元のフォントと文字の幅が違うので、改行やレイアウトはずれることがある。設定がないと、LibreOfficeの依存で入るDejaVuが総称になり、日本語は香港の字形（Noto Sans CJK HK）で埋め込まれる。
 
-OSSとして公開のDocker Hubに置くので、ライセンスはMIT・BSD・Apache等のものを優先し、それ以外（LibreOfficeのMPL、pandoc・poppler-utilsのGPL、NotoのOFL等）は配布してよいかを入れる前に確かめる。AGPL等のものも入れる前に確認する。PowerPoint・Wordの画像やPDFのプレビューはLibreOfficeで作れるようになるが、画面の機能としてはまだ作らない（§3.9）。
+LibreOfficeは、ふつうの `soffice --headless` で動かす。設定（プロファイル）は既定の `$HOME/.config/libreoffice`（`/workspace/work/.home` の下）に置き、ワークスペースと一緒に保存する（数百KB）。公開されているSkillには、このパスにマクロを置いて表計算を再計算するものがあるため、別の場所へは向けない。信頼しない文書を開くので、文書のマクロは動かさない。イメージの設定（`share/registry` のxcd）で、マクロのセキュリティを「非常に高」にし、信頼する場所を置かず、どちらもユーザーのプロファイルからは変えられないように固定する。エージェントがプロファイルに置くマクロ（アプリケーションのマクロ）は止めない。Sandboxではもともと任意のコードを動かせるので、止めても守れるものはない。外部への参照（リンクした画像・データ等）は、Sandboxにネットワークがないので読まれない。
+
+LibreOfficeとNode.jsの資源は、Runtime Profileの初期値（メモリ2GB、プロセス数256）で足りる（数式つき5万行の表の再計算、400ページのWordのPDF化、画像つき40枚のスライドのPDF化と画像化で、メモリは最大365MB、プロセス数は最大18だった）。
+
+OSSとして公開のDocker Hubに置くので、ライセンスはMIT・BSD・Apache等のものを優先し、それ以外（LibreOfficeのMPL、pandoc・poppler-utilsのGPL、`sharp` が同梱するlibvipsのLGPL、NotoのOFL、`react-icons` の一部のアイコンのCC BY・CC BY-SA等）は、Docker Hubへ配布する前に配布してよいかを確かめる。AGPL等のものも入れる前に確認する。PowerPoint・Wordの画像やPDFのプレビューはLibreOfficeで作れるようになるが、画面の機能としてはまだ作らない（§3.9）。
 
 任意コードを実行できるSandboxでは、エージェントがPythonファイルを自作・importすること自体は可能である。packageカタログは管理された取得・復元の範囲を定めるものであり、すべての実行コードを承認済みに限定する仕組みではない。隔離の強制は引き続きOS・コンテナ側で行う。
 
@@ -2005,3 +2009,4 @@ Sandboxイメージの定義は本体と同じリポジトリの `sandbox/` で�
 | 0.50 | 2026年11月6日 | 回答期限が切れたら、ジョブかサブエージェントが動いていても待たずに失敗にすることにした（回答がなければ作業を進められないため。停止中を経由しない）。確認待ちの間にWorkerが失われても確認待ちのままにし、回答で最後の保存から再開する。Attemptの上限で移るときは、答える人がいないRunでも保存する（§5.3・§7.9） |
 | 0.51 | 2026年11月7日 | 確認待ちの間に `/`・`@` を指定した発言は、本文を回答にして、指定したものを再開のときに取り込むことにした（§5.5）。会話では、開始したユーザーがアクセスできるものはすべて使え、利用できることと、使うよう指示することを分けた（authorization.md §1の8）。Runがアクセスできるものは権限モデルだけで決まり、会話は開始したユーザーの権限、個人タスクは本人の権限、部門・全社・システムのタスクはその範囲（authorization.md §5.4の表）とする。`/`・`@`、タスクの定義のSkill・Connector、Skillの宣言と `tools` は使用の指示で、範囲を広げも狭めもしない。システムのタスクは、Skillもシステム・全部門・全社を使えることにした。宣言できるConnectorはSkillの範囲で決める（Skillの範囲の全員に見えるものだけ）。Skillについて権限が決めるのは、セッションの権限で選べるかだけとした（公開の後に使えなくなった宣言は操作のときに断る。読み込んだSkillが停止・失効してもRunは止めない。必要な能力は案内だけ。機密のSkillはSkill自身のフラグだけで決める。使うToolの変更は編集の権限。修正チャットでも `/`・`@` を受け付ける）（`/` で始めたRunでもToolを絞らず、`submit_result` も足さず、`@` を断らない。タスクのRunも絞らず、一覧から探して使える。チャットから起動したRunは起動した人の権限との共通部分を取るが、起動できる人はタスクより狭い権限を持たないのでタスクの範囲と同じになる。Draftの評価のRunも絞らない）。タスクごとのConnectorの取得件数の上限とToolの引数の制限（未実装）はなくした。 |
 | 0.52 | 2026年11月9日 | Connectorの結果を、添付と同じく取得したagentセッションにだけ残し、個別の保持期限を持たないことにした（§8）。アーカイブ・論理削除は会話と修正チャットの持ち主が行い、操作した時点で一覧から外して停止を依頼する。アーカイブした会話はアーカイブの一覧に出し、発言するとアーカイブを解除して空のワークスペースで再開する。操作は監査ログに記録する（§8） |
+| 0.53 | 2026年11月11日 | Sandboxのイメージに文書処理の道具を入れるときに決めた。LibreOfficeの設定はHOMEの既定の場所に置いてワークスペースと一緒に保存し、文書のマクロだけをイメージの固定の設定で止める（アプリケーションのマクロは止めない）。fontconfigの設定がないとDejaVuと香港の字形になることを書いた。資源はRuntime Profileの初期値のままでよいことを確かめた。Pythonにdefusedxml・reportlabを足した。ライセンスは、Docker Hubへ配布する前に確かめる（§7.6） |

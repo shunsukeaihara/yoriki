@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-11-11（agentセッションの実装の⑥、実行記録から始める修正チャット、まで。次は⑦、Sandboxのイメージの確かめ）
+- 最終更新：2026-11-11（agentセッションの実装の⑦、Sandboxのイメージ（#96）まで。次の作業は利用者と決める）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -48,6 +48,7 @@
 | #93 | 添付・成果物の期限をなくした（design.md 0.52 §8）：`Artifact.expires`・`YORIKI_ARTIFACT_RETENTION_DAYS` を消し、Connectorの結果は取得した会話にだけ残して期限で絞らない。アーカイブの見せ方とConnectorの結果の扱いを設計書に書いた |
 | #94 | 会話と修正チャットのアーカイブと論理削除（design.md §8）：`Conversation.archived`・`workspace_discarded`、`POST /conversations/{id}/archive/`、一覧の `?archived=true`、発言（修正チャットでタスクを動かすことも）でアーカイブを解除する。操作した時点で停止を依頼し、それより前に始めたRunが全部止まったらsnapshotを消す（`Checkpoint.discard_closed()`）。その前のsnapshotは戻さず、空から始めることをモデルに知らせる（`WORKSPACE_DISCARDED`）。監査ログはdjango-auditlog（操作した人を `set_actor` で残す）。画面はサイドバーの一覧の切替え、会話のメニューの「アーカイブ」、アーカイブした会話の案内 |
 | #95 | 実行記録から始める修正チャット（design.md §11.11）：`POST /tasks/{id}/fix_chat/?from_run=`（元の実行のログを見られて、今のタスクも管理できる人）。型がファイルの項目に元の実行でのパスを送ると、同じBlobObjectを参照する添付を作る（中身を複製しない）。項目でないファイル（入口の本文等）も引き継ぎ、Webhookからの実行なら入口の本文の注記も添える。元の実行・今の版・既存の修正チャットのどれかが機密なら機密として判定する（機密の修正チャットでも、今の版が機密でなければクラウドのモデルで動いていたのを直した）。画面は実行記録の「修正チャットで直す」と、「もう一度動かす」でのファイルの引継ぎ |
+| #96 | Sandboxのイメージに文書処理の道具を入れた（design.md 0.53 §7.6、harness.md §8.5。契約3）：LibreOffice（ヘッドレスのWriter・Calc・Impress）、pandoc、poppler-utils、Node.js 26と `/node_modules`（docx・pptxgenjs・react・react-dom・react-icons・sharp。lockから）、Pythonにmarkitdown・defusedxml・reportlab。fontconfigでNoto CJKの日本語の字形へ向け、文書のマクロをイメージの固定の設定で止めた。契約テストとベンチマークに足した |
 | #87 | 発言の渡し方（design.md 0.51 §5.5・§11.4、harness.md §7.5・§10.1・§10.2・§10.4）：発言の種類の選択をなくし、`/`・`@` を指定した発言も親へ渡す。Skill・Connectorの一覧を発言ごとに作り直し、`skill`・`connector` の引数を文字列にする。Runがアクセスできるものを権限モデルだけで決め、`/`・`@`、タスクの定義、Skillの宣言と `tools` は使用の指示にする（タスク・評価のRunも絞らない） |
 
 各PRの中身は、Pull Requestの説明と設計書を見る。
@@ -112,10 +113,10 @@
 
 ## 4 次の作業
 
-**今の状態（2026-11-03。2026-11-11 に⑥まで進んだ）**：design.md §12の第1段階のうち、Skill（①〜⑤）と、Connector・タスク・配信（①〜⑦、Connectorの④a・④b）は終わった（#72・#73まで）。今は、業務（下の「第1段階の順番」の3）を作る前の整理を、利用者と決めた次の順で進めている。文書の整理は #74 と、その残り（design.md・harness.md の突き合わせ。#75）で、テストの高速化は #76 で行った（バックエンドのテスト全体は、手元（8コア）で約5分から約35秒に、4並列でも約45秒になった）。#74 では、status.md の終わった段階の「決めたこと・判断した点」を設計書と突き合わせ、設計書になかった今の動きに関わるものを design.md・authorization.md・harness.md・frontend-conventions.md・sandbox/CONTRACT.md へ移してから消した（経過・レビュー・確かめたことは消した。各PRの説明に残っている）。§1 はPRごとの短い一覧にした。確認用の道具は #77 で入れた（偽のLLM `fake_llm`、確認用のデータ `seed_dev`、ログイン済みのセッション `dev_session`。development.md §6）。 2026-11-06 に、agentセッションとSandboxのイメージの案を設計書へ反映した。実装は下の⑥（実行記録から始める修正チャット）まで進んだ。後回し：タスクの実行の論理削除の画面、物理削除の管理コマンド、監査ログの画面。
+**今の状態（2026-11-03。2026-11-11 に⑦まで進んだ）**：design.md §12の第1段階のうち、Skill（①〜⑤）と、Connector・タスク・配信（①〜⑦、Connectorの④a・④b）は終わった（#72・#73まで）。今は、業務（下の「第1段階の順番」の3）を作る前の整理を、利用者と決めた次の順で進めている。文書の整理は #74 と、その残り（design.md・harness.md の突き合わせ。#75）で、テストの高速化は #76 で行った（バックエンドのテスト全体は、手元（8コア）で約5分から約35秒に、4並列でも約45秒になった）。#74 では、status.md の終わった段階の「決めたこと・判断した点」を設計書と突き合わせ、設計書になかった今の動きに関わるものを design.md・authorization.md・harness.md・frontend-conventions.md・sandbox/CONTRACT.md へ移してから消した（経過・レビュー・確かめたことは消した。各PRの説明に残っている）。§1 はPRごとの短い一覧にした。確認用の道具は #77 で入れた（偽のLLM `fake_llm`、確認用のデータ `seed_dev`、ログイン済みのセッション `dev_session`。development.md §6）。 2026-11-06 に、agentセッションとSandboxのイメージの案を設計書へ反映した。実装は下の⑦（Sandboxのイメージ）まで済んだ。後回し：タスクの実行の論理削除の画面、物理削除の管理コマンド、監査ログの画面。
 
-**次の作業**（#95 のマージを確かめてから）：
-1. 設計書（design.md 0.46・0.47、harness.md §5.6・§8・§10.11）に合わせて実装を直す。1つの目的ごとのPull Requestに分け、次の順に進める（2026-11-06 に利用者と確かめた）。① snapshotを確定した2世代にし、Workerを手放す前に保存する（済み。保存するかは答える人がいるかで決め、修正チャットはふつうの会話と同じ扱いにした）、② Runの区切りと `WAITING_BACKGROUND`、ジョブを親の動きと切り離す（済み）、③ 発言の渡し方と、Skill・Connectorの一覧を発言ごとに作り直す（済み）、④ サブエージェント（済み。バックエンドは #91、画面は #92）、⑤ ワークスペースの保存期限の設定、アーカイブと論理削除、添付・成果物の期限をなくす（AとBは済み。Cは自動の削除と一緒に後で）、⑥ 修正チャット（実行記録から始める。済み。#95）、⑦ Sandboxのイメージ（下の確かめの後。**次はこれ**。範囲と進め方は始める前に利用者と確かめる）。
+**次の作業**（#96 のマージを確かめてから）：
+1. 設計書（design.md 0.46・0.47、harness.md §5.6・§8・§10.11）に合わせて実装を直す。1つの目的ごとのPull Requestに分け、次の順に進める（2026-11-06 に利用者と確かめた）。① snapshotを確定した2世代にし、Workerを手放す前に保存する（済み。保存するかは答える人がいるかで決め、修正チャットはふつうの会話と同じ扱いにした）、② Runの区切りと `WAITING_BACKGROUND`、ジョブを親の動きと切り離す（済み）、③ 発言の渡し方と、Skill・Connectorの一覧を発言ごとに作り直す（済み）、④ サブエージェント（済み。バックエンドは #91、画面は #92）、⑤ ワークスペースの保存期限の設定、アーカイブと論理削除、添付・成果物の期限をなくす（AとBは済み。Cは自動の削除と一緒に後で）、⑥ 修正チャット（実行記録から始める。済み。#95）、⑦ Sandboxのイメージ（済み。#96）。①〜⑦が終わったので、**次の作業は利用者と決める**（候補は下の「第1段階の順番」の2の残りと、agentセッションの残り）。
    - ②で利用者と決めたこと（2026-11-06。design.md §5.3 に反映した）：回答期限が切れたら、ジョブが動いていても待たずに失敗にする（回答がなければ作業を進められないため）。回答を待つ間にWorkerが落ちても確認を残し、回答で最後の保存から再開する。Attemptの上限で移るときは、答える人がいないRunでも保存する（実装のときに決めた。§7.9）。
    - ②で利用者と決めたこと（続き）：ステップ数の上限で、ジョブが残っているか親が結果を見ていないジョブがあれば、止めて失敗にする（ステップ数はRun全体で数えるので、新しいAttemptでは解消しない。会話では次の発言の新しいRunで続ける）。Runを終えるときに止めたジョブと見ていないジョブは、そのRunの記録に書いて次のRunの文脈に入れる（harness.md §5.6）。
    - ②で入れなかったもの：サブエージェント（`WAITING_BACKGROUND` の「Attemptを手放していた」経路は④で足す）、発言の種類の選択をなくすこと（③）。実行時間（1つのRunの合計60分。harness.md §4.4）の上限はまだ守らせていない（今回入れたのはAttemptの上限だけ）。Attemptの上限はモデルの呼出しやToolの途中では判定しないので、55分の直前に始まった呼出しが5分を超えるとQ2に切られ、障害として最後の保存からやり直す（Codexの指摘。余裕の5分と障害の復旧で足りると判断して直していない。接続のtimeoutは3600秒まで設定できる）。
@@ -128,7 +129,7 @@
    - **設計に残る課題**：タスクの再現性（一覧から読むSkillは最新の版）、Draftの評価が依頼した人の権限に左右されること、一覧から省かれたものの名前を調べる手段がないこと、Skillの業務結果のSchemaの意味が会話とタスクで違うこと。
    - チャットから起動したRunは「タスクの範囲 ∩ 起動した人の今の権限」で判定する。起動できる人はタスクより狭い権限を持たないのでタスクの範囲と同じになり、共通部分はその検証を兼ねる（テストで確かめる）。一覧の量の上限は見せ方で、省いたものも名前で使える。Webhookの鍵を破られた場合やモデルへの指示で防げない場合の被害は、範囲と出口の中に収まるものとして割り切る。書込みのConnectorは今はないが対応する。
    - ③で入れなかったもの：サブエージェント（④）。実行記録の画面の作業の記録は、回答に添えた指定の取込みも「追加の指示を取り込みました」と出す。
-   - 手元の環境（2026-11-11、#95 の確認の後）：開発用のDB `yoriki` は、#92 の画面の確認（一時の鍵で `seed_dev` を流した）の後に作り直し、空のまま最新までmigrateした（ユーザーもいない）。使う前に、`.envrc` を読み込んだ端末で `createsuperuser`（基盤管理者 `devadmin`）と `seed_dev --sandbox-image ...` を流す。Sandboxのイメージは手元のレジストリの `sha256:355d92b65937…` で最新（2026-11-09 に作り直して同じdigestを確かめた）。2026-11-11（#95 の画面の確認の後）にも作り直し、空のまま最新までmigrateした（ユーザーもいない）。
+   - 手元の環境（2026-11-11、#95 の確認の後）：開発用のDB `yoriki` は、#92 の画面の確認（一時の鍵で `seed_dev` を流した）の後に作り直し、空のまま最新までmigrateした（ユーザーもいない）。使う前に、`.envrc` を読み込んだ端末で `createsuperuser`（基盤管理者 `devadmin`）と `seed_dev --sandbox-image ...` を流す。Sandboxのイメージは手元のレジストリの `sha256:4ed9ff427d02…`（契約3。#96）が最新。2026-11-11（#95 の画面の確認の後）にも作り直し、空のまま最新までmigrateした（ユーザーもいない）。
    - ④で利用者と決めたこと（2026-11-08。#91）：PRはバックエンドと画面の2つに分ける（#91 はバックエンドで、画面には親の `subagent` の呼出しと `subagent.finished` だけを出す。子のRunEventは作業の記録のAPIとSSEから外している）。子のAttemptも、1つのqclusterで同時に動かすAttemptの数（`YORIKI_RUNS_PER_QCLUSTER`）に数える（deployment.md §3.2。子の実行時間の上限はclaimされて動き始めてから数える）。
    - ④で実装のときに決めて文書へ書いたこと：子だけを待ってWorkerを手放すときは、答える人がいないタスクのRunでも保存する（design.md §7.9。Attemptの上限と同じ）。子は新しいAttemptへ移らないので、子の実行時間の上限（Runtime Profileの `subagent_timeout_seconds`）は50分まで（harness.md §4.4）。子のWorkerは返すものを確定して親を起こすだけで、`subagent.finished` は親が次の区切りで記録する（親のTool呼出しと結果の間に挟まないため）。親が受け取る前にRunが終わったら、終わるときに記録して次のRunの文脈に入れる（`Run._close_subagents()`）。`subagent_kill` で止めた子は知らせない。子のステップ数は子ごとに数える（上限は親と同じ200）。`model` はモデル設定の名前。子が最後の応答のときにジョブが動いていれば1回だけ知らせ、それでも終えればジョブを止める（harness.md §10.11）。Attemptの番号は親と子で別に数え（`ExecutionAttempt.subagent`）、RunEvent・ToolInvocation・UsageLedgerは子を持つ（sequenceは親と通し）。子が読み込んだSkillは `Subagent.skills` に持ち、親のManifestへ追記しない。子のConnectorの結果は `Artifact.subagent` を持ち、親の `/workspace/input` には置かない（Codexの指摘で直した）。子の実行時間の上限は応答が届くたびにも確かめるが、最初の応答が届くまでの待ちは接続のtimeout（3600秒まで設定できる）まで切れない（親のAttemptの上限と同じ割り切り）。
    - ④の画面で利用者と決めたこと（2026-11-09。#92。harness.md §10.11 に反映した）：子の記録は親と同じ一覧で返して子のIDを付け、子の状態は別のAPIで返す。子の応答の途中経過（`run.delta`）は流さない（子が同時に複数動くと書きかけが混ざり、親の書きかけとも紛れるため）。動いている子の数をRunの状態の横に出す。1つずつ止める操作は置かない。実装のときに決めたこと：子の記録では会話の画面の読み直し（`useRunLive` の `onEvent`）を呼ばず、親の書きかけの応答も消さない。子は確認待ちの間も動くので、子が動いている間は5秒ごとに子の状態と照会を読み直す。Tool呼出しのIDは親と子で重なりうるので、画面では子ごとに分けてから結ぶ。
@@ -141,15 +142,14 @@
      - Bで試していないこと：Sandboxとqclusterを動かしての、アーカイブから再開した会話のモデルへの知らせ（テストで `_restore` の知らせを確かめただけ）。画面は、apiと `pnpm dev` で、アーカイブ → 一覧の切替え → 発言で解除をPlaywrightで確かめた（qclusterなし）。
    - ⑥（#95）：利用者と決めたこと（2026-11-11）：バックエンドと画面を1つのPRにする。実装のときに決めたこと：元の実行は `from_run` で指定し、ログを見られる（`Run.objects.visible_to`）このタスクの作業のRunに限る（タスクの管理は `fix_chat` の対象のタスクで確かめる）。ファイルの項目の値は元の実行でのパス（実行の `inputs` の値）で送り、元の実行の最初の依頼の添付から探す（消した添付・違うパスは項目の誤りにして付け直させる。外した項目は渡さない）。項目でないファイルはいつも引き継ぐ。「もう一度動かす」も同じAPIで、前の実行を `from_run` にする。今の版にない項目の値は画面で落とし、ダイアログに書く。実行記録の画面のボタンは `TaskRun.can_fix_chat`（ログを見られて、今のタスクを管理でき、版がある）で出す。
      - ⑥で試していないこと：qclusterとSandboxで、引き継いだファイルを実際に読むこと（テストで添付とパスを確かめ、apiと `pnpm dev` で、実行記録 → 修正チャット → もう一度動かすをPlaywrightで確かめた。3つのRunが同じBlobObjectを参照した）。Webhookから始める画面の操作（APIのテストだけ）。
-   - agentセッションの残り：ワークスペースの保存期限の設定の画面（自動の削除と一緒に作る）。Runtime Profileのメモリの初期値も見直す。
-   - Sandboxのイメージ（design.md §7.6、harness.md §8.5）は、作る前に次を確かめる。試していない。`sandbox/CONTRACT.md` §1 は、入れるPull Requestで契約番号とあわせて直す。
-     - gVisorでLibreOfficeが動くか。公開されているスキルの説明には、素の `soffice` がそのサンドボックスでは止まるので専用のスクリプトを使う、とある。runc・gVisorの両方で試す。
-     - LibreOfficeの設定の置き場所。`HOME` は `/workspace/work/.home` なので、そのままだと設定がsnapshotに入る。別の場所へ向けるかを決める。
-     - 資源の上限。LibreOfficeとNode.jsで足りるメモリ・プロセス数を測り、Runtime Profileの初期値を見直す。
-     - 信頼しない文書を開くこと。LibreOfficeのマクロを無効にする設定。ネットワークがないことを前提にしてよいかも確かめる。
-     - イメージの大きさとビルド。今は582MB。multi-arch（arm64）のビルドと、Docker Hubへの配布の時間。
-     - 配布のライセンス。LibreOffice（MPL）、pandoc・poppler-utils（GPL）、Noto（OFL）、`sharp` が同梱するlibvips（LGPLと記憶。現物で確かめる）を入れて配布してよいか。
-     - fontconfigの `monospace`。Noto Sans Mono CJK JP がSansのファイルに入っているはずなので、確かめる。
+   - agentセッションの残り：ワークスペースの保存期限の設定の画面（自動の削除と一緒に作る）。Runtime Profileのメモリの初期値は⑦で測り、変えないことにした。
+   - ⑦（#96）：利用者と決めたこと（2026-11-11。design.md 0.53 §7.6 に反映した）：手元で確かめてから1つのPRにする。gVisorはPRのCI（`sandbox-gvisor`・`sandbox-runner`）で確かめる。LibreOfficeの設定は `$HOME/.config/libreoffice` のまま（ワークスペースと一緒に保存される。約300KB）。公開されているxlsxのSkillの `recalc.py` がこのパスにマクロを置いて再計算するため。止めるのは文書のマクロだけ（`MacroSecurityLevel=3`・信頼する場所なしを `finalized` で固定。`DisableMacrosExecution` は使わない）。Pythonにmarkitdown（docx・pdf・pptx・xlsxの追加の依存も）・defusedxml・reportlabを足す。
+     - 確かめたこと（手元のarm64・runc）：素の `soffice --headless` は止まらない。文書のマクロは、既定（レベル2）でも `--convert-to` でも動かず、プロファイルで0に下げて「開く」と動く（陽性対照）。イメージの設定を入れると、0に下げても動かない（契約テストの `test_document_macros_do_not_run`。設定のないイメージでは失敗することを確かめた）。アプリケーションのマクロでの再計算は動く。資源は、数式つき5万行の再計算（3.7秒、289MB）、Word 400ページのPDF化（1.8秒、186MB）、pptxgenjs＋sharpで40枚→PDF→PNG（4.9秒、365MB）で、プロセス数は最大18。Runtime Profileの初期値（2GB・256）は変えない。fontconfigの設定がないと総称はDejaVuで、日本語はNoto Sans CJK HKで埋め込まれていた。Noto Sans Mono CJK JPはSansのファイル（`NotoSansCJK-*.ttc`）に入っている。
+     - 大きさ：展開して582MB→約1.6GB、圧縮して232MB→約550MB（LibreOffice 249MB、pandoc 204MB、Node本体150MB、`/node_modules` 144MB（react-icons 85MB）、フォント93MB、markitdown等）。手元のarm64のビルドは1分ほど。
+     - ライセンス（現物で確かめた。配布してよいかの判断は**利用者が確かめる**。2026-11-11）：AGPLのものはない（Debianのcopyrightに出るAffero はMPL-2.0の本文）。条件のあるもの：LibreOffice（MPL-2.0）、pandoc・poppler（GPL）、libvips（`@img/sharp-libvips-*`。LGPL-3.0-or-later）、Noto（OFL）、react-iconsの一部のアイコン（Font Awesome・VS Code等はCC BY 4.0、Game IconsはCC BY 3.0、TypiconsはCC BY-SA 3.0。Circumは MPL-2.0）、certifi（MPL-2.0）、jszip（MIT OR GPL-3.0）。Debianのcopyrightのファイルとnpmのライセンスのファイルはイメージに残っている。GPL・LGPLのソースの入手先（Debianのsnapshot、sharp-libvips）を示すNOTICEは、判断を待って置いていない。イメージのラベル `org.opencontainers.image.licenses` は `MIT` のまま。
+     - gVisor（#96 のCIの `sandbox-gvisor`、amd64・arm64）：契約テストは全部通り、素の `soffice` も止まらなかった。マクロのテストは最初、`timeout` が起動の oosplash だけを止め、残った `soffice.bin` が出力を開いたままにして時間切れになったので、出力を `/dev/null` へ向けて名前で止めるように直した。所要時間（runc → runsc、5回の中央値）：Word→PDF（500段落）は amd64 0.50→0.70秒・arm64 0.75→1.22秒、Excelの再計算（1万行）は 0.74→0.94秒・0.98→1.60秒、Nodeの起動は 0.14→0.18秒・0.18→0.29秒（1.3〜1.6倍。matplotlibのPDFの生成の1.7〜2.3倍より小さい）。
+     - 試していないこと：Docker Hubへの配布の時間（配布のワークフローがまだない）、実際のLLMとSkillでの使い方（公開されているSkillのスクリプトを動かすこと）、`soffice` を同時に複数動かすこと（同じプロファイルを使う）。
+     - 手元のレジストリのイメージ（`localhost:5001/yoriki-sandbox-docs:dev`）は、契約3の `sha256:4ed9ff427d02…` にpushし直した。Runtime Profileへの登録は `seed_dev --sandbox-image` で行う（DBは空）。
 
 マイグレーションは後でリセットするので、古い行の移行は考えなくてよい。業務は人間が作り、足りない機能をエージェントが直す。外部のSkillの取り込みは、いったん検討から外す。ほかの作業（クオータと予算の強制、`/runs`、CSP等）の順番は未決。
 
@@ -157,7 +157,7 @@
 
 1. **Skill**：済み（#34〜#41）。後回しにしたものは §3。
 2. **Connector・タスク・配信**：済み（#42〜#73）。範囲の外：HTTP・SharePoint・MCPのConnector、Teams・Slack・DiscordのInteraction Binding（下の4）。
-   - design.md §12 の第1段階のうち、ほかに残るもの（§3）：Plugin Registry（下の4とあわせて）、クオータと予算の強制、清掃（`cleanup_workspaces` 等）、`install_python_packages`・PackageBundle・EnvironmentRevision、Sandboxのイメージの Docker Hub への配布、実行履歴の画面（`/runs`）。順番は、最初の2つの業務で要るものから利用者と決める。
+   - design.md §12 の第1段階のうち、ほかに残るもの（§3）：Plugin Registry（下の4とあわせて）、クオータと予算の強制、清掃（`cleanup_workspaces` 等）、`install_python_packages`・PackageBundle・EnvironmentRevision、Sandboxのイメージの Docker Hub への配布（ライセンスの判断の後。⑦の記録）、実行履歴の画面（`/runs`）。順番は、最初の2つの業務で要るものから利用者と決める。
 3. **最初の2つの業務**（design.md §13。Skillとタスクとして作る）：請求書PDF → 社内DBと照合 → 取込用のCSV、契約書レビュー → Zapierへ結果。
 4. **Channel Plugin**（Teams・Slack・Discord。`plugin` のRegistry）。
 
@@ -183,7 +183,7 @@ cd frontend && pnpm install
 
 - 手元のDocker Desktopの仮想ディスク（37GB）が満杯になると、PostgreSQLが `No space left on device` で止まり、テストが大量にエラーになる。#36 ではビルドキャッシュ（`docker builder prune -f`）を消して空けた。`docker system df` で確かめる。
 - 環境変数はリポジトリルートの `.envrc`（direnv）。テストやmypyは、`.envrc` を読み込んだ状態で実行する。エージェントが `.envrc` を読めない設定のときは、`.envrc.example` の `export` の行と、新しく生成した `YORIKI_SECRET_ENCRYPTION_KEYS`（Fernet）・`YORIKI_SANDBOX_RUNTIME=runc` を一時ファイルに書き、リポジトリのルートでコマンドごとに `source` する（`$PWD` を使う行があるため）。`api/` で `source` すると保存先が `api/.objects` になり、既存の資料・添付の原本が見つからない（Sandboxの起動が「cannot prepare ... not found」で失敗する）。
-- Sandboxの補助コマンド（`sandbox/helper/`）・ライブラリ（`sandbox/python/`）を変えたら、イメージをビルドし直す（#33で `read` の画像の符号化を変えた）。④aでSandboxの契約を2に上げた。手元のレジストリのRuntime Profileで会話を動かすときは、pushし直して、`seed_dev --sandbox-image` か管理画面で新しいdigestに更新する。`pytest -m sandbox` は `YORIKI_SANDBOX_TEST_IMAGE=yoriki-sandbox-docs:dev` を付けて動かす。
+- Sandboxの補助コマンド（`sandbox/helper/`）・ライブラリ（`sandbox/python/`）を変えたら、イメージをビルドし直す（#33で `read` の画像の符号化を変えた）。④aでSandboxの契約を2に、#96 で3に上げた。手元のレジストリのRuntime Profileで会話を動かすときは、pushし直して、`seed_dev --sandbox-image` か管理画面で新しいdigestに更新する。`pytest -m sandbox` は `YORIKI_SANDBOX_TEST_IMAGE=yoriki-sandbox-docs:dev` を付けて動かす。
 - 会話でのConnectorは、`seed_dev` の確認用のスキーマ `devtools_check` とConnector「確認用DB（seed_dev）」で確かめる（会話で `@` で指定し、偽のLLMに `[query]`・`[script]` を送る）。機密のConnectorを試すときは、会話を機密で始めるか、会話の設定の盾のボタンで機密にする（ローカルLLMのモデルが要る。偽モデル（seed_dev）はローカルLLM）。
 - ConnectorのAdapterのテスト（`connector/tests/test_adapters.py`）は、PostgreSQLの分はいつも動き、MySQL・SQL Serverの分は管理者の接続先（`YORIKI_CONNECTOR_TEST_MYSQL`・`YORIKI_CONNECTOR_TEST_SQLSERVER`。`.envrc.example`）を渡したときだけ動く。#42 では一時のコンテナ（`docker run -d --rm --name yoriki-connector-mysql -p 127.0.0.1:3307:3306 -e MYSQL_ROOT_PASSWORD=... mysql:8.0`、`docker run -d --rm --platform linux/amd64 --name yoriki-connector-mssql -p 127.0.0.1:1434:1433 -e ACCEPT_EULA=Y -e MSSQL_SA_PASSWORD=... mcr.microsoft.com/mssql/server:2022-latest`）で試した。手元のmacOSのODBC Driver 18（18.7.1.1まで）は `/opt/homebrew/opt/openssl/lib/` のOpenSSL 3以前を探すので、Homebrewの `openssl` が4系だと読み込めない。`export DYLD_LIBRARY_PATH=/opt/homebrew/opt/openssl@3/lib` を付け、`uv run` ではなく `.venv/bin/python -m pytest ...` で動かす（`uv run` を通すと `DYLD_LIBRARY_PATH` がPythonに届かない）。本体のイメージ（`docker build -t yoriki-api:dev api`）の中で、リポジトリを読取り専用でmountして動かしてもよい（`--user root` で `pip install uv`・`UV_PROJECT_ENVIRONMENT=/tmp/venv uv sync --locked`・`uv run --no-sync pytest ...`。DBのホストは `host.docker.internal`）。手元の `mysql@8.4`（Homebrew）は利用者のものなので使わない。
 - 画面をブラウザで確かめるときは、api（上記）と `cd frontend && pnpm dev` を起動し、Playwright（Python）で操作する。手元のブラウザのキャッシュ（chromium-1208）に合う版は `uv run --no-project --with playwright==1.58.0 python <script>`。ログインは、`dev_session <ユーザー>` が表示するCookie `sessionid` を入れる（SSOの社員もこれで入れる）か、基盤管理者なら `/login?method=password` でログインして `storage_state` を使い回す。

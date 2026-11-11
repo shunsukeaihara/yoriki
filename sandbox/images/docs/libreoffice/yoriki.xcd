@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Sandboxで信頼しない文書を開くので、文書のマクロを動かさない（design.md §7.6）。
+     信頼する場所を置かずに「非常に高」にする。finalized なので、ユーザーのプロファイルからは変えられない。
+     エージェントがプロファイルに置くマクロ（アプリケーションのマクロ）は止めない（Sandboxでは任意のコードを動かせるため） -->
+<oor:data xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:oor="http://openoffice.org/2001/registry">
+  <dependency file="main"/>
+  <oor:component-data oor:package="org.openoffice.Office" oor:name="Common">
+    <node oor:name="Security">
+      <node oor:name="Scripting">
+        <prop oor:name="MacroSecurityLevel" oor:finalized="true"><value>3</value></prop>
+        <prop oor:name="SecureURL" oor:finalized="true"><value/></prop>
+      </node>
+    </node>
+  </oor:component-data>
+</oor:data>

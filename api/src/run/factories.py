@@ -2,6 +2,7 @@ import factory
 from factory.django import DjangoModelFactory
 
 from conversation.factories import ConversationFactory
+from usage.models import Budget
 
 from .models import ClarificationKind, ClarificationRequest, Run, RunStatus
 
@@ -13,6 +14,7 @@ class RunFactory(DjangoModelFactory[Run]):
     conversation = factory.SubFactory(ConversationFactory)
     owner = factory.SelfAttribute("conversation.owner")
     model_version = factory.LazyAttribute(lambda o: o.conversation.model_profile.current_version)
+    budget = factory.LazyFunction(Budget.company)
     status = RunStatus.QUEUED
 
 

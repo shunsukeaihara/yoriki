@@ -55,8 +55,10 @@ from skill.models import (
     SkillEvaluationAsset,
     SkillEvaluationCase,
     SkillEvaluationResult,
+    SkillScope,
 )
-from usage.models import UsageLedger, UsagePurpose
+from usage import budget as budgets
+from usage.models import UsageLedger, UsagePurpose, estimate_cost
 
 from .dispatch import user_message_data
 from .models import Conversation, ConversationMessage, ConversationPurpose, MessageRole
@@ -103,10 +105,13 @@ def start_evaluation(
     effort: str = "",
     run: Run | None = None,
     tool_call_id: str = "",
+    budget_department=None,
 ) -> SkillEvaluation:
     """今のDraftを評価する。始められなければ CannotEvaluate。
 
-    `run`・`tool_call_id` は test_skill_draft で始めたときの編集のRunと呼出し（終わったら結果を返す）
+    `run`・`tool_call_id` は test_skill_draft で始めたときの編集のRunと呼出し（終わったら結果を返す）。
+    `budget_department` は個人のSkillで予算を計上する部門（所属が複数のとき。design.md §9.1）。編集のRunから
+    始めたときは、個人のSkillでもその編集のRunの計上先にする（会話で選んだ部門）
     """
     with transaction.atomic():
         skill = Skill.objects.select_for_update(of=("self",)).select_related("current_version").get(pk=skill.pk)
@@ -131,6 +136,13 @@ def start_evaluation(
             )
         if effort not in model_version.effort_values:
             effort = model_version.default_effort
+        try:
+            if run is not None and skill.scope == SkillScope.PERSONAL:
+                budget = budgets.check(run.budget)
+            else:
+                budget = budgets.check(budgets.for_skill(skill, actor, budget_department))
+        except budgets.BudgetUnavailable as exc:
+            raise CannotEvaluate(str(exc)) from exc
         evaluation = SkillEvaluation.objects.create(
             skill=skill,
             draft_uid=draft.uid,
@@ -171,9 +183,13 @@ def start_evaluation(
             )
             fields = []
             if base is not None:
-                result.base_run = _start_run(evaluation, case, files, runtime_version, "base", sensitive=sensitive)
+                result.base_run = _start_run(
+                    evaluation, case, files, runtime_version, "base", sensitive=sensitive, budget=budget
+                )
                 fields.append("base_run")
-            result.draft_run = _start_run(evaluation, case, files, runtime_version, "draft", sensitive=sensitive)
+            result.draft_run = _start_run(
+                evaluation, case, files, runtime_version, "draft", sensitive=sensitive, budget=budget
+            )
             result.save(update_fields=[*fields, "draft_run"])
         return evaluation
 
@@ -199,7 +215,14 @@ def _check_startable(skill: Skill, cases: list[SkillEvaluationCase], actor, mode
 
 
 def _start_run(
-    evaluation: SkillEvaluation, case: SkillEvaluationCase, files: list, runtime_version, side: str, *, sensitive: bool
+    evaluation: SkillEvaluation,
+    case: SkillEvaluationCase,
+    files: list,
+    runtime_version,
+    side: str,
+    *,
+    sensitive: bool,
+    budget,
 ) -> Run:
     """ケースの依頼の文と添付を最初の発言にして、評価のRunを1つ始める。Runごとに一覧に出さない会話を作る"""
     actor = evaluation.requested_by
@@ -249,6 +272,7 @@ def _start_run(
         owner=actor,
         trigger=RunTrigger.EVALUATION,
         kind=RunKind.EVALUATION,
+        budget=budget,
         model_version=version,
         effort=evaluation.effort,
         runtime_version=runtime_version,
@@ -395,16 +419,13 @@ def match_expected(expected: Any, actual: Any, path: str = "") -> list[dict[str,
 
 def _judge(evaluation: SkillEvaluation, result: SkillEvaluationResult) -> tuple[int | None, str, str]:
     """LLMの判定（参考。公開の条件には使わない）。判定しなければ (None, "", 理由)"""
-    if result.base_run is None:
-        return None, "", _("公開中の版がないので、比べていません。")
-    if not (result.base_check.get("completed") and result.draft_check.get("completed")):
-        return None, "", _("完了しなかったRunがあるので、判定していません。")
     version = evaluation.model_version
-    if not version.supports_tools:
-        return None, "", _("このモデルはToolを使えないので、判定していません。")
+    judge_input = _judge_input(result)
+    if skipped := _judge_skipped(result, version, judge_input):
+        return None, "", skipped
     request = ChatRequest(
         model=version.model_name,
-        messages=[Message("system", JUDGE_SYSTEM), Message("user", _judge_input(result))],
+        messages=[Message("system", JUDGE_SYSTEM), Message("user", judge_input)],
         tools=[ToolDefinition(JUDGE_TOOL, "Report the verdict.", JUDGE_PARAMETERS)],
         max_output_tokens=version.max_output_tokens,
         effort=evaluation.effort or None,
@@ -438,6 +459,21 @@ def _judge(evaluation: SkillEvaluation, result: SkillEvaluationResult) -> tuple[
     if verdict is None:
         return None, "", _("判定の結果を受け取れませんでした。")
     return verdict, reason[:1000], ""
+
+
+def _judge_skipped(result: SkillEvaluationResult, version: ModelProfileVersion, judge_input: str) -> str:
+    """判定しない理由。判定するなら空"""
+    if result.base_run is None:
+        return _("公開中の版がないので、比べていません。")
+    if not (result.base_check.get("completed") and result.draft_check.get("completed")):
+        return _("完了しなかったRunがあるので、判定していません。")
+    if not version.supports_tools:
+        return _("このモデルはToolを使えないので、判定していません。")
+    # 見積もりが評価のRunの計上先の残額に収まるか（Runが終わった後なので予約はしない。design.md §9.1）
+    remaining = result.draft_run.budget.remaining() if result.draft_run is not None else None
+    if remaining is not None and remaining < estimate_cost(version, len(JUDGE_SYSTEM) + len(judge_input)):
+        return _("今月の予算が足りないので、判定していません。")
+    return ""
 
 
 def _judge_input(result: SkillEvaluationResult) -> str:

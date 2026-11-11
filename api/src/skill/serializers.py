@@ -1221,6 +1221,14 @@ class SkillEvaluationCreateSerializer(serializers.Serializer):
         ).select_related("current_version__connection"),
     )
     effort = serializers.CharField(max_length=50, required=False, allow_blank=True)
+    budget_department: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(
+        slug_field="uid",
+        queryset=Department.objects.active(),
+        required=False,
+        allow_null=True,
+        default=None,
+        help_text=_("個人のSkillで予算を計上する部門（所属が複数のときに選ぶ。design.md §9.1）"),
+    )
 
     def validate(self, attrs):
         skill: Skill = self.context["skill"]
@@ -1247,6 +1255,7 @@ class SkillEvaluationCreateSerializer(serializers.Serializer):
                 actor=validated_data["actor"],
                 model_version=validated_data["model_profile"].current_version,
                 effort=validated_data.get("effort", ""),
+                budget_department=validated_data.get("budget_department"),
             )
         except CannotEvaluate as exc:
             raise serializers.ValidationError({"non_field_errors": [str(exc)]}) from exc

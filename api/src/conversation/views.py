@@ -46,7 +46,7 @@ class AppConversationViewSet(ModelViewSet):
     permission_classes = [AppUser]
     lookup_field = "uid"
     queryset = Conversation.objects.filter(deleted=False).select_related(
-        "model_profile__current_version__connection", "task__department"
+        "model_profile__current_version__connection", "task__department", "budget_department"
     )
     serializer_class = ConversationSerializer
     search_fields = ["title"]

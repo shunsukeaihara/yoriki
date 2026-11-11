@@ -67,6 +67,16 @@ class Conversation(models.Model):
         related_name="fix_chats",
         verbose_name=_("修正するタスク"),
     )
+    # 予算を計上する部門。空なら、所属が1つならその部門、所属がなければ全社の枠。修正チャットとタスク・評価のRunの
+    # 会話では使わない（タスク・Skillの計上先を使う。design.md §9.1）
+    budget_department = models.ForeignKey(
+        "user.Department",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("予算を計上する部門"),
+    )
     last_posted = models.DateTimeField(_("最終投稿日時"), null=True, blank=True)
     # アーカイブした日時。会話の一覧から外し、アーカイブの一覧に出す。発言すると空に戻す（design.md §8）
     archived = models.DateTimeField(_("アーカイブ日時"), null=True, blank=True)

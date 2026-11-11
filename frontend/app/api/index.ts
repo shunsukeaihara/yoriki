@@ -33,6 +33,8 @@ const createAPI = () => {
     },
     account: {
       get: () => http.get<MyUser, MyUser>('app/v1/my/'),
+      // 自分が見られる予算の今月の利用額・上限・残額（design.md §9.1）
+      budgets: () => http.get<MyBudget[], MyBudget[]>('app/v1/my/budgets/'),
     },
     // 会話で選べるモデル設定。選択肢として全件を返す（ページングしない）
     modelProfiles: {
@@ -352,6 +354,17 @@ const createAPI = () => {
         // 版は版番号で識別する
         versions: (number?: number) =>
           readOnlyResource<ModelProfileVersion>(http, `v1/model_profiles/${id}/versions`, number?.toString()),
+      }),
+      // 予算の既定の上限（全社の枠の今月の利用額も返す）と、部門ごとの上書き
+      budgetSettings: {
+        get: () => http.get<BudgetSettings, BudgetSettings>('v1/budgets/settings/'),
+        patch: (data: BudgetSettingsWrite) => http.patch<BudgetSettings, BudgetSettings>('v1/budgets/settings/', data),
+      },
+      departmentBudgets: (id?: string) => ({
+        list: (params?: ListParams) =>
+          http.get<Paginated<DepartmentBudget>, Paginated<DepartmentBudget>>('v1/budgets/departments/', { params }),
+        patch: (data: DepartmentBudgetWrite) =>
+          http.patch<DepartmentBudget, DepartmentBudget>(`v1/budgets/departments/${id}/`, data),
       }),
       runtimeProfiles: (id?: string) => ({
         ...resource<RuntimeProfile, RuntimeProfileWrite, RuntimeProfileListParams>(http, 'v1/runtime_profiles', id),

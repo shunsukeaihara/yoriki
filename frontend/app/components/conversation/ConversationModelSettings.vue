@@ -43,12 +43,12 @@ const switchedMessage = () => {
   if (props.fixChat && (!run || run.taskInfo)) return t('切り替えました。タスクを直す依頼で使います')
   return run ? t('切り替えました。次のステップから使います') : t('切り替えました')
 }
-const save = async (data: Partial<ConversationWrite>) => {
+const save = async (data: Partial<ConversationWrite>, message?: string) => {
   saving.value = true
   try {
     const result = await api.conversations(props.conversation.id).patch(data)
     emit('updated', result)
-    toast.add({ title: switchedMessage(), color: 'success' })
+    toast.add({ title: message ?? switchedMessage(), color: 'success' })
   } catch (err) {
     toast.add({ title: t('エラー'), description: makeErrorMsg(err), color: 'error' })
   } finally {
@@ -78,6 +78,21 @@ const makeSensitive = async () => {
   if (!ok) return
   save(target ? { handlesSensitiveData: true, modelProfile: target.id } : { handlesSensitiveData: true })
 }
+
+// 予算を計上する部門（修正チャットはタスクの計上先を使う。design.md §9.1）。所属が2つ以上か、選んだ部門から外れたときに出す
+const budgetDepartments = useBudgetDepartments()
+const budgetDepartmentItems = computed(() => {
+  const items = budgetDepartments.items.value
+  const current = props.conversation.budgetDepartmentInfo
+  if (current && !items.some((i) => i.value === current.id))
+    return [{ value: current.id, title: t('{name}（所属していません）', { name: current.name }) }, ...items]
+  return items
+})
+const showBudgetDepartment = computed(
+  () =>
+    !props.fixChat &&
+    (budgetDepartments.choosable.value || budgetDepartmentItems.value.length > budgetDepartments.items.value.length),
+)
 
 const onEffort = (value: unknown) => {
   const effort = value === DEFAULT_EFFORT || !value ? '' : String(value)
@@ -111,6 +126,24 @@ const onEffort = (value: unknown) => {
       class="w-44 sm:w-48"
       size="sm"
       @update:model-value="(v) => v && v !== conversation.modelProfile && save({ modelProfile: String(v) })"
+    />
+    <DSelect
+      v-if="showBudgetDepartment"
+      :model-value="conversation.budgetDepartment ?? undefined"
+      :label="$t('予算を計上する部門')"
+      :show-label="false"
+      :placeholder="$t('予算の部門')"
+      :items="budgetDepartmentItems"
+      :disabled="saving"
+      :title="$t('予算を計上する部門')"
+      class="w-32 sm:w-40"
+      size="sm"
+      @update:model-value="
+        (v) =>
+          v &&
+          v !== conversation.budgetDepartment &&
+          save({ budgetDepartment: String(v) }, $t('切り替えました。次の依頼から、この部門の予算に入ります'))
+      "
     />
     <DSelect
       v-if="profile.effortValues.length"

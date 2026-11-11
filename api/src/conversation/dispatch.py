@@ -30,6 +30,7 @@ from run.models import (
 from runtime.models import RuntimeProfile
 from skill.connectors import skill_is_sensitive
 from skill.models import CONVERSATION_SCOPES, Skill, SkillAction
+from usage import budget as budgets
 
 from .models import Conversation, ConversationMessage, InstructionKind, InstructionState, MessageRole, UserInstruction
 
@@ -409,6 +410,11 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
         raise CannotStart(
             _("コマンドを動かす環境（Runtime Profile）が登録されていません。基盤管理者に問い合わせてください。")
         )
+    # 予算の計上先を決めて、今月の残額を確かめる（design.md §9.1）
+    try:
+        budget = budgets.check(budgets.for_conversation(conversation))
+    except budgets.BudgetUnavailable as exc:
+        raise CannotStart(str(exc)) from exc
     # 修正チャットのタスクのRunは task.dispatch.start_task_run() で始める。ここで始めるのは、タスクの編集のRun
     # （動いていないときのメッセージと、承認した編集の依頼。タスクのRunが終わる直前に届いて取り込めなかった発言も）
     task_edit = resolve_task_edit(conversation, conversation.owner, version) if conversation.is_task_fix else None
@@ -457,6 +463,7 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
         parent=parent,
         owner=conversation.owner,
         kind=RunKind.TASK_EDIT if task_edit else RunKind.SKILL_EDIT if skill_edit is not None else RunKind.WORK,
+        budget=budget,
         model_version=version,
         effort=effort,
         runtime_version=runtime_version,

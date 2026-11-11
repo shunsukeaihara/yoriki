@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
  * 今のDraftを評価する（design.md §3.7.1）。選んだケースごとに、公開中の版とDraftで評価のRunを1つずつ動かす。
- * モデルは評価のたびに選ぶ。利用量は自分の実行として記録する
+ * モデルは評価のたびに選ぶ。利用量は、部門のSkillはその部門、全社・システムのSkillは全社の枠、個人のSkillは自分の部門
+ * の予算に入る（所属が2つ以上なら選ぶ。design.md §9.1）
  */
 import DDialog from '../common/DDialog.vue'
 
@@ -13,13 +14,19 @@ const { t } = useI18n()
 const dialog = ref<InstanceType<typeof DDialog> | null>(null)
 
 const models = ref<AppModelProfile[]>([])
-const form = ref({ cases: [] as string[], modelProfile: '' })
+const form = ref({ cases: [] as string[], modelProfile: '', budgetDepartment: null as string | null })
+const budgetDepartments = useBudgetDepartments()
+const choosesBudget = computed(() => props.skill.scope === SkillScope.PERSONAL && budgetDepartments.choosable.value)
 
 const onOpen = async (open: boolean) => {
   if (!open) return
   errors.value = {}
   // 必須のケースを先に、上限まで選んでおく（一覧は必須が先に並ぶ）
-  form.value = { cases: props.cases.slice(0, MAX_CASES_PER_EVALUATION).map((c) => c.id), modelProfile: '' }
+  form.value = {
+    cases: props.cases.slice(0, MAX_CASES_PER_EVALUATION).map((c) => c.id),
+    modelProfile: '',
+    budgetDepartment: null,
+  }
   try {
     // Draftの必要な能力を持つかはサーバーが確かめる（ToolもSchemaも使わないDraftは、Tool非対応のモデルでも評価できる）
     models.value = await api.modelProfiles.list()
@@ -36,7 +43,11 @@ const modelItems = computed(() => models.value.map((m) => ({ value: m.id, title:
 
 const { onSubmit, loading, errors } = createSubmit({
   form,
-  fn: (data) => api.skills(props.skill.id).evaluations().create(data),
+  fn: ({ budgetDepartment, ...data }) =>
+    api
+      .skills(props.skill.id)
+      .evaluations()
+      .create({ ...data, ...(choosesBudget.value ? { budgetDepartment } : {}) }),
   onSuccess: (result) => {
     emit('started', result)
     dialog.value?.closeDialog()
@@ -46,7 +57,13 @@ const { onSubmit, loading, errors } = createSubmit({
 })
 
 const tooMany = computed(() => form.value.cases.length > MAX_CASES_PER_EVALUATION)
-const canPost = computed(() => form.value.cases.length > 0 && !tooMany.value && Boolean(form.value.modelProfile))
+const canPost = computed(
+  () =>
+    form.value.cases.length > 0 &&
+    !tooMany.value &&
+    Boolean(form.value.modelProfile) &&
+    (!choosesBudget.value || Boolean(form.value.budgetDepartment)),
+)
 </script>
 
 <template>
@@ -83,6 +100,14 @@ const canPost = computed(() => form.value.cases.length > 0 && !tooMany.value && 
           required
           :hint="$t('評価のRunと、結果を比べる判定に使います')"
           :error-messages="errors.modelProfile"
+        />
+        <DSelect
+          v-if="choosesBudget"
+          v-model="form.budgetDepartment"
+          :label="$t('予算を計上する部門')"
+          :items="budgetDepartments.items.value"
+          required
+          :error-messages="errors.budgetDepartment"
         />
       </DFormStack>
     </template>

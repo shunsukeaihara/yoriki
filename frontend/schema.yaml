@@ -826,6 +826,24 @@ paths:
               schema:
                 $ref: '#/components/schemas/MyUser'
           description: ''
+  /api/app/v1/my/budgets/:
+    get:
+      operationId: app_v1_my_budgets_list
+      description: 自分が見られる予算の今月の利用額・上限・残額。所属している部門と管理できる部門、全社・システムのタスクを管理できる人には全社の枠（design.md
+        §9.1）
+      tags:
+      - app/budget
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MyBudget'
+          description: ''
   /api/app/v1/notifications/:
     get:
       operationId: app_v1_notifications_list
@@ -4407,6 +4425,138 @@ paths:
               schema:
                 $ref: '#/components/schemas/Ping'
           description: ''
+  /api/v1/budgets/departments/:
+    get:
+      operationId: v1_budgets_departments_list
+      description: 部門の予算（上限の上書きと今月の利用額。design.md §9.1）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - manage/budget
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedDepartmentBudgetList'
+          description: ''
+  /api/v1/budgets/departments/{uid}/:
+    get:
+      operationId: v1_budgets_departments_retrieve
+      description: 部門の予算（上限の上書きと今月の利用額。design.md §9.1）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/budget
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentBudget'
+          description: ''
+    patch:
+      operationId: v1_budgets_departments_partial_update
+      description: 部門の予算（上限の上書きと今月の利用額。design.md §9.1）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/budget
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedDepartmentBudgetRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedDepartmentBudgetRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedDepartmentBudgetRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DepartmentBudget'
+          description: ''
+  /api/v1/budgets/settings/:
+    get:
+      operationId: v1_budgets_settings_retrieve
+      description: 予算の既定の上限と、全社の枠の今月の利用額（design.md §9.1）
+      tags:
+      - manage/budget
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BudgetSettings'
+          description: ''
+    patch:
+      operationId: v1_budgets_settings_partial_update
+      description: 予算の既定の上限と、全社の枠の今月の利用額（design.md §9.1）
+      tags:
+      - manage/budget
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedBudgetSettingsRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedBudgetSettingsRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedBudgetSettingsRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BudgetSettings'
+          description: ''
   /api/v1/connectors/:
     get:
       operationId: v1_connectors_list
@@ -7510,6 +7660,62 @@ components:
     BlankEnum:
       enum:
       - ''
+    BudgetSettings:
+      type: object
+      description: 既定の月の上限（design.md §9.1）。空なら無制限
+      properties:
+        department_monthly_limit:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          nullable: true
+          description: 部門の月の上限（米ドル）。部門ごとに上書きできる
+        company_monthly_limit:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          nullable: true
+          description: 全社の枠の月の上限（米ドル）。全社・システムのタスクと、所属のない人の利用
+        company:
+          allOf:
+          - $ref: '#/components/schemas/BudgetStatus'
+          readOnly: true
+          description: 全社の枠の今月の利用額・上限・残額
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - company
+      - company_monthly_limit
+      - department_monthly_limit
+      - updated
+    BudgetStatus:
+      type: object
+      description: 今月の利用額・上限・残額（米ドル）。上限が空なら無制限
+      properties:
+        limit:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          readOnly: true
+          nullable: true
+        spent:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,4})?$
+          readOnly: true
+        remaining:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,4})?$
+          readOnly: true
+          nullable: true
+          description: 上限 −（利用額＋動いているLLM呼出しの予約）。無制限なら空
+      required:
+      - limit
+      - remaining
+      - spent
     CellDiff:
       type: object
       properties:
@@ -8444,6 +8650,16 @@ components:
           readOnly: true
           nullable: true
           description: 修正チャットで直すタスク（ふつうの会話では空）
+        budget_department:
+          type: string
+          nullable: true
+          description: 予算を計上する部門（所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。修正チャットではタスクの計上先を使う。design.md
+            §9.1）
+        budget_department_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumDepartment'
+          readOnly: true
+          nullable: true
         created:
           type: string
           format: date-time
@@ -8455,6 +8671,7 @@ components:
       required:
       - active_run
       - archived
+      - budget_department_info
       - created
       - id
       - last_posted
@@ -8479,6 +8696,12 @@ components:
           type: string
           title: タイトル
           maxLength: 200
+        budget_department:
+          type: string
+          minLength: 1
+          nullable: true
+          description: 予算を計上する部門（所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。修正チャットではタスクの計上先を使う。design.md
+            §9.1）
     ConversationTask:
       type: object
       description: 修正チャットで直すタスク（今の名前と範囲。design.md §11.11）
@@ -8960,6 +9183,32 @@ components:
       - member_count
       - name
       - updated
+    DepartmentBudget:
+      type: object
+      description: 部門の予算。上限の上書きだけを変えられる。部門は `monthly_limit`（予算の行の上書き）を注釈して渡す
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+        monthly_limit:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          nullable: true
+          description: 上限の上書き（米ドル）。空なら既定に従い、0ならこの部門では使わせない
+        status:
+          allOf:
+          - $ref: '#/components/schemas/BudgetStatus'
+          readOnly: true
+          description: 今月の利用額・上限・残額
+      required:
+      - id
+      - monthly_limit
+      - name
+      - status
     DepartmentMembership:
       type: object
       description: 部門の所属。変えるときは、所属を消して作り直す
@@ -10670,6 +10919,12 @@ components:
           format: decimal
           pattern: ^-?\d{0,6}(?:\.\d{0,6})?$
           default: '0.000000'
+        cache_write_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,6})?$
+          nullable: true
+          description: 空なら入力の単価で数える
         output_price:
           type: string
           format: decimal
@@ -10780,6 +11035,12 @@ components:
           format: decimal
           pattern: ^-?\d{0,6}(?:\.\d{0,6})?$
           default: '0.000000'
+        cache_write_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,6})?$
+          nullable: true
+          description: 空なら入力の単価で数える
         output_price:
           type: string
           format: decimal
@@ -10869,6 +11130,13 @@ components:
           pattern: ^-?\d{0,6}(?:\.\d{0,6})?$
           readOnly: true
           title: キャッシュされた入力の単価
+        cache_write_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,6})?$
+          readOnly: true
+          nullable: true
+          title: キャッシュへ書く入力の単価
         output_price:
           type: string
           format: decimal
@@ -10934,6 +11202,7 @@ components:
           format: date-time
           readOnly: true
       required:
+      - cache_write_price
       - cached_input_price
       - change_reason
       - connection
@@ -10957,6 +11226,40 @@ components:
       - supports_structured_output
       - supports_tools
       - supports_video
+    MyBudget:
+      type: object
+      description: 利用者が見られる予算（所属している部門・管理できる部門・全社の枠）
+      properties:
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/MyBudgetKindEnum'
+          readOnly: true
+        department:
+          allOf:
+          - $ref: '#/components/schemas/MinimumDepartment'
+          readOnly: true
+          nullable: true
+        joined:
+          type: boolean
+          readOnly: true
+          description: 所属している部門（会話の計上先に選べる）
+        status:
+          allOf:
+          - $ref: '#/components/schemas/BudgetStatus'
+          readOnly: true
+      required:
+      - department
+      - joined
+      - kind
+      - status
+    MyBudgetKindEnum:
+      enum:
+      - 1
+      - 2
+      type: integer
+      description: |-
+        * `1` - 部門
+        * `2` - 全社の枠
     MyDepartment:
       type: object
       description: 表示専用のModelSerializer。すべての項目を読み取り専用にする
@@ -11265,6 +11568,25 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Delivery'
+    PaginatedDepartmentBudgetList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/DepartmentBudget'
     PaginatedDepartmentList:
       type: object
       required:
@@ -11892,6 +12214,22 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TriggerReceipt'
+    PatchedBudgetSettingsRequest:
+      type: object
+      description: 既定の月の上限（design.md §9.1）。空なら無制限
+      properties:
+        department_monthly_limit:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          nullable: true
+          description: 部門の月の上限（米ドル）。部門ごとに上書きできる
+        company_monthly_limit:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          nullable: true
+          description: 全社の枠の月の上限（米ドル）。全社・システムのタスクと、所属のない人の利用
     PatchedConnectorUpdateRequest:
       type: object
       description: Connectorの更新。使うDB接続と範囲・部門は変えられないので、読み取り専用にする
@@ -11962,6 +12300,12 @@ components:
           type: string
           title: タイトル
           maxLength: 200
+        budget_department:
+          type: string
+          minLength: 1
+          nullable: true
+          description: 予算を計上する部門（所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。修正チャットではタスクの計上先を使う。design.md
+            §9.1）
     PatchedDatabaseConnectionUpdateRequest:
       type: object
       description: DB接続の更新。種別は変えられない（SQLの方言と既定のスキーマの意味が変わるため）
@@ -12015,6 +12359,16 @@ components:
         is_active:
           type: boolean
           title: 有効
+    PatchedDepartmentBudgetRequest:
+      type: object
+      description: 部門の予算。上限の上書きだけを変えられる。部門は `monthly_limit`（予算の行の上書き）を注釈して渡す
+      properties:
+        monthly_limit:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          nullable: true
+          description: 上限の上書き（米ドル）。空なら既定に従い、0ならこの部門では使わせない
     PatchedDepartmentRequest:
       type: object
       properties:
@@ -12142,6 +12496,12 @@ components:
           format: decimal
           pattern: ^-?\d{0,6}(?:\.\d{0,6})?$
           default: '0.000000'
+        cache_write_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,6})?$
+          nullable: true
+          description: 空なら入力の単価で数える
         output_price:
           type: string
           format: decimal
@@ -12406,6 +12766,12 @@ components:
           type: string
           minLength: 1
           maxLength: 100
+        budget_department:
+          type: string
+          minLength: 1
+          nullable: true
+          description: 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。版の外。design.md
+            §9.1）
         version:
           type: integer
           minimum: 0
@@ -14488,6 +14854,11 @@ components:
         effort:
           type: string
           maxLength: 50
+        budget_department:
+          type: string
+          minLength: 1
+          nullable: true
+          description: 個人のSkillで予算を計上する部門（所属が複数のときに選ぶ。design.md §9.1）
       required:
       - cases
       - model_profile
@@ -14930,6 +15301,16 @@ components:
           type: boolean
           readOnly: true
           title: チャットから起動できる
+        budget_department:
+          type: string
+          nullable: true
+          description: 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。版の外。design.md
+            §9.1）
+        budget_department_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumDepartment'
+          readOnly: true
+          nullable: true
         version:
           type: integer
           minimum: 0
@@ -15028,6 +15409,7 @@ components:
           format: date-time
           readOnly: true
       required:
+      - budget_department_info
       - can_run
       - chat_launchable
       - created
@@ -15092,6 +15474,16 @@ components:
           type: boolean
           readOnly: true
           title: チャットから起動できる
+        budget_department:
+          type: string
+          nullable: true
+          description: 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。版の外。design.md
+            §9.1）
+        budget_department_info:
+          allOf:
+          - $ref: '#/components/schemas/MinimumDepartment'
+          readOnly: true
+          nullable: true
         version:
           type: integer
           minimum: 0
@@ -15208,6 +15600,7 @@ components:
           readOnly: true
           description: 今の版が、保存のときの検査に通らない理由（なければ空）。版を作ったときより後の変更（Skillの停止・Connectorの削除等）で生じたもので、多くは実行も断られる
       required:
+      - budget_department_info
       - can_run
       - chat_launchable
       - connectors_info
@@ -15255,6 +15648,12 @@ components:
           type: string
           minLength: 1
           maxLength: 100
+        budget_department:
+          type: string
+          minLength: 1
+          nullable: true
+          description: 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。版の外。design.md
+            §9.1）
         version:
           type: integer
           minimum: 0
@@ -15447,6 +15846,12 @@ components:
           type: string
           minLength: 1
           maxLength: 100
+        budget_department:
+          type: string
+          minLength: 1
+          nullable: true
+          description: 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ全社の枠。版の外。design.md
+            §9.1）
         version:
           type: integer
           minimum: 0

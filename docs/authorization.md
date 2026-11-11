@@ -81,7 +81,7 @@ Skill・Connector・タスク・入口・出口は、範囲（個人・部門・
 | 項目 | 中身 | 画面での使い道 |
 |---|---|---|
 | `allPermissions` | 本人が持つすべてのpermission（Group経由と直接を含む。superuserはすべて） | メニュー・ページ・ボタンの出し分け |
-| `departments` | 実際に所属している部門 | 本人の所属の表示、部門タスクのチャットからの起動の候補 |
+| `departments` | 実際に所属している部門 | 本人の所属の表示、部門タスクのチャットからの起動の候補、会話・個人タスク・個人のSkillの評価で予算を計上する部門の候補（design.md §9.1） |
 | `usableDepartments` | 使える部門（§4.1の関数の結果） | 一覧の絞り込みの選択肢 |
 | `manageableDepartments` | 管理できる部門（§4.1の関数の結果） | 部門のSkill・タスクを作るときの部門の選択肢、作成ボタンの出し分け |
 
@@ -317,6 +317,7 @@ Runの中身が外へ出る経路をすべて列挙し、どれにも「結果�
 | 出口 | 個人の出口（画面の通知・本人へのDM）はタスクの編集の中で選ぶ | 部門・全社・システムの出口 |
 | Runの結果・ログ | 会話の画面（本人）、タスクのRunの画面（`/tasks/{task}/runs/{run}`。管理できる人・結果を見られる人。画面の通知からも開く）、タスクをまたいだ実行の履歴（`/runs`。本番の実行のうち結果を見られるもの。修正チャットのRunは出さない。design.md §11.9） | システムタスクも同じタスクのRunの画面 |
 | ユーザー・部門・SSO・LLM・Runtime Profile・基盤の設定（ワークスペースの保存期限。design.md §8） | — | `/manage` |
+| 予算（design.md §9.1） | `/usage`：所属している部門と管理できる部門、全社・システムのタスクを管理できる人と所属のない人には全社の枠の、今月の利用額・上限・残額（見るだけ） | `/manage/budgets`：既定の上限、部門ごとの上書き、全部門と全社の枠の今月の利用額（`usage.*_budget`） |
 
 #### 7.3.1 業務画面の一覧（Skill・タスク共通の形）
 
@@ -360,7 +361,7 @@ Runの中身が外へ出る経路をすべて列挙し、どれにも「結果�
 
 ## 10 基盤の管理
 
-- 管理APIはすべてpermissionで判定する。対象：部門・全社・システムのConnector・出口、接続、入口の一覧、システムのSkill・タスク、LLMの接続・モデル設定、Runtime Profile、SSOの設定、ユーザー（招待のリンクの発行を含む）、Groupの一覧（割り当ての選択肢）、部門と所属。Django標準のpermission（view・add・change・delete。changeを持てばviewもできる）か、範囲ごとのpermissionを使う。追加・削除だけを任せることはせず、add・deleteはviewかchangeと一緒に付ける（一覧を見られないと、任せた操作にたどり着けないため）。
+- 管理APIはすべてpermissionで判定する。対象：部門・全社・システムのConnector・出口、接続、入口の一覧、システムのSkill・タスク、LLMの接続・モデル設定、Runtime Profile、予算（既定の上限と部門ごとの上書き。design.md §9.1）、SSOの設定、ユーザー（招待のリンクの発行を含む）、Groupの一覧（割り当ての選択肢）、部門と所属。Django標準のpermission（view・add・change・delete。changeを持てばviewもできる）か、範囲ごとのpermissionを使う。追加・削除だけを任せることはせず、add・deleteはviewかchangeと一緒に付ける（一覧を見られないと、任せた操作にたどり着けないため）。
 - permissionの指定を書き忘れた操作を閉じる既定（`DEFAULT_PERMISSION_CLASSES`）は、誰も通さないものにする（superuserも通さない。書き忘れはテストですぐ分かる）。`PlatformAdmin`はなくす。
 - 委任したときの防止策（強い役割の中での事故を減らすためのもの）：
   - ユーザーの更新APIで書ける項目は、表示名・有効・Group・所属だけ。permissionの直接付与、`is_superuser`、SSOの識別子はAPIに出さない。
@@ -388,6 +389,7 @@ Runの中身が外へ出る経路をすべて列挙し、どれにも「結果�
 | システム管理者 | `skill.can_edit_system_skills`、`skill.can_publish_system_skills`、`task.can_manage_system_tasks`、`connector.view_connector`（システムタスクに登録するConnectorの定義を見るため） |
 | 連携の管理者 | 出口のModelのpermission（`delivery.*_destination`。配信の段階のマイグレーションで足した）と、入口の一覧を見るpermission（`task.view_triggerbinding`） |
 | ユーザー管理者 | `user.*_user`、`user.*_department` |
+| 予算の管理者 | `usage.view_budget`・`usage.change_budget`（既定の上限と部門ごとの上書き。予算の段階のマイグレーションで足した） |
 
 ## 12 0.33で変えたこと（以前の設計・実装から）
 

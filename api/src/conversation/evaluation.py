@@ -420,9 +420,17 @@ def match_expected(expected: Any, actual: Any, path: str = "") -> list[dict[str,
 def _judge(evaluation: SkillEvaluation, result: SkillEvaluationResult) -> tuple[int | None, str, str]:
     """LLMの判定（参考。公開の条件には使わない）。判定しなければ (None, "", 理由)"""
     version = evaluation.model_version
-    judge_input = _judge_input(result)
-    if skipped := _judge_skipped(result, version, judge_input):
+    if skipped := _judge_skipped(result, version):
         return None, "", skipped
+    assert result.draft_run is not None  # 完了を確かめた
+    judge_input = _judge_input(result)
+    # 評価のRunの計上先に予約する（Runが終わった後なのでAttemptを持たない予約。design.md §9.1）
+    try:
+        reservation = budgets.reserve(
+            result.draft_run, None, estimate_cost(version, len(JUDGE_SYSTEM) + len(judge_input))
+        )
+    except budgets.BudgetExhausted:
+        return None, "", _("今月の予算が足りないので、判定していません。")
     request = ChatRequest(
         model=version.model_name,
         messages=[Message("system", JUDGE_SYSTEM), Message("user", judge_input)],
@@ -446,7 +454,7 @@ def _judge(evaluation: SkillEvaluation, result: SkillEvaluationResult) -> tuple[
         logger.warning("evaluation %s: judge failed: %s", evaluation.uid, exc.message)
         return None, "", _("判定に失敗しました：%(error)s") % {"error": exc.message}
     finally:
-        if usage is not None and result.draft_run is not None:
+        if usage is not None:
             UsageLedger.record(
                 run=result.draft_run,
                 model_version=version,
@@ -454,6 +462,7 @@ def _judge(evaluation: SkillEvaluation, result: SkillEvaluationResult) -> tuple[
                 usage=usage,
                 request_id=request_id,
             )
+        budgets.settle(reservation)
     verdict = VERDICTS.get(str((call.arguments if call else {}).get("verdict", "")))
     reason = str((call.arguments if call else {}).get("reason", "")).strip()
     if verdict is None:
@@ -461,7 +470,7 @@ def _judge(evaluation: SkillEvaluation, result: SkillEvaluationResult) -> tuple[
     return verdict, reason[:1000], ""
 
 
-def _judge_skipped(result: SkillEvaluationResult, version: ModelProfileVersion, judge_input: str) -> str:
+def _judge_skipped(result: SkillEvaluationResult, version: ModelProfileVersion) -> str:
     """判定しない理由。判定するなら空"""
     if result.base_run is None:
         return _("公開中の版がないので、比べていません。")
@@ -469,10 +478,6 @@ def _judge_skipped(result: SkillEvaluationResult, version: ModelProfileVersion, 
         return _("完了しなかったRunがあるので、判定していません。")
     if not version.supports_tools:
         return _("このモデルはToolを使えないので、判定していません。")
-    # 見積もりが評価のRunの計上先の残額に収まるか（Runが終わった後なので予約はしない。design.md §9.1）
-    remaining = result.draft_run.budget.remaining() if result.draft_run is not None else None
-    if remaining is not None and remaining < estimate_cost(version, len(JUDGE_SYSTEM) + len(judge_input)):
-        return _("今月の予算が足りないので、判定していません。")
     return ""
 
 

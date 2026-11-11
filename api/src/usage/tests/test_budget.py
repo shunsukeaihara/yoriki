@@ -275,3 +275,16 @@ def test_low_budget_is_noticed_once(conversation, company_limit, monkeypatch):
     notices = RunEvent.objects.filter(run=run, kind=RunEventKind.CONTEXT, data__budget_low=True)
     assert notices.count() == 1  # 2回とも2割を切っているが、知らせるのは1回
     assert any("20%" in m.text for m in adapter.requests[1].messages)
+
+
+@pytest.mark.django_db
+def test_detached_reservation_counts_for_an_hour(company_limit):
+    """Runが終わった後の呼出し（評価の判定）の予約はAttemptを持たず、精算できずに残っても1時間で数えなくなる"""
+    company_limit("10")
+    budget = Budget.company()
+    run = RunFactory.create(budget=budget)
+    reservation = budgets.reserve(run, None, Decimal(4))
+    assert budget.remaining() == Decimal(6)
+    assert reservation is not None
+    BudgetReservation.objects.filter(pk=reservation.pk).update(created=timezone.now() - timedelta(hours=2))
+    assert budget.remaining() == Decimal(10)

@@ -1664,37 +1664,40 @@ class Runner:
             self._fail(RunEndReason.BUDGET, budget_error(self.run_obj))
             return False
         try:
-            response = self._stream(self.adapter_factory(version.connection), request, self.run_obj.step_count)
-        except ProviderError as exc:
-            self._fail(RunEndReason.CONTEXT, exc.message)
-            return False
+            try:
+                response = self._stream(self.adapter_factory(version.connection), request, self.run_obj.step_count)
+            except ProviderError as exc:
+                self._fail(RunEndReason.CONTEXT, exc.message)
+                return False
+            summarized = bool(response.text.strip())
+            with self.run_obj.fenced(self.attempt) as run:
+                if summarized:
+                    RunEvent.record(
+                        run,
+                        RunEventKind.COMPACTION,
+                        {
+                            "from": chosen.start,
+                            "to": chosen.end,
+                            "text": compaction.summary_text(response.text, chosen.user_texts),
+                            # 次の圧縮で、この原文の引用を引き継ぐ
+                            "quotes": chosen.user_texts,
+                        },
+                        subagent=self.subagent,
+                    )
+                UsageLedger.record(
+                    run=run,
+                    model_version=version,
+                    purpose=UsagePurpose.COMPACTION,
+                    usage=response.usage or Usage(0, 0),
+                    request_id=response.completed.request_id if response.completed else "",
+                    subagent=self.subagent,
+                )
         finally:
-            # 利用量は下で記録する。記録の前に消しても、同じAttemptの次の予約より先に記録する
+            # 利用量を記録してから予約を消す（その間に別のRunが予約しても、この呼出しの分を数える）
             budgets.settle(reservation)
-        if not response.text.strip():
+        if not summarized:
             self._fail(RunEndReason.CONTEXT, _("会話の要約に失敗しました。"))
             return False
-        with self.run_obj.fenced(self.attempt) as run:
-            RunEvent.record(
-                run,
-                RunEventKind.COMPACTION,
-                {
-                    "from": chosen.start,
-                    "to": chosen.end,
-                    "text": compaction.summary_text(response.text, chosen.user_texts),
-                    # 次の圧縮で、この原文の引用を引き継ぐ
-                    "quotes": chosen.user_texts,
-                },
-                subagent=self.subagent,
-            )
-            UsageLedger.record(
-                run=run,
-                model_version=version,
-                purpose=UsagePurpose.COMPACTION,
-                usage=response.usage or Usage(0, 0),
-                request_id=response.completed.request_id if response.completed else "",
-                subagent=self.subagent,
-            )
         return True
 
 

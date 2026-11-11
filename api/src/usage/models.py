@@ -1,6 +1,6 @@
 """利用量の記録と月間予算（design.md §9）"""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from django.conf import settings
@@ -122,9 +122,17 @@ class Budget(models.Model):
         return limit - self.spent() - self.reserved()
 
 
+# Attemptを持たない予約（Runが終わった後に呼ぶ評価の判定）を数える時間。呼出しの接続のtimeout（3600秒まで）に合わせる
+DETACHED_RESERVATION_TTL = timedelta(hours=1)
+
+
 class BudgetReservationQuerySet(models.QuerySet):
     def active(self) -> "BudgetReservationQuerySet":
-        return self.filter(attempt__ended__isnull=True, attempt__lease_expires__gt=timezone.now())
+        now = timezone.now()
+        return self.filter(
+            Q(attempt__ended__isnull=True, attempt__lease_expires__gt=now)
+            | Q(attempt__isnull=True, created__gt=now - DETACHED_RESERVATION_TTL)
+        )
 
 
 class BudgetReservation(models.Model):
@@ -132,7 +140,10 @@ class BudgetReservation(models.Model):
 
     budget = models.ForeignKey(Budget, on_delete=models.CASCADE, related_name="reservations")
     run = models.ForeignKey("run.Run", on_delete=models.CASCADE, related_name="+")
-    attempt = models.ForeignKey("run.ExecutionAttempt", on_delete=models.CASCADE, related_name="+")
+    # 空なら、Runが終わった後の呼出し（評価の判定）。DETACHED_RESERVATION_TTL の間だけ数える
+    attempt = models.ForeignKey(
+        "run.ExecutionAttempt", on_delete=models.CASCADE, null=True, blank=True, related_name="+"
+    )
     amount = models.DecimalField(_("予約額（米ドル）"), max_digits=14, decimal_places=8)
 
     created = models.DateTimeField(auto_now_add=True)

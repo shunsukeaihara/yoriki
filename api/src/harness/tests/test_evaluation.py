@@ -44,7 +44,7 @@ from skill.models import (
     SkillScope,
     SkillVersion,
 )
-from usage.models import Budget, BudgetSettings, UsageLedger, UsagePurpose
+from usage.models import Budget, BudgetReservation, BudgetSettings, UsageLedger, UsagePurpose
 from user.factories import DepartmentFactory, DepartmentMembershipFactory, grant
 from utils.permissions import AppPermission
 
@@ -176,6 +176,7 @@ def test_checks_and_judge_finish_the_evaluation(app_user, model, monkeypatch):
     assert "<untrusted_content>" in request.messages[0].text
     # 判定の利用量はDraftの側のRunに記録する
     assert UsageLedger.objects.filter(run=result.draft_run, purpose=UsagePurpose.EVALUATION_JUDGE).count() == 1
+    assert not BudgetReservation.objects.exists()  # 判定の予約は記録の後に消す
     # 何度呼んでも判定し直さない
     progress_evaluation(evaluation.pk)
     assert len(adapter.requests) == 1

@@ -86,7 +86,8 @@ def check(budget: Budget) -> Budget:
 
 
 def reserve(run, attempt, amount: Decimal, *, margin: Decimal = Decimal(0)) -> BudgetReservation | None:
-    """計上先の行をロックし、残額が予約額＋余裕（まとめの1回分）以上なら予約する。無制限なら予約しない"""
+    """計上先の行をロックし、残額が予約額＋余裕（まとめの1回分）以上なら予約する。無制限なら予約しない。
+    `attempt` がNoneなら、Runが終わった後の呼出し（評価の判定）の予約"""
     with transaction.atomic():
         budget = Budget.objects.select_for_update().get(pk=run.budget_id)
         remaining = budget.remaining()

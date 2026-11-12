@@ -14,6 +14,7 @@ const emit = defineEmits<{ updated: [value: TaskDetail]; failed: [error: unknown
 
 const toForm = (task: TaskDetail) => ({
   name: task.name,
+  budgetDepartment: task.budgetDepartment ?? null,
   description: task.description,
   promptTemplate: task.promptTemplate,
   inputs: toInputRows(task.inputs),
@@ -35,6 +36,21 @@ const version = ref(props.task.version ?? 0)
 // 名前は版の外にあり、名前だけの変更では版が増えないので、変えたときだけ送る（古い画面から、別の人が変えた名前を
 // 黙って戻さないように）
 const savedName = ref(props.task.name)
+// 個人タスクの予算を計上する部門も版の外にあり、変えたときだけ送る（design.md §9.1）
+const savedBudgetDepartment = ref(props.task.budgetDepartment ?? null)
+const budgetDepartments = useBudgetDepartments()
+const budgetDepartmentItems = computed(() => {
+  const items = budgetDepartments.items.value
+  const current = props.task.budgetDepartmentInfo
+  if (current && !items.some((i) => i.value === current.id))
+    return [{ value: current.id, title: t('{name}（所属していません）', { name: current.name }) }, ...items]
+  return items
+})
+const showBudgetDepartment = computed(
+  () =>
+    props.task.scope === TaskScope.PERSONAL &&
+    (budgetDepartments.choosable.value || budgetDepartmentItems.value.length > budgetDepartments.items.value.length),
+)
 
 /** 中身を入れ直す（保存の後、最新の状態を読み込んだ後） */
 const reset = (task: TaskDetail = props.task) => {
@@ -42,6 +58,7 @@ const reset = (task: TaskDetail = props.task) => {
   saved.value = JSON.stringify(form.value)
   version.value = task.version ?? 0
   savedName.value = task.name
+  savedBudgetDepartment.value = task.budgetDepartment ?? null
   errors.value = {}
   loadChoices()
 }
@@ -143,6 +160,7 @@ const { onSubmit, loading, errors } = createSubmit({
     api.tasks(props.task.id).patch({
       version: version.value,
       ...(data.name !== savedName.value ? { name: data.name } : {}),
+      ...(data.budgetDepartment !== savedBudgetDepartment.value ? { budgetDepartment: data.budgetDepartment } : {}),
       description: data.description,
       promptTemplate: data.promptTemplate,
       inputs: fromInputRows(data.inputs),
@@ -190,6 +208,14 @@ defineExpose({ onSubmit, loading, canPost, dirty, reset })
   <DFormStack>
     <DFormAlert :errors="errors" />
     <DTextField v-model="form.name" :label="$t('名前')" required :error-messages="errors.name" />
+    <DSelect
+      v-if="showBudgetDepartment"
+      v-model="form.budgetDepartment"
+      :label="$t('予算を計上する部門')"
+      :hint="$t('このタスクの実行は、この部門の予算に入ります。版の外にあり、次の実行から使います')"
+      :items="budgetDepartmentItems"
+      :error-messages="errors.budgetDepartment"
+    />
     <DTextarea
       v-model="form.description"
       :label="$t('説明')"

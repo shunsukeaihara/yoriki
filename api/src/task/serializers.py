@@ -22,6 +22,7 @@ from llm.serializers import AppModelProfileSerializer
 from run.models import Run, RunEndReason, RunKind, RunLaunch, RunStatus
 from run.serializers import RunSerializer
 from skill.models import Skill
+from usage import budget as budgets
 from user.models import Department
 from user.serializers import MinimumDepartmentSerializer, MinimumUserSerializer
 from utils.exceptions import Conflict
@@ -223,6 +224,17 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
             "通知先と完了（run.completed）の通知が要り、通知の内容に業務結果を含める。空なら決まった形で送る"
         ),
     )
+    budget_department: "serializers.SlugRelatedField[Department]" = serializers.SlugRelatedField(
+        slug_field="uid",
+        queryset=Department.objects.active(),
+        required=False,
+        allow_null=True,
+        help_text=_(
+            "個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。"
+            "空で所属がなければシステムの枠。版の外。design.md §9.1）"
+        ),
+    )
+    budget_department_info = MinimumDepartmentSerializer(source="budget_department", read_only=True, allow_null=True)
     change_reason = serializers.CharField(max_length=500, required=False, allow_blank=True, write_only=True)
     can_run = serializers.SerializerMethodField(help_text=_("今、手動で実行できるか（停止中でなく、版がある）"))
     triggers = serializers.SerializerMethodField(help_text=_("このタスクの入口"))
@@ -240,6 +252,8 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
             "name",
             "suspended",
             "chat_launchable",
+            "budget_department",
+            "budget_department_info",
             "version",
             *REVISION_FIELDS,
             "model_profile_info",
@@ -329,11 +343,29 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
         if "name" in attrs:
             attrs["name"] = attrs["name"].strip()
             self._check_unique_name(task, attrs["name"])
+        self._validate_budget_department(task, attrs, user)
         content = self._content(attrs, task.current_revision if self.instance else None)
         if errors := checks.content_errors(task, content):
             raise serializers.ValidationError(errors)
         attrs["content"] = content
         return attrs
+
+    def _validate_budget_department(self, task: TaskDefinition, attrs, user) -> None:
+        """個人タスクだけが計上する部門を持つ。持ち主が所属している部門に限る"""
+        if task.scope != TaskScope.PERSONAL:
+            if attrs.get("budget_department") is not None:
+                raise serializers.ValidationError(
+                    {"budget_department": _("部門・全社・システムのタスクの予算は、タスクの範囲で決まります")}
+                )
+            attrs.pop("budget_department", None)
+            return
+        if "budget_department" not in attrs:
+            if self.instance is None:
+                attrs["budget_department"] = budgets.default_department(user)
+            return
+        department = attrs["budget_department"]
+        if department is not None and not Department.objects.joined_by(task.owner).filter(pk=department.pk).exists():
+            raise serializers.ValidationError({"budget_department": _("所属している部門を選んでください")})
 
     def _check_unique_name(self, task: TaskDefinition, name: str) -> None:
         others = TaskDefinition.objects.filter(scope=task.scope, name=name, deleted=False)
@@ -355,7 +387,7 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def create(self, validated_data) -> TaskDefinition:
         validated_data.pop("version_number", None)
-        return TaskDefinition.create_with_revision(
+        task = TaskDefinition.create_with_revision(
             scope=validated_data["scope"],
             name=validated_data["name"],
             department=validated_data["department"],
@@ -363,6 +395,10 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
             change_reason=validated_data.get("change_reason", ""),
             content=validated_data["content"],
         )
+        if validated_data.get("budget_department") is not None:
+            task.budget_department = validated_data["budget_department"]
+            task.save(update_fields=["budget_department", "updated"])
+        return task
 
     @transaction.atomic
     def update(self, instance: TaskDefinition, validated_data) -> TaskDefinition:
@@ -388,6 +424,9 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
         if "name" in validated_data:
             instance.name = validated_data["name"]
             fields.append("name")
+        if "budget_department" in validated_data:
+            instance.budget_department = validated_data["budget_department"]
+            fields.append("budget_department")
         # 変えた項目だけを保存する（行は revise() でロックしている）
         instance.save(update_fields=fields)
         return instance

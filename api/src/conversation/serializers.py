@@ -16,6 +16,9 @@ from llm.serializers import AppModelProfileSerializer
 from run.models import ACTIVE_STATUSES, Run, RunEndReason, RunStatus, RunTrigger
 from run.serializers import RunSerializer
 from skill.models import Skill, SkillAction
+from usage import budget as budgets
+from user.models import Department
+from user.serializers import MinimumDepartmentSerializer
 from utils.fields import NormalizedTextField
 
 from .dispatch import CannotStart, post_message
@@ -51,6 +54,17 @@ class ConversationSerializer(serializers.ModelSerializer):
     task = ConversationTaskSerializer(
         read_only=True, allow_null=True, help_text=_("修正チャットで直すタスク（ふつうの会話では空）")
     )
+    budget_department: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(
+        slug_field="uid",
+        queryset=Department.objects.active(),
+        required=False,
+        allow_null=True,
+        help_text=_(
+            "予算を計上する部門（所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければ"
+            "システムの枠。修正チャットではタスクの計上先を使う。design.md §9.1）"
+        ),
+    )
+    budget_department_info = MinimumDepartmentSerializer(source="budget_department", read_only=True, allow_null=True)
 
     class Meta:
         model = Conversation
@@ -65,6 +79,8 @@ class ConversationSerializer(serializers.ModelSerializer):
             "archived",
             "active_run",
             "task",
+            "budget_department",
+            "budget_department_info",
             "created",
             "updated",
         ]
@@ -122,12 +138,29 @@ class ConversationSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"model_profile": _("修正チャットでは、Toolを使えるモデルを選んでください")}
             )
+        self._validate_budget_department(attrs)
         effort = attrs.get("effort", getattr(self.instance, "effort", ""))
         if "model_profile" in attrs and "effort" not in attrs:
             effort = attrs["effort"] = ""  # モデルを変えたら、そのモデルの既定から始める
         if effort and effort not in version.effort_values:
             raise serializers.ValidationError({"effort": _("このモデルが受け付けるeffortの値から選んでください")})
         return attrs
+
+    def _validate_budget_department(self, attrs) -> None:
+        owner = self.instance.owner if self.instance is not None else self.context["request"].user
+        if "budget_department" not in attrs:
+            if self.instance is None:
+                attrs["budget_department"] = budgets.default_department(owner)
+            return
+        department = attrs["budget_department"]
+        if department is None:
+            return
+        if self.instance is not None and self.instance.is_task_fix:
+            raise serializers.ValidationError(
+                {"budget_department": _("修正チャットの予算は、タスクの計上先に入ります")}
+            )
+        if not Department.objects.joined_by(owner).filter(pk=department.pk).exists():
+            raise serializers.ValidationError({"budget_department": _("所属している部門を選んでください")})
 
     def update(self, instance: Conversation, validated_data) -> Conversation:
         actor = validated_data.pop("actor", None)

@@ -237,6 +237,10 @@ class Run(models.Model):
         related_name="+",
         verbose_name=_("実行したときのタスクの部門"),
     )
+    # 予算の計上先。受付時に決めて変えない（design.md §9.1）
+    budget = models.ForeignKey(
+        "usage.Budget", on_delete=models.PROTECT, related_name="runs", verbose_name=_("予算の計上先")
+    )
     # 受付時に固定した結果の通知先の版（タスクの版で通知を設定したとき。authorization.md §7.2）
     destination_revision = models.ForeignKey(
         "delivery.DestinationRevision",

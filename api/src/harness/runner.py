@@ -13,6 +13,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
+from decimal import Decimal
 from functools import partial
 from typing import Any
 
@@ -73,7 +74,8 @@ from run.tasks import CLARIFICATION_TTL
 from runtime.launcher import SandboxUnavailable
 from skill.models import SkillEvaluation
 from stream.notifier import notify_delta
-from usage.models import UsageLedger, UsagePurpose
+from usage import budget as budgets
+from usage.models import BudgetReservation, UsageLedger, UsagePurpose, estimate_cost
 
 from . import compaction, subagents, tasks
 from .catalogs import rebuild_catalogs, refreshes_catalogs
@@ -179,6 +181,19 @@ STEP_LIMIT_NOTICE = (
     "The maximum number of steps for this request has been reached. Tools are now disabled. Reply with text only: "
     "summarize what you have done, what remains, and what the user should do next."
 )
+
+BUDGET_LIMIT_NOTICE = (
+    "The budget for this work is almost used up. Tools are now disabled. Reply with text only: summarize what you "
+    "have done, what remains, and what the user should do next."
+)
+BUDGET_LOW_NOTICE = (
+    "Less than 20% of this month's budget for this work remains. Focus on what matters most and avoid unnecessary "
+    "steps."
+)
+
+
+def budget_error(run: Run) -> str:
+    return _("「%(name)s」の今月の予算を使い切ったので、作業を止めました。") % {"name": run.budget}
 
 
 class ContextOverflow(Exception):
@@ -500,12 +515,12 @@ class Runner:
         if compaction.estimate_tokens(events, items) > compaction.threshold(version):
             return self._compact(system, items)
 
-        result = self._ask_model(system, items, final=final)
-        if isinstance(result, bool):
-            return result
-        self._record_response(result, UsagePurpose.STEP, images_sent=compaction.images_sent(items))
-        if final:
-            return self._finish_at_step_limit(result.text)
+        outcome = self._ask_within_budget(system, items, events, final=final)
+        if isinstance(outcome, bool):
+            return outcome
+        result, limit = outcome
+        if limit is not None:
+            return self._finish_at_step_limit(result.text, limit)
         if not result.calls:
             return self._handle_reply(result)
         return self._execute_calls(result.calls)
@@ -513,8 +528,63 @@ class Runner:
     def _system_prompt(self) -> str:
         return system_prompt(self.tools)
 
-    def _finish_at_step_limit(self, text: str) -> bool:
-        """ステップ数の上限の最後のまとめの応答で終える。業務結果を確定していて、ジョブの結果もすべて親が見ていれば完了に
+    def _ask_within_budget(
+        self, system: str, items, events, *, final: bool
+    ) -> tuple[ModelResponse, RunEndReason | None] | bool:
+        """予算を予約してモデルを呼び、応答と利用量を記録して予約を精算する。応答と、最後のまとめのステップなら上限の
+        種類（ステップ数・予算）を返す。応答が得られなければ、ステップを続けるかどうか"""
+        version = self.run_obj.model_version
+        reserved = self._reserve_step(
+            estimate_cost(version, compaction.estimate_tokens(events, items) + len(system)), final
+        )
+        if reserved is None:
+            return False
+        reservation, limit = reserved
+        try:
+            result = self._ask_model(system, items, final=limit is not None)
+            if isinstance(result, bool):
+                return result
+            self._record_response(result, UsagePurpose.STEP, images_sent=compaction.images_sent(items))
+        finally:
+            budgets.settle(reservation)
+        self._notify_budget_low()
+        return result, limit
+
+    def _reserve_step(
+        self, estimate: Decimal, final: bool
+    ) -> tuple[BudgetReservation | None, RunEndReason | None] | None:
+        """ステップの予算を予約する（harness.md §10.6）。予約と、最後のまとめのステップなら上限の種類を返す。
+
+        通常のステップは、まとめの1回分を残して予約する。予約できなくなったら、まとめの分が残っていれば、Toolを使わない
+        最後の1ステップにする。それもできなければ失敗にしてNone。無制限の計上先では予約しない"""
+        run = self.run_obj
+        try:
+            reservation = budgets.reserve(run, self.attempt, estimate, margin=Decimal(0) if final else estimate)
+        except budgets.BudgetExhausted:
+            pass
+        else:
+            return reservation, RunEndReason.STEP_LIMIT if final else None
+        if not final:
+            try:
+                reservation = budgets.reserve(run, self.attempt, estimate)
+            except budgets.BudgetExhausted:
+                pass
+            else:
+                self._record(RunEventKind.CONTEXT, {"text": BUDGET_LIMIT_NOTICE})
+                return reservation, RunEndReason.BUDGET
+        self._fail(RunEndReason.BUDGET, budget_error(run))
+        return None
+
+    def _notify_budget_low(self) -> None:
+        """残りが上限の2割を切ったら、Runの中で1回だけ知らせる（harness.md §10.6）"""
+        run = self.run_obj
+        if RunEvent.objects.filter(run=run, kind=RunEventKind.CONTEXT, data__budget_low=True).exists():
+            return
+        if budgets.is_low(run.budget):
+            self._record(RunEventKind.CONTEXT, {"text": BUDGET_LOW_NOTICE, "budget_low": True})
+
+    def _finish_at_step_limit(self, text: str, end_reason: RunEndReason = RunEndReason.STEP_LIMIT) -> bool:
+        """ステップ数・予算の上限の最後のまとめの応答で終える。業務結果を確定していて、ジョブの結果もすべて親が見ていれば完了に
         する（その間に追加の指示が届いていれば、取り込んで続ける）。ジョブが残っているか、結果を見ていないジョブがあれば、
         もう親を起こせないので上限の失敗にする（design.md §5.3）"""
         jobs_left = (
@@ -525,7 +595,8 @@ class Runner:
         )
         if any(t.name == SUBMIT_RESULT for t in self.tools) and not self._result_missing() and not jobs_left:
             return self._finish_with_reply(text, RunStatus.COMPLETED, RunEndReason.COMPLETED)
-        self._finish_with_reply(text, RunStatus.FAILED, RunEndReason.STEP_LIMIT)
+        error = budget_error(self.run_obj) if end_reason == RunEndReason.BUDGET else ""
+        self._finish_with_reply(text, RunStatus.FAILED, end_reason, error=error)
         return False
 
     def _ask_model(self, system: str, items, *, final: bool) -> ModelResponse | bool:
@@ -1586,35 +1657,47 @@ class Runner:
             use_cache=version.supports_prompt_caching,
             reasoning=version.supports_reasoning,
         )
+        estimate = estimate_cost(version, sum(len(m.text) for m in request.messages))
         try:
-            response = self._stream(self.adapter_factory(version.connection), request, self.run_obj.step_count)
-        except ProviderError as exc:
-            self._fail(RunEndReason.CONTEXT, exc.message)
+            reservation = budgets.reserve(self.run_obj, self.attempt, estimate)
+        except budgets.BudgetExhausted:
+            self._fail(RunEndReason.BUDGET, budget_error(self.run_obj))
             return False
-        if not response.text.strip():
+        try:
+            try:
+                response = self._stream(self.adapter_factory(version.connection), request, self.run_obj.step_count)
+            except ProviderError as exc:
+                self._fail(RunEndReason.CONTEXT, exc.message)
+                return False
+            summarized = bool(response.text.strip())
+            with self.run_obj.fenced(self.attempt) as run:
+                if summarized:
+                    RunEvent.record(
+                        run,
+                        RunEventKind.COMPACTION,
+                        {
+                            "from": chosen.start,
+                            "to": chosen.end,
+                            "text": compaction.summary_text(response.text, chosen.user_texts),
+                            # 次の圧縮で、この原文の引用を引き継ぐ
+                            "quotes": chosen.user_texts,
+                        },
+                        subagent=self.subagent,
+                    )
+                UsageLedger.record(
+                    run=run,
+                    model_version=version,
+                    purpose=UsagePurpose.COMPACTION,
+                    usage=response.usage or Usage(0, 0),
+                    request_id=response.completed.request_id if response.completed else "",
+                    subagent=self.subagent,
+                )
+        finally:
+            # 利用量を記録してから予約を消す（その間に別のRunが予約しても、この呼出しの分を数える）
+            budgets.settle(reservation)
+        if not summarized:
             self._fail(RunEndReason.CONTEXT, _("会話の要約に失敗しました。"))
             return False
-        with self.run_obj.fenced(self.attempt) as run:
-            RunEvent.record(
-                run,
-                RunEventKind.COMPACTION,
-                {
-                    "from": chosen.start,
-                    "to": chosen.end,
-                    "text": compaction.summary_text(response.text, chosen.user_texts),
-                    # 次の圧縮で、この原文の引用を引き継ぐ
-                    "quotes": chosen.user_texts,
-                },
-                subagent=self.subagent,
-            )
-            UsageLedger.record(
-                run=run,
-                model_version=version,
-                purpose=UsagePurpose.COMPACTION,
-                usage=response.usage or Usage(0, 0),
-                request_id=response.completed.request_id if response.completed else "",
-                subagent=self.subagent,
-            )
         return True
 
 

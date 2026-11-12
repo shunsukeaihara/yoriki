@@ -23,6 +23,14 @@ export type RuntimeProfile = Api<'RuntimeProfile'>
 export type RuntimeProfileWrite = Api<'RuntimeProfileRequest'>
 export type RuntimeProfileVersion = Api<'RuntimeProfileVersion'>
 
+// 予算（design.md §9.1）。金額は米ドルの10進数の文字列
+export type BudgetStatus = Api<'BudgetStatus'>
+export type BudgetSettings = Api<'BudgetSettings'>
+export type BudgetSettingsWrite = Api<'PatchedBudgetSettingsRequest'>
+export type DepartmentBudget = Api<'DepartmentBudget'>
+export type DepartmentBudgetWrite = Api<'PatchedDepartmentBudgetRequest'>
+export type MyBudget = Api<'MyBudget'>
+
 // 一覧の検索条件（バックエンドの FilterSet と合わせる）
 export type LLMConnectionListParams = ListParams & { name?: string; kind?: ProviderKindEnum; isActive?: boolean }
 export type ModelProfileListParams = ListParams & { name?: string; connection?: string; isActive?: boolean }

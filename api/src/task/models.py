@@ -161,6 +161,15 @@ class TaskDefinition(models.Model):
     department = models.ForeignKey(
         Department, on_delete=models.PROTECT, null=True, blank=True, related_name="+", verbose_name=_("部門")
     )
+    # 個人タスクの予算を計上する部門（版の外。決め方は会話と同じ。design.md §9.1）
+    budget_department = models.ForeignKey(
+        Department,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("予算を計上する部門"),
+    )
     name = models.CharField(_("名前"), max_length=100)
     current_revision = models.ForeignKey(
         "TaskDefinitionRevision",

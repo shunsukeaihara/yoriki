@@ -21,6 +21,8 @@ const emptyForm = () => ({
   maxOutputTokens: null as number | null,
   inputPrice: '0' as string | null,
   cachedInputPrice: '0' as string | null,
+  // 空なら入力の単価で数える
+  cacheWritePrice: null as string | null,
   outputPrice: '0' as string | null,
   supportsTools: false,
   supportsImages: false,
@@ -52,6 +54,7 @@ watch(
           maxOutputTokens: value.maxOutputTokens,
           inputPrice: value.inputPrice,
           cachedInputPrice: value.cachedInputPrice,
+          cacheWritePrice: value.cacheWritePrice ?? null,
           outputPrice: value.outputPrice,
           supportsTools: value.supportsTools,
           supportsImages: value.supportsImages,
@@ -225,7 +228,7 @@ defineExpose({ onSubmit, loading, canPost })
       :title="$t('単価')"
       :description="$t('100万tokenあたりの米ドル。ローカルLLMは0か、設定した原価にします')"
     >
-      <div class="grid grid-cols-3 gap-4">
+      <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
         <DDecimalField
           v-model="form.inputPrice"
           :label="$t('入力')"
@@ -239,6 +242,14 @@ defineExpose({ onSubmit, loading, canPost })
           :decimal-places="6"
           :min="0"
           :error-messages="errors.cachedInputPrice"
+        />
+        <DDecimalField
+          v-model="form.cacheWritePrice"
+          :label="$t('キャッシュへ書く入力')"
+          :hint="$t('空なら入力の単価で数えます')"
+          :decimal-places="6"
+          :min="0"
+          :error-messages="errors.cacheWritePrice"
         />
         <DDecimalField
           v-model="form.outputPrice"

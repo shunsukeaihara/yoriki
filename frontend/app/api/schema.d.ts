@@ -351,6 +351,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/app/v1/my/budgets/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 自分が見られる予算の今月の利用額・上限・残額。所属している部門と管理できる部門、全社・システムのタスクを管理できる人にはシステムの枠（design.md §9.1） */
+        get: operations["app_v1_my_budgets_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/app/v1/notifications/": {
         parameters: {
             query?: never;
@@ -1549,6 +1566,59 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/budgets/departments/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 部門の予算（上限の上書きと今月の利用額。design.md §9.1） */
+        get: operations["v1_budgets_departments_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/budgets/departments/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 部門の予算（上限の上書きと今月の利用額。design.md §9.1） */
+        get: operations["v1_budgets_departments_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** @description 部門の予算（上限の上書きと今月の利用額。design.md §9.1） */
+        patch: operations["v1_budgets_departments_partial_update"];
+        trace?: never;
+    };
+    "/api/v1/budgets/settings/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 予算の既定の上限と、システムの枠の今月の利用額（design.md §9.1） */
+        get: operations["v1_budgets_settings_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** @description 予算の既定の上限と、システムの枠の今月の利用額（design.md §9.1） */
+        patch: operations["v1_budgets_settings_partial_update"];
+        trace?: never;
+    };
     "/api/v1/connectors/": {
         parameters: {
             query?: never;
@@ -2636,6 +2706,35 @@ export interface components {
         };
         /** @enum {unknown} */
         BlankEnum: "";
+        /** @description 既定の月の上限（design.md §9.1）。空なら無制限 */
+        BudgetSettings: {
+            /**
+             * Format: decimal
+             * @description 部門の月の上限（米ドル）。部門ごとに上書きできる
+             */
+            department_monthly_limit: string | null;
+            /**
+             * Format: decimal
+             * @description システムの枠の月の上限（米ドル）。全社・システムのタスクと、所属のない人の利用
+             */
+            system_monthly_limit: string | null;
+            /** @description システムの枠の今月の利用額・上限・残額 */
+            readonly system: components["schemas"]["BudgetStatus"];
+            /** Format: date-time */
+            readonly updated: string;
+        };
+        /** @description 今月の利用額・上限・残額（米ドル）。上限が空なら無制限 */
+        BudgetStatus: {
+            /** Format: decimal */
+            readonly limit: string | null;
+            /** Format: decimal */
+            readonly spent: string;
+            /**
+             * Format: decimal
+             * @description 上限 −（利用額＋動いているLLM呼出しの予約）。無制限なら空
+             */
+            readonly remaining: string | null;
+        };
         CellDiff: {
             column: string;
             before: string | null;
@@ -3054,6 +3153,9 @@ export interface components {
             readonly active_run: components["schemas"]["Run"] | null;
             /** @description 修正チャットで直すタスク（ふつうの会話では空） */
             readonly task: components["schemas"]["ConversationTask"] | null;
+            /** @description 予算を計上する部門（所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。修正チャットではタスクの計上先を使う。design.md §9.1） */
+            budget_department?: string | null;
+            readonly budget_department_info: components["schemas"]["MinimumDepartment"] | null;
             /** Format: date-time */
             readonly created: string;
             /** Format: date-time */
@@ -3068,6 +3170,8 @@ export interface components {
             handles_sensitive_data?: boolean;
             /** タイトル */
             title?: string;
+            /** @description 予算を計上する部門（所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。修正チャットではタスクの計上先を使う。design.md §9.1） */
+            budget_department?: string | null;
         };
         /** @description 修正チャットで直すタスク（今の名前と範囲。design.md §11.11） */
         ConversationTask: {
@@ -3268,6 +3372,18 @@ export interface components {
             readonly created: string;
             /** Format: date-time */
             readonly updated: string;
+        };
+        /** @description 部門の予算。上限の上書きだけを変えられる。部門は `monthly_limit`（予算の行の上書き）を注釈して渡す */
+        DepartmentBudget: {
+            readonly id: string;
+            readonly name: string;
+            /**
+             * Format: decimal
+             * @description 上限の上書き（米ドル）。空なら既定に従い、0ならこの部門では使わせない
+             */
+            monthly_limit: string | null;
+            /** @description 今月の利用額・上限・残額 */
+            readonly status: components["schemas"]["BudgetStatus"];
         };
         /** @description 部門の所属。変えるときは、所属を消して作り直す */
         DepartmentMembership: {
@@ -4017,6 +4133,11 @@ export interface components {
             cached_input_price: string;
             /**
              * Format: decimal
+             * @description 空なら入力の単価で数える
+             */
+            cache_write_price?: string | null;
+            /**
+             * Format: decimal
              * @default 0.000000
              */
             output_price: string;
@@ -4076,6 +4197,11 @@ export interface components {
             cached_input_price: string;
             /**
              * Format: decimal
+             * @description 空なら入力の単価で数える
+             */
+            cache_write_price?: string | null;
+            /**
+             * Format: decimal
              * @default 0.000000
              */
             output_price: string;
@@ -4124,6 +4250,11 @@ export interface components {
              */
             readonly cached_input_price: string;
             /**
+             * キャッシュへ書く入力の単価
+             * Format: decimal
+             */
+            readonly cache_write_price: string | null;
+            /**
              * 出力の単価
              * Format: decimal
              */
@@ -4155,6 +4286,20 @@ export interface components {
             /** Format: date-time */
             readonly created: string;
         };
+        /** @description 利用者が見られる予算（所属している部門・管理できる部門・システムの枠） */
+        MyBudget: {
+            readonly kind: components["schemas"]["MyBudgetKindEnum"];
+            readonly department: components["schemas"]["MinimumDepartment"] | null;
+            /** @description 所属している部門（会話の計上先に選べる） */
+            readonly joined: boolean;
+            readonly status: components["schemas"]["BudgetStatus"];
+        };
+        /**
+         * @description * `1` - 部門
+         *     * `2` - システムの枠
+         * @enum {integer}
+         */
+        MyBudgetKindEnum: 1 | 2;
         /** @description 表示専用のModelSerializer。すべての項目を読み取り専用にする */
         MyDepartment: {
             readonly id: string;
@@ -4322,6 +4467,19 @@ export interface components {
              */
             previous?: string | null;
             results: components["schemas"]["Delivery"][];
+        };
+        PaginatedDepartmentBudgetList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["DepartmentBudget"][];
         };
         PaginatedDepartmentList: {
             /**
@@ -4752,6 +4910,19 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["TriggerReceipt"][];
         };
+        /** @description 既定の月の上限（design.md §9.1）。空なら無制限 */
+        PatchedBudgetSettingsRequest: {
+            /**
+             * Format: decimal
+             * @description 部門の月の上限（米ドル）。部門ごとに上書きできる
+             */
+            department_monthly_limit?: string | null;
+            /**
+             * Format: decimal
+             * @description システムの枠の月の上限（米ドル）。全社・システムのタスクと、所属のない人の利用
+             */
+            system_monthly_limit?: string | null;
+        };
         /** @description Connectorの更新。使うDB接続と範囲・部門は変えられないので、読み取り専用にする */
         PatchedConnectorUpdateRequest: {
             /** 名前 */
@@ -4790,6 +4961,8 @@ export interface components {
             handles_sensitive_data?: boolean;
             /** タイトル */
             title?: string;
+            /** @description 予算を計上する部門（所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。修正チャットではタスクの計上先を使う。design.md §9.1） */
+            budget_department?: string | null;
         };
         /** @description DB接続の更新。種別は変えられない（SQLの方言と既定のスキーマの意味が変わるため） */
         PatchedDatabaseConnectionUpdateRequest: {
@@ -4813,6 +4986,14 @@ export interface components {
             max_concurrency?: number;
             /** 有効 */
             is_active?: boolean;
+        };
+        /** @description 部門の予算。上限の上書きだけを変えられる。部門は `monthly_limit`（予算の行の上書き）を注釈して渡す */
+        PatchedDepartmentBudgetRequest: {
+            /**
+             * Format: decimal
+             * @description 上限の上書き（米ドル）。空なら既定に従い、0ならこの部門では使わせない
+             */
+            monthly_limit?: string | null;
         };
         PatchedDepartmentRequest: {
             /** 名前 */
@@ -4883,6 +5064,11 @@ export interface components {
              * @default 0.000000
              */
             cached_input_price: string;
+            /**
+             * Format: decimal
+             * @description 空なら入力の単価で数える
+             */
+            cache_write_price?: string | null;
             /**
              * Format: decimal
              * @default 0.000000
@@ -5009,6 +5195,8 @@ export interface components {
         /** @description タスクの更新。範囲と部門は変えられないので、読み取り専用にする */
         PatchedTaskDefinitionUpdateRequest: {
             name?: string;
+            /** @description 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。版の外。design.md §9.1） */
+            budget_department?: string | null;
             /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
             version?: number;
             description?: string;
@@ -5825,6 +6013,8 @@ export interface components {
             cases: string[];
             model_profile: string;
             effort?: string;
+            /** @description 個人のSkillで予算を計上する部門（所属が複数のときに選ぶ。design.md §9.1） */
+            budget_department?: string | null;
         };
         SkillEvaluationResult: {
             /** 順番 */
@@ -6004,6 +6194,9 @@ export interface components {
             readonly suspended: boolean;
             /** チャットから起動できる */
             readonly chat_launchable: boolean;
+            /** @description 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。版の外。design.md §9.1） */
+            budget_department?: string | null;
+            readonly budget_department_info: components["schemas"]["MinimumDepartment"] | null;
             /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
             version?: number;
             /** @default  */
@@ -6082,6 +6275,9 @@ export interface components {
             readonly suspended: boolean;
             /** チャットから起動できる */
             readonly chat_launchable: boolean;
+            /** @description 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。版の外。design.md §9.1） */
+            budget_department?: string | null;
+            readonly budget_department_info: components["schemas"]["MinimumDepartment"] | null;
             /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
             version?: number;
             /** @default  */
@@ -6160,6 +6356,8 @@ export interface components {
             /** @description 部門の範囲では必須。作成した後は変えられない */
             department?: string | null;
             name: string;
+            /** @description 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。版の外。design.md §9.1） */
+            budget_department?: string | null;
             /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
             version?: number;
             /** @default  */
@@ -6238,6 +6436,8 @@ export interface components {
         /** @description タスクの更新。範囲と部門は変えられないので、読み取り専用にする */
         TaskDefinitionUpdateRequest: {
             name?: string;
+            /** @description 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。版の外。design.md §9.1） */
+            budget_department?: string | null;
             /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
             version?: number;
             description?: string;
@@ -7558,6 +7758,25 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MyUser"];
+                };
+            };
+        };
+    };
+    app_v1_my_budgets_list: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MyBudget"][];
                 };
             };
         };
@@ -10363,6 +10582,126 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Ping"];
+                };
+            };
+        };
+    };
+    v1_budgets_departments_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedDepartmentBudgetList"];
+                };
+            };
+        };
+    };
+    v1_budgets_departments_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartmentBudget"];
+                };
+            };
+        };
+    };
+    v1_budgets_departments_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedDepartmentBudgetRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedDepartmentBudgetRequest"];
+                "multipart/form-data": components["schemas"]["PatchedDepartmentBudgetRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepartmentBudget"];
+                };
+            };
+        };
+    };
+    v1_budgets_settings_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BudgetSettings"];
+                };
+            };
+        };
+    };
+    v1_budgets_settings_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedBudgetSettingsRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedBudgetSettingsRequest"];
+                "multipart/form-data": components["schemas"]["PatchedBudgetSettingsRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BudgetSettings"];
                 };
             };
         };

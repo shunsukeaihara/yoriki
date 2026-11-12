@@ -27,6 +27,7 @@ urlpatterns: list[URLPattern | URLResolver] = [
                 path("", include("connector.urls")),
                 path("", include("task.urls")),
                 path("", include("delivery.urls")),
+                path("", include("usage.urls")),
             ]
         ),
     ),

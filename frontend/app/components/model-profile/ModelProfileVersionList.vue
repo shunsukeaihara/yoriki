@@ -49,9 +49,10 @@ const capabilities = (v: ModelProfileVersion) =>
         <dt class="text-muted">{{ $t('単価') }}</dt>
         <dd>
           {{
-            $t('入力 {input}・キャッシュ {cached}・出力 {output}', {
+            $t('入力 {input}・キャッシュ {cached}・キャッシュへ書く {write}・出力 {output}', {
               input: formatPrice(v.inputPrice),
               cached: formatPrice(v.cachedInputPrice),
+              write: v.cacheWritePrice === null ? $t('入力と同じ') : formatPrice(v.cacheWritePrice),
               output: formatPrice(v.outputPrice),
             })
           }}

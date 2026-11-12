@@ -11,8 +11,11 @@ const { t } = useI18n()
 const form = ref({
   handlesSensitiveData: null as boolean | null,
   modelProfile: null as string | null,
+  budgetDepartment: null as string | null,
   body: '',
 })
+// 予算を計上する部門。所属が2つ以上のときだけ選ぶ（design.md §9.1）
+const budgetDepartments = useBudgetDepartments()
 
 const sensitiveItems = computed(() => [
   { value: false, title: t('扱わない'), description: t('すべてのモデルから選べます') },
@@ -45,10 +48,11 @@ const picker = useFilePicker(
 
 const { onSubmit, loading, errors } = createSubmit({
   form,
-  fn: async ({ handlesSensitiveData, modelProfile, body }) => {
+  fn: async ({ handlesSensitiveData, modelProfile, budgetDepartment, body }) => {
     const conversation = await api.conversations().create({
       handlesSensitiveData: Boolean(handlesSensitiveData),
       modelProfile: modelProfile ?? undefined,
+      ...(budgetDepartments.choosable.value ? { budgetDepartment } : {}),
     })
     // 会話は作れて最初の依頼だけ失敗した場合は、会話の画面へ移ってから知らせる
     try {
@@ -70,7 +74,13 @@ const { onSubmit, loading, errors } = createSubmit({
 
 const answered = computed(() => form.value.handlesSensitiveData !== null)
 const hasContent = computed(() => Boolean(form.value.body.trim()) || attachments.items.value.length > 0)
-const canPost = computed(() => answered.value && Boolean(form.value.modelProfile) && hasContent.value)
+const canPost = computed(
+  () =>
+    answered.value &&
+    Boolean(form.value.modelProfile) &&
+    (!budgetDepartments.choosable.value || Boolean(form.value.budgetDepartment)) &&
+    hasContent.value,
+)
 const submit = () => {
   if (canPost.value && !loading.value) onSubmit()
 }
@@ -103,6 +113,15 @@ const submit = () => {
       :disabled="!answered"
       required
       :error-messages="errors.modelProfile"
+    />
+    <DSelect
+      v-if="budgetDepartments.choosable.value"
+      v-model="form.budgetDepartment"
+      :label="$t('予算を計上する部門')"
+      :items="budgetDepartments.items.value"
+      :disabled="!answered"
+      required
+      :error-messages="errors.budgetDepartment"
     />
     <UChatPrompt
       ref="prompt"

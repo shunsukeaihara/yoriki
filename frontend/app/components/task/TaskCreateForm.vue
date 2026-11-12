@@ -31,8 +31,12 @@ const form = ref({
   department: null as string | null,
   name: '',
   modelProfile: null as string | null,
+  budgetDepartment: null as string | null,
   promptTemplate: '',
 })
+// 個人タスクの予算を計上する部門。所属が2つ以上のときだけ選ぶ（design.md §9.1）
+const budgetDepartments = useBudgetDepartments()
+const choosesBudget = computed(() => form.value.scope === TaskScope.PERSONAL && budgetDepartments.choosable.value)
 onMounted(async () => {
   try {
     models.value = await api.modelProfiles.list()
@@ -44,10 +48,11 @@ onMounted(async () => {
 
 const { onSubmit, loading, errors } = createSubmit({
   form,
-  fn: ({ department, modelProfile, ...data }) =>
+  fn: ({ department, modelProfile, budgetDepartment, ...data }) =>
     api.tasks().create({
       ...data,
       department: data.scope === TaskScope.DEPARTMENT ? department : null,
+      ...(choosesBudget.value ? { budgetDepartment } : {}),
       modelProfile: modelProfile ?? '',
       description: '',
       effort: '',
@@ -70,7 +75,8 @@ const canPost = computed(
     Boolean(form.value.name.trim()) &&
     Boolean(form.value.modelProfile) &&
     Boolean(form.value.promptTemplate.trim()) &&
-    (form.value.scope !== TaskScope.DEPARTMENT || Boolean(form.value.department)),
+    (form.value.scope !== TaskScope.DEPARTMENT || Boolean(form.value.department)) &&
+    (!choosesBudget.value || Boolean(form.value.budgetDepartment)),
 )
 
 defineExpose({ onSubmit, loading, canPost })
@@ -95,6 +101,14 @@ defineExpose({ onSubmit, loading, canPost })
       required
       :items="departmentItems"
       :error-messages="errors.department"
+    />
+    <DSelect
+      v-if="choosesBudget"
+      v-model="form.budgetDepartment"
+      :label="$t('予算を計上する部門')"
+      required
+      :items="budgetDepartments.items.value"
+      :error-messages="errors.budgetDepartment"
     />
     <DTextField v-model="form.name" :label="$t('名前')" required :error-messages="errors.name" />
     <DSelect

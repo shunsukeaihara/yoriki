@@ -41,6 +41,9 @@ export const PermissionCode = {
   ADD_DESTINATION: 'delivery.add_destination',
   CHANGE_DESTINATION: 'delivery.change_destination',
   DELETE_DESTINATION: 'delivery.delete_destination',
+  // 予算（予算の管理者。design.md §9.1）
+  VIEW_BUDGET: 'usage.view_budget',
+  CHANGE_BUDGET: 'usage.change_budget',
   // 範囲ごとのSkillの編集・公開（authorization.md §5.1）。部門は管理できる部門（manageableDepartments）にだけ効く
   EDIT_DEPARTMENT_SKILLS: 'skill.can_edit_department_skills',
   PUBLISH_DEPARTMENT_SKILLS: 'skill.can_publish_department_skills',

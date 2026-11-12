@@ -44,7 +44,7 @@ from skill.models import (
     SkillScope,
     SkillVersion,
 )
-from usage.models import UsageLedger, UsagePurpose
+from usage.models import Budget, BudgetReservation, BudgetSettings, UsageLedger, UsagePurpose
 from user.factories import DepartmentFactory, DepartmentMembershipFactory, grant
 from utils.permissions import AppPermission
 
@@ -176,9 +176,51 @@ def test_checks_and_judge_finish_the_evaluation(app_user, model, monkeypatch):
     assert "<untrusted_content>" in request.messages[0].text
     # 判定の利用量はDraftの側のRunに記録する
     assert UsageLedger.objects.filter(run=result.draft_run, purpose=UsagePurpose.EVALUATION_JUDGE).count() == 1
+    assert not BudgetReservation.objects.exists()  # 判定の予約は記録の後に消す
     # 何度呼んでも判定し直さない
     progress_evaluation(evaluation.pk)
     assert len(adapter.requests) == 1
+
+
+@pytest.mark.django_db
+def test_judge_is_skipped_without_budget(app_user, model, monkeypatch):
+    skill = skill_with_draft(app_user)
+    evaluation = start_evaluation(skill, cases=[case(skill)], actor=app_user, model_version=model.current_version)
+    result = evaluation.results.get()
+    execute(result.base_run, submit(True))
+    execute(result.draft_run, submit(True))
+    # 判定の見積もり（最大出力tokenを含む）が残額に収まらない（design.md §9.1）
+    defaults = BudgetSettings.load()
+    defaults.system_monthly_limit = Decimal(0)
+    defaults.save()
+    adapter = judge(monkeypatch)
+    progress_evaluation(evaluation.pk)
+
+    result.refresh_from_db()
+    assert result.verdict is None
+    assert "予算が足りない" in result.judge_note
+    assert adapter.requests == []
+
+
+@pytest.mark.django_db
+def test_personal_skill_evaluation_charges_the_chosen_department(app_user, model):
+    first = DepartmentMembershipFactory.create(user=app_user).department
+    second = DepartmentMembershipFactory.create(user=app_user).department
+    skill = skill_with_draft(app_user)
+    with pytest.raises(CannotEvaluate, match="選んでください"):
+        start_evaluation(skill, cases=[case(skill)], actor=app_user, model_version=model.current_version)
+    evaluation = start_evaluation(
+        skill,
+        cases=[case(skill, name="別")],
+        actor=app_user,
+        model_version=model.current_version,
+        budget_department=second,
+    )
+    result = evaluation.results.get()
+    assert result.draft_run is not None and result.base_run is not None
+    assert result.draft_run.budget == Budget.for_department(second)
+    assert result.base_run.budget == Budget.for_department(second)
+    assert first.pk
 
 
 @pytest.mark.django_db

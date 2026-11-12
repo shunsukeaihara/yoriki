@@ -25,6 +25,7 @@ export const ManagePagePermissions = {
   USER: [PermissionCode.VIEW_USER, PermissionCode.CHANGE_USER],
   DEPARTMENT: [PermissionCode.VIEW_DEPARTMENT, PermissionCode.CHANGE_DEPARTMENT],
   SSO_PROVIDER: [PermissionCode.VIEW_SSO_PROVIDER, PermissionCode.CHANGE_SSO_PROVIDER],
+  BUDGET: [PermissionCode.VIEW_BUDGET, PermissionCode.CHANGE_BUDGET],
 } satisfies Record<string, PermissionCode[]>
 
 const isGroup = (item: ManageMenuItem): item is ManageMenuGroup => 'children' in item && Array.isArray(item.children)
@@ -126,6 +127,12 @@ export const useManageMenu = () => {
       icon: 'i-lucide-building-2',
       to: '/manage/departments',
       permission: ManagePagePermissions.DEPARTMENT,
+    },
+    {
+      label: $i18n.t('予算'),
+      icon: 'i-lucide-wallet',
+      to: '/manage/budgets',
+      permission: ManagePagePermissions.BUDGET,
     },
     {
       label: $i18n.t('SSOの設定'),

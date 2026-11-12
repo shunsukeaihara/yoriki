@@ -174,6 +174,15 @@ class ModelProfileSerializer(serializers.ModelSerializer):
         min_value=Decimal(0),
         default=Decimal(0),
     )
+    cache_write_price = serializers.DecimalField(
+        source="current_version.cache_write_price",
+        max_digits=12,
+        decimal_places=6,
+        min_value=Decimal(0),
+        allow_null=True,
+        default=None,
+        help_text=_("空なら入力の単価で数える"),
+    )
     output_price = serializers.DecimalField(
         source="current_version.output_price", max_digits=12, decimal_places=6, min_value=Decimal(0), default=Decimal(0)
     )

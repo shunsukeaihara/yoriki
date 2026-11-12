@@ -29,6 +29,8 @@ from llm.models import ModelProfileVersion
 from run.dispatch import enqueue_run
 from run.models import ACTIVE_STATUSES, Run, RunEvent, RunEventKind, RunKind, RunLaunch, RunStatus, RunTrigger
 from runtime.models import RuntimeProfile, RuntimeProfileVersion
+from usage import budget as budgets
+from usage.models import Budget
 from user.models import system_user
 
 from . import checks
@@ -197,6 +199,7 @@ class RunPlan:
     connector_catalog: dict[str, Any] | None
     connectors: list[dict[str, Any]]  # 定義で使うよう指示したConnector
     destination_revision: DestinationRevision | None
+    budget: Budget  # 予算の計上先（design.md §9.1）
 
 
 def plan_run(
@@ -223,6 +226,11 @@ def plan_run(
     if sensitive and not version.is_local:
         raise CannotRun(_("個人情報や機密情報を扱うタスクでは、ローカルLLMのモデルを選んでください。"))
     effort = revision.effort if revision.effort in version.effort_values else version.default_effort
+    # 予算の計上先はタスクの範囲で決め、起動のしかたによらない（design.md §9.1）
+    try:
+        budget = budgets.check(budgets.for_task(task))
+    except budgets.BudgetUnavailable as exc:
+        raise CannotRun(str(exc)) from exc
     runtime_version = RuntimeProfile.default_version()
     if runtime_version is None:
         raise CannotRun(
@@ -265,6 +273,7 @@ def plan_run(
         connector_catalog=connector_catalog,
         connectors=instructed,
         destination_revision=_destination_revision(task, revision, lock=lock) if deliver else None,
+        budget=budget,
     )
 
 
@@ -340,6 +349,7 @@ def _start(
         owner=actor,
         trigger=RunTrigger.TASK,
         kind=RunKind.WORK,
+        budget=plan.budget,
         model_version=plan.version,
         effort=plan.effort,
         runtime_version=plan.runtime_version,

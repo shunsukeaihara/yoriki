@@ -136,7 +136,7 @@ class AppTaskViewSet(mixins.CreateModelMixin, mixins.UpdateModelMixin, mixins.De
     permission_classes = [AppUser]
     lookup_field = "uid"
     queryset = TaskDefinition.objects.select_related(
-        "owner", "department", "created_by", "current_revision__model_profile__current_version"
+        "owner", "department", "budget_department", "created_by", "current_revision__model_profile__current_version"
     ).prefetch_related("triggers__key_created_by")
     serializer_class = TaskDefinitionSerializer
     filterset_class = TaskFilter

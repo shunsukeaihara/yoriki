@@ -88,6 +88,7 @@ VERSION_FIELDS = (
     "max_output_tokens",
     "input_price",
     "cached_input_price",
+    "cache_write_price",
     "output_price",
     "supports_tools",
     "supports_images",
@@ -208,6 +209,10 @@ class ModelProfileVersion(models.Model):
     input_price = models.DecimalField(_("入力の単価"), max_digits=12, decimal_places=6, default=0)
     cached_input_price = models.DecimalField(
         _("キャッシュされた入力の単価"), max_digits=12, decimal_places=6, default=0
+    )
+    # 空なら入力の単価で数える（入力tokenにはcacheへ書いた分も含まれる）
+    cache_write_price = models.DecimalField(
+        _("キャッシュへ書く入力の単価"), max_digits=12, decimal_places=6, null=True, blank=True
     )
     output_price = models.DecimalField(_("出力の単価"), max_digits=12, decimal_places=6, default=0)
     supports_tools = models.BooleanField(_("Tool呼出し"), default=False)

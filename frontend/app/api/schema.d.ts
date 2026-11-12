@@ -2706,7 +2706,7 @@ export interface components {
         };
         /** @enum {unknown} */
         BlankEnum: "";
-        /** @description 既定の月の上限（design.md §9.1）。空なら無制限 */
+        /** @description 既定の上限（design.md §9.1・§9.2）。空なら無制限 */
         BudgetSettings: {
             /**
              * Format: decimal
@@ -2718,12 +2718,20 @@ export interface components {
              * @description システムの枠の月の上限（米ドル）。全社・システムのタスクと、所属のない人の利用
              */
             system_monthly_limit: string | null;
+            /** @description 部門の月の実行回数の上限。部門ごとに上書きできる */
+            department_monthly_runs: number | null;
+            /** @description システムの枠の月の実行回数の上限 */
+            system_monthly_runs: number | null;
+            /** @description 部門の同時実行数の上限。部門ごとに上書きできる */
+            department_concurrent_runs: number | null;
+            /** @description システムの枠の同時実行数の上限 */
+            system_concurrent_runs: number | null;
             /** @description システムの枠の今月の利用額・上限・残額 */
             readonly system: components["schemas"]["BudgetStatus"];
             /** Format: date-time */
             readonly updated: string;
         };
-        /** @description 今月の利用額・上限・残額（米ドル）。上限が空なら無制限 */
+        /** @description 今月の利用額・上限・残額（米ドル）と、今月の実行回数・今の同時実行数。上限が空なら無制限 */
         BudgetStatus: {
             /** Format: decimal */
             readonly limit: string | null;
@@ -2734,6 +2742,12 @@ export interface components {
              * @description 上限 −（利用額＋動いているLLM呼出しの予約）。無制限なら空
              */
             readonly remaining: string | null;
+            /** @description 今月に受け付けたRunの数 */
+            readonly monthly_runs: number;
+            readonly monthly_runs_limit: number | null;
+            /** @description 確認待ち以外の、終わっていないRunの数 */
+            readonly concurrent_runs: number;
+            readonly concurrent_runs_limit: number | null;
         };
         CellDiff: {
             column: string;
@@ -3373,7 +3387,7 @@ export interface components {
             /** Format: date-time */
             readonly updated: string;
         };
-        /** @description 部門の予算。上限の上書きだけを変えられる。部門は `monthly_limit`（予算の行の上書き）を注釈して渡す */
+        /** @description 部門の予算。上限の上書きだけを変えられる。部門は予算の行の上書き（`OVERRIDES`）を注釈して渡す */
         DepartmentBudget: {
             readonly id: string;
             readonly name: string;
@@ -3382,6 +3396,10 @@ export interface components {
              * @description 上限の上書き（米ドル）。空なら既定に従い、0ならこの部門では使わせない
              */
             monthly_limit: string | null;
+            /** @description 月の実行回数の上限の上書き。空なら既定に従い、0ならこの部門では使わせない */
+            monthly_runs: number | null;
+            /** @description 同時実行数の上限の上書き。空なら既定に従い、0ならこの部門では使わせない */
+            concurrent_runs: number | null;
             /** @description 今月の利用額・上限・残額 */
             readonly status: components["schemas"]["BudgetStatus"];
         };
@@ -4910,7 +4928,7 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["TriggerReceipt"][];
         };
-        /** @description 既定の月の上限（design.md §9.1）。空なら無制限 */
+        /** @description 既定の上限（design.md §9.1・§9.2）。空なら無制限 */
         PatchedBudgetSettingsRequest: {
             /**
              * Format: decimal
@@ -4922,6 +4940,14 @@ export interface components {
              * @description システムの枠の月の上限（米ドル）。全社・システムのタスクと、所属のない人の利用
              */
             system_monthly_limit?: string | null;
+            /** @description 部門の月の実行回数の上限。部門ごとに上書きできる */
+            department_monthly_runs?: number | null;
+            /** @description システムの枠の月の実行回数の上限 */
+            system_monthly_runs?: number | null;
+            /** @description 部門の同時実行数の上限。部門ごとに上書きできる */
+            department_concurrent_runs?: number | null;
+            /** @description システムの枠の同時実行数の上限 */
+            system_concurrent_runs?: number | null;
         };
         /** @description Connectorの更新。使うDB接続と範囲・部門は変えられないので、読み取り専用にする */
         PatchedConnectorUpdateRequest: {
@@ -4987,13 +5013,17 @@ export interface components {
             /** 有効 */
             is_active?: boolean;
         };
-        /** @description 部門の予算。上限の上書きだけを変えられる。部門は `monthly_limit`（予算の行の上書き）を注釈して渡す */
+        /** @description 部門の予算。上限の上書きだけを変えられる。部門は予算の行の上書き（`OVERRIDES`）を注釈して渡す */
         PatchedDepartmentBudgetRequest: {
             /**
              * Format: decimal
              * @description 上限の上書き（米ドル）。空なら既定に従い、0ならこの部門では使わせない
              */
             monthly_limit?: string | null;
+            /** @description 月の実行回数の上限の上書き。空なら既定に従い、0ならこの部門では使わせない */
+            monthly_runs?: number | null;
+            /** @description 同時実行数の上限の上書き。空なら既定に従い、0ならこの部門では使わせない */
+            concurrent_runs?: number | null;
         };
         PatchedDepartmentRequest: {
             /** 名前 */

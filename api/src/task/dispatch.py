@@ -228,7 +228,7 @@ def plan_run(
     effort = revision.effort if revision.effort in version.effort_values else version.default_effort
     # 予算の計上先はタスクの範囲で決め、起動のしかたによらない（design.md §9.1）
     try:
-        budget = budgets.check(budgets.for_task(task))
+        budget = budgets.check(budgets.for_task(task), lock=lock)
     except budgets.BudgetUnavailable as exc:
         raise CannotRun(str(exc)) from exc
     runtime_version = RuntimeProfile.default_version()

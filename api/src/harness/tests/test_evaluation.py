@@ -256,6 +256,25 @@ def test_first_version_runs_only_the_draft(app_user, model, monkeypatch):
     assert "公開中の版がない" in result.judge_note
 
 
+@pytest.mark.django_db
+def test_evaluation_checks_the_run_limits_for_all_its_runs(app_user, model):
+    # 公開中の版があれば、ケースごとに2つのRunを始める。上限は始める前にまとめて確かめる（design.md §9.2）
+    skill = skill_with_draft(app_user)
+    cases = [case(skill), case(skill, name="再発行")]
+    defaults = BudgetSettings.load()
+    defaults.system_concurrent_runs = 3
+    defaults.save()
+    with pytest.raises(CannotEvaluate, match="同時に動かせる数"):
+        start_evaluation(skill, cases=cases, actor=app_user, model_version=model.current_version)
+    assert not SkillEvaluation.objects.exists()
+    assert not Run.objects.exists()
+
+    defaults.system_concurrent_runs = 4
+    defaults.save()
+    start_evaluation(skill, cases=cases, actor=app_user, model_version=model.current_version)
+    assert Run.objects.filter(budget=Budget.system()).count() == 4
+
+
 def test_expected_result_matches_only_the_written_fields():
     assert match_expected({"ok": True}, {"ok": True, "note": "x"}) == []
     assert match_expected({"a": {"b": 1}}, {"a": {"b": 2, "c": 3}}) == [{"path": "a.b", "expected": 1, "actual": 2}]

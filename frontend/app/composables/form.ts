@@ -30,12 +30,16 @@ export const getValidationError = (error: unknown): ValidationErrors => {
   return { nonFieldErrors: [detail ? String(detail) : $i18n.t('不明なエラーです。管理者に問い合わせてください。')] }
 }
 
-/** トーストに出す短いエラー文 */
+/**
+ * トーストに出す短いエラー文。400でも、入力欄によらない理由（受付で断った理由等）があればそれを出す
+ * （会話の送信のように、エラーを出すフォームのない場面で理由が見えるように）
+ */
 export const makeErrorMsg = (error: unknown): string => {
   const { $i18n } = useNuxtApp()
+  const reason = getValidationError(error).nonFieldErrors?.[0]
   if (error instanceof AxiosError && error.response?.status === 400)
-    return $i18n.t('入力に問題があります。修正してください。')
-  return getValidationError(error).nonFieldErrors?.[0] ?? $i18n.t('不明なエラーです。管理者に問い合わせてください。')
+    return reason ?? $i18n.t('入力に問題があります。修正してください。')
+  return reason ?? $i18n.t('不明なエラーです。管理者に問い合わせてください。')
 }
 
 export type CreateSubmitOption<T, F> = {

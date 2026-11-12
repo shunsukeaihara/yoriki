@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** 部門の月の上限の上書き。空なら既定に従い、0ならこの部門では使わせない（design.md §9.1） */
+/** 部門の上限（金額・月の実行回数・同時実行数）の上書き。空なら既定に従い、0ならこの部門では使わせない（design.md §9.1・§9.2） */
 import DDialog from '../common/DDialog.vue'
 
 const props = defineProps<{ budget: DepartmentBudget }>()
@@ -9,11 +9,19 @@ const toast = useToast()
 const { t } = useI18n()
 const dialog = ref<InstanceType<typeof DDialog> | null>(null)
 
-const form = ref({ monthlyLimit: null as string | null })
+const form = ref({
+  monthlyLimit: null as string | null,
+  monthlyRuns: null as number | null,
+  concurrentRuns: null as number | null,
+})
 const onOpen = (open: boolean) => {
   if (!open) return
   errors.value = {}
-  form.value = { monthlyLimit: props.budget.monthlyLimit }
+  form.value = {
+    monthlyLimit: props.budget.monthlyLimit,
+    monthlyRuns: props.budget.monthlyRuns,
+    concurrentRuns: props.budget.concurrentRuns,
+  }
 }
 
 const { onSubmit, loading, errors } = createSubmit({
@@ -33,7 +41,7 @@ const { onSubmit, loading, errors } = createSubmit({
     <template #trigger="{ on }">
       <slot name="trigger" :on="on" />
     </template>
-    <template #header>{{ $t('「{name}」の月の上限', { name: budget.name }) }}</template>
+    <template #header>{{ $t('「{name}」の上限', { name: budget.name }) }}</template>
     <template #content>
       <DFormStack>
         <DFormAlert :errors="errors" />
@@ -44,6 +52,20 @@ const { onSubmit, loading, errors } = createSubmit({
           :decimal-places="2"
           :min="0"
           :error-messages="errors.monthlyLimit"
+        />
+        <DNumberField
+          v-model="form.monthlyRuns"
+          :label="$t('月の実行回数の上限')"
+          :hint="$t('空なら既定に従います。0ならこの部門では使わせません')"
+          :min="0"
+          :error-messages="errors.monthlyRuns"
+        />
+        <DNumberField
+          v-model="form.concurrentRuns"
+          :label="$t('同時実行数の上限')"
+          :hint="$t('空なら既定に従います。0ならこの部門では使わせません')"
+          :min="0"
+          :error-messages="errors.concurrentRuns"
         />
       </DFormStack>
     </template>

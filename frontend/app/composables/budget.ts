@@ -6,8 +6,12 @@ export const formatUsd = (value: string | null | undefined, unlimited: string): 
   return `${sign}$${Math.abs(amount).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
+/** 実行回数・同時実行数と上限（design.md §9.2）。空の上限は無制限 */
+export const formatRunCount = (count: number, limit: number | null | undefined, unlimited: string): string =>
+  `${count.toLocaleString('en-US')} / ${limit === null || limit === undefined ? unlimited : limit.toLocaleString('en-US')}`
+
 /** 上限に対する利用の割合（0〜100）。無制限なら null */
-export const budgetUsedPercent = (status: BudgetStatus): number | null => {
+export const budgetUsedPercent = (status: Pick<BudgetStatus, 'limit' | 'remaining'>): number | null => {
   if (status.limit === null) return null
   const limit = Number(status.limit)
   if (limit <= 0) return 100

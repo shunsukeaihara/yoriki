@@ -8,11 +8,19 @@ describe('formatUsd', () => {
   })
 })
 
+describe('formatRunCount', () => {
+  it('shows the count against the limit', () => {
+    expect(formatRunCount(1200, 5000, '無制限')).toBe('1,200 / 5,000')
+    expect(formatRunCount(3, null, '無制限')).toBe('3 / 無制限')
+    expect(formatRunCount(0, 0, '無制限')).toBe('0 / 0')
+  })
+})
+
 describe('budgetUsedPercent', () => {
   it('counts what is spent or reserved against the limit', () => {
-    expect(budgetUsedPercent({ limit: '100.00', spent: '20.0000', remaining: '70.0000' })).toBe(30)
-    expect(budgetUsedPercent({ limit: '100.00', spent: '130.0000', remaining: '-30.0000' })).toBe(100)
-    expect(budgetUsedPercent({ limit: '0.00', spent: '0.0000', remaining: '0.0000' })).toBe(100)
-    expect(budgetUsedPercent({ limit: null, spent: '5.0000', remaining: null })).toBeNull()
+    expect(budgetUsedPercent({ limit: '100.00', remaining: '70.0000' })).toBe(30)
+    expect(budgetUsedPercent({ limit: '100.00', remaining: '-30.0000' })).toBe(100)
+    expect(budgetUsedPercent({ limit: '0.00', remaining: '0.0000' })).toBe(100)
+    expect(budgetUsedPercent({ limit: null, remaining: null })).toBeNull()
   })
 })

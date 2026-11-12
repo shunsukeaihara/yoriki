@@ -4377,6 +4377,12 @@ paths:
               schema:
                 $ref: '#/components/schemas/HookError'
           description: payloadが入口の上限より大きい
+        '429':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HookError'
+          description: タスク単位の受付頻度・同時実行数の上限に達している（design.md §9.3。しばらくしてから送り直す）
         '415':
           content:
             application/json:
@@ -12870,6 +12876,18 @@ components:
           nullable: true
           description: 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。版の外。design.md
             §9.1）
+        hourly_runs_limit:
+          type: integer
+          maximum: 100000
+          minimum: 1
+          nullable: true
+          description: 1時間あたりの実行回数の上限（本番の実行。修正チャットの実行は数えない）。空なら無制限。版の外。design.md §9.3
+        concurrent_runs_limit:
+          type: integer
+          maximum: 100000
+          minimum: 1
+          nullable: true
+          description: 同時実行数の上限（本番の実行）。空なら無制限。版の外。design.md §9.3
         version:
           type: integer
           minimum: 0
@@ -15411,6 +15429,18 @@ components:
           - $ref: '#/components/schemas/MinimumDepartment'
           readOnly: true
           nullable: true
+        hourly_runs_limit:
+          type: integer
+          maximum: 100000
+          minimum: 1
+          nullable: true
+          description: 1時間あたりの実行回数の上限（本番の実行。修正チャットの実行は数えない）。空なら無制限。版の外。design.md §9.3
+        concurrent_runs_limit:
+          type: integer
+          maximum: 100000
+          minimum: 1
+          nullable: true
+          description: 同時実行数の上限（本番の実行）。空なら無制限。版の外。design.md §9.3
         version:
           type: integer
           minimum: 0
@@ -15584,6 +15614,18 @@ components:
           - $ref: '#/components/schemas/MinimumDepartment'
           readOnly: true
           nullable: true
+        hourly_runs_limit:
+          type: integer
+          maximum: 100000
+          minimum: 1
+          nullable: true
+          description: 1時間あたりの実行回数の上限（本番の実行。修正チャットの実行は数えない）。空なら無制限。版の外。design.md §9.3
+        concurrent_runs_limit:
+          type: integer
+          maximum: 100000
+          minimum: 1
+          nullable: true
+          description: 同時実行数の上限（本番の実行）。空なら無制限。版の外。design.md §9.3
         version:
           type: integer
           minimum: 0
@@ -15754,6 +15796,18 @@ components:
           nullable: true
           description: 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。版の外。design.md
             §9.1）
+        hourly_runs_limit:
+          type: integer
+          maximum: 100000
+          minimum: 1
+          nullable: true
+          description: 1時間あたりの実行回数の上限（本番の実行。修正チャットの実行は数えない）。空なら無制限。版の外。design.md §9.3
+        concurrent_runs_limit:
+          type: integer
+          maximum: 100000
+          minimum: 1
+          nullable: true
+          description: 同時実行数の上限（本番の実行）。空なら無制限。版の外。design.md §9.3
         version:
           type: integer
           minimum: 0
@@ -15952,6 +16006,18 @@ components:
           nullable: true
           description: 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。版の外。design.md
             §9.1）
+        hourly_runs_limit:
+          type: integer
+          maximum: 100000
+          minimum: 1
+          nullable: true
+          description: 1時間あたりの実行回数の上限（本番の実行。修正チャットの実行は数えない）。空なら無制限。版の外。design.md §9.3
+        concurrent_runs_limit:
+          type: integer
+          maximum: 100000
+          minimum: 1
+          nullable: true
+          description: 同時実行数の上限（本番の実行）。空なら無制限。版の外。design.md §9.3
         version:
           type: integer
           minimum: 0

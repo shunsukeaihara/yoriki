@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Self
 from auditlog.registry import auditlog
 from django.conf import settings
 from django.contrib.postgres.fields import ArrayField
+from django.core.validators import MinValueValidator
 from django.db import models, transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -184,6 +185,13 @@ class TaskDefinition(models.Model):
     # チャットから起動できる（authorization.md §5.3）。版の外に持ち、停止と同じく切り替える。システムのタスクには
     # 付けない
     chat_launchable = models.BooleanField(_("チャットから起動できる"), default=False)
+    # タスク単位の上限（版の外。空なら無制限。design.md §9.3）。本番の実行（修正チャット以外）を受付で数える
+    hourly_runs_limit = models.PositiveIntegerField(
+        _("1時間あたりの実行回数の上限"), null=True, blank=True, validators=[MinValueValidator(1)]
+    )
+    concurrent_runs_limit = models.PositiveIntegerField(
+        _("同時実行数の上限"), null=True, blank=True, validators=[MinValueValidator(1)]
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+", verbose_name=_("作成者")
     )

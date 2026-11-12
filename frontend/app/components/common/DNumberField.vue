@@ -18,19 +18,24 @@ const props = withDefaults(
   { showLabel: true, required: false },
 )
 const modelValue = defineModel<number | null>()
+// 空にすると UInputNumber は undefined を出す。undefined はJSONで送られないので、null（値なし）にする
+const onUpdate = (value: number | null | undefined) => {
+  modelValue.value = value ?? null
+}
 defineOptions({ inheritAttrs: false })
 </script>
 
 <template>
   <DFormField v-bind="pickFieldProps(props)">
     <UInputNumber
-      v-model="modelValue"
+      :model-value="modelValue"
       :min="min"
       :max="max"
       :step="step"
       :format-options="formatOptions"
       class="w-full"
       v-bind="$attrs"
+      @update:model-value="onUpdate"
     />
   </DFormField>
 </template>

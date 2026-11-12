@@ -39,7 +39,7 @@ from .dispatch import (
     receive_webhook,
     start_task_run,
 )
-from .errors import CannotRun, VersionConflict
+from .errors import CannotRun, RunLimitReached, VersionConflict
 from .models import (
     BUSINESS_SCOPES,
     TaskAction,
@@ -794,6 +794,10 @@ HOOK_ERRORS = {
         HookErrorSerializer, description="同じイベントIDで違う内容を受け取った、またはタスクを今は実行できない"
     ),
     413: OpenApiResponse(HookErrorSerializer, description="payloadが入口の上限より大きい"),
+    429: OpenApiResponse(
+        HookErrorSerializer,
+        description="タスク単位の受付頻度・同時実行数の上限に達している（design.md §9.3。しばらくしてから送り直す）",
+    ),
     415: OpenApiResponse(HookErrorSerializer, description="受け付けない形式"),
 }
 
@@ -842,11 +846,22 @@ class HookTaskViewSet(GenericViewSet):
         except InvalidInputs as exc:
             return hook_error("invalid_inputs", str(exc), status.HTTP_400_BAD_REQUEST, exc.errors)
         except CannotRun as exc:
-            # 理由にはタスクの中身（Skill・Connectorの名前等）が入るので、送り元には返さずログに残す
+            # 理由にはタスクの中身（Skill・Connectorの名前、上限の値等）が入るので、送り元には返さずログに残す
             logger.warning("webhook %s cannot start task %s: %s", binding.uid, binding.task.uid, exc)
-            return hook_error("task_unavailable", _("タスクを今は実行できません"), status.HTTP_409_CONFLICT)
+            return self._cannot_run(exc)
         data = {**HookRunSerializer(run).data, "duplicate": not created}
         return Response(data, status=status.HTTP_202_ACCEPTED if created else status.HTTP_200_OK)
+
+    @staticmethod
+    def _cannot_run(exc: CannotRun) -> Response:
+        # タスク単位の上限（design.md §9.3）は、送り元が時間をおいて送り直せるように分けて知らせる
+        if isinstance(exc, RunLimitReached):
+            return hook_error(
+                "task_run_limit",
+                _("このタスクの受付の上限に達しています。しばらくしてから送り直してください"),
+                status.HTTP_429_TOO_MANY_REQUESTS,
+            )
+        return hook_error("task_unavailable", _("タスクを今は実行できません"), status.HTTP_409_CONFLICT)
 
     @staticmethod
     def _read_body(request, limit: int) -> bytes | None:

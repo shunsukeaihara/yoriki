@@ -115,6 +115,11 @@ class TaskTriggerSerializer(ReadOnlyModelSerializer):
         fields = ["id", "kind", "name", "suspended", "key_prefix", "key_needs_rotation", "created"]
 
 
+# タスク単位の上限（版の外。design.md §9.3）
+RUN_LIMIT_FIELDS = ("hourly_runs_limit", "concurrent_runs_limit")
+MAX_RUNS_LIMIT = 100_000
+
+
 class TaskDefinitionSerializer(serializers.ModelSerializer):
     """タスクの作成と表示（定義を管理できる人だけが見る。authorization.md §5.3）。中身は今の版の値を平らに出す。
 
@@ -235,6 +240,23 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
         ),
     )
     budget_department_info = MinimumDepartmentSerializer(source="budget_department", read_only=True, allow_null=True)
+    hourly_runs_limit = serializers.IntegerField(
+        min_value=1,
+        max_value=MAX_RUNS_LIMIT,
+        required=False,
+        allow_null=True,
+        help_text=_(
+            "1時間あたりの実行回数の上限（本番の実行。修正チャットの実行は数えない）。空なら無制限。版の外。"
+            "design.md §9.3"
+        ),
+    )
+    concurrent_runs_limit = serializers.IntegerField(
+        min_value=1,
+        max_value=MAX_RUNS_LIMIT,
+        required=False,
+        allow_null=True,
+        help_text=_("同時実行数の上限（本番の実行）。空なら無制限。版の外。design.md §9.3"),
+    )
     change_reason = serializers.CharField(max_length=500, required=False, allow_blank=True, write_only=True)
     can_run = serializers.SerializerMethodField(help_text=_("今、手動で実行できるか（停止中でなく、版がある）"))
     triggers = serializers.SerializerMethodField(help_text=_("このタスクの入口"))
@@ -254,6 +276,8 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
             "chat_launchable",
             "budget_department",
             "budget_department_info",
+            "hourly_runs_limit",
+            "concurrent_runs_limit",
             "version",
             *REVISION_FIELDS,
             "model_profile_info",
@@ -395,9 +419,16 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
             change_reason=validated_data.get("change_reason", ""),
             content=validated_data["content"],
         )
+        fields = []
         if validated_data.get("budget_department") is not None:
             task.budget_department = validated_data["budget_department"]
-            task.save(update_fields=["budget_department", "updated"])
+            fields.append("budget_department")
+        for name in RUN_LIMIT_FIELDS:
+            if validated_data.get(name) is not None:
+                setattr(task, name, validated_data[name])
+                fields.append(name)
+        if fields:
+            task.save(update_fields=[*fields, "updated"])
         return task
 
     @transaction.atomic
@@ -427,6 +458,10 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
         if "budget_department" in validated_data:
             instance.budget_department = validated_data["budget_department"]
             fields.append("budget_department")
+        for name in RUN_LIMIT_FIELDS:
+            if name in validated_data:
+                setattr(instance, name, validated_data[name])
+                fields.append(name)
         # 変えた項目だけを保存する（行は revise() でロックしている）
         instance.save(update_fields=fields)
         return instance

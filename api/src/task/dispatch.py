@@ -9,6 +9,7 @@ import json
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
 from auditlog.context import set_actor
@@ -34,7 +35,7 @@ from usage.models import Budget
 from user.models import system_user
 
 from . import checks
-from .errors import CannotRun, VersionConflict
+from .errors import CannotRun, RunLimitReached, VersionConflict
 from .inputs import InputFile, clean_inputs, render
 from .models import (
     TaskAction,
@@ -215,7 +216,8 @@ def plan_run(
 
     何も作らない。受付（_start()）は `lock` で通知先の行をロックする（transactionの中で呼ぶ）。入口の画面でサンプルを
     試すとき（受付と同じ判定を見せる）は `lock=False` で読むだけにし、受付を待たせない。`deliver` が偽（修正チャット）
-    なら通知先を固定せず、使えるかも確かめない（出口へ送らない）。Connectorは停止中のタスクでも使えるとする。
+    なら通知先を固定せず、使えるかも確かめない（出口へ送らない）。タスク単位の上限（design.md §9.3）も本番の実行だけで
+    確かめる。Connectorは停止中のタスクでも使えるとする。
     `launcher` はチャットから起動した人で、一覧はその人の権限との共通部分にする（authorization.md §6）。`sensitive` は
     タスクの版のほかに機密として扱う理由があるとき（機密の修正チャット。design.md §11.11）"""
     profile = revision.model_profile
@@ -226,6 +228,8 @@ def plan_run(
     if sensitive and not version.is_local:
         raise CannotRun(_("個人情報や機密情報を扱うタスクでは、ローカルLLMのモデルを選んでください。"))
     effort = revision.effort if revision.effort in version.effort_values else version.default_effort
+    if deliver:
+        check_run_limits(task)
     # 予算の計上先はタスクの範囲で決め、起動のしかたによらない（design.md §9.1）
     try:
         budget = budgets.check(budgets.for_task(task), lock=lock)
@@ -275,6 +279,36 @@ def plan_run(
         destination_revision=_destination_revision(task, revision, lock=lock) if deliver else None,
         budget=budget,
     )
+
+
+def production_runs(task: TaskDefinition):
+    """タスクの本番の実行（入口・手動実行・チャットからの起動）。修正チャットの中の実行は入れない"""
+    return Run.objects.filter(task=task, trigger=RunTrigger.TASK).exclude(launch=RunLaunch.FIX)
+
+
+def check_run_limits(task: TaskDefinition) -> None:
+    """タスク単位の受付頻度・同時実行数（design.md §9.3）。本番の実行を1つ受け付けると上限を超えるなら RunLimitReached。
+
+    受付はタスクの行をロックしてから呼ぶので、同じタスクを同時に受け付けても上限を超えない"""
+    if task.hourly_runs_limit is not None:
+        since = timezone.now() - timedelta(hours=1)
+        if production_runs(task).filter(created__gt=since).count() >= task.hourly_runs_limit:
+            raise RunLimitReached(
+                _(
+                    "このタスクの1時間あたりの実行回数の上限（%(limit)s回）に達しました。しばらくしてから試してください。"
+                )
+                % {"limit": task.hourly_runs_limit}
+            )
+    if task.concurrent_runs_limit is not None:
+        running = production_runs(task).filter(status__in=budgets.counted_statuses()).count()
+        if running >= task.concurrent_runs_limit:
+            raise RunLimitReached(
+                _(
+                    "このタスクで同時に動かせる数の上限（%(limit)s件）に達しています。"
+                    "動いている実行が終わってから、もう一度試してください。"
+                )
+                % {"limit": task.concurrent_runs_limit}
+            )
 
 
 def _start(

@@ -303,7 +303,7 @@ const { onSubmit, loading, errors } = createSubmit({
 
 - `errors` はDRFのエラー辞書（camelCaseに変換済み）。各入力欄に `:error-messages="errors.address"`、フォームの先頭に `<DFormAlert :errors="errors" />` を置く。
 - 400以外のエラー（403、409等）は `errors.nonFieldErrors` に `detail` が入り、`DFormAlert` に表示される。
-- 成功・失敗の通知は `useToast()`（Nuxt UI）で出す。失敗の文言は `makeErrorMsg(err)` で作る（400なら「入力に問題があります。修正してください。」、それ以外はサーバーの `detail`）。
+- 成功・失敗の通知は `useToast()`（Nuxt UI）で出す。失敗の文言は `makeErrorMsg(err)` で作る（400なら、入力欄によらない理由（`nonFieldErrors`。受付で断った理由等）があればその文、なければ「入力に問題があります。修正してください。」。それ以外はサーバーの `detail`）。
 
 ### 5.2 Form / Dialog / Select の3点セット
 

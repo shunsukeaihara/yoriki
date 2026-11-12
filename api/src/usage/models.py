@@ -32,7 +32,7 @@ def month_start(now: datetime | None = None) -> datetime:
 
 
 class BudgetSettings(models.Model):
-    """既定の月の上限（1行だけ）。空なら無制限（design.md §9.1）"""
+    """既定の上限（1行だけ）。空なら無制限（design.md §9.1・§9.2）"""
 
     department_monthly_limit = models.DecimalField(
         _("部門の月の上限（米ドル）"), max_digits=14, decimal_places=2, null=True, blank=True
@@ -40,6 +40,10 @@ class BudgetSettings(models.Model):
     system_monthly_limit = models.DecimalField(
         _("システムの枠の月の上限（米ドル）"), max_digits=14, decimal_places=2, null=True, blank=True
     )
+    department_monthly_runs = models.PositiveIntegerField(_("部門の月の実行回数の上限"), null=True, blank=True)
+    system_monthly_runs = models.PositiveIntegerField(_("システムの枠の月の実行回数の上限"), null=True, blank=True)
+    department_concurrent_runs = models.PositiveIntegerField(_("部門の同時実行数の上限"), null=True, blank=True)
+    system_concurrent_runs = models.PositiveIntegerField(_("システムの枠の同時実行数の上限"), null=True, blank=True)
 
     updated = models.DateTimeField(auto_now=True)
 
@@ -68,6 +72,9 @@ class Budget(models.Model):
     )
     # 部門の上限の上書き。空なら既定に従い、0ならその部門では使わせない。システムの枠では使わない（既定の値だけ）
     monthly_limit = models.DecimalField(_("月の上限（米ドル）"), max_digits=14, decimal_places=2, null=True, blank=True)
+    # 月の実行回数・同時実行数の上限の上書き（design.md §9.2）。空・0の意味は金額と同じ
+    monthly_runs = models.PositiveIntegerField(_("月の実行回数の上限"), null=True, blank=True)
+    concurrent_runs = models.PositiveIntegerField(_("同時実行数の上限"), null=True, blank=True)
 
     created = models.DateTimeField(auto_now_add=True)
     updated = models.DateTimeField(auto_now=True)
@@ -79,7 +86,13 @@ class Budget(models.Model):
         constraints = [
             models.CheckConstraint(
                 condition=Q(kind=BudgetKind.DEPARTMENT, department__isnull=False)
-                | Q(kind=BudgetKind.SYSTEM, department__isnull=True, monthly_limit__isnull=True),
+                | Q(
+                    kind=BudgetKind.SYSTEM,
+                    department__isnull=True,
+                    monthly_limit__isnull=True,
+                    monthly_runs__isnull=True,
+                    concurrent_runs__isnull=True,
+                ),
                 name="budget_kind_department",
             ),
             models.UniqueConstraint(fields=["kind"], condition=Q(kind=BudgetKind.SYSTEM), name="uniq_system_budget"),
@@ -103,6 +116,18 @@ class Budget(models.Model):
         if self.kind == BudgetKind.SYSTEM:
             return defaults.system_monthly_limit
         return self.monthly_limit if self.monthly_limit is not None else defaults.department_monthly_limit
+
+    def monthly_runs_limit(self, defaults: BudgetSettings | None = None) -> int | None:
+        defaults = defaults or BudgetSettings.load()
+        if self.kind == BudgetKind.SYSTEM:
+            return defaults.system_monthly_runs
+        return self.monthly_runs if self.monthly_runs is not None else defaults.department_monthly_runs
+
+    def concurrent_runs_limit(self, defaults: BudgetSettings | None = None) -> int | None:
+        defaults = defaults or BudgetSettings.load()
+        if self.kind == BudgetKind.SYSTEM:
+            return defaults.system_concurrent_runs
+        return self.concurrent_runs if self.concurrent_runs is not None else defaults.department_concurrent_runs
 
     def spent(self, since: datetime | None = None) -> Decimal:
         """今月の利用額"""

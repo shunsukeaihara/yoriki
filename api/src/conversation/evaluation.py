@@ -136,11 +136,14 @@ def start_evaluation(
             )
         if effort not in model_version.effort_values:
             effort = model_version.default_effort
+        # ケースごとに、Draftの版と（公開中の版があれば）比べる版のRunを始める。実行回数・同時実行数はまとめて確かめる
+        # （design.md §9.2）
+        runs = len(cases) * (2 if base is not None else 1)
         try:
             if run is not None and skill.scope == SkillScope.PERSONAL:
-                budget = budgets.check(run.budget)
+                budget = budgets.check(run.budget, runs=runs)
             else:
-                budget = budgets.check(budgets.for_skill(skill, actor, budget_department))
+                budget = budgets.check(budgets.for_skill(skill, actor, budget_department), runs=runs)
         except budgets.BudgetUnavailable as exc:
             raise CannotEvaluate(str(exc)) from exc
         evaluation = SkillEvaluation.objects.create(

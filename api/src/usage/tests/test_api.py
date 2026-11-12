@@ -41,6 +41,10 @@ def spend(budget: Budget, amount: str) -> None:
 # --- 管理画面 ---
 
 
+def money(status: dict) -> tuple:
+    return status["limit"], status["spent"], status["remaining"]
+
+
 def test_settings_need_the_budget_permissions(api_client, app_user):
     api_client.force_login(app_user)
     assert api_client.get(SETTINGS).status_code == 403
@@ -57,7 +61,7 @@ def test_settings_need_the_budget_permissions(api_client, app_user):
     spend(Budget.system(), "12.5")
     res = api_client.patch(SETTINGS, {"system_monthly_limit": "50", "department_monthly_limit": "20"}, format="json")
     assert res.status_code == 200, res.json()
-    assert res.json()["system"] == {"limit": "50.00", "spent": "12.5000", "remaining": "37.5000"}
+    assert money(res.json()["system"]) == ("50.00", "12.5000", "37.5000")
     assert BudgetSettings.load().department_monthly_limit == Decimal(20)
     assert api_client.patch(SETTINGS, {"system_monthly_limit": "-1"}, format="json").status_code == 400
 
@@ -74,8 +78,8 @@ def test_department_override(api_client, app_user):
 
     rows = {r["name"]: r for r in api_client.get(DEPARTMENTS).json()["results"]}
     assert rows["営業"]["monthly_limit"] is None
-    assert rows["営業"]["status"] == {"limit": "100.00", "spent": "30.0000", "remaining": "70.0000"}
-    assert rows["経理"]["status"] == {"limit": "100.00", "spent": "0.0000", "remaining": "100.0000"}
+    assert money(rows["営業"]["status"]) == ("100.00", "30.0000", "70.0000")
+    assert money(rows["経理"]["status"]) == ("100.00", "0.0000", "100.0000")
 
     res = api_client.patch(f"{DEPARTMENTS}{sales.uid}/", {"monthly_limit": "0"}, format="json")
     assert res.status_code == 200, res.json()

@@ -42,7 +42,11 @@ class DepartmentBudgetViewSet(ListModelMixin, RetrieveModelMixin, UpdateModelMix
     permission_classes = [ModelPermissions]
     permission_model = Budget
     lookup_field = "uid"
-    queryset = Department.objects.active().select_related("budget").annotate(monthly_limit=F("budget__monthly_limit"))
+    queryset = (
+        Department.objects.active()
+        .select_related("budget")
+        .annotate(**{name: F(f"budget__{name}") for name in DepartmentBudgetSerializer.OVERRIDES})
+    )
     serializer_class = DepartmentBudgetSerializer
     search_fields = ("name",)
     ordering = ("name", "pk")

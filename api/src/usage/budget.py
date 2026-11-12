@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Count, Sum
 from django.utils.translation import gettext as _
 
 from user.models import Department
@@ -75,13 +75,55 @@ def for_skill(skill, user, department: Department | None) -> Budget:
     return Budget.system()
 
 
-def check(budget: Budget) -> Budget:
-    """受付の確認：今月の残額がなければ断る"""
-    remaining = budget.remaining()
+def counted_statuses() -> list[int]:
+    """同時実行数に数えるRunの状態。確認待ちは数えない（design.md §9.2）"""
+    from run.models import RunStatus  # noqa: PLC0415  runがusageをimportするため
+
+    return [
+        RunStatus.QUEUED,
+        RunStatus.RUNNING,
+        RunStatus.RETRY_WAIT,
+        RunStatus.CANCELLING,
+        RunStatus.WAITING_BACKGROUND,
+    ]
+
+
+def check(budget: Budget, *, runs: int = 1, lock: bool = True) -> Budget:
+    """受付の確認：今月の残額がないか、`runs` 個のRunを受け付けると月の実行回数・同時実行数の上限を超えるなら断る。
+
+    Runを作るtransactionの中で呼ぶ。実行回数・同時実行数の上限がある計上先は、行をロックしてから数えるので、
+    同時に受け付けても上限を超えない（design.md §9.2）。`lock` が偽なら読むだけ（受付と同じ判定を見せるとき）"""
+    from run.models import Run  # noqa: PLC0415  runがusageをimportするため
+
+    defaults = BudgetSettings.load()
+    remaining = budget.remaining(defaults)
     if remaining is not None and remaining <= 0:
         raise BudgetUnavailable(
             _("「%(name)s」の今月の予算を使い切りました。予算の管理者に問い合わせてください。") % {"name": budget}
         )
+    monthly = budget.monthly_runs_limit(defaults)
+    concurrent = budget.concurrent_runs_limit(defaults)
+    if monthly is None and concurrent is None:
+        return budget
+    if lock:
+        Budget.objects.select_for_update().get(pk=budget.pk)
+    if monthly is not None:
+        count = Run.objects.filter(budget=budget, created__gte=month_start()).count()
+        if count + runs > monthly:
+            raise BudgetUnavailable(
+                _("「%(name)s」の今月の実行回数の上限（%(limit)s回）に達しました。予算の管理者に問い合わせてください。")
+                % {"name": budget, "limit": monthly}
+            )
+    if concurrent is not None:
+        count = Run.objects.filter(budget=budget, status__in=counted_statuses()).count()
+        if count + runs > concurrent:
+            raise BudgetUnavailable(
+                _(
+                    "「%(name)s」で同時に動かせる数の上限（%(limit)s件）に達しています。"
+                    "動いている作業が終わってから、もう一度試してください。"
+                )
+                % {"name": budget, "limit": concurrent}
+            )
     return budget
 
 
@@ -116,17 +158,31 @@ def is_low(budget: Budget) -> bool:
 
 @dataclass(frozen=True)
 class BudgetStatus:
-    """計上先の今月の利用額・上限・残額（一覧の表示用）"""
+    """計上先の今月の利用額・上限・残額と、今月の実行回数・今の同時実行数とその上限（一覧の表示用）"""
 
     limit: Decimal | None
     spent: Decimal
     remaining: Decimal | None
+    monthly_runs: int = 0
+    monthly_runs_limit: int | None = None
+    concurrent_runs: int = 0
+    concurrent_runs_limit: int | None = None
 
 
 class MonthUsage:
-    """計上先ごとの今月の利用額と有効な予約の合計を、1回ずつの集計で読む（一覧の表示用）"""
+    """計上先ごとの今月の利用額・有効な予約の合計・実行回数・同時実行数を、1回ずつの集計で読む（一覧の表示用）"""
 
     def __init__(self):
+        from run.models import Run  # noqa: PLC0415  runがusageをimportするため
+
+        self.monthly_runs = {
+            row["budget"]: row["n"]
+            for row in Run.objects.filter(created__gte=month_start()).values("budget").annotate(n=Count("pk"))
+        }
+        self.concurrent_runs = {
+            row["budget"]: row["n"]
+            for row in Run.objects.filter(status__in=counted_statuses()).values("budget").annotate(n=Count("pk"))
+        }
         self.defaults = BudgetSettings.load()
         self.spent = {
             row["budget"]: row["t"]
@@ -141,8 +197,22 @@ class MonthUsage:
         """`budget` がNoneなら、まだ行のない部門（計上したことも、上限を上書きしたこともない）"""
         if budget is None:
             limit = self.defaults.department_monthly_limit
-            return BudgetStatus(limit=limit, spent=Decimal(0), remaining=limit)
+            return BudgetStatus(
+                limit=limit,
+                spent=Decimal(0),
+                remaining=limit,
+                monthly_runs_limit=self.defaults.department_monthly_runs,
+                concurrent_runs_limit=self.defaults.department_concurrent_runs,
+            )
         limit = budget.limit(self.defaults)
         spent = self.spent.get(budget.pk, Decimal(0))
         remaining = None if limit is None else limit - spent - self.reserved.get(budget.pk, Decimal(0))
-        return BudgetStatus(limit=limit, spent=spent, remaining=remaining)
+        return BudgetStatus(
+            limit=limit,
+            spent=spent,
+            remaining=remaining,
+            monthly_runs=self.monthly_runs.get(budget.pk, 0),
+            monthly_runs_limit=budget.monthly_runs_limit(self.defaults),
+            concurrent_runs=self.concurrent_runs.get(budget.pk, 0),
+            concurrent_runs_limit=budget.concurrent_runs_limit(self.defaults),
+        )

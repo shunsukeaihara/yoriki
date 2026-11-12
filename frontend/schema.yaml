@@ -7662,7 +7662,7 @@ components:
       - ''
     BudgetSettings:
       type: object
-      description: 既定の月の上限（design.md §9.1）。空なら無制限
+      description: 既定の上限（design.md §9.1・§9.2）。空なら無制限
       properties:
         department_monthly_limit:
           type: string
@@ -7676,6 +7676,30 @@ components:
           pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
           nullable: true
           description: システムの枠の月の上限（米ドル）。全社・システムのタスクと、所属のない人の利用
+        department_monthly_runs:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+          description: 部門の月の実行回数の上限。部門ごとに上書きできる
+        system_monthly_runs:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+          description: システムの枠の月の実行回数の上限
+        department_concurrent_runs:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+          description: 部門の同時実行数の上限。部門ごとに上書きできる
+        system_concurrent_runs:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+          description: システムの枠の同時実行数の上限
         system:
           allOf:
           - $ref: '#/components/schemas/BudgetStatus'
@@ -7686,13 +7710,17 @@ components:
           format: date-time
           readOnly: true
       required:
+      - department_concurrent_runs
       - department_monthly_limit
+      - department_monthly_runs
       - system
+      - system_concurrent_runs
       - system_monthly_limit
+      - system_monthly_runs
       - updated
     BudgetStatus:
       type: object
-      description: 今月の利用額・上限・残額（米ドル）。上限が空なら無制限
+      description: 今月の利用額・上限・残額（米ドル）と、今月の実行回数・今の同時実行数。上限が空なら無制限
       properties:
         limit:
           type: string
@@ -7712,8 +7740,28 @@ components:
           readOnly: true
           nullable: true
           description: 上限 −（利用額＋動いているLLM呼出しの予約）。無制限なら空
+        monthly_runs:
+          type: integer
+          readOnly: true
+          description: 今月に受け付けたRunの数
+        monthly_runs_limit:
+          type: integer
+          readOnly: true
+          nullable: true
+        concurrent_runs:
+          type: integer
+          readOnly: true
+          description: 確認待ち以外の、終わっていないRunの数
+        concurrent_runs_limit:
+          type: integer
+          readOnly: true
+          nullable: true
       required:
+      - concurrent_runs
+      - concurrent_runs_limit
       - limit
+      - monthly_runs
+      - monthly_runs_limit
       - remaining
       - spent
     CellDiff:
@@ -9185,7 +9233,7 @@ components:
       - updated
     DepartmentBudget:
       type: object
-      description: 部門の予算。上限の上書きだけを変えられる。部門は `monthly_limit`（予算の行の上書き）を注釈して渡す
+      description: 部門の予算。上限の上書きだけを変えられる。部門は予算の行の上書き（`OVERRIDES`）を注釈して渡す
       properties:
         id:
           type: string
@@ -9199,14 +9247,28 @@ components:
           pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
           nullable: true
           description: 上限の上書き（米ドル）。空なら既定に従い、0ならこの部門では使わせない
+        monthly_runs:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+          description: 月の実行回数の上限の上書き。空なら既定に従い、0ならこの部門では使わせない
+        concurrent_runs:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+          description: 同時実行数の上限の上書き。空なら既定に従い、0ならこの部門では使わせない
         status:
           allOf:
           - $ref: '#/components/schemas/BudgetStatus'
           readOnly: true
           description: 今月の利用額・上限・残額
       required:
+      - concurrent_runs
       - id
       - monthly_limit
+      - monthly_runs
       - name
       - status
     DepartmentMembership:
@@ -12216,7 +12278,7 @@ components:
             $ref: '#/components/schemas/TriggerReceipt'
     PatchedBudgetSettingsRequest:
       type: object
-      description: 既定の月の上限（design.md §9.1）。空なら無制限
+      description: 既定の上限（design.md §9.1・§9.2）。空なら無制限
       properties:
         department_monthly_limit:
           type: string
@@ -12230,6 +12292,30 @@ components:
           pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
           nullable: true
           description: システムの枠の月の上限（米ドル）。全社・システムのタスクと、所属のない人の利用
+        department_monthly_runs:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+          description: 部門の月の実行回数の上限。部門ごとに上書きできる
+        system_monthly_runs:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+          description: システムの枠の月の実行回数の上限
+        department_concurrent_runs:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+          description: 部門の同時実行数の上限。部門ごとに上書きできる
+        system_concurrent_runs:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+          description: システムの枠の同時実行数の上限
     PatchedConnectorUpdateRequest:
       type: object
       description: Connectorの更新。使うDB接続と範囲・部門は変えられないので、読み取り専用にする
@@ -12361,7 +12447,7 @@ components:
           title: 有効
     PatchedDepartmentBudgetRequest:
       type: object
-      description: 部門の予算。上限の上書きだけを変えられる。部門は `monthly_limit`（予算の行の上書き）を注釈して渡す
+      description: 部門の予算。上限の上書きだけを変えられる。部門は予算の行の上書き（`OVERRIDES`）を注釈して渡す
       properties:
         monthly_limit:
           type: string
@@ -12369,6 +12455,18 @@ components:
           pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
           nullable: true
           description: 上限の上書き（米ドル）。空なら既定に従い、0ならこの部門では使わせない
+        monthly_runs:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+          description: 月の実行回数の上限の上書き。空なら既定に従い、0ならこの部門では使わせない
+        concurrent_runs:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          nullable: true
+          description: 同時実行数の上限の上書き。空なら既定に従い、0ならこの部門では使わせない
     PatchedDepartmentRequest:
       type: object
       properties:

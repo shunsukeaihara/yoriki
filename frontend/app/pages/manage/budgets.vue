@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
- * 予算（design.md §9.1）。既定の月の上限（部門・システムの枠）と、部門ごとの上書き、今月の利用額を扱う。
- * 予算は部門ごととシステムの枠で持ち、個人の予算は持たない
+ * 予算（design.md §9.1・§9.2）。既定の月の上限（部門・システムの枠。金額・実行回数・同時実行数）と、部門ごとの上書き、
+ * 今月の利用額・実行回数を扱う。予算は部門ごととシステムの枠で持ち、個人の予算は持たない
  */
 import type { TableColumn } from '@nuxt/ui'
 
@@ -31,6 +31,13 @@ const columns: TableColumn<DepartmentBudget>[] = [
   { id: 'actions', header: '' },
 ]
 
+/** 部門で上書きしている上限 */
+const overrides = (budget: DepartmentBudget): string[] => [
+  ...(budget.monthlyLimit === null ? [] : [formatUsd(budget.monthlyLimit, '')]),
+  ...(budget.monthlyRuns === null ? [] : [t('月{count}回', { count: budget.monthlyRuns })]),
+  ...(budget.concurrentRuns === null ? [] : [t('同時{count}件', { count: budget.concurrentRuns })]),
+]
+
 const onSettings = (value: BudgetSettings) => {
   settings.value = value
   reload() // 部門の既定の上限が変わる
@@ -44,7 +51,7 @@ const onSettings = (value: BudgetSettings) => {
         :title="$t('予算')"
         :description="
           $t(
-            'LLMの利用額の月の上限です。会話は会話で選んだ部門、タスクはタスクの部門（全社・システムのタスクはシステムの枠）に入ります。上限に達すると、新しい依頼を受け付けず、動いている作業もまとめて止めます。月の区切りは組織のタイムゾーンです',
+            'LLMの利用額の月の上限です。会話は会話で選んだ部門、タスクはタスクの部門（全社・システムのタスクはシステムの枠）に入ります。上限に達すると、新しい依頼を受け付けず、動いている作業もまとめて止めます。月の実行回数と同時実行数の上限も決められ、達すると新しい依頼を受け付けません（動いている作業は止めません）。月の区切りは組織のタイムゾーンです',
           )
         "
       />
@@ -78,7 +85,8 @@ const onSettings = (value: BudgetSettings) => {
         :params="params"
       >
         <template #monthlyLimit-cell="{ row }">
-          {{ row.original.monthlyLimit === null ? $t('既定') : formatUsd(row.original.monthlyLimit, '') }}
+          <span v-if="!overrides(row.original).length">{{ $t('既定') }}</span>
+          <div v-for="text in overrides(row.original)" v-else :key="text">{{ text }}</div>
         </template>
         <template #status-cell="{ row }">
           <BudgetStatusView :status="row.original.status" class="min-w-64" />

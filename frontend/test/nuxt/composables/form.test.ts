@@ -37,6 +37,9 @@ describe('getValidationError', () => {
 describe('makeErrorMsg', () => {
   it('400 は入力の修正を促し、それ以外は detail を返す', () => {
     expect(makeErrorMsg(axiosError(400, { name: ['必須です。'] }))).toBe('入力に問題があります。修正してください。')
+    expect(makeErrorMsg(axiosError(400, { non_field_errors: ['今月の予算を使い切りました。'] }))).toBe(
+      '今月の予算を使い切りました。',
+    )
     expect(makeErrorMsg(axiosError(409, { detail: '実行中です。' }))).toBe('実行中です。')
   })
 })

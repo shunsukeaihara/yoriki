@@ -174,6 +174,10 @@ class SubagentRunner(Runner):
         # 子は新しいAttemptへ移らないので、Attemptの上限を超えない（harness.md §4.4）
         return min(seconds, ATTEMPT_LIMIT_SECONDS)
 
+    def _time_over(self) -> bool:
+        """子はRunの実行時間ではなく、子の実行時間の上限（_timed_out()）で止める"""
+        return False
+
     def _timeout_error(self) -> str:
         return f"it exceeded the time limit of {self._timeout_seconds() // 60} minutes"
 

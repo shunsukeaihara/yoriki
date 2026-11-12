@@ -13116,6 +13116,7 @@ components:
       - 18
       - 19
       - 20
+      - 21
       - 99
       type: integer
       description: |-
@@ -13132,6 +13133,7 @@ components:
         * `18` - 実行環境を使えない
         * `19` - Skillを使えない
         * `20` - タスクを続けられない
+        * `21` - 実行時間の上限
         * `99` - 内部のエラー
     RunEventKindEnum:
       enum:

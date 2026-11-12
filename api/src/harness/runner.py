@@ -123,6 +123,8 @@ RETRY_DELAYS = (1, 2, 4, 8, 16)
 DELTA_INTERVAL = 0.15
 # モデルの呼出しの間にleaseを延ばす間隔（秒）
 HEARTBEAT_INTERVAL = 20
+# 1つのRunの実行時間の上限（秒）。作業中の間の合計で、ステップの区切りで判定する（harness.md §4.4）
+MAX_RUN_SECONDS = 60 * 60
 # 1つのAttemptの上限（秒）。Q2のtimeout（Q_CLUSTER_TIMEOUT）で切られる前に、保存して移る（harness.md §4.4）
 ATTEMPT_LIMIT_SECONDS = 55 * 60
 # 親が動き終えて待つ間に、ジョブ・発言・回答・停止を確かめる間隔（秒）
@@ -180,6 +182,14 @@ RESULT_GRACE_NOTICE = (
 STEP_LIMIT_NOTICE = (
     "The maximum number of steps for this request has been reached. Tools are now disabled. Reply with text only: "
     "summarize what you have done, what remains, and what the user should do next."
+)
+TIME_GRACE_NOTICE = (
+    "The time limit for this work has been reached: this is the last step in which you can call tools. Call "
+    "submit_result now with the result you have, and note anything unfinished in it if the schema allows."
+)
+TIME_LIMIT_NOTICE = (
+    "The time limit for this request has been reached. Tools are now disabled. Reply with text only: summarize what "
+    "you have done, what remains, and what the user should do next."
 )
 
 BUDGET_LIMIT_NOTICE = (
@@ -312,6 +322,8 @@ class Runner:
         self.run_obj.model_version = run.model_version
         self.run_obj.effort = run.effort
         self.run_obj.step_count = run.step_count
+        self.run_obj.active_seconds = run.active_seconds
+        self.run_obj.running_since = run.running_since
         self.run_obj.manifest = run.manifest
         return self.run_obj
 
@@ -498,12 +510,13 @@ class Runner:
             return False
         run = self.run_obj
         version = run.model_version
-        final = run.step_count >= MAX_STEPS
-        if final:
-            self._record(RunEventKind.CONTEXT, {"text": STEP_LIMIT_NOTICE})
-
         self.tools = self._exposed_tools()
-        if run.step_count == MAX_STEPS - 1 and self._result_missing():
+        final = self._final_limit()
+        if final == RunEndReason.STEP_LIMIT:
+            self._record(RunEventKind.CONTEXT, {"text": STEP_LIMIT_NOTICE})
+        elif final == RunEndReason.TIME_LIMIT:
+            self._record(RunEventKind.CONTEXT, {"text": TIME_LIMIT_NOTICE})
+        elif run.step_count == MAX_STEPS - 1 and self._result_missing():
             # 上限の前に1回だけ、今ある結果で業務結果を確定する猶予を与える（harness.md §4.4）
             self._record(RunEventKind.CONTEXT, {"text": RESULT_GRACE_NOTICE})
         system = self._system_prompt()
@@ -525,11 +538,35 @@ class Runner:
             return self._handle_reply(result)
         return self._execute_calls(result.calls)
 
+    def _final_limit(self) -> RunEndReason | None:
+        """ステップ数・実行時間の上限に達していれば、Toolを使わない最後のまとめのステップにする（harness.md §4.4）。
+        実行時間は、業務結果を確定していないRunに1回だけ猶予のステップを置いてから。猶予は、その後にモデルが応答して
+        初めて使ったことにする（同じ区切りで圧縮だけをしたときは、圧縮の後に知らせ直す）"""
+        if self.run_obj.step_count >= MAX_STEPS:
+            return RunEndReason.STEP_LIMIT
+        if not self._time_over():
+            return None
+        if not self._result_missing():
+            return RunEndReason.TIME_LIMIT
+        mine = RunEvent.objects.filter(run=self.run_obj, subagent=self.subagent)
+        grace = mine.filter(kind=RunEventKind.CONTEXT, data__time_grace=True).order_by("-sequence").first()
+        if grace is not None:
+            later = mine.filter(sequence__gt=grace.sequence)
+            if later.filter(kind=RunEventKind.ASSISTANT_MESSAGE).exists():
+                return RunEndReason.TIME_LIMIT
+            if not later.filter(kind=RunEventKind.COMPACTION).exists():
+                return None
+        self._record(RunEventKind.CONTEXT, {"text": TIME_GRACE_NOTICE, "time_grace": True})
+        return None
+
+    def _time_over(self) -> bool:
+        return self.run_obj.active_time() >= timedelta(seconds=MAX_RUN_SECONDS)
+
     def _system_prompt(self) -> str:
         return system_prompt(self.tools)
 
     def _ask_within_budget(
-        self, system: str, items, events, *, final: bool
+        self, system: str, items, events, *, final: RunEndReason | None
     ) -> tuple[ModelResponse, RunEndReason | None] | bool:
         """予算を予約してモデルを呼び、応答と利用量を記録して予約を精算する。応答と、最後のまとめのステップなら上限の
         種類（ステップ数・予算）を返す。応答が得られなければ、ステップを続けるかどうか"""
@@ -551,7 +588,7 @@ class Runner:
         return result, limit
 
     def _reserve_step(
-        self, estimate: Decimal, final: bool
+        self, estimate: Decimal, final: RunEndReason | None
     ) -> tuple[BudgetReservation | None, RunEndReason | None] | None:
         """ステップの予算を予約する（harness.md §10.6）。予約と、最後のまとめのステップなら上限の種類を返す。
 
@@ -563,8 +600,8 @@ class Runner:
         except budgets.BudgetExhausted:
             pass
         else:
-            return reservation, RunEndReason.STEP_LIMIT if final else None
-        if not final:
+            return reservation, final
+        if final is None:
             try:
                 reservation = budgets.reserve(run, self.attempt, estimate)
             except budgets.BudgetExhausted:
@@ -584,7 +621,7 @@ class Runner:
             self._record(RunEventKind.CONTEXT, {"text": BUDGET_LOW_NOTICE, "budget_low": True})
 
     def _finish_at_step_limit(self, text: str, end_reason: RunEndReason = RunEndReason.STEP_LIMIT) -> bool:
-        """ステップ数・予算の上限の最後のまとめの応答で終える。業務結果を確定していて、ジョブの結果もすべて親が見ていれば完了に
+        """ステップ数・実行時間・予算の上限の最後のまとめの応答で終える。業務結果を確定していて、ジョブの結果もすべて親が見ていれば完了に
         する（その間に追加の指示が届いていれば、取り込んで続ける）。ジョブが残っているか、結果を見ていないジョブがあれば、
         もう親を起こせないので上限の失敗にする（design.md §5.3）"""
         jobs_left = (

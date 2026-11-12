@@ -127,6 +127,7 @@ class RunEndReason(models.IntegerChoices):
     SANDBOX = 18, _("実行環境を使えない")
     SKILL = 19, _("Skillを使えない")
     TASK = 20, _("タスクを続けられない")
+    TIME_LIMIT = 21, _("実行時間の上限")
     INTERNAL = 99, _("内部のエラー")
 
 
@@ -209,6 +210,10 @@ class Run(models.Model):
     end_reason = models.PositiveSmallIntegerField(_("終わり方"), choices=RunEndReason.choices, null=True, blank=True)
     error = models.TextField(_("失敗の理由"), blank=True)
     step_count = models.PositiveIntegerField(_("ステップ数"), default=0)
+    # 実行時間（harness.md §4.4）。作業中（RUNNING）だった時間の合計と、今の作業中が始まった日時。
+    # set_status() が更新する
+    active_seconds = models.FloatField(_("作業中の時間（秒）"), default=0)
+    running_since = models.DateTimeField(_("作業中になった日時"), null=True, blank=True)
     # タスクのRun：受付時のタスクの版と起動のしかた、実行したときのタスクの範囲と部門（結果・ログを見られる人の
     # 判定に使う。authorization.md §7.1）
     task = models.ForeignKey(
@@ -333,6 +338,14 @@ class Run(models.Model):
         last_task = runs.filter(trigger=RunTrigger.TASK).order_by("-pk").values_list("pk", flat=True).first()
         return runs.filter(pk__gte=last_task or 0)
 
+    def active_time(self) -> timedelta:
+        """作業中だった時間の合計（今の作業中の分を含む）。確認待ち・裏の作業を待つ間・順番待ちは数えない（harness.md
+        §4.4）"""
+        seconds = self.active_seconds
+        if self.status == RunStatus.RUNNING and self.running_since is not None:
+            seconds += (timezone.now() - self.running_since).total_seconds()
+        return timedelta(seconds=seconds)
+
     @classmethod
     def locked(cls, pk: int) -> "Run":
         """行ロックを取って読む。ロックの順序はいつも 会話 → Run → そのほか（Attempt、確認、依頼）にし、
@@ -358,9 +371,15 @@ class Run(models.Model):
         if not current.can_transit(status):
             raise InvalidTransition(f"{current.get_status_display()} -> {RunStatus(status).label}")
         self.status = status
-        fields = ["status", "updated"]
+        fields = ["status", "updated", "active_seconds", "running_since"]
+        now = timezone.now()
+        self.active_seconds = current.active_seconds
+        self.running_since = current.running_since
+        if current.status == RunStatus.RUNNING and current.running_since is not None:
+            self.active_seconds += (now - current.running_since).total_seconds()
+        self.running_since = now if status == RunStatus.RUNNING else None
         if status in TERMINAL_STATUSES:
-            self.finished = timezone.now()
+            self.finished = now
             self.end_reason = end_reason or (
                 RunEndReason.COMPLETED if status == RunStatus.COMPLETED else RunEndReason.CANCELLED
             )

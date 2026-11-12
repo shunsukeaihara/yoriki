@@ -1,6 +1,9 @@
 """Runnerのテスト。LLMの応答は FakeAdapter で差し替え、RunEvent・状態・会話のメッセージを確かめる"""
 
+from datetime import timedelta
+
 import pytest
+from django.db import transaction
 
 from conversation.dispatch import post_message
 from conversation.factories import ConversationFactory
@@ -466,3 +469,39 @@ def test_orphaned_question_is_closed_on_resume(conversation):
     ClarificationRequest.objects.create(run=run, kind=ClarificationKind.QUESTION, tool_call_id="old", questions=[])
     Runner(attempt, adapter_factory=FakeAdapter([reply("完了")]), sleep=lambda _s: None).run()
     assert ClarificationRequest.objects.get(run=run).status == ClarificationStatus.CANCELLED
+
+
+@pytest.mark.django_db
+def test_time_limit_ends_with_a_summary_without_tools(conversation, monkeypatch):
+    monkeypatch.setattr(runner_module, "MAX_RUN_SECONDS", 0)
+    run = start(conversation)
+    adapter = FakeAdapter([reply("ここまでの結果です。")])
+    run = execute(run, adapter)
+
+    assert run.status == RunStatus.FAILED
+    assert run.end_reason == RunEndReason.TIME_LIMIT
+    last = adapter.requests[-1]
+    assert last.tool_choice == ToolChoice.NONE
+    assert any(runner_module.TIME_LIMIT_NOTICE in m.text for m in last.messages)
+    assert ConversationMessage.objects.filter(run=run, role=MessageRole.AGENT).exists()
+
+
+@pytest.mark.django_db
+def test_active_time_counts_only_while_running(conversation):
+    run = start(conversation)
+    claim_run(run.pk)
+    run.refresh_from_db()
+    assert run.status == RunStatus.RUNNING
+    assert run.running_since is not None
+    Run.objects.filter(pk=run.pk).update(running_since=run.running_since - timedelta(minutes=10))
+    run.refresh_from_db()
+    with transaction.atomic():
+        run.set_status(RunStatus.WAITING_USER)
+    assert run.active_seconds == pytest.approx(600, abs=5)
+    assert run.running_since is None
+    # 確認待ちの間は数えない
+    assert run.active_time().total_seconds() == pytest.approx(600, abs=5)
+    with transaction.atomic():
+        run.set_status(RunStatus.RUNNING)
+    assert run.running_since is not None
+    assert run.active_time().total_seconds() == pytest.approx(600, abs=5)

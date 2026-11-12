@@ -13,6 +13,7 @@ from harness.sandbox import SandboxSession
 from harness.skills import build_catalog
 from harness.tools.base import schema_problem
 from llm.factories import ModelProfileFactory
+from llm.providers.base import ToolChoice
 from resources.factories import ResourceVersionFactory
 from run.models import Run, RunEndReason, RunEvent, RunEventKind, RunKind, RunStatus
 from run.tasks import claim_run
@@ -432,6 +433,57 @@ def test_result_can_be_submitted_just_before_the_step_limit(conversation, app_us
     )
     run = execute(run, adapter)
     assert any(RESULT_GRACE_NOTICE in m.text for m in adapter.requests[1].messages)
+    assert run.status == RunStatus.COMPLETED
+    assert run.result == {"verdict": "ok"}
+
+
+@pytest.mark.django_db
+def test_result_can_be_submitted_after_the_time_limit(conversation, app_user, monkeypatch):
+    monkeypatch.setattr(runner_module, "MAX_RUN_SECONDS", 0)
+    skill, _version = publish(app_user, tools=[], output_schema=RESULT_SCHEMA)
+    run = start_with_result(conversation, skill)
+    adapter = FakeAdapter([calls(("c1", "submit_result", {"verdict": "ok"})), reply("ここまでの結果です。")])
+    run = execute(run, adapter)
+    assert any(runner_module.TIME_GRACE_NOTICE in m.text for m in adapter.requests[0].messages)
+    assert adapter.requests[0].tool_choice != ToolChoice.NONE
+    assert adapter.requests[1].tool_choice == ToolChoice.NONE
+    assert run.status == RunStatus.COMPLETED
+    assert run.result == {"verdict": "ok"}
+
+
+@pytest.mark.django_db
+def test_time_grace_is_not_used_up_by_compaction(conversation, app_user, monkeypatch):
+    # 3ステップの後の区切りで、実行時間の上限と圧縮が重なる
+    state = {"over": False, "compact": False}
+    monkeypatch.setattr(Runner, "_time_over", lambda _self: state["over"])
+    monkeypatch.setattr(runner_module.compaction, "threshold", lambda _version: 0 if state["compact"] else 10**9)
+
+    class Script(FakeAdapter):
+        def stream(self, request):
+            served = len(self.requests)
+            yield from super().stream(request)
+            if served == 2:
+                state.update(over=True, compact=True)
+            elif served == 3:
+                state["compact"] = False
+
+    skill, _version = publish(app_user, tools=["todo_write"], output_schema=RESULT_SCHEMA)
+    run = start_with_result(conversation, skill)
+    todos = {"todos": [{"content": "読む", "status": "in_progress"}]}
+    adapter = Script(
+        [
+            *(calls((f"c{i}", "todo_write", todos), text=f"作業{i}" * 20) for i in range(3)),
+            reply("- 目的：請求書の確認"),
+            calls(("r1", "submit_result", {"verdict": "ok"})),
+            reply("ここまでの結果です。"),
+        ]
+    )
+    run = execute(run, adapter)
+    assert RunEvent.objects.filter(run=run, kind=RunEventKind.COMPACTION).exists()
+    grace = adapter.requests[4]
+    assert grace.tool_choice != ToolChoice.NONE
+    assert any(runner_module.TIME_GRACE_NOTICE in m.text for m in grace.messages)
+    assert adapter.requests[5].tool_choice == ToolChoice.NONE
     assert run.status == RunStatus.COMPLETED
     assert run.result == {"verdict": "ok"}
 

@@ -5227,6 +5227,10 @@ export interface components {
             name?: string;
             /** @description 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。版の外。design.md §9.1） */
             budget_department?: string | null;
+            /** @description 1時間あたりの実行回数の上限（本番の実行。修正チャットの実行は数えない）。空なら無制限。版の外。design.md §9.3 */
+            hourly_runs_limit?: number | null;
+            /** @description 同時実行数の上限（本番の実行）。空なら無制限。版の外。design.md §9.3 */
+            concurrent_runs_limit?: number | null;
             /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
             version?: number;
             description?: string;
@@ -6228,6 +6232,10 @@ export interface components {
             /** @description 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。版の外。design.md §9.1） */
             budget_department?: string | null;
             readonly budget_department_info: components["schemas"]["MinimumDepartment"] | null;
+            /** @description 1時間あたりの実行回数の上限（本番の実行。修正チャットの実行は数えない）。空なら無制限。版の外。design.md §9.3 */
+            hourly_runs_limit?: number | null;
+            /** @description 同時実行数の上限（本番の実行）。空なら無制限。版の外。design.md §9.3 */
+            concurrent_runs_limit?: number | null;
             /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
             version?: number;
             /** @default  */
@@ -6309,6 +6317,10 @@ export interface components {
             /** @description 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。版の外。design.md §9.1） */
             budget_department?: string | null;
             readonly budget_department_info: components["schemas"]["MinimumDepartment"] | null;
+            /** @description 1時間あたりの実行回数の上限（本番の実行。修正チャットの実行は数えない）。空なら無制限。版の外。design.md §9.3 */
+            hourly_runs_limit?: number | null;
+            /** @description 同時実行数の上限（本番の実行）。空なら無制限。版の外。design.md §9.3 */
+            concurrent_runs_limit?: number | null;
             /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
             version?: number;
             /** @default  */
@@ -6389,6 +6401,10 @@ export interface components {
             name: string;
             /** @description 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。版の外。design.md §9.1） */
             budget_department?: string | null;
+            /** @description 1時間あたりの実行回数の上限（本番の実行。修正チャットの実行は数えない）。空なら無制限。版の外。design.md §9.3 */
+            hourly_runs_limit?: number | null;
+            /** @description 同時実行数の上限（本番の実行）。空なら無制限。版の外。design.md §9.3 */
+            concurrent_runs_limit?: number | null;
             /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
             version?: number;
             /** @default  */
@@ -6469,6 +6485,10 @@ export interface components {
             name?: string;
             /** @description 個人タスクの予算を計上する部門（持ち主が所属している部門から選ぶ。作成で省くと、所属が1つならその部門。空で所属がなければシステムの枠。版の外。design.md §9.1） */
             budget_department?: string | null;
+            /** @description 1時間あたりの実行回数の上限（本番の実行。修正チャットの実行は数えない）。空なら無制限。版の外。design.md §9.3 */
+            hourly_runs_limit?: number | null;
+            /** @description 同時実行数の上限（本番の実行）。空なら無制限。版の外。design.md §9.3 */
+            concurrent_runs_limit?: number | null;
             /** @description 今の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
             version?: number;
             description?: string;
@@ -10567,6 +10587,15 @@ export interface operations {
             };
             /** @description 受け付けない形式 */
             415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HookError"];
+                };
+            };
+            /** @description タスク単位の受付頻度・同時実行数の上限に達している（design.md §9.3。しばらくしてから送り直す） */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

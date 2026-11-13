@@ -1,6 +1,6 @@
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import { describe, expect, it } from 'vitest'
-import { DCheckbox, DDecimalField, DFormAlert, DTextField } from '#components'
+import { DCheckbox, DDecimalField, DFormAlert, DNumberField, DTextField } from '#components'
 
 describe('DTextField', () => {
   it('null を空文字で表示し、入力した値を v-model に返す', async () => {
@@ -42,6 +42,16 @@ describe('DDecimalField', () => {
 
   it('空にしたら null を返す', async () => {
     const wrapper = await mountSuspended(DDecimalField, { props: { modelValue: '3' } })
+    const input = wrapper.find('input')
+    await input.setValue('')
+    await input.trigger('blur')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([null])
+  })
+})
+
+describe('DNumberField', () => {
+  it('空にしたら null を返す（undefined だと送られず、値を消せない）', async () => {
+    const wrapper = await mountSuspended(DNumberField, { props: { modelValue: 3 } })
     const input = wrapper.find('input')
     await input.setValue('')
     await input.trigger('blur')

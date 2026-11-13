@@ -28,6 +28,8 @@ const toForm = (task: TaskDetail) => ({
   notifyEvents: [...(task.notifyEvents ?? [])] as string[],
   notifyContent: task.notifyContent,
   notificationInstructions: task.notificationInstructions ?? '',
+  hourlyRunsLimit: task.hourlyRunsLimit ?? null,
+  concurrentRunsLimit: task.concurrentRunsLimit ?? null,
   changeReason: '',
 })
 const form = ref(toForm(props.task))
@@ -38,6 +40,11 @@ const version = ref(props.task.version ?? 0)
 const savedName = ref(props.task.name)
 // 個人タスクの予算を計上する部門も版の外にあり、変えたときだけ送る（design.md §9.1）
 const savedBudgetDepartment = ref(props.task.budgetDepartment ?? null)
+// 受付の上限も版の外にあり、変えたときだけ送る（design.md §9.3）
+const savedLimits = ref({
+  hourlyRunsLimit: props.task.hourlyRunsLimit ?? null,
+  concurrentRunsLimit: props.task.concurrentRunsLimit ?? null,
+})
 const budgetDepartments = useBudgetDepartments()
 const budgetDepartmentItems = computed(() => {
   const items = budgetDepartments.items.value
@@ -59,6 +66,10 @@ const reset = (task: TaskDetail = props.task) => {
   version.value = task.version ?? 0
   savedName.value = task.name
   savedBudgetDepartment.value = task.budgetDepartment ?? null
+  savedLimits.value = {
+    hourlyRunsLimit: task.hourlyRunsLimit ?? null,
+    concurrentRunsLimit: task.concurrentRunsLimit ?? null,
+  }
   errors.value = {}
   loadChoices()
 }
@@ -161,6 +172,10 @@ const { onSubmit, loading, errors } = createSubmit({
       version: version.value,
       ...(data.name !== savedName.value ? { name: data.name } : {}),
       ...(data.budgetDepartment !== savedBudgetDepartment.value ? { budgetDepartment: data.budgetDepartment } : {}),
+      ...(data.hourlyRunsLimit !== savedLimits.value.hourlyRunsLimit ? { hourlyRunsLimit: data.hourlyRunsLimit } : {}),
+      ...(data.concurrentRunsLimit !== savedLimits.value.concurrentRunsLimit
+        ? { concurrentRunsLimit: data.concurrentRunsLimit }
+        : {}),
       description: data.description,
       promptTemplate: data.promptTemplate,
       inputs: fromInputRows(data.inputs),
@@ -351,6 +366,30 @@ defineExpose({ onSubmit, loading, canPost, dirty, reset })
           class="max-w-none"
         />
       </template>
+    </DFormSection>
+
+    <DFormSection
+      :title="$t('受付の上限')"
+      :description="
+        $t(
+          'このタスクの本番の実行（入口・手動実行・チャットからの起動）を受け付ける数を抑えます。達している間は受け付けを断り、動いている実行は止めません。修正チャットの実行は数えません。版の外にあり、保存するとすぐに使います',
+        )
+      "
+    >
+      <DNumberField
+        v-model="form.hourlyRunsLimit"
+        :label="$t('1時間あたりの実行回数の上限')"
+        :hint="$t('直近1時間に受け付けた数で数えます。空なら無制限です')"
+        :min="1"
+        :error-messages="errors.hourlyRunsLimit"
+      />
+      <DNumberField
+        v-model="form.concurrentRunsLimit"
+        :label="$t('同時実行数の上限')"
+        :hint="$t('確認待ちの実行は数えません。空なら無制限です')"
+        :min="1"
+        :error-messages="errors.concurrentRunsLimit"
+      />
     </DFormSection>
 
     <DTextField

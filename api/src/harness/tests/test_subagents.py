@@ -3,6 +3,7 @@
 import io
 import tarfile
 from datetime import timedelta
+from decimal import Decimal
 from typing import Any, cast
 
 import pytest
@@ -36,7 +37,7 @@ from run.models import (
 )
 from run.tasks import _discard_subagent_copies, _recover, claim_run, claim_subagent
 from skill.factories import SkillFactory, SkillVersionFactory
-from usage.models import UsageLedger
+from usage.models import BudgetSettings, UsageLedger, UsagePurpose
 
 from .fakes import FakeAdapter, FakeSession, calls, reply
 from .test_waiting import JobSession, task_run
@@ -163,6 +164,46 @@ def test_parent_starts_a_subagent_and_releases_the_worker_while_it_runs(conversa
     assert run.status == RunStatus.WAITING_BACKGROUND
     assert sessions[0].suspends == [True]
     assert not run.has_live_attempt()
+
+
+def run_cost(run: Run, *, spent: str, limit: str) -> None:
+    """Runの利用額と、Runごとの金額の上限（design.md §9.4）を決める"""
+    UsageLedger.objects.create(
+        owner=run.owner,
+        run=run,
+        budget=run.budget,
+        model_version=run.model_version,
+        purpose=UsagePurpose.STEP,
+        input_tokens=0,
+        output_tokens=0,
+        cost=Decimal(spent),
+    )
+    defaults = BudgetSettings.load()
+    defaults.run_cost_limit = Decimal(limit)
+    defaults.save()
+
+
+def test_subagent_is_stopped_at_the_run_cost_limit(conversation):
+    run, subagent = start_and_wait(conversation)
+    run_cost(run, spent="9", limit="8")  # 子の呼出しも、親のRunの金額に数える
+    adapter = FakeAdapter([reply("呼ばれない")])
+    run_child(subagent, adapter)
+
+    assert subagent.status == SubagentStatus.FAILED
+    assert "1回の実行で使える金額の上限" in subagent.error
+    assert adapter.requests == []
+
+
+def test_low_run_cost_is_noticed_in_each_context(conversation):
+    run, subagent = start_and_wait(conversation)
+    run_cost(run, spent="9", limit="10")
+    run_child(subagent, FakeAdapter([reply("合計は 3 です。")]))
+    run_parent(run, FakeAdapter([reply("合計は 3 でした。")]))
+
+    # 親は子の文脈を読まないので、子が知らされていても親に知らせる（harness.md §10.6）
+    notices = RunEvent.objects.filter(run=run, kind=RunEventKind.CONTEXT, data__cost_low=True)
+    assert notices.filter(subagent=subagent).count() == 1
+    assert notices.filter(subagent__isnull=True).count() == 1
 
 
 def test_finished_subagent_wakes_the_parent_with_its_report_and_files(conversation):

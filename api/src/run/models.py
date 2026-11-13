@@ -128,6 +128,7 @@ class RunEndReason(models.IntegerChoices):
     SKILL = 19, _("Skillを使えない")
     TASK = 20, _("タスクを続けられない")
     TIME_LIMIT = 21, _("実行時間の上限")
+    COST_LIMIT = 22, _("1回の実行の金額の上限")
     INTERNAL = 99, _("内部のエラー")
 
 

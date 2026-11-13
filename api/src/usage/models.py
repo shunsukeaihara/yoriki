@@ -32,7 +32,7 @@ def month_start(now: datetime | None = None) -> datetime:
 
 
 class BudgetSettings(models.Model):
-    """既定の上限（1行だけ）。空なら無制限（design.md §9.1・§9.2）"""
+    """既定の上限（1行だけ）。空なら無制限（design.md §9.1・§9.2・§9.4）"""
 
     department_monthly_limit = models.DecimalField(
         _("部門の月の上限（米ドル）"), max_digits=14, decimal_places=2, null=True, blank=True
@@ -44,6 +44,10 @@ class BudgetSettings(models.Model):
     system_monthly_runs = models.PositiveIntegerField(_("システムの枠の月の実行回数の上限"), null=True, blank=True)
     department_concurrent_runs = models.PositiveIntegerField(_("部門の同時実行数の上限"), null=True, blank=True)
     system_concurrent_runs = models.PositiveIntegerField(_("システムの枠の同時実行数の上限"), null=True, blank=True)
+    # 1つのRunのLLM呼出しの金額の上限（design.md §9.4）。部門ごと・タスクごとの上書きは持たない
+    run_cost_limit = models.DecimalField(
+        _("1回の実行の金額の上限（米ドル）"), max_digits=14, decimal_places=2, null=True, blank=True
+    )
 
     updated = models.DateTimeField(auto_now=True)
 

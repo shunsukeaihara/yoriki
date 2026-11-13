@@ -203,6 +203,38 @@ def test_judge_is_skipped_without_budget(app_user, model, monkeypatch):
 
 
 @pytest.mark.django_db
+def test_judge_is_skipped_at_the_run_cost_limit(app_user, model, monkeypatch):
+    skill = skill_with_draft(app_user)
+    evaluation = start_evaluation(skill, cases=[case(skill)], actor=app_user, model_version=model.current_version)
+    result = evaluation.results.get()
+    execute(result.base_run, submit(True))
+    execute(result.draft_run, submit(True))
+    # 判定の利用量はDraftの側のRunに数えるので、そのRunの上限にも収める（design.md §9.4）
+    run = result.draft_run
+    assert run is not None
+    UsageLedger.objects.create(
+        owner=run.owner,
+        run=run,
+        budget=run.budget,
+        model_version=run.model_version,
+        purpose=UsagePurpose.STEP,
+        input_tokens=0,
+        output_tokens=0,
+        cost=Decimal(1),
+    )
+    defaults = BudgetSettings.load()
+    defaults.run_cost_limit = Decimal(1)
+    defaults.save()
+    adapter = judge(monkeypatch)
+    progress_evaluation(evaluation.pk)
+
+    result.refresh_from_db()
+    assert result.verdict is None
+    assert "1回の実行で使える金額の上限" in result.judge_note
+    assert adapter.requests == []
+
+
+@pytest.mark.django_db
 def test_personal_skill_evaluation_charges_the_chosen_department(app_user, model):
     first = DepartmentMembershipFactory.create(user=app_user).department
     second = DepartmentMembershipFactory.create(user=app_user).department

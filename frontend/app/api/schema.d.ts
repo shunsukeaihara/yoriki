@@ -2706,7 +2706,7 @@ export interface components {
         };
         /** @enum {unknown} */
         BlankEnum: "";
-        /** @description 既定の上限（design.md §9.1・§9.2）。空なら無制限 */
+        /** @description 既定の上限（design.md §9.1・§9.2・§9.4）。空なら無制限 */
         BudgetSettings: {
             /**
              * Format: decimal
@@ -2726,6 +2726,11 @@ export interface components {
             department_concurrent_runs: number | null;
             /** @description システムの枠の同時実行数の上限 */
             system_concurrent_runs: number | null;
+            /**
+             * Format: decimal
+             * @description 1回の実行（会話の発言1回、タスクの実行1回等）のLLMの利用額の上限（米ドル）。空なら無制限
+             */
+            run_cost_limit: string | null;
             /** @description システムの枠の今月の利用額・上限・残額 */
             readonly system: components["schemas"]["BudgetStatus"];
             /** Format: date-time */
@@ -4928,7 +4933,7 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["TriggerReceipt"][];
         };
-        /** @description 既定の上限（design.md §9.1・§9.2）。空なら無制限 */
+        /** @description 既定の上限（design.md §9.1・§9.2・§9.4）。空なら無制限 */
         PatchedBudgetSettingsRequest: {
             /**
              * Format: decimal
@@ -4948,6 +4953,11 @@ export interface components {
             department_concurrent_runs?: number | null;
             /** @description システムの枠の同時実行数の上限 */
             system_concurrent_runs?: number | null;
+            /**
+             * Format: decimal
+             * @description 1回の実行（会話の発言1回、タスクの実行1回等）のLLMの利用額の上限（米ドル）。空なら無制限
+             */
+            run_cost_limit?: string | null;
         };
         /** @description Connectorの更新。使うDB接続と範囲・部門は変えられないので、読み取り専用にする */
         PatchedConnectorUpdateRequest: {
@@ -5375,10 +5385,11 @@ export interface components {
          *     * `19` - Skillを使えない
          *     * `20` - タスクを続けられない
          *     * `21` - 実行時間の上限
+         *     * `22` - 1回の実行の金額の上限
          *     * `99` - 内部のエラー
          * @enum {integer}
          */
-        RunEndReasonEnum: 1 | 2 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 99;
+        RunEndReasonEnum: 1 | 2 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 99;
         /**
          * @description * `1` - 状態の遷移
          *     * `10` - 利用者の発言

@@ -7668,7 +7668,7 @@ components:
       - ''
     BudgetSettings:
       type: object
-      description: 既定の上限（design.md §9.1・§9.2）。空なら無制限
+      description: 既定の上限（design.md §9.1・§9.2・§9.4）。空なら無制限
       properties:
         department_monthly_limit:
           type: string
@@ -7706,6 +7706,12 @@ components:
           minimum: 0
           nullable: true
           description: システムの枠の同時実行数の上限
+        run_cost_limit:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          nullable: true
+          description: 1回の実行（会話の発言1回、タスクの実行1回等）のLLMの利用額の上限（米ドル）。空なら無制限
         system:
           allOf:
           - $ref: '#/components/schemas/BudgetStatus'
@@ -7719,6 +7725,7 @@ components:
       - department_concurrent_runs
       - department_monthly_limit
       - department_monthly_runs
+      - run_cost_limit
       - system
       - system_concurrent_runs
       - system_monthly_limit
@@ -12284,7 +12291,7 @@ components:
             $ref: '#/components/schemas/TriggerReceipt'
     PatchedBudgetSettingsRequest:
       type: object
-      description: 既定の上限（design.md §9.1・§9.2）。空なら無制限
+      description: 既定の上限（design.md §9.1・§9.2・§9.4）。空なら無制限
       properties:
         department_monthly_limit:
           type: string
@@ -12322,6 +12329,12 @@ components:
           minimum: 0
           nullable: true
           description: システムの枠の同時実行数の上限
+        run_cost_limit:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
+          nullable: true
+          description: 1回の実行（会話の発言1回、タスクの実行1回等）のLLMの利用額の上限（米ドル）。空なら無制限
     PatchedConnectorUpdateRequest:
       type: object
       description: Connectorの更新。使うDB接続と範囲・部門は変えられないので、読み取り専用にする
@@ -13233,6 +13246,7 @@ components:
       - 19
       - 20
       - 21
+      - 22
       - 99
       type: integer
       description: |-
@@ -13250,6 +13264,7 @@ components:
         * `19` - Skillを使えない
         * `20` - タスクを続けられない
         * `21` - 実行時間の上限
+        * `22` - 1回の実行の金額の上限
         * `99` - 内部のエラー
     RunEventKindEnum:
       enum:

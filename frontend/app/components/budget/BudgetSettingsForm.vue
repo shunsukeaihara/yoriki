@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** 予算の既定の上限（金額は design.md §9.1、実行回数・同時実行数は §9.2）。空なら無制限。部門の上限は部門ごとに上書きできる */
+/** 予算の既定の上限（金額は design.md §9.1、実行回数・同時実行数は §9.2、1回の実行の金額は §9.4）。空なら無制限。部門の上限は部門ごとに上書きできる */
 const props = defineProps<{ settings: BudgetSettings; readonly?: boolean }>()
 const emit = defineEmits<{ updated: [value: BudgetSettings] }>()
 const api = useAPI()
@@ -13,6 +13,7 @@ const toForm = (value: BudgetSettings) => ({
   systemMonthlyLimit: value.systemMonthlyLimit,
   systemMonthlyRuns: value.systemMonthlyRuns,
   systemConcurrentRuns: value.systemConcurrentRuns,
+  runCostLimit: value.runCostLimit,
 })
 const form = ref(toForm(props.settings))
 const saved = ref(JSON.stringify(form.value))
@@ -88,6 +89,15 @@ const { onSubmit, loading, errors } = createSubmit({
       :min="0"
       :disabled="readonly"
       :error-messages="errors.systemConcurrentRuns"
+    />
+    <DDecimalField
+      v-model="form.runCostLimit"
+      :label="$t('1回の実行の金額の上限（米ドル）')"
+      :hint="$t('会話の発言1回・タスクの実行1回ごとの、LLMの利用額の上限です。空なら無制限です')"
+      :decimal-places="2"
+      :min="0.01"
+      :disabled="readonly"
+      :error-messages="errors.runCostLimit"
     />
     <div v-if="!readonly">
       <DBtn :disabled="!dirty" :loading="loading" @click="onSubmit">{{ $t('保存') }}</DBtn>

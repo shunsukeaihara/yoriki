@@ -46,7 +46,7 @@ def _status(serializer, budget: Budget | None) -> dict[str, Any]:
 
 
 class BudgetSettingsSerializer(serializers.ModelSerializer):
-    """既定の上限（design.md §9.1・§9.2）。空なら無制限"""
+    """既定の上限（design.md §9.1・§9.2・§9.4）。空なら無制限"""
 
     department_monthly_limit = limit_field(_("部門の月の上限（米ドル）。部門ごとに上書きできる"))
     system_monthly_limit = limit_field(
@@ -56,6 +56,13 @@ class BudgetSettingsSerializer(serializers.ModelSerializer):
     system_monthly_runs = count_field(_("システムの枠の月の実行回数の上限"))
     department_concurrent_runs = count_field(_("部門の同時実行数の上限。部門ごとに上書きできる"))
     system_concurrent_runs = count_field(_("システムの枠の同時実行数の上限"))
+    run_cost_limit = serializers.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        min_value=Decimal("0.01"),
+        allow_null=True,
+        help_text=_("1回の実行（会話の発言1回、タスクの実行1回等）のLLMの利用額の上限（米ドル）。空なら無制限"),
+    )
     system = serializers.SerializerMethodField(help_text=_("システムの枠の今月の利用額・上限・残額"))
 
     class Meta:
@@ -67,6 +74,7 @@ class BudgetSettingsSerializer(serializers.ModelSerializer):
             "system_monthly_runs",
             "department_concurrent_runs",
             "system_concurrent_runs",
+            "run_cost_limit",
             "system",
             "updated",
         ]

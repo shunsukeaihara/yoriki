@@ -200,9 +200,25 @@ BUDGET_LOW_NOTICE = (
     "Less than 20% of this month's budget for this work remains. Focus on what matters most and avoid unnecessary "
     "steps."
 )
+COST_LIMIT_NOTICE = (
+    "The cost limit for this request has been reached. Tools are now disabled. Reply with text only: summarize what "
+    "you have done, what remains, and what the user should do next."
+)
+COST_LOW_NOTICE = (
+    "Less than 20% of the cost limit for this request remains. Focus on what matters most and avoid unnecessary steps."
+)
+
+# 予算で止める終わり方（月間予算と、Runごとの金額の上限。design.md §9.1・§9.4）
+BUDGET_END_REASONS = (RunEndReason.BUDGET, RunEndReason.COST_LIMIT)
 
 
-def budget_error(run: Run) -> str:
+def budget_end_reason(exc: budgets.BudgetExhausted) -> RunEndReason:
+    return RunEndReason.COST_LIMIT if isinstance(exc, budgets.RunCostExhausted) else RunEndReason.BUDGET
+
+
+def budget_error(run: Run, end_reason: RunEndReason = RunEndReason.BUDGET) -> str:
+    if end_reason == RunEndReason.COST_LIMIT:
+        return budgets.run_cost_error()
     return _("「%(name)s」の今月の予算を使い切ったので、作業を止めました。") % {"name": run.budget}
 
 
@@ -577,6 +593,9 @@ class Runner:
         if reserved is None:
             return False
         reservation, limit = reserved
+        if limit is not None and final is None:
+            # 予算の上限の知らせを今記録したので、最後の呼出しに入れる
+            items = build_items(self.run_obj, self._events(), self.inherited)
         try:
             result = self._ask_model(system, items, final=limit is not None)
             if isinstance(result, bool):
@@ -593,32 +612,36 @@ class Runner:
         """ステップの予算を予約する（harness.md §10.6）。予約と、最後のまとめのステップなら上限の種類を返す。
 
         通常のステップは、まとめの1回分を残して予約する。予約できなくなったら、まとめの分が残っていれば、Toolを使わない
-        最後の1ステップにする。それもできなければ失敗にしてNone。無制限の計上先では予約しない"""
+        最後の1ステップにする。それもできなければ失敗にしてNone。月間予算もRunごとの上限も無制限なら予約しない。
+        終わり方は、月間予算なら `budget`、Runごとの金額の上限なら `cost_limit`"""
         run = self.run_obj
         try:
             reservation = budgets.reserve(run, self.attempt, estimate, margin=Decimal(0) if final else estimate)
-        except budgets.BudgetExhausted:
-            pass
+        except budgets.BudgetExhausted as exc:
+            reason = budget_end_reason(exc)
         else:
             return reservation, final
         if final is None:
             try:
                 reservation = budgets.reserve(run, self.attempt, estimate)
-            except budgets.BudgetExhausted:
-                pass
+            except budgets.BudgetExhausted as exc:
+                reason = budget_end_reason(exc)
             else:
-                self._record(RunEventKind.CONTEXT, {"text": BUDGET_LIMIT_NOTICE})
-                return reservation, RunEndReason.BUDGET
-        self._fail(RunEndReason.BUDGET, budget_error(run))
+                notice = COST_LIMIT_NOTICE if reason == RunEndReason.COST_LIMIT else BUDGET_LIMIT_NOTICE
+                self._record(RunEventKind.CONTEXT, {"text": notice})
+                return reservation, reason
+        self._fail(reason, budget_error(run, reason))
         return None
 
     def _notify_budget_low(self) -> None:
-        """残りが上限の2割を切ったら、Runの中で1回だけ知らせる（harness.md §10.6）"""
+        """月間予算・Runごとの上限の残りが2割を切ったら、それぞれ1回だけ知らせる（harness.md §10.6）。
+        親は子の文脈を読まないので、親と各サブエージェントの文脈ごとに数える"""
         run = self.run_obj
-        if RunEvent.objects.filter(run=run, kind=RunEventKind.CONTEXT, data__budget_low=True).exists():
-            return
-        if budgets.is_low(run.budget):
+        noticed = RunEvent.objects.filter(run=run, subagent=self.subagent, kind=RunEventKind.CONTEXT)
+        if not noticed.filter(data__budget_low=True).exists() and budgets.is_low(run.budget):
             self._record(RunEventKind.CONTEXT, {"text": BUDGET_LOW_NOTICE, "budget_low": True})
+        if not noticed.filter(data__cost_low=True).exists() and budgets.run_is_low(run):
+            self._record(RunEventKind.CONTEXT, {"text": COST_LOW_NOTICE, "cost_low": True})
 
     def _finish_at_step_limit(self, text: str, end_reason: RunEndReason = RunEndReason.STEP_LIMIT) -> bool:
         """ステップ数・実行時間・予算の上限の最後のまとめの応答で終える。業務結果を確定していて、ジョブの結果もすべて親が見ていれば完了に
@@ -632,7 +655,7 @@ class Runner:
         )
         if any(t.name == SUBMIT_RESULT for t in self.tools) and not self._result_missing() and not jobs_left:
             return self._finish_with_reply(text, RunStatus.COMPLETED, RunEndReason.COMPLETED)
-        error = budget_error(self.run_obj) if end_reason == RunEndReason.BUDGET else ""
+        error = budget_error(self.run_obj, end_reason) if end_reason in BUDGET_END_REASONS else ""
         self._finish_with_reply(text, RunStatus.FAILED, end_reason, error=error)
         return False
 
@@ -1697,8 +1720,9 @@ class Runner:
         estimate = estimate_cost(version, sum(len(m.text) for m in request.messages))
         try:
             reservation = budgets.reserve(self.run_obj, self.attempt, estimate)
-        except budgets.BudgetExhausted:
-            self._fail(RunEndReason.BUDGET, budget_error(self.run_obj))
+        except budgets.BudgetExhausted as exc:
+            reason = budget_end_reason(exc)
+            self._fail(reason, budget_error(self.run_obj, reason))
             return False
         try:
             try:

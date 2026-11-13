@@ -245,6 +245,8 @@ class SubagentRunner(Runner):
     def _finish_at_step_limit(self, text: str, end_reason: RunEndReason = RunEndReason.STEP_LIMIT) -> bool:
         if end_reason == RunEndReason.BUDGET:
             return self._finish(text, SubagentStatus.FAILED, error="this month's budget is used up")
+        if end_reason == RunEndReason.COST_LIMIT:
+            return self._finish(text, SubagentStatus.FAILED, error="the cost limit for this request was reached")
         return self._finish(text, SubagentStatus.FAILED, error="it reached the maximum number of steps")
 
     def _finish(self, text: str, status: SubagentStatus = SubagentStatus.COMPLETED, *, error: str = "") -> bool:

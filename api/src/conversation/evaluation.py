@@ -432,6 +432,8 @@ def _judge(evaluation: SkillEvaluation, result: SkillEvaluationResult) -> tuple[
         reservation = budgets.reserve(
             result.draft_run, None, estimate_cost(version, len(JUDGE_SYSTEM) + len(judge_input))
         )
+    except budgets.RunCostExhausted:
+        return None, "", _("1回の実行で使える金額の上限に達したので、判定していません。")
     except budgets.BudgetExhausted:
         return None, "", _("今月の予算が足りないので、判定していません。")
     request = ChatRequest(

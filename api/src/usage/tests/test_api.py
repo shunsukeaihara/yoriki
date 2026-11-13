@@ -64,6 +64,13 @@ def test_settings_need_the_budget_permissions(api_client, app_user):
     assert money(res.json()["system"]) == ("50.00", "12.5000", "37.5000")
     assert BudgetSettings.load().department_monthly_limit == Decimal(20)
     assert api_client.patch(SETTINGS, {"system_monthly_limit": "-1"}, format="json").status_code == 400
+    # Runごとの金額の上限（design.md §9.4）：0.01以上、空なら無制限
+    assert res.json()["run_cost_limit"] is None
+    res = api_client.patch(SETTINGS, {"run_cost_limit": "0.5"}, format="json")
+    assert (res.status_code, res.json()["run_cost_limit"]) == (200, "0.50")
+    assert api_client.patch(SETTINGS, {"run_cost_limit": "0"}, format="json").status_code == 400
+    assert api_client.patch(SETTINGS, {"run_cost_limit": None}, format="json").status_code == 200
+    assert BudgetSettings.load().run_cost_limit is None
 
 
 def test_department_override(api_client, app_user):

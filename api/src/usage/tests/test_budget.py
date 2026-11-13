@@ -1,4 +1,5 @@
-"""月間予算（design.md §9.1、harness.md §10.6）。計上先の決定、残額と予約、Runnerでの予約・まとめ・知らせ"""
+"""月間予算とRunごとの金額の上限（design.md §9.1・§9.4、harness.md §10.6）。計上先の決定、残額と予約、
+Runnerでの予約・まとめ・知らせ"""
 
 from datetime import timedelta
 from decimal import Decimal
@@ -49,6 +50,18 @@ def fixture_system_limit(db):
     return set_limit
 
 
+@pytest.fixture(name="run_limit")
+def fixture_run_limit(db):
+    """Runごとの金額の上限（基盤の既定）を決める"""
+
+    def set_limit(value: str | None) -> None:
+        defaults = BudgetSettings.load()
+        defaults.run_cost_limit = None if value is None else Decimal(value)
+        defaults.save()
+
+    return set_limit
+
+
 def start(conversation, body="請求書を確認して") -> Run:
     post_message(conversation, body=body, client_message_id="", actor=conversation.owner)
     return Run.objects.get(conversation=conversation)
@@ -63,11 +76,14 @@ def execute(run: Run, adapter: FakeAdapter) -> Run:
 
 
 def spend(budget: Budget, amount: str) -> None:
-    run = RunFactory.create(budget=budget)
+    spend_on(RunFactory.create(budget=budget), amount)
+
+
+def spend_on(run: Run, amount: str) -> None:
     UsageLedger.objects.create(
         owner=run.owner,
         run=run,
-        budget=budget,
+        budget=run.budget,
         model_version=run.model_version,
         purpose=UsagePurpose.STEP,
         input_tokens=0,
@@ -247,6 +263,7 @@ def test_exhausted_budget_ends_with_a_summary_without_tools(conversation, system
     assert run.end_reason == RunEndReason.BUDGET
     assert "使い切った" in run.error
     assert adapter.requests[-1].tool_choice == ToolChoice.NONE
+    assert any("budget for this work is almost used up" in m.text for m in adapter.requests[-1].messages)
     assert len(adapter.requests) == 2
 
 
@@ -288,3 +305,86 @@ def test_detached_reservation_counts_for_an_hour(system_limit):
     assert reservation is not None
     BudgetReservation.objects.filter(pk=reservation.pk).update(created=timezone.now() - timedelta(hours=2))
     assert budget.remaining() == Decimal(10)
+
+
+# --- Runごとの金額の上限（design.md §9.4） ---
+
+
+@pytest.mark.django_db
+def test_run_cost_limit_counts_only_the_run(run_limit):
+    run_limit("2.5")
+    budget = Budget.system()
+    spend(budget, "100")  # ほかのRunの利用額は数えない
+    run = RunFactory.create(budget=budget)
+    assert budgets.run_remaining(run) == Decimal("2.5")
+    attempt = ExecutionAttempt.start(run)
+    # 月の上限が無制限でも、Runごとの上限があれば予約する
+    reservation = budgets.reserve(run, attempt, Decimal(1), margin=Decimal(1))
+    assert reservation is not None
+    assert budgets.run_remaining(run) == Decimal("1.5")
+    with pytest.raises(budgets.RunCostExhausted):
+        budgets.reserve(run, attempt, Decimal(1), margin=Decimal(1))  # 残り1.5は、予約1＋余裕1に足りない
+    budgets.settle(reservation)
+    spend_on(run, "2")
+    assert budgets.run_remaining(run) == Decimal("0.5")
+    other = RunFactory.create(budget=budget)
+    assert budgets.reserve(other, ExecutionAttempt.start(other), Decimal(2)) is not None
+
+
+@pytest.mark.django_db
+def test_monthly_budget_is_the_reason_when_both_are_exhausted(system_limit, run_limit):
+    system_limit("0.5")
+    run_limit("0.5")
+    run = RunFactory.create(budget=Budget.system())
+    with pytest.raises(budgets.BudgetExhausted) as caught:
+        budgets.reserve(run, ExecutionAttempt.start(run), Decimal(1))
+    assert not isinstance(caught.value, budgets.RunCostExhausted)
+
+
+@pytest.mark.django_db
+def test_run_cost_limit_ends_with_a_summary_without_tools(conversation, run_limit, monkeypatch):
+    monkeypatch.setattr(runner_module, "estimate_cost", lambda _version, _tokens: Decimal(1))
+    run_limit("3")
+    run = start(conversation)  # 受付では確かめない
+    todos = {"todos": [{"content": "読む", "status": "pending"}]}
+    adapter = FakeAdapter([calls(("c1", "todo_write", todos)), reply("ここまでの結果です。")])
+    run = execute(run, adapter)
+
+    # 1回目：残り3は予約1＋まとめの1以上。2回目：残り1.8では足りないので、まとめの1回だけ
+    assert run.status == RunStatus.FAILED
+    assert run.end_reason == RunEndReason.COST_LIMIT
+    assert "1回の実行で使える金額の上限（3.00米ドル）" in run.error
+    assert adapter.requests[-1].tool_choice == ToolChoice.NONE
+    assert any("cost limit for this request" in m.text for m in adapter.requests[-1].messages)
+    assert len(adapter.requests) == 2
+    assert not BudgetReservation.objects.exists()
+
+
+@pytest.mark.django_db
+def test_run_cost_limit_without_room_for_a_summary_fails_without_calling(conversation, run_limit, monkeypatch):
+    monkeypatch.setattr(runner_module, "estimate_cost", lambda _version, _tokens: Decimal(1))
+    run_limit("0.5")
+    run = start(conversation)
+    adapter = FakeAdapter([reply("呼ばれない")])
+    run = execute(run, adapter)
+    assert run.end_reason == RunEndReason.COST_LIMIT
+    assert adapter.requests == []
+
+
+@pytest.mark.django_db
+def test_low_run_cost_is_noticed_once(conversation, run_limit, monkeypatch):
+    monkeypatch.setattr(runner_module, "estimate_cost", lambda _version, _tokens: Decimal("0.1"))
+    run_limit("10")
+    run = start(conversation)
+    spend_on(run, "7")
+    todos = {"todos": [{"content": "読む", "status": "pending"}]}
+    adapter = FakeAdapter(
+        [calls(("c1", "todo_write", todos)), calls(("c2", "todo_write", todos)), reply("終わりました。")]
+    )
+    run = execute(run, adapter)
+
+    # 1回目の後に残り1.8で2割を切る。2回目の後も切っているが、知らせるのは1回
+    assert run.status == RunStatus.COMPLETED
+    assert RunEvent.objects.filter(run=run, kind=RunEventKind.CONTEXT, data__cost_low=True).count() == 1
+    assert not RunEvent.objects.filter(run=run, kind=RunEventKind.CONTEXT, data__budget_low=True).exists()
+    assert any("cost limit for this request remains" in m.text for m in adapter.requests[1].messages)

@@ -1,4 +1,4 @@
-"""予算の計上先の決定と、LLM呼出しごとの予約・精算（design.md §9.1、harness.md §10.6）"""
+"""予算の計上先の決定と、LLM呼出しごとの予約・精算（design.md §9.1・§9.4、harness.md §10.6）"""
 
 from dataclasses import dataclass
 from decimal import Decimal
@@ -21,6 +21,10 @@ class BudgetUnavailable(Exception):
 
 class BudgetExhausted(Exception):
     """LLM呼出しの予約ができない"""
+
+
+class RunCostExhausted(BudgetExhausted):
+    """Runごとの金額の上限に達していて、LLM呼出しの予約ができない（design.md §9.4）"""
 
 
 def for_member(user, department: Department | None) -> Budget:
@@ -127,16 +131,33 @@ def check(budget: Budget, *, runs: int = 1, lock: bool = True) -> Budget:
     return budget
 
 
+def run_remaining(run, defaults: BudgetSettings | None = None) -> Decimal | None:
+    """そのRunで使える残額（Runごとの上限 −（そのRunの利用額＋そのRunの有効な予約））。無制限ならNone。
+    サブエージェント・圧縮・評価の判定の呼出しも、同じRunに記録されている（design.md §9.4）"""
+    limit = (defaults or BudgetSettings.load()).run_cost_limit
+    if limit is None:
+        return None
+    spent = UsageLedger.objects.filter(run=run).aggregate(t=Sum("cost"))["t"] or Decimal(0)
+    reserved = BudgetReservation.objects.active().filter(run=run).aggregate(t=Sum("amount"))["t"] or Decimal(0)
+    return limit - spent - reserved
+
+
 def reserve(run, attempt, amount: Decimal, *, margin: Decimal = Decimal(0)) -> BudgetReservation | None:
-    """計上先の行をロックし、残額が予約額＋余裕（まとめの1回分）以上なら予約する。無制限なら予約しない。
+    """計上先の行をロックし、計上先の残額とRunの残額が予約額＋余裕（まとめの1回分）以上なら予約する。どちらも
+    無制限なら予約しない。同じRunの親とサブエージェントも同じ行をロックするので、Runごとの上限も超えない。
     `attempt` がNoneなら、Runが終わった後の呼出し（評価の判定）の予約"""
     with transaction.atomic():
         budget = Budget.objects.select_for_update().get(pk=run.budget_id)
-        remaining = budget.remaining()
-        if remaining is None:
+        defaults = BudgetSettings.load()
+        remaining = budget.remaining(defaults)
+        run_left = run_remaining(run, defaults)
+        if remaining is None and run_left is None:
             return None
-        if remaining < amount + margin:
+        # 両方に達しているときは、月間予算を理由にする
+        if remaining is not None and remaining < amount + margin:
             raise BudgetExhausted()
+        if run_left is not None and run_left < amount + margin:
+            raise RunCostExhausted()
         return BudgetReservation.objects.create(budget=budget, run=run, attempt=attempt, amount=amount)
 
 
@@ -154,6 +175,24 @@ def is_low(budget: Budget) -> bool:
         return False
     remaining = budget.remaining(defaults)
     return remaining is not None and remaining < limit * LOW_RATIO
+
+
+def run_is_low(run) -> bool:
+    """Runごとの上限の残りが2割を切った"""
+    defaults = BudgetSettings.load()
+    limit = defaults.run_cost_limit
+    if not limit:
+        return False
+    remaining = run_remaining(run, defaults)
+    return remaining is not None and remaining < limit * LOW_RATIO
+
+
+def run_cost_error() -> str:
+    """Runごとの金額の上限で止めたときに、利用者に見せる理由"""
+    limit = BudgetSettings.load().run_cost_limit
+    if limit is None:
+        return _("1回の実行で使える金額の上限に達したので、作業を止めました。")
+    return _("1回の実行で使える金額の上限（%(limit)s米ドル）に達したので、作業を止めました。") % {"limit": limit}
 
 
 @dataclass(frozen=True)

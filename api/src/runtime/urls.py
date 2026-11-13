@@ -1,6 +1,7 @@
+from django.urls import path
 from rest_framework.routers import DefaultRouter
 
-from .views import RuntimeProfileVersionViewSet, RuntimeProfileViewSet
+from .views import PlatformSettingsAPIView, RuntimeProfileVersionViewSet, RuntimeProfileViewSet
 
 router = DefaultRouter()
 
@@ -11,4 +12,7 @@ router.register(
     basename="runtime_profile_version_viewset",
 )
 
-urlpatterns = router.urls
+urlpatterns = [
+    path("v1/platform_settings/", PlatformSettingsAPIView.as_view()),
+    *router.urls,
+]

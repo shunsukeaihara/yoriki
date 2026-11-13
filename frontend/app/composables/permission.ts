@@ -27,6 +27,9 @@ export const PermissionCode = {
   ADD_RUNTIME_PROFILE: 'runtime.add_runtimeprofile',
   CHANGE_RUNTIME_PROFILE: 'runtime.change_runtimeprofile',
   DELETE_RUNTIME_PROFILE: 'runtime.delete_runtimeprofile',
+  // 基盤の設定（ワークスペースの保存期限。design.md §8）
+  VIEW_PLATFORM_SETTINGS: 'runtime.view_platformsettings',
+  CHANGE_PLATFORM_SETTINGS: 'runtime.change_platformsettings',
   VIEW_DATABASE_CONNECTION: 'connector.view_databaseconnection',
   ADD_DATABASE_CONNECTION: 'connector.add_databaseconnection',
   CHANGE_DATABASE_CONNECTION: 'connector.change_databaseconnection',

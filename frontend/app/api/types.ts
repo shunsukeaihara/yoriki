@@ -30,6 +30,8 @@ export type BudgetSettingsWrite = Api<'PatchedBudgetSettingsRequest'>
 export type DepartmentBudget = Api<'DepartmentBudget'>
 export type DepartmentBudgetWrite = Api<'PatchedDepartmentBudgetRequest'>
 export type MyBudget = Api<'MyBudget'>
+export type PlatformSettings = Api<'PlatformSettings'>
+export type PlatformSettingsWrite = Api<'PatchedPlatformSettingsRequest'>
 
 // 一覧の検索条件（バックエンドの FilterSet と合わせる）
 export type LLMConnectionListParams = ListParams & { name?: string; kind?: ProviderKindEnum; isActive?: boolean }

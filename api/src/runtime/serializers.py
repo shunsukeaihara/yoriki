@@ -9,7 +9,7 @@ from rest_framework import serializers
 from utils.exceptions import Conflict
 
 from .errors import RegistryError, VersionConflict
-from .models import VERSION_FIELDS, RuntimeProfile, RuntimeProfileVersion
+from .models import VERSION_FIELDS, PlatformSettings, RuntimeProfile, RuntimeProfileVersion
 from .registry import inspect_image
 
 # 資源の上限として入力を受け付ける項目（イメージの情報はレジストリから読む）
@@ -199,3 +199,22 @@ class RuntimeProfileSerializer(serializers.ModelSerializer):
                 setattr(instance, name, validated_data[name])
         instance.save(update_fields=["name", "is_active", "updated"])
         return instance
+
+
+class PlatformSettingsSerializer(serializers.ModelSerializer):
+    """基盤の設定（design.md §5.1）"""
+
+    workspace_retention_days = serializers.IntegerField(
+        min_value=1,
+        max_value=36500,
+        allow_null=True,
+        help_text=_(
+            "会話・修正チャットのワークスペース（作業ファイル）を、最後の実行が終わってから残す日数。"
+            "空なら自動では消さない"
+        ),
+    )
+
+    class Meta:
+        model = PlatformSettings
+        fields = ["workspace_retention_days", "updated"]
+        read_only_fields = ["updated"]

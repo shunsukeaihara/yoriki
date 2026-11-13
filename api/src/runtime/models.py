@@ -186,3 +186,31 @@ class RuntimeProfileVersion(models.Model):
 
 auditlog.register(RuntimeProfile, exclude_fields=["updated"])
 auditlog.register(RuntimeProfileVersion)
+
+
+class PlatformSettings(models.Model):
+    """基盤の設定（1行だけ。design.md §5.1）"""
+
+    # 会話・修正チャットのワークスペース（snapshot）を、最後のRunが終わってから残す日数。空なら自動では消さない
+    # （design.md §8。run.cleanup）
+    workspace_retention_days = models.PositiveIntegerField(
+        _("ワークスペースの保存期限（日数）"), null=True, blank=True, default=30
+    )
+
+    updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _("基盤の設定")
+        verbose_name_plural = verbose_name
+        default_permissions = ("view", "change")
+
+    def __str__(self):
+        return str(_("基盤の設定"))
+
+    @classmethod
+    def load(cls) -> "PlatformSettings":
+        obj, _created = cls.objects.get_or_create(pk=1)
+        return obj
+
+
+auditlog.register(PlatformSettings, exclude_fields=["updated"])

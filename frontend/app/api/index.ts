@@ -366,6 +366,12 @@ const createAPI = () => {
         patch: (data: DepartmentBudgetWrite) =>
           http.patch<DepartmentBudget, DepartmentBudget>(`v1/budgets/departments/${id}/`, data),
       }),
+      // 基盤の設定（ワークスペースの保存期限）
+      platformSettings: {
+        get: () => http.get<PlatformSettings, PlatformSettings>('v1/platform_settings/'),
+        patch: (data: PlatformSettingsWrite) =>
+          http.patch<PlatformSettings, PlatformSettings>('v1/platform_settings/', data),
+      },
       runtimeProfiles: (id?: string) => ({
         ...resource<RuntimeProfile, RuntimeProfileWrite, RuntimeProfileListParams>(http, 'v1/runtime_profiles', id),
         makeDefault: () => http.post<RuntimeProfile, RuntimeProfile>(`v1/runtime_profiles/${id}/make_default/`),

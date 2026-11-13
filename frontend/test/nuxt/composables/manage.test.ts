@@ -47,6 +47,15 @@ describe('useManageMenu', () => {
   })
 })
 
+describe('useManageMenu（基盤の設定）', () => {
+  it('基盤の設定は、基盤の設定のpermissionを持つ人にだけ出す', () => {
+    login([PermissionCode.VIEW_RUNTIME_PROFILE])
+    expect(useManageMenu().links.value.map((link) => link.to)).toEqual(['/manage/runtime_profiles'])
+    login([PermissionCode.VIEW_PLATFORM_SETTINGS])
+    expect(useManageMenu().links.value.map((link) => link.to)).toEqual(['/manage/settings'])
+  })
+})
+
 describe('useManageMenu（連携）', () => {
   it('入口と出口は「連携」の見出しの下に、それぞれのpermissionで出す', () => {
     login([PermissionCode.VIEW_TRIGGER_BINDING])

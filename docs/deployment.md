@@ -287,7 +287,7 @@ docker compose -f deploy/compose.yaml exec api python manage.py resume_workers
 - **掃除**：使わなくなったSandboxイメージは、RunやCheckpointが参照していないことを確認してから削除する（design.md §10.1）。`docker image prune` を無条件に実行しない。
 - **Sandboxのコンテナ**：LauncherはAttemptを終えるときにSandboxを `docker rm -f` で消す。Workerが落ちて残ったものは、次にSandboxを起動するときに、終わったAttemptのもの（ラベル `org.yoriki.attempt`）を探して消す。別のDBのAttemptのもの（ラベル `org.yoriki.database` のPostgreSQLのクラスタの識別子とDBの名前が違うもの。同じDockerで手元の開発とテストを動かすとき等）と、このラベルのないもの（ラベルを付ける前の版が起動したもの）は、どのDBのものか判定できないので消さない。クラスタの識別子（`pg_control_system()`）を読めない環境ではDBの名前だけで見分けるので、同じDockerで複数の環境を動かすときは、それぞれのDBの名前を分ける。ラベルのないものが残っていたら、Runが動いていないことを確かめてから `docker ps -a --filter label=org.yoriki.sandbox=1` で探して消す。
 - **結果の配信**：出口（Webhook・Zapier）への送信はqclusterから行う。qclusterのコンテナ（Workerサーバーを含む）から送り先（`hooks.zapier.com` 等）へのHTTPSの外向きの通信が要る。環境変数のproxy（`HTTPS_PROXY`）は使わず、名前を引いて確かめたアドレスへ直接つなぐ（design.md §4.4）。社内のアドレスへ送るときだけ、`YORIKI_DELIVERY_ALLOWED_NETWORKS` に許すネットワーク（CIDR）を指定する。出口へ成果物を渡すときは、外（Zapier等）から見たYorikiのURLを `YORIKI_PUBLIC_URL` に指定する（取得用のURLの元。未設定なら、ファイルを渡す配信は失敗にする）。認証プロキシの裏に置く場合も、`/api/files/` はプロキシを通さない（§8.6）。
-- **ファイルの保存先**：添付・成果物・Workspaceのsnapshot（tar）は、`YORIKI_STORAGE_BACKEND` で選んだ保存先（Localなら `/var/lib/yoriki/objects`、S3ならbucket）に置く（§7.2）。ワークスペースの保存期限での削除はまだない。添付と成果物は明示的に消すまで残す（design.md §8、docs/status.md §3）。
+- **ファイルの保存先**：添付・成果物・Workspaceのsnapshot（tar）は、`YORIKI_STORAGE_BACKEND` で選んだ保存先（Localなら `/var/lib/yoriki/objects`、S3ならbucket）に置く（§7.2）。会話のワークスペースのsnapshotは、保存期限（管理画面の「基盤の設定」。初期値30日）を過ぎると1日1回の清掃（Q2のSchedule `cleanup_workspaces`）で消す。QClusterを止めている間は `python manage.py cleanup_workspaces` で同じ処理を動かせる（`--dry-run` は件数だけ）。添付と成果物は明示的に消すまで残す（design.md §8、docs/status.md §3）。
 
 ### 7.1 Sandboxを動かすホスト
 

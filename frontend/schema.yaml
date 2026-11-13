@@ -6469,6 +6469,46 @@ paths:
               schema:
                 $ref: '#/components/schemas/ModelProfile'
           description: ''
+  /api/v1/platform_settings/:
+    get:
+      operationId: v1_platform_settings_retrieve
+      description: 基盤の設定（ワークスペースの保存期限。design.md §8）
+      tags:
+      - manage/platform_settings
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformSettings'
+          description: ''
+    patch:
+      operationId: v1_platform_settings_partial_update
+      description: 基盤の設定（ワークスペースの保存期限。design.md §8）
+      tags:
+      - manage/platform_settings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedPlatformSettingsRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedPlatformSettingsRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedPlatformSettingsRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlatformSettings'
+          description: ''
   /api/v1/runtime_profiles/:
     get:
       operationId: v1_runtime_profiles_list
@@ -12664,6 +12704,16 @@ components:
           type: string
           writeOnly: true
           maxLength: 500
+    PatchedPlatformSettingsRequest:
+      type: object
+      description: 基盤の設定（design.md §5.1）
+      properties:
+        workspace_retention_days:
+          type: integer
+          maximum: 36500
+          minimum: 1
+          nullable: true
+          description: 会話・修正チャットのワークスペース（作業ファイル）を、最後の実行が終わってから残す日数。空なら自動では消さない
     PatchedRuntimeProfileRequest:
       type: object
       description: |-
@@ -13008,6 +13058,23 @@ components:
           readOnly: true
       required:
       - status
+    PlatformSettings:
+      type: object
+      description: 基盤の設定（design.md §5.1）
+      properties:
+        workspace_retention_days:
+          type: integer
+          maximum: 36500
+          minimum: 1
+          nullable: true
+          description: 会話・修正チャットのワークスペース（作業ファイル）を、最後の実行が終わってから残す日数。空なら自動では消さない
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - updated
+      - workspace_retention_days
     ProviderKindEnum:
       enum:
       - 1

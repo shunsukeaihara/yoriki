@@ -317,7 +317,8 @@ Runの中身が外へ出る経路をすべて列挙し、どれにも「結果�
 | 入口 | タスクの画面で作り、変える（システムのタスクも同じ画面を使う） | 入口の一覧（見るだけ） |
 | 出口 | 個人の出口（画面の通知・本人へのDM）はタスクの編集の中で選ぶ | 部門・全社・システムの出口 |
 | Runの結果・ログ | 会話の画面（本人）、タスクのRunの画面（`/tasks/{task}/runs/{run}`。管理できる人・結果を見られる人。画面の通知からも開く）、タスクをまたいだ実行の履歴（`/runs`。本番の実行のうち結果を見られるもの。修正チャットのRunは出さない。design.md §11.9） | システムタスクも同じタスクのRunの画面 |
-| ユーザー・部門・SSO・LLM・Runtime Profile・基盤の設定（ワークスペースの保存期限。design.md §8） | — | `/manage` |
+| ユーザー・部門・SSO・LLM・Runtime Profile | — | `/manage` |
+| 基盤の設定（ワークスペースの保存期限。design.md §8） | — | `/manage/settings`（`runtime.*_platformsettings`。Groupは作らず、基盤管理者が扱う） |
 | 予算（design.md §9.1・§9.2・§9.4） | `/usage`：所属している部門と管理できる部門、全社・システムのタスクを管理できる人と所属のない人にはシステムの枠の、今月の利用額・上限・残額と、実行回数・同時実行数とその上限（見るだけ） | `/manage/budgets`：既定の上限（金額・月の実行回数・同時実行数・Runごとの金額）、部門ごとの上書き、全部門とシステムの枠の今月の利用額・実行回数・同時実行数（`usage.*_budget`） |
 
 #### 7.3.1 業務画面の一覧（Skill・タスク共通の形）
@@ -362,7 +363,7 @@ Runの中身が外へ出る経路をすべて列挙し、どれにも「結果�
 
 ## 10 基盤の管理
 
-- 管理APIはすべてpermissionで判定する。対象：部門・全社・システムのConnector・出口、接続、入口の一覧、システムのSkill・タスク、LLMの接続・モデル設定、Runtime Profile、予算（金額・月の実行回数・同時実行数の、既定の上限と部門ごとの上書き、Runごとの金額の上限。design.md §9.1・§9.2・§9.4）、SSOの設定、ユーザー（招待のリンクの発行を含む）、Groupの一覧（割り当ての選択肢）、部門と所属。Django標準のpermission（view・add・change・delete。changeを持てばviewもできる）か、範囲ごとのpermissionを使う。追加・削除だけを任せることはせず、add・deleteはviewかchangeと一緒に付ける（一覧を見られないと、任せた操作にたどり着けないため）。
+- 管理APIはすべてpermissionで判定する。対象：部門・全社・システムのConnector・出口、接続、入口の一覧、システムのSkill・タスク、LLMの接続・モデル設定、Runtime Profile、基盤の設定（ワークスペースの保存期限。design.md §8）、予算（金額・月の実行回数・同時実行数の、既定の上限と部門ごとの上書き、Runごとの金額の上限。design.md §9.1・§9.2・§9.4）、SSOの設定、ユーザー（招待のリンクの発行を含む）、Groupの一覧（割り当ての選択肢）、部門と所属。Django標準のpermission（view・add・change・delete。changeを持てばviewもできる）か、範囲ごとのpermissionを使う。追加・削除だけを任せることはせず、add・deleteはviewかchangeと一緒に付ける（一覧を見られないと、任せた操作にたどり着けないため）。
 - permissionの指定を書き忘れた操作を閉じる既定（`DEFAULT_PERMISSION_CLASSES`）は、誰も通さないものにする（superuserも通さない。書き忘れはテストですぐ分かる）。`PlatformAdmin`はなくす。
 - 委任したときの防止策（強い役割の中での事故を減らすためのもの）：
   - ユーザーの更新APIで書ける項目は、表示名・有効・Group・所属だけ。permissionの直接付与、`is_superuser`、SSOの識別子はAPIに出さない。

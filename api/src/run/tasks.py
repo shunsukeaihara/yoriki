@@ -13,6 +13,7 @@ from django.utils.translation import gettext as _
 from conversation.models import Conversation
 from utils.lock import lock
 
+from . import cleanup
 from .dispatch import dispatch_pending, enqueue_run, send_subagent
 from .models import (
     LIVE_SUBAGENT_STATUSES,
@@ -115,6 +116,11 @@ def claim_subagent(subagent_id: int) -> ExecutionAttempt | None:
 
 def _running_here(worker: str) -> int:
     return ExecutionAttempt.objects.filter(worker=worker, ended__isnull=True, lease_expires__gt=timezone.now()).count()
+
+
+def cleanup_workspaces() -> None:
+    """保存期限を過ぎたワークスペースと、消し残したsnapshotを清掃する。Q2のScheduleで1日に1回呼ぶ（design.md §8）"""
+    cleanup.cleanup_workspaces()
 
 
 def reconcile_runs() -> None:

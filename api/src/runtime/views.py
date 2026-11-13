@@ -4,14 +4,15 @@ from drf_spectacular.utils import OpenApiResponse, extend_schema, extend_schema_
 from rest_framework.decorators import action
 from rest_framework.generics import get_object_or_404
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
 from utils.exceptions import Conflict
 from utils.permissions import ModelPermissions
 from utils.views import SoftDeleteMixin
 
-from .models import RuntimeProfile, RuntimeProfileVersion
-from .serializers import RuntimeProfileSerializer, RuntimeProfileVersionSerializer
+from .models import PlatformSettings, RuntimeProfile, RuntimeProfileVersion
+from .serializers import PlatformSettingsSerializer, RuntimeProfileSerializer, RuntimeProfileVersionSerializer
 
 CONFLICT = OpenApiResponse(description="他の変更と競合した（編集を始めた後に、別の版ができている）")
 
@@ -88,3 +89,26 @@ class RuntimeProfileVersionViewSet(RuntimeProfileMixin, ReadOnlyModelViewSet):
     queryset = RuntimeProfileVersion.objects.select_related("created_by")
     serializer_class = RuntimeProfileVersionSerializer
     ordering = "-number"  # Runtime Profileの中で一意
+
+
+@extend_schema(description="基盤の設定（ワークスペースの保存期限。design.md §8）", tags=["manage/platform_settings"])
+class PlatformSettingsAPIView(APIView):
+    permission_classes = [ModelPermissions]
+    permission_model = PlatformSettings
+    http_method_names = ["get", "patch", "head", "options"]
+
+    # ModelPermissions はViewSetのactionで判定するので、APIViewではメソッドから決める
+    @property
+    def action(self) -> str:
+        return "retrieve" if self.request.method in ("GET", "HEAD", "OPTIONS") else "partial_update"
+
+    @extend_schema(responses=PlatformSettingsSerializer)
+    def get(self, request):
+        return Response(PlatformSettingsSerializer(PlatformSettings.load()).data)
+
+    @extend_schema(request=PlatformSettingsSerializer, responses=PlatformSettingsSerializer)
+    def patch(self, request):
+        serializer = PlatformSettingsSerializer(PlatformSettings.load(), data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)

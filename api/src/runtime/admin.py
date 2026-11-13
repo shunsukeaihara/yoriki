@@ -2,7 +2,7 @@ from django.contrib import admin
 
 from utils.admin import ReadOnlyAdmin
 
-from .models import RuntimeProfile, RuntimeProfileVersion
+from .models import PlatformSettings, RuntimeProfile, RuntimeProfileVersion
 
 
 @admin.register(RuntimeProfile)
@@ -21,3 +21,8 @@ class RuntimeProfileAdmin(ReadOnlyAdmin):
 class RuntimeProfileVersionAdmin(ReadOnlyAdmin):
     list_display = ("id", "uid", "profile", "number", "image_repository", "contract", "created")
     search_fields = ("uid", "image_repository", "image_digest")
+
+
+@admin.register(PlatformSettings)
+class PlatformSettingsAdmin(ReadOnlyAdmin):
+    list_display = ("id", "workspace_retention_days", "updated")

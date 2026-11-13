@@ -26,6 +26,7 @@ export const ManagePagePermissions = {
   DEPARTMENT: [PermissionCode.VIEW_DEPARTMENT, PermissionCode.CHANGE_DEPARTMENT],
   SSO_PROVIDER: [PermissionCode.VIEW_SSO_PROVIDER, PermissionCode.CHANGE_SSO_PROVIDER],
   BUDGET: [PermissionCode.VIEW_BUDGET, PermissionCode.CHANGE_BUDGET],
+  PLATFORM_SETTINGS: [PermissionCode.VIEW_PLATFORM_SETTINGS, PermissionCode.CHANGE_PLATFORM_SETTINGS],
 } satisfies Record<string, PermissionCode[]>
 
 const isGroup = (item: ManageMenuItem): item is ManageMenuGroup => 'children' in item && Array.isArray(item.children)
@@ -139,6 +140,12 @@ export const useManageMenu = () => {
       icon: 'i-lucide-key-round',
       to: '/manage/sso_providers',
       permission: ManagePagePermissions.SSO_PROVIDER,
+    },
+    {
+      label: $i18n.t('基盤の設定'),
+      icon: 'i-lucide-settings',
+      to: '/manage/settings',
+      permission: ManagePagePermissions.PLATFORM_SETTINGS,
     },
   ])
 

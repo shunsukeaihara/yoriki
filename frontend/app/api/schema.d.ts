@@ -2240,6 +2240,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/platform_settings/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 基盤の設定（ワークスペースの保存期限。design.md §8） */
+        get: operations["v1_platform_settings_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** @description 基盤の設定（ワークスペースの保存期限。design.md §8） */
+        patch: operations["v1_platform_settings_partial_update"];
+        trace?: never;
+    };
     "/api/v1/runtime_profiles/": {
         parameters: {
             query?: never;
@@ -5136,6 +5154,11 @@ export interface components {
             default_effort: string;
             change_reason?: string;
         };
+        /** @description 基盤の設定（design.md §5.1） */
+        PatchedPlatformSettingsRequest: {
+            /** @description 会話・修正チャットのワークスペース（作業ファイル）を、最後の実行が終わってから残す日数。空なら自動では消さない */
+            workspace_retention_days?: number | null;
+        };
         /**
          * @description Runtime Profile。中身（イメージ、資源の上限）は現在の版の値を平らに出す。
          *
@@ -5287,6 +5310,13 @@ export interface components {
         };
         Ping: {
             readonly status: string;
+        };
+        /** @description 基盤の設定（design.md §5.1） */
+        PlatformSettings: {
+            /** @description 会話・修正チャットのワークスペース（作業ファイル）を、最後の実行が終わってから残す日数。空なら自動では消さない */
+            workspace_retention_days: number | null;
+            /** Format: date-time */
+            readonly updated: string;
         };
         /**
          * @description * `1` - OpenAI
@@ -12370,6 +12400,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelProfile"];
+                };
+            };
+        };
+    };
+    v1_platform_settings_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformSettings"];
+                };
+            };
+        };
+    };
+    v1_platform_settings_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedPlatformSettingsRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedPlatformSettingsRequest"];
+                "multipart/form-data": components["schemas"]["PatchedPlatformSettingsRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlatformSettings"];
                 };
             };
         };

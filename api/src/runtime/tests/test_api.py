@@ -166,3 +166,26 @@ class TestRunPinsTheVersion:
         assert res.status_code == 400
         assert "Runtime Profile" in str(res.data["non_field_errors"][0])
         assert not Run.objects.filter(conversation=conversation).exists()
+
+
+@pytest.mark.django_db
+class TestPlatformSettings:
+    URL = "/api/v1/platform_settings/"
+
+    def test_default_and_update(self, admin_client):
+        assert admin_client.get(self.URL).data["workspace_retention_days"] == 30
+        res = admin_client.patch(self.URL, {"workspace_retention_days": 7}, format="json")
+        assert res.status_code == 200, res.data
+        assert admin_client.get(self.URL).data["workspace_retention_days"] == 7
+        # 空なら自動では消さない
+        assert admin_client.patch(self.URL, {"workspace_retention_days": None}, format="json").status_code == 200
+        assert admin_client.get(self.URL).data["workspace_retention_days"] is None
+
+    def test_zero_is_rejected(self, admin_client):
+        res = admin_client.patch(self.URL, {"workspace_retention_days": 0}, format="json")
+        assert res.status_code == 400
+
+    def test_requires_permission(self, api_client, app_user):
+        api_client.force_login(app_user)
+        assert api_client.get(self.URL).status_code == 403
+        assert api_client.patch(self.URL, {"workspace_retention_days": 1}, format="json").status_code == 403

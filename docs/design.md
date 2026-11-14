@@ -1386,7 +1386,7 @@ package取得の一時領域と未参照wheel cacheにも容量上限と保持�
 RUNNINGというDB表示だけで清掃対象外にし続けない。lease、heartbeat、実在コンテナ、最大実行時間を照合する。Worker起動時と定期実行時に孤立コンテナ、期限切れWorkspace、未参照snapshot、途中保存Artifactを回収する（今の実装は、Sandboxを起動するときに残ったコンテナを消すことと、次の2つの定期の回収。Worker起動時の回収と、途中保存Artifactの回収はまだない）。
 
 - `cleanup_workspaces`（1日1回）：保存期限を過ぎたワークスペースと消し残したsnapshot（上記）。
-- `cleanup_orphans`（1時間ごと。同じ処理を管理コマンドでも動かせ、`--dry-run` は件数だけを出す）：終わったAttempt・leaseの切れたAttemptのSandboxのコンテナ、`YORIKI_WORKSPACES_DIR/attempts/` に残った生きていないAttemptの作業領域、確定する前に落ちたsnapshotとサブエージェントへのコピーの実体（既定の保存先の `snapshots/runs/`・`subagents/` の下で、CheckpointにもSubagentにも記録がないもの）。どれも、このDBにあるRunのものだけを扱い、他のDBのもの・どのDBのものか分からないものは触らない。作業領域と実体は、Runに生きているAttempt（親・サブエージェント）がないときだけ消す。leaseが切れてから1時間は生きているものとして扱い、leaseの確認の中で始めた記録の確定より先に実体を消さない。記録を読むのは、生きているAttemptがないことを確かめた後にする。コンテナと作業領域は清掃を動かしたWorkerのものだけを見るので、Workerサーバーが複数あれば、ほかのWorkerのものは、そこでSandboxを起動するときか、そこで管理コマンドを流したときに消える。
+- `cleanup_orphans`（1時間ごと。同じ処理を管理コマンドでも動かせ、`--dry-run` は件数だけを出す）：終わったAttempt・leaseの切れたAttemptのSandboxのコンテナ、`YORIKI_WORKSPACES_DIR/attempts/` に残った生きていないAttemptの作業領域、確定する前に落ちたsnapshotとサブエージェントへのコピーの実体（既定の保存先の `snapshots/runs/`・`subagents/` の下で、CheckpointにもSubagentにも記録がないもの）。どれも、このDBにあるRunのものだけを扱い、他のDBのもの・どのDBのものか分からないものは触らない。作業領域はそのAttemptが生きていないときに、実体はRunに生きているAttempt（親・サブエージェント）がないときだけ消す（keyからはAttemptを特定できないため）。leaseが切れてから1時間は生きているものとして扱い、leaseの確認の中で始めた記録の確定より先に実体を消さない。記録を読むのは、生きているAttemptがないことを確かめた後にする。コンテナと作業領域は清掃を動かしたWorkerのものだけを見るので、Workerサーバーが複数あれば、ほかのWorkerのものは、そこでSandboxを起動するときか、そこで管理コマンドを流したときに消える。
 
 Workspaceパスはサーバーが生成したAttempt IDから組み立てる。削除時は専用rootの直下であることを検証し、symlinkを辿らない。ユーザーやLLMが指定した文字列をそのまま再帰削除に渡さない。
 

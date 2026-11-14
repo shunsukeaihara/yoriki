@@ -2,7 +2,8 @@
 から呼ぶ。
 
 - コンテナ：終わったAttempt・leaseの切れたAttemptのSandbox（Sandboxを起動するときにも消す。sandbox.py）
-- 作業領域：`YORIKI_WORKSPACES_DIR/attempts/` に残った、生きていないAttemptのディレクトリ
+- 作業領域：`YORIKI_WORKSPACES_DIR/attempts/` に残った、生きていないAttemptのディレクトリ（同じRunのほかのAttemptが
+  動いていても消す。作業領域はAttemptごとのもの）
 - 保存先：確定する前に落ちたsnapshotとサブエージェントへのコピーの実体（CheckpointにもSubagentにも記録がないobject）
 
 コンテナと作業領域は、清掃を動かしたWorkerのものだけを見る（Workerサーバーが複数あれば、ほかのWorkerのものは、そこで

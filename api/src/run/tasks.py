@@ -123,6 +123,15 @@ def cleanup_workspaces() -> None:
     cleanup.cleanup_workspaces()
 
 
+def cleanup_orphans() -> None:
+    """終わったAttemptのコンテナ・作業領域と、記録のない保存先の実体を清掃する。Q2のScheduleで1時間ごとに呼ぶ
+    （design.md §8）"""
+    # harnessはrunのModelを使うため、循環importを避けて関数内でimportする
+    from harness.cleanup import cleanup_orphans as run_cleanup  # noqa: PLC0415
+
+    run_cleanup()
+
+
 def reconcile_runs() -> None:
     """leaseの切れたRunを復旧し、送れずに残った通知を送り直す。Q2のScheduleで1分ごとに呼ぶ"""
     now = timezone.now()

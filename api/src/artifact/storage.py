@@ -13,6 +13,7 @@ import re
 import shutil
 import tempfile
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import IO, Any
@@ -43,7 +44,7 @@ class StoredObject:
 
 
 class StorageBackend(ABC):
-    """design.md §7.8の契約（put_immutable、open_read、stat、delete）"""
+    """design.md §7.8の契約（put_immutable、open_read、stat、delete、list_keys）"""
 
     def __init__(self, backend_id: str):
         # 保存先のID。保存したものの記録に残すので、物理的な保存先を変えるときは別のIDにする（design.md §7.10）
@@ -64,6 +65,11 @@ class StorageBackend(ABC):
     @abstractmethod
     def delete(self, key: str) -> None:
         pass
+
+    @abstractmethod
+    def list_keys(self, prefix: str) -> Iterator[str]:
+        """`prefix`（`snapshots/runs/` 等。`/` で終える）の下にあるkey。順番は決めない。清掃で、記録のない実体を
+        探すのに使う（design.md §8）。読めなければ StorageError"""
 
     def exists(self, key: str) -> bool:
         """あるか（中身は読まない）。既定は stat() で確かめる"""
@@ -175,8 +181,25 @@ class LocalStorage(StorageBackend):
         else:
             path.unlink(missing_ok=True)
 
+    def list_keys(self, prefix: str) -> Iterator[str]:
+        top = self.root / validate_key(prefix.rstrip("/"))
+        if top.is_symlink() or not top.is_dir():
+            return
+        # symlinkは辿らず、書き込み中の一時ファイル（`.tmp-`）とkeyにならない名前は返さない
+        for dirpath, _dirnames, filenames in os.walk(top, onerror=_raise_storage_error):
+            for name in filenames:
+                path = Path(dirpath) / name
+                key = path.relative_to(self.root).as_posix()
+                if name.startswith(".tmp-") or path.is_symlink() or not KEY_PATTERN.match(key):
+                    continue
+                yield key
+
     def accel_redirect(self, key: str) -> str | None:
         return f"{self.accel_prefix.rstrip('/')}/{validate_key(key)}" if self.accel_prefix else None
+
+
+def _raise_storage_error(exc: OSError) -> None:
+    raise StorageError(f"cannot list: {exc}") from exc
 
 
 class S3Storage(StorageBackend):
@@ -271,3 +294,15 @@ class S3Storage(StorageBackend):
             self.client.delete_object(Bucket=self.bucket, Key=self._key(key))
         except (ClientError, BotoCoreError) as exc:
             raise StorageError(f"cannot delete {key}: {exc}") from exc
+
+    def list_keys(self, prefix: str) -> Iterator[str]:
+        validate_key(prefix.rstrip("/"))
+        try:
+            pages = self.client.get_paginator("list_objects_v2").paginate(
+                Bucket=self.bucket, Prefix=self.prefix + prefix
+            )
+            for page in pages:
+                for item in page.get("Contents", []):
+                    yield item["Key"].removeprefix(self.prefix)
+        except (ClientError, BotoCoreError) as exc:
+            raise StorageError(f"cannot list {prefix}: {exc}") from exc

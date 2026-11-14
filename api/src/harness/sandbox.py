@@ -238,7 +238,7 @@ class SandboxSession:
         self.sandbox: Sandbox | None = None
         self.jobs: dict[str, Job] = {}
         # Attemptの作業領域（ジョブの出力）。Sandboxには見せない
-        self.dir = Path(settings.YORIKI_WORKSPACES_DIR) / "attempts" / self._name()
+        self.dir = attempts_root() / self._name()
         # 戻したCheckpoint。このRunのものなら、その時点までの読んだファイルの版の記録を使える（harness.md §11.1）
         self.restored: Checkpoint | None = None
         # /workspace/input に置いた添付（ArtifactのID）と、/workspace/master に置いたSkillの中身（content_key()）
@@ -261,9 +261,9 @@ class SandboxSession:
         return self.sandbox is not None
 
     def _name(self) -> str:
-        if self.subagent is not None:
-            return f"{self.run.uid}-{self.subagent.uid}-{self.attempt.number}"
-        return f"{self.run.uid}-{self.attempt.number}"
+        return attempt_dir_name(
+            self.run.uid, self.subagent.uid if self.subagent is not None else None, self.attempt.number
+        )
 
     # --- 起動と復元 ---
 
@@ -1016,8 +1016,28 @@ def _read_cluster_id() -> str:
 _cluster_ids: dict[str, str] = {}
 
 
+def attempts_root() -> Path:
+    """Attemptの作業領域を置く専用のroot（design.md §8）"""
+    return Path(settings.YORIKI_WORKSPACES_DIR) / "attempts"
+
+
+def attempt_dir_name(run_uid: str, subagent_uid: str | None, number: int) -> str:
+    """Attemptの作業領域の名前。uidは英数字だけなので `-` で区切れる（harness/cleanup.py が読み戻す）"""
+    if subagent_uid is not None:
+        return f"{run_uid}-{subagent_uid}-{number}"
+    return f"{run_uid}-{number}"
+
+
 def remove_stale_sandboxes(launcher: Launcher) -> None:
-    """終わったAttemptのSandboxが残っていれば消す（Workerが落ちた等）。leaseの切れたAttemptのものも消す。
+    """終わったAttemptのSandboxが残っていれば消す（Workerが落ちた等）。Sandboxを起動するときと、定期の清掃
+    （harness/cleanup.py）で呼ぶ"""
+    for container_id, attempt_id in stale_sandboxes(launcher):
+        logger.info("removing a stale sandbox of attempt %s", attempt_id)
+        launcher.remove(container_id)
+
+
+def stale_sandboxes(launcher: Launcher) -> list[tuple[str, int]]:
+    """終わったAttemptと、leaseの切れたAttemptのSandbox（コンテナのIDとAttemptのID）。
 
     他のDBのAttemptのものは判定できないので触らない。DBのラベルのないもの（ラベルを付ける前の版が起動したもの）も、
     どのDBのものか分からないので触らない（deployment.md §7）
@@ -1033,13 +1053,10 @@ def remove_stale_sandboxes(launcher: Launcher) -> None:
         if value.isdigit():
             ids[container["Id"]] = int(value)
     if not ids:
-        return
+        return []
     alive = set(
         ExecutionAttempt.objects.filter(
             pk__in=set(ids.values()), ended__isnull=True, lease_expires__gt=timezone.now()
         ).values_list("pk", flat=True)
     )
-    for container_id, attempt_id in ids.items():
-        if attempt_id not in alive:
-            logger.info("removing a stale sandbox of attempt %s", attempt_id)
-            launcher.remove(container_id)
+    return [(container_id, attempt_id) for container_id, attempt_id in ids.items() if attempt_id not in alive]

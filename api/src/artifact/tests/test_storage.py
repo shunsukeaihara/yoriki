@@ -134,3 +134,37 @@ def test_snapshots_saved_before_the_storage_backend_are_readable(settings, tmp_p
     (tmp_path / "snapshots/runs/r1/1-abc.tar").write_bytes(b"tar")
     storage = get_storage("local:0123abcd")
     assert storage.stat("runs/r1/1-abc.tar") == StoredObject("runs/r1/1-abc.tar", 3, hashlib.sha256(b"tar").hexdigest())
+
+
+def test_list_keys_under_a_prefix(storage):
+    for key in ("snapshots/runs/r1/1.tar", "snapshots/runs/r2/a/2.tar", "subagents/r1/c.tar", "blobs/x"):
+        storage.put_immutable(key, io.BytesIO(b"x"))
+    assert sorted(storage.list_keys("snapshots/runs/")) == ["snapshots/runs/r1/1.tar", "snapshots/runs/r2/a/2.tar"]
+    assert list(storage.list_keys("missing/")) == []
+    with pytest.raises(StorageError):
+        list(storage.list_keys("../"))
+
+
+def test_local_list_keys_skips_temporary_files_and_symlinks(tmp_path):
+    storage = LocalStorage("local-main", root=str(tmp_path / "objects"))
+    storage.put_immutable("snapshots/runs/r1/1.tar", io.BytesIO(b"x"))
+    folder = tmp_path / "objects" / "snapshots" / "runs" / "r1"
+    (folder / ".tmp-abc").write_bytes(b"x")
+    (tmp_path / "outside").mkdir()
+    (tmp_path / "outside" / "secret.tar").write_bytes(b"x")
+    (folder / "link.tar").symlink_to(tmp_path / "outside" / "secret.tar")
+    (tmp_path / "objects" / "snapshots" / "runs" / "r2").symlink_to(tmp_path / "outside")
+    assert list(storage.list_keys("snapshots/runs/")) == ["snapshots/runs/r1/1.tar"]
+
+
+def test_s3_list_keys_pages_and_strips_the_prefix(s3):
+    storage = S3Storage("s3-main", bucket=BUCKET, prefix="production", region="us-east-1")
+    for i in range(3):
+        storage.put_immutable(f"snapshots/runs/r1/{i}.tar", io.BytesIO(b"x"))
+    # 別のprefixのものは返さない
+    S3Storage("s3-other", bucket=BUCKET, prefix="staging", region="us-east-1").put_immutable(
+        "snapshots/runs/r9/0.tar", io.BytesIO(b"x")
+    )
+    with mock.patch.object(storage.client, "get_paginator", wraps=storage.client.get_paginator) as paginator:
+        assert sorted(storage.list_keys("snapshots/runs/")) == [f"snapshots/runs/r1/{i}.tar" for i in range(3)]
+    paginator.assert_called_once_with("list_objects_v2")

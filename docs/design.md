@@ -2,7 +2,7 @@
 
 作成日：2026年10月2日  
 更新日：2026年11月14日  
-版：0.60 設計案  
+版：0.61 設計案  
 対象：サービス企画、開発、運用担当
 
 プロダクト名はYoriki（よりき）とする（0.16でYuhitsuから変更）。同名の製品・サービスがあることは承知の上で、検索での見つけやすさは重視しない。名称の商標・ドメイン等の確認は本設計の対象外とする。
@@ -1271,7 +1271,7 @@ Artifact Storeは論理的な保存サービスの名称とし、実装をArtifa
 | 実行中のwork・output・仮想環境 | AttemptとWorkspace管理情報 | コンテナの中のtmpfs。Workerを手放す前に永続化 |
 | サブエージェントへ渡すワークスペースのコピー | Subagent | 選択したStorage Backendに一時的に置き、子が終わったら消す |
 
-Storage Backendの契約は、validate_config、healthcheck、put_immutable、open_read、stat、deleteとする。put_immutableは新しいobject keyへ保存し、保存参照・サイズ・SHA-256を返す。同じ操作の再送は同じ内容として確認でき、既存の別内容を上書きしない。Backend固有のETag等を、基盤で計算する内容hashの代わりにはしない。
+Storage Backendの契約は、validate_config、healthcheck、put_immutable、open_read、stat、delete、list_keysとする。put_immutableは新しいobject keyへ保存し、保存参照・サイズ・SHA-256を返す。同じ操作の再送は同じ内容として確認でき、既存の別内容を上書きしない。Backend固有のETag等を、基盤で計算する内容hashの代わりにはしない。list_keysはprefixの下のkeyを返し、清掃でDBに記録のないobjectを探すのにだけ使う（§8）。
 
 署名付きURL、サーバー内コピー、multipart等はcapabilitiesとして宣言する任意機能とする。業務コードはローカルの絶対pathやfilesystemのrename、ディレクトリ一覧を必須としない。Django Storageを実装内部で使えるが、権限・不変性・snapshot整合性はArtifact Serviceが保証する。ローカルpathを提供しないStorageもあるため、共通処理はstream／論理参照を使う。
 
@@ -1337,7 +1337,7 @@ snapshotは添付・成果物と同じStorage Backend（§7.8）に置く。S3�
 
 ## 8 清掃と保持期間
 
-清掃はエージェントの指示に依存せず、管理側が実行する。定期実行はQ2のScheduleでQClusterに登録し、同じ処理を管理コマンドとしても実行できるようにして、QCluster停止中でも回収できるようにする（backend-conventions.md §8.1）。
+清掃はエージェントの指示に依存せず、管理側が実行する。定期実行はQ2のScheduleでQClusterに登録し、同じ処理を管理コマンドとしても実行できるようにして、QCluster停止中でも回収できるようにする（backend-conventions.md §8.1）。ただし、Workerのホストごとにあるもの（Sandboxのコンテナ、作業領域）は、Q2のScheduleがクラスタのどれか1台でしか動かないので、管理コマンドを各ホストのcronから動かす（deployment.md §7）。
 
 | 対象 | 初期案 | 条件 |
 |---|---|---|
@@ -1383,7 +1383,12 @@ package取得の一時領域と未参照wheel cacheにも容量上限と保持�
 
 チャット添付をSkill資料へ登録した場合は、元の添付と別の永続参照・保持条件を付与する。bytesの重複保存は避けてもよいが、元のRunや添付を削除したことで公開中のSkill資料が消えないようにする。Skillからの削除は新しい公開版で参照を外す操作とし、旧版やRunが参照する原本を直ちに物理削除しない。
 
-RUNNINGというDB表示だけで清掃対象外にし続けない。lease、heartbeat、実在コンテナ、最大実行時間を照合する。Worker起動時と定期実行時に孤立コンテナ、期限切れWorkspace、未参照snapshot、途中保存Artifactを回収する（初期の実装は、Sandboxを起動するときに残ったコンテナを消すことと、保存期限を過ぎたワークスペースと消し残したsnapshotの定期の回収。孤立したコンテナ・作業領域と、確定する前に落ちたsnapshotの実体の定期の回収は次に作る）。
+RUNNINGというDB表示だけで清掃対象外にし続けない。lease、heartbeat、実在コンテナ、最大実行時間を照合する。Worker起動時と定期実行時に孤立コンテナ、期限切れWorkspace、未参照snapshot、途中保存Artifactを回収する（今の実装は、Sandboxを起動するときに残ったコンテナを消すことと、次の3つの定期の回収。Worker起動時の回収と、途中保存Artifactの回収はまだない）。
+
+- `cleanup_workspaces`（1日1回）：保存期限を過ぎたワークスペースと消し残したsnapshot（上記）。
+- `cleanup_worker`（管理コマンド。qclusterを動かす各ホストのcronから1時間ごとに流す。`--dry-run` は件数だけを出す）：そのホストに残った、終わったAttempt・leaseの切れたAttemptのSandboxのコンテナと、`YORIKI_WORKSPACES_DIR/attempts/` に残った生きていないAttemptの作業領域。作業領域はそのAttemptが生きていないときに消す（同じRunのほかのAttemptが動いていても消す）。
+- `cleanup_objects`（1時間ごとのSchedule。同じ処理を管理コマンドでも動かせ、`--dry-run` は件数だけを出す）：確定する前に落ちたsnapshotとサブエージェントへのコピーの実体（既定の保存先の `snapshots/runs/`・`subagents/` の下で、CheckpointにもSubagentにも記録がないもの）。保存先はどのホストからも同じに見えるので、Scheduleで1か所から動かす。実体はRunに生きているAttempt（親・サブエージェント）がないときだけ消す（keyからはAttemptを特定できないため）。記録を読むのは、生きているAttemptがないことを確かめた後にする。
+- `cleanup_worker`・`cleanup_objects` のどちらも、このDBにあるRunのものだけを扱い、他のDBのもの・どのDBのものか分からないものは触らない。leaseが切れてから1時間は生きているものとして扱い、leaseの確認の中で始めた記録の確定より先に消さない。
 
 Workspaceパスはサーバーが生成したAttempt IDから組み立てる。削除時は専用rootの直下であることを検証し、symlinkを辿らない。ユーザーやLLMが指定した文字列をそのまま再帰削除に渡さない。
 
@@ -2102,3 +2107,4 @@ Sandboxイメージの定義は本体と同じリポジトリの `sandbox/` で�
 | 0.58 | 2026年11月12日 | タスク単位の受付頻度（1時間あたりの実行回数）と同時実行数の上限を決めた（§9.3）。本番の実行だけを数え、修正チャットの実行は数えない。設定はタスクの設定（版の外。初期値は無制限）で、受付で断る。入口からの起動は429で断る |
 | 0.59 | 2026年11月13日 | Runごとの金額の上限を決めた（§9.4）。そのRunのLLM呼出しの金額（サブエージェント・圧縮・評価の判定を含む）に、基盤の既定の上限を1つ持つ（管理画面の「予算」。初期値は無制限。タスクごとの上書きは持たない）。強制は月間予算と同じ形（呼出しの前の予約、まとめの1ステップ、残り2割の知らせ）で、終わり方 `cost_limit` を足した。「料金とほかの上限」は§9.5にした |
 | 0.60 | 2026年11月14日 | ワークスペースの保存期限での自動の削除を決めた（§8）。期限は会話の最後のRunが終わった時から数え（最終更新からではない）、終わっていないRunがある会話は消さない。設定は基盤の設定（管理画面の「基盤の設定」。初期値30日、空なら自動では消さない）で、1日1回の `cleanup_workspaces`（管理コマンドでも動かせる）が消す。消せずに残ったsnapshotも同じ処理で消し直す |
+| 0.61 | 2026年11月14日 | 実行の残骸の定期の回収を決めた（§8）。Workerのホストごとにあるもの（終わったAttemptのSandboxのコンテナ・作業領域）は、Q2のScheduleがクラスタの1台でしか動かないので、管理コマンド `cleanup_worker` を各ホストのcronから1時間ごとに流す。確定する前に落ちたsnapshot・サブエージェントへのコピーの実体（記録のないobject）は、1時間ごとのSchedule `cleanup_objects`（管理コマンドでも動かせる）が消す。leaseが切れてから1時間は消さない。記録のないobjectを探すため、Storage Backendの契約に list_keys を足した（§7.8） |

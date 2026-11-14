@@ -1,14 +1,15 @@
-"""実行の残骸の清掃（design.md §8）。Q2のSchedule（run.tasks.cleanup_orphans）と、管理コマンド（cleanup_orphans）
-から呼ぶ。
+"""実行の残骸の清掃（design.md §8）。
 
-- コンテナ：終わったAttempt・leaseの切れたAttemptのSandbox（Sandboxを起動するときにも消す。sandbox.py）
-- 作業領域：`YORIKI_WORKSPACES_DIR/attempts/` に残った、生きていないAttemptのディレクトリ（同じRunのほかのAttemptが
-  動いていても消す。作業領域はAttemptごとのもの）
-- 保存先：確定する前に落ちたsnapshotとサブエージェントへのコピーの実体（CheckpointにもSubagentにも記録がないobject）
+- `cleanup_worker()`：このWorkerのホストに残ったもの。各ホストのcronから管理コマンド `cleanup_worker` で動かす
+  （Q2のScheduleはクラスタのどれか1台でしか動かないため。deployment.md §7）
+  - コンテナ：終わったAttempt・leaseの切れたAttemptのSandbox（Sandboxを起動するときにも消す。sandbox.py）
+  - 作業領域：`YORIKI_WORKSPACES_DIR/attempts/` に残った、生きていないAttemptのディレクトリ（同じRunのほかのAttemptが
+    動いていても消す。作業領域はAttemptごとのもの）
+- `cleanup_objects()`：保存先に残った、確定する前に落ちたsnapshotとサブエージェントへのコピーの実体（Checkpointにも
+  Subagentにも記録がないobject）。どのホストからも同じに見えるので、Q2のSchedule（run.tasks.cleanup_objects）と
+  管理コマンド `cleanup_objects` で動かす
 
-コンテナと作業領域は、清掃を動かしたWorkerのものだけを見る（Workerサーバーが複数あれば、ほかのWorkerのものは、そこで
-Sandboxを起動するときか、そこで管理コマンドを流したときに消える）。どれも、このDBにあるRunのものだけを扱い、他のDBの
-もの・どのDBのものか分からないものは触らない。
+どれも、このDBにあるRunのものだけを扱い、他のDBのもの・どのDBのものか分からないものは触らない。
 """
 
 import logging
@@ -41,38 +42,44 @@ BATCH = 500
 
 
 @dataclass(frozen=True)
-class OrphanCleanupResult:
+class WorkerCleanupResult:
     """消した数（dry-runでは対象の数）。`failed` は消そうとして消せなかった数"""
 
     sandboxes: int
     workspaces: int
+    failed: int
+
+
+@dataclass(frozen=True)
+class ObjectCleanupResult:
+    """消した数（dry-runでは対象の数）。`failed` は消そうとして消せなかった数"""
+
     objects: int
     failed: int
 
 
-def cleanup_orphans(
-    *,
-    dry_run: bool = False,
-    launcher_factory: Callable[[], Launcher] | None = None,
-    storage_factory: Callable[[], StorageBackend] | None = None,
-) -> OrphanCleanupResult:
+def cleanup_worker(
+    *, dry_run: bool = False, launcher_factory: Callable[[], Launcher] | None = None
+) -> WorkerCleanupResult:
     sandboxes, failed_sandboxes = _cleanup_sandboxes(launcher_factory or Launcher, dry_run)
     workspaces, failed_workspaces = _cleanup_workspaces(dry_run)
-    objects, failed_objects = _cleanup_objects(storage_factory or get_storage, dry_run)
-    result = OrphanCleanupResult(
-        sandboxes=sandboxes,
-        workspaces=workspaces,
-        objects=objects,
-        failed=failed_sandboxes + failed_workspaces + failed_objects,
+    result = WorkerCleanupResult(
+        sandboxes=sandboxes, workspaces=workspaces, failed=failed_sandboxes + failed_workspaces
     )
-    if not dry_run and (result.sandboxes or result.workspaces or result.objects or result.failed):
+    if not dry_run and (result.sandboxes or result.workspaces or result.failed):
         logger.info(
-            "orphan cleanup: %d sandboxes, %d workspaces, %d objects, %d failed",
-            result.sandboxes,
-            result.workspaces,
-            result.objects,
-            result.failed,
+            "worker cleanup: %d sandboxes, %d workspaces, %d failed", result.sandboxes, result.workspaces, result.failed
         )
+    return result
+
+
+def cleanup_objects(
+    *, dry_run: bool = False, storage_factory: Callable[[], StorageBackend] | None = None
+) -> ObjectCleanupResult:
+    objects, failed = _cleanup_objects(storage_factory or get_storage, dry_run)
+    result = ObjectCleanupResult(objects=objects, failed=failed)
+    if not dry_run and (result.objects or result.failed):
+        logger.info("object cleanup: %d objects, %d failed", result.objects, result.failed)
     return result
 
 

@@ -123,11 +123,11 @@ def cleanup_workspaces() -> None:
     cleanup.cleanup_workspaces()
 
 
-def cleanup_orphans() -> None:
-    """終わったAttemptのコンテナ・作業領域と、記録のない保存先の実体を清掃する。Q2のScheduleで1時間ごとに呼ぶ
-    （design.md §8）"""
+def cleanup_objects() -> None:
+    """確定する前に落ちたsnapshot等の、記録のない保存先の実体を清掃する。Q2のScheduleで1時間ごとに呼ぶ（design.md §8）。
+    Workerのホストに残ったコンテナ・作業領域は、各ホストのcronから管理コマンド `cleanup_worker` で消す"""
     # harnessはrunのModelを使うため、循環importを避けて関数内でimportする
-    from harness.cleanup import cleanup_orphans as run_cleanup  # noqa: PLC0415
+    from harness.cleanup import cleanup_objects as run_cleanup  # noqa: PLC0415
 
     run_cleanup()
 

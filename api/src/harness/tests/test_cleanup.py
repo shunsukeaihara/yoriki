@@ -13,7 +13,7 @@ from django.utils import timezone
 
 from artifact.storage import StorageError, get_storage
 from conversation.factories import ConversationFactory
-from harness.cleanup import cleanup_orphans
+from harness.cleanup import cleanup_objects, cleanup_worker
 from harness.sandbox import ATTEMPT_LABEL, DATABASE_LABEL, attempt_dir_name, attempts_root, database_label
 from run.factories import RunFactory
 from run.models import Checkpoint, ExecutionAttempt, Run, Subagent
@@ -69,7 +69,7 @@ def remaining_keys() -> set[str]:
 
 def run_cleanup(dry_run: bool = False, launcher: FakeLauncher | None = None):
     factory: Any = (lambda: launcher) if launcher else no_docker
-    return cleanup_orphans(dry_run=dry_run, launcher_factory=factory)
+    return cleanup_worker(dry_run=dry_run, launcher_factory=factory)
 
 
 @pytest.fixture(autouse=True)
@@ -185,9 +185,9 @@ def test_unrecorded_objects_of_settled_runs_are_removed():
         sha256="0" * 64,
     )
 
-    assert run_cleanup(dry_run=True).objects == 2
+    assert cleanup_objects(dry_run=True).objects == 2
     assert remaining_keys() == kept | orphans
-    result = run_cleanup()
+    result = cleanup_objects()
     assert (result.objects, result.failed) == (2, 0)
     assert remaining_keys() == kept
 
@@ -197,7 +197,7 @@ def test_objects_are_skipped_when_the_storage_cannot_list():
     attempt(run, alive=False)
     key = put(f"snapshots/runs/{run.uid}/1-aaaa.tar")
     with mock.patch("artifact.storage.LocalStorage.list_keys", side_effect=StorageError("denied")):
-        assert run_cleanup().objects == 0
+        assert cleanup_objects().objects == 0
     assert remaining_keys() == {key}
 
 
@@ -206,18 +206,31 @@ def test_object_that_cannot_be_deleted_is_counted_as_failed():
     attempt(run, alive=False)
     put(f"snapshots/runs/{run.uid}/1-aaaa.tar")
     with mock.patch("artifact.storage.LocalStorage.delete", side_effect=StorageError("denied")):
-        result = run_cleanup()
+        result = cleanup_objects()
     assert (result.objects, result.failed) == (0, 1)
 
 
-def test_command(capsys):
+def test_worker_command(capsys):
+    run = make_run()
+    ended = attempt(run, alive=False)
+    workspace = attempts_root() / attempt_dir_name(run.uid, None, ended.number)
+    workspace.mkdir(parents=True)
+    with mock.patch("harness.cleanup.Launcher", side_effect=no_docker):
+        call_command("cleanup_worker", "--dry-run")
+        assert "作業領域: 1件が対象" in capsys.readouterr().out
+        assert workspace.exists()
+        call_command("cleanup_worker")
+    assert "作業領域: 1件を消しました" in capsys.readouterr().out
+    assert not workspace.exists()
+
+
+def test_objects_command(capsys):
     run = make_run()
     attempt(run, alive=False)
     key = put(f"snapshots/runs/{run.uid}/1-aaaa.tar")
-    with mock.patch("harness.cleanup.Launcher", side_effect=no_docker):
-        call_command("cleanup_orphans", "--dry-run")
-        assert "保存先の実体: 1件が対象" in capsys.readouterr().out
-        assert remaining_keys() == {key}
-        call_command("cleanup_orphans")
+    call_command("cleanup_objects", "--dry-run")
+    assert "保存先の実体: 1件が対象" in capsys.readouterr().out
+    assert remaining_keys() == {key}
+    call_command("cleanup_objects")
     assert "保存先の実体: 1件を消しました" in capsys.readouterr().out
     assert remaining_keys() == set()

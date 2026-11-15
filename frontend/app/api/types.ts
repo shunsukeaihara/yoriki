@@ -31,12 +31,15 @@ export type DepartmentBudget = Api<'DepartmentBudget'>
 export type DepartmentBudgetWrite = Api<'PatchedDepartmentBudgetRequest'>
 export type MyBudget = Api<'MyBudget'>
 export type PlatformSettings = Api<'PlatformSettings'>
+export type PythonPackage = Api<'PythonPackage'>
+export type PythonPackageWrite = Api<'PythonPackageRequest'>
 export type PlatformSettingsWrite = Api<'PatchedPlatformSettingsRequest'>
 
 // 一覧の検索条件（バックエンドの FilterSet と合わせる）
 export type LLMConnectionListParams = ListParams & { name?: string; kind?: ProviderKindEnum; isActive?: boolean }
 export type ModelProfileListParams = ListParams & { name?: string; connection?: string; isActive?: boolean }
 export type RuntimeProfileListParams = ListParams & { name?: string; isActive?: boolean }
+export type PythonPackageListParams = ListParams & { name?: string; isActive?: boolean }
 
 export type ConnectorKindEnum = Schemas['ConnectorKindEnum']
 export type TlsEnum = Schemas['TlsEnum']

@@ -2,7 +2,7 @@
 
 作成日：2026年10月2日  
 更新日：2026年11月14日  
-版：0.61 設計案  
+版：0.62 設計案  
 対象：サービス企画、開発、運用担当
 
 プロダクト名はYoriki（よりき）とする（0.16でYuhitsuから変更）。同名の製品・サービスがあることは承知の上で、検索での見つけやすさは重視しない。名称の商標・ドメイン等の確認は本設計の対象外とする。
@@ -877,7 +877,8 @@ Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプ�
 | SkillChange | 依頼元、編集Run、本文・ファイルの差分、理由、公開結果、operation key |
 | SkillEvaluationCase / SkillEvaluation | 評価ケース（依頼の文、添付、確認する観点、期待する業務結果、公開の前に必須か）。評価は、写したDraftの中身とrevision、比べた公開中の版、モデル、依頼者・編集Run、ケースごとの評価Run・機械的な検証・LLMの判定（§3.7.1） |
 | RuntimeProfile / RuntimeProfileVersion | 名前・説明、有効か、既定か（1つだけ）。版はimage（repositoryとindex＝manifest listのdigest。Workerは自分のplatformのmanifestを解決し、そのdigestをAttemptに記録する）、契約番号、対応platform、Python版、資源上限（メモリ、CPU、pids、tmpfsの大きさ、コマンド・ジョブの時間、サブエージェントの時間）。中身を変えると新しい版を作る（§7.3） |
-| EnvironmentRevision / PackageBundle | 完全な依存lock、wheelのhash、対応ABIとplatform、保管参照、元revision |
+| PythonPackage | 追加してよいPythonのpackageのカタログ（§7.6）。名前（正規化したもの）、許す版の範囲（空ならどの版も）、メモ、停止 |
+| EnvironmentRevision / PackageBundle | 会話の追加のPython環境（§7.6・§7.7）。revisionは会話、元のrevision、image digest（platformのmanifest）、platform、Pythonの版、直接頼んだpackageと版、入っているwheelの全件。bundleは1回の追加で入れたwheelの完全なlock（名前・版・sha256・保管したBlobObject） |
 | TaskDefinition / TaskDefinitionRevision | 範囲（個人・部門・全社・システム）と持ち主・部門、個人タスクの予算を計上する部門（§9.1）、名前、停止、チャットから起動できるか（名前・停止・印は版の外）、今の版。版は説明、プロンプトのテンプレート、使うSkillと固定の版、Connector、モデル設定とeffort（空なら既定）、機密、入力の項目（名前・型・必須・選択肢）、業務結果Schema（なければSkillのもの）、結果の通知（出口・対象イベント・通知内容・通知の書き方。初期は1つ）、保存した人。フローの起動・対話Bindingは各段階で足す |
 | PluginExtension | 拡張種別、Adapter実装版、契約版、設定Schema、対応能力、有効状態 |
 | TriggerBinding / TriggerBindingRevision | 安定ID、起動Plugin版、認証参照、タスク（範囲と部門はタスクと同じ。1つの入口が起動するタスクは1つ。付け替えない。1つのタスクに複数の入口を付けられる）、名前・鍵と鍵を作った人・停止（版の外）、設定版（取り出す項目の名前とpath、イベントIDの場所、大きさの上限） |
@@ -1012,7 +1013,7 @@ MVPではworkspace.file_snapshot Adapterで、Workerを手放す前に、サイ�
 
 Checkpointはmanifest、状態、snapshotをStorage Backendへ保存・検証できた時点でDB参照を確定する。未確定snapshotは後で回収する。再開用snapshotとユーザー向け成果物は保存種別と消す条件を分ける（§8）。
 
-Pythonの仮想環境とpackage cacheは原則としてsnapshotへ含めない。CheckpointにEnvironment Revisionを記録し、同じimage digest、platform、Python ABI、依存lock、保管済みwheelから再構築する。実行時のpackage追加は不変のEnvironment Revisionを新たに作り、元のRun Manifestは変更しない。
+Pythonの仮想環境とpackage cacheはsnapshotへ含めない。会話のEnvironment Revision（§7.6）を、同じimage digest、platform、Python ABI、依存lock、保管済みwheelから、Sandboxを起動するたびに再構築する。実行時のpackage追加は不変のEnvironment Revisionを新たに作り、元のRun Manifestは変更しない。
 
 Skill Draftと公開結果はControl Planeへ永続化し、Workspaceに依存させない。編集RunのCheckpointにはDraft ID、revision、operation keyを記録する。再開時に更新済みであれば競合を検出し、公開済みであれば同じ公開結果を返す。
 
@@ -1098,8 +1099,7 @@ LLM呼出しが成功した直後に応答保存に失敗した場合も、呼�
 | /workspace/master | RO | 使うSkillに紐付いた資料、マスター、テンプレートの固定版 |
 | /workspace/work | RW | 中間ファイル。ワークスペースが消えるまで残す（§8） |
 | /workspace/output | RW | 成果物候補。管理側が検証して永続化 |
-| /workspace/env | RW | Run専用Python仮想環境。イメージのPythonの上の薄い環境（`--system-site-packages`）で、追加したpackageだけを持つ。コンテナを片付けるときに削除 |
-| /packages | RO | 追加するpackageの検証済みwheelと依存lock（PackageBundle） |
+| /workspace/env | RW | Run専用Python仮想環境。イメージのPythonの上の薄い環境（`--system-site-packages`）で、追加したpackageだけを持つ。snapshotに入れず、Sandboxを起動するたびに会話のEnvironment Revisionから入れ直す（§7.6）。コンテナを片付けるときに削除 |
 | /tmp | RW | サイズ制限付きtmpfs。コンテナ終了時に破棄 |
 
 同じ会話の中では、前の依頼の作業ファイルを使えるようにする。添付は会話のものをすべて `/workspace/input` に置き、`/workspace/work`・`/workspace/output` は最新のsnapshotから戻す（§7.9）。新しいRunの最初の発言には、それまでの添付の一覧を添えてエージェントに知らせる。
@@ -1125,7 +1125,7 @@ tmpfs:
   - /tmp:size=256m,mode=1777
 ```
 
-これは制限方針の例であり、完成したComposeサービス定義ではない。input・master・packagesはROのbind mountで、指定できるhost pathをLauncher側で固定する。work・output・envはコンテナの中のtmpfsに置き、コンテナの外へのマウントは作らない（サブエージェントはコピーで動き、Workerにも固定しないので、共有のためのマウントは要らない）。privileged、host network、host PID、デバイス、DockerソケットはSandboxに渡さない。標準seccompを維持し、対応環境ではAppArmor等も使う。
+これは制限方針の例であり、完成したComposeサービス定義ではない。input・masterはROのbind mountで、指定できるhost pathをLauncher側で固定する。work・output・envはコンテナの中のtmpfsに置き、コンテナの外へのマウントは作らない（サブエージェントはコピーで動き、Workerにも固定しないので、共有のためのマウントは要らない）。privileged、host network、host PID、デバイス、DockerソケットはSandboxに渡さない。標準seccompを維持し、対応環境ではAppArmor等も使う。
 
 CPU・メモリ上限ではディスク書込み量を制限できない。初期のwork、output、envは、それぞれ大きさを制限したtmpfs（Runtime Profileの `work_mb`・`output_mb`・`env_mb`）で管理し、そのメモリもコンテナ上限に含める。packageの展開サイズと処理用メモリを合わせてRuntime Profileの上限を決める。作業ファイルの大きさはメモリの範囲に限られ、プロセスとコンテナのメモリ上限を分け合う（割り切る。大きなファイルが必要になったら、大きさの制限付きのディスクを足す）。大容量用途では専用filesystemのproject quota等へ移行する。bind mount先への定期的なサイズ確認だけを容量制限として扱わない。
 
@@ -1196,34 +1196,42 @@ timeoutまでに終わらないコマンドは止めずにバックグラウン�
 頻出ライブラリは共通イメージへ同梱する。追加が必要な場合は`install_python_packages`という管理Toolを呼び、管理側で取得してRun専用のPython環境へ導入する。Sandboxのネットワークは終始無効のままにする。
 
 ```python
-# version未指定時は管理側で許可済み版を選び、結果を固定して返す
+# versionを省くと、カタログの範囲で取得できる最新の版を選び、結果を固定して返す
 install_python_packages(packages=[{"name": "rapidfuzz"}])
 ```
 
-1. Control PlaneがRunの権限、package名、要求版、残り資源を検証する。MVPでは承認済みpackage・versionのカタログを使う。
-2. 添付・社内資料・LLMキーを持たない取得専用環境で、固定したindexから対象platform用のwheelを依存関係ごと取得する。cacheがあれば再利用する。
-3. 直接依存と推移依存の全件について、許可、対応Python・ABI、サイズを検証する。ソース配布、任意URL、Git指定、editable install、外部URLを含む依存指定は取得前に拒否する。取得先・redirect先も固定経路で制限する。
-4. exact versionとSHA-256を含む完全なlockとwheel群をPackageBundleとして保存する。承認状態とhashを区別し、hash一致だけで安全性を判定しない。
-5. Launcherが検証済みbundleをSandboxへ渡し、Run専用仮想環境へローカルインストールする。
-6. 成功時にEnvironment Revisionを確定し、追加された全packageとversionをTool結果へ返す。
+**カタログ**：追加してよいpackageは、基盤管理者が管理画面（`/manage/python_packages`。authorization.md §7.3）でカタログ（PythonPackage）に登録する。項目は名前（PEP 503で正規化する）、許す版の範囲（PEP 440のspecifier。空ならどの版も）、メモ、停止。モデルが直接頼めるのは、登録していて停止していないpackageの、範囲の中の版だけ。推移依存は、登録したpackageの依存として許す（全件に下の検証をかける）。登録のないpackageや範囲の外の版は、取得せずにTool結果のエラーで返し、基盤管理者にカタログへの登録を頼むよう伝える（Runは失敗にしない）。カタログはすべての実行コードを承認済みに限る仕組みではなく、管理された取得の範囲を決めるもの（下の最後の段落）。
 
-取得環境にはRun本文を渡さず、サーバーで正規化したpackage識別子と実行環境条件だけを渡す。index等の接続設定はユーザーやLLMから上書きできない。依存関係の解析・インストールをWeb APIプロセス内で直接実行しない。
+**取得**：
 
-頻出ライブラリは、イメージのビルド時に、全依存の固定版とhashを含むlock（`requirements.lock`）からイメージのPythonへ入れる。rootfsは読取り専用なので、Sandboxの中からは変えられない。Run専用の仮想環境 `/workspace/env` は、このPythonの上に `--system-site-packages` で作る薄い環境で（数十KB、作るのは一瞬）、追加したpackageだけを持つ。追加したpackageはイメージの版より先に読まれる。頻出ライブラリをRunごとにコピー・インストールしないので、起動が速く、tmpfsのメモリも使わない。
+1. Runnerが、要求の形（1回に10件まで。名前と任意の版）、カタログ、Runの状態を確かめる。
+2. 取得用の短命のコンテナで、wheelを依存関係ごと取得する。イメージはそのRunのRuntime Profileの版のもの（Workerのplatformのmanifest）で、Python・ABI・platformはSandboxと同じになる。添付・社内資料・LLMキー・Secretを持たない（mountなし。渡すのは、正規化したpackageの指定、会話の今の追加のlock、indexのURLだけ）。ネットワークはDockerの既定のbridgeで外へ出られるが、Sandboxと同じく読取り専用のrootfs・非root・capabilityなし・資源の上限で動かす。
+3. コンテナの中では、Sandboxと同じ薄い仮想環境に会話のそれまでの追加の版を制約として置き、`pip install --dry-run --report --only-binary=:all:` で足りないものだけを解決してから、決まった版のwheelを取得する。モデルが渡せるのは名前と版だけなので、任意URL・Git・editableの指定はできない。ソース配布は取得しない（`--only-binary=:all:`）。依存に直接URLを書いたもの（PEP 508の `name @ URL`）は、解決の結果で見つけて断る。pipは解決の途中でそのURLを読みに行くので、取得用のコンテナからの通信を完全には防げない（PyPIはこの依存を持つpackageを受け付けないので、起きうるのは導入先が管理する社内のミラーだけ。割り切る）。イメージに入っているpackageより新しい版が要るときは、追加の環境に新しい版を入れて上書きしてよい（追加の環境が先に読まれる。イメージのPythonで動く補助コマンドには影響しない。イメージ自体も定期的に更新する。§10.1）。
+4. Runnerが、取得した全件を確かめ直す：wheelであること、tagがSandboxのPython・ABI・platformに合うこと、件数（依存を含めて100件まで）と合計の大きさ（500MBまで）、直接頼んだものがカタログの範囲の中であること。取得は5分で止める。上限はどれも定数。
+5. wheelを内容のSHA-256でBlobObjectとして保存先へ置き（同じwheelは使い回す）、exact versionとSHA-256を含む完全なlockをPackageBundleとして記録する。hashの一致は同じ内容であることを示すだけで、安全性の判定には使わない。
+6. Sandboxへ入れる（下の「導入」）。成功したら会話の新しいEnvironment Revisionを確定し、追加した全packageと版、すでに入っていたものをTool結果で返す。
 
-基底のsite-packagesはimage digestとlockで固定されているので、共有しても再現性は保てる。環境はimage digestと追加したpackageのlockで表す（§7.7のEnvironment Revision）。追加は、互換性を検証したbundleを、pipのローカル取得とhash検証で入れる。[pip install](https://pip.pypa.io/en/stable/cli/pip_install/)と[Secure installs](https://pip.pypa.io/en/stable/topics/secure-installs/)を参照。
+取得環境にはRun本文を渡さない。indexのURL（`YORIKI_PYTHON_PACKAGE_INDEX_URL`、既定はPyPI。社内のミラーに変えられる。deployment.md §5）はユーザーやLLMから上書きできない。依存関係の解析・インストールをWeb APIプロセスやWorkerのプロセスの中で直接実行しない。取得はLLMの呼出しではないので、予算（§9）には計上しない。
+
+**導入**：頻出ライブラリは、イメージのビルド時に、全依存の固定版とhashを含むlock（`requirements.lock`）からイメージのPythonへ入れる。rootfsは読取り専用なので、Sandboxの中からは変えられない。Run専用の仮想環境 `/workspace/env` は、このPythonの上に `--system-site-packages` で作る薄い環境で（数十KB、作るのは一瞬）、追加したpackageだけを持つ。追加したpackageはイメージの版より先に読まれる。頻出ライブラリをRunごとにコピー・インストールしないので、起動が速く、tmpfsのメモリも使わない。
+
+基底のsite-packagesはimage digestとlockで固定されているので、共有しても再現性は保てる。環境はimage digestと追加したpackageのlockで表す（§7.7のEnvironment Revision）。追加は、Launcherがwheelとlockをコンテナの中の `/tmp` へ写し（動いているSandboxにはmountを足せないので、途中の追加も起動時の入れ直しも同じ方法にする。`/tmp` に収まるように分けて写す）、pipのローカル取得とhash検証で入れ、写したものを消す。[pip install](https://pip.pypa.io/en/stable/cli/pip_install/)と[Secure installs](https://pip.pypa.io/en/stable/topics/secure-installs/)を参照。
 
 ```bash
 /workspace/env/bin/python -m pip install \
   --no-index \
-  --find-links=/packages/wheels \
+  --find-links=/tmp/yoriki-packages/wheels \
   --only-binary=:all: \
   --require-hashes \
   --no-deps \
-  -r /packages/requirements.lock
+  -r /tmp/yoriki-packages/requirements.lock
 ```
 
-Run間でRW共有しない。環境を切り替える間はコマンドを停止し、半端なインストール状態で業務処理を継続しない。
+入れたpackageの大きさは `/workspace/env` のtmpfs（Runtime Profileの `env_mb`）に収まる範囲に限る。収まらなければ失敗として返し、Runtime Profileの更新対象にする。Run間でRW共有しない。入れている間はほかのToolを動かさず（並列にしない）、失敗したら環境を前のrevisionに戻してから返し、半端なインストール状態で業務処理を継続しない。
+
+**引き継ぎ**：追加したpackageは、ワークスペースと同じく会話で引き継ぐ。会話は今のEnvironment Revisionを持ち、Sandboxを起動するたび（同じ会話の次のRun、新しいAttempt、サブエージェント）に、そのrevisionの全wheelを入れ直す（仮想環境はsnapshotに入れない。§5.4）。Attemptは使ったrevisionを記録する。サブエージェントは親のその時点のrevisionで始め、子が追加したものは子の環境にだけ入れて会話の環境は変えない（子が返すのはテキストとファイルだけ。harness.md §10.11）。タスクの実行は実行ごとの会話なので、追加のない環境から始める。Skill・タスクで使うpackageを前もって宣言する仕組みはまだない。
+
+Runtime Profileの版やWorkerのplatformが会話のrevisionと違うとき（次のRunで既定の版が変わった、別のarchitectureのWorkerが受けた等）は、直接頼んだpackageを同じ版で新しい条件向けに取り直し、新しいrevisionにする（取得と検証は上と同じ）。取り直せなかったものは入れずに続け、入っていないpackageをモデルに知らせる。
 
 対応wheelがない場合やOSライブラリが必要な場合は、理由を返してRuntime Profileの更新対象にする。OS側のCLIが必要な場合はイメージのビルド時に追加し、Sandbox内のaptやsudoを前提としない。
 
@@ -1251,11 +1259,11 @@ OSSとして公開のDocker Hubに置くので、ライセンスはMIT・BSD・A
 
 ### 7.7 環境の保持と分散再開
 
-実行時に使ったimage digest、OS/architecture、Python ABI、追加したpackageのversion・hash、wheelの保存参照をEnvironment Revisionへ残す（イメージの中のpackageはimage digestで決まる）。環境追加時は新しいrevisionを作り、Checkpointに対応するrevisionを記録する。
+実行時に使ったimage digest、OS/architecture、Python ABI、追加したpackageのversion・hash、wheelの保存参照をEnvironment Revisionへ残す（イメージの中のpackageはimage digestで決まる）。環境追加時は新しいrevisionを作って会話の今のrevisionにし、Attemptに使ったrevisionを記録する（§7.6）。
 
-別WorkerではWorkspace Persistence AdapterがManifestとCheckpointを読み、Storage Backendから作業ファイルを取得して同じ環境を復元する。未対応platformのWorkerへ無理に割り当てず、別architectureへの移行は新しい環境条件として検証する。Dockerのmulti-platform imageを使う場合も、image indexのdigestと選択したplatform manifestのdigestを記録する。
+別WorkerではWorkspace Persistence AdapterがManifestとCheckpointを読み、Storage Backendから作業ファイルを取得し、会話のrevisionから追加の環境を入れ直す。別architectureのWorkerやRuntime Profileの別の版では、直接頼んだpackageを同じ版で新しい環境条件向けに取り直して検証する（§7.6）。Dockerのmulti-platform imageを使う場合も、image indexのdigestと選択したplatform manifestのdigestを記録する。
 
-wheelは公開indexから再取得できることだけに依存せず、再開対象Runの保持期間中は内容hashにより保管する。依存が失効して実行禁止になった場合は再開を止め、代替環境への移行を新しいRunとして記録する。
+wheelは公開indexから再取得できることだけに依存せず、会話が残っている間は内容hashにより保管する。入れ直すときに、直接頼んだpackageがカタログで停止・削除されていたら、そのpackage（とそれだけが必要とした依存）は入れずに続け、入っていないことをモデルに知らせる（Runは止めない）。
 
 ### 7.8 Storage Backendによるファイル保存
 
@@ -2108,3 +2116,4 @@ Sandboxイメージの定義は本体と同じリポジトリの `sandbox/` で�
 | 0.59 | 2026年11月13日 | Runごとの金額の上限を決めた（§9.4）。そのRunのLLM呼出しの金額（サブエージェント・圧縮・評価の判定を含む）に、基盤の既定の上限を1つ持つ（管理画面の「予算」。初期値は無制限。タスクごとの上書きは持たない）。強制は月間予算と同じ形（呼出しの前の予約、まとめの1ステップ、残り2割の知らせ）で、終わり方 `cost_limit` を足した。「料金とほかの上限」は§9.5にした |
 | 0.60 | 2026年11月14日 | ワークスペースの保存期限での自動の削除を決めた（§8）。期限は会話の最後のRunが終わった時から数え（最終更新からではない）、終わっていないRunがある会話は消さない。設定は基盤の設定（管理画面の「基盤の設定」。初期値30日、空なら自動では消さない）で、1日1回の `cleanup_workspaces`（管理コマンドでも動かせる）が消す。消せずに残ったsnapshotも同じ処理で消し直す |
 | 0.61 | 2026年11月14日 | 実行の残骸の定期の回収を決めた（§8）。Workerのホストごとにあるもの（終わったAttemptのSandboxのコンテナ・作業領域）は、Q2のScheduleがクラスタの1台でしか動かないので、管理コマンド `cleanup_worker` を各ホストのcronから1時間ごとに流す。確定する前に落ちたsnapshot・サブエージェントへのコピーの実体（記録のないobject）は、1時間ごとのSchedule `cleanup_objects`（管理コマンドでも動かせる）が消す。leaseが切れてから1時間は消さない。記録のないobjectを探すため、Storage Backendの契約に list_keys を足した（§7.8） |
+| 0.62 | 2026年11月15日 | Pythonのpackageの追加を決めた（§7.6・§7.7）。カタログ（PythonPackage）は基盤管理者が登録し、直接頼めるのは登録したものだけで、推移依存は登録したpackageの依存として許す。取得はRuntime Profileのイメージの短命の取得用コンテナ（mount・Secretなし、外へ出られる）で行い、wheelを内容のhashで保存先に置く。追加は会話のEnvironment Revisionとして引き継ぎ、Sandboxを起動するたびに入れ直す（`/packages` のmountはやめ、`/tmp` へ写して入れる）。イメージのpackageより新しい版は追加の環境で上書きしてよい。版・platformが変わったら同じ版で取り直す。サブエージェントの追加は子の環境だけ |

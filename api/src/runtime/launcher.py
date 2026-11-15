@@ -50,6 +50,10 @@ CHUNK = 64 * 1024
 # プロセス数）から換算する。上限を超えると、gVisorではforkが失敗するのでなくSandboxごと落ちる（design.md §7.2）
 GVISOR_PIDS_PER_PROCESS = 2
 GVISOR_PIDS_OVERHEAD = 64
+# 取得用のコンテナ（design.md §7.6）の /tmp の大きさ（MB）。取得するwheelの合計の上限（500MB）とpipの作業の分。
+# メモリの上限は、これにコマンドの分を足した大きさ以上にする
+FETCH_TMP_MB = 1024
+FETCH_MIN_MEMORY_MB = FETCH_TMP_MB + 1024
 OUTPUT_DISCARDED = b"\n[output beyond %d bytes was discarded; write large output to a file instead]\n"
 
 
@@ -81,6 +85,30 @@ class SandboxSpec:
     # dockerdから見たパスにする
     input_dir: str = ""
     master_dir: str = ""
+    # 取得用のコンテナ（design.md §7.6）：Dockerの既定のbridgeで外へ出られ、mountなし・書けるのは /tmp だけ
+    fetch: bool = False
+
+    @property
+    def network(self) -> str:
+        return "bridge" if self.fetch else "none"
+
+    @classmethod
+    def for_fetch(cls, sandbox: "SandboxSpec", *, labels: dict[str, str]) -> "SandboxSpec":
+        """Sandboxと同じイメージ・実行環境・制限で、packageを取得するコンテナ。添付・資料はmountしない"""
+        return cls(
+            image=sandbox.image,
+            platform=sandbox.platform,
+            memory_mb=max(sandbox.memory_mb, FETCH_MIN_MEMORY_MB),
+            cpus=sandbox.cpus,
+            pids_limit=sandbox.pids_limit,
+            tmp_mb=FETCH_TMP_MB,
+            work_mb=0,
+            output_mb=0,
+            env_mb=0,
+            runtime=sandbox.runtime,
+            labels={SANDBOX_LABEL: "1", **labels},
+            fetch=True,
+        )
 
     @classmethod
     def for_version(
@@ -125,6 +153,8 @@ class SandboxSpec:
 
     def tmpfs(self) -> dict[str, str]:
         """書ける場所はすべて大きさを決めたtmpfsにする（CONTRACT.md §2）。workとenvはスクリプトを実行できる"""
+        if self.fetch:
+            return {"/tmp": f"size={self.tmp_mb}m,mode=1777"}
         owned = "uid=10001,gid=10001,mode=0700"
         return {
             "/tmp": f"size={self.tmp_mb}m,mode=1777",
@@ -137,7 +167,7 @@ class SandboxSpec:
         """`create_host_config` に渡す制限。`--init` は付けない（イメージの init がPID 1。CONTRACT.md §2）"""
         memory = f"{self.memory_mb}m"
         config: dict[str, Any] = {
-            "network_mode": "none",
+            "network_mode": self.network,
             "read_only": True,
             "cap_drop": ["ALL"],
             "security_opt": ["no-new-privileges:true"],
@@ -156,6 +186,8 @@ class SandboxSpec:
 
     def bind_mounts(self) -> list[tuple[str, str]]:
         """読取り専用でmountする（Workerのディレクトリ, Sandboxのパス）"""
+        if self.fetch:
+            return []
         pairs = [(self.input_dir, INPUT_DIR), (self.master_dir, MASTER_DIR)]
         return [(source, target) for source, target in pairs if source]
 
@@ -167,7 +199,7 @@ def verify_container(info: dict[str, Any], spec: SandboxSpec) -> list[str]:
     problems = []
     memory = spec.memory_mb * 1024 * 1024
     expected = {
-        "NetworkMode": "none",
+        "NetworkMode": spec.network,
         "Privileged": False,
         "ReadonlyRootfs": True,
         "PidsLimit": spec.host_pids_limit,
@@ -482,16 +514,28 @@ class Sandbox:
         if exit_code != 0:
             raise SandboxUnavailable(f"cannot archive the workspace (exit {exit_code}): {stderr[-1000:]!r}")
 
-    def restore(self, src: IO[bytes]) -> None:
-        """`archive` で作ったtarを `/workspace` の下へ戻す。Sandboxの利用者の権限で、書けるtmpfsの中にだけ展開される。
-        GNU tarは絶対パスの先頭の `/` と `..` を含む名前を外して展開する"""
+    def restore(self, src: IO[bytes], directory: str = "/workspace") -> None:
+        """`archive` で作ったtarを `directory`（既定は `/workspace`）の下へ戻す。Sandboxの利用者の権限で、書けるtmpfsの
+        中にだけ展開される。GNU tarは絶対パスの先頭の `/` と `..` を含む名前を外して展開する"""
         _stdout, stderr, exit_code = self._run(
-            ["tar", "--extract", "--file=-", "--directory=/workspace", "--no-same-owner", "--no-overwrite-dir"],
+            ["tar", "--extract", "--file=-", f"--directory={directory}", "--no-same-owner", "--no-overwrite-dir"],
             src,
             timeout=ARCHIVE_TIMEOUT,
         )
         if exit_code != 0:
             raise SandboxUnavailable(f"cannot restore the workspace (exit {exit_code}): {stderr[-1000:]!r}")
+
+    def run(
+        self,
+        command: list[str],
+        stdin: bytes | IO[bytes] = b"",
+        *,
+        timeout: int,
+        stdout_sink: Callable[[bytes], Any] | None = None,
+    ) -> tuple[bytes, bytes, int]:
+        """決まった操作（packageの取得・導入。design.md §7.6）のコマンドを、Sandboxの利用者の権限で動かして終わりを
+        待つ。（標準出力、標準エラー、終了コード）。`stdout_sink` を渡すと、標準出力はそこへ書く"""
+        return self._run(command, stdin, timeout=timeout, stdout_sink=stdout_sink)
 
     def put_file(self, path: str, src: IO[bytes]) -> bool:
         """`src` の内容を、Sandboxの利用者の権限でそのまま `path` に書く（親のディレクトリも作る）。
@@ -652,6 +696,7 @@ class Launcher:
             logger.warning("Docker runs without userns-remap or rootless mode; see docs/deployment.md §7.1")
 
     def start(self, spec: SandboxSpec, name: str) -> Sandbox:
+        """Sandboxを起動する。取得用のコンテナ（`spec.fetch`）では、Run専用の環境を作らない"""
         self.check_isolation(spec)
         try:
             self._check_runtime(spec.runtime)
@@ -664,7 +709,7 @@ class Launcher:
                 user=SANDBOX_USER,
                 labels=spec.labels,
                 host_config=self.api.create_host_config(**spec.host_config()),
-                network_disabled=True,
+                network_disabled=not spec.fetch,
             )
         except DockerException as exc:
             raise SandboxUnavailable(f"cannot start the sandbox: {exc}") from exc
@@ -687,6 +732,8 @@ class Launcher:
             self.api.start(sandbox.container_id)
         except DockerException as exc:
             raise SandboxUnavailable(f"cannot start the sandbox: {exc}") from exc
+        if spec.fetch:
+            return
         result = sandbox.helper("init-env", {})
         if not result.get("ok"):
             raise SandboxUnavailable(f"cannot prepare the sandbox: {result.get('error')}")

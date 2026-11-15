@@ -91,6 +91,11 @@ export const skillToolItems = (t: T) =>
     { value: 'shell', title: 'shell', description: t('Sandboxでコマンドを動かす') },
     { value: 'job_output', title: 'job_output', description: t('バックグラウンドのジョブの出力を見る') },
     { value: 'job_kill', title: 'job_kill', description: t('バックグラウンドのジョブを止める') },
+    {
+      value: 'install_python_packages',
+      title: 'install_python_packages',
+      description: t('カタログにあるPythonのpackageを追加する'),
+    },
     { value: 'ask_user', title: 'ask_user', description: t('利用者に確認する') },
     { value: 'todo_write', title: 'todo_write', description: t('作業の計画を書く') },
     { value: 'datasource_describe', title: 'datasource_describe', description: t('Connectorの表・列の説明を見る') },

@@ -348,7 +348,7 @@ class ToolResult:
 | `ask_user` | `questions`（1〜3。各 `header`・`question`・`options`・`multi_select`） | 利用者に確かめる（§10.3） | INTERACT | 不可（単独で呼ぶ） |
 | `present_files` | `files`（`path`・`description` の並び。4件まで） | 主な成果物を示す（§10.5） | READ | 不可 |
 | `submit_result` | 業務結果のSchema（SkillかTask Definitionのもの） | 業務結果を確定する（§10.5） | READ | 不可（単独で呼ぶ） |
-| `install_python_packages` | `packages`（`name`・`version`） | 管理された取得で、Run専用の環境へ入れる（design.md §7.6） | WRITE_SANDBOX | 不可 |
+| `install_python_packages` | `packages`（`name`、`version`（任意。PEP 440の版。省くとカタログの範囲で最新）の並び。10件まで） | カタログ（基盤管理者が登録）にあるpackageを、取得用のコンテナで依存ごと取得し、Run専用の環境へ入れる。結果は追加したpackageと版の全部と、すでに入っていたもの。カタログにないものは取得せずに断り、基盤管理者に登録を頼むよう伝える。追加は会話で引き継ぐ（design.md §7.6）。Runtime Profileを固定したRun（Sandboxを使えるRun）に限る | WRITE_SANDBOX | 不可 |
 | `datasource_describe` | `connector`（使えるConnectorの名前。一覧は§10.2） | 公開している表・列の説明（design.md §4.9.2） | READ | 不可（同時実行の枠と記録をDBで扱うので、1つずつ実行する） |
 | `datasource_query` | `connector`、`sql`、`params`（文字列の並び） | SELECT文（引数の場所は `?`）を実行し、結果をCSVで `/workspace/input/connectors/{invocation_id}/` に置く | READ | 不可（同上。接続の同時実行数の上限の中で） |
 | `request_skill_edit` | `skill`（編集するSkillの名前。新しく作るなら空）、`summary`（変更の要約） | Skillの編集を提案し、利用者の確認を待つ（§10.9）。答える人がいる業務のRunだけに出す（修正チャットのタスクのRunには出さない） | INTERACT | 不可（単独で呼ぶ） |
@@ -809,9 +809,9 @@ Codexの非同期の質問と、Gemini CLIの「承認待ちのTool呼出し」�
 2. 親のコンテナの中で `/workspace/work`・`/workspace/output` のtarを作り、保存先へ一時的に置く（親のsnapshotとは別の扱い。親のコンテナがなければ最新のsnapshotを使う）。親のコマンドが書き込み中でもその時点のファイルを写し、書き込み中のファイルの中身は保証しない（ジョブが動いていれば、そのことを親への結果と子の指示に添える）。作れなければ親へエラーを返す。
 3. Subagentを記録し、子のAttemptをQ2へ渡す。
 
-**ワークスペース**：親と同じRuntime Profileの版で別のSandboxを起動し、コピーを展開する。`/workspace/input`・`/workspace/master` は親と同じものを読取り専用で置く。コピーは自由に読み書きでき、親の変更は子から見えず、子の変更は親から見えない。
+**ワークスペース**：親と同じRuntime Profileの版で別のSandboxを起動し、コピーを展開する。`/workspace/input`・`/workspace/master` は親と同じものを読取り専用で置く。追加のPython環境は、起動したときの会話のEnvironment Revisionから入れる。子が `install_python_packages` で足したものは子の環境にだけ入り、会話の環境は変えない（design.md §7.6）。コピーは自由に読み書きでき、親の変更は子から見えず、子の変更は親から見えない。
 
-**種類とTool**：種類は組込みの汎用の1つだけ。system promptは子向けのもの（親の指示とSkillだけが指示で、利用者にも親にも尋ねられず、最後の応答が親への報告になる）を使う。Toolは、Sandboxの土台のTool（`todo_write` を除く）と `skill`・`datasource_*` のうち、親のRunに出しているToolとの共通部分だけ（§7.5）。呼ぶたびに親の実行許可（authorization.md §6）で確かめる。Skillは読み込んで使えるが変更はできない。子が使うSkillは、起動したときの親の読込みを写したものと、子が読み込んだもので、子の読込みは親や別の子の読込みにしない（親のManifestへ追記しない）。子がConnectorで読んだ結果は子の `/workspace/input/connectors/` にだけ置き、親には置かない（親へ返すのはテキストとファイルだけ）。親に `skill` を出していないRun（評価のRun）では子にも出さない。親に使うよう指示したSkillがあれば、その内容を子の最初の発言に入れる。`ask_user`、`submit_result`、`present_files`、`prepare_notification`、`request_*`、`install_python_packages`、`subagent` は出さない。困ったら報告で親へ返すよう指示する。孫は作らない。ステップ数は子ごとに数え、上限は親と同じ（§4.4）。子は待ちに移らないので、最後の応答のときにジョブが動いていれば1回だけ知らせ（待つなら `job_output` で待つ）、それでも最後の応答を返せばジョブを止めて終える。
+**種類とTool**：種類は組込みの汎用の1つだけ。system promptは子向けのもの（親の指示とSkillだけが指示で、利用者にも親にも尋ねられず、最後の応答が親への報告になる）を使う。Toolは、Sandboxの土台のTool（`todo_write` を除く）と `skill`・`datasource_*`・`install_python_packages` のうち、親のRunに出しているToolとの共通部分だけ（§7.5）。呼ぶたびに親の実行許可（authorization.md §6）で確かめる。Skillは読み込んで使えるが変更はできない。子が使うSkillは、起動したときの親の読込みを写したものと、子が読み込んだもので、子の読込みは親や別の子の読込みにしない（親のManifestへ追記しない）。子がConnectorで読んだ結果は子の `/workspace/input/connectors/` にだけ置き、親には置かない（親へ返すのはテキストとファイルだけ）。親に `skill` を出していないRun（評価のRun）では子にも出さない。親に使うよう指示したSkillがあれば、その内容を子の最初の発言に入れる。`ask_user`、`submit_result`、`present_files`、`prepare_notification`、`request_*`、`subagent` は出さない。困ったら報告で親へ返すよう指示する。孫は作らない。ステップ数は子ごとに数え、上限は親と同じ（§4.4）。子は待ちに移らないので、最後の応答のときにジョブが動いていれば1回だけ知らせ（待つなら `job_output` で待つ）、それでも最後の応答を返せばジョブを止めて終える。
 
 **親へ返すもの**：テキストとファイルだけ。
 
@@ -844,7 +844,7 @@ Codexの非同期の質問と、Gemini CLIの「承認待ちのTool呼出し」�
 - 新しいAttemptでは、RunEventの最新の `compaction` とその後のイベントから文脈を組み立てる（Codexの方式）。ワークスペースは最新のsnapshotから戻す（作業ディレクトリは持ち越さない）。
 - **Workspaceと記録の食い違い**：CheckpointにはWorkspace snapshotと、その時点のRunEventのsequenceを一緒に記録する（design.md §5.4）。Checkpointは、Workerを手放すときに確定する（§8.1。保存するRunと場面は design.md §7.9 の保存基準）。ジョブが動いている確認待ちで落ちたときも、同じく最後の保存まで戻る。障害で最後のCheckpointより後のRunEventが残っているときは、記録を消さずに、次の内容の `context.snapshot` を追記してから続ける。
   - 作業ファイルを、sequence Nの時点（最後に保存した区切り）に戻したこと。
-  - それより後にSandboxのファイルを変えたTool呼出し（`shell`・`write`・`edit`・`install_python_packages` 等）の一覧と、その結果は今のファイルに反映されていないこと。必要なら確かめてやり直すこと。
+  - それより後にSandboxのファイルを変えたTool呼出し（`shell`・`write`・`edit` 等）の一覧と、その結果は今のファイルに反映されていないこと（`install_python_packages` で追加したpackageは会話の環境から入れ直すので含めない。design.md §7.6）。必要なら確かめてやり直すこと。
   - 読んだファイルの版の記録（§7.8）は、sequence Nまでのものだけを使う。
 - **外部への書込みとlease**：fencing tokenはYorikiのDBへの書込みは止められるが、外部のサービスへの送信は止められない。外部の確定した変更を伴うToolは、送る直前にleaseを確かめ、送る前にToolInvocationを `running` で確定する。送り先が受け付ける重複のキー（operation keyをIdempotency-Key等で渡す）を必須にし、送り先が重複のキーを持たない操作は、書込みの操作として登録できないようにする。送った後に結果が分からなければ `unknown` とし、自動でやり直さない（design.md §6.3）。
 - 結果のないTool呼出しは、次のように閉じる。

@@ -2,7 +2,14 @@ from django.contrib import admin
 
 from utils.admin import ReadOnlyAdmin
 
-from .models import PlatformSettings, RuntimeProfile, RuntimeProfileVersion
+from .models import (
+    EnvironmentRevision,
+    PlatformSettings,
+    PythonPackage,
+    PythonWheel,
+    RuntimeProfile,
+    RuntimeProfileVersion,
+)
 
 
 @admin.register(RuntimeProfile)
@@ -26,3 +33,22 @@ class RuntimeProfileVersionAdmin(ReadOnlyAdmin):
 @admin.register(PlatformSettings)
 class PlatformSettingsAdmin(ReadOnlyAdmin):
     list_display = ("id", "workspace_retention_days", "updated")
+
+
+@admin.register(PythonPackage)
+class PythonPackageAdmin(ReadOnlyAdmin):
+    list_display = ("id", "uid", "name", "specifier", "is_active", "deleted", "updated")
+    list_filter = ("is_active", "deleted")
+    search_fields = ("uid", "name")
+
+
+@admin.register(PythonWheel)
+class PythonWheelAdmin(ReadOnlyAdmin):
+    list_display = ("id", "filename", "sha256", "size", "created")
+    search_fields = ("filename", "sha256")
+
+
+@admin.register(EnvironmentRevision)
+class EnvironmentRevisionAdmin(ReadOnlyAdmin):
+    list_display = ("id", "uid", "conversation", "run", "subagent", "platform", "python_version", "created")
+    search_fields = ("uid",)

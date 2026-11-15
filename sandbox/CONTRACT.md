@@ -19,7 +19,8 @@ Runner（`api/` のLauncherとTool）とSandboxイメージの取り決め。イ
 | Python | `/usr/local/bin/python3`（mise.tomlの版）。頻出ライブラリは、全依存の版とSHA-256を固定したlockから、このPythonに入れてある（design.md §7.6）。補助コマンドもこれで動く |
 | lock | `/opt/yoriki/requirements.lock`（イメージに入れたpackageの全依存の版とSHA-256）。追加するpackageの依存を解くときに使う |
 | `yoriki_connector` | Skillのスクリプトが社内DB等のConnectorを使うPythonのライブラリ（`/opt/yoriki/python`。イメージのPythonの `site-packages` の `.pth` で読めるようにする）。`query(connector, sql, params)`（`columns` はSQLのとおりの列名、`rows` は列名をキーにした行で、値はすべて文字列（NULLは空文字）。同じ名前の列は2つめから `名前_2`）・`describe(connector)`。`rate_limited`（`retry_after` の秒）と `busy` では、ライブラリが待ってやり直す。要求は §4.9 の中継のソケットへ送り、結果のCSVはRunnerが `/workspace/input/connectors/` に置いたものを読む |
-| `/packages` | 空のディレクトリ。追加するpackageのbundle（wheelとlock）を、Launcherが読取り専用でmountする |
+| `/packages` | 空のディレクトリ。使わない（追加するpackageはLauncherが `/tmp` へ写して入れる。§2。次に契約を上げるときに消す） |
+| `pip` | イメージのPythonの `pip`。追加するpackageの取得（取得用のコンテナ）と、`/workspace/env` への導入に使う（§2） |
 | 入っているもの | harness.md §8.5のGNUのツールとPython、`images/<profile>/requirements.in` のライブラリ、日本語のフォント（Noto CJK）。`docs` は、LibreOffice（ヘッドレスのWriter・Calc・Impress）、pandoc、poppler-utils、Node.js（mise.tomlの版）と `images/docs/node/package.json` のパッケージも持つ（design.md §7.6） |
 | Node.jsのパッケージ | `/node_modules`（版とhashを固定したlockから入れたもの）。Nodeは親のディレクトリを順に探すので、どこのスクリプトからも `require`・`import` で読める。`npm install` はできない |
 | フォント | fontconfig（`/etc/fonts/local.conf`）で、総称（`sans-serif`・`serif`・`monospace`）とよくあるフォント名をNoto CJKの日本語の字形へ向ける。言語の指定が中国語・韓国語なら、そちらの字形にする |
@@ -43,12 +44,13 @@ LauncherはSandboxを次の制限で起動する（design.md §7.2）。これ�
 | `/workspace/work` | 書ける・実行できる。tmpfs（`uid=10001,gid=10001,mode=0700,exec`）か、Workerの作業領域のbind mount。エージェントが作ったスクリプトを `./run.sh` で動かせるようにする（Pythonで任意のコードを動かせるので、実行を止めても守れるものはない） |
 | `/workspace/output` | 書ける。tmpfs（`uid=10001,gid=10001,mode=0700`）か、Workerの作業領域のbind mount |
 | `/workspace/env` | 書ける・実行できる（tmpfsなら `exec` を付ける）。最初は空で、`init-env` で薄い仮想環境を作る |
-| `/packages` | 追加するpackageがあるときだけ、そのbundleを読取り専用のbind mountで |
 | `/workspace/input`・`/workspace/master` | 読取り専用のbind mount |
 | 渡さないもの | privileged、host network・PID、デバイス、Dockerのソケット、ホストの任意のディレクトリ |
 | 実行環境 | 既定はgVisor（`--runtime=runsc`。design.md §7.2の5）。イメージはruncでもgVisorでも同じ契約で動く（契約テストは両方で行う） |
 
 - `/workspace/env` は、イメージのPythonの上に `--system-site-packages` で作る薄い仮想環境（数十KB）で、追加したpackageだけを持つ。追加したpackageは、イメージの版より先に読まれる。追加の量だけtmpfsのメモリを使う。
+- 追加するpackage（design.md §7.6）：Launcherが、wheelと `requirements.lock`（名前・版・SHA-256）を `/tmp/yoriki-packages/` へ写し（`docker cp` と同じarchiveの操作。`/tmp` に収まるように分ける）、Sandboxの利用者の権限で `/workspace/env/bin/python -m pip install --no-index --find-links=/tmp/yoriki-packages/wheels --only-binary=:all: --require-hashes --no-deps -r /tmp/yoriki-packages/requirements.lock` を動かしてから消す。起動の直後（`init-env` の後）に会話の追加を入れ直すときも、途中で追加するときも同じ。
+- 取得用のコンテナ（design.md §7.6）：同じイメージ（同じplatformのdigest）を、mountなし・ネットワークはDockerの既定のbridge・ほかの制限はこの表と同じで起動し、`/tmp` の中の薄い仮想環境で `pip install --dry-run --report --only-binary=:all:` と `pip download --only-binary=:all: --no-deps` を動かす。渡す環境変数は、indexのURL（`PIP_INDEX_URL`）とpipの設定（キャッシュを `/tmp` へ）だけ。取得したwheelはLauncherがarchiveの操作で取り出す。
 - gVisorでは、Sandboxの中のプロセスごとにホストのプロセスが増えるので、`--pids-limit` にはSandboxの中のプロセス数の上限を換算した値（×2＋64）を渡す。上限を超えると、forkが失敗するのでなくSandboxごと止まる。メモリの上限を超えたときも、Sandboxごと止まることがある（runcでは、超えたコマンドだけが止まる）。
 - `/workspace/work`・`/workspace/output`・`/workspace/env` の大きさは、tmpfsの `size` か、作業領域のquotaで制限する（design.md §7.2）。
 

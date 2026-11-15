@@ -11,8 +11,13 @@ from utils.exceptions import Conflict
 from utils.permissions import ModelPermissions
 from utils.views import SoftDeleteMixin
 
-from .models import PlatformSettings, RuntimeProfile, RuntimeProfileVersion
-from .serializers import PlatformSettingsSerializer, RuntimeProfileSerializer, RuntimeProfileVersionSerializer
+from .models import PlatformSettings, PythonPackage, RuntimeProfile, RuntimeProfileVersion
+from .serializers import (
+    PlatformSettingsSerializer,
+    PythonPackageSerializer,
+    RuntimeProfileSerializer,
+    RuntimeProfileVersionSerializer,
+)
 
 CONFLICT = OpenApiResponse(description="他の変更と競合した（編集を始めた後に、別の版ができている）")
 
@@ -112,3 +117,30 @@ class PlatformSettingsAPIView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+
+class PythonPackageFilter(filters.FilterSet):
+    name = filters.CharFilter(label=_("名前"), lookup_expr="icontains")
+
+    class Meta:
+        model = PythonPackage
+        fields = ["name", "is_active"]
+
+
+@extend_schema(
+    description="追加してよいPythonのpackageのカタログの管理API（design.md §7.6）", tags=["manage/python_package"]
+)
+class PythonPackageViewSet(SoftDeleteMixin, ModelViewSet):
+    """モデルが install_python_packages で直接頼めるのは、ここで有効にしたpackageの、範囲の中の版だけ。
+    推移依存は、登録したpackageの依存として許す"""
+
+    permission_classes = [ModelPermissions]
+    lookup_field = "uid"
+    queryset = PythonPackage.objects.filter(deleted=False).select_related("created_by")
+    serializer_class = PythonPackageSerializer
+    filterset_class = PythonPackageFilter
+    search_fields = ("name", "note")
+    ordering = ("name", "pk")
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)

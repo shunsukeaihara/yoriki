@@ -586,6 +586,10 @@ class ExecutionAttempt(models.Model):
     # Sandboxを起動したときのWorkerのplatformと、使ったイメージ（platformのmanifestのdigest。design.md §7.7）
     sandbox_platform = models.CharField(_("Sandboxのplatform"), max_length=50, blank=True)
     sandbox_image = models.CharField(_("Sandboxのイメージ"), max_length=400, blank=True)
+    # Sandboxに入れた追加のPython環境の版（design.md §7.7）。最後に入れたもの
+    environment = models.ForeignKey(
+        "runtime.EnvironmentRevision", on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
 
     class Meta:
         verbose_name = _("実行の試み")

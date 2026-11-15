@@ -187,6 +187,13 @@ export const TodoStatus = {
   COMPLETED: 'completed',
 } as const satisfies Record<string, Todo['status']>
 
+/** install_python_packages の引数（packages: [{name, version?}]）の名前を並べる */
+const packageNames = (value: unknown) =>
+  (Array.isArray(value) ? value : [])
+    .map((item) => (item && typeof item === 'object' && 'name' in item ? String(item.name) : ''))
+    .filter(Boolean)
+    .join(', ')
+
 /** Tool の呼出しを、作業の記録に出す短い文にする。知らない Tool は名前をそのまま出す */
 export const toolLabel = (
   call: Pick<ToolCallInfo, 'name' | 'arguments'>,
@@ -218,6 +225,8 @@ export const toolLabel = (
       return t('ジョブの出力を確認')
     case 'job_kill':
       return t('ジョブを停止')
+    case 'install_python_packages':
+      return t('Pythonのpackageを追加：{names}', { names: packageNames(call.arguments.packages) })
     case 'skill':
       return t('Skillを読み込む：{name}', { name: arg('name') })
     case 'datasource_describe':

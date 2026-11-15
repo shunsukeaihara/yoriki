@@ -6509,6 +6509,181 @@ paths:
               schema:
                 $ref: '#/components/schemas/PlatformSettings'
           description: ''
+  /api/v1/python_packages/:
+    get:
+      operationId: v1_python_packages_list
+      description: 追加してよいPythonのpackageのカタログの管理API（design.md §7.6）
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+      - in: query
+        name: name
+        schema:
+          type: string
+        description: 名前
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - manage/python_package
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPythonPackageList'
+          description: ''
+    post:
+      operationId: v1_python_packages_create
+      description: 追加してよいPythonのpackageのカタログの管理API（design.md §7.6）
+      tags:
+      - manage/python_package
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PythonPackageRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PythonPackageRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PythonPackageRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PythonPackage'
+          description: ''
+  /api/v1/python_packages/{uid}/:
+    get:
+      operationId: v1_python_packages_retrieve
+      description: 追加してよいPythonのpackageのカタログの管理API（design.md §7.6）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/python_package
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PythonPackage'
+          description: ''
+    put:
+      operationId: v1_python_packages_update
+      description: 追加してよいPythonのpackageのカタログの管理API（design.md §7.6）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/python_package
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PythonPackageRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PythonPackageRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PythonPackageRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PythonPackage'
+          description: ''
+    patch:
+      operationId: v1_python_packages_partial_update
+      description: 追加してよいPythonのpackageのカタログの管理API（design.md §7.6）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/python_package
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedPythonPackageRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedPythonPackageRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedPythonPackageRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PythonPackage'
+          description: ''
+    delete:
+      operationId: v1_python_packages_destroy
+      description: 追加してよいPythonのpackageのカタログの管理API（design.md §7.6）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/python_package
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
   /api/v1/runtime_profiles/:
     get:
       operationId: v1_runtime_profiles_list
@@ -12006,6 +12181,25 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Notification'
+    PaginatedPythonPackageList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/PythonPackage'
     PaginatedRunList:
       type: object
       required:
@@ -12714,6 +12908,26 @@ components:
           minimum: 1
           nullable: true
           description: 会話・修正チャットのワークスペース（作業ファイル）を、最後の実行が終わってから残す日数。空なら自動では消さない
+    PatchedPythonPackageRequest:
+      type: object
+      description: 追加してよいPythonのpackageのカタログ（design.md §7.6）。名前はPEP 503で正規化して持つ
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: PyPI等のpackageの名前（例：rapidfuzz）
+          maxLength: 100
+        specifier:
+          type: string
+          description: 許す版の範囲（PEP 440。例：>=3,<4）。空ならどの版も
+          maxLength: 200
+        note:
+          type: string
+          title: メモ
+          maxLength: 500
+        is_active:
+          type: boolean
+          title: 有効
     PatchedRuntimeProfileRequest:
       type: object
       description: |-
@@ -13087,6 +13301,67 @@ components:
         * `2` - Anthropic（Claude）
         * `3` - Google Gemini
         * `4` - ローカルLLM
+    PythonPackage:
+      type: object
+      description: 追加してよいPythonのpackageのカタログ（design.md §7.6）。名前はPEP 503で正規化して持つ
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          description: PyPI等のpackageの名前（例：rapidfuzz）
+          maxLength: 100
+        specifier:
+          type: string
+          description: 許す版の範囲（PEP 440。例：>=3,<4）。空ならどの版も
+          maxLength: 200
+        note:
+          type: string
+          title: メモ
+          maxLength: 500
+        is_active:
+          type: boolean
+          title: 有効
+        created_by:
+          type: string
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created
+      - created_by
+      - id
+      - name
+      - updated
+    PythonPackageRequest:
+      type: object
+      description: 追加してよいPythonのpackageのカタログ（design.md §7.6）。名前はPEP 503で正規化して持つ
+      properties:
+        name:
+          type: string
+          minLength: 1
+          description: PyPI等のpackageの名前（例：rapidfuzz）
+          maxLength: 100
+        specifier:
+          type: string
+          description: 許す版の範囲（PEP 440。例：>=3,<4）。空ならどの版も
+          maxLength: 200
+        note:
+          type: string
+          title: メモ
+          maxLength: 500
+        is_active:
+          type: boolean
+          title: 有効
+      required:
+      - name
     ResourceVersion:
       type: object
       properties:
@@ -16781,6 +17056,7 @@ components:
       - shell
       - job_output
       - job_kill
+      - install_python_packages
       - ask_user
       - todo_write
       - datasource_describe
@@ -16795,6 +17071,7 @@ components:
         * `shell` - shell
         * `job_output` - job_output
         * `job_kill` - job_kill
+        * `install_python_packages` - install_python_packages
         * `ask_user` - ask_user
         * `todo_write` - todo_write
         * `datasource_describe` - datasource_describe

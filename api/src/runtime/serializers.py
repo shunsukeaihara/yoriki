@@ -9,7 +9,8 @@ from rest_framework import serializers
 from utils.exceptions import Conflict
 
 from .errors import RegistryError, VersionConflict
-from .models import VERSION_FIELDS, PlatformSettings, RuntimeProfile, RuntimeProfileVersion
+from .models import VERSION_FIELDS, PlatformSettings, PythonPackage, RuntimeProfile, RuntimeProfileVersion
+from .packages import PackageError, check_specifier, normalize
 from .registry import inspect_image
 
 # 資源の上限として入力を受け付ける項目（イメージの情報はレジストリから読む）
@@ -218,3 +219,40 @@ class PlatformSettingsSerializer(serializers.ModelSerializer):
         model = PlatformSettings
         fields = ["workspace_retention_days", "updated"]
         read_only_fields = ["updated"]
+
+
+class PythonPackageSerializer(serializers.ModelSerializer):
+    """追加してよいPythonのpackageのカタログ（design.md §7.6）。名前はPEP 503で正規化して持つ"""
+
+    id = serializers.CharField(source="uid", read_only=True)
+    name = serializers.CharField(max_length=100, help_text=_("PyPI等のpackageの名前（例：rapidfuzz）"))
+    specifier = serializers.CharField(
+        max_length=200,
+        required=False,
+        allow_blank=True,
+        help_text=_("許す版の範囲（PEP 440。例：>=3,<4）。空ならどの版も"),
+    )
+    created_by: "serializers.SlugRelatedField[Any]" = serializers.SlugRelatedField(slug_field="uid", read_only=True)
+
+    class Meta:
+        model = PythonPackage
+        fields = ["id", "name", "specifier", "note", "is_active", "created_by", "created", "updated"]
+        read_only_fields = ["created_by", "created", "updated"]
+
+    def validate_name(self, value: str) -> str:
+        try:
+            name = normalize(value.strip())
+        except PackageError as exc:
+            raise serializers.ValidationError(_("packageの名前として正しくありません")) from exc
+        duplicate = PythonPackage.objects.filter(name=name, deleted=False)
+        if self.instance is not None:
+            duplicate = duplicate.exclude(pk=self.instance.pk)
+        if duplicate.exists():
+            raise serializers.ValidationError(_("同じ名前のpackageが登録されています"))
+        return name
+
+    def validate_specifier(self, value: str) -> str:
+        try:
+            return check_specifier(value)
+        except ValueError as exc:
+            raise serializers.ValidationError(_("版の範囲の書き方が正しくありません（例：>=3,<4）")) from exc

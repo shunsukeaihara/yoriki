@@ -214,3 +214,109 @@ class PlatformSettings(models.Model):
 
 
 auditlog.register(PlatformSettings, exclude_fields=["updated"])
+
+
+class PythonPackage(models.Model):
+    """追加してよいPythonのpackageのカタログ（design.md §7.6）。モデルが直接頼めるのは、ここにあって停止していない
+    packageの、範囲の中の版だけ。推移依存は、登録したpackageの依存として許す"""
+
+    uid = NanoidField(unique=True)
+    # PEP 503で正規化した名前（小文字、`-`・`_`・`.` の並びを `-` に）
+    name = models.CharField(_("名前"), max_length=100)
+    # 許す版の範囲（PEP 440のspecifier。例：`>=3,<4`）。空ならどの版も
+    specifier = models.CharField(_("版の範囲"), max_length=200, blank=True)
+    note = models.CharField(_("メモ"), max_length=500, blank=True)
+    is_active = models.BooleanField(_("有効"), default=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+    deleted = models.BooleanField(default=False)
+
+    class Meta:
+        verbose_name = _("Pythonのpackage")
+        verbose_name_plural = verbose_name
+        constraints = [
+            models.UniqueConstraint(
+                fields=["name"], condition=models.Q(deleted=False), name="uniq_python_package_name"
+            ),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+auditlog.register(PythonPackage, exclude_fields=["updated"])
+
+
+class PythonWheel(models.Model):
+    """取得したwheel。内容のSHA-256で1つにし、会話・Runをまたいで使い回す（design.md §7.6）"""
+
+    filename = models.CharField(_("ファイル名"), max_length=300)
+    name = models.CharField(_("名前"), max_length=100)
+    version = models.CharField(_("版"), max_length=100)
+    sha256 = models.CharField(_("SHA-256"), max_length=64, unique=True)
+    size = models.PositiveBigIntegerField(_("大きさ"))
+    blob = models.ForeignKey("artifact.BlobObject", on_delete=models.PROTECT, related_name="+")
+
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("Pythonのwheel")
+        verbose_name_plural = verbose_name
+
+    def __str__(self):
+        return self.filename
+
+
+class EnvironmentRevision(models.Model):
+    """追加のPython環境の版（design.md §7.6・§7.7）。会話（タスクのRunはそのRun、サブエージェントはその子）の今の版は
+    最新のもの。不変で、追加・取り直しのたびに新しい版を作る"""
+
+    uid = NanoidField(unique=True)
+    conversation = models.ForeignKey(
+        "conversation.Conversation", on_delete=models.CASCADE, related_name="environment_revisions"
+    )
+    # Workspaceを会話で引き継がないRun（タスクのRun）なら、そのRun
+    run = models.ForeignKey("run.Run", on_delete=models.CASCADE, null=True, blank=True, related_name="+")
+    # サブエージェントが足したものなら、その子（会話の環境は変えない）
+    subagent = models.ForeignKey("run.Subagent", on_delete=models.CASCADE, null=True, blank=True, related_name="+")
+    parent = models.ForeignKey("self", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
+    # 入れたSandboxのイメージ（platformのmanifestのdigest）・platform・Pythonの版。違うSandboxでは取り直す
+    image = models.CharField(_("イメージ"), max_length=400)
+    platform = models.CharField(_("platform"), max_length=50)
+    python_version = models.CharField(_("Pythonの版"), max_length=20)
+    # 直接頼んだpackageと決まった版（[{"name", "version"}]。それまでの追加を含む）。取り直すときに使う
+    requested = models.JSONField(_("頼んだpackage"), default=list)
+    # 入っているwheelの全件
+    wheels = models.ManyToManyField(PythonWheel, related_name="+")
+
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("Python環境の版")
+        verbose_name_plural = verbose_name
+        indexes = [models.Index(fields=["conversation", "run", "subagent", "-id"])]
+
+    def __str__(self):
+        return self.uid
+
+
+class PackageBundle(models.Model):
+    """1回の追加・取り直しで入れたwheelの完全なlock（design.md §7.6）"""
+
+    revision = models.OneToOneField(EnvironmentRevision, on_delete=models.CASCADE, related_name="bundle")
+    # この回に頼んだもの（[{"name", "version"}]。取り直しなら空）
+    requested = models.JSONField(_("頼んだpackage"), default=list)
+    wheels = models.ManyToManyField(PythonWheel, related_name="+")
+
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("package bundle")
+        verbose_name_plural = verbose_name
+
+    def __str__(self):
+        return str(self.revision)

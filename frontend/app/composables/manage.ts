@@ -27,6 +27,7 @@ export const ManagePagePermissions = {
   SSO_PROVIDER: [PermissionCode.VIEW_SSO_PROVIDER, PermissionCode.CHANGE_SSO_PROVIDER],
   BUDGET: [PermissionCode.VIEW_BUDGET, PermissionCode.CHANGE_BUDGET],
   PLATFORM_SETTINGS: [PermissionCode.VIEW_PLATFORM_SETTINGS, PermissionCode.CHANGE_PLATFORM_SETTINGS],
+  PYTHON_PACKAGE: [PermissionCode.VIEW_PYTHON_PACKAGE, PermissionCode.CHANGE_PYTHON_PACKAGE],
 } satisfies Record<string, PermissionCode[]>
 
 const isGroup = (item: ManageMenuItem): item is ManageMenuGroup => 'children' in item && Array.isArray(item.children)
@@ -58,6 +59,12 @@ export const useManageMenu = () => {
       icon: 'i-lucide-box',
       to: '/manage/runtime_profiles',
       permission: ManagePagePermissions.RUNTIME_PROFILE,
+    },
+    {
+      label: $i18n.t('Pythonのpackage'),
+      icon: 'i-lucide-package',
+      to: '/manage/python_packages',
+      permission: ManagePagePermissions.PYTHON_PACKAGE,
     },
     {
       label: $i18n.t('Connector'),

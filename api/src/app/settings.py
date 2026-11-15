@@ -325,6 +325,8 @@ YORIKI_WORKSPACES_DIR = os.getenv("YORIKI_WORKSPACES_DIR", "/var/lib/yoriki/work
 # Sandboxのコンテナの実行環境（Dockerに登録した名前）。既定はgVisor（design.md §7.2の5、deployment.md §7.1）。
 # 空にするとDockerの既定（runc）で動かす
 YORIKI_SANDBOX_RUNTIME = os.getenv("YORIKI_SANDBOX_RUNTIME", "runsc")
+# install_python_packages がwheelを取得するindex（simpleのURL）。社内のミラーに変えられる（design.md §7.6）
+YORIKI_PYTHON_PACKAGE_INDEX_URL = os.getenv("YORIKI_PYTHON_PACKAGE_INDEX_URL", "https://pypi.org/simple")
 # 手元でビルドしたSandboxイメージ（`yoriki-sandbox-docs:dev`）に差し替える。開発時（DEBUG）だけ使い、本番では無視する
 YORIKI_SANDBOX_IMAGE_OVERRIDE = os.getenv("YORIKI_SANDBOX_IMAGE_OVERRIDE", "") if DEBUG else ""
 

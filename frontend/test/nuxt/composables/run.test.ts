@@ -86,6 +86,14 @@ describe('toolLabel', () => {
     )
   })
 
+  it('install_python_packages は頼んだpackageの名前を出す', () => {
+    const packages = [{ name: 'tabulate' }, { name: 'humanize', version: '4.9.0' }]
+    expect(toolLabel({ name: 'install_python_packages', arguments: { packages } }, t)).toBe(
+      'Pythonのpackageを追加：tabulate, humanize',
+    )
+    expect(toolLabel({ name: 'install_python_packages', arguments: {} }, t)).toBe('Pythonのpackageを追加：')
+  })
+
   it('知らない Tool は名前をそのまま出す', () => {
     expect(toolLabel({ name: 'other', arguments: {} }, t)).toBe('other')
   })

@@ -30,6 +30,10 @@ export const PermissionCode = {
   // 基盤の設定（ワークスペースの保存期限。design.md §8）
   VIEW_PLATFORM_SETTINGS: 'runtime.view_platformsettings',
   CHANGE_PLATFORM_SETTINGS: 'runtime.change_platformsettings',
+  VIEW_PYTHON_PACKAGE: 'runtime.view_pythonpackage',
+  ADD_PYTHON_PACKAGE: 'runtime.add_pythonpackage',
+  CHANGE_PYTHON_PACKAGE: 'runtime.change_pythonpackage',
+  DELETE_PYTHON_PACKAGE: 'runtime.delete_pythonpackage',
   VIEW_DATABASE_CONNECTION: 'connector.view_databaseconnection',
   ADD_DATABASE_CONNECTION: 'connector.add_databaseconnection',
   CHANGE_DATABASE_CONNECTION: 'connector.change_databaseconnection',

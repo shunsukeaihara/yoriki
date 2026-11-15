@@ -372,6 +372,8 @@ const createAPI = () => {
         patch: (data: PlatformSettingsWrite) =>
           http.patch<PlatformSettings, PlatformSettings>('v1/platform_settings/', data),
       },
+      pythonPackages: (id?: string) =>
+        resource<PythonPackage, PythonPackageWrite, PythonPackageListParams>(http, 'v1/python_packages', id),
       runtimeProfiles: (id?: string) => ({
         ...resource<RuntimeProfile, RuntimeProfileWrite, RuntimeProfileListParams>(http, 'v1/runtime_profiles', id),
         makeDefault: () => http.post<RuntimeProfile, RuntimeProfile>(`v1/runtime_profiles/${id}/make_default/`),

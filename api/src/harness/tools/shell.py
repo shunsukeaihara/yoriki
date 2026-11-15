@@ -24,7 +24,7 @@ SHELL_DESCRIPTION = """Run a bash command in the sandbox.
 
 - Each call starts a new shell: `cd` and `export` do not carry over to the next call. Use `workdir` instead of \
 `cd`. The default working directory is /workspace/work.
-- There is no network. `pip install` does not work.
+- There is no network. `pip install` does not work; use `install_python_packages` to add Python packages.
 - Standard input is closed: do not use interactive commands (editors, pagers, `input()`).
 - Files: /workspace/input and /workspace/master are read-only; write intermediate files in /workspace/work and \
 deliverables in /workspace/output. Python with pandas, openpyxl, pypdf, pdfplumber, python-docx, python-pptx and \

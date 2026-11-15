@@ -50,6 +50,8 @@ export YORIKI_SANDBOX_RUNTIME=runc
 # HTTPで読むレジストリ。手元に立てたレジストリ（docker run -p 5001:5000 registry:3）にpushしたイメージを、
 # Runtime Profileとして登録して試すときだけ使う（本番では設定しない）
 # export YORIKI_SANDBOX_INSECURE_REGISTRIES=localhost:5001
+# install_python_packages がwheelを取得するindex（既定は PyPI）。社内のミラーを使うときだけ
+# export YORIKI_PYTHON_PACKAGE_INDEX_URL=https://pypi.org/simple
 
 # --- ファイルの保存先（添付・成果物・Workspaceのsnapshot。design.md §7.8） ---
 # 既定の /var/lib/yoriki/objects は手元では書けないので、リポジトリの中の .objects/（gitに入れない）にする。

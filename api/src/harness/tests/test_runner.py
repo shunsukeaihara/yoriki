@@ -101,6 +101,7 @@ def test_reply_completes_the_run(conversation):
         "shell",
         "job_output",
         "job_kill",
+        "install_python_packages",
         "subagent",
         "subagent_kill",
     }

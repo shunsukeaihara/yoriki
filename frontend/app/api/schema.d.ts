@@ -2258,6 +2258,44 @@ export interface paths {
         patch: operations["v1_platform_settings_partial_update"];
         trace?: never;
     };
+    "/api/v1/python_packages/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 追加してよいPythonのpackageのカタログの管理API（design.md §7.6） */
+        get: operations["v1_python_packages_list"];
+        put?: never;
+        /** @description 追加してよいPythonのpackageのカタログの管理API（design.md §7.6） */
+        post: operations["v1_python_packages_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/python_packages/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 追加してよいPythonのpackageのカタログの管理API（design.md §7.6） */
+        get: operations["v1_python_packages_retrieve"];
+        /** @description 追加してよいPythonのpackageのカタログの管理API（design.md §7.6） */
+        put: operations["v1_python_packages_update"];
+        post?: never;
+        /** @description 追加してよいPythonのpackageのカタログの管理API（design.md §7.6） */
+        delete: operations["v1_python_packages_destroy"];
+        options?: never;
+        head?: never;
+        /** @description 追加してよいPythonのpackageのカタログの管理API（design.md §7.6） */
+        patch: operations["v1_python_packages_partial_update"];
+        trace?: never;
+    };
     "/api/v1/runtime_profiles/": {
         parameters: {
             query?: never;
@@ -4730,6 +4768,19 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["Notification"][];
         };
+        PaginatedPythonPackageList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["PythonPackage"][];
+        };
         PaginatedRunList: {
             /**
              * Format: uri
@@ -5159,6 +5210,17 @@ export interface components {
             /** @description 会話・修正チャットのワークスペース（作業ファイル）を、最後の実行が終わってから残す日数。空なら自動では消さない */
             workspace_retention_days?: number | null;
         };
+        /** @description 追加してよいPythonのpackageのカタログ（design.md §7.6）。名前はPEP 503で正規化して持つ */
+        PatchedPythonPackageRequest: {
+            /** @description PyPI等のpackageの名前（例：rapidfuzz） */
+            name?: string;
+            /** @description 許す版の範囲（PEP 440。例：>=3,<4）。空ならどの版も */
+            specifier?: string;
+            /** メモ */
+            note?: string;
+            /** 有効 */
+            is_active?: boolean;
+        };
         /**
          * @description Runtime Profile。中身（イメージ、資源の上限）は現在の版の値を平らに出す。
          *
@@ -5326,6 +5388,34 @@ export interface components {
          * @enum {integer}
          */
         ProviderKindEnum: 1 | 2 | 3 | 4;
+        /** @description 追加してよいPythonのpackageのカタログ（design.md §7.6）。名前はPEP 503で正規化して持つ */
+        PythonPackage: {
+            readonly id: string;
+            /** @description PyPI等のpackageの名前（例：rapidfuzz） */
+            name: string;
+            /** @description 許す版の範囲（PEP 440。例：>=3,<4）。空ならどの版も */
+            specifier?: string;
+            /** メモ */
+            note?: string;
+            /** 有効 */
+            is_active?: boolean;
+            readonly created_by: string;
+            /** Format: date-time */
+            readonly created: string;
+            /** Format: date-time */
+            readonly updated: string;
+        };
+        /** @description 追加してよいPythonのpackageのカタログ（design.md §7.6）。名前はPEP 503で正規化して持つ */
+        PythonPackageRequest: {
+            /** @description PyPI等のpackageの名前（例：rapidfuzz） */
+            name: string;
+            /** @description 許す版の範囲（PEP 440。例：>=3,<4）。空ならどの版も */
+            specifier?: string;
+            /** メモ */
+            note?: string;
+            /** 有効 */
+            is_active?: boolean;
+        };
         ResourceVersion: {
             readonly id: string;
             readonly resource: string;
@@ -6804,13 +6894,14 @@ export interface components {
          *     * `shell` - shell
          *     * `job_output` - job_output
          *     * `job_kill` - job_kill
+         *     * `install_python_packages` - install_python_packages
          *     * `ask_user` - ask_user
          *     * `todo_write` - todo_write
          *     * `datasource_describe` - datasource_describe
          *     * `datasource_query` - datasource_query
          * @enum {string}
          */
-        ToolsEnum: "read" | "write" | "edit" | "glob" | "grep" | "shell" | "job_output" | "job_kill" | "ask_user" | "todo_write" | "datasource_describe" | "datasource_query";
+        ToolsEnum: "read" | "write" | "edit" | "glob" | "grep" | "shell" | "job_output" | "job_kill" | "install_python_packages" | "ask_user" | "todo_write" | "datasource_describe" | "datasource_query";
         /**
          * @description 入口の作成と表示（タスクを管理できる人。authorization.md §5.5）。受け取り方は今の版の値を平らに出す。
          *
@@ -12444,6 +12535,157 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlatformSettings"];
+                };
+            };
+        };
+    };
+    v1_python_packages_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                is_active?: boolean;
+                /** @description 名前 */
+                name?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedPythonPackageList"];
+                };
+            };
+        };
+    };
+    v1_python_packages_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PythonPackageRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PythonPackageRequest"];
+                "multipart/form-data": components["schemas"]["PythonPackageRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PythonPackage"];
+                };
+            };
+        };
+    };
+    v1_python_packages_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PythonPackage"];
+                };
+            };
+        };
+    };
+    v1_python_packages_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PythonPackageRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PythonPackageRequest"];
+                "multipart/form-data": components["schemas"]["PythonPackageRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PythonPackage"];
+                };
+            };
+        };
+    };
+    v1_python_packages_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_python_packages_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedPythonPackageRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedPythonPackageRequest"];
+                "multipart/form-data": components["schemas"]["PatchedPythonPackageRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PythonPackage"];
                 };
             };
         };

@@ -46,8 +46,10 @@ from runtime.launcher import (
     SandboxSpec,
     SandboxUnavailable,
 )
+from runtime.models import EnvironmentRevision
 from skill.models import Skill, SkillEvaluation
 
+from . import packages
 from .skills import asset_path, content_key, draft_asset_path, load_contents, loaded_entries
 
 logger = logging.getLogger(__name__)
@@ -236,6 +238,11 @@ class SandboxSession:
         self.storage_factory = storage_factory
         self.heartbeat = heartbeat
         self.sandbox: Sandbox | None = None
+        # 起動したSandboxの条件と、使ったLauncher（packageの取得用のコンテナも同じLauncherで起こす）
+        self.spec: SandboxSpec | None = None
+        self._launcher: Launcher | None = None
+        # Sandboxに入れた追加のPython環境の版（design.md §7.6）。入れていなければNone
+        self.environment: EnvironmentRevision | None = None
         self.jobs: dict[str, Job] = {}
         # Attemptの作業領域（ジョブの出力）。Sandboxには見せない
         self.dir = attempts_root() / self._name()
@@ -292,8 +299,13 @@ class SandboxSession:
         name = f"yoriki-sandbox-{self._name()}"
         # イメージのpullで、Attemptのleaseより長くかかることがある
         sandbox = self._keep_lease(lambda: launcher.start(spec, name), on_abandon=Sandbox.remove)
+        self.spec = spec
+        self._launcher = launcher
         try:
             self._restore(sandbox)
+            # 追加のPython環境はsnapshotに入れず、環境の版から入れ直す（design.md §7.6）
+            if notice := packages.restore(self, sandbox, spec):
+                self.notice = "\n\n".join(n for n in (self.notice, notice) if n)
         except BaseException:
             # 途中まで戻したWorkspaceを保存して、最新のsnapshotを上書きしないように、このSandboxは使わない
             sandbox.remove()
@@ -301,6 +313,11 @@ class SandboxSession:
         self.sandbox = sandbox
         self._start_relay()
         return self.sandbox
+
+    def launcher(self) -> Launcher:
+        if self._launcher is None:
+            self._launcher = self.launcher_factory()
+        return self._launcher
 
     @property
     def input_dir(self) -> Path:

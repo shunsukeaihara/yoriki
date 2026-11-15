@@ -13,12 +13,13 @@ import shutil
 import tarfile
 import tempfile
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
+from packaging.requirements import Requirement
 from packaging.specifiers import InvalidSpecifier, Specifier, SpecifierSet
 from packaging.tags import Tag
 from packaging.utils import InvalidName, InvalidWheelFilename, canonicalize_name, parse_wheel_filename
@@ -50,9 +51,11 @@ COMMAND_ENV = ["/usr/bin/env", "-i", "HOME=/tmp", "PATH=/usr/local/bin:/usr/bin:
 
 # 取得用のコンテナの中で動かすスクリプト（イメージのPythonを -I で）。標準入力でJSONを受け取り、標準出力にJSONを返す。
 # Sandboxと同じ薄い仮想環境で、会話のそれまでの追加の版を制約にして足りないものだけを解決し、決まった版のwheelを
-# hashつきで取得する。ソース配布は扱わない（--only-binary=:all:）
+# hashつきで取得する。ソース配布と、依存に直接URLを書いたもの（PEP 508の `name @ URL`）は扱わない。直接URLは解決の
+# 途中でpipが読みに行くのを止める手段がないので、解決の結果で断る（PyPIはこの依存を持つpackageを受け付けない。
+# 社内のミラーは導入先が管理する。design.md §7.6）
 FETCH_SCRIPT = r"""
-import hashlib, json, os, subprocess, sys, venv
+import json, os, re, subprocess, sys, venv
 
 request = json.load(sys.stdin)
 env = {
@@ -64,6 +67,9 @@ env = {
 def fail(stage, text):
     print(json.dumps({"ok": False, "stage": stage, "error": text[-4000:]}))
     sys.exit(0)
+
+def canonical(name):
+    return re.sub(r"[-_.]+", "-", name).lower()
 
 def pip(*args):
     return subprocess.run(["/tmp/env/bin/python", "-m", "pip", *args], env=env, capture_output=True, text=True)
@@ -87,7 +93,9 @@ for entry in report.get("install", []):
     name, version = metadata.get("name", ""), metadata.get("version", "")
     sha256 = ((info.get("archive_info") or {}).get("hashes") or {}).get("sha256", "")
     url = info.get("url", "")
-    if f"{name.lower()}=={version}" in skip:
+    if entry.get("is_direct"):
+        fail("resolve", f"{name} {version} is referenced by a direct URL ({url}); only the package index is allowed")
+    if f"{canonical(name)}=={version}" in skip:
         continue
     if not sha256 or not url.split("#")[0].endswith(".whl"):
         fail("resolve", f"{name} {version} has no wheel with a SHA-256 hash in the index ({url})")
@@ -101,9 +109,25 @@ if lines:
                  "-r", "/tmp/download.txt")
     if result.returncode != 0:
         fail("download", result.stderr or result.stdout)
+# 頼んだもののうち、イメージかそれまでの追加ですでに入っていたものの版（取り直すときに同じ版にするため）
+fetched = {canonical(item["name"]) for item in items}
+probe = "\n".join([
+    "import importlib.metadata as m, json, sys",
+    "out = {}",
+    "for n in sys.argv[1:]:",
+    "    try:",
+    "        out[n] = m.version(n)",
+    "    except m.PackageNotFoundError:",
+    "        pass",
+    "print(json.dumps(out))",
+])
+names = [n for n in request["names"] if n not in fetched]
+result = subprocess.run(["/tmp/env/bin/python", "-c", probe, *names], env=env, capture_output=True, text=True)
+installed = json.loads(result.stdout or "{}") if result.returncode == 0 else {}
 from pip._vendor.packaging import tags
 print(json.dumps({
     "ok": True,
+    "installed": installed,
     "python": sys.version.split()[0],
     "tags": [str(t) for t in tags.sys_tags()],
     "items": items,
@@ -138,6 +162,8 @@ class LocalWheel:
 class FetchResult:
     wheels: list[LocalWheel]
     python_version: str
+    # 頼んだもののうち、取得せずにすでに入っていたもの（正規化した名前 → 版）
+    installed: dict[str, str] = field(default_factory=dict)
 
 
 # --- カタログ ---
@@ -265,9 +291,13 @@ def record_revision(
     return revision
 
 
-def merge_requested(base: list[dict[str, str]], added: list[LocalWheel]) -> list[dict[str, str]]:
-    """それまでに直接頼んだものに、今回頼んだもの（決まった版）を足す。同じ名前は今回の版にする"""
+def merge_requested(
+    base: list[dict[str, str]], added: list[LocalWheel], installed: dict[str, str] | None = None
+) -> list[dict[str, str]]:
+    """それまでに直接頼んだものに、今回頼んだもの（決まった版）を足す。同じ名前は今回の版にする。すでに入っていて
+    取得しなかったもの（`installed`）も、イメージが変わったときに取り直せるよう記録する"""
     merged = {r["name"]: r["version"] for r in base}
+    merged.update(installed or {})
     for wheel in added:
         if wheel.requested:
             merged[wheel.name] = wheel.version
@@ -295,6 +325,7 @@ def fetch(
         "requirements": requirement_lines,
         "constraints": [f"{n}=={v}" for n, v in base],
         "skip": [f"{n}=={v}" for n, v in base],
+        "names": [_requirement_name(line) for line in requirement_lines],
     }
     spec = SandboxSpec.for_fetch(sandbox_spec, labels=labels)
     container = launcher.start(spec, name)
@@ -320,7 +351,12 @@ def fetch(
         raise
     finally:
         container.remove()
-    return FetchResult(_verify(result, workdir), str(result.get("python") or ""))
+    installed = {str(canonicalize_name(str(k))): str(v) for k, v in (result.get("installed") or {}).items()}
+    return FetchResult(_verify(result, workdir), str(result.get("python") or ""), installed)
+
+
+def _requirement_name(line: str) -> str:
+    return str(canonicalize_name(Requirement(line).name))
 
 
 def _fetch_error(result: dict[str, Any]) -> str:

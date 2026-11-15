@@ -1206,7 +1206,7 @@ install_python_packages(packages=[{"name": "rapidfuzz"}])
 
 1. Runnerが、要求の形（1回に10件まで。名前と任意の版）、カタログ、Runの状態を確かめる。
 2. 取得用の短命のコンテナで、wheelを依存関係ごと取得する。イメージはそのRunのRuntime Profileの版のもの（Workerのplatformのmanifest）で、Python・ABI・platformはSandboxと同じになる。添付・社内資料・LLMキー・Secretを持たない（mountなし。渡すのは、正規化したpackageの指定、会話の今の追加のlock、indexのURLだけ）。ネットワークはDockerの既定のbridgeで外へ出られるが、Sandboxと同じく読取り専用のrootfs・非root・capabilityなし・資源の上限で動かす。
-3. コンテナの中では、Sandboxと同じ薄い仮想環境に会話のそれまでの追加の版を制約として置き、`pip install --dry-run --report --only-binary=:all:` で足りないものだけを解決してから、決まった版のwheelを取得する。ソース配布、任意URL、Git指定、editable install、外部URLを含む依存指定は扱わない（`--only-binary=:all:`、`--no-index` でない取得は固定したindexだけ）。イメージに入っているpackageより新しい版が要るときは、追加の環境に新しい版を入れて上書きしてよい（追加の環境が先に読まれる。イメージのPythonで動く補助コマンドには影響しない。イメージ自体も定期的に更新する。§10.1）。
+3. コンテナの中では、Sandboxと同じ薄い仮想環境に会話のそれまでの追加の版を制約として置き、`pip install --dry-run --report --only-binary=:all:` で足りないものだけを解決してから、決まった版のwheelを取得する。モデルが渡せるのは名前と版だけなので、任意URL・Git・editableの指定はできない。ソース配布は取得しない（`--only-binary=:all:`）。依存に直接URLを書いたもの（PEP 508の `name @ URL`）は、解決の結果で見つけて断る。pipは解決の途中でそのURLを読みに行くので、取得用のコンテナからの通信を完全には防げない（PyPIはこの依存を持つpackageを受け付けないので、起きうるのは導入先が管理する社内のミラーだけ。割り切る）。イメージに入っているpackageより新しい版が要るときは、追加の環境に新しい版を入れて上書きしてよい（追加の環境が先に読まれる。イメージのPythonで動く補助コマンドには影響しない。イメージ自体も定期的に更新する。§10.1）。
 4. Runnerが、取得した全件を確かめ直す：wheelであること、tagがSandboxのPython・ABI・platformに合うこと、件数（依存を含めて100件まで）と合計の大きさ（500MBまで）、直接頼んだものがカタログの範囲の中であること。取得は5分で止める。上限はどれも定数。
 5. wheelを内容のSHA-256でBlobObjectとして保存先へ置き（同じwheelは使い回す）、exact versionとSHA-256を含む完全なlockをPackageBundleとして記録する。hashの一致は同じ内容であることを示すだけで、安全性の判定には使わない。
 6. Sandboxへ入れる（下の「導入」）。成功したら会話の新しいEnvironment Revisionを確定し、追加した全packageと版、すでに入っていたものをTool結果で返す。

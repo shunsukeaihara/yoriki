@@ -190,7 +190,7 @@ def add(session: "SandboxSession", requests: list[Requested]) -> Added:
         parent=base,
         spec=spec,
         python_version=result.python_version,
-        requested=packages.merge_requested(base.requested if base is not None else [], result.wheels),
+        requested=packages.merge_requested(base.requested if base is not None else [], result.wheels, result.installed),
         added=wheels,
         base=base_wheels,
         bundle_requested=[{"name": r.name, "version": r.version} for r in requests],

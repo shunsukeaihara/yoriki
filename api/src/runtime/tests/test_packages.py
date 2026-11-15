@@ -197,6 +197,9 @@ class TestRevisions:
             [local("tabulate", "0.9.0", True), local("wcwidth", "0.2", False)],
         )
         assert merged == [{"name": "humanize", "version": "4.0"}, {"name": "tabulate", "version": "0.9.0"}]
+        # 取得せずにすでに入っていたもの（イメージの版）も記録する
+        merged = merge_requested([], [local("tabulate", "0.9.0", True)], {"six": "1.17.0"})
+        assert merged == [{"name": "six", "version": "1.17.0"}, {"name": "tabulate", "version": "0.9.0"}]
 
 
 @pytest.mark.django_db

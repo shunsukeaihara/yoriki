@@ -152,11 +152,12 @@ def _pypi_reachable() -> bool:
 def test_fetch_from_the_index(conversation):
     """取得用のコンテナでPyPIから取得し、hashを確かめて入れる"""
     PythonPackage.objects.create(name="tabulate", specifier="==0.9.0")
+    PythonPackage.objects.create(name="six")
     run = execute(
         post(conversation),
         FakeAdapter(
             [
-                install("tabulate"),
+                install("tabulate", "six"),
                 calls(("c1", "shell", shell('python -c "import tabulate; print(tabulate.__version__)"'))),
                 reply("OK"),
             ]
@@ -164,6 +165,10 @@ def test_fetch_from_the_index(conversation):
     )
     r = results(run)
     assert "Installed: tabulate 0.9.0" in text(r["p1"]), text(r["p1"])
+    # six はイメージに入っているので取得しないが、イメージが変わったときに取り直せるよう版を記録する
+    assert "Already installed: six" in text(r["p1"])
     assert "0.9.0" in text(r["c1"])
-    [wheel] = EnvironmentRevision.objects.get(conversation=conversation).wheels.all()
+    revision = EnvironmentRevision.objects.get(conversation=conversation)
+    [wheel] = revision.wheels.all()
     assert wheel.filename.startswith("tabulate-0.9.0-") and wheel.filename.endswith(".whl")
+    assert [r["name"] for r in revision.requested] == ["six", "tabulate"]

@@ -36,27 +36,35 @@ def check_plugin(spec: Any, *, entry_point: str, builtin: bool) -> list[str]:
         problems.append(f"only built-in plugins may use the {BUILTIN_PREFIX!r} namespace")
     if not spec.version:
         problems.append("version is empty")
-    if not spec.extensions:
+    extensions = spec.extensions if isinstance(spec.extensions, tuple | list) else ()
+    if not extensions:
         problems.append("no extensions")
-    for extension in spec.extensions:
-        problems.extend(f"{extension.id}: {p}" for p in check_extension(spec, extension))
+    for extension in extensions:
+        label = extension.id if isinstance(extension, Extension) else repr(extension)[:100]
+        problems.extend(f"{label}: {p}" for p in check_extension(spec, extension))
     return problems
 
 
 def check_extension(spec: PluginSpec, extension: Extension) -> list[str]:
     if not isinstance(extension, Extension):
         return ["not an Extension"]
+    if not isinstance(extension.id, str):
+        return ["extension id is not a string"]
     if extension.id != spec.id and not extension.id.startswith(spec.id + "."):
         return [f"extension id must start with the plugin id {spec.id!r}"]
     try:
         extension_type = ExtensionType(extension.type)
     except ValueError:
         return [f"unknown extension type {extension.type!r}"]
-    return check_shape(extension.adapter, base_class(extension_type))
+    # 設定をコンストラクタのキーワード引数で受け取るのは、settingsで設定する保存先だけ（ほかは決まった形で作る）
+    return check_shape(
+        extension.adapter, base_class(extension_type), config_kwargs=extension_type == ExtensionType.STORAGE
+    )
 
 
-def check_shape(adapter: Any, base: type) -> list[str]:
-    """`adapter` が `base` の形に合うか。合わない理由の一覧"""
+def check_shape(adapter: Any, base: type, *, config_kwargs: bool = False) -> list[str]:
+    """`adapter` が `base` の形に合うか。合わない理由の一覧。`config_kwargs` なら、コンストラクタで基底クラスにない
+    キーワード専用の引数を設定とみなす（保存先の root・bucket 等）"""
     if not isinstance(adapter, type) or not issubclass(adapter, base):
         return [f"adapter does not inherit {base.__module__}.{base.__qualname__}"]
     if inspect.isabstract(adapter):
@@ -70,7 +78,7 @@ def check_shape(adapter: Any, base: type) -> list[str]:
         if not callable(actual):
             problems.append(f"{name} is not a method")
             continue
-        if problem := _compare(expected, actual, constructor=name == "__init__"):
+        if problem := _compare(expected, actual, constructor=config_kwargs and name == "__init__"):
             problems.append(f"{name}: {problem}")
     return problems
 

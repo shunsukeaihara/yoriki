@@ -13,7 +13,7 @@ Yorikiのサーバーに配備する拡張（Plugin）の作り方と、Yoriki�
 | 種別 | 基底クラス | Yorikiが呼ぶもの | 契約の例外 |
 |---|---|---|---|
 | `trigger`（入口） | `task.triggers.TriggerAdapter` | `parse(request)`・`dedup_key(...)`・`input_values(...)` | `task.webhook.PayloadError` |
-| `notification`（出口） | `delivery.adapters.NotificationAdapter` | `deliver(request) -> Outcome`、URLを持つ種類は `validate_url(url)` | 結果は `Outcome` で返す（例外にしない） |
+| `notification`（出口） | `delivery.adapters.NotificationAdapter` | `deliver(request) -> Outcome`、URLを持つ種類は `validate_url(url)` | 結果は `Outcome` で返す。`PluginTemporaryError` は送り直し、`PluginConfigError`・`PluginPermanentError` は失敗にする |
 | `storage`（保存先） | `artifact.storage.StorageBackend` | `put_immutable`・`open_read`・`stat`・`delete`・`list_keys` | `artifact.storage.StorageError` |
 | `connector`（Connector） | `connector.adapters.base.DatasourceAdapter` | `connect`・`open_cursor`・`translate_error` を実装し、`check`・`list_tables`・`describe`・`query` は基底クラスが行う | `connector.errors.ConnectorError`（種類つき） |
 
@@ -32,7 +32,7 @@ Yorikiのサーバーに配備する拡張（Plugin）の作り方と、Yoriki�
 ### 2.2 設定
 
 - Adapterの設定は、`Extension.config_schema`（JSON Schema）で宣言する。画面は `default` を既定値に使う（例：接続先のポート）。
-- コンストラクタの引数は、基底クラスの形で呼べること。基底クラスにないキーワード専用の引数は、設定とみなす（例：保存先の `root`・`bucket`）。
+- コンストラクタの引数は、基底クラスの形で呼べること。入口・出口は引数なし、Connectorは接続と版で作る。保存先だけは、基底クラスにないキーワード専用の引数を設定とみなし、settingsの値を渡す（例：`root`・`bucket`）。
 - Secretは値を宣言に書かない。必要な種別だけを `Extension.secrets` に書く。
 
 ## 3 宣言のしかた
@@ -94,7 +94,7 @@ PLUGIN = PluginSpec(
 ## 6 例外と失敗
 
 - Adapterが投げてよいのは、契約の例外（上の表）と、`plugin.errors` の `PluginConfigError`（設定の誤り）・`PluginTemporaryError`（一時的な障害。時間切れは `PluginTimeoutError`）・`PluginPermanentError`（恒久的な失敗）だけ。メッセージは利用者に見せてよい内容にする（接続文字列やパスワードを入れない）。
-- それ以外の例外は、Yorikiが呼ぶ境界で「予期しない失敗」として数え、失敗にする（再試行しない）。
+- それ以外の例外は、Yorikiが呼ぶ境界で「予期しない失敗」として数え、失敗にする（再試行しない）。本文にSecretが入りうるので、記録と画面には例外の型と起きた場所だけを残す。
 - 冪等性（同じ `event_id` の再送）、読取りだけ、timeout等の意味は、コードでは強制しない。timeoutのように外から守れるものはYorikiが守る。
 
 ## 7 合致度の追い方
@@ -103,6 +103,7 @@ PLUGIN = PluginSpec(
 
   ```python
   from plugin.testing import NotificationContract
+
 
   class TestAcmeChat(NotificationContract):
       spec = PLUGIN

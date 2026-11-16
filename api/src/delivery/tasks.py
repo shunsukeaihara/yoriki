@@ -14,7 +14,7 @@ from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from plugin import builtin, registry
-from plugin.errors import PluginUnavailable
+from plugin.errors import PluginError, PluginTemporaryError, PluginUnavailable
 from plugin.observe import observed
 
 from .adapters import DeliveryRequest, Outcome, adapter_for
@@ -56,6 +56,12 @@ def send_delivery(delivery_id: int) -> None:
     except PluginUnavailable:
         # 送る直前の確かめ（send_problem）の後に止められた。送っていないので、失敗にする
         outcome = Outcome(AttemptOutcome.FAILED, error=_("出口の種類（Plugin）が停止中です"))
+    except PluginTemporaryError as exc:
+        # 契約の例外（plugin/CONTRACT.md §6）。一時的な障害は送り直す
+        outcome = Outcome(AttemptOutcome.RETRYABLE, error=str(exc)[:500])
+    except PluginError as exc:
+        # 設定の誤り・恒久的な失敗。送り直さない
+        outcome = Outcome(AttemptOutcome.FAILED, error=str(exc)[:500])
     except Exception:
         logger.exception("delivery %s: unexpected error", delivery.uid)
         outcome = Outcome(AttemptOutcome.UNKNOWN, error=_("送信の途中で内部のエラーが起きました"))

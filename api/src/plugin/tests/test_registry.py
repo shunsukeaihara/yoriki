@@ -103,12 +103,14 @@ class TestShape:
 
         assert check_shape(Extended, NotificationAdapter) == []
 
-    def test_constructor_keyword_arguments_are_configuration(self):
+    def test_constructor_keyword_arguments_are_configuration_only_for_storage(self):
         class Configured(PostgreSQLAdapter):
             def __init__(self, connection, version=None, *, pool_size: int):
                 super().__init__(connection, version)
 
-        assert check_shape(Configured, DatasourceAdapter) == []
+        # Connectorは接続と版だけで作るので、必須の設定の引数があれば作れない
+        assert check_shape(Configured, DatasourceAdapter)
+        assert check_shape(Configured, DatasourceAdapter, config_kwargs=True) == []
 
         class Positional(PostgreSQLAdapter):
             def __init__(self, connection, version, pool_size):
@@ -153,6 +155,28 @@ class TestRegistration:
             ),
             ("acme.broken", ImportError("no module named acme_chat"), "cannot be loaded"),
             ("acme.notspec", object(), "does not point to a PluginSpec"),
+            (
+                "acme.mixed",
+                PluginSpec(id="acme.mixed", name="x", version="1", extensions=(object(),)),  # type: ignore[arg-type]
+                "not an Extension",
+            ),
+            (
+                "acme.noid",
+                PluginSpec(
+                    id="acme.noid",
+                    name="x",
+                    version="1",
+                    extensions=(
+                        Extension(
+                            id=None,  # type: ignore[arg-type]
+                            type=ExtensionType.NOTIFICATION,
+                            name="x",
+                            adapter=AcmeNotification,
+                        ),
+                    ),
+                ),
+                "not a string",
+            ),
         ],
     )
     def test_invalid_declarations_are_registered_with_the_reason(self, entry_points, name, value, problem):
@@ -244,6 +268,13 @@ class TestObservation:
             registry.versions([builtin.WEBHOOK])[builtin.WEBHOOK],
         )
         assert row.last_error == "PluginTimeoutError: slow"
+
+    def test_unexpected_error_messages_are_not_kept(self):
+        with pytest.raises(RuntimeError), observed(builtin.WEBHOOK):
+            raise RuntimeError("postgresql://reader:secret-pass@db/core")
+        row = PluginFailure.objects.get()
+        assert "secret-pass" not in row.last_error
+        assert row.last_error.startswith("builtins.RuntimeError (test_registry.py:")
 
     def test_contract_errors_are_not_counted(self):
         with pytest.raises(ConnectorError), observed(builtin.POSTGRESQL):

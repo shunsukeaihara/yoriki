@@ -10,6 +10,7 @@ from delivery.factories import DestinationFactory
 from delivery.models import Delivery, DeliveryStatus
 from delivery.tasks import send_delivery
 from plugin import builtin, registry
+from plugin.errors import PluginConfigError, PluginTemporaryError
 from plugin.models import Plugin
 from plugin.spec import PluginSpec
 from run.models import RunLaunch, RunStatus
@@ -220,6 +221,27 @@ class TestRuns:
         api_client.force_login(manager)
         res = api_client.post(f"/api/app/v1/tasks/{task.uid}/triggers/", {"name": "別"}, format="json")
         assert res.status_code == 400
+
+    @pytest.mark.parametrize(
+        ("error", "status"),
+        [
+            (PluginTemporaryError("混んでいます"), DeliveryStatus.RETRY_WAIT),
+            (PluginConfigError("宛先の設定が違います"), DeliveryStatus.FAILED),
+        ],
+    )
+    def test_contract_errors_of_notifications_become_outcomes(self, task, manager, error, status):
+        run = start_task_run(task, inputs={}, actor=manager, launch=RunLaunch.MANUAL)
+        run.set_status(RunStatus.RUNNING)
+        with mock.patch("delivery.outbox.async_task"):
+            run.set_status(RunStatus.COMPLETED)
+        delivery = Delivery.objects.get(run=run)
+        with (
+            mock.patch("delivery.adapters.WebhookAdapter.deliver", side_effect=error),
+            mock.patch("delivery.tasks.send_later"),
+        ):
+            send_delivery(delivery.pk)
+        delivery.refresh_from_db()
+        assert (delivery.status, delivery.last_error) == (status, str(error))
 
     def test_deliveries_of_a_disabled_plugin_are_not_sent(self, task, manager):
         run = start_task_run(task, inputs={}, actor=manager, launch=RunLaunch.MANUAL)

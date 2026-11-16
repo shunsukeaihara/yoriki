@@ -43,7 +43,7 @@ def loaded() -> dict[str, LoadedPlugin]:
     """このプロセスが読み込んだPlugin（plugin_idごと）。確かめに通らなかったものも、理由とともに入れる"""
     result: dict[str, LoadedPlugin] = {}
     for spec in _builtin_specs():
-        result[spec.id] = LoadedPlugin(spec.id, spec, True, check_plugin(spec, entry_point=spec.id, builtin=True))
+        result[spec.id] = LoadedPlugin(spec.id, spec, True, _check(spec, spec.id, builtin=True))
     for ep in entry_points(group=ENTRY_POINT_GROUP):
         if ep.name in result:
             result[ep.name].problems.append(f"plugin id {ep.name!r} is declared more than once")
@@ -54,12 +54,12 @@ def loaded() -> dict[str, LoadedPlugin]:
             logger.exception("plugin %s cannot be loaded", ep.name)
             result[ep.name] = LoadedPlugin(ep.name, None, False, [f"cannot be loaded: {type(exc).__name__}: {exc}"])
             continue
-        problems = check_plugin(spec, entry_point=ep.name, builtin=False)
+        problems = _check(spec, ep.name, builtin=False)
         result[ep.name] = LoadedPlugin(ep.name, spec if isinstance(spec, PluginSpec) else None, False, problems)
     # Adapterのidが別のPluginと重なれば、両方とも使わない
     owners: dict[str, list[str]] = {}
     for item in result.values():
-        for extension in item.spec.extensions if item.spec else ():
+        for extension in _declared_extensions(item.spec):
             owners.setdefault(extension.id, []).append(item.plugin_id)
     for extension_id, plugin_ids in owners.items():
         if len(plugin_ids) > 1:
@@ -69,6 +69,21 @@ def loaded() -> dict[str, LoadedPlugin]:
         if item.problems:
             logger.warning("plugin %s is not usable: %s", item.plugin_id, "; ".join(item.problems))
     return result
+
+
+def _declared_extensions(spec: PluginSpec | None) -> list[Extension]:
+    """宣言のうち、Extensionの形でidが文字列のもの（壊れた宣言でも、重複の確かめと登録を止めない）"""
+    extensions = spec.extensions if spec is not None and isinstance(spec.extensions, tuple | list) else ()
+    return [e for e in extensions if isinstance(e, Extension) and isinstance(e.id, str) and e.id]
+
+
+def _check(spec, entry_point: str, *, builtin: bool) -> list[str]:
+    """宣言の確かめ。確かめの途中の例外（壊れた宣言）でも本体を止めず、理由にする"""
+    try:
+        return check_plugin(spec, entry_point=entry_point, builtin=builtin)
+    except Exception as exc:
+        logger.exception("plugin %s cannot be checked", entry_point)
+        return [f"cannot be checked: {type(exc).__name__}"]
 
 
 def extensions() -> dict[str, tuple[Extension, PluginSpec]]:
@@ -145,9 +160,7 @@ def sync_plugins() -> None:
                 setattr(plugin, name, value)
             plugin.save()
         current: set[str] = set()
-        for extension in spec.extensions if spec else ():
-            if not isinstance(extension, Extension):
-                continue
+        for extension in _declared_extensions(spec):
             current.add(extension.id)
             other = PluginExtension.objects.filter(extension_id=extension.id).exclude(plugin=plugin).first()
             if other is not None:

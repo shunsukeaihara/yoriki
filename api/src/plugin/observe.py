@@ -2,6 +2,7 @@
 失敗）と時間切れを、AdapterとPluginの版、日ごとに数える。例外はそのまま投げ直す（扱いは呼ぶ側が決める）"""
 
 import logging
+import traceback
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -32,10 +33,20 @@ def observed(extension_id: str, *, expected: tuple[type[BaseException], ...] = (
         raise
 
 
+def describe(exc: BaseException) -> str:
+    """記録と画面に出す失敗の説明。契約の例外は利用者に見せてよい文なので本文も、それ以外は本文にSecret（接続文字列
+    等）が入りうるので、例外の型と起きた場所（最後のフレームのモジュールと行）だけにする"""
+    if isinstance(exc, PluginError):
+        return f"{type(exc).__name__}: {exc}"[:500]
+    frames = traceback.extract_tb(exc.__traceback__)
+    where = f" ({frames[-1].filename.rsplit('/', 1)[-1]}:{frames[-1].lineno})" if frames else ""
+    return f"{type(exc).__module__}.{type(exc).__qualname__}{where}"[:500]
+
+
 def record(extension_id: str, exc: BaseException, *, timeout: bool) -> None:
     found = declared(extension_id)
     version = found[1].version if found else ""
-    error = f"{type(exc).__name__}: {exc}"[:500]
+    error = describe(exc)
     if connection.in_atomic_block and connection.needs_rollback:
         # 壊れたtransactionの中では書けない。ログだけに残す
         logger.warning("plugin %s failure not recorded: %s", extension_id, error)

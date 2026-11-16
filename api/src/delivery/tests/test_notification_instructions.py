@@ -9,7 +9,7 @@ import pytest
 
 from artifact.models import Artifact, BlobObject
 from delivery.factories import DestinationFactory
-from delivery.models import Delivery, DestinationKind, Notification
+from delivery.models import Delivery, Notification
 from delivery.tasks import send_delivery
 from harness.tests.fakes import FakeAdapter, calls, reply
 from harness.tests.test_connectors import execute, results, text_of
@@ -18,6 +18,7 @@ from harness.tools.prepare_notification import PREPARE_NOTIFICATION
 from llm.factories import ModelProfileFactory
 from llm.models import ModelProfileVersion
 from llm.providers.base import ToolCall
+from plugin import builtin
 from run.models import RunLaunch, RunStatus
 from run.tasks import claim_run
 from task.dispatch import start_task_run
@@ -57,12 +58,12 @@ def fixture_manager(db):
 INSTRUCTIONS = "確認した件数を1文で書く"
 
 
-def _task(*, kind=DestinationKind.IN_APP, schema=SCHEMA):
-    url = "" if kind == DestinationKind.IN_APP else "https://hooks.example.com/yoriki"
+def _task(*, kind=builtin.IN_APP, schema=SCHEMA):
+    url = "" if kind == builtin.IN_APP else "https://hooks.example.com/yoriki"
     return TaskDefinitionFactory.create(
         scope=TaskScope.COMPANY,
         revision__output_schema=schema,
-        revision__destination=DestinationFactory.create(kind=kind, revision__url=url),
+        revision__destination=DestinationFactory.create(extension=kind, revision__url=url),
         revision__notify_events=["run.completed", "run.failed"],
         revision__notification_instructions=INSTRUCTIONS,
     )
@@ -199,7 +200,7 @@ def test_the_candidate_is_not_sent_for_a_failure(manager):
 
 def _files_run(manager, result):
     run = start_task_run(
-        _task(kind=DestinationKind.WEBHOOK, schema=FILE_SCHEMA), inputs={}, actor=manager, launch=RunLaunch.MANUAL
+        _task(kind=builtin.WEBHOOK, schema=FILE_SCHEMA), inputs={}, actor=manager, launch=RunLaunch.MANUAL
     )
     attempt = claim_run(run.pk)
     assert attempt is not None
@@ -252,7 +253,7 @@ def test_a_task_run_without_tools_falls_back_to_the_standard_form(manager):
     task = TaskDefinitionFactory.create(
         scope=TaskScope.COMPANY,
         revision__model_profile=profile,
-        revision__destination=DestinationFactory.create(kind=DestinationKind.IN_APP, revision__url=""),
+        revision__destination=DestinationFactory.create(extension=builtin.IN_APP, revision__url=""),
         revision__notify_events=["run.completed"],
         revision__notification_instructions=INSTRUCTIONS,
     )

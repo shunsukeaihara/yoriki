@@ -3,6 +3,10 @@ from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
+from plugin import builtin, registry
+from plugin.errors import PluginUnavailable
+from plugin.fields import ExtensionField
+from plugin.spec import ExtensionType
 from user.models import Department
 from user.serializers import MinimumDepartmentSerializer, MinimumUserSerializer
 from utils.exceptions import Conflict
@@ -12,12 +16,10 @@ from .adapters import adapter_for
 from .errors import VersionConflict
 from .models import (
     DESTINATION_REVISION_FIELDS,
-    URL_KINDS,
     Delivery,
     DeliveryAttempt,
     DeliveryStatus,
     Destination,
-    DestinationKind,
     DestinationRevision,
     DestinationScope,
     FileFetch,
@@ -38,8 +40,9 @@ class DestinationSerializer(serializers.ModelSerializer):
     """
 
     id = serializers.CharField(source="uid", read_only=True)
-    kind = serializers.ChoiceField(choices=DestinationKind.choices, help_text=_("種類。作成した後は変えられない"))
-    kind_display = serializers.CharField(source="get_kind_display", read_only=True)
+    extension = ExtensionField(ExtensionType.NOTIFICATION)
+    extension_name = serializers.CharField(read_only=True)
+    is_external = serializers.BooleanField(read_only=True, help_text=_("外へ送る（宛先のURLを持つ）種類か"))
     scope = serializers.ChoiceField(
         # 個人の出口（画面の通知）はYorikiが作る
         choices=[c for c in DestinationScope.choices if c[0] != DestinationScope.PERSONAL],
@@ -88,8 +91,9 @@ class DestinationSerializer(serializers.ModelSerializer):
         model = Destination
         fields = [
             "id",
-            "kind",
-            "kind_display",
+            "extension",
+            "extension_name",
+            "is_external",
             "scope",
             "scope_display",
             "department",
@@ -115,11 +119,11 @@ class DestinationSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"department": _("部門を選んでください")})
             if scope != DestinationScope.DEPARTMENT:
                 attrs["department"] = None
-            kind = attrs["kind"]
+            extension = attrs["extension"]
         else:
             if "version_number" not in attrs:
                 raise serializers.ValidationError({"version": _("編集を始めた時点の版を送ってください")})
-            kind = self.instance.kind
+            extension = self.instance.extension
         if "name" in attrs:
             attrs["name"] = attrs["name"].strip()
         sent = attrs.pop("current_revision", {})
@@ -132,13 +136,13 @@ class DestinationSerializer(serializers.ModelSerializer):
                 content[name] = current.url.reveal() if current else ""
             else:
                 content[name] = getattr(current, name)
-        self._check_url(kind, sent, content)
+        self._check_url(extension, sent, content)
         attrs["content"] = content
         return attrs
 
     @staticmethod
-    def _check_url(kind: int, sent: dict, content: dict) -> None:
-        if kind not in URL_KINDS:
+    def _check_url(extension: str, sent: dict, content: dict) -> None:
+        if not registry.has_capability(extension, builtin.URL):
             # 画面の通知は送り先を持たない
             if str(sent.get("url") or "").strip():
                 raise serializers.ValidationError({"url": _("画面の通知には送り先のURLを指定しません")})
@@ -150,14 +154,16 @@ class DestinationSerializer(serializers.ModelSerializer):
             # 登録するときも、送り先の形と、名前を引いた先が送ってよいアドレスかを確かめる（design.md §4.4）
             content["url"] = content["url"].strip()
             try:
-                resolve(adapter_for(kind).validate_url(content["url"]))
+                resolve(adapter_for(extension).validate_url(content["url"]))
             except BlockedAddress as exc:
                 raise serializers.ValidationError({"url": str(exc)}) from exc
+            except PluginUnavailable as exc:
+                raise serializers.ValidationError({"extension": _("この種類は今は使えません（停止中等）")}) from exc
 
     @transaction.atomic
     def create(self, validated_data) -> Destination:
         destination, secret = Destination.create_with_revision(
-            kind=validated_data["kind"],
+            extension=validated_data["extension"],
             scope=validated_data["scope"],
             department=validated_data["department"],
             name=validated_data["name"],
@@ -190,7 +196,7 @@ class DestinationSerializer(serializers.ModelSerializer):
 class DestinationUpdateSerializer(DestinationSerializer):
     """出口の更新。種類・範囲・部門は変えられない"""
 
-    kind = serializers.ChoiceField(choices=DestinationKind.choices, read_only=True)
+    extension = ExtensionField(ExtensionType.NOTIFICATION, read_only=True)
     scope = serializers.ChoiceField(choices=DestinationScope.choices, read_only=True)
     department = serializers.SlugRelatedField(slug_field="uid", read_only=True)
 
@@ -251,7 +257,9 @@ class DestinationChoiceSerializer(ReadOnlyModelSerializer):
     """タスクの編集画面で選ぶ出口の候補（ID・名前・種類・範囲だけ。送り先・鍵は返さない。authorization.md §7.2）"""
 
     id = serializers.CharField(source="uid", read_only=True)
-    kind = serializers.ChoiceField(choices=DestinationKind.choices, read_only=True)
+    extension = serializers.CharField(read_only=True)
+    extension_name = serializers.CharField(read_only=True)
+    is_external = serializers.BooleanField(read_only=True, help_text=_("外へ送る（宛先のURLを持つ）種類か"))
     scope = serializers.ChoiceField(choices=DestinationScope.choices, read_only=True)
     department = MinimumDepartmentSerializer(read_only=True, allow_null=True)
     allows_sensitive_results = serializers.BooleanField(
@@ -260,7 +268,16 @@ class DestinationChoiceSerializer(ReadOnlyModelSerializer):
 
     class Meta:
         model = Destination
-        fields = ["id", "name", "kind", "scope", "department", "allows_sensitive_results"]
+        fields = [
+            "id",
+            "name",
+            "extension",
+            "extension_name",
+            "is_external",
+            "scope",
+            "department",
+            "allows_sensitive_results",
+        ]
 
 
 class FileFetchSerializer(ReadOnlyModelSerializer):

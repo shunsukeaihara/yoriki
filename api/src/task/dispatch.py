@@ -23,10 +23,11 @@ from conversation.dispatch import user_message_data
 from conversation.models import Conversation, ConversationMessage, ConversationPurpose, MessageRole
 from delivery.models import Destination, DestinationRevision
 from harness.catalogs import build_task_catalogs
-from harness.connectors import is_allowed_for
+from harness.connectors import is_allowed_for, plugin_versions
 from harness.skills import declared_connectors, manifest_entry
 from harness.untrusted import untrusted
 from llm.models import ModelProfileVersion
+from plugin.observe import observed
 from run.dispatch import enqueue_run
 from run.models import ACTIVE_STATUSES, Run, RunEvent, RunEventKind, RunKind, RunLaunch, RunStatus, RunTrigger
 from runtime.models import RuntimeProfile, RuntimeProfileVersion
@@ -47,7 +48,8 @@ from .models import (
     TriggerBindingRevision,
     TriggerReceipt,
 )
-from .webhook import Payload, PayloadError, dedup_key, input_values, parse_payload
+from .triggers import TriggerAdapter, TriggerRequest, trigger_adapter
+from .webhook import Payload, PayloadError, dedup_key
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +97,7 @@ def start_task_run(
     conversation: Conversation | None = None,
     client_request_id: str = "",
     source: Run | None = None,
+    extensions: Sequence[str] = (),
 ) -> Run:
     """タスクの今の版でRunを始める。始められなければ CannotRun（入力の誤りは InvalidInputs）。
     `expected_version` を渡すと、今の版がそれと違えば VersionConflict（画面で確かめた版と違う定義で動かさない）。
@@ -162,7 +165,7 @@ def start_task_run(
                     sensitive=fix_chat.handles_sensitive_data,
                     source=source,
                 )
-            run = _start(task, revision, cleaned, actor=actor, launch=launch, files=files)
+            run = _start(task, revision, cleaned, actor=actor, launch=launch, files=files, extensions=extensions)
             if conversation is not None:
                 _add_launch_card(conversation, run, actor=actor, client_request_id=client_request_id)
             return run
@@ -323,6 +326,7 @@ def _start(
     client_request_id: str = "",
     sensitive: bool = False,
     source: Run | None = None,
+    extensions: Sequence[str] = (),
 ) -> Run:
     """Runを作る。`conversation` は修正チャット（なければRunごとの会話を作る）。`client_request_id` は修正チャットの
     最初の依頼の `client_message_id`。`sensitive` は機密の修正チャット、`source` は修正チャットの元の実行"""
@@ -365,6 +369,15 @@ def _start(
         "skill_catalog": plan.skill_catalog,
         "connectors": plan.connectors,
         "connector_catalog": plan.connector_catalog,
+        # 使いうるAdapterとPluginの版（Connector、出口、入口。design.md §3.11.1）
+        "plugins": plugin_versions(
+            plan.connector_catalog,
+            plan.connectors,
+            [
+                *extensions,
+                *([plan.destination_revision.destination.extension] if plan.destination_revision else []),
+            ],
+        ),
         "task": {
             "task": task.uid,
             "name": task.name,
@@ -712,13 +725,16 @@ def receive_webhook(
     あれば既存のRunを返す。payloadはそのままファイルとして作業場所に置く（入力とタスクを確かめた後に保存する）。
     受け付けられない要求は PayloadError（形の誤り・鍵・停止）、InvalidInputs（項目の誤り）、CannotRun（タスクを
     始められない）"""
-    payload = parse_payload(body, content_type)
+    # 入口のAdapter（Plugin）。停止中なら入口の停止と同じく断る。契約にない例外は予期しない失敗として数える
+    adapter = trigger_adapter(binding.extension)
+    with observed(binding.extension):
+        payload = adapter.parse(TriggerRequest(body=body, content_type=content_type, idempotency_key=idempotency_key))
     # 再送は、保存先に書く前に見つけて返す。鍵の作り直し・停止と同時でも古い鍵で返さないよう、行をロックして確かめる
     # （ロックはDBの確認の間だけで、保存先には書かない）
     with transaction.atomic():
         _lock_task(binding)
-        current, revision, key = _current_binding(binding, body, payload, idempotency_key)
-        if (existing := received_run(current, key, payload, idempotency_key)) is not None:
+        current, revision, key = _current_binding(binding, body, payload, idempotency_key, adapter)
+        if (existing := received_run(current, key, payload, idempotency_key, adapter)) is not None:
             return existing, False
     payload_file = InputFile(payload.file_name, payload.file_bytes)
     # 保存先への書き込みは、入口とタスクの行をロックする前に行う（保存先が遅くても、同じ入口・タスクを待たせない）。
@@ -727,15 +743,16 @@ def receive_webhook(
     try:
         with transaction.atomic():
             _lock_task(binding)
-            current, revision, key = _current_binding(binding, body, payload, idempotency_key)
-            existing = received_run(current, key, payload, idempotency_key)
+            current, revision, key = _current_binding(binding, body, payload, idempotency_key, adapter)
+            existing = received_run(current, key, payload, idempotency_key, adapter)
             if existing is None:
                 run = start_task_run(
                     current.task,
-                    inputs=lambda task_revision: input_values(payload, revision.inputs, task_revision.inputs),
+                    inputs=lambda task_revision: _input_values(adapter, binding, payload, revision, task_revision),
                     actor=system_user(),
                     launch=RunLaunch.WEBHOOK,
                     files=[payload_file, *payload.files],
+                    extensions=[current.extension],
                 )
                 TriggerReceipt.objects.create(
                     binding=current,
@@ -761,8 +778,19 @@ def _lock_task(binding: TriggerBinding) -> None:
     TaskDefinition.objects.select_for_update(of=("self",)).filter(pk=binding.task_id).first()
 
 
+def _input_values(
+    adapter: TriggerAdapter, binding: TriggerBinding, payload: Payload, revision, task_revision
+) -> dict[str, Any]:
+    with observed(binding.extension):
+        return adapter.input_values(payload, revision.inputs, task_revision.inputs)
+
+
 def _current_binding(
-    binding: TriggerBinding, body: bytes, payload: Payload, idempotency_key: str | None
+    binding: TriggerBinding,
+    body: bytes,
+    payload: Payload,
+    idempotency_key: str | None,
+    adapter: TriggerAdapter | None = None,
 ) -> tuple[TriggerBinding, TriggerBindingRevision, str | None]:
     """入口の行をロックして読み直し、鍵（作り直されていないか）・停止・今の版の上限を確かめる。
     （入口、今の版、重複のキー）"""
@@ -784,10 +812,20 @@ def _current_binding(
             _("payloadが大きすぎます（上限 %(limit)s バイト）") % {"limit": revision.max_payload_bytes},
             status=413,
         )
-    return current, revision, dedup_key(payload, revision.event_id_path, idempotency_key)
+    with observed(current.extension):
+        key = (adapter or trigger_adapter(current.extension)).dedup_key(
+            payload, revision.event_id_path, idempotency_key
+        )
+    return current, revision, key
 
 
-def received_run(binding: TriggerBinding, key: str | None, payload: Payload, idempotency_key: str | None) -> Run | None:
+def received_run(
+    binding: TriggerBinding,
+    key: str | None,
+    payload: Payload,
+    idempotency_key: str | None,
+    adapter: TriggerAdapter | None = None,
+) -> Run | None:
     """前に受け付けた同じ要求のRun。
 
     今の版と前の版のイベントIDの場所で取り出したキーのどれかで、同じ入力の受付があればそのRun（イベントIDの場所を
@@ -796,7 +834,7 @@ def received_run(binding: TriggerBinding, key: str | None, payload: Payload, ide
     keys = {key}
     for path in set(binding.revisions.values_list("event_id_path", flat=True)):
         try:
-            keys.add(dedup_key(payload, path, idempotency_key))
+            keys.add((adapter.dedup_key if adapter else dedup_key)(payload, path, idempotency_key))
         except PayloadError:
             continue
     keys.discard(None)

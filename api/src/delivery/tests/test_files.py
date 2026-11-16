@@ -17,8 +17,9 @@ from artifact.storage import LocalStorage, StorageError
 from artifact.tests.test_api import body_of
 from delivery.adapters import WebhookAdapter
 from delivery.factories import DestinationFactory
-from delivery.models import FILE_LINK_MAX_FETCHES, Delivery, DeliveryStatus, DestinationKind, FileFetch, FileLink
+from delivery.models import FILE_LINK_MAX_FETCHES, Delivery, DeliveryStatus, FileFetch, FileLink
 from delivery.tasks import send_delivery
+from plugin import builtin
 from run.models import RunLaunch, RunStatus
 from task.dispatch import start_task_run
 from task.factories import TaskDefinitionFactory
@@ -65,11 +66,11 @@ def fixture_manager(db):
     return grant(UserFactory.create(), AppPermission.MANAGE_COMPANY_TASKS)
 
 
-def _delivery(manager, *, kind=DestinationKind.WEBHOOK, result=None, outputs=None, content="status_and_result"):
-    url = ZAPIER_URL if kind == DestinationKind.ZAPIER else "https://hooks.example.com/yoriki"
+def _delivery(manager, *, kind=builtin.WEBHOOK, result=None, outputs=None, content="status_and_result"):
+    url = ZAPIER_URL if kind == builtin.ZAPIER else "https://hooks.example.com/yoriki"
     task = TaskDefinitionFactory.create(
         scope=TaskScope.COMPANY,
-        revision__destination=DestinationFactory.create(kind=kind, revision__url=url),
+        revision__destination=DestinationFactory.create(extension=kind, revision__url=url),
         revision__notify_events=["run.completed"],
         revision__notify_content=content,
         revision__output_schema=SCHEMA,
@@ -151,7 +152,7 @@ def test_no_public_url_fails_the_delivery(manager, sent, settings):
 
 
 def test_a_zapier_link_gives_the_file_without_login(manager, sent):
-    delivery = _delivery(manager, kind=DestinationKind.ZAPIER)
+    delivery = _delivery(manager, kind=builtin.ZAPIER)
     send_delivery(delivery.pk)
     url = _sent_files(sent)[0]["url"]
     res = APIClient().get(f"/api/files/{_token(url)}/", HTTP_USER_AGENT="Zapier", REMOTE_ADDR="203.0.113.5")
@@ -182,7 +183,7 @@ def test_a_webhook_link_needs_the_destination_key(manager, sent):
 
 
 def test_a_link_has_a_limited_number_of_fetches(manager, sent):
-    delivery = _delivery(manager, kind=DestinationKind.ZAPIER)
+    delivery = _delivery(manager, kind=builtin.ZAPIER)
     send_delivery(delivery.pk)
     token = _token(_sent_files(sent)[0]["url"])
     # HEADは受け付けず、回数に数えない
@@ -194,7 +195,7 @@ def test_a_link_has_a_limited_number_of_fetches(manager, sent):
 
 
 def test_expired_unknown_or_deleted(manager, sent):
-    delivery = _delivery(manager, kind=DestinationKind.ZAPIER)
+    delivery = _delivery(manager, kind=builtin.ZAPIER)
     send_delivery(delivery.pk)
     report, attachment = (_token(f["url"]) for f in _sent_files(sent))
     assert APIClient().get("/api/files/unknown/").status_code == 404
@@ -208,7 +209,7 @@ def test_expired_unknown_or_deleted(manager, sent):
 
 @pytest.mark.parametrize("stop", ["destination", "task", "sensitive"])
 def test_stopping_the_destination_or_the_task_revokes_unused_links(manager, sent, stop):
-    delivery = _delivery(manager, kind=DestinationKind.ZAPIER)
+    delivery = _delivery(manager, kind=builtin.ZAPIER)
     send_delivery(delivery.pk)
     token = _token(_sent_files(sent)[0]["url"])
     destination = delivery.destination_revision.destination
@@ -224,7 +225,7 @@ def test_stopping_the_destination_or_the_task_revokes_unused_links(manager, sent
 
 
 def test_a_storage_failure_is_not_counted_as_served(manager, sent):
-    delivery = _delivery(manager, kind=DestinationKind.ZAPIER)
+    delivery = _delivery(manager, kind=builtin.ZAPIER)
     send_delivery(delivery.pk)
     token = _token(_sent_files(sent)[0]["url"])
     with mock.patch.object(LocalStorage, "signed_url", side_effect=StorageError("down")):
@@ -241,7 +242,7 @@ def test_a_storage_failure_is_not_counted_as_served(manager, sent):
 
 
 def test_s3_redirects_to_a_short_signed_url(manager, sent):
-    delivery = _delivery(manager, kind=DestinationKind.ZAPIER)
+    delivery = _delivery(manager, kind=builtin.ZAPIER)
     send_delivery(delivery.pk)
     token = _token(_sent_files(sent)[0]["url"])
     with mock.patch.object(LocalStorage, "signed_url", return_value="https://s3.example.com/signed") as signed:

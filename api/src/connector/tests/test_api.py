@@ -16,13 +16,13 @@ from connector.models import (
     VERSION_FIELDS,
     ConnectionLease,
     Connector,
-    ConnectorKind,
     ConnectorScope,
     ConnectorVersion,
     DatabaseConnection,
     Operation,
 )
 from connector.serializers import ConnectorUpdateSerializer, DatabaseConnectionUpdateSerializer
+from plugin import builtin
 from user.factories import UserFactory, grant
 from user.models import Department, DepartmentMembership, User
 from utils.exceptions import Conflict
@@ -45,7 +45,7 @@ def fixture_department(db) -> Department:
 def _connection_data(**overrides):
     data = {
         "name": "基幹DB",
-        "kind": ConnectorKind.POSTGRESQL,
+        "extension": builtin.POSTGRESQL,
         "host": "db.example.co.jp",
         "database": "core",
         "username": "yoriki_reader",
@@ -337,10 +337,10 @@ class TestDatabaseConnection:
     @pytest.mark.django_db
     def test_kind_cannot_change(self, admin_client):
         connection = DatabaseConnectionFactory.create()
-        res = admin_client.patch(f"{CONNECTIONS}{connection.uid}/", {"kind": ConnectorKind.MYSQL}, format="json")
+        res = admin_client.patch(f"{CONNECTIONS}{connection.uid}/", {"extension": builtin.MYSQL}, format="json")
         assert res.status_code == 200, res.data
         connection.refresh_from_db()
-        assert connection.kind == ConnectorKind.POSTGRESQL
+        assert connection.extension == builtin.POSTGRESQL
 
     @pytest.mark.django_db
     def test_password_is_not_audited(self, admin_client):
@@ -392,7 +392,7 @@ class TestDatabaseConnection:
 
     @pytest.mark.django_db
     def test_update_serializer_keeps_kind(self):
-        assert "kind" in DatabaseConnectionUpdateSerializer.Meta.read_only_fields
+        assert DatabaseConnectionUpdateSerializer().fields["extension"].read_only
 
 
 class TestCreate:
@@ -406,7 +406,7 @@ class TestCreate:
         body = res.json()
         assert body["connection"] == connection.uid
         assert body["connection_info"]["host"] == "db.example.co.jp"
-        assert body["kind"] == ConnectorKind.POSTGRESQL
+        assert body["extension"] == builtin.POSTGRESQL
         assert body["version"] == 1
         assert body["default_schema"] == "public"
         assert body["tables"] == [
@@ -424,7 +424,7 @@ class TestCreate:
 
     @pytest.mark.django_db
     def test_mysql_has_no_schema(self, admin_client):
-        mysql = DatabaseConnectionFactory.create(kind=ConnectorKind.MYSQL, port=3306)
+        mysql = DatabaseConnectionFactory.create(extension=builtin.MYSQL, port=3306)
         res = admin_client.post(CONNECTORS, _data(mysql, tables=[{"schema": "x", "name": "vendors"}]), format="json")
         assert res.status_code == 201, res.data
         assert res.json()["default_schema"] == ""
@@ -585,7 +585,7 @@ class TestOperations:
 
     @pytest.mark.django_db
     def test_connector_uses_its_connection(self, monkeypatch):
-        connection = DatabaseConnectionFactory.create(kind=ConnectorKind.MYSQL)
+        connection = DatabaseConnectionFactory.create(extension=builtin.MYSQL)
         connector = ConnectorFactory.create(connection=connection)
         adapter = get_adapter(connector)
         assert adapter.connection == connection
@@ -759,7 +759,7 @@ class TestAppConnector:
         assert set(company) == {
             "id",
             "name",
-            "kind_display",
+            "extension_name",
             "description",
             "is_sensitive",
             "scope",

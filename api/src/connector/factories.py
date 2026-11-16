@@ -1,9 +1,10 @@
 import factory
 from factory.django import DjangoModelFactory
 
+from plugin import builtin, registry
 from user.factories import UserFactory
 
-from .models import Connector, ConnectorKind, ConnectorScope, DatabaseConnection, TLSMode
+from .models import Connector, ConnectorScope, DatabaseConnection, TLSMode
 
 
 class DatabaseConnectionFactory(DjangoModelFactory[DatabaseConnection]):
@@ -11,7 +12,7 @@ class DatabaseConnectionFactory(DjangoModelFactory[DatabaseConnection]):
         model = DatabaseConnection
 
     name = factory.Sequence(lambda n: f"社内DB接続{n}")
-    kind = ConnectorKind.POSTGRESQL
+    extension = builtin.POSTGRESQL
     host = "db.example.co.jp"
     port = 5432
     database = "core"
@@ -22,7 +23,7 @@ class DatabaseConnectionFactory(DjangoModelFactory[DatabaseConnection]):
 
 
 class ConnectorFactory(DjangoModelFactory[Connector]):
-    """Connectorと最初の版を作る。版の項目は `version__tables=[...]`、接続の項目は `connection__kind=...` のように
+    """Connectorと最初の版を作る。版の項目は `version__tables=[...]`、接続の項目は `connection__extension=...` のように
     指定する
     """
 
@@ -40,7 +41,7 @@ class ConnectorFactory(DjangoModelFactory[Connector]):
         if not create:
             return
         kwargs.setdefault("description", "")
-        kwargs.setdefault("default_schema", ConnectorKind(obj.connection.kind).default_schema)
+        kwargs.setdefault("default_schema", registry.config_default(obj.connection.extension, "default_schema", ""))
         kwargs.setdefault("tables", [])
         kwargs.setdefault("max_rows", 1000)
         kwargs.setdefault("max_result_bytes", 10 * 1024 * 1024)

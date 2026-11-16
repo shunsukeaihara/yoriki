@@ -10,8 +10,8 @@ class DestinationAdmin(ReadOnlyAdmin):
     """作成・変更・停止・署名の鍵の作り直しはYorikiの画面（API）で行う（送り先を確かめ、版を記録する）"""
 
     raw_id_fields = ("department", "current_revision", "created_by")
-    list_display = ("id", "uid", "name", "kind", "scope", "department", "current_revision", "suspended", "deleted")
-    list_filter = ("kind", "scope", "suspended", "deleted")
+    list_display = ("id", "uid", "name", "extension", "scope", "department", "current_revision", "suspended", "deleted")
+    list_filter = ("extension", "scope", "suspended", "deleted")
     search_fields = ("uid", "name")
 
 

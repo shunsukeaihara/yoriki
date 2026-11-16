@@ -31,7 +31,8 @@ from connector.adapters import get_adapter
 from connector.adapters.base import QueryResult, _fetch
 from connector.errors import ConnectorError, ConnectorErrorKind
 from connector.factories import ConnectorFactory
-from connector.models import VERSION_FIELDS, Connector, ConnectorKind, TLSMode
+from connector.models import VERSION_FIELDS, Connector, TLSMode
+from plugin import builtin
 
 READER_PASSWORD = "Reader-pass-1234"  # SQL Serverのパスワードの規則（大文字・小文字・数字）を満たす
 VENDOR_ROWS = 50
@@ -41,7 +42,7 @@ VENDOR_ROWS = 50
 class Source:
     """テスト用に作った接続先"""
 
-    kind: ConnectorKind
+    kind: str
     host: str
     port: int
     database: str
@@ -98,7 +99,7 @@ def fixture_postgres_source(django_db_setup, django_db_blocker) -> Iterator[Sour
         ]:
             admin_query(sql)
         yield Source(
-            ConnectorKind.POSTGRESQL, params["host"], int(params["port"]), params["dbname"], role, schema, admin_query
+            builtin.POSTGRESQL, params["host"], int(params["port"]), params["dbname"], role, schema, admin_query
         )
     finally:
         admin_query(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
@@ -154,7 +155,7 @@ def fixture_mysql_source() -> Iterator[Source]:
             f"GRANT SELECT, INSERT ON {database}.items TO '{reader}'@'%'",
         ]:
             admin_query(sql)
-        yield Source(ConnectorKind.MYSQL, str(host), port or 3306, database, reader, "", admin_query)
+        yield Source(builtin.MYSQL, str(host), port or 3306, database, reader, "", admin_query)
     finally:
         admin_query(f"DROP DATABASE IF EXISTS {database}")
         admin_query(f"DROP USER IF EXISTS '{reader}'@'%'")
@@ -204,7 +205,7 @@ def fixture_sqlserver_source() -> Iterator[Source]:
         ]:
             run(sql, database)
         yield Source(
-            ConnectorKind.SQLSERVER, str(host), port or 1433, database, reader, "dbo", lambda sql: run(sql, database)
+            builtin.SQLSERVER, str(host), port or 1433, database, reader, "dbo", lambda sql: run(sql, database)
         )
     finally:
         run(f"IF DB_ID('{database}') IS NOT NULL ALTER DATABASE {database} SET SINGLE_USER WITH ROLLBACK IMMEDIATE")
@@ -222,13 +223,13 @@ def _connector(source: Source, **version: Any) -> Connector:
     version.setdefault("tables", tables)
     version.setdefault("default_schema", source.schema)
     return ConnectorFactory.create(
-        connection__kind=source.kind,
+        connection__extension=source.kind,
         connection__host=source.host,
         connection__port=source.port,
         connection__database=source.database,
         connection__username=source.username,
         connection__password=READER_PASSWORD,
-        connection__tls=TLSMode.DISABLE if source.kind != ConnectorKind.SQLSERVER else TLSMode.REQUIRE,
+        connection__tls=TLSMode.DISABLE if source.kind != builtin.SQLSERVER else TLSMode.REQUIRE,
         **{f"version__{k}": v for k, v in version.items()},
     )
 

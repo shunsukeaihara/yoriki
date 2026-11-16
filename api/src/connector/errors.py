@@ -1,5 +1,7 @@
 from enum import StrEnum
 
+from plugin.errors import PluginError
+
 
 class VersionConflict(Exception):
     """版を作る間に、他の人が先に新しい版を作った"""
@@ -16,10 +18,15 @@ class ConnectorErrorKind(StrEnum):
     BUSY = "busy"  # 接続の同時実行数の上限で、待っても枠が空かなかった
 
 
-class ConnectorError(Exception):
-    """Connectorの操作の失敗。メッセージは利用者・エージェントに見せてよい内容だけにする（接続文字列やパスワードを含めない）"""
+class ConnectorError(PluginError):
+    """Connectorの操作の失敗。メッセージは利用者・エージェントに見せてよい内容だけにする（接続文字列やパスワードを含めない）。
+    ConnectorのAdapter（Plugin）の契約の例外で、種類（kind）で細かく分ける（design.md §3.11.2）"""
 
     def __init__(self, kind: ConnectorErrorKind, message: str):
         super().__init__(message)
         self.kind = kind
         self.message = message
+
+    @property
+    def is_timeout(self) -> bool:  # type: ignore[override]
+        return self.kind == ConnectorErrorKind.TIMEOUT

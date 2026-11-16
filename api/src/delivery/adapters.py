@@ -1,8 +1,8 @@
 """配信Adapter（design.md §4.4）。共通の送る内容（`payload.build_payload()`）を、出口の種類ごとの形で送る。
 
 Adapterは送る内容の形と送り先の確かめ方だけを持ち、再試行の上限と記録は共通の処理（`delivery/tasks.py`）が持つ。
-Zapierは汎用のWebhookと同じ送り方で、送り先をZapierのCatch HookのURLに限る。Plugin Registryはまだないので、出口の
-種類からコードで選ぶ（Channel Pluginとあわせて作る）。
+Zapierは汎用のWebhookと同じ送り方で、送り先をZapierのCatch HookのURLに限る。Adapterは出口のextension_id
+（Pluginの宣言。design.md §3.11.1）で選ぶ。基底クラスは `NotificationAdapter`（書き方は plugin/CONTRACT.md）。
 """
 
 import base64
@@ -10,19 +10,24 @@ import hashlib
 import hmac
 import json
 import logging
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import SplitResult
 
 import httpx
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
+from plugin import registry
 from utils.http import PinnedTransport
 
-from .models import SIGNING_SECRET_PREFIX, AttemptOutcome, DestinationKind
+from .models import SIGNING_SECRET_PREFIX, AttemptOutcome
 from .network import BlockedAddress, IPAddress, ResolutionFailed, check_url, resolve
+
+if TYPE_CHECKING:
+    from .models import Delivery
 
 logger = logging.getLogger(__name__)
 
@@ -83,21 +88,45 @@ def classify(response: httpx.Response) -> Outcome:
     return Outcome(AttemptOutcome.FAILED, http_status=status, error=error)
 
 
-class WebhookAdapter:
-    """設定したendpointへ、共通のイベントをJSONでPOSTする"""
+@dataclass
+class DeliveryRequest:
+    """1回の送信。項目は既定値つきで足し、今のAdapterを壊さない（design.md §3.11.2）"""
 
-    kind: ClassVar[DestinationKind] = DestinationKind.WEBHOOK
-    # テストで差し替える
-    transport: ClassVar[httpx.BaseTransport | None] = None
+    delivery: "Delivery"
+    # 何回目の送信か（1から）
+    attempt: int
+    # 送る内容（共通のイベント。成果物のURLは送るたびに発行して入れる）
+    payload: dict[str, Any]
+    # 固定した版の宛先のURL（宛先のURLを持つ種類だけ）と、署名の鍵
+    url: str = ""
+    secret: str = ""
+
+
+class NotificationAdapter(ABC):
+    """出口のAdapter（拡張種別 notification）。結果は Outcome で返し、受付確認・一時的な失敗（送り直す）・失敗・届いたか
+    分からない、に分ける。それ以外の例外は予期しない失敗として数え、「届いたか分からない」にする"""
 
     def validate_url(self, url: str) -> SplitResult:
-        """登録するときの確認。誤りは BlockedAddress（理由は利用者に見せてよい文）"""
+        """宛先のURLを持つ種類（capability `url`）の、登録するときの確認。誤りは BlockedAddress（理由は利用者に
+        見せてよい文）"""
         return check_url(url)
+
+    @abstractmethod
+    def deliver(self, request: DeliveryRequest) -> Outcome:
+        pass
+
+
+class WebhookAdapter(NotificationAdapter):
+    """設定したendpointへ、共通のイベントをJSONでPOSTする"""
+
+    # テストで差し替える
+    transport: ClassVar[httpx.BaseTransport | None] = None
 
     def prepare(self, payload: dict[str, Any]) -> bytes:
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()
 
-    def deliver(self, *, url: str, secret: str, payload: dict[str, Any], attempt: int) -> Outcome:
+    def deliver(self, request: DeliveryRequest) -> Outcome:
+        url, secret, payload, attempt = request.url, request.secret, request.payload, request.attempt
         try:
             parts = self.validate_url(url)
             addresses = resolve(parts)
@@ -157,8 +186,6 @@ ZAPIER_PATH_PREFIX = "/hooks/catch/"
 class ZapierAdapter(WebhookAdapter):
     """ZapierのCatch Hookへ送る。送り方は汎用のWebhookと同じ（Zapierは入れ子のJSONを項目に展開する）"""
 
-    kind = DestinationKind.ZAPIER
-
     def validate_url(self, url: str) -> SplitResult:
         parts = super().validate_url(url)
         if parts.scheme != "https" or parts.hostname != ZAPIER_HOST or not parts.path.startswith(ZAPIER_PATH_PREFIX):
@@ -169,8 +196,7 @@ class ZapierAdapter(WebhookAdapter):
         return parts
 
 
-ADAPTERS: dict[int, WebhookAdapter] = {a.kind: a for a in (WebhookAdapter(), ZapierAdapter())}
-
-
-def adapter_for(kind: int) -> WebhookAdapter:
-    return ADAPTERS[kind]
+def adapter_for(extension_id: str) -> NotificationAdapter:
+    """出口のAdapter。停止中・配備されていないPluginは PluginUnavailable"""
+    extension, _spec = registry.get(extension_id)
+    return extension.adapter()

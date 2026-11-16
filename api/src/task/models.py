@@ -25,6 +25,7 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from plugin import builtin, registry
 from user.models import Department, manageable_department_ids
 from utils.fields import NanoidField
 from utils.permissions import AppPermission
@@ -426,12 +427,6 @@ class TaskDefinitionRevision(models.Model):
         return f"{self.task} v{self.number}"
 
 
-class TriggerKind(models.IntegerChoices):
-    """入口の種類。スケジュールは後で足す"""
-
-    WEBHOOK = 1, _("Webhook")
-
-
 # Webhookの入口を付けられるタスクの範囲（個人のタスクの入口はスケジュールだけ。authorization.md §5.4）
 WEBHOOK_TASK_SCOPES = (TaskScope.DEPARTMENT, TaskScope.COMPANY, TaskScope.SYSTEM)
 # payloadの大きさの上限（入口ごとに設定する。既定1MiB・最大10MiB。nginxの client_max_body_size も合わせる）
@@ -458,7 +453,8 @@ class TriggerBinding(models.Model):
     """
 
     uid = NanoidField(unique=True)
-    kind = models.PositiveSmallIntegerField(_("種類"), choices=TriggerKind.choices, default=TriggerKind.WEBHOOK)
+    # 使うAdapter（Pluginのextension_id。design.md §3.11.1）。今はWebhookだけで、スケジュールは後で足す
+    extension = models.CharField(_("種類"), max_length=200, default=builtin.WEBHOOK_TRIGGER)
     task = models.ForeignKey(
         TaskDefinition, on_delete=models.PROTECT, related_name="triggers", verbose_name=_("タスク")
     )
@@ -503,7 +499,17 @@ class TriggerBinding(models.Model):
         return self.name
 
     def in_service(self) -> bool:
-        return not self.deleted and not self.suspended and self.current_revision_id is not None
+        """停止したPluginの入口は、入口を停止したのと同じに扱う（design.md §3.11.1）"""
+        return (
+            not self.deleted
+            and not self.suspended
+            and self.current_revision_id is not None
+            and registry.is_available(self.extension)
+        )
+
+    @property
+    def extension_name(self) -> str:
+        return registry.display_name(self.extension)
 
     @property
     def key_needs_rotation(self) -> bool:

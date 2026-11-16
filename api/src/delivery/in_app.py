@@ -19,7 +19,7 @@ from run.models import Run, RunLaunch
 from stream.notifier import notify_notification
 from task.models import SCOPE_PERMISSIONS, TaskScope, can_manage
 
-from .adapters import Outcome
+from .adapters import DeliveryRequest, NotificationAdapter, Outcome
 from .models import AttemptOutcome, Delivery, Notification
 
 PERMISSION_BACKEND = "utils.backends.PasswordBackend"
@@ -79,3 +79,10 @@ def notify(delivery: Delivery) -> Outcome:
     for user in users:
         notify_notification(user.uid)
     return Outcome(AttemptOutcome.ACCEPTED)
+
+
+class InAppAdapter(NotificationAdapter):
+    """画面の通知のAdapter。外へ送らず、通知欄に載せる（ファイルのURLは発行しない）"""
+
+    def deliver(self, request: DeliveryRequest) -> Outcome:
+        return notify(request.delivery)

@@ -14,6 +14,16 @@ from user.factories import UserFactory
 from user.models import User
 
 
+@pytest.fixture(scope="session")
+def django_db_setup(django_db_setup, django_db_blocker):
+    """テスト用のDBに、配備されているPluginを登録する（--reuse-db でマイグレーションが流れなくても、今のコードの
+    Pluginにそろえる。design.md §3.11.1）"""
+    from plugin.registry import sync_plugins  # noqa: PLC0415  Djangoの設定を読んだ後に読む
+
+    with django_db_blocker.unblock():
+        sync_plugins()
+
+
 @pytest.fixture(autouse=True)
 def fixture_storage(settings, tmp_path) -> None:
     """添付・成果物・snapshotの保存先を、テストごとの一時ディレクトリにする"""

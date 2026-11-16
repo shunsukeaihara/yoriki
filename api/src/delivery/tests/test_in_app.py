@@ -11,13 +11,13 @@ from delivery.models import (
     Delivery,
     DeliveryStatus,
     Destination,
-    DestinationKind,
     DestinationScope,
     Notification,
 )
 from delivery.tasks import send_delivery
 from llm.factories import LLMConnectionFactory, ModelProfileFactory
 from llm.models import ProviderKind
+from plugin import builtin
 from run.models import RunLaunch, RunStatus
 from task.dispatch import start_task_run
 from task.factories import TaskDefinitionFactory
@@ -32,7 +32,7 @@ NOTIFICATIONS = "/api/app/v1/notifications/"
 
 
 def _in_app(**kwargs) -> Destination:
-    return DestinationFactory.create(kind=DestinationKind.IN_APP, revision__url="", **kwargs)
+    return DestinationFactory.create(extension=builtin.IN_APP, revision__url="", **kwargs)
 
 
 def _finish(task, actor, *, launch=RunLaunch.MANUAL) -> Delivery:
@@ -222,12 +222,12 @@ def test_an_in_app_destination_has_no_url():
     admin = grant(UserFactory.create(), "delivery.add_destination", "delivery.view_destination")
     client = APIClient()
     client.force_login(admin)
-    body = {"kind": DestinationKind.IN_APP, "scope": DestinationScope.COMPANY, "name": "画面"}
+    body = {"extension": builtin.IN_APP, "scope": DestinationScope.COMPANY, "name": "画面"}
     res = client.post("/api/v1/destinations/", body, format="json")
     assert res.status_code == 201, res.json()
     res = client.post("/api/v1/destinations/", {**body, "url": "https://hooks.example.com/x"}, format="json")
     assert "url" in res.json()
-    res = client.post("/api/v1/destinations/", {**body, "kind": DestinationKind.WEBHOOK}, format="json")
+    res = client.post("/api/v1/destinations/", {**body, "extension": builtin.WEBHOOK}, format="json")
     assert "url" in res.json()
     # 個人の出口はYorikiが作り、管理では作れない・一覧に出さない
     personal = Destination.personal_in_app()

@@ -20,6 +20,8 @@ from uuid import UUID
 
 from django.utils.translation import gettext as _
 
+from plugin.observe import observed
+
 from ..errors import ConnectorError, ConnectorErrorKind
 from ..models import ConnectorVersion, DatabaseConnection
 from ..sql import CheckedQuery, Dialect, check_query
@@ -127,15 +129,17 @@ class DatasourceAdapter(ABC):
         return self.version.default_schema
 
     def _run(self, fn):
-        try:
-            return fn()
-        except ConnectorError:
-            raise
-        except Exception as exc:
-            error = self.translate_error(exc)
-            if error is None:
+        # Pluginの境界。ドライバの例外は ConnectorError にし、それ以外は予期しない失敗として数える（design.md §3.11.4）
+        with observed(self.connection.extension):
+            try:
+                return fn()
+            except ConnectorError:
                 raise
-            raise error from exc
+            except Exception as exc:
+                error = self.translate_error(exc)
+                if error is None:
+                    raise
+                raise error from exc
 
     def check(self) -> None:
         """接続できるか（ホスト、認証、DB名）を確かめる"""

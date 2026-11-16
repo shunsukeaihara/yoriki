@@ -1,9 +1,10 @@
 import factory
 from factory.django import DjangoModelFactory
 
+from plugin import builtin
 from user.factories import UserFactory
 
-from .models import Destination, DestinationKind, DestinationScope
+from .models import Destination, DestinationScope
 
 
 class DestinationFactory(DjangoModelFactory[Destination]):
@@ -13,7 +14,7 @@ class DestinationFactory(DjangoModelFactory[Destination]):
         model = Destination
         skip_postgeneration_save = True  # revision() の revise() で保存する
 
-    kind = DestinationKind.WEBHOOK
+    extension = builtin.WEBHOOK
     scope = DestinationScope.COMPANY  # 部門の範囲にするときは department も渡す
     name = factory.Sequence(lambda n: f"出口{n}")
     signing_secret = factory.LazyFunction(Destination.new_secret)

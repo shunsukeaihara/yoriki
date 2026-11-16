@@ -7,7 +7,6 @@ from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from plugin import registry
-from plugin.builtin import SCHEMAS
 from plugin.fields import ExtensionField
 from plugin.spec import ExtensionType
 from user.models import Department
@@ -58,6 +57,8 @@ class DatabaseConnectionSerializer(serializers.ModelSerializer):
     id = serializers.CharField(source="uid", read_only=True)
     extension = ExtensionField(ExtensionType.CONNECTOR)
     extension_name = serializers.CharField(read_only=True)
+    uses_schemas = serializers.BooleanField(read_only=True, help_text=_("表の名前にスキーマがある種別か"))
+    kind_default_schema = serializers.CharField(read_only=True, help_text=_("種別の既定のスキーマ"))
     port = serializers.IntegerField(
         min_value=1, max_value=65535, required=False, help_text=_("省略すると種別の既定のポート")
     )
@@ -81,6 +82,8 @@ class DatabaseConnectionSerializer(serializers.ModelSerializer):
             "name",
             "extension",
             "extension_name",
+            "uses_schemas",
+            "kind_default_schema",
             "host",
             "port",
             "database",
@@ -195,6 +198,8 @@ class MinimumDatabaseConnectionSerializer(serializers.ModelSerializer):
 
     id = serializers.CharField(source="uid", read_only=True)
     extension_name = serializers.CharField(read_only=True)
+    uses_schemas = serializers.BooleanField(read_only=True, help_text=_("表の名前にスキーマがある種別か"))
+    kind_default_schema = serializers.CharField(read_only=True, help_text=_("種別の既定のスキーマ"))
     host = serializers.CharField(read_only=True, allow_null=True, help_text=_("接続先を見る権限がなければnull"))
     port = serializers.IntegerField(read_only=True, allow_null=True, help_text=_("接続先を見る権限がなければnull"))
     database = serializers.CharField(read_only=True, allow_null=True, help_text=_("接続先を見る権限がなければnull"))
@@ -216,6 +221,8 @@ class MinimumDatabaseConnectionSerializer(serializers.ModelSerializer):
             "name",
             "extension",
             "extension_name",
+            "uses_schemas",
+            "kind_default_schema",
             "host",
             "port",
             "database",
@@ -351,8 +358,8 @@ class ConnectorSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"version": _("編集を始めた時点の版を送ってください")})
         self._validate_scope(attrs)
         connection = attrs["connection"] if self.instance is None else self.instance.connection
-        schemas = registry.has_capability(connection.extension, SCHEMAS)
-        kind_default_schema = registry.config_default(connection.extension, "default_schema", "")
+        schemas = connection.uses_schemas
+        kind_default_schema = connection.kind_default_schema
         errors: defaultdict[str, list[Any]] = defaultdict(list)
         content = attrs.get("current_version", {})
         if self.instance is None or "default_schema" in content:

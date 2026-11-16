@@ -5,7 +5,7 @@ from django.utils.translation import gettext as _
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import mixins, serializers
 from rest_framework.response import Response
-from rest_framework.viewsets import GenericViewSet
+from rest_framework.viewsets import GenericViewSet, ViewSet
 
 from utils.permissions import AppUser, ModelPermissions
 
@@ -72,10 +72,8 @@ class PluginViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.Upd
     parameters=[OpenApiParameter("type", str, enum=[t.value for t in ExtensionType], description="拡張種別")],
     responses=SelectableExtensionSerializer(many=True),
 )
-class AppPluginExtensionViewSet(GenericViewSet):
+class AppPluginExtensionViewSet(ViewSet):
     permission_classes = [AppUser]
-    serializer_class = SelectableExtensionSerializer
-    pagination_class = None
 
     def list(self, request, *args, **kwargs):
         try:
@@ -94,4 +92,4 @@ class AppPluginExtensionViewSet(GenericViewSet):
             for extension_id, (extension, _spec) in sorted(registry.extensions().items())
             if extension_id in ids
         ]
-        return Response(self.get_serializer(items, many=True).data)
+        return Response(SelectableExtensionSerializer(items, many=True).data)

@@ -19,13 +19,47 @@ mockNuxtImport('useAPI', () => () => ({
     databaseConnections: () => ({ create: connectionCreate, patch: connectionPatch }),
     departments: () => ({ list: vi.fn().mockResolvedValue({ results: [], next: null, previous: null }) }),
   },
+  pluginExtensions: {
+    list: vi.fn().mockImplementation(async (type: string) =>
+      type === 'notification'
+        ? [
+            {
+              id: BuiltinExtension.WEBHOOK,
+              type,
+              name: 'Webhook',
+              capabilities: ['file_fetch_auth', 'url'],
+              configSchema: {},
+            },
+            { id: BuiltinExtension.ZAPIER, type, name: 'Zapier', capabilities: ['url'], configSchema: {} },
+            { id: BuiltinExtension.IN_APP, type, name: '画面の通知', capabilities: ['personal'], configSchema: {} },
+          ]
+        : [
+            {
+              id: BuiltinExtension.POSTGRESQL,
+              type,
+              name: 'PostgreSQL',
+              capabilities: ['schemas'],
+              configSchema: { properties: { port: { default: 5432 } } },
+            },
+            {
+              id: BuiltinExtension.MYSQL,
+              type,
+              name: 'MySQL',
+              capabilities: [],
+              configSchema: { properties: { port: { default: 3306 } } },
+            },
+          ],
+    ),
+  },
 }))
 
 const connection: DatabaseConnection = {
   id: 'd1',
   name: '販売管理DB',
-  kind: ConnectorKind.SQLSERVER,
-  kindDisplay: 'SQL Server',
+  extension: BuiltinExtension.SQLSERVER,
+  extensionName: 'SQL Server',
+  usesSchemas: true,
+  kindDefaultSchema: 'dbo',
   host: 'sales-db.internal',
   port: 1433,
   database: 'Sales',
@@ -49,16 +83,18 @@ const connector: Connector = {
   connectionInfo: {
     id: 'd1',
     name: '販売管理DB',
-    kind: ConnectorKind.SQLSERVER,
-    kindDisplay: 'SQL Server',
+    extension: BuiltinExtension.SQLSERVER,
+    extensionName: 'SQL Server',
+    usesSchemas: true,
+    kindDefaultSchema: 'dbo',
     host: 'sales-db.internal',
     port: 1433,
     database: 'Sales',
     connectTimeoutSeconds: 10,
     isActive: true,
   },
-  kind: ConnectorKind.SQLSERVER,
-  kindDisplay: 'SQL Server',
+  extension: BuiltinExtension.SQLSERVER,
+  extensionName: 'SQL Server',
   isActive: true,
   version: 2,
   description: '販売の実績',
@@ -88,7 +124,7 @@ describe('DatabaseConnectionForm', () => {
   })
 
   type Form = Exposed & {
-    form: { name: string; kind: number; host: string; database: string; username: string; password: string }
+    form: { name: string; extension: string; host: string; database: string; username: string; password: string }
   }
 
   it('作成では接続先とパスワードを送る。ポートは空なら送らない', async () => {
@@ -96,7 +132,7 @@ describe('DatabaseConnectionForm', () => {
     const vm = wrapper.vm as unknown as Form
     Object.assign(vm.form, {
       name: '基幹DB',
-      kind: ConnectorKind.MYSQL,
+      extension: BuiltinExtension.MYSQL,
       host: ' db.internal ',
       database: 'core',
       username: 'reader',
@@ -106,7 +142,7 @@ describe('DatabaseConnectionForm', () => {
     expect(vm.canPost).toBe(true)
     await vm.onSubmit()
     const data = connectionCreate.mock.calls[0]![0]
-    expect(data).toMatchObject({ kind: ConnectorKind.MYSQL, host: 'db.internal', password: 'secret' })
+    expect(data).toMatchObject({ extension: BuiltinExtension.MYSQL, host: 'db.internal', password: 'secret' })
     expect(data.port).toBeUndefined()
   })
 
@@ -116,7 +152,7 @@ describe('DatabaseConnectionForm', () => {
     expect(wrapper.text()).toContain('末尾 word')
     await vm.onSubmit()
     expect(connectionPatch.mock.calls[0]![0]).not.toHaveProperty('password')
-    expect(connectionPatch.mock.calls[0]![0]).not.toHaveProperty('kind')
+    expect(connectionPatch.mock.calls[0]![0]).not.toHaveProperty('extension')
 
     vm.form.host = 'sales-db2.internal'
     await nextTick()

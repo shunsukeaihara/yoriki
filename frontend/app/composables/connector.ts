@@ -7,14 +7,6 @@ export const MAX_CHOSEN_CONNECTORS = 5
 export const isConnectorUsableIn = (connector: Pick<AppConnector, 'isSensitive'>, sensitiveConversation: boolean) =>
   !connector.isSensitive || sensitiveConversation
 
-// バックエンドの connector.models.ConnectorKind と同じ値
-export const ConnectorKind = {
-  POSTGRESQL: 1,
-  MYSQL: 2,
-  SQLSERVER: 3,
-} as const satisfies Record<string, ConnectorKindEnum>
-export type ConnectorKind = (typeof ConnectorKind)[keyof typeof ConnectorKind]
-
 // バックエンドの connector.models.ConnectorScope と同じ値。個人は会話でConnectorを使う段階で足す
 export const ConnectorScope = {
   DEPARTMENT: 2,
@@ -40,21 +32,6 @@ export const TlsMode = {
   VERIFY: 3,
 } as const satisfies Record<string, TlsEnum>
 export type TlsMode = (typeof TlsMode)[keyof typeof TlsMode]
-
-/** 種別の既定のポート（ConnectorKind.default_port）。ポートを空欄で作成すると、サーバーがこの値にする */
-export const defaultPort = (kind: ConnectorKind): number =>
-  ({ [ConnectorKind.POSTGRESQL]: 5432, [ConnectorKind.MYSQL]: 3306, [ConnectorKind.SQLSERVER]: 1433 })[kind]
-
-/** 種別の既定のスキーマ（ConnectorKind.default_schema）。MySQLはDB名がスキーマなので空 */
-export const defaultSchema = (kind: ConnectorKind): string =>
-  ({ [ConnectorKind.POSTGRESQL]: 'public', [ConnectorKind.MYSQL]: '', [ConnectorKind.SQLSERVER]: 'dbo' })[kind]
-
-// 種別の選択肢。一覧の表示はサーバーの kindDisplay を使う
-export const connectorKindItems = (t: T) => [
-  { value: ConnectorKind.POSTGRESQL, title: t('PostgreSQL') },
-  { value: ConnectorKind.MYSQL, title: t('MySQL') },
-  { value: ConnectorKind.SQLSERVER, title: t('SQL Server') },
-]
 
 export const tlsItems = (t: T) => [
   { value: TlsMode.VERIFY, title: t('暗号化して証明書を確かめる') },

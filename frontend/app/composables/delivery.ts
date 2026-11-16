@@ -1,35 +1,5 @@
 type T = (key: string, params?: Record<string, unknown>) => string
 
-// バックエンドの delivery.models.DestinationKind と同じ値
-export const DestinationKind = {
-  WEBHOOK: 1,
-  ZAPIER: 2,
-  IN_APP: 3,
-} as const satisfies Record<string, DestinationKindEnum>
-
-/** 送り先のURLを持つ（外へ送る）種類（delivery.models.URL_KINDS） */
-export const isUrlDestinationKind = (kind: DestinationKindEnum | null | undefined) =>
-  kind === DestinationKind.WEBHOOK || kind === DestinationKind.ZAPIER
-
-/** 種類の選択肢（作成と検索条件）。一覧の表示はサーバーの kindDisplay を使う */
-export const destinationKindItems = (t: T) => [
-  {
-    value: DestinationKind.WEBHOOK,
-    title: t('Webhook'),
-    description: t('結果を署名付きのJSONで送ります。受け手は署名を確かめます'),
-  },
-  {
-    value: DestinationKind.ZAPIER,
-    title: t('Zapier'),
-    description: t('ZapierのCatch HookのURLへ送ります'),
-  },
-  {
-    value: DestinationKind.IN_APP,
-    title: t('画面の通知'),
-    description: t('タスクを管理できる人（手動実行では実行した人）の通知欄に載せます'),
-  },
-]
-
 // 配信の状態（delivery.models.DeliveryStatus。design.md §4.5）。表示はサーバーの statusDisplay を使う
 export const DeliveryStatus = {
   PENDING: 1,

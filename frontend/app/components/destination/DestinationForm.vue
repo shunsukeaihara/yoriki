@@ -19,8 +19,8 @@ const emptyForm = () => ({
   // 編集を始めた時点の版。その間に他の人が版を作っていたら、サーバーが409で断る
   version: 0,
   name: '',
-  // 作成のときだけ送る
-  kind: DestinationKind.WEBHOOK as DestinationKindEnum,
+  // 作成のときだけ送る（種類はPluginのAdapterのID）
+  extension: BuiltinExtension.WEBHOOK as string,
   scope: DestinationScope.DEPARTMENT as ConnectorScopeEnum,
   department: null as string | null,
   url: '',
@@ -34,7 +34,7 @@ const toForm = (value: Destination | null | undefined) =>
         id: value.id,
         version: value.version ?? 0,
         name: value.name,
-        kind: value.kind,
+        extension: value.extension,
         allowsSensitiveResults: value.allowsSensitiveResults ?? false,
       }
     : emptyForm()
@@ -60,7 +60,12 @@ watch(
 )
 
 const isEdit = computed(() => Boolean(form.value.id))
-const hasUrl = computed(() => isUrlDestinationKind(form.value.kind))
+// 選べる種類（停止中・廃止予定のPluginのものは出ない）
+const { extensions, find } = useSelectableExtensions('notification')
+// 外へ送る（宛先のURLを持つ）種類か。編集では出口の値、作成では選んだ種類の対応能力で決める
+const hasUrl = computed(() =>
+  isEdit.value ? Boolean(modelValue.value?.isExternal) : hasCapability(find(form.value.extension), Capability.URL),
+)
 
 const { onSubmit, loading, errors } = createSubmit({
   form,
@@ -74,7 +79,7 @@ const { onSubmit, loading, errors } = createSubmit({
     }
     if (!f.id) {
       const department = f.scope === DestinationScope.DEPARTMENT ? f.department : null
-      return api.manage.destinations().create({ ...common, kind: f.kind, scope: f.scope, department })
+      return api.manage.destinations().create({ ...common, extension: f.extension, scope: f.scope, department })
     }
     // 名前は版の外なので、変えたときだけ送る（古い画面からの保存で、別の人が変えた名前を戻さない）
     const name = f.name !== modelValue.value?.name ? f.name : undefined
@@ -112,12 +117,12 @@ defineExpose({ onSubmit, loading, canPost, reset })
 
     <template v-if="!isEdit">
       <DRadioGroup
-        v-model="form.kind"
+        v-model="form.extension"
         :label="$t('種類')"
         :hint="$t('作成した後は変更できません')"
-        :items="destinationKindItems(t)"
+        :items="extensionItems(extensions, t)"
         variant="card"
-        :error-messages="errors.kind"
+        :error-messages="errors.extension"
       />
       <DRadioGroup
         v-model="form.scope"
@@ -139,7 +144,7 @@ defineExpose({ onSubmit, loading, canPost, reset })
     </template>
     <div v-else class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
       <span class="text-muted">{{ $t('種類') }}</span>
-      <span>{{ modelValue?.kindDisplay }}</span>
+      <span>{{ modelValue?.extensionName }}</span>
       <span class="text-muted">{{ $t('使ってよい範囲') }}</span>
       <span>
         {{ modelValue?.scopeDisplay }}

@@ -10,10 +10,12 @@ const { hasPermission } = usePermission()
 const { t } = useI18n()
 const reloadKey = ref(0)
 const reload = () => (reloadKey.value = Date.now())
+// 種類の絞り込みの選択肢（使えるPluginのもの）
+const { extensions } = useSelectableExtensions('notification')
 
 const emptyParams = (): DestinationListParams => ({
   search: undefined,
-  kind: undefined,
+  extension: undefined,
   scope: undefined,
   department: undefined,
   suspended: undefined,
@@ -33,7 +35,7 @@ watch(
 
 const columns: TableColumn<Destination>[] = [
   { accessorKey: 'name', header: t('名前') },
-  { accessorKey: 'kindDisplay', header: t('種類') },
+  { accessorKey: 'extensionName', header: t('種類') },
   { accessorKey: 'scopeDisplay', header: t('使ってよい範囲') },
   { accessorKey: 'urlDisplay', header: t('送り先') },
   { accessorKey: 'version', header: t('版') },
@@ -65,7 +67,7 @@ const columns: TableColumn<Destination>[] = [
 
       <TableSearchForm :reload="reload" :clear="clearParams">
         <DTextField v-model="params.search" :label="$t('名前')" />
-        <DSelect v-model="params.kind" :label="$t('種類')" :items="destinationKindItems(t)" clearable />
+        <DSelect v-model="params.extension" :label="$t('種類')" :items="extensionItems(extensions, t)" clearable />
         <DSelect v-model="params.scope" :label="$t('範囲')" :items="destinationScopeItems(t)" clearable />
         <DAutocomplete
           v-if="params.scope === DestinationScope.DEPARTMENT"

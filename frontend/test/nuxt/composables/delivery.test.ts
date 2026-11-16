@@ -1,13 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
 describe('delivery', () => {
-  it('送り先のURLを持つのはWebhookとZapierだけ', () => {
-    expect(isUrlDestinationKind(DestinationKind.WEBHOOK)).toBe(true)
-    expect(isUrlDestinationKind(DestinationKind.ZAPIER)).toBe(true)
-    expect(isUrlDestinationKind(DestinationKind.IN_APP)).toBe(false)
-    expect(isUrlDestinationKind(null)).toBe(false)
-  })
-
   it('人が送り直せるのは、失敗・確認待ち・取消の配信だけ', () => {
     const retryable = Object.values(DeliveryStatus).filter((status) => isRetryableDelivery({ status }))
     expect(retryable).toEqual([DeliveryStatus.FAILED, DeliveryStatus.UNKNOWN, DeliveryStatus.CANCELLED])

@@ -21,7 +21,7 @@ const onOpen = (open: boolean) => {
 
 const onCreated = (value: DestinationSecret) => {
   emit('saved', value)
-  if (isUrlDestinationKind(value.kind)) created.value = value
+  if (value.isExternal) created.value = value
   else dialog.value?.closeDialog()
 }
 </script>
@@ -45,7 +45,7 @@ const onCreated = (value: DestinationSecret) => {
         :label="$t('署名の鍵')"
         :value="created.signingSecret"
         :description="
-          created.kind === DestinationKind.WEBHOOK
+          created.extension === BuiltinExtension.WEBHOOK
             ? t(
                 '受け手に設定し、届いた要求の署名（Standard Webhooks）を確かめてもらいます。成果物のファイルを取得するときも、この鍵を Authorization: Bearer で付けます。鍵はこの画面でしか表示できません',
               )

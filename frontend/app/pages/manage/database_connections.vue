@@ -12,8 +12,10 @@ const canView = computed(() =>
 )
 const reloadKey = ref(0)
 const reload = () => (reloadKey.value = Date.now())
+// 種類の絞り込みの選択肢（使えるPluginのもの）
+const { extensions } = useSelectableExtensions('connector')
 
-const emptyParams = (): DatabaseConnectionListParams => ({ name: undefined, kind: undefined, isActive: undefined })
+const emptyParams = (): DatabaseConnectionListParams => ({ name: undefined, extension: undefined, isActive: undefined })
 const params = ref(emptyParams())
 const clearParams = () => {
   params.value = emptyParams()
@@ -22,7 +24,7 @@ const clearParams = () => {
 
 const columns: TableColumn<DatabaseConnection>[] = [
   { accessorKey: 'name', header: t('名前') },
-  { accessorKey: 'kindDisplay', header: t('種別') },
+  { accessorKey: 'extensionName', header: t('種別') },
   { accessorKey: 'host', header: t('ホスト・DB名') },
   { accessorKey: 'connectorCount', header: t('Connector') },
   { accessorKey: 'isActive', header: t('有効') },
@@ -57,7 +59,7 @@ const columns: TableColumn<DatabaseConnection>[] = [
       <template v-else>
         <TableSearchForm :reload="reload" :clear="clearParams">
           <DTextField v-model="params.name" :label="$t('名前')" />
-          <DSelect v-model="params.kind" :label="$t('種別')" :items="connectorKindItems(t)" clearable />
+          <DSelect v-model="params.extension" :label="$t('種別')" :items="extensionItems(extensions, t)" clearable />
           <DSelect v-model="params.isActive" :label="$t('有効')" :items="activeItems(t)" clearable />
         </TableSearchForm>
 

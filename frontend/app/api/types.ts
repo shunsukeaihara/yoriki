@@ -41,7 +41,19 @@ export type ModelProfileListParams = ListParams & { name?: string; connection?: 
 export type RuntimeProfileListParams = ListParams & { name?: string; isActive?: boolean }
 export type PythonPackageListParams = ListParams & { name?: string; isActive?: boolean }
 
-export type ConnectorKindEnum = Schemas['ConnectorKindEnum']
+// Plugin（基盤管理者。design.md §3.11.1）と、新しく作る入口・出口・Connectorの接続で選べる種別（PluginのAdapter）
+export type PluginInfo = Api<'Plugin'>
+export type PluginExtension = Api<'PluginExtension'>
+export type PluginUpdate = Api<'PatchedPluginRequest'>
+export type PluginListParams = ListParams & {
+  search?: string
+  builtin?: boolean
+  enabled?: boolean
+  deployed?: boolean
+}
+export type SelectableExtension = Api<'SelectableExtension'>
+export type ExtensionType = 'trigger' | 'notification' | 'storage' | 'connector'
+
 export type TlsEnum = Schemas['TlsEnum']
 export type DatabaseConnection = Api<'DatabaseConnection'>
 export type DatabaseConnectionWrite = Api<'DatabaseConnectionRequest'>
@@ -61,12 +73,12 @@ export type ConnectorVersion = Api<'ConnectorVersion'>
 export type AppConnector = Api<'AppConnector'>
 // 使えるConnectorの詳細（Skillで使う表を宣言するときの候補）
 export type AppConnectorDetail = Api<'AppConnectorDetail'>
-export type DatabaseConnectionListParams = ListParams & { name?: string; kind?: ConnectorKindEnum; isActive?: boolean }
+export type DatabaseConnectionListParams = ListParams & { name?: string; extension?: string; isActive?: boolean }
 export type ConnectorScopeEnum = Schemas['ConnectorScopeEnum']
 export type ConnectorListParams = ListParams & {
   name?: string
   connection?: string
-  kind?: ConnectorKindEnum
+  extension?: string
   isActive?: boolean
   isSensitive?: boolean
   scope?: ConnectorScopeEnum
@@ -216,7 +228,6 @@ export type TaskChatLaunch = Api<'TaskChatLaunchRequest'>
 // チャットから起動できるタスク（名前・説明・入力の項目だけ）と、会話のカードに出す起動したRun（authorization.md §7.1）
 export type LaunchableTask = Api<'LaunchableTask'>
 export type LaunchedTaskRun = Api<'LaunchedTaskRun'>
-export type DestinationKindEnum = Schemas['DestinationKindEnum']
 // 手動実行の入力の値。キーは項目の名前（変換しない）。型がファイルの項目は File か、修正チャットで引き継ぐ元の実行の
 // ファイルのパス（文字）
 export type TaskRunInputs = Record<string, string | number | boolean | File | null>
@@ -252,7 +263,7 @@ export type DestinationRevision = Api<'DestinationRevision'>
 export type DestinationListParams = ListParams & {
   // 名前の一部（DRFの検索）
   search?: string
-  kind?: DestinationKindEnum
+  extension?: string
   scope?: ConnectorScopeEnum
   department?: string
   suspended?: boolean

@@ -941,6 +941,34 @@ paths:
               schema:
                 $ref: '#/components/schemas/NotificationCount'
           description: ''
+  /api/app/v1/plugin_extensions/:
+    get:
+      operationId: app_v1_plugin_extensions_list
+      description: 新しく作る入口・出口・Connectorの接続で選べる種別（使えて、廃止予定でないPluginのAdapter）
+      parameters:
+      - in: query
+        name: type
+        schema:
+          type: string
+          enum:
+          - connector
+          - notification
+          - storage
+          - trigger
+        description: 拡張種別
+      tags:
+      - app/plugin
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SelectableExtension'
+          description: ''
   /api/app/v1/runs/:
     get:
       operationId: app_v1_runs_list
@@ -4585,6 +4613,11 @@ paths:
           type: string
         description: 部門
       - in: query
+        name: extension
+        schema:
+          type: string
+        description: 種別
+      - in: query
         name: is_active
         schema:
           type: boolean
@@ -4593,21 +4626,6 @@ paths:
         schema:
           type: boolean
         description: 機密
-      - in: query
-        name: kind
-        schema:
-          type: integer
-          title: 種別
-          enum:
-          - 1
-          - 2
-          - 3
-        description: |-
-          種別
-
-          * `1` - PostgreSQL
-          * `2` - MySQL
-          * `3` - SQL Server
       - in: query
         name: name
         schema:
@@ -5028,24 +5046,14 @@ paths:
         schema:
           type: string
       - in: query
+        name: extension
+        schema:
+          type: string
+        description: 種別
+      - in: query
         name: is_active
         schema:
           type: boolean
-      - in: query
-        name: kind
-        schema:
-          type: integer
-          title: 種別
-          enum:
-          - 1
-          - 2
-          - 3
-        description: |-
-          種別
-
-          * `1` - PostgreSQL
-          * `2` - MySQL
-          * `3` - SQL Server
       - in: query
         name: name
         schema:
@@ -5565,18 +5573,9 @@ paths:
           type: string
         description: 部門のID
       - in: query
-        name: kind
+        name: extension
         schema:
-          type: integer
-          title: 種類
-          enum:
-          - 1
-          - 2
-          - 3
-        description: |-
-          * `1` - Webhook
-          * `2` - Zapier
-          * `3` - 画面の通知
+          type: string
       - name: ordering
         required: false
         in: query
@@ -6509,6 +6508,112 @@ paths:
               schema:
                 $ref: '#/components/schemas/PlatformSettings'
           description: ''
+  /api/v1/plugins/:
+    get:
+      operationId: v1_plugins_list
+      description: Pluginの一覧と有効・停止（基盤管理者。design.md §3.11.1）。行は配備されているコードから作る
+      parameters:
+      - in: query
+        name: builtin
+        schema:
+          type: boolean
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - in: query
+        name: deployed
+        schema:
+          type: boolean
+      - in: query
+        name: enabled
+        schema:
+          type: boolean
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - manage/plugin
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPluginList'
+          description: ''
+  /api/v1/plugins/{plugin_id}/:
+    get:
+      operationId: v1_plugins_retrieve
+      description: Pluginの一覧と有効・停止（基盤管理者。design.md §3.11.1）。行は配備されているコードから作る
+      parameters:
+      - in: path
+        name: plugin_id
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - manage/plugin
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plugin'
+          description: ''
+    patch:
+      operationId: v1_plugins_partial_update
+      description: Pluginの一覧と有効・停止（基盤管理者。design.md §3.11.1）。行は配備されているコードから作る
+      parameters:
+      - in: path
+        name: plugin_id
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      tags:
+      - manage/plugin
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedPluginRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedPluginRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedPluginRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Plugin'
+          description: ''
   /api/v1/python_packages/:
     get:
       operationId: v1_python_packages_list
@@ -7424,7 +7529,7 @@ components:
           type: string
           readOnly: true
           title: 名前
-        kind_display:
+        extension_name:
           type: string
           readOnly: true
         description:
@@ -7450,9 +7555,9 @@ components:
       required:
       - department_info
       - description
+      - extension_name
       - id
       - is_sensitive
-      - kind_display
       - name
       - scope
       - scope_display
@@ -7469,7 +7574,7 @@ components:
           type: string
           readOnly: true
           title: 名前
-        kind_display:
+        extension_name:
           type: string
           readOnly: true
         description:
@@ -7505,9 +7610,9 @@ components:
       required:
       - department_info
       - description
+      - extension_name
       - id
       - is_sensitive
-      - kind_display
       - name
       - operations
       - scope
@@ -8297,11 +8402,10 @@ components:
           allOf:
           - $ref: '#/components/schemas/MinimumDatabaseConnection'
           readOnly: true
-        kind:
-          allOf:
-          - $ref: '#/components/schemas/ConnectorKindEnum'
+        extension:
+          type: string
           readOnly: true
-        kind_display:
+        extension_name:
           type: string
           readOnly: true
         is_active:
@@ -8381,9 +8485,9 @@ components:
       - created
       - created_by
       - department_info
+      - extension
+      - extension_name
       - id
-      - kind
-      - kind_display
       - name
       - scope
       - scope_display
@@ -8466,16 +8570,6 @@ components:
       required:
       - connector
       - operations
-    ConnectorKindEnum:
-      enum:
-      - 1
-      - 2
-      - 3
-      type: integer
-      description: |-
-        * `1` - PostgreSQL
-        * `2` - MySQL
-        * `3` - SQL Server
     ConnectorOperationEnum:
       enum:
       - datasource_describe
@@ -9041,15 +9135,21 @@ components:
           type: string
           title: 名前
           maxLength: 100
-        kind:
-          allOf:
-          - $ref: '#/components/schemas/ConnectorKindEnum'
-          title: 種別
-          minimum: 0
-          maximum: 32767
-        kind_display:
+        extension:
+          type: string
+          description: 種別（PluginのAdapterのID）。作成した後は変えられない
+          maxLength: 200
+        extension_name:
           type: string
           readOnly: true
+        uses_schemas:
+          type: boolean
+          readOnly: true
+          description: 表の名前にスキーマがある種別か
+        kind_default_schema:
+          type: string
+          readOnly: true
+          description: 種別の既定のスキーマ
         host:
           type: string
           title: ホスト
@@ -9112,15 +9212,17 @@ components:
       - created
       - created_by
       - database
+      - extension
+      - extension_name
       - has_password
       - host
       - id
-      - kind
-      - kind_display
+      - kind_default_schema
       - name
       - password_hint
       - updated
       - username
+      - uses_schemas
     DatabaseConnectionRequest:
       type: object
       description: DB接続の作成と表示。パスワードは書き込み専用で、応答には末尾の4文字だけを出す
@@ -9130,12 +9232,11 @@ components:
           minLength: 1
           title: 名前
           maxLength: 100
-        kind:
-          allOf:
-          - $ref: '#/components/schemas/ConnectorKindEnum'
-          title: 種別
-          minimum: 0
-          maximum: 32767
+        extension:
+          type: string
+          minLength: 1
+          description: 種別（PluginのAdapterのID）。作成した後は変えられない
+          maxLength: 200
         host:
           type: string
           minLength: 1
@@ -9182,8 +9283,8 @@ components:
           title: 有効
       required:
       - database
+      - extension
       - host
-      - kind
       - name
       - username
     DatabaseConnectionUpdateRequest:
@@ -9557,18 +9658,17 @@ components:
         id:
           type: string
           readOnly: true
-        kind:
-          allOf:
-          - $ref: '#/components/schemas/DestinationKindEnum'
-          description: |-
-            種類。作成した後は変えられない
-
-            * `1` - Webhook
-            * `2` - Zapier
-            * `3` - 画面の通知
-        kind_display:
+        extension:
+          type: string
+          description: 種別（PluginのAdapterのID）。作成した後は変えられない
+          maxLength: 200
+        extension_name:
           type: string
           readOnly: true
+        is_external:
+          type: boolean
+          readOnly: true
+          description: 外へ送る（宛先のURLを持つ）種類か
         scope:
           allOf:
           - $ref: '#/components/schemas/ConnectorScopeEnum'
@@ -9631,9 +9731,10 @@ components:
       - created
       - created_by
       - department_info
+      - extension
+      - extension_name
       - id
-      - kind
-      - kind_display
+      - is_external
       - name
       - scope
       - scope_display
@@ -9653,10 +9754,16 @@ components:
           readOnly: true
           title: 名前
           maxLength: 100
-        kind:
-          allOf:
-          - $ref: '#/components/schemas/DestinationKindEnum'
+        extension:
+          type: string
           readOnly: true
+        extension_name:
+          type: string
+          readOnly: true
+        is_external:
+          type: boolean
+          readOnly: true
+          description: 外へ送る（宛先のURLを持つ）種類か
         scope:
           allOf:
           - $ref: '#/components/schemas/SkillScopeEnum'
@@ -9672,20 +9779,12 @@ components:
       required:
       - allows_sensitive_results
       - department
+      - extension
+      - extension_name
       - id
-      - kind
+      - is_external
       - name
       - scope
-    DestinationKindEnum:
-      enum:
-      - 1
-      - 2
-      - 3
-      type: integer
-      description: |-
-        * `1` - Webhook
-        * `2` - Zapier
-        * `3` - 画面の通知
     DestinationRequest:
       type: object
       description: |-
@@ -9695,15 +9794,11 @@ components:
         署名の鍵は作成時と作り直したときに一度だけ返す。更新では、編集を始めた時点の `version` を送り、その間に他の人が
         版を作っていたら409になる
       properties:
-        kind:
-          allOf:
-          - $ref: '#/components/schemas/DestinationKindEnum'
-          description: |-
-            種類。作成した後は変えられない
-
-            * `1` - Webhook
-            * `2` - Zapier
-            * `3` - 画面の通知
+        extension:
+          type: string
+          minLength: 1
+          description: 種別（PluginのAdapterのID）。作成した後は変えられない
+          maxLength: 200
         scope:
           allOf:
           - $ref: '#/components/schemas/ConnectorScopeEnum'
@@ -9740,7 +9835,7 @@ components:
           writeOnly: true
           maxLength: 500
       required:
-      - kind
+      - extension
       - name
       - scope
     DestinationRevision:
@@ -9791,18 +9886,17 @@ components:
         id:
           type: string
           readOnly: true
-        kind:
-          allOf:
-          - $ref: '#/components/schemas/DestinationKindEnum'
-          description: |-
-            種類。作成した後は変えられない
-
-            * `1` - Webhook
-            * `2` - Zapier
-            * `3` - 画面の通知
-        kind_display:
+        extension:
+          type: string
+          description: 種別（PluginのAdapterのID）。作成した後は変えられない
+          maxLength: 200
+        extension_name:
           type: string
           readOnly: true
+        is_external:
+          type: boolean
+          readOnly: true
+          description: 外へ送る（宛先のURLを持つ）種類か
         scope:
           allOf:
           - $ref: '#/components/schemas/ConnectorScopeEnum'
@@ -9869,9 +9963,10 @@ components:
       - created
       - created_by
       - department_info
+      - extension
+      - extension_name
       - id
-      - kind
-      - kind_display
+      - is_external
       - name
       - scope
       - scope_display
@@ -10930,14 +11025,21 @@ components:
           type: string
           readOnly: true
           title: 名前
-        kind:
-          allOf:
-          - $ref: '#/components/schemas/ConnectorKindEnum'
-          readOnly: true
-          title: 種別
-        kind_display:
+        extension:
           type: string
           readOnly: true
+          title: 種別
+        extension_name:
+          type: string
+          readOnly: true
+        uses_schemas:
+          type: boolean
+          readOnly: true
+          description: 表の名前にスキーマがある種別か
+        kind_default_schema:
+          type: string
+          readOnly: true
+          description: 種別の既定のスキーマ
         host:
           type: string
           readOnly: true
@@ -10964,13 +11066,15 @@ components:
       required:
       - connect_timeout_seconds
       - database
+      - extension
+      - extension_name
       - host
       - id
       - is_active
-      - kind
-      - kind_display
+      - kind_default_schema
       - name
       - port
+      - uses_schemas
     MinimumDepartment:
       type: object
       properties:
@@ -12181,6 +12285,25 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Notification'
+    PaginatedPluginList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Plugin'
     PaginatedPythonPackageList:
       type: object
       required:
@@ -12908,6 +13031,13 @@ components:
           minimum: 1
           nullable: true
           description: 会話・修正チャットのワークスペース（作業ファイル）を、最後の実行が終わってから残す日数。空なら自動では消さない
+    PatchedPluginRequest:
+      type: object
+      description: Plugin（基盤管理者。design.md §3.11.1）。変えられるのは有効か（`enabled`）だけ
+      properties:
+        enabled:
+          type: boolean
+          title: 有効
     PatchedPythonPackageRequest:
       type: object
       description: 追加してよいPythonのpackageのカタログ（design.md §7.6）。名前はPEP 503で正規化して持つ
@@ -13289,6 +13419,135 @@ components:
       required:
       - updated
       - workspace_retention_days
+    Plugin:
+      type: object
+      description: Plugin（基盤管理者。design.md §3.11.1）。変えられるのは有効か（`enabled`）だけ
+      properties:
+        id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+          title: 名前
+        description:
+          type: string
+          readOnly: true
+          title: 説明
+        version:
+          type: string
+          readOnly: true
+          title: 版
+        builtin:
+          type: boolean
+          readOnly: true
+          title: 本体のPlugin
+        enabled:
+          type: boolean
+          title: 有効
+        deployed:
+          type: boolean
+          readOnly: true
+          title: 配備されている
+        problem:
+          type: string
+          readOnly: true
+          title: 登録できない理由
+        deprecated:
+          type: string
+          readOnly: true
+          title: 廃止の予告
+        replaced_by:
+          type: string
+          readOnly: true
+          title: 代わりのPlugin
+        has_self_check:
+          type: boolean
+          readOnly: true
+          title: 自己診断がある
+        usable:
+          type: boolean
+          readOnly: true
+          description: 使える（有効で、配備されていて、確かめに通った）
+        extensions:
+          type: array
+          items:
+            $ref: '#/components/schemas/PluginExtension'
+          readOnly: true
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - builtin
+      - deployed
+      - deprecated
+      - description
+      - extensions
+      - has_self_check
+      - id
+      - name
+      - problem
+      - replaced_by
+      - updated
+      - usable
+      - version
+    PluginExtension:
+      type: object
+      description: 表示専用のModelSerializer。すべての項目を読み取り専用にする
+      properties:
+        id:
+          type: string
+          readOnly: true
+        type:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+          title: 名前
+          maxLength: 200
+        capabilities:
+          type: array
+          items:
+            type: string
+          readOnly: true
+        deployed:
+          type: boolean
+          readOnly: true
+          title: 配備されている
+        failures:
+          type: array
+          items:
+            type: object
+            properties:
+              pluginVersion:
+                type: string
+              unexpected:
+                type: integer
+              timeouts:
+                type: integer
+              lastError:
+                type: string
+              lastAt:
+                type: string
+                format: date-time
+                nullable: true
+            required:
+            - pluginVersion
+            - unexpected
+            - timeouts
+            - lastError
+            - lastAt
+          readOnly: true
+          description: 直近7日の予期しない失敗・時間切れの件数（Pluginの版ごと）と最後のエラー
+      required:
+      - capabilities
+      - deployed
+      - failures
+      - id
+      - name
+      - type
     ProviderKindEnum:
       enum:
       - 1
@@ -14611,6 +14870,28 @@ components:
       - subagent
       - tables
       - truncated
+    SelectableExtension:
+      type: object
+      description: 新しく作る入口・出口・Connectorの接続で選べるAdapter
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        name:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        config_schema:
+          description: 設定のJSON Schema（画面の既定値に使う）
+      required:
+      - capabilities
+      - config_schema
+      - id
+      - name
+      - type
     Session:
       type: object
       properties:
@@ -16765,12 +17046,15 @@ components:
         destination_name:
           type: string
           readOnly: true
-        destination_kind:
-          allOf:
-          - $ref: '#/components/schemas/DestinationKindEnum'
+        destination_extension:
+          type: string
+          readOnly: true
+        destination_is_external:
+          type: boolean
           readOnly: true
       required:
-      - destination_kind
+      - destination_extension
+      - destination_is_external
       - destination_name
       - event_type
       - id
@@ -16911,9 +17195,11 @@ components:
         id:
           type: string
           readOnly: true
-        kind:
-          allOf:
-          - $ref: '#/components/schemas/TriggerKindEnum'
+        extension:
+          type: string
+          readOnly: true
+        extension_name:
+          type: string
           readOnly: true
         name:
           type: string
@@ -16938,10 +17224,11 @@ components:
           readOnly: true
       required:
       - created
+      - extension
+      - extension_name
       - id
       - key_needs_rotation
       - key_prefix
-      - kind
       - name
       - suspended
     TextDiff:
@@ -17088,9 +17375,12 @@ components:
         id:
           type: string
           readOnly: true
-        kind:
-          allOf:
-          - $ref: '#/components/schemas/TriggerKindEnum'
+        extension:
+          type: string
+          readOnly: true
+          description: 種類（PluginのAdapterのID）。今はWebhookだけ
+        extension_name:
+          type: string
           readOnly: true
         task:
           type: string
@@ -17165,12 +17455,13 @@ components:
       required:
       - created
       - created_by
+      - extension
+      - extension_name
       - id
       - key_created_by
       - key_needs_rotation
       - key_prefix
       - key_rotated
-      - kind
       - name
       - suspended
       - task
@@ -17184,9 +17475,12 @@ components:
         id:
           type: string
           readOnly: true
-        kind:
-          allOf:
-          - $ref: '#/components/schemas/TriggerKindEnum'
+        extension:
+          type: string
+          readOnly: true
+          description: 種類（PluginのAdapterのID）。今はWebhookだけ
+        extension_name:
+          type: string
           readOnly: true
         task:
           type: string
@@ -17265,13 +17559,14 @@ components:
       required:
       - created
       - created_by
+      - extension
+      - extension_name
       - id
       - key
       - key_created_by
       - key_needs_rotation
       - key_prefix
       - key_rotated
-      - kind
       - name
       - suspended
       - task
@@ -17519,11 +17814,6 @@ components:
       required:
       - name
       - path
-    TriggerKindEnum:
-      enum:
-      - 1
-      type: integer
-      description: '* `1` - Webhook'
     TriggerPreview:
       type: object
       description: |-

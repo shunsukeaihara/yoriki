@@ -24,7 +24,7 @@ from django.conf import settings
 from django.db import models, transaction
 from django.utils.translation import gettext_lazy as _
 
-from plugin import registry
+from plugin import builtin, registry
 from plugin.spec import ExtensionType
 from user.models import Department, usable_department_ids
 from utils.fields import EncryptedSecretField, NanoidField
@@ -96,6 +96,16 @@ class DatabaseConnection(models.Model):
     @property
     def extension_name(self) -> str:
         return registry.display_name(self.extension)
+
+    @property
+    def uses_schemas(self) -> bool:
+        """表の名前にスキーマがある種別か（MySQLはDB名がスキーマなので持たない）"""
+        return registry.has_capability(self.extension, builtin.SCHEMAS)
+
+    @property
+    def kind_default_schema(self) -> str:
+        """表の名前にスキーマを書かなかったときの、種別の既定のスキーマ"""
+        return registry.config_default(self.extension, "default_schema", "") or ""
 
 
 class ConnectorScope(models.IntegerChoices):

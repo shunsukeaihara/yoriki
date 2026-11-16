@@ -60,7 +60,8 @@ watch(items, schedulePoll)
 onBeforeUnmount(() => clearTimeout(pollTimer))
 
 const eventLabels = computed(() => new Map(notifyEventItems(t).map((item) => [item.value, item.title])))
-const kindIcon = (kind: DestinationKindEnum) => (kind === DestinationKind.IN_APP ? 'i-lucide-bell' : 'i-lucide-send')
+// 外へ送る出口は送信、画面の通知等はベル
+const kindIcon = (destination: DestinationChoice) => (destination.isExternal ? 'i-lucide-send' : 'i-lucide-bell')
 const formatPayload = (payload: unknown) => JSON.stringify(payload, null, 2)
 
 const retrying = ref<string | null>(null)
@@ -108,7 +109,7 @@ const retry = async (delivery: Delivery) => {
     <p v-if="!loading && items.length === 0" class="text-sm text-dimmed">{{ $t('配信はありません') }}</p>
     <UCard v-for="delivery in items" :key="delivery.id" :ui="{ body: 'grid gap-2 p-3 sm:p-3' }">
       <div class="flex flex-wrap items-center gap-2">
-        <UIcon :name="kindIcon(delivery.destination.kind)" class="size-4 shrink-0 text-muted" />
+        <UIcon :name="kindIcon(delivery.destination)" class="size-4 shrink-0 text-muted" />
         <span class="min-w-0 truncate text-sm font-medium">{{ delivery.destination.name }}</span>
         <span class="text-xs text-dimmed">
           {{

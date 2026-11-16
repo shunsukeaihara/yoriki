@@ -34,6 +34,9 @@ export const PermissionCode = {
   ADD_PYTHON_PACKAGE: 'runtime.add_pythonpackage',
   CHANGE_PYTHON_PACKAGE: 'runtime.change_pythonpackage',
   DELETE_PYTHON_PACKAGE: 'runtime.delete_pythonpackage',
+  // Plugin（有効・停止だけ変えられる。design.md §3.11.1）
+  VIEW_PLUGIN: 'plugin.view_plugin',
+  CHANGE_PLUGIN: 'plugin.change_plugin',
   VIEW_DATABASE_CONNECTION: 'connector.view_databaseconnection',
   ADD_DATABASE_CONNECTION: 'connector.add_databaseconnection',
   CHANGE_DATABASE_CONNECTION: 'connector.change_databaseconnection',

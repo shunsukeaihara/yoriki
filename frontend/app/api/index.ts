@@ -268,6 +268,11 @@ const createAPI = () => {
           params: { conversation, version, client_request_id: clientRequestId },
         }),
     }),
+    // 新しく作る入口・出口・Connectorの接続で選べる種別（使えて、廃止予定でないPluginのAdapter）。全件を返す
+    pluginExtensions: {
+      list: (type: ExtensionType) =>
+        http.get<SelectableExtension[], SelectableExtension[]>('app/v1/plugin_extensions/', { params: { type } }),
+    },
     // タスクの編集画面で選ぶ出口の候補（タスクを管理できる範囲の、停止していないもの）
     destinations: {
       list: (params: TaskChoiceParams) =>
@@ -374,6 +379,11 @@ const createAPI = () => {
       },
       pythonPackages: (id?: string) =>
         resource<PythonPackage, PythonPackageWrite, PythonPackageListParams>(http, 'v1/python_packages', id),
+      // Plugin。行は配備されているコードから作られ、変えられるのは有効か（enabled）だけ
+      plugins: (id?: string) => ({
+        ...readOnlyResource<PluginInfo, PluginListParams>(http, 'v1/plugins', id),
+        patch: (data: PluginUpdate) => http.patch<PluginInfo, PluginInfo>(`v1/plugins/${id}/`, data),
+      }),
       runtimeProfiles: (id?: string) => ({
         ...resource<RuntimeProfile, RuntimeProfileWrite, RuntimeProfileListParams>(http, 'v1/runtime_profiles', id),
         makeDefault: () => http.post<RuntimeProfile, RuntimeProfile>(`v1/runtime_profiles/${id}/make_default/`),

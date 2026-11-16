@@ -28,6 +28,7 @@ export const ManagePagePermissions = {
   BUDGET: [PermissionCode.VIEW_BUDGET, PermissionCode.CHANGE_BUDGET],
   PLATFORM_SETTINGS: [PermissionCode.VIEW_PLATFORM_SETTINGS, PermissionCode.CHANGE_PLATFORM_SETTINGS],
   PYTHON_PACKAGE: [PermissionCode.VIEW_PYTHON_PACKAGE, PermissionCode.CHANGE_PYTHON_PACKAGE],
+  PLUGIN: [PermissionCode.VIEW_PLUGIN, PermissionCode.CHANGE_PLUGIN],
 } satisfies Record<string, PermissionCode[]>
 
 const isGroup = (item: ManageMenuItem): item is ManageMenuGroup => 'children' in item && Array.isArray(item.children)
@@ -147,6 +148,12 @@ export const useManageMenu = () => {
       icon: 'i-lucide-key-round',
       to: '/manage/sso_providers',
       permission: ManagePagePermissions.SSO_PROVIDER,
+    },
+    {
+      label: $i18n.t('Plugin'),
+      icon: 'i-lucide-puzzle',
+      to: '/manage/plugins',
+      permission: ManagePagePermissions.PLUGIN,
     },
     {
       label: $i18n.t('基盤の設定'),

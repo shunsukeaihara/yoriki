@@ -1,0 +1,117 @@
+# Pluginの契約
+
+Yorikiのサーバーに配備する拡張（Plugin）の作り方と、Yorikiが守る約束をまとめる。設計は [design.md §3.11](../../../docs/design.md) を正とする。
+
+## 1 Pluginとは
+
+- Pluginは、サーバーに配備する拡張の配布・管理の単位。有効・停止はPluginの単位で、基盤管理者が管理画面（`/manage/plugins`）で切り替える。
+- Adapterは、Yorikiが呼び出す実装（Pluginの中に1つ以上）。入口・出口・Connectorの接続は、Adapterの `extension_id` で指す。
+- Pluginのコードはレビュー済みのpackageとして配備する。DBや外部の入力からコードを読み込むことはない。画面からの追加とマーケットプレイスは、まだない。
+
+## 2 拡張種別
+
+| 種別 | 基底クラス | Yorikiが呼ぶもの | 契約の例外 |
+|---|---|---|---|
+| `trigger`（入口） | `task.triggers.TriggerAdapter` | `parse(request)`・`dedup_key(...)`・`input_values(...)` | `task.webhook.PayloadError` |
+| `notification`（出口） | `delivery.adapters.NotificationAdapter` | `deliver(request) -> Outcome`、URLを持つ種類は `validate_url(url)` | 結果は `Outcome` で返す（例外にしない） |
+| `storage`（保存先） | `artifact.storage.StorageBackend` | `put_immutable`・`open_read`・`stat`・`delete`・`list_keys` | `artifact.storage.StorageError` |
+| `connector`（Connector） | `connector.adapters.base.DatasourceAdapter` | `connect`・`open_cursor`・`translate_error` を実装し、`check`・`list_tables`・`describe`・`query` は基底クラスが行う | `connector.errors.ConnectorError`（種類つき） |
+
+保存先は環境変数で選ぶので（deployment.md §7.2）、Registryには版と状態を見せるために載せるだけで、画面からは止めない。作業ファイルの退避（file_snapshot）は、まだAdapterに分けていない。
+
+### 2.1 対応能力（capabilities）
+
+| 名前 | 種別 | 意味 |
+|---|---|---|
+| `start` | trigger | 新しいRunを起動する |
+| `url` | notification | 外へ送る（宛先のURLを持つ）。登録時に `validate_url` で確かめ、送るたびに成果物のURLを発行する。機密の結果は、出口の版で許したときだけ送る |
+| `personal` | notification | 個人のタスクの出口に使える（Yorikiが作る共通の画面の通知） |
+| `file_fetch_auth` | notification | 渡した成果物のURLの取得に、出口の署名の鍵（`Authorization: Bearer`）を要る |
+| `schemas` | connector | 表の名前にスキーマがある（MySQLはDB名がスキーマなので持たない） |
+
+### 2.2 設定
+
+- Adapterの設定は、`Extension.config_schema`（JSON Schema）で宣言する。画面は `default` を既定値に使う（例：接続先のポート）。
+- コンストラクタの引数は、基底クラスの形で呼べること。基底クラスにないキーワード専用の引数は、設定とみなす（例：保存先の `root`・`bucket`）。
+- Secretは値を宣言に書かない。必要な種別だけを `Extension.secrets` に書く。
+
+## 3 宣言のしかた
+
+自社のPluginは、別のpackageとして作り、entry points（グループ `yoriki.plugins`）で `PluginSpec` を指す。entry pointの名前は `plugin_id` と同じにする。
+
+```toml
+# 自社のPluginの pyproject.toml
+[project.entry-points."yoriki.plugins"]
+"acme.chat" = "acme_yoriki.plugin:PLUGIN"
+```
+
+```python
+# acme_yoriki/plugin.py
+from plugin.spec import Extension, ExtensionType, PluginSpec
+
+PLUGIN = PluginSpec(
+    id="acme.chat",
+    name="ACME Chat",
+    version="0.3.0",
+    extensions=(
+        Extension(
+            id="acme.chat.notification",
+            type=ExtensionType.NOTIFICATION,
+            name="ACME Chat",
+            adapter=AcmeChatNotification,
+            capabilities=frozenset({"url"}),
+        ),
+    ),
+    self_check=check_settings,  # 任意。外へ出ず、副作用のない確かめだけ
+)
+```
+
+- `plugin_id` は自社の名前から始める（`yoriki.` は本体だけ）。`extension_id` は `plugin_id` から始める。
+- Yorikiのimageから派生させたimageに入れる。Yoriki本体のsettingsやコードは変えない。
+
+  ```dockerfile
+  FROM <yoriki-api のimage>
+  RUN uv pip install acme-yoriki==0.3.0
+  ```
+
+- 本体（`api/`）はpackageとして入れないので、本体のPluginはentry pointsではなく `plugin/builtin_plugins.py` で同じ型を作る。
+
+## 4 登録と有効化
+
+- 各プロセス（api・qcluster）は、本体のPluginとentry pointsを読み込み、形と宣言を確かめる（`plugin.registry.loaded()`）。読み込めない・確かめに通らないPluginは使わず、理由を記録する（本体は止めない）。
+- DBへの登録は、`migrate` の後（配備のたびに流れる）と、管理コマンド `sync_plugins` で行う。初めて見つかったPluginは、本体のものは有効、それ以外は停止の状態で登録する。配備から消えたPluginは、行を残して「配備されていない」にする。
+- 有効にする時は、形と宣言、廃止の予告がないこと、自己診断（`self_check`）に通ることを確かめる。動くかどうかは、Connector・出口を作るときの接続確認で確かめる。
+- 停止したPluginのAdapterを使う入口・出口・Connectorの接続は、それぞれを停止したのと同じに扱う（新しく作れない、Webhookを受け付けない、配信の直前に確かめて送らない、モデルへ渡す一覧に出さない）。設定は残る。
+
+## 5 インターフェースの確かめ方と変え方
+
+- 登録の時に確かめるのは形だけ：基底クラスを継承しているか、抽象メソッドが残っていないか、Yorikiが呼ぶ形の引数を受け取れるか（`inspect.signature`）。実行時に引数・戻り値の型は確かめない。
+- 契約の版の番号は持たない。
+- 広げるときは、今のPluginを壊さない形にする：既定の実装のある任意のメソッドを足す、引数をまとめたデータの型（`DeliveryRequest`・`TriggerRequest`）に既定値のある項目を足す。
+- 破壊的な変更は、型に表れる形（新しいメソッドの名前、必須の引数）で行い、今のPluginが登録の時の確かめで落ちるようにする。移行の期間を置くときは、古い形を新しい形へつなぐ変換を本体に置き、それを使うPluginをdeprecatedとする。
+- Plugin自身が廃止を予告するときは、`PluginSpec.deprecated`（理由）と `replaced_by`（代わりのplugin_id）を書く。停止中なら有効にできず、新しく作るものの選択肢に出ない。有効なものは動き続ける。
+
+## 6 例外と失敗
+
+- Adapterが投げてよいのは、契約の例外（上の表）と、`plugin.errors` の `PluginConfigError`（設定の誤り）・`PluginTemporaryError`（一時的な障害。時間切れは `PluginTimeoutError`）・`PluginPermanentError`（恒久的な失敗）だけ。メッセージは利用者に見せてよい内容にする（接続文字列やパスワードを入れない）。
+- それ以外の例外は、Yorikiが呼ぶ境界で「予期しない失敗」として数え、失敗にする（再試行しない）。
+- 冪等性（同じ `event_id` の再送）、読取りだけ、timeout等の意味は、コードでは強制しない。timeoutのように外から守れるものはYorikiが守る。
+
+## 7 合致度の追い方
+
+- **適合テストの道具**（`plugin.testing`）：拡張種別ごとのpytestのクラス（`TriggerContract`・`NotificationContract`・`StorageContract`・`ConnectorContract`）。継承して `spec`・`extension_id` と、相手の要るもの（`contract_*` のfixture）を用意して流す。テストはcapabilityごとに分け、宣言していないcapabilityのテストは飛ばす。Adapterの呼出しは、基底クラスの型ヒントで引数と戻り値を確かめる（beartypeを入れる）。本体のPluginも同じ道具で確かめる（`plugin/tests/test_contracts.py`、`connector/tests/test_adapters.py`）。mypy等の静的な検査も勧める。
+
+  ```python
+  from plugin.testing import NotificationContract
+
+  class TestAcmeChat(NotificationContract):
+      spec = PLUGIN
+      extension_id = "acme.chat.notification"
+
+      @pytest.fixture
+      def contract_request(self):
+          return DeliveryRequest(delivery=..., attempt=1, payload={...}, url="https://chat.example.com/hook")
+  ```
+
+- **実行時の観察**：境界で捕まえた予期しない失敗と時間切れを、AdapterとPluginの版・日ごとに数え（`PluginFailure`）、管理画面に直近7日の件数と最後のエラーを出す。
+- Runは受付時に、使いうるAdapterとPluginの版をManifestの `plugins` に固定する。

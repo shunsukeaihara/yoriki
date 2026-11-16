@@ -53,6 +53,7 @@ yoriki/
 - Dockerfileのベースイメージは `mise.toml` のバージョンに合わせる（Node 26、Python 3.13）。`mise.toml` を変えたら、Dockerfileも同じ変更で更新する。
 - 公式イメージもタグだけでなくdigestで固定する。更新はDependabot等でdigestの変更を提案させ、レビューしてから取り込む。
 - Sandboxイメージは、本体がdigestで固定して参照する（`RuntimeProfileVersion`）。本体のリリースとは連動させない。
+- 自社のPlugin（design.md §3.11.1）は、`yoriki-api` から派生させたイメージにpackageを入れて足す（`FROM <yoriki-apiのイメージ>` と `RUN uv pip install <package>`。本体のsettingsやコードは変えない）。api・qcluster・Workerサーバーは、同じ派生のイメージにそろえる。作り方は `api/src/plugin/CONTRACT.md`。
 
 ### 2.1 Sandboxイメージの公開
 
@@ -295,6 +296,7 @@ docker compose -f deploy/compose.yaml exec api python manage.py resume_workers
   17 * * * * root cd <checkout> && docker compose -f deploy/compose.yaml exec -T qcluster python manage.py cleanup_worker >> /var/log/yoriki-cleanup.log 2>&1
   ```
 
+- **Plugin**：配備されているPlugin（本体と自社のもの）は、migrate（§6の手順4）の後にDBへ登録される。migrateを流さずにPluginだけを足したときは `python manage.py sync_plugins` で登録する。自社のPluginは停止の状態で登録されるので、基盤管理者が管理画面（`/manage/plugins`）で確かめてから有効にする。停止すると、そのPluginを使う入口・出口・Connectorの接続を停止したのと同じになる。読み込めない・確かめに通らないPluginは使われず、理由が管理画面に出る（本体は止まらない）。
 - **Pythonのpackageの取得**：`install_python_packages`（design.md §7.6）の取得は、qclusterがDockerで起こす短命の取得用のコンテナ（Sandboxと同じイメージ・同じ実行環境（gVisor）、mountなし）から行う。Sandboxと違い、Dockerの既定のbridgeで外へ出るので、qclusterを動かすホスト（Workerサーバーを含む）から、indexへのHTTPSの外向きの通信が要る（PyPIなら `pypi.org` と `files.pythonhosted.org`）。社内のミラーを使うときは `YORIKI_PYTHON_PACKAGE_INDEX_URL` にそのsimpleのURLを指定する（既定 `https://pypi.org/simple`）。取得したwheelは保存先（§7.2）に内容のhashで置き、同じものは取り直さない。入れてよいpackageは基盤管理者が管理画面（`/manage/python_packages`）で登録する。
 - **結果の配信**：出口（Webhook・Zapier）への送信はqclusterから行う。qclusterのコンテナ（Workerサーバーを含む）から送り先（`hooks.zapier.com` 等）へのHTTPSの外向きの通信が要る。環境変数のproxy（`HTTPS_PROXY`）は使わず、名前を引いて確かめたアドレスへ直接つなぐ（design.md §4.4）。社内のアドレスへ送るときだけ、`YORIKI_DELIVERY_ALLOWED_NETWORKS` に許すネットワーク（CIDR）を指定する。出口へ成果物を渡すときは、外（Zapier等）から見たYorikiのURLを `YORIKI_PUBLIC_URL` に指定する（取得用のURLの元。未設定なら、ファイルを渡す配信は失敗にする）。認証プロキシの裏に置く場合も、`/api/files/` はプロキシを通さない（§8.6）。
 - **ファイルの保存先**：添付・成果物・Workspaceのsnapshot（tar）は、`YORIKI_STORAGE_BACKEND` で選んだ保存先（Localなら `/var/lib/yoriki/objects`、S3ならbucket）に置く（§7.2）。会話のワークスペースのsnapshotは、保存期限（管理画面の「基盤の設定」。初期値30日）を過ぎると1日1回の清掃（Q2のSchedule `cleanup_workspaces`）で消す。QClusterを止めている間は `python manage.py cleanup_workspaces` で同じ処理を動かせる（`--dry-run` は件数だけ）。確定する前に落ちたsnapshotの実体（記録のないobject）は、1時間ごとの清掃（Q2のSchedule `cleanup_objects`。管理コマンドも同じ名前）で消す。添付と成果物は明示的に消すまで残す（design.md §8、docs/status.md §3）。

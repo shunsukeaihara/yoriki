@@ -33,6 +33,8 @@ from connector.errors import ConnectorError, ConnectorErrorKind
 from connector.factories import ConnectorFactory
 from connector.models import VERSION_FIELDS, Connector, TLSMode
 from plugin import builtin
+from plugin.builtin_plugins import plugins
+from plugin.testing import ConnectorContract
 
 READER_PASSWORD = "Reader-pass-1234"  # SQL Serverのパスワードの規則（大文字・小文字・数字）を満たす
 VENDOR_ROWS = 50
@@ -238,6 +240,22 @@ def _revise(connector: Connector, **changes: Any) -> None:
     current = connector.current_version
     content = {name: changes.get(name, getattr(current, name)) for name in VERSION_FIELDS}
     connector.revise(actor=connector.created_by, expected_version=connector.version_number, **content)
+
+
+@pytest.mark.django_db
+class TestConnectorContract(ConnectorContract):
+    """本体のConnectorのAdapterを、自社のPluginと同じ適合テストの道具で確かめる（design.md §3.11.4）"""
+
+    builtin = True
+
+    @pytest.fixture(autouse=True)
+    def fixture_declaration(self, source):
+        spec = next(s for s in plugins() if s.id == source.kind)
+        self.spec, self.extension_id = spec, source.kind  # type: ignore[misc]
+
+    @pytest.fixture
+    def contract_connector(self, source):
+        return _connector(source)
 
 
 @pytest.mark.django_db

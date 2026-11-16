@@ -33,6 +33,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "beartype>=0.23.1",
     "django-stubs>=6.1.2",
     "djangorestframework-stubs>=3.18.1",
     "factory-boy>=3.3.3",

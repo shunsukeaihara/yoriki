@@ -11,11 +11,13 @@ const router = useRouter()
 const { t } = useI18n()
 const reloadKey = ref(0)
 const reload = () => (reloadKey.value = Date.now())
+// 種類の絞り込みの選択肢（使えるPluginのもの）
+const { extensions } = useSelectableExtensions('connector')
 
 const emptyParams = (): ConnectorListParams => ({
   name: undefined,
   connection: undefined,
-  kind: undefined,
+  extension: undefined,
   isActive: undefined,
   isSensitive: undefined,
   scope: undefined,
@@ -52,7 +54,7 @@ const columns: TableColumn<Connector>[] = [
   { accessorKey: 'name', header: t('名前') },
   { accessorKey: 'scopeDisplay', header: t('範囲') },
   { accessorKey: 'connection', header: t('接続先') },
-  { accessorKey: 'kindDisplay', header: t('種別') },
+  { accessorKey: 'extensionName', header: t('種別') },
   { accessorKey: 'tables', header: t('公開する表') },
   { accessorKey: 'version', header: t('版') },
   { accessorKey: 'isActive', header: t('有効') },
@@ -93,7 +95,7 @@ const onCreated = (connector: Connector) => {
           v-model="params.connection"
           :label="$t('接続先')"
           :search-fn="api.manage.connectors().connections"
-          item-description="kindDisplay"
+          item-description="extensionName"
           :initial-selected="initialConnection"
         />
         <DSelect v-model="params.scope" :label="$t('範囲')" :items="connectorScopeItems(t)" clearable />
@@ -103,7 +105,7 @@ const onCreated = (connector: Connector) => {
           :label="$t('部門')"
           :search-fn="api.manage.connectors().departments"
         />
-        <DSelect v-model="params.kind" :label="$t('種別')" :items="connectorKindItems(t)" clearable />
+        <DSelect v-model="params.extension" :label="$t('種別')" :items="extensionItems(extensions, t)" clearable />
         <DSelect v-model="params.isSensitive" :label="$t('機密')" :items="sensitiveItems(t)" clearable />
         <DSelect v-model="params.isActive" :label="$t('有効')" :items="activeItems(t)" clearable />
       </TableSearchForm>

@@ -7,7 +7,7 @@ from run.models import RunLaunch
 from task.checks import launcher_scope_problem, task_problem
 from user.models import User
 
-from .models import URL_KINDS, Delivery, Destination
+from .models import Delivery, Destination
 
 
 def send_problem(delivery: Delivery) -> str:
@@ -22,7 +22,7 @@ def send_problem(delivery: Delivery) -> str:
     if (
         not problem
         and sensitive
-        and destination.kind in URL_KINDS
+        and destination.is_external
         and not delivery.destination_revision.allows_sensitive_results
     ):
         problem = _("出口が機密の結果を送ってよい先ではありません")

@@ -1,0 +1,118 @@
+"""本体のPluginを、自社のPluginと同じ適合テストの道具（plugin/testing.py）で確かめる（design.md §3.11.4）。
+ConnectorのAdapterは、接続先を用意する connector/tests/test_adapters.py で確かめる"""
+
+import json
+import socket
+from unittest import mock
+
+import boto3
+import httpx
+import pytest
+from beartype.roar import BeartypeDoorHintViolation
+from moto import mock_aws
+
+from artifact.storage import LocalStorage, S3Storage, StorageBackend
+from delivery.adapters import DeliveryRequest, WebhookAdapter
+from delivery.models import Destination
+from plugin import builtin
+from plugin.builtin_plugins import plugins
+from plugin.testing import NotificationContract, PluginContract, StorageContract, TriggerContract, checked
+from task.triggers import TriggerRequest
+
+SPECS = {spec.id: spec for spec in plugins()}
+
+
+@pytest.mark.parametrize("plugin_id", sorted(SPECS))
+def test_every_builtin_declaration_fits(plugin_id):
+    class Contract(PluginContract):
+        spec = SPECS[plugin_id]
+        builtin = True
+
+    Contract().test_declaration_fits_the_contract()
+
+
+class TestLocalStorage(StorageContract):
+    spec = SPECS[builtin.LOCAL_STORAGE]
+    extension_id = builtin.LOCAL_STORAGE
+    builtin = True
+
+    @pytest.fixture
+    def contract_storage(self, tmp_path):
+        return LocalStorage("contract", root=str(tmp_path / "objects"))
+
+
+class TestS3Storage(StorageContract):
+    spec = SPECS[builtin.S3_STORAGE]
+    extension_id = builtin.S3_STORAGE
+    builtin = True
+
+    @pytest.fixture
+    def contract_storage(self, monkeypatch):
+        monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+        monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+        with mock_aws():
+            boto3.client("s3", region_name="us-east-1").create_bucket(Bucket="contract")
+            yield S3Storage("contract", bucket="contract", prefix="p", region="us-east-1")
+
+
+class TestWebhookTrigger(TriggerContract):
+    spec = SPECS[builtin.WEBHOOK_TRIGGER]
+    extension_id = builtin.WEBHOOK_TRIGGER
+    builtin = True
+
+    @pytest.fixture
+    def contract_request(self):
+        body = json.dumps({"event_id": "e1", "inputs": {"vendor": "ACME"}}).encode()
+        return TriggerRequest(body=body, content_type="application/json")
+
+    @pytest.fixture
+    def contract_invalid_request(self):
+        return TriggerRequest(body=b"{broken", content_type="application/json")
+
+
+class _WebhookLike(NotificationContract):
+    builtin = True
+    url = ""
+
+    @pytest.fixture(autouse=True)
+    def fixture_receiver(self):
+        info = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))]
+        transport = httpx.MockTransport(lambda request: httpx.Response(202))
+        with (
+            mock.patch("delivery.network.socket.getaddrinfo", return_value=info),
+            mock.patch.object(WebhookAdapter, "transport", transport),
+        ):
+            yield
+
+    @pytest.fixture
+    def contract_request(self):
+        return DeliveryRequest(
+            # 外へ送る出口は配信の行を読まない
+            delivery=None,  # type: ignore[arg-type]
+            attempt=1,
+            payload={"event_id": "evt-1", "event_type": "run.completed"},
+            url=self.url,
+            secret=Destination.new_secret(),
+        )
+
+
+class TestWebhookNotification(_WebhookLike):
+    spec = SPECS[builtin.WEBHOOK]
+    extension_id = builtin.WEBHOOK
+    url = "https://hooks.example.com/yoriki"
+
+
+class TestZapierNotification(_WebhookLike):
+    spec = SPECS[builtin.ZAPIER]
+    extension_id = builtin.ZAPIER
+    url = "https://hooks.zapier.com/hooks/catch/1/abc/"
+
+
+def test_checked_adapters_catch_wrong_return_types(tmp_path):
+    class Sloppy(LocalStorage):
+        def stat(self, key):
+            return {"key": key}  # StoredObject ではない
+
+    storage = checked(Sloppy("x", root=str(tmp_path)), StorageBackend)
+    with pytest.raises(BeartypeDoorHintViolation):
+        storage.stat("a")

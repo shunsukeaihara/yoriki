@@ -12,8 +12,8 @@ class DatabaseConnectionAdmin(ReadOnlyAdmin):
     """
 
     readonly_fields = ("uid", "created_by", "created", "updated")
-    list_display = ("id", "uid", "name", "kind", "host", "port", "database", "is_active", "deleted", "updated")
-    list_filter = ("kind", "is_active", "deleted")
+    list_display = ("id", "uid", "name", "extension", "host", "port", "database", "is_active", "deleted", "updated")
+    list_filter = ("extension", "is_active", "deleted")
     search_fields = ("uid", "name", "host")
 
 

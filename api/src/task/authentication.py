@@ -5,7 +5,7 @@ from rest_framework.permissions import BasePermission
 
 from utils.authentication import HookKeyAuthentication
 
-from .models import TriggerBinding, TriggerKind
+from .models import TriggerBinding
 
 
 class WebhookKeyAuthentication(HookKeyAuthentication):
@@ -13,10 +13,7 @@ class WebhookKeyAuthentication(HookKeyAuthentication):
 
     def resolve(self, key_hash: str) -> TriggerBinding | None:
         return (
-            TriggerBinding.objects.alive()
-            .filter(key_hash=key_hash, kind=TriggerKind.WEBHOOK)
-            .select_related("task", "current_revision")
-            .first()
+            TriggerBinding.objects.alive().filter(key_hash=key_hash).select_related("task", "current_revision").first()
         )
 
 

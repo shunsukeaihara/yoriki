@@ -49,6 +49,8 @@
 
 ## 例1 管理画面のCRUD（通知先）
 
+（書き方の例。実際の出口（`delivery.Destination`）は、種別を整数の選択肢ではなく、PluginのAdapterのID（`extension`）で持つ。design.md §3.11.1）
+
 ### composables/delivery.ts
 
 ```ts

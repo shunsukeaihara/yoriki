@@ -70,7 +70,7 @@ class DestinationViewSet(SoftDeleteMixin, ModelViewSet):
         .select_related("department", "current_revision", "created_by")
     )
     serializer_class = DestinationSerializer
-    filterset_fields = ["kind", "scope", "suspended"]
+    filterset_fields = ["extension", "scope", "suspended"]
     search_fields = ("name",)
     ordering = ("name", "pk")
 
@@ -186,7 +186,7 @@ def choosable_condition(user) -> Q:
 )
 class AppDestinationViewSet(mixins.ListModelMixin, GenericViewSet):
     permission_classes = [AppUser]
-    queryset = Destination.objects.alive().filter(suspended=False, current_revision__isnull=False)
+    queryset = Destination.objects.all()
     serializer_class = DestinationChoiceSerializer
     search_fields = ("name",)
     ordering = ("name", "pk")
@@ -194,8 +194,7 @@ class AppDestinationViewSet(mixins.ListModelMixin, GenericViewSet):
     def get_queryset(self):
         Destination.personal_in_app()  # 個人のタスクの画面の通知は、最初に選ぶときに作る
         qs = (
-            super()
-            .get_queryset()
+            Destination.objects.in_service()
             .filter(choosable_condition(self.request.user))
             .select_related("department", "current_revision")
         )

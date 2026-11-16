@@ -15,9 +15,10 @@ from django.db import connection, models
 from psycopg import sql
 
 from connector.models import VERSION_FIELDS as CONNECTOR_FIELDS
-from connector.models import Connector, ConnectorKind, ConnectorScope, DatabaseConnection, TLSMode
+from connector.models import Connector, ConnectorScope, DatabaseConnection, TLSMode
 from llm.models import VERSION_FIELDS as MODEL_FIELDS
 from llm.models import LLMConnection, ModelProfile, ModelProfileVersion, ProviderKind
+from plugin import builtin
 from runtime.models import VERSION_FIELDS as RUNTIME_FIELDS
 from runtime.models import RuntimeProfile, RuntimeProfileVersion
 from runtime.registry import inspect_image
@@ -291,7 +292,7 @@ class Seeder:
     def _connector(self, actor: User) -> None:
         settings_dict = connection.settings_dict
         values = {
-            "kind": ConnectorKind.POSTGRESQL,
+            "extension": builtin.POSTGRESQL,
             "host": settings_dict["HOST"] or "localhost",
             "port": int(settings_dict["PORT"] or 5432),
             "database": settings_dict["NAME"],

@@ -16,10 +16,11 @@ from django.utils.translation import gettext as _
 
 from artifact.download import file_response
 from artifact.storage import StorageError, get_storage
+from plugin import builtin, registry
 from utils.backends import client_ip
 
 from .checks import send_problem
-from .models import FILE_LINK_MAX_FETCHES, DestinationKind, FileFetch, FileLink
+from .models import FILE_LINK_MAX_FETCHES, FileFetch, FileLink
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ def _response(artifact) -> HttpResponse | StreamingHttpResponse:
 def _check(link: FileLink, request) -> None:
     delivery = link.attempt.delivery
     destination = delivery.destination_revision.destination
-    if destination.kind == DestinationKind.WEBHOOK:
+    if registry.has_capability(destination.extension, builtin.FILE_FETCH_AUTH):
         sent = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
         if not sent or not hmac.compare_digest(sent.encode(), destination.signing_secret.reveal().encode()):
             raise FileRefused(_("出口の署名の鍵がありません・違います"), unauthorized=True)

@@ -112,7 +112,7 @@ design.md §5.1の永続オブジェクトを、次の単位で分ける。実�
 | アプリ | 主なModel |
 |---|---|
 | `user` | User、Groupとpermission、SSOのログイン（django-allauth）、Department・DepartmentMembership（部門と所属。使える部門・管理できる部門の判定。authorization.md §4） |
-| `plugin` | PluginExtension（サーバーに配備する拡張のRegistry。design.md §3.11） |
+| `plugin` | Plugin、PluginExtension、PluginFailure（サーバーに配備する拡張のRegistry。宣言の読み込み、形の確かめ、有効・停止、実行時の観察、適合テストの道具。design.md §3.11、`api/src/plugin/CONTRACT.md`） |
 | `skill` | Skill、SkillVersion、SkillDraft、SkillChange、SkillEvaluation、SkillAssetBinding（Skillが使うTool・資料・Connector・必要な能力も版で持つ。実行環境はRunの単位で決める。design.md §3.2、§7.3） |
 | `resources` | Resource、ResourceVersion（Pythonの標準ライブラリの `resource` と名前が重なるので、複数形にする） |
 | `conversation` | Conversation、ConversationMessage、UserInstruction |

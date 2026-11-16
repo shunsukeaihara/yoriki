@@ -320,6 +320,7 @@ Runの中身が外へ出る経路をすべて列挙し、どれにも「結果�
 | ユーザー・部門・SSO・LLM・Runtime Profile | — | `/manage` |
 | 基盤の設定（ワークスペースの保存期限。design.md §8） | — | `/manage/settings`（`runtime.*_platformsettings`。Groupは作らず、基盤管理者が扱う） |
 | Pythonのpackageのカタログ（design.md §7.6） | — | `/manage/python_packages`（`runtime.*_pythonpackage`。Groupは作らず、基盤管理者が扱う） |
+| Pluginの有効・停止（design.md §3.11.1） | — | `/manage/plugins`（`plugin.*_plugin`。Groupは作らず、基盤管理者が扱う） |
 | 予算（design.md §9.1・§9.2・§9.4） | `/usage`：所属している部門と管理できる部門、全社・システムのタスクを管理できる人と所属のない人にはシステムの枠の、今月の利用額・上限・残額と、実行回数・同時実行数とその上限（見るだけ） | `/manage/budgets`：既定の上限（金額・月の実行回数・同時実行数・Runごとの金額）、部門ごとの上書き、全部門とシステムの枠の今月の利用額・実行回数・同時実行数（`usage.*_budget`） |
 
 #### 7.3.1 業務画面の一覧（Skill・タスク共通の形）

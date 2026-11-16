@@ -55,12 +55,11 @@ const form = ref(emptyForm())
 const { reset } = syncConnectorForm(modelValue, form, toForm)
 
 const isEdit = computed(() => Boolean(form.value.id))
-// 選んだDB接続の種別（MySQLは既定のスキーマを持たない）
+// 選んだDB接続。スキーマを使うか・種別の既定のスキーマはサーバーが返す（MySQLは既定のスキーマを持たない）
 const selectedConnection = ref<MinimumDatabaseConnection | null>(null)
-const kind = computed<ConnectorKind>(
-  () => modelValue.value?.kind ?? selectedConnection.value?.kind ?? ConnectorKind.POSTGRESQL,
-)
-const isMySQL = computed(() => kind.value === ConnectorKind.MYSQL)
+const connection = computed(() => modelValue.value?.connectionInfo ?? selectedConnection.value)
+const usesSchemas = computed(() => connection.value?.usesSchemas ?? true)
+const kindDefaultSchema = computed(() => connection.value?.kindDefaultSchema ?? '')
 
 const { onSubmit, loading, errors } = createSubmit({
   form,
@@ -70,8 +69,8 @@ const { onSubmit, loading, errors } = createSubmit({
       name: f.name,
       isActive: f.isActive,
       description: f.description,
-      // MySQLはDB名がスキーマなので送らない。空欄は種別の既定（public、dbo）
-      defaultSchema: isMySQL.value ? undefined : f.defaultSchema.trim(),
+      // スキーマのない種別（MySQLはDB名がスキーマ）では送らない。空欄は種別の既定（public、dbo）
+      defaultSchema: usesSchemas.value ? f.defaultSchema.trim() : undefined,
       maxRows: f.maxRows ?? undefined,
       maxResultBytes: f.maxResultMb === null ? undefined : mbToBytes(f.maxResultMb, modelValue.value?.maxResultBytes),
       timeoutSeconds: f.timeoutSeconds ?? undefined,
@@ -120,7 +119,7 @@ defineExpose({ onSubmit, loading, canPost, reset })
       :label="$t('接続先')"
       required
       :search-fn="api.manage.connectors().connections"
-      item-description="kindDisplay"
+      item-description="extensionName"
       :clearable="false"
       :hint="$t('作成した後は変更できません。ホスト・DB名と資格情報は、接続先の画面で変えます')"
       :error-messages="errors.connection"
@@ -154,12 +153,12 @@ defineExpose({ onSubmit, loading, canPost, reset })
           {{ modelValue.connectionInfo.name }}
         </NuxtLink>
         <span class="font-mono text-xs text-muted">
-          {{ modelValue.kindDisplay }}・{{ modelValue.connectionInfo.host }}:{{ modelValue.connectionInfo.port }}/{{
+          {{ modelValue.extensionName }}・{{ modelValue.connectionInfo.host }}:{{ modelValue.connectionInfo.port }}/{{
             modelValue.connectionInfo.database
           }}
         </span>
       </template>
-      <span v-else>{{ modelValue?.connectionInfo.name }}（{{ modelValue?.kindDisplay }}）</span>
+      <span v-else>{{ modelValue?.connectionInfo.name }}（{{ modelValue?.extensionName }}）</span>
       <span class="mt-2 text-muted">{{ $t('範囲') }}</span>
       <span>
         {{ modelValue?.scopeDisplay }}
@@ -182,11 +181,11 @@ defineExpose({ onSubmit, loading, canPost, reset })
         :error-messages="errors.description"
       />
       <DTextField
-        v-if="!isMySQL"
+        v-if="usesSchemas"
         v-model="form.defaultSchema"
         :label="$t('既定のスキーマ')"
-        :placeholder="defaultSchema(kind)"
-        :hint="$t('表の名前にスキーマを書かなかったときのスキーマ。空欄は {schema}', { schema: defaultSchema(kind) })"
+        :placeholder="kindDefaultSchema"
+        :hint="$t('表の名前にスキーマを書かなかったときのスキーマ。空欄は {schema}', { schema: kindDefaultSchema })"
         :error-messages="errors.defaultSchema"
       />
       <div class="grid grid-cols-3 gap-4">

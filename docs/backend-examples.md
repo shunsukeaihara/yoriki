@@ -93,6 +93,8 @@ URLは各アプリの `urls.py` では `/api/` を付けずに登録し、`app/u
 
 ## 例1 可変マスターのCRUD（通知先）
 
+（書き方の例。実際の出口（`delivery.Destination`）は、種別を整数の選択肢ではなく、PluginのAdapterのID（`extension`）で持つ。design.md §3.11.1）
+
 通知先の管理のpermissionを持つ利用者（連携の管理者）が通知先を登録・編集・削除する。業務画面には、利用者が管理できるタスクの範囲に許された通知先だけを、タスクに付ける候補として見せる（タスクを管理できない人には出ない）。
 
 ### delivery/models.py

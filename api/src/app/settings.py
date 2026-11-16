@@ -69,6 +69,7 @@ INSTALLED_APPS = [
     "connector",
     "task",
     "delivery",
+    "plugin",
     "devtools",
 ]
 
@@ -212,9 +213,12 @@ REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "utils.handlers.exception_handler",
 }
 
+# Yorikiの版。本体のPluginの版にも使う（design.md §3.11.1）
+YORIKI_VERSION = "0.1.0"
+
 SPECTACULAR_SETTINGS = {
     "TITLE": "Yoriki API",
-    "VERSION": "0.1.0",
+    "VERSION": YORIKI_VERSION,
     "COMPONENT_SPLIT_REQUEST": True,
     "SERVE_INCLUDE_SCHEMA": False,
     "SERVE_PERMISSIONS": ["utils.permissions.AppUser"],
@@ -251,12 +255,9 @@ SPECTACULAR_SETTINGS = {
         "CsvEncodingEnum": "resources.formats.CSV_ENCODINGS",
         "CsvDelimiterEnum": "resources.formats.CSV_DELIMITER_CHOICES",
         "CsvColumnTypeEnum": "resources.formats.COLUMN_TYPES",
-        "ConnectorKindEnum": "connector.models.ConnectorKind",
         "ConnectorOperationEnum": "connector.models.Operation",
         "ToolStatusEnum": "run.models.ToolStatus",
-        "TriggerKindEnum": "task.models.TriggerKind",
         "TaskInputTypeEnum": "task.models.TaskInputType",
-        "DestinationKindEnum": "delivery.models.DestinationKind",
         "NotifyEventEnum": "delivery.models.NotifyEvent",
         "NotifyContentEnum": "delivery.models.NotifyContent",
         "DeliveryStatusEnum": "delivery.models.DeliveryStatus",

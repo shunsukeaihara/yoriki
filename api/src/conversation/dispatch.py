@@ -10,7 +10,7 @@ from django.utils.translation import gettext as _
 from artifact.models import Artifact, ArtifactKind
 from connector.models import Connector
 from harness.catalogs import build_catalogs
-from harness.connectors import ConnectorUnavailable
+from harness.connectors import ConnectorUnavailable, plugin_versions
 from harness.connectors import explicit_text as explicit_connectors_text
 from harness.connectors import resolve_explicit as resolve_explicit_connectors
 from harness.skills import SkillUnavailable, declared_connectors, explicit_text, resolve_explicit
@@ -450,6 +450,7 @@ def start_run(conversation: Conversation, message: ConversationMessage, actor, *
         "skill_catalog": catalog,
         "connectors": connectors,
         "connector_catalog": connector_catalog,
+        "plugins": plugin_versions(connector_catalog, connectors),
     }
     if skill_edit is not None:
         fixed["skill_edit"] = skill_edit

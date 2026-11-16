@@ -24,27 +24,12 @@ from django.conf import settings
 from django.db import models, transaction
 from django.utils.translation import gettext_lazy as _
 
+from plugin import builtin, registry
+from plugin.spec import ExtensionType
 from user.models import Department, usable_department_ids
 from utils.fields import EncryptedSecretField, NanoidField
 
 from .errors import VersionConflict
-
-
-class ConnectorKind(models.IntegerChoices):
-    """Connectorの種別。今は社内DB（読取り専用のデータソース。design.md §4.9.2）だけ"""
-
-    POSTGRESQL = 1, _("PostgreSQL")
-    MYSQL = 2, _("MySQL")
-    SQLSERVER = 3, _("SQL Server")
-
-    @property
-    def default_port(self) -> int:
-        return {ConnectorKind.POSTGRESQL: 5432, ConnectorKind.MYSQL: 3306, ConnectorKind.SQLSERVER: 1433}[self]
-
-    @property
-    def default_schema(self) -> str:
-        """表の名前にスキーマを書かなかったときのスキーマ。MySQLはDB名がスキーマなので空"""
-        return {ConnectorKind.POSTGRESQL: "public", ConnectorKind.MYSQL: "", ConnectorKind.SQLSERVER: "dbo"}[self]
 
 
 class TLSMode(models.IntegerChoices):
@@ -69,14 +54,15 @@ DATASOURCE_OPERATIONS = (Operation.DATASOURCE_DESCRIBE, Operation.DATASOURCE_QUE
 class DatabaseConnection(models.Model):
     """社内DBへの接続先と資格情報。permissionを持つ人（既定では基盤管理者）だけが登録・変更する。エージェントには見せない。
 
-    種別は作成した後は変えない（SQLの方言と既定のスキーマの意味が変わるため）。接続先（ホスト・ポート・DB名）は
+    種別（Adapter）は作成した後は変えない（SQLの方言と既定のスキーマの意味が変わるため）。接続先（ホスト・ポート・DB名）は
     変えられるが、そのときはパスワードを入れ直す（登録済みのパスワードを別のサーバーへ送らないため。
     DatabaseConnectionUpdateSerializer）。版は持たず、変えると実行中のRunにも次の操作から効く
     """
 
     uid = NanoidField(unique=True)
     name = models.CharField(_("名前"), max_length=100)
-    kind = models.PositiveSmallIntegerField(_("種別"), choices=ConnectorKind.choices)
+    # 使うAdapter（Pluginのextension_id。例：yoriki.connector.postgresql。design.md §3.11.1）
+    extension = models.CharField(_("種別"), max_length=200)
     host = models.CharField(_("ホスト"), max_length=255)
     port = models.PositiveIntegerField(_("ポート"))
     database = models.CharField(_("DB名"), max_length=128)
@@ -107,6 +93,20 @@ class DatabaseConnection(models.Model):
     def __str__(self):
         return self.name
 
+    @property
+    def extension_name(self) -> str:
+        return registry.display_name(self.extension)
+
+    @property
+    def uses_schemas(self) -> bool:
+        """表の名前にスキーマがある種別か（MySQLはDB名がスキーマなので持たない）"""
+        return registry.has_capability(self.extension, builtin.SCHEMAS)
+
+    @property
+    def kind_default_schema(self) -> str:
+        """表の名前にスキーマを書かなかったときの、種別の既定のスキーマ"""
+        return registry.config_default(self.extension, "default_schema", "") or ""
+
 
 class ConnectorScope(models.IntegerChoices):
     """Connectorの範囲（authorization.md §2）。値はSkillの範囲（skill.models.SkillScope）とそろえる。
@@ -125,13 +125,14 @@ class ConnectorAction(Enum):
 
 class ConnectorQuerySet(models.QuerySet):
     def in_service(self) -> "ConnectorQuerySet":
-        """Connectorと接続が有効で、版があるもの"""
+        """Connectorと接続が有効で、版があり、接続のPluginが使えるもの（停止したPluginは、接続を停止したのと同じ）"""
         return self.filter(
             deleted=False,
             is_active=True,
             current_version__isnull=False,
             connection__deleted=False,
             connection__is_active=True,
+            connection__extension__in=registry.available_ids(ExtensionType.CONNECTOR),
         )
 
     def usable_by(self, user) -> "ConnectorQuerySet":
@@ -198,11 +199,8 @@ class Connector(models.Model):
         return self.name
 
     @property
-    def kind(self) -> int:
-        return self.connection.kind
-
-    def get_kind_display(self) -> str:
-        return self.connection.get_kind_display()
+    def extension(self) -> str:
+        return self.connection.extension
 
     @property
     def version_number(self) -> int:
@@ -220,6 +218,7 @@ class Connector(models.Model):
             and self.current_version_id is not None
             and not self.connection.deleted
             and self.connection.is_active
+            and registry.is_available(self.connection.extension)
         )
 
     def can(self, user, action: ConnectorAction) -> bool:

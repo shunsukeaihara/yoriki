@@ -6,6 +6,9 @@ from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
+from plugin import registry
+from plugin.fields import ExtensionField
+from plugin.spec import ExtensionType
 from user.models import Department
 from user.serializers import MinimumDepartmentSerializer
 from utils.crypto import is_encryption_configured
@@ -16,7 +19,6 @@ from .errors import VersionConflict
 from .models import (
     VERSION_FIELDS,
     Connector,
-    ConnectorKind,
     ConnectorScope,
     ConnectorVersion,
     DatabaseConnection,
@@ -53,7 +55,10 @@ class DatabaseConnectionSerializer(serializers.ModelSerializer):
     """DB接続の作成と表示。パスワードは書き込み専用で、応答には末尾の4文字だけを出す"""
 
     id = serializers.CharField(source="uid", read_only=True)
-    kind_display = serializers.CharField(source="get_kind_display", read_only=True)
+    extension = ExtensionField(ExtensionType.CONNECTOR)
+    extension_name = serializers.CharField(read_only=True)
+    uses_schemas = serializers.BooleanField(read_only=True, help_text=_("表の名前にスキーマがある種別か"))
+    kind_default_schema = serializers.CharField(read_only=True, help_text=_("種別の既定のスキーマ"))
     port = serializers.IntegerField(
         min_value=1, max_value=65535, required=False, help_text=_("省略すると種別の既定のポート")
     )
@@ -75,8 +80,10 @@ class DatabaseConnectionSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "name",
-            "kind",
-            "kind_display",
+            "extension",
+            "extension_name",
+            "uses_schemas",
+            "kind_default_schema",
             "host",
             "port",
             "database",
@@ -137,7 +144,9 @@ class DatabaseConnectionSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         if self.instance is None:
-            attrs.setdefault("port", ConnectorKind(attrs["kind"]).default_port)
+            attrs.setdefault("port", registry.config_default(attrs["extension"], "port"))
+            if attrs["port"] is None:
+                raise serializers.ValidationError({"port": _("ポートを入力してください")})
             if not attrs.get("password"):
                 raise serializers.ValidationError({"password": _("パスワードを入力してください")})
             return attrs
@@ -177,8 +186,10 @@ ADDRESS_FIELDS = ("host", "port", "database")
 class DatabaseConnectionUpdateSerializer(DatabaseConnectionSerializer):
     """DB接続の更新。種別は変えられない（SQLの方言と既定のスキーマの意味が変わるため）"""
 
+    extension = ExtensionField(ExtensionType.CONNECTOR, read_only=True)
+
     class Meta(DatabaseConnectionSerializer.Meta):
-        read_only_fields = ["kind", "created", "updated"]
+        read_only_fields = ["created", "updated"]
 
 
 class MinimumDatabaseConnectionSerializer(serializers.ModelSerializer):
@@ -186,7 +197,9 @@ class MinimumDatabaseConnectionSerializer(serializers.ModelSerializer):
     （Connectorは所属だけで見られるので、接続先の詳細をpermissionの判定を通さずに出さない）"""
 
     id = serializers.CharField(source="uid", read_only=True)
-    kind_display = serializers.CharField(source="get_kind_display", read_only=True)
+    extension_name = serializers.CharField(read_only=True)
+    uses_schemas = serializers.BooleanField(read_only=True, help_text=_("表の名前にスキーマがある種別か"))
+    kind_default_schema = serializers.CharField(read_only=True, help_text=_("種別の既定のスキーマ"))
     host = serializers.CharField(read_only=True, allow_null=True, help_text=_("接続先を見る権限がなければnull"))
     port = serializers.IntegerField(read_only=True, allow_null=True, help_text=_("接続先を見る権限がなければnull"))
     database = serializers.CharField(read_only=True, allow_null=True, help_text=_("接続先を見る権限がなければnull"))
@@ -206,8 +219,10 @@ class MinimumDatabaseConnectionSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "name",
-            "kind",
-            "kind_display",
+            "extension",
+            "extension_name",
+            "uses_schemas",
+            "kind_default_schema",
             "host",
             "port",
             "database",
@@ -232,8 +247,8 @@ class ConnectorSerializer(serializers.ModelSerializer):
         slug_field="uid", queryset=DatabaseConnection.objects.filter(deleted=False), help_text=_("使う接続先")
     )
     connection_info = MinimumDatabaseConnectionSerializer(source="connection", read_only=True)
-    kind = serializers.ChoiceField(source="connection.kind", choices=ConnectorKind.choices, read_only=True)
-    kind_display = serializers.CharField(source="get_kind_display", read_only=True)
+    extension = serializers.CharField(source="connection.extension", read_only=True)
+    extension_name = serializers.CharField(source="connection.extension_name", read_only=True)
     version = serializers.IntegerField(
         source="version_number",
         min_value=0,
@@ -296,8 +311,8 @@ class ConnectorSerializer(serializers.ModelSerializer):
             "name",
             "connection",
             "connection_info",
-            "kind",
-            "kind_display",
+            "extension",
+            "extension_name",
             "is_active",
             "version",
             *VERSION_FIELDS,
@@ -343,21 +358,24 @@ class ConnectorSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"version": _("編集を始めた時点の版を送ってください")})
         self._validate_scope(attrs)
         connection = attrs["connection"] if self.instance is None else self.instance.connection
-        kind = ConnectorKind(connection.kind)
+        schemas = connection.uses_schemas
+        kind_default_schema = connection.kind_default_schema
         errors: defaultdict[str, list[Any]] = defaultdict(list)
         content = attrs.get("current_version", {})
         if self.instance is None or "default_schema" in content:
             schema = content.get("default_schema", "").strip()
-            if kind == ConnectorKind.MYSQL and schema:
-                errors["default_schema"].append(_("MySQLでは、既定のスキーマは指定できません（DB名がスキーマ）"))
-            content["default_schema"] = schema or kind.default_schema
+            if not schemas and schema:
+                errors["default_schema"].append(
+                    _("この種別では、既定のスキーマは指定できません（MySQL等、DB名がスキーマ）")
+                )
+            content["default_schema"] = schema or kind_default_schema
             attrs["current_version"] = content
         current = self.instance.current_version if self.instance else None
-        default_schema = content.get("default_schema") or (current.default_schema if current else kind.default_schema)
+        default_schema = content.get("default_schema") or (current.default_schema if current else kind_default_schema)
         seen = set()
         for entry in content.get("tables", []):
             # MySQLのスキーマはDB名なので持たない。他はスキーマを省いた表を既定のスキーマにそろえる
-            entry["schema"] = "" if kind == ConnectorKind.MYSQL else entry["schema"] or default_schema
+            entry["schema"] = entry["schema"] or default_schema if schemas else ""
             key = (entry["schema"], entry["name"])
             if key in seen:
                 errors["tables"].append(
@@ -419,12 +437,12 @@ class ConnectorUpdateSerializer(ConnectorSerializer):
 
 class MinimumConnectorSerializer(serializers.ModelSerializer):
     id = serializers.CharField(source="uid", read_only=True)
-    kind = serializers.ChoiceField(source="connection.kind", choices=ConnectorKind.choices, read_only=True)
-    kind_display = serializers.CharField(source="get_kind_display", read_only=True)
+    extension = serializers.CharField(source="connection.extension", read_only=True)
+    extension_name = serializers.CharField(source="connection.extension_name", read_only=True)
 
     class Meta:
         model = Connector
-        fields = ["id", "name", "kind", "kind_display", "is_active"]
+        fields = ["id", "name", "extension", "extension_name", "is_active"]
         read_only_fields = fields
 
 
@@ -433,7 +451,7 @@ class AppConnectorSerializer(serializers.ModelSerializer):
     公開する表は返さない（authorization.md §7.2「候補のAPIと設定のAPIを分ける」）"""
 
     id = serializers.CharField(source="uid", read_only=True)
-    kind_display = serializers.CharField(source="get_kind_display", read_only=True)
+    extension_name = serializers.CharField(source="connection.extension_name", read_only=True)
     description = serializers.CharField(source="current_version.description", read_only=True)
     is_sensitive = serializers.BooleanField(
         source="current_version.is_sensitive",
@@ -448,7 +466,7 @@ class AppConnectorSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "name",
-            "kind_display",
+            "extension_name",
             "description",
             "is_sensitive",
             "scope",

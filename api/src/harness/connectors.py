@@ -13,6 +13,7 @@ from typing import Any
 from django.utils.translation import gettext as _
 
 from connector.models import Connector, ConnectorAction, ConnectorVersion
+from plugin import registry
 from run.models import Run
 
 # ConnectorのTool（harness/tools/datasource.py）の名前
@@ -77,6 +78,20 @@ def catalog_of(usable: list[Connector], explicit: Sequence[dict[str, Any]] = ())
         for c in usable[:MAX_CATALOG_CONNECTORS]
     ]
     return {"connectors": entries, "omitted": len(usable) - len(entries)}
+
+
+def plugin_versions(
+    connector_catalog: dict[str, Any] | None,
+    explicit: Sequence[dict[str, Any]] = (),
+    extension_ids: Sequence[str] = (),
+) -> dict[str, str]:
+    """Runが使いうるAdapterとPluginの版（Manifestの `plugins` に固定する。design.md §3.11.1）。Connectorは一覧と
+    指定したものの接続のAdapter、ほかに入口・出口のAdapter（`extension_ids`）"""
+    uids = {e["connector"] for e in (connector_catalog or {}).get("connectors", [])} | {
+        e["connector"] for e in explicit
+    }
+    ids = set(Connector.objects.filter(uid__in=uids).values_list("connection__extension", flat=True))
+    return registry.versions(ids | set(extension_ids))
 
 
 def catalog(run: Run) -> dict[str, Any]:

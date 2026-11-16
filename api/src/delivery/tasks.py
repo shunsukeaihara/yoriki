@@ -13,10 +13,13 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from . import in_app
-from .adapters import Outcome, adapter_for
+from plugin import builtin, registry
+from plugin.errors import PluginError, PluginTemporaryError, PluginUnavailable
+from plugin.observe import observed
+
+from .adapters import DeliveryRequest, Outcome, adapter_for
 from .checks import send_problem
-from .models import SENDABLE_STATUSES, AttemptOutcome, Delivery, DeliveryAttempt, DeliveryStatus, DestinationKind
+from .models import SENDABLE_STATUSES, AttemptOutcome, Delivery, DeliveryAttempt, DeliveryStatus
 from .outbox import send_later
 from .payload import FileLinksUnavailable, with_file_links
 
@@ -38,19 +41,27 @@ def send_delivery(delivery_id: int) -> None:
     if claimed is None:
         return
     delivery, attempt, url, secret = claimed
-    revision = delivery.destination_revision
+    extension_id = delivery.destination_revision.destination.extension
     try:
-        if revision.destination.kind == DestinationKind.IN_APP:
-            # 画面の通知は外へ送らず、通知欄に載せる（ファイルのURLは発行しない）
-            outcome = in_app.notify(delivery)
-        else:
+        adapter = adapter_for(extension_id)
+        payload = delivery.payload
+        if registry.has_capability(extension_id, builtin.URL):
             # ファイルのURLは送るたびに発行する（期限が短いので、送り直しでも新しくする。design.md §4.5）
-            payload = with_file_links(delivery.payload, attempt)
-            outcome = adapter_for(revision.destination.kind).deliver(
-                url=url, secret=secret, payload=payload, attempt=attempt.number
-            )
+            payload = with_file_links(payload, attempt)
+        request = DeliveryRequest(delivery=delivery, attempt=attempt.number, payload=payload, url=url, secret=secret)
+        with observed(extension_id):
+            outcome = adapter.deliver(request)
     except FileLinksUnavailable as exc:
         outcome = Outcome(AttemptOutcome.FAILED, error=str(exc))
+    except PluginUnavailable:
+        # 送る直前の確かめ（send_problem）の後に止められた。送っていないので、失敗にする
+        outcome = Outcome(AttemptOutcome.FAILED, error=_("出口の種類（Plugin）が停止中です"))
+    except PluginTemporaryError as exc:
+        # 契約の例外（plugin/CONTRACT.md §6）。一時的な障害は送り直す
+        outcome = Outcome(AttemptOutcome.RETRYABLE, error=str(exc)[:500])
+    except PluginError as exc:
+        # 設定の誤り・恒久的な失敗。送り直さない
+        outcome = Outcome(AttemptOutcome.FAILED, error=str(exc)[:500])
     except Exception:
         logger.exception("delivery %s: unexpected error", delivery.uid)
         outcome = Outcome(AttemptOutcome.UNKNOWN, error=_("送信の途中で内部のエラーが起きました"))

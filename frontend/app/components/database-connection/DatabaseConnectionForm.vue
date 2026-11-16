@@ -17,7 +17,8 @@ const emit = defineEmits<{
 const emptyForm = () => ({
   id: null as string | null,
   name: '',
-  kind: ConnectorKind.POSTGRESQL as ConnectorKind,
+  // 種別（PluginのAdapterのID）
+  extension: BuiltinExtension.POSTGRESQL as string,
   host: '',
   port: null as number | null,
   database: '',
@@ -35,7 +36,7 @@ const toForm = (value: DatabaseConnection | null | undefined) =>
         ...emptyForm(),
         id: value.id,
         name: value.name,
-        kind: value.kind,
+        extension: value.extension,
         host: value.host,
         port: value.port ?? null,
         database: value.database,
@@ -50,6 +51,12 @@ const form = ref(emptyForm())
 watch(modelValue, (value) => (form.value = toForm(value)), { immediate: true })
 
 const isEdit = computed(() => Boolean(form.value.id))
+// 選べる種別（停止中・廃止予定のPluginのものは出ない）。ポートの既定値は種別の設定のSchemaから
+const { extensions, find } = useSelectableExtensions('connector')
+const portPlaceholder = computed(() => {
+  const port = configDefault(find(form.value.extension), 'port')
+  return port === undefined ? undefined : String(port)
+})
 // 編集で接続先を変えたか（変えたらパスワードを入れ直す）
 const moved = computed(() => {
   const current = modelValue.value
@@ -73,7 +80,7 @@ const { onSubmit, loading, errors } = createSubmit({
       maxConcurrency: f.maxConcurrency ?? undefined,
       isActive: f.isActive,
     }
-    if (!f.id) return api.manage.databaseConnections().create({ ...data, kind: f.kind, password: f.password })
+    if (!f.id) return api.manage.databaseConnections().create({ ...data, extension: f.extension, password: f.password })
     return api.manage.databaseConnections(f.id).patch({ ...data, ...(f.password ? { password: f.password } : {}) })
   },
   onSuccess: (result) => {
@@ -114,18 +121,18 @@ defineExpose({ onSubmit, loading, canPost })
 
     <DRadioGroup
       v-if="!isEdit"
-      v-model="form.kind"
+      v-model="form.extension"
       :label="$t('種別')"
-      :items="connectorKindItems(t)"
+      :items="extensionItems(extensions, t)"
       orientation="horizontal"
       variant="card"
       required
-      :error-messages="errors.kind"
+      :error-messages="errors.extension"
     />
     <!-- 種別は作成した後は変えられない（SQLの書き方と既定のスキーマの意味が変わるため） -->
     <DTextField
       v-else
-      :model-value="modelValue?.kindDisplay"
+      :model-value="modelValue?.extensionName"
       :label="$t('種別')"
       disabled
       :hint="$t('作成した後は変更できません')"
@@ -145,7 +152,7 @@ defineExpose({ onSubmit, loading, canPost })
         :min="1"
         :max="65535"
         :format-options="{ useGrouping: false }"
-        :placeholder="String(defaultPort(form.kind))"
+        :placeholder="portPlaceholder"
         :error-messages="errors.port"
       />
     </div>

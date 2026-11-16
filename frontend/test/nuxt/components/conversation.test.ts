@@ -154,7 +154,7 @@ describe('ConversationAttachmentChips', () => {
 const connector = (id: string, isSensitive = false): AppConnector => ({
   id,
   name: id,
-  kindDisplay: 'PostgreSQL',
+  extensionName: 'PostgreSQL',
   description: `${id}の説明`,
   isSensitive,
   scope: 3,

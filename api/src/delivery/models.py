@@ -25,24 +25,12 @@ from django.utils import timezone
 from django.utils.translation import gettext
 from django.utils.translation import gettext_lazy as _
 
+from plugin import builtin, registry
+from plugin.spec import ExtensionType
 from user.models import Department
 from utils.fields import EncryptedSecretField, NanoidField
 
 from .errors import VersionConflict
-
-
-class DestinationKind(models.IntegerChoices):
-    """出口の種類。Teams・Slack等は後で足す"""
-
-    WEBHOOK = 1, _("Webhook")
-    ZAPIER = 2, _("Zapier")
-    # 画面の通知。送り先のURLはなく、Yorikiの利用者の通知欄に載せる（認証の要る画面の中だけで、受け手をRunの結果を
-    # 見られる人に限るので、機密のタスクにも使える。authorization.md §7）
-    IN_APP = 3, _("画面の通知")
-
-
-# 送り先のURLを持つ（外へ送る）種類
-URL_KINDS = (DestinationKind.WEBHOOK, DestinationKind.ZAPIER)
 
 
 class DestinationScope(models.IntegerChoices):
@@ -79,13 +67,23 @@ class DestinationQuerySet(models.QuerySet):
     def alive(self) -> Self:
         return self.filter(deleted=False)
 
+    def in_service(self) -> Self:
+        """停止・削除されておらず、版があり、Pluginが使える出口（Destination.in_service() と同じ）"""
+        return self.filter(
+            deleted=False,
+            suspended=False,
+            current_revision__isnull=False,
+            extension__in=registry.available_ids(ExtensionType.NOTIFICATION),
+        )
+
 
 class Destination(models.Model):
     """出口（authorization.md §5.5）。部門の出口はその部門のタスク、全社の出口は全社のタスク、システムの出口は
     システムのタスクだけが使う（部門のデータを全社向けの出口へ流させない。authorization.md §7）"""
 
     uid = NanoidField(unique=True)
-    kind = models.PositiveSmallIntegerField(_("種類"), choices=DestinationKind.choices)
+    # 使うAdapter（Pluginのextension_id。例：yoriki.notification.webhook。design.md §3.11.1）。作成した後は変えない
+    extension = models.CharField(_("種類"), max_length=200)
     scope = models.PositiveSmallIntegerField(_("使ってよい範囲"), choices=DestinationScope.choices)
     department = models.ForeignKey(
         Department, on_delete=models.PROTECT, null=True, blank=True, related_name="+", verbose_name=_("部門")
@@ -136,7 +134,7 @@ class Destination(models.Model):
             ),
             # 個人の出口は、全員で共通の画面の通知の1つだけ
             models.CheckConstraint(
-                condition=~Q(scope=DestinationScope.PERSONAL) | Q(kind=DestinationKind.IN_APP),
+                condition=~Q(scope=DestinationScope.PERSONAL) | Q(extension=builtin.IN_APP),
                 name="destination_personal_in_app",
             ),
             models.UniqueConstraint(
@@ -150,11 +148,26 @@ class Destination(models.Model):
         return self.name
 
     def in_service(self) -> bool:
-        return not self.deleted and not self.suspended and self.current_revision_id is not None
+        """停止したPluginの出口は、出口を停止したのと同じに扱う（design.md §3.11.1）"""
+        return (
+            not self.deleted
+            and not self.suspended
+            and self.current_revision_id is not None
+            and registry.is_available(self.extension)
+        )
 
     @property
     def version_number(self) -> int:
         return self.current_revision.number if self.current_revision else 0
+
+    @property
+    def extension_name(self) -> str:
+        return registry.display_name(self.extension)
+
+    @property
+    def is_external(self) -> bool:
+        """外へ送る（宛先のURLを持つ）種類か"""
+        return registry.has_capability(self.extension, builtin.URL)
 
     def allowed_for(self, task) -> bool:
         """このタスクの範囲で使ってよい出口か（停止・削除は見ない）。タスクは保存前でもよい"""
@@ -171,10 +184,12 @@ class Destination(models.Model):
             return gettext("出口が削除されました")
         if self.suspended or self.current_revision is None:
             return gettext("出口が停止中です")
+        if not registry.is_available(self.extension):
+            return gettext("出口の種類（Plugin）が停止中です")
         if task is None or not self.allowed_for(task):
             return gettext("出口がタスクの範囲で使えなくなりました")
         # 画面の通知は認証の要る画面の中だけで、受け手をRunの結果を見られる人に限るので、機密のタスクにも使える
-        if sensitive and self.kind in URL_KINDS and not self.current_revision.allows_sensitive_results:
+        if sensitive and self.is_external and not self.current_revision.allows_sensitive_results:
             return gettext("出口が機密の結果を送ってよい先ではありません")
         return ""
 
@@ -187,7 +202,7 @@ class Destination(models.Model):
         try:
             with transaction.atomic():
                 destination, _secret = cls.create_with_revision(
-                    kind=DestinationKind.IN_APP,
+                    extension=builtin.IN_APP,
                     scope=DestinationScope.PERSONAL,
                     department=None,
                     name=gettext("画面の通知（本人）"),
@@ -207,7 +222,7 @@ class Destination(models.Model):
     def create_with_revision(
         cls,
         *,
-        kind: DestinationKind,
+        extension: str,
         scope: DestinationScope,
         department: Department | None,
         name: str,
@@ -218,7 +233,7 @@ class Destination(models.Model):
         """出口と最初の版を作る。（出口、署名の鍵）。鍵はここでだけ返す"""
         secret = cls.new_secret()
         destination = cls.objects.create(
-            kind=kind,
+            extension=extension,
             scope=scope,
             department=department if scope == DestinationScope.DEPARTMENT else None,
             name=name,

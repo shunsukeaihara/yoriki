@@ -15,14 +15,47 @@ mockNuxtImport('useAPI', () => () => ({
     destinations: () => ({ create, patch, departments: emptyList }),
   },
   tasks: () => ({ triggers: () => ({ patch: triggerPatch, preview }) }),
+  pluginExtensions: {
+    list: vi.fn().mockImplementation(async (type: string) =>
+      type === 'notification'
+        ? [
+            {
+              id: BuiltinExtension.WEBHOOK,
+              type,
+              name: 'Webhook',
+              capabilities: ['file_fetch_auth', 'url'],
+              configSchema: {},
+            },
+            { id: BuiltinExtension.ZAPIER, type, name: 'Zapier', capabilities: ['url'], configSchema: {} },
+            { id: BuiltinExtension.IN_APP, type, name: '画面の通知', capabilities: ['personal'], configSchema: {} },
+          ]
+        : [
+            {
+              id: BuiltinExtension.POSTGRESQL,
+              type,
+              name: 'PostgreSQL',
+              capabilities: ['schemas'],
+              configSchema: { properties: { port: { default: 5432 } } },
+            },
+            {
+              id: BuiltinExtension.MYSQL,
+              type,
+              name: 'MySQL',
+              capabilities: [],
+              configSchema: { properties: { port: { default: 3306 } } },
+            },
+          ],
+    ),
+  },
 }))
 
 const user = { id: 'u1', email: 'u1@example.com', displayName: 'U1' }
 
 const destination: Destination = {
   id: 'd1',
-  kind: DestinationKind.ZAPIER,
-  kindDisplay: 'Zapier',
+  extension: BuiltinExtension.ZAPIER,
+  extensionName: 'Zapier',
+  isExternal: true,
   scope: DestinationScope.DEPARTMENT,
   scopeDisplay: '部門',
   department: 'dep1',
@@ -40,7 +73,8 @@ const destination: Destination = {
 
 const binding: TriggerBinding = {
   id: 'b1',
-  kind: 1,
+  extension: BuiltinExtension.WEBHOOK_TRIGGER,
+  extensionName: 'Webhook',
   task: 't1',
   taskInfo: {
     id: 't1',
@@ -98,7 +132,7 @@ describe('DestinationForm', () => {
     expect(vm.canPost).toBe(true)
     await vm.onSubmit()
     expect(create.mock.calls[0]![0]).toMatchObject({
-      kind: DestinationKind.WEBHOOK,
+      extension: BuiltinExtension.WEBHOOK,
       scope: DestinationScope.DEPARTMENT,
       department: 'dep1',
       url: 'https://example.com/hook',
@@ -110,7 +144,7 @@ describe('DestinationForm', () => {
     const vm = wrapper.vm as unknown as Form
     Object.assign(vm.form, {
       name: '全社の通知',
-      kind: DestinationKind.IN_APP,
+      extension: BuiltinExtension.IN_APP,
       scope: DestinationScope.COMPANY,
       department: 'dep1',
       url: 'https://example.com/hook',
@@ -119,7 +153,11 @@ describe('DestinationForm', () => {
     expect(vm.canPost).toBe(true)
     await vm.onSubmit()
     const data = create.mock.calls[0]![0]
-    expect(data).toMatchObject({ kind: DestinationKind.IN_APP, scope: DestinationScope.COMPANY, department: null })
+    expect(data).toMatchObject({
+      extension: BuiltinExtension.IN_APP,
+      scope: DestinationScope.COMPANY,
+      department: null,
+    })
     expect(data.url).toBeUndefined()
   })
 

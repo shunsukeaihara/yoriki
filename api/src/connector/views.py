@@ -18,7 +18,7 @@ from utils.views import SoftDeleteMixin
 from .adapters import get_adapter
 from .errors import ConnectorError
 from .limits import connection_slot, run_holding
-from .models import Connector, ConnectorKind, ConnectorScope, ConnectorVersion, DatabaseConnection
+from .models import Connector, ConnectorScope, ConnectorVersion, DatabaseConnection
 from .serializers import (
     AppConnectorDetailSerializer,
     AppConnectorSerializer,
@@ -52,24 +52,24 @@ def in_slot(connection: DatabaseConnection, request, hold_seconds: int, operatio
 
 class DatabaseConnectionFilter(filters.FilterSet):
     name = filters.CharFilter(label=_("名前"), lookup_expr="icontains")
-    kind = filters.ChoiceFilter(label=_("種別"), choices=ConnectorKind.choices)
+    extension = filters.CharFilter(label=_("種別"))
 
     class Meta:
         model = DatabaseConnection
-        fields = ["name", "kind", "is_active"]
+        fields = ["name", "extension", "is_active"]
 
 
 class ConnectorFilter(filters.FilterSet):
     name = filters.CharFilter(label=_("名前"), lookup_expr="icontains")
     connection = filters.CharFilter(label=_("接続先"), field_name="connection__uid")
-    kind = filters.ChoiceFilter(label=_("種別"), field_name="connection__kind", choices=ConnectorKind.choices)
+    extension = filters.CharFilter(label=_("種別"), field_name="connection__extension")
     is_sensitive = filters.BooleanFilter(label=_("機密"), field_name="current_version__is_sensitive")
     scope = filters.ChoiceFilter(label=_("範囲"), choices=ConnectorScope.choices)
     department = filters.CharFilter(label=_("部門"), field_name="department__uid")
 
     class Meta:
         model = Connector
-        fields = ["name", "connection", "kind", "is_active", "is_sensitive", "scope", "department"]
+        fields = ["name", "connection", "extension", "is_active", "is_sensitive", "scope", "department"]
 
 
 CONFLICT = OpenApiResponse(description="他の変更と競合した（編集を始めた後に、別の版ができている）")

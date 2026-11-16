@@ -13,12 +13,14 @@ from rest_framework.fields import empty
 from rest_framework.utils import html
 
 from connector.models import Connector
-from delivery.models import Delivery, DeliveryStatus, Destination, DestinationKind, NotifyContent, NotifyEvent
+from delivery.models import Delivery, DeliveryStatus, Destination, NotifyContent, NotifyEvent
 from delivery.serializers import DestinationChoiceSerializer
 from harness.result_files import file_format_problem
 from harness.tools.base import schema_problem
 from llm.models import ModelProfile
 from llm.serializers import AppModelProfileSerializer
+from plugin import builtin, registry
+from plugin.spec import ExtensionType
 from run.models import Run, RunEndReason, RunKind, RunLaunch, RunStatus
 from run.serializers import RunSerializer
 from skill.models import Skill
@@ -46,7 +48,6 @@ from .models import (
     TaskScope,
     TriggerBinding,
     TriggerBindingRevision,
-    TriggerKind,
     TriggerReceipt,
 )
 from .webhook import PayloadError, dedup_key, input_values, parse_path, parse_payload
@@ -107,12 +108,22 @@ class TaskTriggerSerializer(ReadOnlyModelSerializer):
     """タスクの一覧・詳細に出す入口の要約（設定は入口のAPI `app/v1/tasks/{task}/triggers/`）"""
 
     id = serializers.CharField(source="uid", read_only=True)
-    kind = serializers.ChoiceField(choices=TriggerKind.choices, read_only=True)
+    extension = serializers.CharField(read_only=True)
+    extension_name = serializers.CharField(read_only=True)
     key_needs_rotation = serializers.BooleanField(read_only=True, help_text=KEY_NEEDS_ROTATION_HELP)
 
     class Meta:
         model = TriggerBinding
-        fields = ["id", "kind", "name", "suspended", "key_prefix", "key_needs_rotation", "created"]
+        fields = [
+            "id",
+            "extension",
+            "extension_name",
+            "name",
+            "suspended",
+            "key_prefix",
+            "key_needs_rotation",
+            "created",
+        ]
 
 
 # タスク単位の上限（版の外。design.md §9.3）
@@ -446,7 +457,7 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
         # ロックしてから確かめるので、行をロックした後（revise() の後）に確かめる
         if (
             not checks.notifies_failure(validated_data["content"])
-            and TriggerBinding.objects.alive().filter(task=instance, kind=TriggerKind.WEBHOOK).exists()
+            and TriggerBinding.objects.alive().filter(task=instance).exists()
         ):
             raise serializers.ValidationError(
                 {"notify_events": _("Webhookの入口があるタスクでは、失敗（run.failed）を知らせる通知先が必要です")}
@@ -772,7 +783,8 @@ class TriggerBindingSerializer(serializers.ModelSerializer):
     """
 
     id = serializers.CharField(source="uid", read_only=True)
-    kind = serializers.ChoiceField(choices=TriggerKind.choices, read_only=True)
+    extension = serializers.CharField(read_only=True, help_text=_("種類（PluginのAdapterのID）。今はWebhookだけ"))
+    extension_name = serializers.CharField(read_only=True)
     task: "serializers.SlugRelatedField[TaskDefinition]" = serializers.SlugRelatedField(
         slug_field="uid", read_only=True
     )
@@ -820,7 +832,8 @@ class TriggerBindingSerializer(serializers.ModelSerializer):
         model = TriggerBinding
         fields = [
             "id",
-            "kind",
+            "extension",
+            "extension_name",
             "task",
             "task_info",
             "name",
@@ -858,6 +871,9 @@ class TriggerBindingSerializer(serializers.ModelSerializer):
             task: TaskDefinition = self.context["task"]
             if task.scope not in WEBHOOK_TASK_SCOPES:
                 raise serializers.ValidationError({"task": _("個人のタスクには、Webhookの入口を付けられません")})
+            # 停止中・廃止予定のPluginの入口は新しく作らない（design.md §3.11.1）
+            if builtin.WEBHOOK_TRIGGER not in registry.available_ids(ExtensionType.TRIGGER, for_new=True):
+                raise serializers.ValidationError(_("Webhookの入口は今は作れません（Pluginが停止中等）"))
         else:
             if "version_number" not in attrs:
                 raise serializers.ValidationError({"version": _("編集を始めた時点の版を送ってください")})
@@ -1119,6 +1135,8 @@ class TriggerPreviewSerializer(serializers.Serializer):
         refusals: list[str] = []
         if binding.suspended or current is None:
             refusals.append(str(_("この入口は停止中です")))
+        elif not registry.is_available(binding.extension):
+            refusals.append(str(_("入口の種類（Plugin）が停止中です")))
         result: dict[str, Any] = {
             "outcome": TriggerPreviewOutcome.REFUSED,
             "format_error": "",
@@ -1287,13 +1305,22 @@ class TaskRunDeliveryStateSerializer(ReadOnlyModelSerializer):
     status = serializers.ChoiceField(choices=DeliveryStatus.choices, read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     destination_name = serializers.CharField(source="destination_revision.destination.name", read_only=True)
-    destination_kind = serializers.ChoiceField(
-        source="destination_revision.destination.kind", choices=DestinationKind.choices, read_only=True
+    destination_extension = serializers.CharField(source="destination_revision.destination.extension", read_only=True)
+    destination_is_external = serializers.BooleanField(
+        source="destination_revision.destination.is_external", read_only=True
     )
 
     class Meta:
         model = Delivery
-        fields = ["id", "event_type", "status", "status_display", "destination_name", "destination_kind"]
+        fields = [
+            "id",
+            "event_type",
+            "status",
+            "status_display",
+            "destination_name",
+            "destination_extension",
+            "destination_is_external",
+        ]
 
 
 class TaskRunInputValueSerializer(serializers.Serializer):

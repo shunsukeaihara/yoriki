@@ -436,6 +436,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/app/v1/plugin_extensions/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 新しく作る入口・出口・Connectorの接続で選べる種別（使えて、廃止予定でないPluginのAdapter） */
+        get: operations["app_v1_plugin_extensions_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/app/v1/runs/": {
         parameters: {
             query?: never;
@@ -2258,6 +2275,41 @@ export interface paths {
         patch: operations["v1_platform_settings_partial_update"];
         trace?: never;
     };
+    "/api/v1/plugins/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Pluginの一覧と有効・停止（基盤管理者。design.md §3.11.1）。行は配備されているコードから作る */
+        get: operations["v1_plugins_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plugins/{plugin_id}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Pluginの一覧と有効・停止（基盤管理者。design.md §3.11.1）。行は配備されているコードから作る */
+        get: operations["v1_plugins_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** @description Pluginの一覧と有効・停止（基盤管理者。design.md §3.11.1）。行は配備されているコードから作る */
+        patch: operations["v1_plugins_partial_update"];
+        trace?: never;
+    };
     "/api/v1/python_packages/": {
         parameters: {
             query?: never;
@@ -2540,7 +2592,7 @@ export interface components {
             readonly id: string;
             /** 名前 */
             readonly name: string;
-            readonly kind_display: string;
+            readonly extension_name: string;
             readonly description: string;
             /** @description 機密。ローカルLLMのモデルの会話でだけ使える */
             readonly is_sensitive: boolean;
@@ -2557,7 +2609,7 @@ export interface components {
             readonly id: string;
             /** 名前 */
             readonly name: string;
-            readonly kind_display: string;
+            readonly extension_name: string;
             readonly description: string;
             /** @description 機密。ローカルLLMのモデルの会話でだけ使える */
             readonly is_sensitive: boolean;
@@ -2935,8 +2987,8 @@ export interface components {
             /** @description 使う接続先 */
             connection: string;
             readonly connection_info: components["schemas"]["MinimumDatabaseConnection"];
-            readonly kind: components["schemas"]["ConnectorKindEnum"];
-            readonly kind_display: string;
+            readonly extension: string;
+            readonly extension_name: string;
             /** 有効 */
             is_active?: boolean;
             /** @description 現在の版。更新では、編集を始めた時点の値を送る（作成では送らない） */
@@ -3005,13 +3057,6 @@ export interface components {
             /** @description 使う表（`スキーマ.表`）。空ならConnectorの公開する表のどれでも */
             tables?: string[];
         };
-        /**
-         * @description * `1` - PostgreSQL
-         *     * `2` - MySQL
-         *     * `3` - SQL Server
-         * @enum {integer}
-         */
-        ConnectorKindEnum: 1 | 2 | 3;
         /**
          * @description * `datasource_describe` - 表・列の説明を見る
          *     * `datasource_query` - SELECT文で読み取る
@@ -3285,9 +3330,13 @@ export interface components {
             readonly id: string;
             /** 名前 */
             name: string;
-            /** 種別 */
-            kind: components["schemas"]["ConnectorKindEnum"];
-            readonly kind_display: string;
+            /** @description 種別（PluginのAdapterのID）。作成した後は変えられない */
+            extension: string;
+            readonly extension_name: string;
+            /** @description 表の名前にスキーマがある種別か */
+            readonly uses_schemas: boolean;
+            /** @description 種別の既定のスキーマ */
+            readonly kind_default_schema: string;
             /** ホスト */
             host: string;
             /** @description 省略すると種別の既定のポート */
@@ -3318,8 +3367,8 @@ export interface components {
         DatabaseConnectionRequest: {
             /** 名前 */
             name: string;
-            /** 種別 */
-            kind: components["schemas"]["ConnectorKindEnum"];
+            /** @description 種別（PluginのAdapterのID）。作成した後は変えられない */
+            extension: string;
             /** ホスト */
             host: string;
             /** @description 省略すると種別の既定のポート */
@@ -3491,15 +3540,11 @@ export interface components {
          */
         Destination: {
             readonly id: string;
-            /**
-             * @description 種類。作成した後は変えられない
-             *
-             *     * `1` - Webhook
-             *     * `2` - Zapier
-             *     * `3` - 画面の通知
-             */
-            kind: components["schemas"]["DestinationKindEnum"];
-            readonly kind_display: string;
+            /** @description 種別（PluginのAdapterのID）。作成した後は変えられない */
+            extension: string;
+            readonly extension_name: string;
+            /** @description 外へ送る（宛先のURLを持つ）種類か */
+            readonly is_external: boolean;
             /**
              * @description 使ってよい範囲。部門の出口はその部門のタスクだけが使う。作成した後は変えられない
              *
@@ -3540,18 +3585,14 @@ export interface components {
             readonly id: string;
             /** 名前 */
             readonly name: string;
-            readonly kind: components["schemas"]["DestinationKindEnum"];
+            readonly extension: string;
+            readonly extension_name: string;
+            /** @description 外へ送る（宛先のURLを持つ）種類か */
+            readonly is_external: boolean;
             readonly scope: components["schemas"]["SkillScopeEnum"];
             readonly department: components["schemas"]["MinimumDepartment"] | null;
             readonly allows_sensitive_results: boolean;
         };
-        /**
-         * @description * `1` - Webhook
-         *     * `2` - Zapier
-         *     * `3` - 画面の通知
-         * @enum {integer}
-         */
-        DestinationKindEnum: 1 | 2 | 3;
         /**
          * @description 出口の作成と表示（連携の管理者。authorization.md §5.5）。中身は今の版の値を平らに出す。
          *
@@ -3560,14 +3601,8 @@ export interface components {
          *     版を作っていたら409になる
          */
         DestinationRequest: {
-            /**
-             * @description 種類。作成した後は変えられない
-             *
-             *     * `1` - Webhook
-             *     * `2` - Zapier
-             *     * `3` - 画面の通知
-             */
-            kind: components["schemas"]["DestinationKindEnum"];
+            /** @description 種別（PluginのAdapterのID）。作成した後は変えられない */
+            extension: string;
             /**
              * @description 使ってよい範囲。部門の出口はその部門のタスクだけが使う。作成した後は変えられない
              *
@@ -3607,15 +3642,11 @@ export interface components {
         /** @description 作成・署名の鍵の作り直しの応答。鍵はこのときだけ返す（再表示はできない） */
         DestinationSecret: {
             readonly id: string;
-            /**
-             * @description 種類。作成した後は変えられない
-             *
-             *     * `1` - Webhook
-             *     * `2` - Zapier
-             *     * `3` - 画面の通知
-             */
-            kind: components["schemas"]["DestinationKindEnum"];
-            readonly kind_display: string;
+            /** @description 種別（PluginのAdapterのID）。作成した後は変えられない */
+            extension: string;
+            readonly extension_name: string;
+            /** @description 外へ送る（宛先のURLを持つ）種類か */
+            readonly is_external: boolean;
             /**
              * @description 使ってよい範囲。部門の出口はその部門のタスクだけが使う。作成した後は変えられない
              *
@@ -4098,8 +4129,12 @@ export interface components {
             /** 名前 */
             readonly name: string;
             /** 種別 */
-            readonly kind: components["schemas"]["ConnectorKindEnum"];
-            readonly kind_display: string;
+            readonly extension: string;
+            readonly extension_name: string;
+            /** @description 表の名前にスキーマがある種別か */
+            readonly uses_schemas: boolean;
+            /** @description 種別の既定のスキーマ */
+            readonly kind_default_schema: string;
             /** @description 接続先を見る権限がなければnull */
             readonly host: string | null;
             /** @description 接続先を見る権限がなければnull */
@@ -4768,6 +4803,19 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["Notification"][];
         };
+        PaginatedPluginList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["Plugin"][];
+        };
         PaginatedPythonPackageList: {
             /**
              * Format: uri
@@ -5210,6 +5258,11 @@ export interface components {
             /** @description 会話・修正チャットのワークスペース（作業ファイル）を、最後の実行が終わってから残す日数。空なら自動では消さない */
             workspace_retention_days?: number | null;
         };
+        /** @description Plugin（基盤管理者。design.md §3.11.1）。変えられるのは有効か（`enabled`）だけ */
+        PatchedPluginRequest: {
+            /** 有効 */
+            enabled?: boolean;
+        };
         /** @description 追加してよいPythonのpackageのカタログ（design.md §7.6）。名前はPEP 503で正規化して持つ */
         PatchedPythonPackageRequest: {
             /** @description PyPI等のpackageの名前（例：rapidfuzz） */
@@ -5379,6 +5432,54 @@ export interface components {
             workspace_retention_days: number | null;
             /** Format: date-time */
             readonly updated: string;
+        };
+        /** @description Plugin（基盤管理者。design.md §3.11.1）。変えられるのは有効か（`enabled`）だけ */
+        Plugin: {
+            readonly id: string;
+            /** 名前 */
+            readonly name: string;
+            /** 説明 */
+            readonly description: string;
+            /** 版 */
+            readonly version: string;
+            /** 本体のPlugin */
+            readonly builtin: boolean;
+            /** 有効 */
+            enabled?: boolean;
+            /** 配備されている */
+            readonly deployed: boolean;
+            /** 登録できない理由 */
+            readonly problem: string;
+            /** 廃止の予告 */
+            readonly deprecated: string;
+            /** 代わりのPlugin */
+            readonly replaced_by: string;
+            /** 自己診断がある */
+            readonly has_self_check: boolean;
+            /** @description 使える（有効で、配備されていて、確かめに通った） */
+            readonly usable: boolean;
+            readonly extensions: components["schemas"]["PluginExtension"][];
+            /** Format: date-time */
+            readonly updated: string;
+        };
+        /** @description 表示専用のModelSerializer。すべての項目を読み取り専用にする */
+        PluginExtension: {
+            readonly id: string;
+            readonly type: string;
+            /** 名前 */
+            readonly name: string;
+            readonly capabilities: string[];
+            /** 配備されている */
+            readonly deployed: boolean;
+            /** @description 直近7日の予期しない失敗・時間切れの件数（Pluginの版ごと）と最後のエラー */
+            readonly failures: {
+                pluginVersion: string;
+                unexpected: number;
+                timeouts: number;
+                lastError: string;
+                /** Format: date-time */
+                lastAt: string | null;
+            }[];
         };
         /**
          * @description * `1` - OpenAI
@@ -5904,6 +6005,15 @@ export interface components {
              * Format: date-time
              */
             readonly ended: string | null;
+        };
+        /** @description 新しく作る入口・出口・Connectorの接続で選べるAdapter */
+        SelectableExtension: {
+            id: string;
+            type: string;
+            name: string;
+            capabilities: string[];
+            /** @description 設定のJSON Schema（画面の既定値に使う） */
+            config_schema: unknown;
         };
         Session: {
             readonly is_authenticated: boolean;
@@ -6773,7 +6883,8 @@ export interface components {
             readonly status: components["schemas"]["DeliveryStatusEnum"];
             readonly status_display: string;
             readonly destination_name: string;
-            readonly destination_kind: components["schemas"]["DestinationKindEnum"];
+            readonly destination_extension: string;
+            readonly destination_is_external: boolean;
         };
         TaskRunInputValue: {
             readonly name: string;
@@ -6826,7 +6937,8 @@ export interface components {
         /** @description タスクの一覧・詳細に出す入口の要約（設定は入口のAPI `app/v1/tasks/{task}/triggers/`） */
         TaskTrigger: {
             readonly id: string;
-            readonly kind: components["schemas"]["TriggerKindEnum"];
+            readonly extension: string;
+            readonly extension_name: string;
             /** 名前 */
             readonly name: string;
             /** 停止中 */
@@ -6911,7 +7023,9 @@ export interface components {
          */
         TriggerBinding: {
             readonly id: string;
-            readonly kind: components["schemas"]["TriggerKindEnum"];
+            /** @description 種類（PluginのAdapterのID）。今はWebhookだけ */
+            readonly extension: string;
+            readonly extension_name: string;
             readonly task: string;
             readonly task_info: components["schemas"]["TriggerTask"];
             name: string;
@@ -6952,7 +7066,9 @@ export interface components {
         /** @description 作成・鍵の作り直しの応答。鍵はこのときだけ返す（再表示はできない） */
         TriggerBindingKey: {
             readonly id: string;
-            readonly kind: components["schemas"]["TriggerKindEnum"];
+            /** @description 種類（PluginのAdapterのID）。今はWebhookだけ */
+            readonly extension: string;
+            readonly extension_name: string;
             readonly task: string;
             readonly task_info: components["schemas"]["TriggerTask"];
             name: string;
@@ -7092,11 +7208,6 @@ export interface components {
             /** @description payloadの中の場所（JSONのpath。例：$.data.vendor_name） */
             path: string;
         };
-        /**
-         * @description * `1` - Webhook
-         * @enum {integer}
-         */
-        TriggerKindEnum: 1;
         /**
          * @description サンプルのpayloadで取り出しを試す（design.md §4.2）。保存していない受け取り方（イベントIDの場所・項目の
          *     取り出し）で試せるように、それらも送れる（送らなければ今の版の値）。受付と同じ処理（payloadの読み取り、重複の
@@ -8050,6 +8161,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NotificationCount"];
+                };
+            };
+        };
+    };
+    app_v1_plugin_extensions_list: {
+        parameters: {
+            query?: {
+                /** @description 拡張種別 */
+                type?: "connector" | "notification" | "storage" | "trigger";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SelectableExtension"][];
                 };
             };
         };
@@ -10907,17 +11040,11 @@ export interface operations {
                 cursor?: string;
                 /** @description 部門 */
                 department?: string;
+                /** @description 種別 */
+                extension?: string;
                 is_active?: boolean;
                 /** @description 機密 */
                 is_sensitive?: boolean;
-                /**
-                 * @description 種別
-                 *
-                 *     * `1` - PostgreSQL
-                 *     * `2` - MySQL
-                 *     * `3` - SQL Server
-                 */
-                kind?: 1 | 2 | 3;
                 /** @description 名前 */
                 name?: string;
                 /** @description Which field to use when ordering the results. */
@@ -11267,15 +11394,9 @@ export interface operations {
             query?: {
                 /** @description The pagination cursor value. */
                 cursor?: string;
+                /** @description 種別 */
+                extension?: string;
                 is_active?: boolean;
-                /**
-                 * @description 種別
-                 *
-                 *     * `1` - PostgreSQL
-                 *     * `2` - MySQL
-                 *     * `3` - SQL Server
-                 */
-                kind?: 1 | 2 | 3;
                 /** @description 名前 */
                 name?: string;
                 /** @description Which field to use when ordering the results. */
@@ -11720,12 +11841,7 @@ export interface operations {
                 cursor?: string;
                 /** @description 部門のID */
                 department?: string;
-                /**
-                 * @description * `1` - Webhook
-                 *     * `2` - Zapier
-                 *     * `3` - 画面の通知
-                 */
-                kind?: 1 | 2 | 3;
+                extension?: string;
                 /** @description Which field to use when ordering the results. */
                 ordering?: string;
                 /** @description Number of results to return per page. */
@@ -12535,6 +12651,85 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlatformSettings"];
+                };
+            };
+        };
+    };
+    v1_plugins_list: {
+        parameters: {
+            query?: {
+                builtin?: boolean;
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                deployed?: boolean;
+                enabled?: boolean;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedPluginList"];
+                };
+            };
+        };
+    };
+    v1_plugins_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plugin_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Plugin"];
+                };
+            };
+        };
+    };
+    v1_plugins_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                plugin_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedPluginRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedPluginRequest"];
+                "multipart/form-data": components["schemas"]["PatchedPluginRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Plugin"];
                 };
             };
         };

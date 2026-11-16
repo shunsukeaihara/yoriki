@@ -31,6 +31,7 @@ from django.http.multipartparser import MultiPartParser, MultiPartParserError
 from django.utils.translation import gettext as _
 
 from artifact.models import clean_filename, input_paths
+from plugin.errors import PluginPermanentError
 
 from .inputs import InputFile
 from .models import TaskInputType
@@ -44,8 +45,8 @@ PATH_TOKEN_RE = re.compile(r"""\.([^.\[\]"'\s]+)|\[(\d+)\]|\["((?:[^"\\]|\\.)*)"
 MAX_PATH_DEPTH = 20
 
 
-class PayloadError(Exception):
-    """要求を受け付けない（400・415）。`code` は送り元に返す決まった文字列"""
+class PayloadError(PluginPermanentError):
+    """要求を受け付けない（400・415）。`code` は送り元に返す決まった文字列。入口のAdapter（Plugin）の契約の例外"""
 
     def __init__(self, code: str, detail: str, *, status: int = 400, errors: dict[str, str] | None = None):
         super().__init__(detail)

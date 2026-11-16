@@ -14,13 +14,13 @@ from delivery.models import (
     DeliveryAttempt,
     DeliveryStatus,
     Destination,
-    DestinationKind,
     DestinationRevision,
     DestinationScope,
     NotifyEvent,
 )
 from llm.factories import LLMConnectionFactory, ModelProfileFactory
 from llm.models import ProviderKind
+from plugin import builtin
 from run.models import RunLaunch, RunStatus
 from task.dispatch import start_task_run
 from task.errors import CannotRun
@@ -66,7 +66,7 @@ def fixture_company_manager(db) -> User:
 
 def _create(api_client, user, **data):
     api_client.force_login(user)
-    body = {"kind": DestinationKind.ZAPIER, "scope": DestinationScope.COMPANY, "name": "経理のZap", "url": HOOK_URL}
+    body = {"extension": builtin.ZAPIER, "scope": DestinationScope.COMPANY, "name": "経理のZap", "url": HOOK_URL}
     return api_client.post(DESTINATIONS, {**body, **data}, format="json")
 
 
@@ -93,17 +93,17 @@ def test_creating_a_destination_needs_the_permission_and_shows_the_secret_once(a
 
 
 @pytest.mark.parametrize(
-    ("kind", "url", "message"),
+    ("extension", "url", "message"),
     [
-        (DestinationKind.WEBHOOK, "http://hooks.example.com/a", "https://"),
-        (DestinationKind.WEBHOOK, "https://user:pass@hooks.example.com/a", "パスワード"),
-        (DestinationKind.ZAPIER, "https://hooks.example.com/hooks/catch/1/", "Catch Hook"),
-        (DestinationKind.ZAPIER, "https://hooks.zapier.com/other/", "Catch Hook"),
-        (DestinationKind.WEBHOOK, "https://[::1/hook", "形"),
+        (builtin.WEBHOOK, "http://hooks.example.com/a", "https://"),
+        (builtin.WEBHOOK, "https://user:pass@hooks.example.com/a", "パスワード"),
+        (builtin.ZAPIER, "https://hooks.example.com/hooks/catch/1/", "Catch Hook"),
+        (builtin.ZAPIER, "https://hooks.zapier.com/other/", "Catch Hook"),
+        (builtin.WEBHOOK, "https://[::1/hook", "形"),
     ],
 )
-def test_the_url_must_fit_the_kind(api_client, integrator, kind, url, message):
-    res = _create(api_client, integrator, kind=kind, url=url)
+def test_the_url_must_fit_the_kind(api_client, integrator, extension, url, message):
+    res = _create(api_client, integrator, extension=extension, url=url)
     assert res.status_code == 400
     assert message in str(res.json()["url"])
 
@@ -112,7 +112,7 @@ def test_the_url_must_fit_the_kind(api_client, integrator, kind, url, message):
 def test_internal_addresses_are_refused_unless_allowed(api_client, integrator, settings, address):
     url = "https://intranet.example.co.jp/hook"
     with _resolving_to(address):
-        res = _create(api_client, integrator, kind=DestinationKind.WEBHOOK, url=url)
+        res = _create(api_client, integrator, extension=builtin.WEBHOOK, url=url)
         assert res.status_code == 400
         assert "社内のアドレス" in str(res.json()["url"])
 
@@ -125,7 +125,7 @@ def test_internal_addresses_are_refused_unless_allowed(api_client, integrator, s
             "fd00::/8",
             "100.64.0.0/10",
         ]
-        assert _create(api_client, integrator, kind=DestinationKind.WEBHOOK, url=url).status_code == 201
+        assert _create(api_client, integrator, extension=builtin.WEBHOOK, url=url).status_code == 201
 
 
 def test_a_name_that_cannot_be_resolved_is_refused(api_client, integrator):
@@ -187,8 +187,8 @@ def test_updating_makes_a_revision_and_conflicts_with_other_changes(api_client, 
     assert api_client.patch(url, {"version": 1, "name": "x"}, format="json").status_code == 409
     assert api_client.patch(url, {"name": "x"}, format="json").status_code == 400  # 版を送らない
     # 種類・範囲は変えられない
-    res = api_client.patch(url, {"version": 2, "kind": DestinationKind.WEBHOOK, "scope": 4}, format="json")
-    assert (res.json()["kind"], res.json()["scope"]) == (DestinationKind.ZAPIER, DestinationScope.COMPANY)
+    res = api_client.patch(url, {"version": 2, "extension": builtin.WEBHOOK, "scope": 4}, format="json")
+    assert (res.json()["extension"], res.json()["scope"]) == (builtin.ZAPIER, DestinationScope.COMPANY)
     assert [r["number"] for r in api_client.get(f"{url}revisions/").json()["results"]] == [2, 1]
 
 
@@ -243,7 +243,9 @@ def test_a_task_uses_only_destinations_of_its_scope(api_client, company_manager)
     assert data["destination_info"] == {
         "id": company.uid,
         "name": "全社のZap",
-        "kind": DestinationKind.WEBHOOK,
+        "extension": builtin.WEBHOOK,
+        "extension_name": "Webhook",
+        "is_external": True,
         "scope": DestinationScope.COMPANY,
         "department": None,
         "allows_sensitive_results": False,
@@ -302,7 +304,16 @@ def test_choices_show_only_what_task_managers_may_pick(api_client, app_user, com
     results = api_client.get(CHOICES).json()["results"]
     assert [d["id"] for d in results] == [company.uid, personal.uid]
     # 送り先・鍵は返さない
-    assert set(results[0]) == {"id", "name", "kind", "scope", "department", "allows_sensitive_results"}
+    assert set(results[0]) == {
+        "id",
+        "name",
+        "extension",
+        "extension_name",
+        "is_external",
+        "scope",
+        "department",
+        "allows_sensitive_results",
+    }
 
 
 # --- Webhookで起動するタスクは、失敗の通知先が必須（design.md §4.2） ---

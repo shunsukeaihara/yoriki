@@ -1,8 +1,8 @@
 # Yoriki — 社内AI Agent基盤 設計企画書
 
 作成日：2026年10月2日  
-更新日：2026年11月14日  
-版：0.62 設計案  
+更新日：2026年11月16日  
+版：0.63 設計案  
 対象：サービス企画、開発、運用担当
 
 プロダクト名はYoriki（よりき）とする（0.16でYuhitsuから変更）。同名の製品・サービスがあることは承知の上で、検索での見つけやすさは重視しない。名称の商標・ドメイン等の確認は本設計の対象外とする。
@@ -347,7 +347,7 @@ Run限定の参照差替えも開始時に固定する。進行中のRunでマ�
 
 ### 3.11 起動・通知・保存のPlugin契約
 
-Plugin Registryに拡張種別を設け、Adapter実装、契約版、設定Schema、対応能力を登録する。Pluginはサーバーに配備する拡張の配布・管理の単位、Adapterは基盤が呼び出す実装、Bindingはタスク等から選択する具体的な設定とする（Connectorは、接続と、その上の版付きのConnector（公開する表・操作等の境界）で表し、Bindingは持たない。§4.9）。Skillは自然言語の手順を担い、Adapterの通信・保存・権限処理を置き換えない。
+Plugin Registryに拡張種別を設け、Adapter実装、設定Schema、対応能力を登録する。Pluginはサーバーに配備する拡張の配布・管理の単位、Adapterは基盤が呼び出す実装、Bindingはタスク等から選択する具体的な設定とする（Connectorは、接続と、その上の版付きのConnector（公開する表・操作等の境界）で表し、Bindingは持たない。§4.9）。Skillは自然言語の手順を担い、Adapterの通信・保存・権限処理を置き換えない。
 
 | 拡張種別 | 基盤から見た契約 | 主な選択場所 | 初期実装 |
 |---|---|---|---|
@@ -355,20 +355,54 @@ Plugin Registryに拡張種別を設け、Adapter実装、契約版、設定Sche
 | notification | Runの確定イベントと結果を宛先へ配信 | タスク／明示的な送信操作 | in_app、webhook、zapier |
 | storage | 不変のbytesを保存・取得・削除 | サーバーセットアップ | local、s3 |
 | workspace_persistence | 作業ファイルの退避・検証・復元 | サーバーセットアップ | file_snapshot |
+| connector | 外部データの接続の確認・describe・execute（§4.9） | Connectorの接続 | postgresql、mysql、sqlserver |
+
+初期の実装では、chatの起動はRegistryに載せない（会話の基本の経路で、止められないようにする）。
 
 Teams・Slack・DiscordのChannel Pluginは、Triggerの受信AdapterとNotificationの送信Adapter、スレッド操作能力をまとめたPlugin packageとする。新たな実行エンジンや保存方式は増やさない。新規起動を受け付ける能力と、既存Runへの返信を受け付ける能力を分け、自動実行の返信用設定を追加しただけではチャネル内の発言から新規Runを起動しない。
 
 Channel Pluginにはcreate_thread、send_thread_message、receive_thread_reply等のcapabilitiesと対応チャネル種別を宣言する。Interaction BindingはPlugin・接続設定・Destination・入力モードを参照し、Run開始時にそのRevisionを固定する。返信受付はConversationInputへ正規化し、共通の会話処理へ渡す。スレッドIDは設定に直接書くのではなく、Runごとの実行結果として保存する。
 
-通知Pluginは、通知Adapterと合わせて既定の通知の書き方（連携用の要約の雛形）を同梱してよい。雛形は、タスクの画面で選んだときにタスクの通知の書き方へ写し、以後はタスクの版として扱う（雛形を後で変えても、写したタスクは変わらない）。共通Registry上で依存・対応版・有効状態を管理する。エージェントにStorage Backendの選択Toolを渡す必要はない。
+通知Pluginは、通知Adapterと合わせて既定の通知の書き方（連携用の要約の雛形）を同梱してよい。雛形は、タスクの画面で選んだときにタスクの通知の書き方へ写し、以後はタスクの版として扱う（雛形を後で変えても、写したタスクは変わらない）。共通Registry上で依存・有効状態を管理する。エージェントにStorage Backendの選択Toolを渡す必要はない。
 
-共通Manifestにはplugin_id、plugin_version、extension_id、extension_type、api_version、config_schema、capabilities、必要な権限・Secretの種別を持たせる。通知の書き方の雛形を含む場合は、その版も持つ。サーバー起動時に配備済み実装をRegistryへ登録し、契約版、必須設定、接続確認を検証する。未知のPlugin ID、未対応の設定、必要能力がない組合せは設定段階で拒否する。失敗時に別の通知経路や保存先へ黙って切り替えない。
+Pluginの宣言にはplugin_id、plugin_version、名前、含むAdapter（extension_id、extension_type、実装、config_schema、capabilities、必要な権限・Secretの種別）を持たせる。通知の書き方の雛形を含む場合は、その版も持つ。サーバー起動時に配備済み実装をRegistryへ登録し、インターフェースの形と宣言を検証する（§3.11.2）。必須設定と接続確認は、そのAdapterを使うConnector・出口・入口を作るときに検証する（§3.11.3）。契約の版の番号は持たない。未知のPlugin ID、未対応の設定、必要能力がない組合せは設定段階で拒否する。失敗時に別の通知経路や保存先へ黙って切り替えない。
 
 Adapterの実装コードはレビュー済みのサーバーpackage・imageとして配備し、インストールと有効化は基盤管理者が行う。DBのSkill本文や外部入力から任意のmodule path、配布URL、コードを読み込まない。通知の書き方はタスクの定義の一部で、タスクを管理できる人が変える。通知先・利用権限・認証情報・保存先の変更は、それぞれの管理権限で検証する。
 
 タスクは保存のたびに不変の版を作り、入口（Trigger Binding）・出口（Destination）も、それぞれの保存のたびに版を作る。Runは受付時にタスク・入口・出口の版を固定する（初期の実装では、通知の設定はタスクの版の項目で、Notification Bindingを別に持たない。§4.1・§4.3）。Pluginの実装版も記録し、処理中Run・未配信Deliveryが依存する版を維持する。更新で互換性が失われる場合は対象を待機させ、drain・旧版併存・明示的な移行を行う。強制停止や権限失効は固定版にも適用する。Storageの物理位置と移行は7.10節の別手順で扱う。
 
 API・Plugin契約・設定例は本基盤独自の設計案であり、外部製品のPlugin形式や既存の実装済みAPIを意味しない。
+
+#### 3.11.1 宣言・登録・有効化
+
+Pluginは、Pythonのentry points（グループ `yoriki.plugins`）で宣言する。entry pointの名前が plugin_id、値がPluginの宣言（版、名前、含むAdapter）である。本体のPluginも `api/pyproject.toml` で同じように宣言し、本体のものと自社のものを同じ仕組みで扱う。自社のPluginは別のpackageとして作り、Yorikiのimageから派生させたimageに入れる（Yoriki本体のsettingsやコードは変えない）。plugin_idは、本体のものを `yoriki.` から、自社のものを自社の名前（`acme.` 等）から始め、重ならないようにする。
+
+- **単位と識別子**：有効・停止はPluginの単位で行い、Adapter（PluginExtension）はPluginに属する（Channel Pluginは、入口と出口のAdapterを1つのPluginにまとめる）。extension_idはどのPluginとも重ならない文字列で、plugin_idから始める。Connector・出口・入口は、extension_idでAdapterを指す。本体のPluginは、別々に止められるよう、1つのAdapterごとに1つのPluginとする（plugin_idとextension_idは同じ）：`yoriki.trigger.webhook`、`yoriki.notification.webhook`・`yoriki.notification.zapier`・`yoriki.notification.in_app`、`yoriki.connector.postgresql`・`yoriki.connector.mysql`・`yoriki.connector.sqlserver`、`yoriki.storage.local`・`yoriki.storage.s3`、`yoriki.workspace.file_snapshot`。
+- **登録**：apiとqclusterは、起動時にentry pointsを読み、形と宣言を確かめて（§3.11.2）、PluginとPluginExtensionを登録・更新する。確かめに通らないもの（形が合わない、IDの重複・名前空間の誤り、宣言の誤り）は使える状態にせず、理由を記録して管理画面に出す。DBの値からimportしない。初めて見つかったPluginは、本体のものは有効、それ以外は停止の状態で登録する。配備から消えたPluginは行を消さず「配備されていない」とし、停止と同じに扱う。
+- **有効・停止**：有効かどうかはDBに持ち、基盤管理者が管理画面（`/manage/plugins`）で切り替える。停止したPluginのAdapterを使う入口・出口・Connectorの接続は、それぞれを停止したときと同じに扱う（新しく作れない・選べない、Webhookを受け付けない、配信の直前に確かめて送らない（§4.1）、モデルへ渡す一覧に出さない）。設定は残り、Pluginを有効に戻せば元どおり使える。保存先と退避は環境変数で選ぶので（§10.2）、Registryに登録して版と状態を見せるだけで、画面からは止めない。
+- **廃止の予告（deprecated）**：Pluginが廃止を予告したインターフェースを使っている場合（後方互換の変換で動かしている場合）と、Pluginが自身を廃止予定と宣言した場合（理由と代わりのplugin_idを書く）に、deprecatedとする。停止中のdeprecatedなPluginは有効にできない。有効なものは止めずに警告（理由・代わり・使えなくなる時期）を出し、そのAdapterは新しく作る入口・出口・Connectorの接続の選択肢に出さない（今あるものは動き続け、画面に警告を出す）。使えなくなったもの（変換を外した等）は登録の確かめに通らず、停止と同じに扱う。
+- **Runへの記録**：Runは受付時に、使うAdapterのextension_idとPluginの版をManifestに固定する（入口、固定した出口、Connectorの一覧）。版が合わなくなったときのdrainと旧版の併存は、実際に互換性のない更新をするときに作る。
+
+画面からのPluginの追加（wheelを上げて各ホストに配る。上げたコードがControl Planeで動くので、許す人・監査・既定で止める設定も要る）と、Pluginの一覧・配布（マーケットプレイス）は後で作る。§3.11.1の形（entry pointsで宣言し、DBで有効にする）は変えずに足せる。
+
+#### 3.11.2 インターフェースの確かめ方
+
+拡張種別ごとのインターフェースは、本体の基底クラス（ABC）とその型ヒントで表し、型を公開する（`py.typed`）。契約の版の番号は持たない。
+
+- **形（登録の時）**：基底クラスを継承しているか、抽象メソッドが残っていないか、Yorikiが呼ぶ形の引数を受け取れるか（`inspect.signature`）を確かめる。型ヒントどうしの比較や、実行時の引数・戻り値の型の確かめはしない（合わなければ例外になり、下の「予期しない失敗」になる）。
+- **例外**：契約として決める例外は、設定の誤り・一時的な障害（再試行してよい）・恒久的な失敗の3つの型だけとする。それ以外の例外は、Yorikiが呼ぶ境界でまとめて捕まえ、「予期しない失敗」として記録して失敗にする（再試行しない）。
+- **意味**（冪等性、読取りだけ、timeout等）：コードでは強制せず、文書と適合テストの道具（§3.11.4）で担保する。timeoutのように外から守れるものはYorikiの側で守り、Pluginを信じない。
+- **広げ方と破壊的な変更**：インターフェースを広げるときは、既定の実装のある任意のメソッドを足すか、引数をまとめたデータの型に既定値のある項目を足し、今のPluginを壊さない。破壊的な変更は、型に表れる形（新しいメソッドの名前、必須の引数）で行い、今のPluginが登録の時の確かめで落ちるようにする。移行の期間を置くときは、古い形を新しい形へつなぐ変換を本体に置き、それを使うPluginをdeprecatedとする（§3.11.1）。
+
+#### 3.11.3 動くかの確かめ
+
+- **Pluginを有効にする時**：形と宣言（§3.11.2）と、Pluginの自己診断（`self_check()`。任意。外へ出ず副作用のないもの。必要なライブラリを読めるか等）を確かめる。設定がないので、Adapterの操作は呼ばない。
+- **Connector・出口・入口を作る時**：実際の設定で、副作用のない操作だけを呼んで確かめる（Connectorは接続の確認と表の一覧、出口は宛先のURLの確かめ）。出口へのテストの送信は、利用者が明示したときだけ行う。
+
+#### 3.11.4 合致度の追い方
+
+- **適合テストの道具**：本体は、拡張種別ごとの適合テストをpytestのPluginとして用意する。テストはcapabilityごとに分け、Pluginが宣言したcapabilityの分だけ流す。相手の要るテストは、Pluginの作者が用意するfixture（テスト用のDB、ローカルのHTTPサーバー等）で動かす。境界の呼出しには型ヒントの実行時の確かめ（beartype）を付け、型の食い違いも見つける。Pluginの作者は自分のCIで流し、mypy等の静的な検査も勧める。本体のPluginも同じ道具でテストする。結果（capabilityごとの合否と、使ったYorikiの版）を配布物に同梱して画面に出すことは、自社のPluginが出てきてから作る。
+- **実行時の観察**：Yorikiが呼ぶ境界で捕まえた予期しない失敗とtimeoutを、AdapterとPluginの版ごとに数え、管理画面に直近の件数と最後のエラーを出す。版を上げた後に悪くなったことも見える。
 
 ## 4 全体構成
 
@@ -812,7 +846,7 @@ Webの検索と取得も、初期段階の後にConnector（Web検索・Web取�
 
 #### 4.9.4 Adapterの契約
 
-ConnectorのAdapterは `validate_config`、`describe`（提供する操作と入出力のSchema）、`execute`（操作の実行）を実装し、他のPluginと同じRegistryで管理する（Plugin Registryを作るときの契約。初期の実装は社内DBの基底クラスで、種別からAdapterをコードで選ぶ。§4.9.2）。接続のSecretとtokenはControl Planeの中だけで使い、Runner・Sandbox・ログへ出さない。QClusterだけのWorkerサーバー（§6.1）のRunnerも、社内DB・SaaSへ直接接続せず、Connector（同じプロセス内のConnectorの処理）を通す。HTTPを介さないだけで、操作のたびの利用の許可の確認（そのRunの実行許可と、その時点の所属・範囲。authorization.md §6）、利用者の権限のtoken、読取り専用の多層の強制（§4.9.2）、行数・サイズ・時間の上限、ToolInvocationへの記録はすべてこの処理の中で行う。接続情報はControl Planeと同じ信頼範囲のサーバーの中だけで使い、SandboxとLLMへは渡さない。
+ConnectorのAdapterは `validate_config`、`describe`（提供する操作と入出力のSchema）、`execute`（操作の実行）を実装し、他のPluginと同じRegistryで管理する（§3.11。初期の実装は社内DBの基底クラスで、DB接続はextension_id（`yoriki.connector.postgresql` 等）でAdapterを指す。§4.9.2）。接続のSecretとtokenはControl Planeの中だけで使い、Runner・Sandbox・ログへ出さない。QClusterだけのWorkerサーバー（§6.1）のRunnerも、社内DB・SaaSへ直接接続せず、Connector（同じプロセス内のConnectorの処理）を通す。HTTPを介さないだけで、操作のたびの利用の許可の確認（そのRunの実行許可と、その時点の所属・範囲。authorization.md §6）、利用者の権限のtoken、読取り専用の多層の強制（§4.9.2）、行数・サイズ・時間の上限、ToolInvocationへの記録はすべてこの処理の中で行う。接続情報はControl Planeと同じ信頼範囲のサーバーの中だけで使い、SandboxとLLMへは渡さない。
 
 #### 4.9.5 Connectorが動く場所
 
@@ -880,14 +914,14 @@ Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプ�
 | PythonPackage | 追加してよいPythonのpackageのカタログ（§7.6）。名前（正規化したもの）、許す版の範囲（空ならどの版も）、メモ、停止 |
 | EnvironmentRevision / PackageBundle | 会話の追加のPython環境（§7.6・§7.7）。revisionは会話、元のrevision、image digest（platformのmanifest）、platform、Pythonの版、直接頼んだpackageと版、入っているwheelの全件。bundleは1回の追加で入れたwheelの完全なlock（名前・版・sha256・保管したBlobObject） |
 | TaskDefinition / TaskDefinitionRevision | 範囲（個人・部門・全社・システム）と持ち主・部門、個人タスクの予算を計上する部門（§9.1）、名前、停止、チャットから起動できるか（名前・停止・印は版の外）、今の版。版は説明、プロンプトのテンプレート、使うSkillと固定の版、Connector、モデル設定とeffort（空なら既定）、機密、入力の項目（名前・型・必須・選択肢）、業務結果Schema（なければSkillのもの）、結果の通知（出口・対象イベント・通知内容・通知の書き方。初期は1つ）、保存した人。フローの起動・対話Bindingは各段階で足す |
-| PluginExtension | 拡張種別、Adapter実装版、契約版、設定Schema、対応能力、有効状態 |
-| TriggerBinding / TriggerBindingRevision | 安定ID、起動Plugin版、認証参照、タスク（範囲と部門はタスクと同じ。1つの入口が起動するタスクは1つ。付け替えない。1つのタスクに複数の入口を付けられる）、名前・鍵と鍵を作った人・停止（版の外）、設定版（取り出す項目の名前とpath、イベントIDの場所、大きさの上限） |
+| Plugin / PluginExtension | Pluginはplugin_id、名前、版、有効か、配備されているか、登録の確かめに通らなかった理由、deprecated（理由・代わり）、実行時の観察（版ごとの予期しない失敗・timeoutの件数と最後のエラー）。PluginExtensionはextension_id、Plugin、拡張種別、実装、設定Schema、対応能力（§3.11.1） |
+| TriggerBinding / TriggerBindingRevision | 安定ID、入口のAdapter（extension_id）、認証参照、タスク（範囲と部門はタスクと同じ。1つの入口が起動するタスクは1つ。付け替えない。1つのタスクに複数の入口を付けられる）、名前・鍵と鍵を作った人・停止（版の外）、設定版（取り出す項目の名前とpath、イベントIDの場所、大きさの上限） |
 | TriggerReceipt | 起動Binding、外部イベントID、入力hash、対応Run・会話操作、受付時刻 |
 | NotificationBinding / NotificationBindingRevision | Plugin、通知の書き方、対象イベント、通知内容、Destination版、許可項目。初期（1つのタスクに1つの結果通知）は別のModelにせず、TaskDefinitionRevisionの項目（出口・対象イベント・通知内容・通知の書き方）にする（§4.3）。Runは受付時にDestinationの版を固定する（§4.1） |
 | InteractionBinding / InteractionBindingRevision | Channel Plugin版、接続・Destination版、スレッド方針、返信モード、通知イベント |
 | ExternalThreadBinding | Run・Conversation、対話Binding版、provider・接続・チャネル・thread参照、親message、作成操作key、状態 |
 | ChannelMessageReceipt | provider・接続・event／message ID、投稿者ID・表示名、thread、質問世代、本文hash、受付・適用結果 |
-| Destination / DestinationRevision | 種別（webhook・zapier・in_app。Teams・Slack等は後で足す）、使ってよい範囲（個人・部門・全社・システム。個人はYorikiが作る共通の画面の通知だけ）と部門、署名の鍵（暗号化して保存。版に入れない）、停止。版は宛先のURL（資格情報を含みうるので暗号化して保存し、画面にはホストと末尾だけを出す）、機密の結果を送ってよいか（既定は送らない。§4.4） |
+| Destination / DestinationRevision | Adapter（extension_id。webhook・zapier・in_app。Teams・Slack等は後で足す）、使ってよい範囲（個人・部門・全社・システム。個人はYorikiが作る共通の画面の通知だけ）と部門、署名の鍵（暗号化して保存。版に入れない）、停止。版は宛先のURL（資格情報を含みうるので暗号化して保存し、画面にはホストと末尾だけを出す）、機密の結果を送ってよいか（既定は送らない。§4.4） |
 | Delivery | Run、RunEvent（event_idはRunのIDとイベントの順序）、Destinationの版（配信キーはこの2つ）、確定内容（送る内容をRunの終わりに組み立てて保存する）、配信状態、送った回数、次回試行時刻、配信中の期限（§4.5）。外部thread参照は対話の段階で足す |
 | DeliveryAttempt | 試行番号、受付結果（受付確認・一時的な失敗・失敗・届いたか分からない）、HTTPの状態コード、エラー（応答の本文は保存しない） |
 | FileLink / FileFetch | 出口へ渡した成果物の取得用のtoken（試行・成果物、tokenのハッシュ、期限、取得した回数）と、取得の記録（返したか、返さなかった理由、IPアドレス、User-Agent。§4.4） |
@@ -895,7 +929,7 @@ Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプ�
 | LLMConnection | プロバイダ種別、API key（暗号化して保存）、base URL、timeout、同時実行数・rate limit（§4.8） |
 | ModelProfile / ModelProfileVersion | 接続、モデル名、token上限、単価、対応能力、受け付けるeffortの値と既定、使わせる範囲を版付きで保持（§4.8） |
 | 接続（DatabaseConnection等。種類ごと） | 種別、接続先、認証方式、資格情報（暗号化して保存）、接続のタイムアウト、同時実行数の上限（§4.9.1） |
-| Connector / ConnectorVersion | Adapter実装版、使う接続、範囲（個人・部門・全社・システム）と部門、公開する範囲、上限、機密のフラグ、宣言した操作（§4.9） |
+| Connector / ConnectorVersion | 使う接続（接続がextension_idでAdapterを指す）、範囲（個人・部門・全社・システム）と部門、公開する範囲、上限、機密のフラグ、宣言した操作（§4.9） |
 | Connectorの書込みの許可 | 書込みの操作を加えるときに、許可した操作と対象、実行前に利用者の確認を必須にするか（harness.md §10.7）を持たせる（今は持たない） |
 | UserOAuthToken | 社内ユーザー、provider、scope、暗号化したaccess token・refresh token、有効期限（§4.9.1） |
 | 基盤の設定 | ワークスペースの保存期限（日数。§8）。管理画面（`/manage/settings`）で変える。1行だけ持つ |
@@ -1576,7 +1610,7 @@ Webhook、Teams・Slack・Discordからの受信は、社員のセッション�
 | 本体イメージ（yoriki-api、yoriki-frontend） | 非公開のレジストリ | リリースタグとdigest |
 | Skill本文とSchema | PostgreSQL | Skill Version |
 | Skill・タスク・Binding | PostgreSQL | Skill Version・Task Definition Revision・Binding Revision |
-| 起動・通知・保存Adapterコード | レビュー済みソースとサーバーimage | 実装versionとPlugin契約版 |
+| 起動・通知・保存・ConnectorのAdapterコード | レビュー済みソースとサーバーimage（自社のPluginは派生のimage） | Pluginの版（インターフェースは登録の時に形で確かめる。§3.11.2） |
 | 保存先・Workspace退避設定 | サーバー設定とSecret管理 | 基盤設定の版・backend_id |
 | Skillの参照資料・マスター・テンプレート | Artifact StoreとDBの参照 | Resource VersionとSkillAssetBinding |
 | 追加Python依存 | PackageBundle保管先 | lockとwheelのhash |
@@ -1591,7 +1625,7 @@ Hubのpull制限は契約等で異なるため、具体的な回数を設計へ�
 
 ### 10.2 サーバーセットアップのPlugin設定例
 
-次は本基盤独自の設定案（Plugin Registryを作るときの形）であり、そのままDjangoやDocker Composeへ渡す設定ではない。初期の実装では、保存先は環境変数（`YORIKI_STORAGE_BACKEND`・`YORIKI_STORAGE_ID`、移行前の保存先は `YORIKI_STORAGE_PREVIOUS`。deployment.md §7.2）で選ぶ。配備済みのPluginを選択し、AdapterのSchemaで検証する。起動・対話・結果通知のフロー設定と、基盤全体の保存設定を分ける。Channel Pluginの資格情報は登録済み接続へ保持し、利用する接続・チャネルを各フローで選ぶ。
+次は本基盤独自の設定案であり、そのままDjangoやDocker Composeへ渡す設定ではない。初期の実装では、Pluginの有効・停止はDBに持って管理画面で切り替え（§3.11.1。下の `plugins.enabled` は使わない）、保存先は環境変数（`YORIKI_STORAGE_BACKEND`・`YORIKI_STORAGE_ID`、移行前の保存先は `YORIKI_STORAGE_PREVIOUS`。deployment.md §7.2）で選ぶ。配備済みのPluginを選択し、AdapterのSchemaで検証する。起動・対話・結果通知のフロー設定と、基盤全体の保存設定を分ける。Channel Pluginの資格情報は登録済み接続へ保持し、利用する接続・チャネルを各フローで選ぶ。
 
 ```yaml
 # Local保存の初期構成例
@@ -2117,3 +2151,4 @@ Sandboxイメージの定義は本体と同じリポジトリの `sandbox/` で�
 | 0.60 | 2026年11月14日 | ワークスペースの保存期限での自動の削除を決めた（§8）。期限は会話の最後のRunが終わった時から数え（最終更新からではない）、終わっていないRunがある会話は消さない。設定は基盤の設定（管理画面の「基盤の設定」。初期値30日、空なら自動では消さない）で、1日1回の `cleanup_workspaces`（管理コマンドでも動かせる）が消す。消せずに残ったsnapshotも同じ処理で消し直す |
 | 0.61 | 2026年11月14日 | 実行の残骸の定期の回収を決めた（§8）。Workerのホストごとにあるもの（終わったAttemptのSandboxのコンテナ・作業領域）は、Q2のScheduleがクラスタの1台でしか動かないので、管理コマンド `cleanup_worker` を各ホストのcronから1時間ごとに流す。確定する前に落ちたsnapshot・サブエージェントへのコピーの実体（記録のないobject）は、1時間ごとのSchedule `cleanup_objects`（管理コマンドでも動かせる）が消す。leaseが切れてから1時間は消さない。記録のないobjectを探すため、Storage Backendの契約に list_keys を足した（§7.8） |
 | 0.62 | 2026年11月15日 | Pythonのpackageの追加を決めた（§7.6・§7.7）。カタログ（PythonPackage）は基盤管理者が登録し、直接頼めるのは登録したものだけで、推移依存は登録したpackageの依存として許す。取得はRuntime Profileのイメージの短命の取得用コンテナ（mount・Secretなし、外へ出られる）で行い、wheelを内容のhashで保存先に置く。追加は会話のEnvironment Revisionとして引き継ぎ、Sandboxを起動するたびに入れ直す（`/packages` のmountはやめ、`/tmp` へ写して入れる）。イメージのpackageより新しい版は追加の環境で上書きしてよい。版・platformが変わったら同じ版で取り直す。サブエージェントの追加は子の環境だけ |
+| 0.63 | 2026年11月16日 | Plugin Registryの初期の実装を決めた（§3.11.1〜§3.11.4）。Pluginはentry points（`yoriki.plugins`）で宣言し、起動時に形を確かめて登録し、有効・停止はDBに持って基盤管理者が管理画面で切り替える（本体のPluginも同じ仕組み。自社のPluginは派生のimageで足す）。有効・停止の単位はPlugin、Connector・出口・入口はextension_idでAdapterを指す。停止はそれを使うものを停止したのと同じ扱い。契約の版の番号は持たず、インターフェースは形（基底クラス・抽象メソッド・引数）だけを確かめ、破壊的な変更は型に表れる形で行う。例外は契約の3つの型と予期しない失敗に分ける。合致度は適合テストの道具（capabilityごと）と実行時の観察で追う。deprecatedなものは新しく選べなくする。画面からの追加とマーケットプレイスは後で |

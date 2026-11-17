@@ -176,7 +176,8 @@ def _waiting_run(manager, slack, questions=(QUESTION,)):
 # --- 一通りの流れ（design.md §12 の受入条件：質問・回答受付・再質問・完了を同じスレッドで） ---
 
 
-def test_question_answer_and_report_in_the_same_thread(client, manager, slack):
+def test_question_answer_and_report_in_the_same_thread(client, manager, slack, settings):
+    settings.YORIKI_PUBLIC_URL = "https://yoriki.example.com"
     run = start_task_run(_task(), inputs={}, actor=manager, launch=RunLaunch.MANUAL)
     assert run.is_interactive and run.has_channel
     adapter = FakeAdapter([calls(("q1", "ask_user", {"questions": [QUESTION]}))])

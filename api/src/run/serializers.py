@@ -477,6 +477,12 @@ class ClarificationRequestSerializer(serializers.ModelSerializer):
         slug_field="uid", read_only=True, allow_null=True
     )
     target = ClarificationContextSerializer(source="context", read_only=True, allow_null=True)
+    answered_by_name = serializers.SerializerMethodField(
+        help_text=_("回答者の表示名（Webで答えたYorikiのユーザーか、対話の出口で答えた人）")
+    )
+    answered_via = serializers.SerializerMethodField(
+        help_text=_("回答した場所（web、または対話の出口の種類。例：slack）。未回答なら空")
+    )
 
     class Meta:
         model = ClarificationRequest
@@ -490,11 +496,25 @@ class ClarificationRequestSerializer(serializers.ModelSerializer):
             "answers",
             "comment",
             "answered_by",
+            "answered_by_name",
+            "answered_via",
             "answered",
             "expires",
             "created",
         ]
         read_only_fields = fields
+
+    def get_answered_by_name(self, instance: ClarificationRequest) -> str:
+        external = instance.answered_external or {}
+        if external:
+            return external.get("name", "")
+        user = instance.answered_by
+        return (getattr(user, "display_name", "") or getattr(user, "email", "")) if user else ""
+
+    def get_answered_via(self, instance: ClarificationRequest) -> str:
+        if instance.status != ClarificationStatus.ANSWERED:
+            return ""
+        return (instance.answered_external or {}).get("provider", "") or "web"
 
     def to_representation(self, instance):
         data = super().to_representation(instance)

@@ -320,7 +320,7 @@ def runtime_context(run: Run, *, user_name: str) -> str:
 
 def _mode(run: Run) -> str:
     """会話か、タスクか。タスクでは答える人がいるか（修正チャット）も示す（harness.md §6.2）"""
-    if run.is_task_fix:
+    if run.is_task_fix or run.has_channel:
         return '  <mode responder="true">task</mode>'
     return f"  <mode>{'conversation' if run.is_interactive else 'task'}</mode>"
 

@@ -12,6 +12,7 @@
 
 import base64
 import hashlib
+import json
 import secrets
 from datetime import timedelta
 from typing import Any, Self
@@ -59,6 +60,70 @@ class NotifyContent(models.TextChoices):
     STATUS_AND_RESULT = "status_and_result", _("状態と業務結果")
 
 
+class ChannelEvent(models.TextChoices):
+    """対話の出口へ送るイベント（design.md §4.7）。結果の通知の対象には選べない"""
+
+    QUESTION = "run.waiting_user", _("確認")
+    ANSWERED = "clarification.answered", _("回答の受付")
+
+
+class ChannelConnectionQuerySet(models.QuerySet):
+    def alive(self) -> Self:
+        return self.filter(deleted=False)
+
+
+class ChannelConnection(models.Model):
+    """連携の接続（design.md §4.6）。Slackのアプリ1つ（1つのWorkspace）を1つの接続にする。連携の管理者が作り、範囲は
+    持たない（使ってよい範囲は、この接続の上に登録する対話の出口が持つ。authorization.md §5.5）。
+
+    - `secrets`：資格情報（Slackは bot_token・signing_secret）のJSON。暗号化して保存し、画面・ログには出さない
+    - `workspace_id`・`workspace_name`・`bot_user_id`：作るときと資格情報を変えるときに確かめた接続先。受信の照合と、
+      bot自身の投稿の除外に使う
+    """
+
+    uid = NanoidField(unique=True)
+    # 使うAdapter（Pluginのextension_id。例：yoriki.channel.slack）。作成した後は変えない
+    extension = models.CharField(_("種類"), max_length=200)
+    name = models.CharField(_("名前"), max_length=100)
+    secrets = EncryptedSecretField(_("資格情報"))
+    workspace_id = models.CharField(_("Workspace等のID"), max_length=100)
+    workspace_name = models.CharField(_("Workspace等の名前"), max_length=200, blank=True)
+    bot_user_id = models.CharField(_("botのユーザーID"), max_length=100, blank=True)
+    # 停止。投稿も受信もしない（まだ送っていない配信は、送る直前に取り消す）
+    suspended = models.BooleanField(_("停止中"), default=False)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+", verbose_name=_("作成者")
+    )
+
+    created = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated = models.DateTimeField(auto_now=True)
+    deleted = models.BooleanField(default=False)
+
+    objects = ChannelConnectionQuerySet.as_manager()
+
+    class Meta:
+        verbose_name = _("連携の接続")
+        verbose_name_plural = verbose_name
+
+    def __str__(self):
+        return self.name
+
+    def secret_values(self) -> dict[str, str]:
+        raw = self.secrets.reveal()
+        try:
+            values = json.loads(raw) if raw else {}
+        except ValueError:
+            return {}
+        return {str(k): str(v) for k, v in values.items()} if isinstance(values, dict) else {}
+
+    def in_service(self) -> bool:
+        return not self.deleted and not self.suspended and registry.is_available(self.extension)
+
+    @property
+    def extension_name(self) -> str:
+        return registry.display_name(self.extension)
+
+
 # 署名の鍵の形（Standard Webhooks。`whsec_` とbase64の鍵）
 SIGNING_SECRET_PREFIX = "whsec_"
 
@@ -73,7 +138,8 @@ class DestinationQuerySet(models.QuerySet):
             deleted=False,
             suspended=False,
             current_revision__isnull=False,
-            extension__in=registry.available_ids(ExtensionType.NOTIFICATION),
+            extension__in=registry.available_ids(ExtensionType.NOTIFICATION)
+            | registry.available_ids(ExtensionType.CHANNEL),
         )
 
 
@@ -166,8 +232,14 @@ class Destination(models.Model):
 
     @property
     def is_external(self) -> bool:
-        """外へ送る（宛先のURLを持つ）種類か"""
-        return registry.has_capability(self.extension, builtin.URL)
+        """外へ送る種類か（宛先のURLを持つもの、対話の出口）"""
+        return registry.has_capability(self.extension, builtin.URL) or self.is_channel
+
+    @property
+    def is_channel(self) -> bool:
+        """対話の出口（Slack等のチャネル。design.md §4.6）か"""
+        found = registry.declared(self.extension)
+        return found is not None and found[0].type == ExtensionType.CHANNEL
 
     def allowed_for(self, task) -> bool:
         """このタスクの範囲で使ってよい出口か（停止・削除は見ない）。タスクは保存前でもよい"""
@@ -182,15 +254,25 @@ class Destination(models.Model):
         """このタスクのRunが今この出口へ送れない理由（送れれば空文字）"""
         if self.deleted:
             return gettext("出口が削除されました")
-        if self.suspended or self.current_revision is None:
-            return gettext("出口が停止中です")
-        if not registry.is_available(self.extension):
-            return gettext("出口の種類（Plugin）が停止中です")
+        if problem := self._service_problem():
+            return problem
+        assert self.current_revision is not None  # _service_problem() が確かめた
         if task is None or not self.allowed_for(task):
             return gettext("出口がタスクの範囲で使えなくなりました")
         # 画面の通知は認証の要る画面の中だけで、受け手をRunの結果を見られる人に限るので、機密のタスクにも使える
         if sensitive and self.is_external and not self.current_revision.allows_sensitive_results:
             return gettext("出口が機密の結果を送ってよい先ではありません")
+        return ""
+
+    def _service_problem(self) -> str:
+        """停止中・版がない・Pluginや連携の接続が停止中なら、その理由"""
+        if self.suspended or self.current_revision is None:
+            return gettext("出口が停止中です")
+        if not registry.is_available(self.extension):
+            return gettext("出口の種類（Plugin）が停止中です")
+        connection = self.current_revision.connection
+        if connection is not None and (connection.deleted or connection.suspended):
+            return gettext("出口の連携の接続が停止中です")
         return ""
 
     @classmethod
@@ -278,7 +360,7 @@ class Destination(models.Model):
 
 
 # 出口の版に入れる項目。変えると新しい版になる
-DESTINATION_REVISION_FIELDS = ("url", "allows_sensitive_results")
+DESTINATION_REVISION_FIELDS = ("url", "allows_sensitive_results", "connection", "channel_id", "channel_name")
 
 
 class DestinationRevision(models.Model):
@@ -287,6 +369,8 @@ class DestinationRevision(models.Model):
     - `url`：送り先（ZapierのCatch HookのURL等）。URLそのものが送るための資格情報になる送り先があるので、暗号化して
       保存し、画面・ログ・LLMには出さない（design.md §4.4）
     - `allows_sensitive_results`：機密のタスクの結果を送ってよい（出口の機密のフラグ。design.md §4冒頭）
+    - `connection`・`channel_id`・`channel_name`：対話の出口（Slack等）の接続とチャネル。表示名は選ぶためだけに使い、
+      実行時はIDを使う（design.md §4.6）。ほかの出口では空
     """
 
     uid = NanoidField(unique=True)
@@ -296,6 +380,16 @@ class DestinationRevision(models.Model):
     number = models.PositiveIntegerField(_("版"))
     url = EncryptedSecretField(_("送り先のURL"))
     allows_sensitive_results = models.BooleanField(_("機密の結果を送ってよい"), default=False)
+    connection = models.ForeignKey(
+        ChannelConnection,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="destination_revisions",
+        verbose_name=_("連携の接続"),
+    )
+    channel_id = models.CharField(_("チャネルのID"), max_length=100, blank=True)
+    channel_name = models.CharField(_("チャネルの名前"), max_length=200, blank=True)
     change_reason = models.CharField(_("変更理由"), max_length=500, blank=True)
     # 個人の画面の通知（Yorikiが作る）では空
     created_by = models.ForeignKey(
@@ -321,9 +415,13 @@ class DestinationRevision(models.Model):
 
     def same_content(self, fields: dict[str, Any]) -> bool:
         # URLは暗号文が毎回変わるので、平文で比べる
+        connection = fields.get("connection")
         return (
             self.url.reveal() == str(fields["url"])
             and self.allows_sensitive_results == fields["allows_sensitive_results"]
+            and self.connection_id == (connection.pk if connection is not None else None)
+            and self.channel_id == fields.get("channel_id", "")
+            and self.channel_name == fields.get("channel_name", "")
         )
 
     @property
@@ -364,10 +462,21 @@ class Delivery(models.Model):
     run_event = models.ForeignKey(
         "run.RunEvent", on_delete=models.PROTECT, related_name="+", verbose_name=_("Runのイベント")
     )
-    event_type = models.CharField(_("イベント"), max_length=30, choices=NotifyEvent.choices)
+    event_type = models.CharField(_("イベント"), max_length=30, choices=NotifyEvent.choices + ChannelEvent.choices)
     destination_revision = models.ForeignKey(
         DestinationRevision, on_delete=models.PROTECT, related_name="deliveries", verbose_name=_("出口の版")
     )
+    # 対話の出口の、質問・回答の受付の対象の確認（design.md §4.7）
+    clarification = models.ForeignKey(
+        "run.ClarificationRequest",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="deliveries",
+        verbose_name=_("確認"),
+    )
+    # 対話の出口へ投稿したメッセージの参照（Slackのts。質問のメッセージの書き換えに使う）
+    external_ref = models.CharField(_("投稿したメッセージ"), max_length=100, blank=True)
     status = models.PositiveSmallIntegerField(_("状態"), choices=DeliveryStatus.choices, default=DeliveryStatus.PENDING)
     payload = models.JSONField(_("送る内容"))
     attempt_count = models.PositiveIntegerField(_("送った回数"), default=0)
@@ -408,6 +517,11 @@ class Delivery(models.Model):
         current.status = DeliveryStatus.PENDING
         current.next_attempt = None
         current.retry_from = current.attempt_count
+        # スレッドの親メッセージを送ったか分からず止まっていたなら、人が確かめて送り直すので、作り直してよいことにする
+        # （design.md §4.7。同じRunに有効なスレッドを2つ作らないよう、人が判断する）
+        ExternalThreadBinding.objects.filter(run_id=current.run_id, status=ThreadStatus.UNKNOWN).update(
+            status=ThreadStatus.PENDING, updated=timezone.now()
+        )
         current.save(update_fields=["status", "next_attempt", "retry_from", "updated"])
         self.status, self.next_attempt, self.retry_from = current.status, None, current.retry_from
         return ""
@@ -549,5 +663,113 @@ class Notification(models.Model):
         return f"{self.user_id} {self.task_name} {self.event_type}"
 
 
+class ThreadStatus(models.IntegerChoices):
+    PENDING = 1, _("作成待ち")
+    CREATED = 2, _("作成済み")
+    # 親メッセージを送ったか分からない。自動では作り直さない（design.md §4.7）
+    UNKNOWN = 3, _("確認待ち")
+
+
+class ExternalThreadBinding(models.Model):
+    """Runと対話の出口のスレッドの対応（design.md §4.7）。1つのRunに1つ。最初の質問（質問がなければ報告）のときに
+    親メッセージを投稿して作り、再質問・Attemptの変更で作り直さない。受信は接続・チャネル・親メッセージで引く"""
+
+    run = models.OneToOneField(
+        "run.Run", on_delete=models.CASCADE, related_name="external_thread", verbose_name=_("実行")
+    )
+    destination_revision = models.ForeignKey(
+        DestinationRevision, on_delete=models.PROTECT, related_name="+", verbose_name=_("対話の出口の版")
+    )
+    connection = models.ForeignKey(
+        ChannelConnection, on_delete=models.PROTECT, related_name="threads", verbose_name=_("連携の接続")
+    )
+    channel_id = models.CharField(_("チャネルのID"), max_length=100)
+    # 親メッセージの参照（Slackのts）。作成済みのときだけ
+    thread_ref = models.CharField(_("スレッド"), max_length=100, blank=True)
+    status = models.PositiveSmallIntegerField(_("状態"), choices=ThreadStatus.choices, default=ThreadStatus.PENDING)
+    # ボタンで選んで、まだ確定していない選択（{"<確認のID>": [[ラベル...], ...]}）
+    selections = models.JSONField(_("選んでいる選択肢"), default=dict, blank=True)
+
+    created = models.DateTimeField(auto_now_add=True)
+    updated = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = _("対話のスレッド")
+        verbose_name_plural = verbose_name
+        constraints = [
+            models.UniqueConstraint(
+                fields=["connection", "channel_id", "thread_ref"],
+                condition=~Q(thread_ref=""),
+                name="uniq_external_thread",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.run_id} {self.channel_id} {self.thread_ref}"
+
+
+class ReceiptKind(models.TextChoices):
+    REPLY = "reply", _("返信")
+    SELECT = "select", _("選択")
+    SUBMIT = "submit", _("回答の送信")
+
+
+class ReceiptResult(models.IntegerChoices):
+    RECEIVED = 1, _("受付")
+    APPLIED = 10, _("回答に確定")
+    SELECTED = 11, _("選択を保持")
+    REJECTED = 20, _("受け付けない")
+    UNMATCHED = 21, _("照合できない")
+    IGNORED = 22, _("取り込まない")
+
+
+class ChannelMessageReceipt(models.Model):
+    """対話の出口から受信した返信・ボタンの記録（design.md §4.7）。受け口で記録してすぐに応答し、照合と回答の適用は
+    qclusterで行う。同じ出来事（重複のキー）は1回だけ記録する"""
+
+    connection = models.ForeignKey(
+        ChannelConnection, on_delete=models.PROTECT, related_name="receipts", verbose_name=_("連携の接続")
+    )
+    kind = models.CharField(_("種類"), max_length=10, choices=ReceiptKind.choices)
+    dedup_key = models.CharField(_("重複のキー"), max_length=200)
+    workspace_id = models.CharField(_("Workspace等のID"), max_length=100, blank=True)
+    channel_id = models.CharField(_("チャネルのID"), max_length=100, blank=True)
+    thread_ref = models.CharField(_("スレッド"), max_length=100, blank=True)
+    message_ref = models.CharField(_("メッセージ"), max_length=100, blank=True)
+    user_id = models.CharField(_("投稿者のID"), max_length=100, blank=True)
+    user_name = models.CharField(_("投稿者の表示名"), max_length=200, blank=True)
+    is_bot = models.BooleanField(_("botの投稿"), default=False)
+    # 返信の文、ボタンの確認のIDと番号
+    text = models.TextField(_("本文"), blank=True)
+    action = models.JSONField(_("ボタン"), default=dict, blank=True)
+    run = models.ForeignKey(
+        "run.Run", on_delete=models.SET_NULL, null=True, blank=True, related_name="+", verbose_name=_("実行")
+    )
+    clarification = models.ForeignKey(
+        "run.ClarificationRequest",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("対象の確認"),
+    )
+    result = models.PositiveSmallIntegerField(_("結果"), choices=ReceiptResult.choices, default=ReceiptResult.RECEIVED)
+    reason = models.CharField(_("理由"), max_length=300, blank=True)
+
+    created = models.DateTimeField(auto_now_add=True, db_index=True)
+    processed = models.DateTimeField(_("処理した日時"), null=True, blank=True)
+
+    class Meta:
+        verbose_name = _("対話の受信")
+        verbose_name_plural = verbose_name
+        constraints = [
+            models.UniqueConstraint(fields=["connection", "dedup_key"], name="uniq_channel_receipt"),
+        ]
+
+    def __str__(self):
+        return f"{self.connection_id} {self.dedup_key}"
+
+
+auditlog.register(ChannelConnection, exclude_fields=["secrets", "updated"])
 auditlog.register(Destination, exclude_fields=["signing_secret", "updated"])
 auditlog.register(DestinationRevision, exclude_fields=["url"])

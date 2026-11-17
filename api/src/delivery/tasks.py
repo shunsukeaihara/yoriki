@@ -18,6 +18,8 @@ from plugin.errors import PluginError, PluginTemporaryError, PluginUnavailable
 from plugin.observe import observed
 
 from .adapters import DeliveryRequest, Outcome, adapter_for
+from .channels.base import ChannelAdapter
+from .channels.outbound import deliver_channel
 from .checks import send_problem
 from .models import SENDABLE_STATUSES, AttemptOutcome, Delivery, DeliveryAttempt, DeliveryStatus
 from .outbox import send_later
@@ -44,6 +46,12 @@ def send_delivery(delivery_id: int) -> None:
     extension_id = delivery.destination_revision.destination.extension
     try:
         adapter = adapter_for(extension_id)
+        if isinstance(adapter, ChannelAdapter):
+            # 対話の出口（Slack等）。スレッドの作成と投稿・書き換え（design.md §4.7）
+            with observed(extension_id):
+                outcome = deliver_channel(delivery, adapter)
+            _record(delivery.pk, attempt.pk, outcome)
+            return
         payload = delivery.payload
         if registry.has_capability(extension_id, builtin.URL):
             # ファイルのURLは送るたびに発行する（期限が短いので、送り直しでも新しくする。design.md §4.5）
@@ -108,6 +116,10 @@ def _record(delivery_id: int, attempt_id: int, outcome: Outcome) -> None:
     attempt.error = outcome.error[:500]
     attempt.finished = now
     attempt.save(update_fields=["outcome", "http_status", "error", "finished"])
+    if outcome.message_ref and not delivery.external_ref:
+        # 対話の出口へ投稿したメッセージ（質問のメッセージの書き換えに使う）
+        delivery.external_ref = outcome.message_ref
+        delivery.save(update_fields=["external_ref", "updated"])
     if delivery.attempt_count != attempt.number:
         return  # 後の試行がもう始まっている（記録だけ残す）
     if delivery.status != DeliveryStatus.SENDING:

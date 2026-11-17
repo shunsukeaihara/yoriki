@@ -32,6 +32,7 @@ from conversation.models import (
     MessageRole,
     UserInstruction,
 )
+from delivery.channels.outbound import queue_question
 from llm.providers import get_adapter
 from llm.providers.base import (
     ChatRequest,
@@ -899,6 +900,9 @@ class Runner:
             tools = tuple(
                 t for t in tools if t.name not in ("ask_user", REQUEST_SKILL_EDIT.name, REQUEST_TASK_EDIT.name)
             )
+        elif self.run_obj.has_channel:
+            # 対話の出口のあるタスクのRunでは、チャネルの参加者に尋ねるのは業務の質問だけ（design.md §4.7）
+            tools = tuple(t for t in tools if t.name not in (REQUEST_SKILL_EDIT.name, REQUEST_TASK_EDIT.name))
         if PREPARE_NOTIFICATION in tools and self._notification_closed():
             tools = tuple(t for t in tools if t is not PREPARE_NOTIFICATION)
         if self.run_obj.runtime_version_id is not None:
@@ -1045,7 +1049,8 @@ class Runner:
             self.attempt.heartbeat()
 
     def _handle_provider_failure(self, error: ProviderError) -> None:
-        if not (error.retryable and self.run_obj.is_interactive):
+        # モデルの切り替えはWebの画面でだけ答えられるので、対話の出口のあるタスクのRunでは尋ねずに失敗にする
+        if not (error.retryable and self.run_obj.is_interactive and not self.run_obj.has_channel):
             self._fail(RunEndReason.PROVIDER, error.message)
             return
         holding = self._prepare_to_wait_for_user()
@@ -1683,11 +1688,14 @@ class Runner:
                 expires=timezone.now() + CLARIFICATION_TTL,
             )
             ToolInvocation.objects.filter(pk=invocation.pk).update(value={"clarification": clarification.uid})
-            RunEvent.record(
+            requested = RunEvent.record(
                 run,
                 RunEventKind.CLARIFICATION_REQUESTED,
                 {"clarification": clarification.uid, "kind": clarification.kind, "questions": clarification.questions},
             )
+            if run.has_channel and clarification.kind == ClarificationKind.QUESTION:
+                # 対話の出口のスレッドへ質問を送る。WAITING_USERと同じtransactionで配信を作る（design.md §4.7）
+                queue_question(run, requested, clarification)
             if clarification.kind == ClarificationKind.EVALUATION:
                 # 評価が先に終わっていれば、ここで結果を返す（harness.md §10.9）
                 evaluation = SkillEvaluation.objects.get(uid=clarification.context["evaluation"])

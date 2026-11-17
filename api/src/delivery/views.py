@@ -13,6 +13,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet, ModelViewSet, ReadOnlyModelViewSet
 
+from plugin import registry
+from plugin.spec import ExtensionType
 from run.models import Run
 from task.models import SCOPE_PERMISSIONS
 from task.views import TaskMixin
@@ -22,9 +24,11 @@ from utils.permissions import AppUser, ModelPermissions
 from utils.views import SoftDeleteMixin
 
 from .files import FileRefused, fetch_file
-from .models import Delivery, Destination, DestinationRevision, DestinationScope, Notification
+from .models import ChannelConnection, Delivery, Destination, DestinationRevision, DestinationScope, Notification
 from .outbox import enqueue_delivery
 from .serializers import (
+    ChannelConnectionSerializer,
+    ChannelConnectionUpdateSerializer,
     DeliverySerializer,
     DestinationChoiceSerializer,
     DestinationRevisionSerializer,
@@ -147,6 +151,60 @@ class DestinationViewSet(SoftDeleteMixin, ModelViewSet):
         return Response(output(destination, context=self.get_serializer_context()).data)
 
 
+@extend_schema(
+    description="連携の接続（Slackのアプリ等）の一覧・作成・変更・停止・削除（連携の管理者。design.md §4.6、"
+    "authorization.md §5.5）。資格情報は書くだけで返さない",
+    tags=["manage/channel_connection"],
+)
+@extend_schema_view(
+    update=extend_schema(request=ChannelConnectionUpdateSerializer, responses=ChannelConnectionSerializer),
+    partial_update=extend_schema(request=ChannelConnectionUpdateSerializer, responses=ChannelConnectionSerializer),
+    destroy=extend_schema(description="接続を消す。この接続を使う出口が残っていれば断る（400）"),
+)
+class ChannelConnectionViewSet(SoftDeleteMixin, ModelViewSet):
+    permission_classes = [ModelPermissions]
+    action_permissions = {"suspend": "change", "resume": "change"}
+    lookup_field = "uid"
+    queryset = ChannelConnection.objects.alive().select_related("created_by")
+    serializer_class = ChannelConnectionSerializer
+    filterset_fields = ["extension", "suspended"]
+    search_fields = ("name",)
+    ordering = ("name", "pk")
+
+    def get_serializer_class(self):
+        if self.action in ("update", "partial_update"):
+            return ChannelConnectionUpdateSerializer
+        return super().get_serializer_class()
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
+
+    def perform_destroy(self, instance):
+        used = Destination.objects.alive().filter(current_revision__connection=instance)
+        if used.exists():
+            names = "、".join(used.values_list("name", flat=True)[:5])
+            raise ValidationError(
+                {"non_field_errors": [f"この接続を使う出口があります（{names}）。先に出口を消してください"]}
+            )
+        super().perform_destroy(instance)
+
+    @extend_schema(description="停止する。投稿も受信もしない", request=None, responses=ChannelConnectionSerializer)
+    @action(detail=True, methods=["post"])
+    def suspend(self, request, *args, **kwargs):
+        return self._set_suspended(True)
+
+    @extend_schema(description="停止を解く", request=None, responses=ChannelConnectionSerializer)
+    @action(detail=True, methods=["post"])
+    def resume(self, request, *args, **kwargs):
+        return self._set_suspended(False)
+
+    def _set_suspended(self, suspended: bool) -> Response:
+        connection = self.get_object()
+        connection.suspended = suspended
+        connection.save(update_fields=["suspended", "updated"])
+        return Response(ChannelConnectionSerializer(connection, context=self.get_serializer_context()).data)
+
+
 @extend_schema(description="出口の版の履歴", tags=["manage/destination/revision"])
 class DestinationRevisionViewSet(ReadOnlyModelViewSet):
     permission_classes = [ModelPermissions]
@@ -182,6 +240,7 @@ def choosable_condition(user) -> Q:
     parameters=[
         OpenApiParameter("scope", int, description="タスクの範囲（1：個人、2：部門、3：全社、4：システム）"),
         OpenApiParameter("department", str, description="部門のID（部門の範囲のとき）"),
+        OpenApiParameter("channel", str, description="true：対話の出口（Slack等）だけ、false：結果の通知の出口だけ"),
     ],
 )
 class AppDestinationViewSet(mixins.ListModelMixin, GenericViewSet):
@@ -202,6 +261,10 @@ class AppDestinationViewSet(mixins.ListModelMixin, GenericViewSet):
             qs = qs.filter(scope=scope) if scope.isdigit() else qs.none()
         if department := self.request.query_params.get("department"):
             qs = qs.filter(department__uid=department)
+        channel = self.request.query_params.get("channel")
+        if channel in ("true", "false"):
+            channels = registry.available_ids(ExtensionType.CHANNEL)
+            qs = qs.filter(extension__in=channels) if channel == "true" else qs.exclude(extension__in=channels)
         return qs
 
 

@@ -256,6 +256,15 @@ class Run(models.Model):
         related_name="+",
         verbose_name=_("結果の通知先の版"),
     )
+    # 受付時に固定した対話の出口の版（タスクの版で対話の出口を設定したとき。design.md §4.6）
+    interaction_revision = models.ForeignKey(
+        "delivery.DestinationRevision",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("対話の出口の版"),
+    )
 
     created = models.DateTimeField(auto_now_add=True, db_index=True)
     updated = models.DateTimeField(auto_now=True)
@@ -316,9 +325,15 @@ class Run(models.Model):
 
     @property
     def is_interactive(self) -> bool:
-        """答える人がいる（会話のRunと、修正チャットのタスクのRun）。ほかのタスクのRunは、対話Bindingがある場合だけ
-        （後で加える）。答える人がいないRunは続きがないので、Workspaceを保存しない（design.md §7.9・§8）"""
-        return self.trigger == RunTrigger.CONVERSATION or self.is_task_fix
+        """答える人がいる（会話のRun、修正チャットのタスクのRun、対話の出口のあるタスクのRun）。答える人がいないRunは
+        続きがないので、Workspaceを保存しない（design.md §7.9・§8）"""
+        return self.trigger == RunTrigger.CONVERSATION or self.is_task_fix or self.has_channel
+
+    @property
+    def has_channel(self) -> bool:
+        """対話の出口（Slack等のスレッド）で質問・回答するタスクのRun（design.md §4.6）。答えるのはチャネルの参加者と
+        Runの画面を見られる人で、尋ねるのは ask_user だけ（Skill・タスクの編集やモデルの切り替えは尋ねない）"""
+        return self.interaction_revision_id is not None
 
     @property
     def is_task_fix(self) -> bool:
@@ -413,6 +428,11 @@ class Run(models.Model):
                 from delivery.outbox import queue_deliveries  # noqa: PLC0415  deliveryがrunのModelを参照するため
 
                 queue_deliveries(self, event)
+            if self.has_channel:
+                # 対話の出口のスレッドへ報告する（design.md §4.6）
+                from delivery.channels.outbound import queue_report  # noqa: PLC0415
+
+                queue_report(self, event)
             if self.kind in (RunKind.EVALUATION, RunKind.SKILL_EDIT):
                 # 評価のRunが終わったら評価を進め、編集のRunが終わったら待っている評価を止める（design.md §3.7.1）
                 from conversation.evaluation import on_run_finished  # noqa: PLC0415
@@ -768,6 +788,9 @@ class ClarificationRequest(models.Model):
     answered_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, null=True, blank=True, verbose_name=_("回答者")
     )
+    # 対話の出口（Slack等）で答えた人（{"provider", "user_id", "name"}）。Yorikiのユーザーには結び付けない
+    # （design.md §4.7）。Webで答えたときは空で、`answered_by` を使う
+    answered_external = models.JSONField(_("外部の回答者"), default=dict, blank=True)
     answered = models.DateTimeField(_("回答日時"), null=True, blank=True)
     expires = models.DateTimeField(_("回答期限"), null=True, blank=True)
 
@@ -782,9 +805,16 @@ class ClarificationRequest(models.Model):
 
     @transaction.atomic
     def accept_answer(
-        self, answers: list[dict[str, Any]], comment: str, actor, *, attachments: list[dict[str, Any]] | None = None
+        self,
+        answers: list[dict[str, Any]],
+        comment: str,
+        actor,
+        *,
+        attachments: list[dict[str, Any]] | None = None,
+        external: dict[str, str] | None = None,
     ) -> None:
-        """回答を保存し、同じtransactionでRunを再キューする。`attachments` は回答に添えた添付の一覧"""
+        """回答を保存し、同じtransactionでRunを再キューする。`attachments` は回答に添えた添付の一覧。`external` は
+        対話の出口（Slack等）で答えた人（`actor` はNone。design.md §4.7）"""
         from .dispatch import enqueue_run  # noqa: PLC0415  dispatchがこのModelをimportするため
 
         run = Run.locked(self.run_id)
@@ -796,12 +826,22 @@ class ClarificationRequest(models.Model):
         self.comment = comment
         self.answered_by = actor
         self.answered = timezone.now()
-        self.save(update_fields=["status", "answers", "comment", "answered_by", "answered"])
+        self.answered_external = external or {}
+        self.save(update_fields=["status", "answers", "comment", "answered_by", "answered", "answered_external"])
         self.run = run
-        data: dict[str, Any] = {"clarification": self.uid, "answers": answers, "comment": comment}
-        if attachments:
-            data["attachments"] = attachments
-        RunEvent.record(run, RunEventKind.CLARIFICATION_ANSWERED, data, actor=actor)
+        data: dict[str, Any] = {
+            "clarification": self.uid,
+            "answers": answers,
+            "comment": comment,
+            **({"attachments": attachments} if attachments else {}),
+            **({"external": external} if external else {}),
+        }
+        answered_event = RunEvent.record(run, RunEventKind.CLARIFICATION_ANSWERED, data, actor=actor)
+        if run.has_channel and self.kind == ClarificationKind.QUESTION:
+            # 対話の出口の質問のメッセージを、確定した回答の形に書き換える（Webで答えたときも。design.md §4.7）
+            from delivery.channels.outbound import queue_answered  # noqa: PLC0415  deliveryがrunのModelを参照するため
+
+            queue_answered(run, answered_event, self)
         if self.kind == ClarificationKind.QUESTION:
             # ask_user の呼出しへの結果として記録する。呼出しの直後に結果がある形になる（harness.md §10.3）
             from harness.tools.ask_user import answer_result  # noqa: PLC0415  harnessがrunのModelを使うため

@@ -26,6 +26,9 @@ def send_problem(delivery: Delivery) -> str:
         and not delivery.destination_revision.allows_sensitive_results
     ):
         problem = _("出口が機密の結果を送ってよい先ではありません")
+    connection = delivery.destination_revision.connection
+    if not problem and connection is not None and (connection.deleted or connection.suspended):
+        problem = _("出口の連携の接続が停止中です")
     problem = problem or task_problem(run.task)
     if not problem and run.launch == RunLaunch.CHAT:
         # チャットから起動したRunは、起動した人が今も有効で起動できる立場かも確かめる（authorization.md §6）

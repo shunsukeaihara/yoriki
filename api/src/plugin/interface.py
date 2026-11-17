@@ -18,6 +18,7 @@ BASES: dict[ExtensionType, str] = {
     ExtensionType.NOTIFICATION: "delivery.adapters.NotificationAdapter",
     ExtensionType.STORAGE: "artifact.storage.StorageBackend",
     ExtensionType.CONNECTOR: "connector.adapters.base.DatasourceAdapter",
+    ExtensionType.CHANNEL: "delivery.channels.base.ChannelAdapter",
 }
 
 

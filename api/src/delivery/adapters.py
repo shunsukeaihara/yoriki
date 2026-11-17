@@ -27,6 +27,7 @@ from .models import SIGNING_SECRET_PREFIX, AttemptOutcome
 from .network import BlockedAddress, IPAddress, ResolutionFailed, check_url, resolve
 
 if TYPE_CHECKING:
+    from .channels.base import ChannelAdapter
     from .models import Delivery
 
 logger = logging.getLogger(__name__)
@@ -48,6 +49,8 @@ class Outcome:
     retry_after: int | None = None
     # 接続できず、何も送っていない（ほかのアドレスを試してよい）
     not_sent: bool = False
+    # 対話の連携で、投稿したメッセージの参照（Slackのts）。書き換え・スレッドの親に使う
+    message_ref: str = ""
 
 
 def sign(secret: str, message_id: str, timestamp: int, body: bytes) -> str:
@@ -196,7 +199,7 @@ class ZapierAdapter(WebhookAdapter):
         return parts
 
 
-def adapter_for(extension_id: str) -> NotificationAdapter:
-    """出口のAdapter。停止中・配備されていないPluginは PluginUnavailable"""
+def adapter_for(extension_id: str) -> "NotificationAdapter | ChannelAdapter":
+    """出口のAdapter（対話の出口ではChannelAdapter）。停止中・配備されていないPluginは PluginUnavailable"""
     extension, _spec = registry.get(extension_id)
     return extension.adapter()

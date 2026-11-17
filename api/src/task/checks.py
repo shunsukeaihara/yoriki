@@ -163,6 +163,7 @@ def content_errors(task: TaskLike, content: dict[str, Any]) -> dict[str, list[st
     _check_skills(task, content, skills, errors)
     _check_model(content, skills, errors)
     _check_notification(task, content, errors)
+    _check_interaction(task, content, errors)
     names = {i["name"] for i in content["inputs"]}
     if unknown := [name for name in placeholders(content["prompt_template"]) if name not in names]:
         errors.add(
@@ -242,6 +243,9 @@ def _check_notification(task: TaskLike, content: dict[str, Any], errors: Errors)
         if content["notify_events"]:
             errors.add("destination", _("通知するイベントを選んだときは、通知先を選んでください"))
         return
+    if destination.is_channel:
+        errors.add("destination", _("対話の出口（チャネル）は、結果の通知先には選べません。対話の出口に選んでください"))
+        return
     if not content["notify_events"]:
         errors.add("notify_events", _("通知するイベントを選んでください"))
     if problem := destination.problem_for(task, sensitive=content["handles_sensitive_data"]):
@@ -251,11 +255,31 @@ def _check_notification(task: TaskLike, content: dict[str, Any], errors: Errors)
         )
 
 
+def _check_interaction(task: TaskLike, content: dict[str, Any], errors: Errors) -> None:
+    """対話の出口が、対話の出口の種類で、タスクの範囲で使えて、機密の区分に合うか（design.md §4.6）"""
+    destination: Destination | None = content["interaction_destination"]
+    if destination is None:
+        return
+    if not destination.is_channel:
+        errors.add("interaction_destination", _("対話の出口には、Slack等のチャネルの出口を選んでください"))
+        return
+    if problem := destination.problem_for(task, sensitive=content["handles_sensitive_data"]):
+        errors.add(
+            "interaction_destination",
+            _("対話の出口「%(name)s」は使えません（%(reason)s）") % {"name": destination.name, "reason": problem},
+        )
+
+
 def notifies_failure(revision: Any) -> bool:
-    """失敗を知らせる先がある（Webhookで起動するタスクに必須。design.md §4.2）。`revision` は版か版の中身の辞書"""
+    """失敗を知らせる先がある（Webhookで起動するタスクに必須。design.md §4.2）。`run.failed` を含む結果の通知か、
+    対話の出口（失敗をスレッドへ報告する。design.md §4.6）。`revision` は版か版の中身の辞書"""
     if isinstance(revision, dict):
-        return revision["destination"] is not None and NotifyEvent.FAILED in revision["notify_events"]
-    return revision.destination_id is not None and NotifyEvent.FAILED in revision.notify_events
+        return revision.get("interaction_destination") is not None or (
+            revision["destination"] is not None and NotifyEvent.FAILED in revision["notify_events"]
+        )
+    return revision.interaction_destination_id is not None or (
+        revision.destination_id is not None and NotifyEvent.FAILED in revision.notify_events
+    )
 
 
 def _check_model(content: dict[str, Any], skills: dict[str, tuple[Skill, SkillVersion | None]], errors: Errors) -> None:

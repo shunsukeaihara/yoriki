@@ -51,6 +51,11 @@ export const PermissionCode = {
   ADD_DESTINATION: 'delivery.add_destination',
   CHANGE_DESTINATION: 'delivery.change_destination',
   DELETE_DESTINATION: 'delivery.delete_destination',
+  // 連携の接続（Slackのアプリ等。連携の管理者。design.md §4.6）
+  VIEW_CHANNEL_CONNECTION: 'delivery.view_channelconnection',
+  ADD_CHANNEL_CONNECTION: 'delivery.add_channelconnection',
+  CHANGE_CHANNEL_CONNECTION: 'delivery.change_channelconnection',
+  DELETE_CHANNEL_CONNECTION: 'delivery.delete_channelconnection',
   // 予算（予算の管理者。design.md §9.1）
   VIEW_BUDGET: 'usage.view_budget',
   CHANGE_BUDGET: 'usage.change_budget',

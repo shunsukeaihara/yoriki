@@ -18,7 +18,7 @@ const props = withDefaults(
   }>(),
   { showLog: true, events: undefined, delta: undefined, clarifications: undefined },
 )
-const emit = defineEmits<{ answered: [value: Clarification] }>()
+const emit = defineEmits<{ answered: [value: Clarification]; conflicted: [] }>()
 const api = useAPI()
 
 const active = computed(() => isActiveRun(props.run))
@@ -344,6 +344,7 @@ const unsentNotice = computed(() => {
         :run-id="run.id"
         :clarification="clarification"
         @answered="emit('answered', $event)"
+        @conflicted="emit('conflicted')"
       />
     </template>
   </div>

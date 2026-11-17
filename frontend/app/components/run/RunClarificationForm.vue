@@ -1,11 +1,15 @@
 <script setup lang="ts">
+import { AxiosError } from 'axios'
+
 /**
  * エージェントからの確認（ask_user）、モデルにつながらないときの切り替えの確認、Skill の編集の提案の確認
  * （request_skill_edit。design.md §11.6）、タスクの定義を直す提案の確認（request_task_edit。design.md §11.11）に答える。
  * 質問ごとに選択肢から選ぶか自由記述で答え、全体の補足も書ける。回答を受け付けると Run が再開する。
+ * 別のタブや対話の出口（Slackのスレッド）から先に回答されていたら（409）、そのことを知らせて conflicted を出す
+ * （親が確認を読み直す）。
  */
 const props = defineProps<{ runId: string; clarification: Clarification }>()
-const emit = defineEmits<{ answered: [value: Clarification] }>()
+const emit = defineEmits<{ answered: [value: Clarification]; conflicted: [] }>()
 const toast = useToast()
 const { t } = useI18n()
 const api = useAPI()
@@ -37,8 +41,13 @@ const { onSubmit, loading, errors } = createSubmit({
     emit('answered', result)
     toast.add({ title: t('回答しました。作業を再開します'), color: 'success' })
   },
-  // 409（別のタブや外部のスレッドから先に回答された）も、DFormAlert に表示する
-  onError: () => {},
+  // 409（別のタブや外部のスレッドから先に回答された）は、知らせて読み直してもらう。ほかの誤りは DFormAlert に表示する
+  onError: (err) => {
+    if (err instanceof AxiosError && err.response?.status === 409) {
+      toast.add({ title: t('ほかの人が先に回答しました'), description: makeErrorMsg(err), color: 'warning' })
+      emit('conflicted')
+    }
+  },
 })
 
 // 回答の行ごとのエラーは、質問の欄ではなく先頭にまとめて出す

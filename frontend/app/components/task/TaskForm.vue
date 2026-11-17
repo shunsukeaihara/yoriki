@@ -28,6 +28,7 @@ const toForm = (task: TaskDetail) => ({
   notifyEvents: [...(task.notifyEvents ?? [])] as string[],
   notifyContent: task.notifyContent,
   notificationInstructions: task.notificationInstructions ?? '',
+  interactionDestination: task.interactionDestination ?? null,
   hourlyRunsLimit: task.hourlyRunsLimit ?? null,
   concurrentRunsLimit: task.concurrentRunsLimit ?? null,
   changeReason: '',
@@ -81,8 +82,12 @@ const { items: skillChoices, fetchAll: fetchSkills } = useFetchAll(() => api.tas
 const { items: connectorChoices, fetchAll: fetchConnectors } = useFetchAll(() =>
   api.tasks().connectorChoices(choiceParams),
 )
+// 結果の通知の出口と、対話の出口（Slack等のチャネル。design.md §4.6）は、候補を分けて読む
 const { items: destinationChoices, fetchAll: fetchDestinations } = useFetchAll(() =>
-  api.destinations.list(choiceParams),
+  api.destinations.list({ ...choiceParams, channel: false }),
+)
+const { items: interactionChoices, fetchAll: fetchInteractionDestinations } = useFetchAll(() =>
+  api.destinations.list({ ...choiceParams, channel: true }),
 )
 const models = ref<AppModelProfile[]>([])
 // 候補は、開いたときと、タスクを読み直したとき（保存・最新の状態の読み込み）に読む（その間に公開された版等を出す）
@@ -92,6 +97,7 @@ const loadChoices = async () => {
       fetchSkills(),
       fetchConnectors(),
       fetchDestinations(),
+      fetchInteractionDestinations(),
       api.modelProfiles.list().then((list) => (models.value = list)),
     ])
   } catch (err) {
@@ -137,16 +143,20 @@ watch(
   },
 )
 
-const destinationItems = computed(() => {
-  const items = destinationChoices.value.map((d) => ({
+/** 出口の選択肢。候補にない（停止・削除・範囲の外になった）登録済みのものも、外せるように出す */
+const destinationItemsOf = (choices: DestinationChoice[], current: DestinationChoice | null | undefined) => {
+  const items = choices.map((d) => ({
     value: d.id,
     title: d.allowsSensitiveResults ? `${d.name}（${t('機密の結果を送れます')}）` : d.name,
   }))
-  const current = props.task.destinationInfo
   if (current && !items.some((i) => i.value === current.id))
     items.push({ value: current.id, title: `${current.name}（${t('このタスクでは使えません')}）` })
   return items
-})
+}
+const destinationItems = computed(() => destinationItemsOf(destinationChoices.value, props.task.destinationInfo))
+const interactionItems = computed(() =>
+  destinationItemsOf(interactionChoices.value, props.task.interactionDestinationInfo),
+)
 watch(
   () => form.value.destination,
   (value) => {
@@ -189,6 +199,7 @@ const { onSubmit, loading, errors } = createSubmit({
       notifyEvents: data.destination ? (data.notifyEvents as NotifyEventEnum[]) : [],
       notifyContent: data.notifyContent,
       notificationInstructions: data.notificationInstructions,
+      interactionDestination: data.interactionDestination,
       changeReason: data.changeReason,
     }),
   onSuccess: (result) => {
@@ -327,7 +338,9 @@ defineExpose({ onSubmit, loading, canPost, dirty, reset })
     <DFormSection
       :title="$t('結果の通知')"
       :description="
-        $t('通知先は連携の管理者が登録したものから選びます。Webhookの入口があるタスクは、失敗の通知が必要です')
+        $t(
+          '通知先は連携の管理者が登録したものから選びます。Webhookの入口があるタスクは、失敗の通知か対話の出口が必要です',
+        )
       "
     >
       <DSelect
@@ -366,6 +379,22 @@ defineExpose({ onSubmit, loading, canPost, dirty, reset })
           class="max-w-none"
         />
       </template>
+    </DFormSection>
+
+    <DFormSection :title="$t('対話の出口')">
+      <DSelect
+        v-model="form.interactionDestination"
+        :label="$t('対話の出口')"
+        :items="interactionItems"
+        clearable
+        :placeholder="$t('使わない')"
+        :hint="
+          $t(
+            'Slackのチャネルで、作業中の質問に答えてもらい、完了を報告します。チャネルの参加者が質問と結果を見られることを確かめてから選んでください。',
+          )
+        "
+        :error-messages="errors.interactionDestination"
+      />
     </DFormSection>
 
     <DFormSection

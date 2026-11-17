@@ -126,6 +126,10 @@ const onCreated = (task: TaskDetail) => navigateTo(`/tasks/${task.id}`)
               <span v-if="row.original.destinationInfo">
                 <UIcon name="i-lucide-send" class="align-middle" /> {{ row.original.destinationInfo.name }}
               </span>
+              <span v-if="row.original.interactionDestinationInfo">
+                <UIcon name="i-lucide-message-square" class="align-middle" />
+                {{ row.original.interactionDestinationInfo.name }}
+              </span>
             </div>
           </template>
           <template #updated-cell="{ row }">{{ formatDatetime(row.original.updated) }}</template>

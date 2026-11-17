@@ -425,6 +425,7 @@ const menuItems = computed(() => [
                     :delta="item.runId === activeRunId ? live.delta.value : undefined"
                     :clarifications="item.runId === activeRunId ? clarifications : undefined"
                     @answered="sync()"
+                    @conflicted="sync()"
                   />
                 </template>
                 <template v-else-if="item?.kind === 'message'">

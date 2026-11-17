@@ -71,4 +71,14 @@ describe('useManageMenu（連携）', () => {
     login([PermissionCode.ADD_DESTINATION])
     expect(useManageMenu().links.value).toEqual([])
   })
+
+  it('連携の接続は、出口の後に連携の接続のpermissionで出す', () => {
+    login([PermissionCode.VIEW_DESTINATION, PermissionCode.CHANGE_CHANNEL_CONNECTION])
+    expect(useManageMenu().links.value.map((link) => link.to)).toEqual([
+      '/manage/destinations',
+      '/manage/channel_connections',
+    ])
+    login([PermissionCode.ADD_CHANNEL_CONNECTION])
+    expect(useManageMenu().links.value).toEqual([])
+  })
 })

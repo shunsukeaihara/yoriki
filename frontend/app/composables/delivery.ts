@@ -43,6 +43,14 @@ export const destinationScopeItems = (t: T) => [
   { value: DestinationScope.SYSTEM, title: t('システム'), description: t('システムのタスクだけが使います') },
 ]
 
+/** 配信のイベントの名前（結果の通知と、対話の出口への質問・回答の受付。design.md §4.7） */
+export const deliveryEventItems = (t: T) =>
+  [
+    ...notifyEventItems(t),
+    { value: 'run.waiting_user', title: t('確認') },
+    { value: 'clarification.answered', title: t('回答の受付') },
+  ] satisfies { value: DeliveryEventTypeEnum; title: string }[]
+
 /** 停止の検索条件 */
 export const suspendedItems = (t: T) => [
   { value: false, title: t('動いているもの') },

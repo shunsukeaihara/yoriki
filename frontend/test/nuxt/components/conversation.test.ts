@@ -1,5 +1,6 @@
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
+import { AxiosError, AxiosHeaders } from 'axios'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ConversationAttachmentChips,
@@ -98,13 +99,18 @@ const clarification: Clarification = {
   answers: [],
   comment: '',
   answeredBy: null,
+  answeredByName: '',
+  answeredVia: '',
   answered: null,
   expires: null,
   created: '2026-10-21T00:00:00Z',
 }
 
 describe('RunClarificationForm', () => {
-  beforeEach(() => answer.mockReset().mockResolvedValue({ ...clarification, status: ClarificationStatus.ANSWERED }))
+  // mockReset() は mock を返すので、波括弧で包む（返した関数は、vitest が後始末として呼ぶ）
+  beforeEach(() => {
+    answer.mockReset().mockResolvedValue({ ...clarification, status: ClarificationStatus.ANSWERED })
+  })
 
   it('質問と同じ順に、選んだ選択肢と自由記述を送る', async () => {
     const wrapper = await mountSuspended(RunClarificationForm, { props: { runId: 'r1', clarification } })
@@ -126,6 +132,27 @@ describe('RunClarificationForm', () => {
       comment: '',
     })
     expect(wrapper.emitted('answered')).toHaveLength(1)
+  })
+
+  it('先に別の場所（Slack等）で回答されていたら（409）、知らせて読み直してもらう', async () => {
+    answer.mockReset().mockRejectedValue(
+      new AxiosError('Conflict', '409', undefined, undefined, {
+        status: 409,
+        data: { detail: 'この確認には、すでに回答があります' },
+        statusText: 'Conflict',
+        headers: { 'content-type': 'application/json' },
+        config: { headers: new AxiosHeaders() },
+      }),
+    )
+    const wrapper = await mountSuspended(RunClarificationForm, { props: { runId: 'r1', clarification } })
+    await wrapper.findAll('button[role="radio"]')[0]!.trigger('click')
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text() === '回答する')!
+      .trigger('click')
+    await flushPromises()
+    expect(wrapper.emitted('conflicted')).toHaveLength(1)
+    expect(wrapper.emitted('answered')).toBeUndefined()
   })
 })
 

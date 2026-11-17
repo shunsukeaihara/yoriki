@@ -2,7 +2,10 @@
 /**
  * 出口の作成と編集（連携の管理者。authorization.md §5.5、design.md §4.4）。種類・範囲・部門は作成した後は変えられない。
  * 送り先のURLと「機密の結果を送ってよい」を変えて保存すると新しい版になる。URLは書くだけで、サーバーはホストと
- * 末尾の4文字しか返さないので、編集では空欄なら変えない
+ * 末尾の4文字しか返さないので、編集では空欄なら変えない。
+ *
+ * 対話の出口（Slackのチャネル。design.md §4.6）は、URLの代わりに連携の接続とチャネルのIDを持つ。サーバーは、botが
+ * そのチャネルに参加しているかを確かめてチャネルの名前を記録するので、接続とチャネルは変えたときだけ送る
  */
 const api = useAPI()
 const toast = useToast()
@@ -24,6 +27,9 @@ const emptyForm = () => ({
   scope: DestinationScope.DEPARTMENT as ConnectorScopeEnum,
   department: null as string | null,
   url: '',
+  // 対話の出口：連携の接続とチャネルのID
+  connection: null as string | null,
+  channelId: '',
   allowsSensitiveResults: false,
   changeReason: '',
 })
@@ -35,6 +41,8 @@ const toForm = (value: Destination | null | undefined) =>
         version: value.version ?? 0,
         name: value.name,
         extension: value.extension,
+        connection: value.connection ?? null,
+        channelId: value.channelId ?? '',
         allowsSensitiveResults: value.allowsSensitiveResults ?? false,
       }
     : emptyForm()
@@ -60,11 +68,33 @@ watch(
 )
 
 const isEdit = computed(() => Boolean(form.value.id))
-// 選べる種類（停止中・廃止予定のPluginのものは出ない）
-const { extensions, find } = useSelectableExtensions('notification')
-// 外へ送る（宛先のURLを持つ）種類か。編集では出口の値、作成では選んだ種類の対応能力で決める
+// 選べる種類（停止中・廃止予定のPluginのものは出ない）。結果の通知の出口と、対話の出口（チャネル）
+const notification = useSelectableExtensions('notification')
+const channel = useSelectableExtensions('channel')
+const extensions = computed(() => [...notification.extensions.value, ...channel.extensions.value])
+const find = (id: string) => notification.find(id) ?? channel.find(id)
+// 対話の出口か。編集では出口の値、作成では選んだ種類で決める
+const isChannel = computed(() =>
+  isEdit.value ? Boolean(modelValue.value?.isChannel) : find(form.value.extension)?.type === 'channel',
+)
+// 宛先のURLを持つ種類か。編集では出口の値、作成では選んだ種類の対応能力で決める
 const hasUrl = computed(() =>
-  isEdit.value ? Boolean(modelValue.value?.isExternal) : hasCapability(find(form.value.extension), Capability.URL),
+  isEdit.value
+    ? Boolean(modelValue.value?.isExternal) && !isChannel.value
+    : hasCapability(find(form.value.extension), Capability.URL),
+)
+// 種類を選び直したら、別の種類の接続を外す
+watch(
+  () => form.value.extension,
+  () => {
+    if (!isEdit.value) form.value.connection = null
+  },
+)
+// 編集で選び直す前の接続の表示名
+const initialConnection = computed(() =>
+  modelValue.value?.connection
+    ? { id: modelValue.value.connection, name: modelValue.value.connectionName ?? '' }
+    : null,
 )
 
 const { onSubmit, loading, errors } = createSubmit({
@@ -77,13 +107,23 @@ const { onSubmit, loading, errors } = createSubmit({
       // 編集で空欄のURLは送らない（今の送り先のまま）。画面の通知は送り先を持たない
       url: hasUrl.value && f.url.trim() ? f.url.trim() : undefined,
     }
+    // 対話の出口の接続とチャネル。編集では変えたときだけ送る（送るとサーバーがSlackでチャネルを確かめ直す）
+    const channelId = f.channelId.trim()
+    const current = modelValue.value
+    const target = !isChannel.value
+      ? {}
+      : !f.id || f.connection !== (current?.connection ?? null) || channelId !== (current?.channelId ?? '')
+        ? { connection: f.connection, channelId }
+        : {}
     if (!f.id) {
       const department = f.scope === DestinationScope.DEPARTMENT ? f.department : null
-      return api.manage.destinations().create({ ...common, extension: f.extension, scope: f.scope, department })
+      return api.manage
+        .destinations()
+        .create({ ...common, ...target, extension: f.extension, scope: f.scope, department })
     }
     // 名前は版の外なので、変えたときだけ送る（古い画面からの保存で、別の人が変えた名前を戻さない）
     const name = f.name !== modelValue.value?.name ? f.name : undefined
-    return api.manage.destinations(f.id).patch({ ...common, name, version: f.version })
+    return api.manage.destinations(f.id).patch({ ...common, ...target, name, version: f.version })
   },
   onSuccess: (result) => {
     if (form.value.id) emit('updated', result)
@@ -98,10 +138,11 @@ const { onSubmit, loading, errors } = createSubmit({
   },
 })
 
-// 必須項目が埋まっているかだけを確認する。URLの形と送ってよい宛先かはサーバーが確かめる
+// 必須項目が埋まっているかだけを確認する。URLの形と送ってよい宛先、botがチャネルにいるかはサーバーが確かめる
 const canPost = computed(
   () =>
     Boolean(form.value.name.trim()) &&
+    (!isChannel.value || (Boolean(form.value.connection) && Boolean(form.value.channelId.trim()))) &&
     (isEdit.value ||
       ((!hasUrl.value || Boolean(form.value.url.trim())) &&
         (form.value.scope !== DestinationScope.DEPARTMENT || Boolean(form.value.department)))),
@@ -176,15 +217,45 @@ defineExpose({ onSubmit, loading, canPost, reset })
         "
         :error-messages="errors.url"
       />
+      <template v-if="isChannel">
+        <DAutocomplete
+          :key="form.extension"
+          v-model="form.connection"
+          :label="$t('連携の接続')"
+          required
+          :search-fn="api.manage.channelConnections().list"
+          :query-params="{ extension: form.extension }"
+          item-description="workspaceName"
+          :initial-selected="initialConnection"
+          :hint="$t('Slackのアプリ（Workspace）。「連携の接続」で登録したものから選びます')"
+          :error-messages="errors.connection"
+        />
+        <DTextField
+          v-model="form.channelId"
+          :label="$t('チャネルのID')"
+          required
+          placeholder="C0123456789"
+          :hint="
+            isEdit && modelValue?.channelName
+              ? $t('今のチャネル：{name}。Slackのチャネルの詳細の下にあるID。botをチャネルに追加してから登録します', {
+                  name: modelValue.channelName,
+                })
+              : $t('Slackのチャネルの詳細の下にあるID。botをチャネルに追加してから登録します')
+          "
+          :error-messages="errors.channelId"
+        />
+      </template>
       <DSwitch
         v-model="form.allowsSensitiveResults"
         :label="$t('機密の結果を送ってよい')"
         :hint="
-          hasUrl
-            ? $t('個人情報・機密情報を扱うタスクの結果を、この送り先へ送ってよいときだけ付けます')
-            : $t(
-                '画面の通知はログインした画面の中だけで、結果を見られる人にだけ届くので、この指定によらず機密のタスクにも使えます',
-              )
+          isChannel
+            ? $t('個人情報・機密情報を扱うタスクの質問と結果を、このチャネルへ投稿してよいときだけ付けます')
+            : hasUrl
+              ? $t('個人情報・機密情報を扱うタスクの結果を、この送り先へ送ってよいときだけ付けます')
+              : $t(
+                  '画面の通知はログインした画面の中だけで、結果を見られる人にだけ届くので、この指定によらず機密のタスクにも使えます',
+                )
         "
         :error-messages="errors.allowsSensitiveResults"
       />

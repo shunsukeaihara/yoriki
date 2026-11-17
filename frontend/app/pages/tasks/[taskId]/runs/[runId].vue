@@ -8,8 +8,12 @@
  * 今のタスクも管理できる人。design.md §11.11）。
  *
  * チャットから起動した人は、結果（状態・自分の入力・応答・業務結果・成果物）だけを見る（`canViewLogs` が偽）。最初の
- * 依頼（タスクの依頼文から作る）、作業の記録、配信、Runのストリームはログなので出さない
+ * 依頼（タスクの依頼文から作る）、作業の記録、配信、Runのストリームはログなので出さない。
+ *
+ * 対話の出口（Slackのチャネル）のあるタスクの Run では、エージェントからの確認（質問）と回答の欄も出し、Slackの
+ * スレッドと同じくこの画面からも答えられる（チャットから起動した人にも出す。design.md §4.7）
  */
+import TaskRunClarifications from '~/components/task/TaskRunClarifications.vue'
 import TaskRunDeliveries from '~/components/task/TaskRunDeliveries.vue'
 
 const route = useRoute()
@@ -37,6 +41,7 @@ const {
 await Promise.all([messages.refresh(), fetchFiles()])
 
 const deliveriesRef = ref<InstanceType<typeof TaskRunDeliveries> | null>(null)
+const clarificationsRef = ref<InstanceType<typeof TaskRunClarifications> | null>(null)
 const canViewLogs = computed(() => run.value?.canViewLogs ?? false)
 
 /** 読み直す。イベントが続けて届いても、まとめて1回にする（会話の画面と同じ） */
@@ -51,7 +56,13 @@ const syncNow = async () => {
   try {
     do {
       syncAgain = false
-      await Promise.all([refreshRun(), messages.refresh(), fetchFiles(), deliveriesRef.value?.reload()])
+      await Promise.all([
+        refreshRun(),
+        messages.refresh(),
+        fetchFiles(),
+        deliveriesRef.value?.reload(),
+        clarificationsRef.value?.reload(),
+      ])
     } while (syncAgain)
   } catch {
     // 裏の更新なので、失敗しても次のイベントか「読み直す」で戻る
@@ -222,6 +233,13 @@ const stop = async () => {
     <template #body>
       <div v-if="run" class="mx-auto grid w-full max-w-6xl min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <!-- 狭い画面では概要・通知・ファイルを先に、広い画面では右の欄に出す -->
+        <!-- 確認（質問）と回答は、狭い画面でも先に出す（回答待ちを見落とさないように） -->
+        <TaskRunClarifications
+          ref="clarificationsRef"
+          :run-id="runId"
+          class="order-first min-w-0 lg:col-span-2"
+          @answered="sync()"
+        />
         <section class="order-2 grid min-w-0 content-start gap-4 lg:order-1">
           <div v-if="messages.hasOlder.value" class="flex justify-center">
             <DBtn variant="ghost" color="neutral" :loading="messages.loadingOlder.value" @click="messages.loadOlder()">

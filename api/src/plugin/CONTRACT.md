@@ -16,6 +16,9 @@ Yorikiのサーバーに配備する拡張（Plugin）の作り方と、Yoriki�
 | `notification`（出口） | `delivery.adapters.NotificationAdapter` | `deliver(request) -> Outcome`、URLを持つ種類は `validate_url(url)` | 結果は `Outcome` で返す。`PluginTemporaryError` は送り直し、`PluginConfigError`・`PluginPermanentError` は失敗にする |
 | `storage`（保存先） | `artifact.storage.StorageBackend` | `put_immutable`・`open_read`・`stat`・`delete`・`list_keys` | `artifact.storage.StorageError` |
 | `connector`（Connector） | `connector.adapters.base.DatasourceAdapter` | `connect`・`open_cursor`・`translate_error` を実装し、`check`・`list_tables`・`describe`・`query` は基底クラスが行う | `connector.errors.ConnectorError`（種類つき） |
+| `channel`（対話の出口） | `delivery.channels.base.ChannelAdapter` | `check_connection`・`check_channel`・`post`・`update`・`notify_user`・`verify`・`parse`（任意で `user_name`） | 送信の結果は出口と同じ `Outcome`（投稿したメッセージの参照は `message_ref`）。確かめは `PluginConfigError`、読めない要求は `PluginPermanentError` |
+
+対話の出口のAdapterは、チャットツールのAPIとの通信とメッセージの見せ方（ボタン等）だけを持つ。スレッドとRunの対応、回答の確定、配信の再試行・記録はYorikiが持つ（design.md §4.7）。資格情報は連携の接続（ChannelConnection）が暗号化して持ち、呼ぶたびに `secrets` で渡す。投稿の結果が分からないとき（送った後に応答が失われた等）は「届いたか分からない」を返す（Yorikiは自動では送り直さない）。受け口は `/api/hooks/channels/<extension_idの最後の部分>/<接続のID>/` で、Yorikiが接続を引いて `verify`・`parse` を呼ぶ。
 
 保存先は環境変数で選ぶので（deployment.md §7.2）、Registryには版と状態を見せるために載せるだけで、画面からは止めない。作業ファイルの退避（file_snapshot）は、まだAdapterに分けていない。
 
@@ -99,7 +102,7 @@ PLUGIN = PluginSpec(
 
 ## 7 合致度の追い方
 
-- **適合テストの道具**（`plugin.testing`）：拡張種別ごとのpytestのクラス（`TriggerContract`・`NotificationContract`・`StorageContract`・`ConnectorContract`）。継承して `spec`・`extension_id` と、相手の要るもの（`contract_*` のfixture）を用意して流す。テストはcapabilityごとに分け、宣言していないcapabilityのテストは飛ばす。Adapterの呼出しは、基底クラスの型ヒントで引数と戻り値を確かめる（beartypeを入れる）。本体のPluginも同じ道具で確かめる（`plugin/tests/test_contracts.py`、`connector/tests/test_adapters.py`）。mypy等の静的な検査も勧める。
+- **適合テストの道具**（`plugin.testing`）：拡張種別ごとのpytestのクラス（`TriggerContract`・`NotificationContract`・`StorageContract`・`ConnectorContract`・`ChannelContract`）。継承して `spec`・`extension_id` と、相手の要るもの（`contract_*` のfixture）を用意して流す。テストはcapabilityごとに分け、宣言していないcapabilityのテストは飛ばす。Adapterの呼出しは、基底クラスの型ヒントで引数と戻り値を確かめる（beartypeを入れる）。本体のPluginも同じ道具で確かめる（`plugin/tests/test_contracts.py`、`connector/tests/test_adapters.py`）。mypy等の静的な検査も勧める。
 
   ```python
   from plugin.testing import NotificationContract

@@ -28,6 +28,16 @@ from artifact.storage import StorageBackend, StorageError
 from connector.adapters.base import DatasourceAdapter, QueryResult, TableInfo
 from connector.errors import ConnectorError
 from delivery.adapters import DeliveryRequest, NotificationAdapter, Outcome
+from delivery.channels.base import (
+    ChannelAdapter,
+    ChannelInfo,
+    ConnectionInfo,
+    InboundRequest,
+    MessageKind,
+    QuestionView,
+    ThreadMessage,
+)
+from delivery.models import AttemptOutcome
 from delivery.network import BlockedAddress
 from task.triggers import TriggerAdapter, TriggerRequest
 from task.webhook import Payload, PayloadError
@@ -184,6 +194,37 @@ class NotificationContract(AdapterContract):
         self.requires("url")
         with pytest.raises(BlockedAddress):
             notification.validate_url("http://hooks.example.com/yoriki")
+
+
+class ChannelContract(AdapterContract):
+    """対話の出口（design.md §4.6）。`contract_secrets` に接続の資格情報、`contract_channel_id` に投稿できるチャネル、
+    `contract_signed_request` に認証に通る受信の要求（ヘッダーと本文）を用意する（相手はテストの中で用意する）"""
+
+    base = ChannelAdapter
+
+    @pytest.fixture(name="channel")
+    def fixture_contract_channel(self) -> ChannelAdapter:
+        return self.wrap(self.extension.adapter())
+
+    def test_checks_the_connection_and_the_channel(self, channel, contract_secrets, contract_channel_id):
+        assert isinstance(channel.check_connection(contract_secrets), ConnectionInfo)
+        assert isinstance(channel.check_channel(contract_secrets, contract_channel_id), ChannelInfo)
+
+    def test_posts_into_a_thread_and_updates(self, channel, contract_secrets, contract_channel_id):
+        parent = channel.post(contract_secrets, contract_channel_id, ThreadMessage(MessageKind.PARENT, "parent"))
+        assert parent.outcome == AttemptOutcome.ACCEPTED and parent.message_ref
+        view = QuestionView("q1", [{"header": "h", "question": "q?", "options": [{"label": "a"}, {"label": "b"}]}])
+        message = ThreadMessage(MessageKind.QUESTION, "", question=view)
+        posted = channel.post(contract_secrets, contract_channel_id, message, thread_ref=parent.message_ref)
+        assert posted.outcome == AttemptOutcome.ACCEPTED and posted.message_ref
+        updated = channel.update(contract_secrets, contract_channel_id, posted.message_ref, message)
+        assert isinstance(updated, Outcome)
+
+    def test_verifies_and_parses_requests(self, channel, contract_secrets, contract_signed_request):
+        headers, body = contract_signed_request
+        assert channel.verify(contract_secrets, headers, body)
+        assert not channel.verify(contract_secrets, headers, body + b" ")
+        assert isinstance(channel.parse(headers, body), InboundRequest)
 
 
 class ConnectorContract(AdapterContract):

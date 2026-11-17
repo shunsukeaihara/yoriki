@@ -102,6 +102,11 @@ class SlackAdapter(ChannelAdapter):
         channel = data.get("channel") or {}
         if channel.get("is_archived"):
             raise PluginConfigError(_("アーカイブされたチャネルです"))
+        if channel.get("is_private") or channel.get("is_ext_shared") or not channel.get("is_channel", True):
+            # 確かめたのは、アプリが参加した公開チャネルだけ（非公開・Slack Connect・DMは後で。design.md §4.6）
+            raise PluginConfigError(
+                _("公開チャネルを指定してください（非公開チャネル・共有チャネルにはまだ対応していません）")
+            )
         if not channel.get("is_member"):
             raise PluginConfigError(_("botがチャネルに参加していません。チャネルでアプリを追加（/invite）してください"))
         return ChannelInfo(channel_id=channel.get("id", channel_id), name="#" + channel.get("name", channel_id))

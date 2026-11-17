@@ -547,3 +547,42 @@ def test_channel_destination_checks_the_channel(api_client, integrator, slack):
     # 使っている接続は消せない
     res = api_client.delete(f"/api/v1/channel_connections/{connection.uid}/")
     assert res.status_code == 400
+
+
+def test_private_channel_is_refused(api_client, integrator, slack):
+    api_client.force_authenticate(integrator)
+    connection = ChannelConnectionFactory.create()
+    slack.responses["conversations.info"] = [
+        httpx.Response(
+            200, json={"ok": True, "channel": {"id": "G1", "name": "秘密", "is_member": True, "is_private": True}}
+        )
+    ]
+    body = {
+        "extension": "yoriki.channel.slack",
+        "scope": TaskScope.COMPANY,
+        "name": "x",
+        "connection": connection.uid,
+        "channel_id": "G1",
+    }
+    res = api_client.post("/api/v1/destinations/", body, format="json")
+    assert res.status_code == 400
+    assert "公開チャネル" in str(res.json()["channel_id"])
+
+
+def test_file_only_reply_does_not_answer(client, manager, slack):
+    run = _waiting_run(manager, slack)
+    thread = ExternalThreadBinding.objects.get(run=run)
+    event = {
+        "type": "message",
+        "subtype": "file_share",
+        "channel": thread.channel_id,
+        "user": "U123",
+        "text": "",
+        "ts": "2000.0001",
+        "thread_ts": thread.thread_ref,
+    }
+    _post_event(client, thread.connection, event)
+    _process()
+    assert ChannelMessageReceipt.objects.get().result == ReceiptResult.REJECTED
+    assert ClarificationRequest.objects.get(run=run).status == ClarificationStatus.OPEN
+    assert slack.calls[-1][0] == "chat.postEphemeral"

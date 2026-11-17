@@ -172,6 +172,15 @@ def _apply(receipt: ChannelMessageReceipt, thread: ExternalThreadBinding, adapte
             )
         assert open_question is not None
         receipt.clarification = open_question
+        if not receipt.text.strip():
+            # ファイルだけの共有等。回答の添付ファイルにはまだ対応していない（design.md §4.6）
+            raise _Done(
+                ReceiptResult.REJECTED,
+                "empty reply",
+                _(
+                    "本文のない返信は回答として受け付けません（ファイルの添付にはまだ対応していません）。文で答えてください。"
+                ),
+            )
         selections = thread.selections.get(open_question.uid) or []
         answers = [
             {"selected": selections[i] if i < len(selections) else [], "text": ""}

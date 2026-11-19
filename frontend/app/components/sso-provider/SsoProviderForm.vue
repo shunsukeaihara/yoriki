@@ -2,7 +2,8 @@
 const api = useAPI()
 const toast = useToast()
 const { t } = useI18n()
-const { copy } = useClipboard()
+// https でない開発時の画面（Clipboard APIを使えない）でも、古い方法でコピーする
+const { copy } = useClipboard({ legacy: true })
 const modelValue = defineModel<SSOProvider | null>()
 const emit = defineEmits<{
   created: [value: SSOProvider]

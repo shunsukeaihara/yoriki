@@ -528,7 +528,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description エージェントからの確認 */
+        /** @description エージェントからの確認。結果とログを見られる人と、チャットから起動した本人（対話の出口のあるタスクのRun。design.md §4.7）が見て答えられる */
         get: operations["app_v1_runs_clarifications_list"];
         put?: never;
         post?: never;
@@ -545,7 +545,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** @description エージェントからの確認 */
+        /** @description エージェントからの確認。結果とログを見られる人と、チャットから起動した本人（対話の出口のあるタスクのRun。design.md §4.7）が見て答えられる */
         get: operations["app_v1_runs_clarifications_retrieve"];
         put?: never;
         post?: never;
@@ -1634,6 +1634,78 @@ export interface paths {
         head?: never;
         /** @description 予算の既定の上限と、システムの枠の今月の利用額（design.md §9.1） */
         patch: operations["v1_budgets_settings_partial_update"];
+        trace?: never;
+    };
+    "/api/v1/channel_connections/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 連携の接続（Slackのアプリ等）の一覧・作成・変更・停止・削除（連携の管理者。design.md §4.6、authorization.md §5.5）。資格情報は書くだけで返さない */
+        get: operations["v1_channel_connections_list"];
+        put?: never;
+        /** @description 連携の接続（Slackのアプリ等）の一覧・作成・変更・停止・削除（連携の管理者。design.md §4.6、authorization.md §5.5）。資格情報は書くだけで返さない */
+        post: operations["v1_channel_connections_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/channel_connections/{uid}/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 連携の接続（Slackのアプリ等）の一覧・作成・変更・停止・削除（連携の管理者。design.md §4.6、authorization.md §5.5）。資格情報は書くだけで返さない */
+        get: operations["v1_channel_connections_retrieve"];
+        /** @description 連携の接続（Slackのアプリ等）の一覧・作成・変更・停止・削除（連携の管理者。design.md §4.6、authorization.md §5.5）。資格情報は書くだけで返さない */
+        put: operations["v1_channel_connections_update"];
+        post?: never;
+        /** @description 接続を消す。この接続を使う出口が残っていれば断る（400） */
+        delete: operations["v1_channel_connections_destroy"];
+        options?: never;
+        head?: never;
+        /** @description 連携の接続（Slackのアプリ等）の一覧・作成・変更・停止・削除（連携の管理者。design.md §4.6、authorization.md §5.5）。資格情報は書くだけで返さない */
+        patch: operations["v1_channel_connections_partial_update"];
+        trace?: never;
+    };
+    "/api/v1/channel_connections/{uid}/resume/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 停止を解く */
+        post: operations["v1_channel_connections_resume_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/channel_connections/{uid}/suspend/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 停止する。投稿も受信もしない */
+        post: operations["v1_channel_connections_suspend_create"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/connectors/": {
@@ -2867,6 +2939,59 @@ export interface components {
             before: string | null;
             after: string | null;
         };
+        /**
+         * @description 連携の接続（Slackのアプリ等。連携の管理者。design.md §4.6、authorization.md §5.5）。
+         *
+         *     資格情報は書くだけで返さない。作るときと資格情報を変えるときに接続を確かめ（Slackは `auth.test`）、Workspace等と
+         *     botのユーザーIDを保存する。別のWorkspaceの資格情報への変更は断る（作ったスレッドの照合が合わなくなるため）。
+         *     `receive_url` は、チャットツールのアプリに設定する受け口（Slackでは Event Subscriptions と Interactivity）
+         */
+        ChannelConnection: {
+            readonly id: string;
+            /** @description 種別（PluginのAdapterのID）。作成した後は変えられない */
+            extension: string;
+            readonly extension_name: string;
+            name: string;
+            /** Workspace等のID */
+            readonly workspace_id: string;
+            /** Workspace等の名前 */
+            readonly workspace_name: string;
+            /** BotのユーザーID */
+            readonly bot_user_id: string;
+            /** 停止中 */
+            readonly suspended: boolean;
+            /** @description チャットツールのアプリに設定する受け口のURL */
+            readonly receive_url: string;
+            readonly created_by: components["schemas"]["MinimumUser"];
+            /** Format: date-time */
+            readonly created: string;
+            /** Format: date-time */
+            readonly updated: string;
+        };
+        /**
+         * @description 連携の接続（Slackのアプリ等。連携の管理者。design.md §4.6、authorization.md §5.5）。
+         *
+         *     資格情報は書くだけで返さない。作るときと資格情報を変えるときに接続を確かめ（Slackは `auth.test`）、Workspace等と
+         *     botのユーザーIDを保存する。別のWorkspaceの資格情報への変更は断る（作ったスレッドの照合が合わなくなるため）。
+         *     `receive_url` は、チャットツールのアプリに設定する受け口（Slackでは Event Subscriptions と Interactivity）
+         */
+        ChannelConnectionRequest: {
+            /** @description 種別（PluginのAdapterのID）。作成した後は変えられない */
+            extension: string;
+            name: string;
+            /** @description Bot User OAuth Token（xoxb-）。返さない */
+            bot_token?: string;
+            /** @description Signing Secret。返さない */
+            signing_secret?: string;
+        };
+        /** @description 連携の接続の変更。種類は変えられない。資格情報は送ったものだけを変える */
+        ChannelConnectionUpdateRequest: {
+            name?: string;
+            /** @description Bot User OAuth Token（xoxb-）。返さない */
+            bot_token?: string;
+            /** @description Signing Secret。返さない */
+            signing_secret?: string;
+        };
         ClarificationAnswerItem: {
             selected?: string[];
             /** @default  */
@@ -2942,6 +3067,10 @@ export interface components {
             /** 補足 */
             readonly comment: string;
             readonly answered_by: string | null;
+            /** @description 回答者の表示名（Webで答えたYorikiのユーザーか、対話の出口で答えた人） */
+            readonly answered_by_name: string;
+            /** @description 回答した場所（web、または対話の出口の種類。例：slack）。未回答なら空 */
+            readonly answered_via: string;
             /**
              * 回答日時
              * Format: date-time
@@ -3424,7 +3553,7 @@ export interface components {
         Delivery: {
             readonly id: string;
             readonly run: string;
-            readonly event_type: components["schemas"]["NotifyEventEnum"];
+            readonly event_type: components["schemas"]["DeliveryEventTypeEnum"];
             readonly status: components["schemas"]["DeliveryStatusEnum"];
             readonly status_display: string;
             readonly destination: components["schemas"]["DestinationChoice"];
@@ -3475,6 +3604,15 @@ export interface components {
             /** @description この送信で渡したファイルの取得の記録 */
             readonly file_fetches: components["schemas"]["FileFetch"][];
         };
+        /**
+         * @description * `run.completed` - 完了
+         *     * `run.failed` - 失敗
+         *     * `run.cancelled` - 停止
+         *     * `run.waiting_user` - 確認
+         *     * `clarification.answered` - 回答の受付
+         * @enum {string}
+         */
+        DeliveryEventTypeEnum: "run.completed" | "run.failed" | "run.cancelled" | "run.waiting_user" | "clarification.answered";
         /**
          * @description * `1` - 配信待ち
          *     * `2` - 配信中
@@ -3543,8 +3681,10 @@ export interface components {
             /** @description 種別（PluginのAdapterのID）。作成した後は変えられない */
             extension: string;
             readonly extension_name: string;
-            /** @description 外へ送る（宛先のURLを持つ）種類か */
+            /** @description 外へ送る種類か（宛先のURL・対話の出口） */
             readonly is_external: boolean;
+            /** @description 対話の出口（Slack等のチャネル）か。タスクの対話の出口にだけ選べる */
+            readonly is_channel: boolean;
             /**
              * @description 使ってよい範囲。部門の出口はその部門のタスクだけが使う。作成した後は変えられない
              *
@@ -3564,6 +3704,13 @@ export interface components {
             version?: number;
             /** @description 送り先のホストと末尾の4文字 */
             readonly url_display: string;
+            /** @description 対話の出口の連携の接続（対話の出口では必須） */
+            connection?: string | null;
+            readonly connection_name: string | null;
+            /** @description 対話の出口のチャネルのID（Slackでは C から始まるID）。登録のときに、botが参加しているかを確かめる */
+            channel_id?: string;
+            /** @description 確かめたときのチャネルの名前 */
+            readonly channel_name: string;
             /**
              * @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面の中だけで、受け手を結果を見られる人に限るので、この指定によらず機密のタスクにも使える
              * @default false
@@ -3587,8 +3734,10 @@ export interface components {
             readonly name: string;
             readonly extension: string;
             readonly extension_name: string;
-            /** @description 外へ送る（宛先のURLを持つ）種類か */
+            /** @description 外へ送る種類か（宛先のURL・対話の出口） */
             readonly is_external: boolean;
+            /** @description 対話の出口（Slack等のチャネル）か */
+            readonly is_channel: boolean;
             readonly scope: components["schemas"]["SkillScopeEnum"];
             readonly department: components["schemas"]["MinimumDepartment"] | null;
             readonly allows_sensitive_results: boolean;
@@ -3618,6 +3767,10 @@ export interface components {
             version?: number;
             /** @description 送り先のURL（https）。Webhook・Zapierでは必須、画面の通知では送らない。表示では返さない */
             url?: string;
+            /** @description 対話の出口の連携の接続（対話の出口では必須） */
+            connection?: string | null;
+            /** @description 対話の出口のチャネルのID（Slackでは C から始まるID）。登録のときに、botが参加しているかを確かめる */
+            channel_id?: string;
             /**
              * @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面の中だけで、受け手を結果を見られる人に限るので、この指定によらず機密のタスクにも使える
              * @default false
@@ -3633,6 +3786,10 @@ export interface components {
             readonly url_display: string;
             /** 機密の結果を送ってよい */
             readonly allows_sensitive_results: boolean;
+            /** チャネルのID */
+            readonly channel_id: string;
+            /** チャネルの名前 */
+            readonly channel_name: string;
             /** 変更理由 */
             readonly change_reason: string;
             readonly created_by: components["schemas"]["MinimumUser"];
@@ -3645,8 +3802,10 @@ export interface components {
             /** @description 種別（PluginのAdapterのID）。作成した後は変えられない */
             extension: string;
             readonly extension_name: string;
-            /** @description 外へ送る（宛先のURLを持つ）種類か */
+            /** @description 外へ送る種類か（宛先のURL・対話の出口） */
             readonly is_external: boolean;
+            /** @description 対話の出口（Slack等のチャネル）か。タスクの対話の出口にだけ選べる */
+            readonly is_channel: boolean;
             /**
              * @description 使ってよい範囲。部門の出口はその部門のタスクだけが使う。作成した後は変えられない
              *
@@ -3666,6 +3825,13 @@ export interface components {
             version?: number;
             /** @description 送り先のホストと末尾の4文字 */
             readonly url_display: string;
+            /** @description 対話の出口の連携の接続（対話の出口では必須） */
+            connection?: string | null;
+            readonly connection_name: string | null;
+            /** @description 対話の出口のチャネルのID（Slackでは C から始まるID）。登録のときに、botが参加しているかを確かめる */
+            channel_id?: string;
+            /** @description 確かめたときのチャネルの名前 */
+            readonly channel_name: string;
             /**
              * @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面の中だけで、受け手を結果を見られる人に限るので、この指定によらず機密のタスクにも使える
              * @default false
@@ -3691,6 +3857,10 @@ export interface components {
             version?: number;
             /** @description 送り先のURL（https）。Webhook・Zapierでは必須、画面の通知では送らない。表示では返さない */
             url?: string;
+            /** @description 対話の出口の連携の接続（対話の出口では必須） */
+            connection?: string | null;
+            /** @description 対話の出口のチャネルのID（Slackでは C から始まるID）。登録のときに、botが参加しているかを確かめる */
+            channel_id?: string;
             /** @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面の中だけで、受け手を結果を見られる人に限るので、この指定によらず機密のタスクにも使える */
             allows_sensitive_results?: boolean;
             change_reason?: string;
@@ -4504,6 +4674,19 @@ export interface components {
             previous?: string | null;
             results: components["schemas"]["Artifact"][];
         };
+        PaginatedChannelConnectionList: {
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cD00ODY%3D"
+             */
+            next?: string | null;
+            /**
+             * Format: uri
+             * @example http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+             */
+            previous?: string | null;
+            results: components["schemas"]["ChannelConnection"][];
+        };
         PaginatedClarificationRequestList: {
             /**
              * Format: uri
@@ -5076,6 +5259,14 @@ export interface components {
              */
             run_cost_limit?: string | null;
         };
+        /** @description 連携の接続の変更。種類は変えられない。資格情報は送ったものだけを変える */
+        PatchedChannelConnectionUpdateRequest: {
+            name?: string;
+            /** @description Bot User OAuth Token（xoxb-）。返さない */
+            bot_token?: string;
+            /** @description Signing Secret。返さない */
+            signing_secret?: string;
+        };
         /** @description Connectorの更新。使うDB接続と範囲・部門は変えられないので、読み取り専用にする */
         PatchedConnectorUpdateRequest: {
             /** 名前 */
@@ -5163,6 +5354,10 @@ export interface components {
             version?: number;
             /** @description 送り先のURL（https）。Webhook・Zapierでは必須、画面の通知では送らない。表示では返さない */
             url?: string;
+            /** @description 対話の出口の連携の接続（対話の出口では必須） */
+            connection?: string | null;
+            /** @description 対話の出口のチャネルのID（Slackでは C から始まるID）。登録のときに、botが参加しているかを確かめる */
+            channel_id?: string;
             /** @description 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面の中だけで、受け手を結果を見られる人に限るので、この指定によらず機密のタスクにも使える */
             allows_sensitive_results?: boolean;
             change_reason?: string;
@@ -5408,6 +5603,8 @@ export interface components {
             notify_content?: components["schemas"]["NotifyContentEnum"];
             /** @description 通知の書き方（任意）。業務のRunの最後に、これに従って完了の通知の文章と渡すファイルを決めさせる。通知先と完了（run.completed）の通知が要り、通知の内容に業務結果を含める。空なら決まった形で送る */
             notification_instructions?: string;
+            /** @description 対話の出口（Slack等のチャネル。任意）。Runごとにスレッドを作って質問し、回答を受け、完了等を報告する。タスクの範囲で使ってよい対話の出口だけ（候補は app/v1/destinations/?channel=true） */
+            interaction_destination?: string | null;
             change_reason?: string;
         };
         /** @description 入口の更新 */
@@ -6518,8 +6715,11 @@ export interface components {
              * @default
              */
             notification_instructions: string;
+            /** @description 対話の出口（Slack等のチャネル。任意）。Runごとにスレッドを作って質問し、回答を受け、完了等を報告する。タスクの範囲で使ってよい対話の出口だけ（候補は app/v1/destinations/?channel=true） */
+            interaction_destination?: string | null;
             readonly model_profile_info: components["schemas"]["AppModelProfile"];
             readonly destination_info: components["schemas"]["DestinationChoice"] | null;
+            readonly interaction_destination_info: components["schemas"]["DestinationChoice"] | null;
             /** @description 今、手動で実行できるか（停止中でなく、版がある） */
             readonly can_run: boolean;
             /** @description このタスクの入口 */
@@ -6603,8 +6803,11 @@ export interface components {
              * @default
              */
             notification_instructions: string;
+            /** @description 対話の出口（Slack等のチャネル。任意）。Runごとにスレッドを作って質問し、回答を受け、完了等を報告する。タスクの範囲で使ってよい対話の出口だけ（候補は app/v1/destinations/?channel=true） */
+            interaction_destination?: string | null;
             readonly model_profile_info: components["schemas"]["AppModelProfile"];
             readonly destination_info: components["schemas"]["DestinationChoice"] | null;
+            readonly interaction_destination_info: components["schemas"]["DestinationChoice"] | null;
             /** @description 今、手動で実行できるか（停止中でなく、版がある） */
             readonly can_run: boolean;
             /** @description このタスクの入口 */
@@ -6687,6 +6890,8 @@ export interface components {
              * @default
              */
             notification_instructions: string;
+            /** @description 対話の出口（Slack等のチャネル。任意）。Runごとにスレッドを作って質問し、回答を受け、完了等を報告する。タスクの範囲で使ってよい対話の出口だけ（候補は app/v1/destinations/?channel=true） */
+            interaction_destination?: string | null;
             change_reason?: string;
         };
         /** @description 版の表示（履歴） */
@@ -6715,6 +6920,7 @@ export interface components {
             readonly notify_content: string;
             /** 通知の書き方 */
             readonly notification_instructions: string;
+            readonly interaction_destination: string | null;
             /** 変更理由 */
             readonly change_reason: string;
             readonly created_by: components["schemas"]["MinimumUser"];
@@ -6759,6 +6965,8 @@ export interface components {
             notify_content?: components["schemas"]["NotifyContentEnum"];
             /** @description 通知の書き方（任意）。業務のRunの最後に、これに従って完了の通知の文章と渡すファイルを決めさせる。通知先と完了（run.completed）の通知が要り、通知の内容に業務結果を含める。空なら決まった形で送る */
             notification_instructions?: string;
+            /** @description 対話の出口（Slack等のチャネル。任意）。Runごとにスレッドを作って質問し、回答を受け、完了等を報告する。タスクの範囲で使ってよい対話の出口だけ（候補は app/v1/destinations/?channel=true） */
+            interaction_destination?: string | null;
             change_reason?: string;
         };
         TaskInput: {
@@ -7854,6 +8062,8 @@ export interface operations {
     app_v1_destinations_list: {
         parameters: {
             query?: {
+                /** @description true：対話の出口（Slack等）だけ、false：結果の通知の出口だけ */
+                channel?: string;
                 /** @description The pagination cursor value. */
                 cursor?: string;
                 /** @description 部門のID（部門の範囲のとき） */
@@ -8169,7 +8379,7 @@ export interface operations {
         parameters: {
             query?: {
                 /** @description 拡張種別 */
-                type?: "connector" | "notification" | "storage" | "trigger";
+                type?: "channel" | "connector" | "notification" | "storage" | "trigger";
             };
             header?: never;
             path?: never;
@@ -9744,8 +9954,10 @@ export interface operations {
                  * @description * `run.completed` - 完了
                  *     * `run.failed` - 失敗
                  *     * `run.cancelled` - 停止
+                 *     * `run.waiting_user` - 確認
+                 *     * `clarification.answered` - 回答の受付
                  */
-                event_type?: "run.cancelled" | "run.completed" | "run.failed";
+                event_type?: "clarification.answered" | "run.cancelled" | "run.completed" | "run.failed" | "run.waiting_user";
                 /** @description Which field to use when ordering the results. */
                 ordering?: string;
                 /** @description Number of results to return per page. */
@@ -11027,6 +11239,198 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BudgetSettings"];
+                };
+            };
+        };
+    };
+    v1_channel_connections_list: {
+        parameters: {
+            query?: {
+                /** @description The pagination cursor value. */
+                cursor?: string;
+                extension?: string;
+                /** @description Which field to use when ordering the results. */
+                ordering?: string;
+                /** @description Number of results to return per page. */
+                page_size?: number;
+                /** @description A search term. */
+                search?: string;
+                suspended?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PaginatedChannelConnectionList"];
+                };
+            };
+        };
+    };
+    v1_channel_connections_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChannelConnectionRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["ChannelConnectionRequest"];
+                "multipart/form-data": components["schemas"]["ChannelConnectionRequest"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelConnection"];
+                };
+            };
+        };
+    };
+    v1_channel_connections_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelConnection"];
+                };
+            };
+        };
+    };
+    v1_channel_connections_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ChannelConnectionUpdateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["ChannelConnectionUpdateRequest"];
+                "multipart/form-data": components["schemas"]["ChannelConnectionUpdateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelConnection"];
+                };
+            };
+        };
+    };
+    v1_channel_connections_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    v1_channel_connections_partial_update: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["PatchedChannelConnectionUpdateRequest"];
+                "application/x-www-form-urlencoded": components["schemas"]["PatchedChannelConnectionUpdateRequest"];
+                "multipart/form-data": components["schemas"]["PatchedChannelConnectionUpdateRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelConnection"];
+                };
+            };
+        };
+    };
+    v1_channel_connections_resume_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelConnection"];
+                };
+            };
+        };
+    };
+    v1_channel_connections_suspend_create: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelConnection"];
                 };
             };
         };

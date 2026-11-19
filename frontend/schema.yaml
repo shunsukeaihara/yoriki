@@ -577,6 +577,11 @@ paths:
       operationId: app_v1_destinations_list
       description: タスクの編集画面で選ぶ出口の候補（停止中でなく、タスクを管理できる範囲のもの。authorization.md §7.2）
       parameters:
+      - in: query
+        name: channel
+        schema:
+          type: string
+        description: true：対話の出口（Slack等）だけ、false：結果の通知の出口だけ
       - name: cursor
         required: false
         in: query
@@ -951,6 +956,7 @@ paths:
         schema:
           type: string
           enum:
+          - channel
           - connector
           - notification
           - storage
@@ -1158,7 +1164,8 @@ paths:
   /api/app/v1/runs/{run}/clarifications/:
     get:
       operationId: app_v1_runs_clarifications_list
-      description: エージェントからの確認
+      description: エージェントからの確認。結果とログを見られる人と、チャットから起動した本人（対話の出口のあるタスクのRun。design.md
+        §4.7）が見て答えられる
       parameters:
       - name: cursor
         required: false
@@ -1219,7 +1226,8 @@ paths:
   /api/app/v1/runs/{run}/clarifications/{uid}/:
     get:
       operationId: app_v1_runs_clarifications_retrieve
-      description: エージェントからの確認
+      description: エージェントからの確認。結果とログを見られる人と、チャットから起動した本人（対話の出口のあるタスクのRun。design.md
+        §4.7）が見て答えられる
       parameters:
       - in: path
         name: run
@@ -3000,13 +3008,17 @@ paths:
           type: string
           title: イベント
           enum:
+          - clarification.answered
           - run.cancelled
           - run.completed
           - run.failed
+          - run.waiting_user
         description: |-
           * `run.completed` - 完了
           * `run.failed` - 失敗
           * `run.cancelled` - 停止
+          * `run.waiting_user` - 確認
+          * `clarification.answered` - 回答の受付
       - name: ordering
         required: false
         in: query
@@ -4590,6 +4602,226 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BudgetSettings'
+          description: ''
+  /api/v1/channel_connections/:
+    get:
+      operationId: v1_channel_connections_list
+      description: 連携の接続（Slackのアプリ等）の一覧・作成・変更・停止・削除（連携の管理者。design.md §4.6、authorization.md
+        §5.5）。資格情報は書くだけで返さない
+      parameters:
+      - name: cursor
+        required: false
+        in: query
+        description: The pagination cursor value.
+        schema:
+          type: string
+      - in: query
+        name: extension
+        schema:
+          type: string
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: suspended
+        schema:
+          type: boolean
+      tags:
+      - manage/channel_connection
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedChannelConnectionList'
+          description: ''
+    post:
+      operationId: v1_channel_connections_create
+      description: 連携の接続（Slackのアプリ等）の一覧・作成・変更・停止・削除（連携の管理者。design.md §4.6、authorization.md
+        §5.5）。資格情報は書くだけで返さない
+      tags:
+      - manage/channel_connection
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelConnectionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ChannelConnectionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ChannelConnectionRequest'
+        required: true
+      security:
+      - cookieAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelConnection'
+          description: ''
+  /api/v1/channel_connections/{uid}/:
+    get:
+      operationId: v1_channel_connections_retrieve
+      description: 連携の接続（Slackのアプリ等）の一覧・作成・変更・停止・削除（連携の管理者。design.md §4.6、authorization.md
+        §5.5）。資格情報は書くだけで返さない
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/channel_connection
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelConnection'
+          description: ''
+    put:
+      operationId: v1_channel_connections_update
+      description: 連携の接続（Slackのアプリ等）の一覧・作成・変更・停止・削除（連携の管理者。design.md §4.6、authorization.md
+        §5.5）。資格情報は書くだけで返さない
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/channel_connection
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChannelConnectionUpdateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ChannelConnectionUpdateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ChannelConnectionUpdateRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelConnection'
+          description: ''
+    patch:
+      operationId: v1_channel_connections_partial_update
+      description: 連携の接続（Slackのアプリ等）の一覧・作成・変更・停止・削除（連携の管理者。design.md §4.6、authorization.md
+        §5.5）。資格情報は書くだけで返さない
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/channel_connection
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedChannelConnectionUpdateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedChannelConnectionUpdateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedChannelConnectionUpdateRequest'
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelConnection'
+          description: ''
+    delete:
+      operationId: v1_channel_connections_destroy
+      description: 接続を消す。この接続を使う出口が残っていれば断る（400）
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/channel_connection
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/channel_connections/{uid}/resume/:
+    post:
+      operationId: v1_channel_connections_resume_create
+      description: 停止を解く
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/channel_connection
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelConnection'
+          description: ''
+  /api/v1/channel_connections/{uid}/suspend/:
+    post:
+      operationId: v1_channel_connections_suspend_create
+      description: 停止する。投稿も受信もしない
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/channel_connection
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelConnection'
           description: ''
   /api/v1/connectors/:
     get:
@@ -8112,6 +8344,118 @@ components:
       - after
       - before
       - column
+    ChannelConnection:
+      type: object
+      description: |-
+        連携の接続（Slackのアプリ等。連携の管理者。design.md §4.6、authorization.md §5.5）。
+
+        資格情報は書くだけで返さない。作るときと資格情報を変えるときに接続を確かめ（Slackは `auth.test`）、Workspace等と
+        botのユーザーIDを保存する。別のWorkspaceの資格情報への変更は断る（作ったスレッドの照合が合わなくなるため）。
+        `receive_url` は、チャットツールのアプリに設定する受け口（Slackでは Event Subscriptions と Interactivity）
+      properties:
+        id:
+          type: string
+          readOnly: true
+        extension:
+          type: string
+          description: 種別（PluginのAdapterのID）。作成した後は変えられない
+          maxLength: 200
+        extension_name:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          maxLength: 100
+        workspace_id:
+          type: string
+          readOnly: true
+          title: Workspace等のID
+        workspace_name:
+          type: string
+          readOnly: true
+          title: Workspace等の名前
+        bot_user_id:
+          type: string
+          readOnly: true
+          title: BotのユーザーID
+        suspended:
+          type: boolean
+          readOnly: true
+          title: 停止中
+        receive_url:
+          type: string
+          readOnly: true
+          description: チャットツールのアプリに設定する受け口のURL
+        created_by:
+          allOf:
+          - $ref: '#/components/schemas/MinimumUser'
+          readOnly: true
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        updated:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - bot_user_id
+      - created
+      - created_by
+      - extension
+      - extension_name
+      - id
+      - name
+      - receive_url
+      - suspended
+      - updated
+      - workspace_id
+      - workspace_name
+    ChannelConnectionRequest:
+      type: object
+      description: |-
+        連携の接続（Slackのアプリ等。連携の管理者。design.md §4.6、authorization.md §5.5）。
+
+        資格情報は書くだけで返さない。作るときと資格情報を変えるときに接続を確かめ（Slackは `auth.test`）、Workspace等と
+        botのユーザーIDを保存する。別のWorkspaceの資格情報への変更は断る（作ったスレッドの照合が合わなくなるため）。
+        `receive_url` は、チャットツールのアプリに設定する受け口（Slackでは Event Subscriptions と Interactivity）
+      properties:
+        extension:
+          type: string
+          minLength: 1
+          description: 種別（PluginのAdapterのID）。作成した後は変えられない
+          maxLength: 200
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        bot_token:
+          type: string
+          writeOnly: true
+          description: Bot User OAuth Token（xoxb-）。返さない
+        signing_secret:
+          type: string
+          writeOnly: true
+          description: Signing Secret。返さない
+      required:
+      - extension
+      - name
+    ChannelConnectionUpdateRequest:
+      type: object
+      description: 連携の接続の変更。種類は変えられない。資格情報は送ったものだけを変える
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        bot_token:
+          type: string
+          writeOnly: true
+          description: Bot User OAuth Token（xoxb-）。返さない
+        signing_secret:
+          type: string
+          writeOnly: true
+          description: Signing Secret。返さない
     ClarificationAnswerItem:
       type: object
       properties:
@@ -8313,6 +8657,14 @@ components:
           type: string
           readOnly: true
           nullable: true
+        answered_by_name:
+          type: string
+          readOnly: true
+          description: 回答者の表示名（Webで答えたYorikiのユーザーか、対話の出口で答えた人）
+        answered_via:
+          type: string
+          readOnly: true
+          description: 回答した場所（web、または対話の出口の種類。例：slack）。未回答なら空
         answered:
           type: string
           format: date-time
@@ -8332,6 +8684,8 @@ components:
       required:
       - answered
       - answered_by
+      - answered_by_name
+      - answered_via
       - answers
       - comment
       - created
@@ -9382,7 +9736,7 @@ components:
           readOnly: true
         event_type:
           allOf:
-          - $ref: '#/components/schemas/NotifyEventEnum'
+          - $ref: '#/components/schemas/DeliveryEventTypeEnum'
           readOnly: true
         status:
           allOf:
@@ -9514,6 +9868,20 @@ components:
       - outcome
       - outcome_display
       - started
+    DeliveryEventTypeEnum:
+      enum:
+      - run.completed
+      - run.failed
+      - run.cancelled
+      - run.waiting_user
+      - clarification.answered
+      type: string
+      description: |-
+        * `run.completed` - 完了
+        * `run.failed` - 失敗
+        * `run.cancelled` - 停止
+        * `run.waiting_user` - 確認
+        * `clarification.answered` - 回答の受付
     DeliveryStatusEnum:
       enum:
       - 1
@@ -9668,7 +10036,11 @@ components:
         is_external:
           type: boolean
           readOnly: true
-          description: 外へ送る（宛先のURLを持つ）種類か
+          description: 外へ送る種類か（宛先のURL・対話の出口）
+        is_channel:
+          type: boolean
+          readOnly: true
+          description: 対話の出口（Slack等のチャネル）か。タスクの対話の出口にだけ選べる
         scope:
           allOf:
           - $ref: '#/components/schemas/ConnectorScopeEnum'
@@ -9705,6 +10077,22 @@ components:
           type: string
           readOnly: true
           description: 送り先のホストと末尾の4文字
+        connection:
+          type: string
+          nullable: true
+          description: 対話の出口の連携の接続（対話の出口では必須）
+        connection_name:
+          type: string
+          readOnly: true
+          nullable: true
+        channel_id:
+          type: string
+          description: 対話の出口のチャネルのID（Slackでは C から始まるID）。登録のときに、botが参加しているかを確かめる
+          maxLength: 100
+        channel_name:
+          type: string
+          readOnly: true
+          description: 確かめたときのチャネルの名前
         allows_sensitive_results:
           type: boolean
           default: false
@@ -9728,12 +10116,15 @@ components:
           format: date-time
           readOnly: true
       required:
+      - channel_name
+      - connection_name
       - created
       - created_by
       - department_info
       - extension
       - extension_name
       - id
+      - is_channel
       - is_external
       - name
       - scope
@@ -9763,7 +10154,11 @@ components:
         is_external:
           type: boolean
           readOnly: true
-          description: 外へ送る（宛先のURLを持つ）種類か
+          description: 外へ送る種類か（宛先のURL・対話の出口）
+        is_channel:
+          type: boolean
+          readOnly: true
+          description: 対話の出口（Slack等のチャネル）か
         scope:
           allOf:
           - $ref: '#/components/schemas/SkillScopeEnum'
@@ -9782,6 +10177,7 @@ components:
       - extension
       - extension_name
       - id
+      - is_channel
       - is_external
       - name
       - scope
@@ -9826,6 +10222,15 @@ components:
           writeOnly: true
           description: 送り先のURL（https）。Webhook・Zapierでは必須、画面の通知では送らない。表示では返さない
           maxLength: 2000
+        connection:
+          type: string
+          minLength: 1
+          nullable: true
+          description: 対話の出口の連携の接続（対話の出口では必須）
+        channel_id:
+          type: string
+          description: 対話の出口のチャネルのID（Slackでは C から始まるID）。登録のときに、botが参加しているかを確かめる
+          maxLength: 100
         allows_sensitive_results:
           type: boolean
           default: false
@@ -9858,6 +10263,16 @@ components:
           type: boolean
           readOnly: true
           title: 機密の結果を送ってよい
+        channel_id:
+          type: string
+          readOnly: true
+          title: チャネルのID
+          maxLength: 100
+        channel_name:
+          type: string
+          readOnly: true
+          title: チャネルの名前
+          maxLength: 200
         change_reason:
           type: string
           readOnly: true
@@ -9874,6 +10289,8 @@ components:
       required:
       - allows_sensitive_results
       - change_reason
+      - channel_id
+      - channel_name
       - created
       - created_by
       - id
@@ -9896,7 +10313,11 @@ components:
         is_external:
           type: boolean
           readOnly: true
-          description: 外へ送る（宛先のURLを持つ）種類か
+          description: 外へ送る種類か（宛先のURL・対話の出口）
+        is_channel:
+          type: boolean
+          readOnly: true
+          description: 対話の出口（Slack等のチャネル）か。タスクの対話の出口にだけ選べる
         scope:
           allOf:
           - $ref: '#/components/schemas/ConnectorScopeEnum'
@@ -9933,6 +10354,22 @@ components:
           type: string
           readOnly: true
           description: 送り先のホストと末尾の4文字
+        connection:
+          type: string
+          nullable: true
+          description: 対話の出口の連携の接続（対話の出口では必須）
+        connection_name:
+          type: string
+          readOnly: true
+          nullable: true
+        channel_id:
+          type: string
+          description: 対話の出口のチャネルのID（Slackでは C から始まるID）。登録のときに、botが参加しているかを確かめる
+          maxLength: 100
+        channel_name:
+          type: string
+          readOnly: true
+          description: 確かめたときのチャネルの名前
         allows_sensitive_results:
           type: boolean
           default: false
@@ -9960,12 +10397,15 @@ components:
           readOnly: true
           description: 署名の鍵（Standard Webhooksの webhook-signature を確かめる鍵）。いま一度だけ表示する
       required:
+      - channel_name
+      - connection_name
       - created
       - created_by
       - department_info
       - extension
       - extension_name
       - id
+      - is_channel
       - is_external
       - name
       - scope
@@ -9992,6 +10432,15 @@ components:
           writeOnly: true
           description: 送り先のURL（https）。Webhook・Zapierでは必須、画面の通知では送らない。表示では返さない
           maxLength: 2000
+        connection:
+          type: string
+          minLength: 1
+          nullable: true
+          description: 対話の出口の連携の接続（対話の出口では必須）
+        channel_id:
+          type: string
+          description: 対話の出口のチャネルのID（Slackでは C から始まるID）。登録のときに、botが参加しているかを確かめる
+          maxLength: 100
         allows_sensitive_results:
           type: boolean
           description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面の中だけで、受け手を結果を見られる人に限るので、この指定によらず機密のタスクにも使える
@@ -11848,6 +12297,25 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Artifact'
+    PaginatedChannelConnectionList:
+      type: object
+      required:
+      - results
+      properties:
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cD00ODY%3D"
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?cursor=cj0xJnA9NDg3
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChannelConnection'
     PaginatedClarificationRequestList:
       type: object
       required:
@@ -12692,6 +13160,22 @@ components:
           pattern: ^-?\d{0,12}(?:\.\d{0,2})?$
           nullable: true
           description: 1回の実行（会話の発言1回、タスクの実行1回等）のLLMの利用額の上限（米ドル）。空なら無制限
+    PatchedChannelConnectionUpdateRequest:
+      type: object
+      description: 連携の接続の変更。種類は変えられない。資格情報は送ったものだけを変える
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        bot_token:
+          type: string
+          writeOnly: true
+          description: Bot User OAuth Token（xoxb-）。返さない
+        signing_secret:
+          type: string
+          writeOnly: true
+          description: Signing Secret。返さない
     PatchedConnectorUpdateRequest:
       type: object
       description: Connectorの更新。使うDB接続と範囲・部門は変えられないので、読み取り専用にする
@@ -12868,6 +13352,15 @@ components:
           writeOnly: true
           description: 送り先のURL（https）。Webhook・Zapierでは必須、画面の通知では送らない。表示では返さない
           maxLength: 2000
+        connection:
+          type: string
+          minLength: 1
+          nullable: true
+          description: 対話の出口の連携の接続（対話の出口では必須）
+        channel_id:
+          type: string
+          description: 対話の出口のチャネルのID（Slackでは C から始まるID）。登録のときに、botが参加しているかを確かめる
+          maxLength: 100
         allows_sensitive_results:
           type: boolean
           description: 機密（個人情報・機密情報を扱う）のタスクの結果を送ってよい。画面の通知は認証の要る画面の中だけで、受け手を結果を見られる人に限るので、この指定によらず機密のタスクにも使える
@@ -13359,6 +13852,12 @@ components:
           type: string
           description: 通知の書き方（任意）。業務のRunの最後に、これに従って完了の通知の文章と渡すファイルを決めさせる。通知先と完了（run.completed）の通知が要り、通知の内容に業務結果を含める。空なら決まった形で送る
           maxLength: 4000
+        interaction_destination:
+          type: string
+          minLength: 1
+          nullable: true
+          description: 対話の出口（Slack等のチャネル。任意）。Runごとにスレッドを作って質問し、回答を受け、完了等を報告する。タスクの範囲で使ってよい対話の出口だけ（候補は
+            app/v1/destinations/?channel=true）
         change_reason:
           type: string
           writeOnly: true
@@ -16145,11 +16644,21 @@ components:
           default: ''
           description: 通知の書き方（任意）。業務のRunの最後に、これに従って完了の通知の文章と渡すファイルを決めさせる。通知先と完了（run.completed）の通知が要り、通知の内容に業務結果を含める。空なら決まった形で送る
           maxLength: 4000
+        interaction_destination:
+          type: string
+          nullable: true
+          description: 対話の出口（Slack等のチャネル。任意）。Runごとにスレッドを作って質問し、回答を受け、完了等を報告する。タスクの範囲で使ってよい対話の出口だけ（候補は
+            app/v1/destinations/?channel=true）
         model_profile_info:
           allOf:
           - $ref: '#/components/schemas/AppModelProfile'
           readOnly: true
         destination_info:
+          allOf:
+          - $ref: '#/components/schemas/DestinationChoice'
+          readOnly: true
+          nullable: true
+        interaction_destination_info:
           allOf:
           - $ref: '#/components/schemas/DestinationChoice'
           readOnly: true
@@ -16185,6 +16694,7 @@ components:
       - department_info
       - destination_info
       - id
+      - interaction_destination_info
       - model_profile
       - model_profile_info
       - name
@@ -16330,11 +16840,21 @@ components:
           default: ''
           description: 通知の書き方（任意）。業務のRunの最後に、これに従って完了の通知の文章と渡すファイルを決めさせる。通知先と完了（run.completed）の通知が要り、通知の内容に業務結果を含める。空なら決まった形で送る
           maxLength: 4000
+        interaction_destination:
+          type: string
+          nullable: true
+          description: 対話の出口（Slack等のチャネル。任意）。Runごとにスレッドを作って質問し、回答を受け、完了等を報告する。タスクの範囲で使ってよい対話の出口だけ（候補は
+            app/v1/destinations/?channel=true）
         model_profile_info:
           allOf:
           - $ref: '#/components/schemas/AppModelProfile'
           readOnly: true
         destination_info:
+          allOf:
+          - $ref: '#/components/schemas/DestinationChoice'
+          readOnly: true
+          nullable: true
+        interaction_destination_info:
           allOf:
           - $ref: '#/components/schemas/DestinationChoice'
           readOnly: true
@@ -16389,6 +16909,7 @@ components:
       - department_info
       - destination_info
       - id
+      - interaction_destination_info
       - model_profile
       - model_profile_info
       - name
@@ -16516,6 +17037,12 @@ components:
           default: ''
           description: 通知の書き方（任意）。業務のRunの最後に、これに従って完了の通知の文章と渡すファイルを決めさせる。通知先と完了（run.completed）の通知が要り、通知の内容に業務結果を含める。空なら決まった形で送る
           maxLength: 4000
+        interaction_destination:
+          type: string
+          minLength: 1
+          nullable: true
+          description: 対話の出口（Slack等のチャネル。任意）。Runごとにスレッドを作って質問し、回答を受け、完了等を報告する。タスクの範囲で使ってよい対話の出口だけ（候補は
+            app/v1/destinations/?channel=true）
         change_reason:
           type: string
           writeOnly: true
@@ -16598,6 +17125,10 @@ components:
           type: string
           readOnly: true
           title: 通知の書き方
+        interaction_destination:
+          type: string
+          readOnly: true
+          nullable: true
         change_reason:
           type: string
           readOnly: true
@@ -16622,6 +17153,7 @@ components:
       - handles_sensitive_data
       - id
       - inputs
+      - interaction_destination
       - model_profile
       - notification_instructions
       - notify_content
@@ -16720,6 +17252,12 @@ components:
           type: string
           description: 通知の書き方（任意）。業務のRunの最後に、これに従って完了の通知の文章と渡すファイルを決めさせる。通知先と完了（run.completed）の通知が要り、通知の内容に業務結果を含める。空なら決まった形で送る
           maxLength: 4000
+        interaction_destination:
+          type: string
+          minLength: 1
+          nullable: true
+          description: 対話の出口（Slack等のチャネル。任意）。Runごとにスレッドを作って質問し、回答を受け、完了等を報告する。タスクの範囲で使ってよい対話の出口だけ（候補は
+            app/v1/destinations/?channel=true）
         change_reason:
           type: string
           writeOnly: true

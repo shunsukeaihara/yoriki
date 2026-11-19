@@ -214,6 +214,21 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
     destination_info = DestinationChoiceSerializer(
         source="current_revision.destination", read_only=True, allow_null=True
     )
+    interaction_destination: "serializers.SlugRelatedField[Destination]" = serializers.SlugRelatedField(
+        source="current_revision.interaction_destination",
+        slug_field="uid",
+        queryset=Destination.objects.alive().select_related("current_revision__connection", "department"),
+        required=False,
+        allow_null=True,
+        default=None,
+        help_text=_(
+            "対話の出口（Slack等のチャネル。任意）。Runごとにスレッドを作って質問し、回答を受け、完了等を報告する。"
+            "タスクの範囲で使ってよい対話の出口だけ（候補は app/v1/destinations/?channel=true）"
+        ),
+    )
+    interaction_destination_info = DestinationChoiceSerializer(
+        source="current_revision.interaction_destination", read_only=True, allow_null=True
+    )
     notify_events = serializers.ListField(
         source="current_revision.notify_events",
         child=serializers.ChoiceField(choices=NotifyEvent.choices),
@@ -293,6 +308,7 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
             *REVISION_FIELDS,
             "model_profile_info",
             "destination_info",
+            "interaction_destination_info",
             "change_reason",
             "can_run",
             "triggers",
@@ -460,7 +476,11 @@ class TaskDefinitionSerializer(serializers.ModelSerializer):
             and TriggerBinding.objects.alive().filter(task=instance).exists()
         ):
             raise serializers.ValidationError(
-                {"notify_events": _("Webhookの入口があるタスクでは、失敗（run.failed）を知らせる通知先が必要です")}
+                {
+                    "notify_events": _(
+                        "Webhookの入口があるタスクでは、失敗（run.failed）を知らせる通知先か、対話の出口が必要です"
+                    )
+                }
             )
         fields = ["current_revision", "updated"]
         if "name" in validated_data:
@@ -580,6 +600,9 @@ class TaskDefinitionRevisionSerializer(ReadOnlyModelSerializer):
         slug_field="uid", read_only=True
     )
     destination: "serializers.SlugRelatedField[Destination]" = serializers.SlugRelatedField(
+        slug_field="uid", read_only=True, allow_null=True
+    )
+    interaction_destination: "serializers.SlugRelatedField[Destination]" = serializers.SlugRelatedField(
         slug_field="uid", read_only=True, allow_null=True
     )
     created_by = MinimumUserSerializer(read_only=True)
@@ -945,8 +968,8 @@ def _check_failure_notice(task: TaskDefinition) -> None:
         raise serializers.ValidationError(
             {
                 "task": _(
-                    "Webhookで起動するタスクには、失敗（run.failed）を知らせる通知先が必要です。"
-                    "タスクの結果の通知を設定してください"
+                    "Webhookで起動するタスクには、失敗（run.failed）を知らせる通知先か、対話の出口が必要です。"
+                    "タスクの結果の通知か対話の出口を設定してください"
                 )
             }
         )

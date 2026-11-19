@@ -1,10 +1,12 @@
+import json
+
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from plugin import builtin, registry
-from plugin.errors import PluginUnavailable
+from plugin.errors import PluginError, PluginUnavailable
 from plugin.fields import ExtensionField
 from plugin.spec import ExtensionType
 from user.models import Department
@@ -12,10 +14,12 @@ from user.serializers import MinimumDepartmentSerializer, MinimumUserSerializer
 from utils.exceptions import Conflict
 from utils.serializers import ReadOnlyModelSerializer
 
-from .adapters import adapter_for
+from .adapters import NotificationAdapter, adapter_for
 from .errors import VersionConflict
 from .models import (
     DESTINATION_REVISION_FIELDS,
+    ChannelConnection,
+    ChannelEvent,
     Delivery,
     DeliveryAttempt,
     DeliveryStatus,
@@ -40,9 +44,35 @@ class DestinationSerializer(serializers.ModelSerializer):
     """
 
     id = serializers.CharField(source="uid", read_only=True)
-    extension = ExtensionField(ExtensionType.NOTIFICATION)
+    extension = ExtensionField(ExtensionType.NOTIFICATION, ExtensionType.CHANNEL)
     extension_name = serializers.CharField(read_only=True)
-    is_external = serializers.BooleanField(read_only=True, help_text=_("外へ送る（宛先のURLを持つ）種類か"))
+    is_external = serializers.BooleanField(read_only=True, help_text=_("外へ送る種類か（宛先のURL・対話の出口）"))
+    is_channel = serializers.BooleanField(
+        read_only=True, help_text=_("対話の出口（Slack等のチャネル）か。タスクの対話の出口にだけ選べる")
+    )
+    connection: "serializers.SlugRelatedField[ChannelConnection]" = serializers.SlugRelatedField(
+        source="current_revision.connection",
+        slug_field="uid",
+        queryset=ChannelConnection.objects.alive(),
+        required=False,
+        allow_null=True,
+        help_text=_("対話の出口の連携の接続（対話の出口では必須）"),
+    )
+    connection_name = serializers.CharField(
+        source="current_revision.connection.name", read_only=True, allow_null=True, default=None
+    )
+    channel_id = serializers.CharField(
+        source="current_revision.channel_id",
+        max_length=100,
+        required=False,
+        allow_blank=True,
+        help_text=_(
+            "対話の出口のチャネルのID（Slackでは C から始まるID）。登録のときに、botが参加しているかを確かめる"
+        ),
+    )
+    channel_name = serializers.CharField(
+        source="current_revision.channel_name", read_only=True, help_text=_("確かめたときのチャネルの名前")
+    )
     scope = serializers.ChoiceField(
         # 個人の出口（画面の通知）はYorikiが作る
         choices=[c for c in DestinationScope.choices if c[0] != DestinationScope.PERSONAL],
@@ -94,6 +124,7 @@ class DestinationSerializer(serializers.ModelSerializer):
             "extension",
             "extension_name",
             "is_external",
+            "is_channel",
             "scope",
             "scope_display",
             "department",
@@ -103,6 +134,10 @@ class DestinationSerializer(serializers.ModelSerializer):
             "version",
             "url",
             "url_display",
+            "connection",
+            "connection_name",
+            "channel_id",
+            "channel_name",
             "allows_sensitive_results",
             "change_reason",
             "secret_rotated",
@@ -127,18 +162,57 @@ class DestinationSerializer(serializers.ModelSerializer):
         if "name" in attrs:
             attrs["name"] = attrs["name"].strip()
         sent = attrs.pop("current_revision", {})
-        current = self.instance.current_revision if self.instance else None
+        content = self._revision_content(sent, self.instance.current_revision if self.instance else None)
+        found = registry.declared(extension)
+        if found is not None and found[0].type == ExtensionType.CHANNEL:
+            self._check_channel(extension, sent, content)
+        else:
+            self._check_url(extension, sent, content)
+            content.update(connection=None, channel_id="", channel_name="")
+        attrs["content"] = content
+        return attrs
+
+    @staticmethod
+    def _revision_content(sent: dict, current: DestinationRevision | None) -> dict:
+        """新しい版の中身。送らなかった項目は今の版の値（作成では空）"""
+        empty = {"url": "", "allows_sensitive_results": False, "connection": None, "channel_id": "", "channel_name": ""}
         content = {}
         for name in DESTINATION_REVISION_FIELDS:
             if name in sent:
                 content[name] = sent[name]
-            elif name == "url":
-                content[name] = current.url.reveal() if current else ""
+            elif current is None:
+                content[name] = empty[name]
             else:
-                content[name] = getattr(current, name)
-        self._check_url(extension, sent, content)
-        attrs["content"] = content
-        return attrs
+                content[name] = current.url.reveal() if name == "url" else getattr(current, name)
+        return content
+
+    @staticmethod
+    def _check_channel(extension: str, sent: dict, content: dict) -> None:
+        """対話の出口：URLは持たず、接続とチャネルを確かめる（design.md §4.6）"""
+        if str(sent.get("url") or "").strip():
+            raise serializers.ValidationError({"url": _("対話の出口には送り先のURLを指定しません")})
+        content["url"] = ""
+        connection, channel_id = content.get("connection"), str(content.get("channel_id") or "").strip()
+        if connection is None:
+            raise serializers.ValidationError({"connection": _("連携の接続を選んでください")})
+        if connection.extension != extension:
+            raise serializers.ValidationError({"connection": _("この種類の接続を選んでください")})
+        if not channel_id:
+            raise serializers.ValidationError({"channel_id": _("チャネルのIDを入力してください")})
+        content["channel_id"] = channel_id
+        if "connection" not in sent and "channel_id" not in sent:
+            return
+        if not connection.in_service():
+            raise serializers.ValidationError({"connection": _("この接続は今は使えません（停止中等）")})
+        from .channels.outbound import channel_adapter  # noqa: PLC0415  channelsがserializerのModelを使うため
+
+        try:
+            info = channel_adapter(extension).check_channel(connection.secret_values(), channel_id)
+        except PluginUnavailable as exc:
+            raise serializers.ValidationError({"extension": _("この種類は今は使えません（停止中等）")}) from exc
+        except PluginError as exc:
+            raise serializers.ValidationError({"channel_id": str(exc)}) from exc
+        content["channel_name"] = info.name
 
     @staticmethod
     def _check_url(extension: str, sent: dict, content: dict) -> None:
@@ -154,7 +228,9 @@ class DestinationSerializer(serializers.ModelSerializer):
             # 登録するときも、送り先の形と、名前を引いた先が送ってよいアドレスかを確かめる（design.md §4.4）
             content["url"] = content["url"].strip()
             try:
-                resolve(adapter_for(extension).validate_url(content["url"]))
+                adapter = adapter_for(extension)
+                assert isinstance(adapter, NotificationAdapter)
+                resolve(adapter.validate_url(content["url"]))
             except BlockedAddress as exc:
                 raise serializers.ValidationError({"url": str(exc)}) from exc
             except PluginUnavailable as exc:
@@ -196,7 +272,7 @@ class DestinationSerializer(serializers.ModelSerializer):
 class DestinationUpdateSerializer(DestinationSerializer):
     """出口の更新。種類・範囲・部門は変えられない"""
 
-    extension = ExtensionField(ExtensionType.NOTIFICATION, read_only=True)
+    extension = ExtensionField(ExtensionType.NOTIFICATION, ExtensionType.CHANNEL, read_only=True)
     scope = serializers.ChoiceField(choices=DestinationScope.choices, read_only=True)
     department = serializers.SlugRelatedField(slug_field="uid", read_only=True)
 
@@ -250,7 +326,17 @@ class DestinationRevisionSerializer(ReadOnlyModelSerializer):
 
     class Meta:
         model = DestinationRevision
-        fields = ["id", "number", "url_display", "allows_sensitive_results", "change_reason", "created_by", "created"]
+        fields = [
+            "id",
+            "number",
+            "url_display",
+            "allows_sensitive_results",
+            "channel_id",
+            "channel_name",
+            "change_reason",
+            "created_by",
+            "created",
+        ]
 
 
 class DestinationChoiceSerializer(ReadOnlyModelSerializer):
@@ -259,7 +345,8 @@ class DestinationChoiceSerializer(ReadOnlyModelSerializer):
     id = serializers.CharField(source="uid", read_only=True)
     extension = serializers.CharField(read_only=True)
     extension_name = serializers.CharField(read_only=True)
-    is_external = serializers.BooleanField(read_only=True, help_text=_("外へ送る（宛先のURLを持つ）種類か"))
+    is_external = serializers.BooleanField(read_only=True, help_text=_("外へ送る種類か（宛先のURL・対話の出口）"))
+    is_channel = serializers.BooleanField(read_only=True, help_text=_("対話の出口（Slack等のチャネル）か"))
     scope = serializers.ChoiceField(choices=DestinationScope.choices, read_only=True)
     department = MinimumDepartmentSerializer(read_only=True, allow_null=True)
     allows_sensitive_results = serializers.BooleanField(
@@ -274,6 +361,7 @@ class DestinationChoiceSerializer(ReadOnlyModelSerializer):
             "extension",
             "extension_name",
             "is_external",
+            "is_channel",
             "scope",
             "department",
             "allows_sensitive_results",
@@ -318,7 +406,7 @@ class DeliverySerializer(ReadOnlyModelSerializer):
 
     id = serializers.CharField(source="uid", read_only=True)
     run = serializers.CharField(source="run.uid", read_only=True)
-    event_type = serializers.ChoiceField(choices=NotifyEvent.choices, read_only=True)
+    event_type = serializers.ChoiceField(choices=NotifyEvent.choices + ChannelEvent.choices, read_only=True)
     status = serializers.ChoiceField(choices=DeliveryStatus.choices, read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     destination = DestinationChoiceSerializer(source="destination_revision.destination", read_only=True)
@@ -362,3 +450,99 @@ class NotificationSerializer(ReadOnlyModelSerializer):
 
 class NotificationCountSerializer(serializers.Serializer):
     unread = serializers.IntegerField(read_only=True)
+
+
+class ChannelConnectionSerializer(serializers.ModelSerializer):
+    """連携の接続（Slackのアプリ等。連携の管理者。design.md §4.6、authorization.md §5.5）。
+
+    資格情報は書くだけで返さない。作るときと資格情報を変えるときに接続を確かめ（Slackは `auth.test`）、Workspace等と
+    botのユーザーIDを保存する。別のWorkspaceの資格情報への変更は断る（作ったスレッドの照合が合わなくなるため）。
+    `receive_url` は、チャットツールのアプリに設定する受け口（Slackでは Event Subscriptions と Interactivity）"""
+
+    id = serializers.CharField(source="uid", read_only=True)
+    extension = ExtensionField(ExtensionType.CHANNEL)
+    extension_name = serializers.CharField(read_only=True)
+    name = serializers.CharField(max_length=100)
+    bot_token = serializers.CharField(
+        write_only=True, required=False, allow_blank=True, help_text=_("Bot User OAuth Token（xoxb-）。返さない")
+    )
+    signing_secret = serializers.CharField(
+        write_only=True, required=False, allow_blank=True, help_text=_("Signing Secret。返さない")
+    )
+    receive_url = serializers.SerializerMethodField(help_text=_("チャットツールのアプリに設定する受け口のURL"))
+    created_by = MinimumUserSerializer(read_only=True)
+
+    class Meta:
+        model = ChannelConnection
+        fields = [
+            "id",
+            "extension",
+            "extension_name",
+            "name",
+            "bot_token",
+            "signing_secret",
+            "workspace_id",
+            "workspace_name",
+            "bot_user_id",
+            "suspended",
+            "receive_url",
+            "created_by",
+            "created",
+            "updated",
+        ]
+        read_only_fields = ["workspace_id", "workspace_name", "bot_user_id", "suspended", "created", "updated"]
+
+    def get_receive_url(self, connection: ChannelConnection) -> str:
+        from django.conf import settings  # noqa: PLC0415
+
+        path = f"/api/hooks/channels/{connection.extension.rsplit('.', 1)[-1]}/{connection.uid}/"
+        return (settings.YORIKI_PUBLIC_URL or "") + path
+
+    def validate(self, attrs):
+        extension = attrs.get("extension") or (self.instance.extension if self.instance else "")
+        if "name" in attrs:
+            attrs["name"] = attrs["name"].strip()
+        secrets = self.instance.secret_values() if self.instance else {}
+        changed = False
+        for key in ("bot_token", "signing_secret"):
+            value = str(attrs.pop(key, "") or "").strip()
+            if value:
+                secrets[key], changed = value, True
+        if self.instance is None or changed:
+            from .channels.outbound import channel_adapter  # noqa: PLC0415  channelsがserializerのModelを使うため
+
+            try:
+                info = channel_adapter(extension).check_connection(secrets)
+            except PluginUnavailable as exc:
+                raise serializers.ValidationError({"extension": _("この種類は今は使えません（停止中等）")}) from exc
+            except PluginError as exc:
+                raise serializers.ValidationError({"bot_token": str(exc)}) from exc
+            if self.instance is not None and info.workspace_id != self.instance.workspace_id:
+                raise serializers.ValidationError(
+                    {"bot_token": _("別のWorkspaceの資格情報です。別のWorkspaceには新しい接続を作ってください")}
+                )
+            attrs.update(
+                secrets=json.dumps(secrets),
+                workspace_id=info.workspace_id,
+                workspace_name=info.workspace_name,
+                bot_user_id=info.bot_user_id,
+            )
+        return attrs
+
+
+class ChannelConnectionUpdateSerializer(ChannelConnectionSerializer):
+    """連携の接続の変更。種類は変えられない。資格情報は送ったものだけを変える"""
+
+    extension = ExtensionField(ExtensionType.CHANNEL, read_only=True)
+    name = serializers.CharField(max_length=100, required=False)
+
+
+class ChannelConnectionChoiceSerializer(ReadOnlyModelSerializer):
+    """対話の出口の作成で選ぶ接続（名前と種類とWorkspaceだけ）"""
+
+    id = serializers.CharField(source="uid", read_only=True)
+    extension = serializers.CharField(read_only=True)
+
+    class Meta:
+        model = ChannelConnection
+        fields = ["id", "name", "extension", "workspace_name", "suspended"]

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** 出口の版の履歴（読み取り専用）。新しい版から順に並べる。送り先はホストと末尾の4文字だけ */
+/** 出口の版の履歴（読み取り専用）。新しい版から順に並べる。送り先はホストと末尾の4文字だけ。対話の出口はチャネル */
 const props = defineProps<{ destinationId: string }>()
 const reloadKey = defineModel<number>('reloadKey', { default: 0 })
 const api = useAPI()
@@ -30,6 +30,12 @@ watch(reloadKey, fetchAll, { immediate: true })
       <dl v-if="r.urlDisplay" class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
         <dt class="text-muted">{{ $t('送り先') }}</dt>
         <dd class="font-mono break-all">{{ r.urlDisplay }}</dd>
+      </dl>
+      <dl v-if="r.channelId" class="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+        <dt class="text-muted">{{ $t('チャネル') }}</dt>
+        <dd class="break-all">
+          {{ r.channelName || '-' }} <span class="font-mono text-muted">（{{ r.channelId }}）</span>
+        </dd>
       </dl>
     </UCard>
   </div>

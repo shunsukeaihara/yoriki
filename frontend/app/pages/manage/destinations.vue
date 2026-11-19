@@ -10,8 +10,10 @@ const { hasPermission } = usePermission()
 const { t } = useI18n()
 const reloadKey = ref(0)
 const reload = () => (reloadKey.value = Date.now())
-// 種類の絞り込みの選択肢（使えるPluginのもの）
-const { extensions } = useSelectableExtensions('notification')
+// 種類の絞り込みの選択肢（使えるPluginのもの。結果の通知の出口と対話の出口）
+const { extensions: notificationExtensions } = useSelectableExtensions('notification')
+const { extensions: channelExtensions } = useSelectableExtensions('channel')
+const extensions = computed(() => [...notificationExtensions.value, ...channelExtensions.value])
 
 const emptyParams = (): DestinationListParams => ({
   search: undefined,
@@ -51,7 +53,7 @@ const columns: TableColumn<Destination>[] = [
         :title="$t('出口（通知先）')"
         :description="
           $t(
-            'タスクの結果を送る先です。タスクを管理する人は、タスクの範囲で使ってよい出口から選ぶだけで、送り先は変えられません。送り先や機密の扱いを変えて保存すると新しい版になります',
+            'タスクの結果を送る先と、作業中の質問に答えてもらうSlackのチャネル（対話の出口）です。タスクを管理する人は、タスクの範囲で使ってよい出口から選ぶだけで、送り先は変えられません。送り先や機密の扱いを変えて保存すると新しい版になります',
           )
         "
       >
@@ -99,7 +101,12 @@ const columns: TableColumn<Destination>[] = [
           </div>
         </template>
         <template #urlDisplay-cell="{ row }">
-          <span class="font-mono text-xs">{{ row.original.urlDisplay || '-' }}</span>
+          <!-- 対話の出口は、チャネルと連携の接続を出す -->
+          <template v-if="row.original.isChannel">
+            <div>{{ row.original.channelName || row.original.channelId }}</div>
+            <div class="text-xs text-muted">{{ row.original.connectionName }}</div>
+          </template>
+          <span v-else class="font-mono text-xs">{{ row.original.urlDisplay || '-' }}</span>
         </template>
         <template #suspended-cell="{ row }">
           <UBadge :color="row.original.suspended ? 'error' : 'success'" variant="subtle">

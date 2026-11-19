@@ -1,8 +1,11 @@
 """本体のPluginを、自社のPluginと同じ適合テストの道具（plugin/testing.py）で確かめる（design.md §3.11.4）。
 ConnectorのAdapterは、接続先を用意する connector/tests/test_adapters.py で確かめる"""
 
+import hashlib
+import hmac
 import json
 import socket
+import time
 from unittest import mock
 
 import boto3
@@ -13,10 +16,18 @@ from moto import mock_aws
 
 from artifact.storage import LocalStorage, S3Storage, StorageBackend
 from delivery.adapters import DeliveryRequest, WebhookAdapter
+from delivery.channels.slack import SlackAdapter
 from delivery.models import Destination
 from plugin import builtin
 from plugin.builtin_plugins import plugins
-from plugin.testing import NotificationContract, PluginContract, StorageContract, TriggerContract, checked
+from plugin.testing import (
+    ChannelContract,
+    NotificationContract,
+    PluginContract,
+    StorageContract,
+    TriggerContract,
+    checked,
+)
 from task.triggers import TriggerRequest
 
 SPECS = {spec.id: spec for spec in plugins()}
@@ -116,3 +127,41 @@ def test_checked_adapters_catch_wrong_return_types(tmp_path):
     storage = checked(Sloppy("x", root=str(tmp_path)), StorageBackend)
     with pytest.raises(BeartypeDoorHintViolation):
         storage.stat("a")
+
+
+class TestSlackChannel(ChannelContract):
+    spec = SPECS[builtin.SLACK]
+    extension_id = builtin.SLACK
+    builtin = True
+
+    @pytest.fixture(autouse=True)
+    def fixture_slack(self):
+        def respond(request: httpx.Request) -> httpx.Response:
+            method = request.url.path.rsplit("/", 1)[-1]
+            data: dict = {"ok": True, "ts": "1.0001", "team_id": "T1", "team": "t", "user_id": "UBOT"}
+            if method == "conversations.info":
+                data["channel"] = {"id": "C1", "name": "general", "is_member": True}
+            return httpx.Response(200, json=data)
+
+        with mock.patch.object(SlackAdapter, "transport", httpx.MockTransport(respond)):
+            yield
+
+    @pytest.fixture
+    def contract_secrets(self):
+        return {"bot_token": "xoxb-1", "signing_secret": "secret"}
+
+    @pytest.fixture
+    def contract_channel_id(self):
+        return "C1"
+
+    @pytest.fixture
+    def contract_signed_request(self):
+        body = json.dumps({"type": "url_verification", "challenge": "c"}).encode()
+        timestamp = str(int(time.time()))
+        digest = hmac.new(b"secret", b"v0:" + timestamp.encode() + b":" + body, hashlib.sha256).hexdigest()
+        headers = {
+            "content-type": "application/json",
+            "x-slack-request-timestamp": timestamp,
+            "x-slack-signature": f"v0={digest}",
+        }
+        return headers, body

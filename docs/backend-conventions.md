@@ -119,8 +119,8 @@ design.md §5.1の永続オブジェクトを、次の単位で分ける。実�
 | `run` | Run、ExecutionAttempt、RunEvent、ClarificationRequest、Checkpoint、ToolInvocation、ResultEnvelope、Outbox（`dispatch.py`） |
 | `artifact` | Artifact、BlobObject、BlobLocation、WorkspaceSnapshot |
 | `runtime` | RuntimeProfile、RuntimeProfileVersion、EnvironmentRevision、PackageBundle、Launcher |
-| `task` | TaskDefinition、TaskDefinitionRevision（初期は結果の通知の設定（通知の書き方を含む）もここに持つ）、TriggerBinding、TriggerBindingRevision、TriggerReceipt、InteractionBinding、InteractionBindingRevision、NotificationBinding、NotificationBindingRevision（NotificationBindingは1つのタスクに複数の通知を持たせるときに作る。それまでは通知の設定をTaskDefinitionRevisionに持つ。design.md §4.3） |
-| `delivery` | Destination、DestinationRevision、Delivery、DeliveryAttempt、FileLink・FileFetch（出口へ渡す成果物の取得）、Notification（画面の通知）、ExternalThreadBinding、ChannelMessageReceipt |
+| `task` | TaskDefinition、TaskDefinitionRevision（初期は結果の通知の設定（通知の書き方を含む）もここに持つ）、TriggerBinding、TriggerBindingRevision、TriggerReceipt、InteractionBinding、InteractionBindingRevision（初期は対話の出口もTaskDefinitionRevisionに持つ。design.md §4.6）、NotificationBinding、NotificationBindingRevision（NotificationBindingは1つのタスクに複数の通知を持たせるときに作る。それまでは通知の設定をTaskDefinitionRevisionに持つ。design.md §4.3） |
+| `delivery` | Destination、DestinationRevision、Delivery、DeliveryAttempt、FileLink・FileFetch（出口へ渡す成果物の取得）、Notification（画面の通知）、ChannelConnection（連携の接続）、ExternalThreadBinding、ChannelMessageReceipt（Channel PluginのAdapterの実装は `delivery/channels/`） |
 | `worker` | Workerの登録情報 |
 | `usage` | UsageLedger、クオータ |
 | `llm` | LLMConnection、ModelProfile、Provider Adapter（design.md §4.8） |

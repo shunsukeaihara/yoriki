@@ -275,7 +275,7 @@ const createAPI = () => {
     },
     // タスクの編集画面で選ぶ出口の候補（タスクを管理できる範囲の、停止していないもの）
     destinations: {
-      list: (params: TaskChoiceParams) =>
+      list: (params: DestinationChoiceParams) =>
         http.get<Paginated<DestinationChoice>, Paginated<DestinationChoice>>('app/v1/destinations/', { params }),
     },
     // タスクをまたいだ実行の履歴（本番の実行のうち結果を見られるもの。修正チャットのRunは出さない）。1つのRunは
@@ -408,7 +408,7 @@ const createAPI = () => {
         tables: (waitSeconds: number) =>
           http.get<ConnectorTables, ConnectorTables>(`v1/database_connections/${id}/tables/`, waitFor(waitSeconds)),
       }),
-      // 出口（Webhook・Zapier）。作成と署名の鍵の作り直しの応答にだけ、署名の鍵（signingSecret）が入る
+      // 出口（Webhook・Zapier・画面の通知・Slackのチャネル）。作成と署名の鍵の作り直しの応答にだけ、署名の鍵が入る
       destinations: (id?: string) => ({
         ...readOnlyResource<Destination, DestinationListParams>(http, 'v1/destinations', id),
         create: (data: DestinationWrite) => http.post<DestinationSecret, DestinationSecret>('v1/destinations/', data),
@@ -426,6 +426,21 @@ const createAPI = () => {
           }),
         revisions: (number?: number) =>
           readOnlyResource<DestinationRevision>(http, `v1/destinations/${id}/revisions`, number?.toString()),
+      }),
+      // 連携の接続（Slackのアプリ等）。資格情報（bot token・signing secret）は書くだけで返らない
+      channelConnections: (id?: string) => ({
+        ...resource<ChannelConnection, ChannelConnectionWrite, ChannelConnectionListParams>(
+          http,
+          'v1/channel_connections',
+          id,
+        ),
+        // 更新では種類を送れない。資格情報は送ったものだけを変える
+        update: (data: ChannelConnectionUpdate) =>
+          http.put<ChannelConnection, ChannelConnection>(`v1/channel_connections/${id}/`, data),
+        patch: (data: Partial<ChannelConnectionUpdate>) =>
+          http.patch<ChannelConnection, ChannelConnection>(`v1/channel_connections/${id}/`, data),
+        suspend: () => http.post<ChannelConnection, ChannelConnection>(`v1/channel_connections/${id}/suspend/`),
+        resume: () => http.post<ChannelConnection, ChannelConnection>(`v1/channel_connections/${id}/resume/`),
       }),
       // 発行済みの入口（Webhook）の一覧（見るだけ。入口はタスクの画面で作る。authorization.md §5.5）
       triggerBindings: () => ({

@@ -23,6 +23,7 @@ class ExtensionType(StrEnum):
     NOTIFICATION = "notification"
     STORAGE = "storage"
     CONNECTOR = "connector"
+    CHANNEL = "channel"
 
 
 @dataclass(frozen=True)

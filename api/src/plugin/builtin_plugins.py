@@ -12,6 +12,7 @@ from connector.adapters.mysql import MySQLAdapter
 from connector.adapters.postgresql import PostgreSQLAdapter
 from connector.adapters.sqlserver import SQLServerAdapter
 from delivery.adapters import WebhookAdapter, ZapierAdapter
+from delivery.channels.slack import SlackAdapter
 from delivery.in_app import InAppAdapter
 from task.triggers import WebhookTrigger
 
@@ -24,6 +25,7 @@ from .builtin import (
     POSTGRESQL,
     S3_STORAGE,
     SCHEMAS,
+    SLACK,
     SQLSERVER,
     START,
     URL,
@@ -73,6 +75,7 @@ def plugins() -> list[PluginSpec]:
             secrets=("signing_secret",),
         ),
         _single(IN_APP, "画面の通知", ExtensionType.NOTIFICATION, InAppAdapter, capabilities=frozenset({PERSONAL})),
+        _single(SLACK, "Slack", ExtensionType.CHANNEL, SlackAdapter, secrets=("bot_token", "signing_secret")),
         _single(LOCAL_STORAGE, "ローカル", ExtensionType.STORAGE, LocalStorage),
         _single(S3_STORAGE, "S3", ExtensionType.STORAGE, S3Storage),
         _single(

@@ -2,7 +2,7 @@
 
 作成日：2026年10月2日  
 更新日：2026年11月16日  
-版：0.63 設計案  
+版：0.64 設計案  
 対象：サービス企画、開発、運用担当
 
 プロダクト名はYoriki（よりき）とする（0.16でYuhitsuから変更）。同名の製品・サービスがあることは承知の上で、検索での見つけやすさは重視しない。名称の商標・ドメイン等の確認は本設計の対象外とする。
@@ -354,6 +354,7 @@ Plugin Registryに拡張種別を設け、Adapter実装、設定Schema、対応�
 | trigger | 認証済み起動元をExecutionRequestへ正規化 | タスク設定。通常チャットは既定Binding | chat、webhook |
 | notification | Runの確定イベントと結果を宛先へ配信 | タスク／明示的な送信操作 | in_app、webhook、zapier |
 | storage | 不変のbytesを保存・取得・削除 | サーバーセットアップ | local、s3 |
+| channel | 対話のスレッドを作って投稿・書き換えし、受信した要求の認証とイベントの正規化を行う（§4.6・§4.7） | タスク（対話の出口） | slack（teams・discordは後で足す） |
 | workspace_persistence | 作業ファイルの退避・検証・復元 | サーバーセットアップ | file_snapshot |
 | connector | 外部データの接続の確認・describe・execute（§4.9） | Connectorの接続 | postgresql、mysql、sqlserver |
 
@@ -694,6 +695,16 @@ Discordではthread channelを作成・保持し、BotがGatewayでメッセー�
 
 普通の返信を受け取れない接続をthread_replyとして有効化しない。組織の設定上その権限を付与できない場合だけ、明示的に別モードとしてメンション付き返信または認証済みWeb画面からの回答を選べるようにする。質問文には実際に使える回答方法を表示する。
 
+**初期の実装（Slack）**：Channel Pluginは拡張種別 `channel` のAdapter（§3.11）として作り、最初はSlack（`yoriki.channel.slack`）だけにする。TeamsとDiscord（GatewayのためのChannel-listenerを含む）は、続くPull Requestで同じ契約に足す。
+
+- **接続**（ChannelConnection）：Slackのアプリ1つ（1つのWorkspace）を1つの接続とし、Bot tokenとSigning secretを暗号化して持つ。連携の管理者が作り、範囲を持たない（使ってよい範囲は出口が持つ）。作るときと資格情報を変えるときに、Slackの `auth.test` で接続を確かめ、Workspaceのteam IDとbotのuser IDを保存する（受信の照合とbot自身の投稿の除外に使う）。停止できる。
+- **対話の出口**：チャネルは、今の出口（Destination）の1つの種類（extensionは `yoriki.channel.slack`）として登録する。範囲・部門・停止・機密の結果を送ってよいかは今の出口と同じで、版はURLの代わりに接続とchannel IDを持つ（表示名は選ぶためだけに使い、実行時はIDを使う）。登録のときに、botがそのチャネルに参加していて投稿できることを確かめる。タスクの結果の通知の出口には選べない（対話の出口だけに使う）。
+- **タスクの設定**：タスクの版に「対話の出口」を足す（InteractionBindingを別のModelにせず、結果の通知と同じくタスクの版の項目にする。§4.1の `interaction`）。選べるのは、結果の通知の出口と同じく、タスクの範囲に許された対話の出口だけ。スレッドは1つのRunに1つ（`one_per_run`）で、最初の質問のときに作る（`first_question`。質問がなければ完了等の報告のときに作る）。返信のモードは普通の返信（`thread_reply`）だけ。スレッドに出すイベントは、質問・回答の受付と、完了・失敗・停止の報告に決め、設定の項目にしない。対話の出口のあるタスクのRunは答える人がいるRunとして扱い（`ask_user` を出し、ワークスペースを保存する。§7.9）、起動のしかた（入口・手動実行・チャットからの起動）によらない。
+- **回答の形**：質問（`ask_user` の1〜3問）は、親メッセージ（タスクの名前とRunの画面へのリンク）のスレッドへ、選択肢のボタンつきで投稿する。1問で単一選択なら、ボタンを押すとその選択で回答を確定する。複数の質問・複数選択では、ボタンで選ぶと選んだ状態をメッセージに表示し、「この内容で回答」のボタンで確定する。スレッドへの普通の返信も回答として受け、ボタンで選んでいた分があればそれに返信の文を補足として添えて、なければ返信の文だけを回答として確定する（モデルが読み取る）。確定したら、質問のメッセージのボタンを消し、回答者の表示名と回答を書いた形に書き換える。ボタンの受信には、Slackのアプリの Interactivity のURLも同じ受け口に設定する。
+- **受け口**：`/api/hooks/channels/slack/<接続のID>/` で、Events API（`message` のイベント）とInteractivityの両方を受ける。Signing secretで署名と時刻（5分以内）を確かめ、Events APIのURLの確認（`url_verification`）に答える。受け付けた要求は ChannelMessageReceipt に記録してすぐに200を返し、照合と回答の適用はqclusterで行う（§4.7）。
+- **完了の報告**：完了・失敗・停止は、状態、最後の応答（通知の書き方で `prepare_notification` の文章を作っていればその文章）、Runの画面へのリンク（社内の認証が要る。`YORIKI_PUBLIC_URL` から作る）をスレッドへ投稿する。成果物のファイルはSlackへ上げない（Runの画面から取る）。
+- **後回し**：チャネルの発言から新しいRunを起動すること、スレッドからの停止（今はWebのRunの画面から止める）、起動した本人からの追加指示（YorikiのアカウントとSlackのユーザーの対応付けが要る。authorization.md §5.5）、本人へのDM、起動時にスレッドを作る設定、回答の添付ファイル、Socket Mode、Slack Connectの共有チャネル・非公開チャネル（確かめるのはアプリが参加した公開チャネルだけ）。
+
 ### 4.7 同一スレッドでの質問・回答とRun再開
 
 スレッドの単位はフロー定義ではなく一回のRunとする。同じ定期タスクの次回実行や同時実行には別スレッドを割り当てる。最初の質問時に指定チャネルへ親メッセージ／スレッドを作り、Run、Conversation、Interaction Binding Revision、外部スレッド参照をExternalThreadBindingとして保存する。必要なフローでは起動時に作成する設定も選べる。再質問やAttempt変更で作り直さない。
@@ -743,6 +754,14 @@ sequenceDiagram
 実行中の返信は、人が起動したRunで、送り主がそのRunを起動した本人（Yorikiのアカウントに紐付いた人）のときだけUserInstructionとして次の安全な区切りで取り込む（ほかの参加者の指示を、起動した人の権限で実行しないため）。それ以外の参加者の返信と、入口から起動したRunでは、未回答の質問への回答としてだけ受け付け、それ以外の返信は取り込まずに、受け付けないことをスレッドで知らせる（authorization.md §6）。停止は共通取消経路へ渡す。挨拶・雑談・別依頼で現在の質問を自動解決しない。Bot自身や他Botの投稿、連携による反射イベントは回答入力から除外し、外部event IDとmessage IDで再送を重複適用しない。既に適用した回答の編集・削除では過去の判断を巻き戻さず、訂正は、起動した本人からなら新しい指示として受け付ける（それ以外は、未回答の質問への回答のときだけ受け付ける）。
 
 スレッドには質問、回答受付、実際の再開、必要な節目の進捗、完了・失敗・停止を出す。回答の受付と適用完了を区別し、tokenやToolログを逐次転送しない。Webチャットも同じConversationを表示し、外部からの回答と適用結果を確認できる。対話スレッドでのやり取りをZapier等の結果通知先へ逐次送ることはしない。
+
+**初期の実装（Slack）**：
+
+- **送信**：親メッセージ・質問・完了等の報告は、今の配信（Delivery）に載せ、再試行・確認待ち・手での送り直しも同じに扱う。質問は確認（ClarificationRequest）を作ったRunEventごとの別のイベント（`run.waiting_user`）として配信する（配信のキーは今の「RunEvent・出口の版」のまま）。スレッドの作成はRunごとにExternalThreadBindingの行をロックして直列にし、親メッセージの投稿の結果（channel IDと `ts`）を保存してから、そのスレッドへ投稿する。親メッセージの投稿の結果が分からない場合（送った後に応答が失われた等）は、自動で作り直さず確認待ちにする（Slackには重複のキーがないため。§4.5）。人がチャネルを確かめて配信を送り直したら、作り直してよいことにする。Runが終わったら、答えられないまま残った質問のボタンを閉じる。送る直前に、出口が有効で範囲の中にあるか、機密の結果を送ってよいかを確かめ直す（authorization.md §5.5）。
+- **照合**：受信は、接続、Workspaceのteam ID、channel ID、スレッドの親の `ts` の組で ExternalThreadBinding を引き、どれかが合わなければ業務の入力にしない（記録だけ残す）。bot自身の投稿・ほかのbotの投稿・編集・削除・スレッドの外の発言は取り込まない。本文のない返信（ファイルだけの共有等）は回答にせず、受け付けないことを知らせる（回答の添付ファイルは後で）。同じイベント（Events APIの `event_id`、Interactivityの `action_ts` とメッセージ）は1回だけ適用する。
+- **確定**：回答は、Runが確認待ちで、その確認が回答待ちのときだけ、確認の世代（ボタンに埋め込んだ確認のID。普通の返信では受信の時点で回答待ちの確認）に対して1回だけ確定する（ClarificationRequest の行のロック）。回答者はSlackのuser IDと表示名で記録し、Yorikiのユーザーには結び付けない（`answered_by` は空。権限は増えない）。確定の後に届いた回答、回答待ちの確認がないときの返信、解決済みの確認のボタンは適用せず、受け付けないことをスレッドに返す（人がいる起動でも、追加指示は後回しなので同じ）。返信が答えになっているかをサーバーでは判定せず、回答待ちの確認があれば回答として確定する。答えになっていなければ、モデルがもう一度尋ねる（上の「挨拶・雑談で現在の質問を自動解決しない」は、この尋ね直しで満たす）。
+- **尋ねること**：対話の出口のあるタスクのRunでチャネルの参加者に尋ねるのは、業務の質問（`ask_user`）だけにする。Skill・タスクの編集の確認は出さず、プロバイダの障害でのモデルの切り替えも尋ねずに失敗にする（ほかのタスクと同じ。失敗はスレッドへ報告する。harness.md §10.8）。
+- **Webの画面**：対話の出口のあるタスクのRunでは、タスクのRunの画面にも会話の画面と同じ回答の欄（選択肢と自由文）を出し、Webからも回答できる。答えられるのは、そのRunの作業の記録を見られる人（タスクを管理できる人）と、手動実行・チャットから起動した本人（チャットから起動した本人には、結果に加えて質問と回答の欄を見せる）。どちらもタスクの範囲の中の人で、回答してもRunの権限は増えない。Slackとの競合は、上の確定と同じく確認ごとに1回だけ確定し、先に届いたほうを採る（後から届いたものは、Slackならスレッドで、Webならエラーで回答済みと返す）。Webで確定したら、Slackの質問のメッセージのボタンを消し、Yorikiのユーザーの表示名でWebから回答したことと回答を書いた形に書き換える。Webの回答は `answered_by` にYorikiのユーザーを入れる。停止はRunの画面から今までどおり行う。
 
 完了までのWAITING_USER、QUEUED、RUNNING、RETRY_WAITをまたいで同じスレッドを維持する。外部スレッドのアーカイブはRun完了を意味しない。Discord等で再開操作が必要なら権限の範囲で同じthreadを復帰させる。削除・権限失効・Bot停止等で使えない場合は新しい公開チャネルへ自動転送せず、Web画面で未配信と復旧方法を示す。返信受信経路の切断時は再接続・受信位置の復元と取得可能な範囲での照合を行い、回収できない欠落は明示する。
 
@@ -913,16 +932,17 @@ Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプ�
 | RuntimeProfile / RuntimeProfileVersion | 名前・説明、有効か、既定か（1つだけ）。版はimage（repositoryとindex＝manifest listのdigest。Workerは自分のplatformのmanifestを解決し、そのdigestをAttemptに記録する）、契約番号、対応platform、Python版、資源上限（メモリ、CPU、pids、tmpfsの大きさ、コマンド・ジョブの時間、サブエージェントの時間）。中身を変えると新しい版を作る（§7.3） |
 | PythonPackage | 追加してよいPythonのpackageのカタログ（§7.6）。名前（正規化したもの）、許す版の範囲（空ならどの版も）、メモ、停止 |
 | EnvironmentRevision / PackageBundle | 会話の追加のPython環境（§7.6・§7.7）。revisionは会話、元のrevision、image digest（platformのmanifest）、platform、Pythonの版、直接頼んだpackageと版、入っているwheelの全件。bundleは1回の追加で入れたwheelの完全なlock（名前・版・sha256・保管したBlobObject） |
-| TaskDefinition / TaskDefinitionRevision | 範囲（個人・部門・全社・システム）と持ち主・部門、個人タスクの予算を計上する部門（§9.1）、名前、停止、チャットから起動できるか（名前・停止・印は版の外）、今の版。版は説明、プロンプトのテンプレート、使うSkillと固定の版、Connector、モデル設定とeffort（空なら既定）、機密、入力の項目（名前・型・必須・選択肢）、業務結果Schema（なければSkillのもの）、結果の通知（出口・対象イベント・通知内容・通知の書き方。初期は1つ）、保存した人。フローの起動・対話Bindingは各段階で足す |
+| TaskDefinition / TaskDefinitionRevision | 範囲（個人・部門・全社・システム）と持ち主・部門、個人タスクの予算を計上する部門（§9.1）、名前、停止、チャットから起動できるか（名前・停止・印は版の外）、今の版。版は説明、プロンプトのテンプレート、使うSkillと固定の版、Connector、モデル設定とeffort（空なら既定）、機密、入力の項目（名前・型・必須・選択肢）、業務結果Schema（なければSkillのもの）、結果の通知（出口・対象イベント・通知内容・通知の書き方。初期は1つ）、対話の出口（任意。§4.6）、保存した人 |
 | Plugin / PluginExtension / PluginFailure | Pluginはplugin_id、名前、版、本体のものか、有効か、配備されているか、登録の確かめに通らなかった理由、deprecated（理由・代わり）、自己診断があるか。PluginExtensionはextension_id、Plugin、拡張種別、名前、設定Schema、対応能力、今の宣言にあるか。PluginFailureは実行時の観察（Adapter・Pluginの版・日ごとの予期しない失敗・timeoutの件数と最後のエラー）（§3.11.1・§3.11.4） |
 | TriggerBinding / TriggerBindingRevision | 安定ID、入口のAdapter（extension_id）、認証参照、タスク（範囲と部門はタスクと同じ。1つの入口が起動するタスクは1つ。付け替えない。1つのタスクに複数の入口を付けられる）、名前・鍵と鍵を作った人・停止（版の外）、設定版（取り出す項目の名前とpath、イベントIDの場所、大きさの上限） |
 | TriggerReceipt | 起動Binding、外部イベントID、入力hash、対応Run・会話操作、受付時刻 |
 | NotificationBinding / NotificationBindingRevision | Plugin、通知の書き方、対象イベント、通知内容、Destination版、許可項目。初期（1つのタスクに1つの結果通知）は別のModelにせず、TaskDefinitionRevisionの項目（出口・対象イベント・通知内容・通知の書き方）にする（§4.3）。Runは受付時にDestinationの版を固定する（§4.1） |
-| InteractionBinding / InteractionBindingRevision | Channel Plugin版、接続・Destination版、スレッド方針、返信モード、通知イベント |
-| ExternalThreadBinding | Run・Conversation、対話Binding版、provider・接続・チャネル・thread参照、親message、作成操作key、状態 |
-| ChannelMessageReceipt | provider・接続・event／message ID、投稿者ID・表示名、thread、質問世代、本文hash、受付・適用結果 |
-| Destination / DestinationRevision | Adapter（extension_id。webhook・zapier・in_app。Teams・Slack等は後で足す）、使ってよい範囲（個人・部門・全社・システム。個人はYorikiが作る共通の画面の通知だけ）と部門、署名の鍵（暗号化して保存。版に入れない）、停止。版は宛先のURL（資格情報を含みうるので暗号化して保存し、画面にはホストと末尾だけを出す）、機密の結果を送ってよいか（既定は送らない。§4.4） |
-| Delivery | Run、RunEvent（event_idはRunのIDとイベントの順序）、Destinationの版（配信キーはこの2つ）、確定内容（送る内容をRunの終わりに組み立てて保存する）、配信状態、送った回数、次回試行時刻、配信中の期限（§4.5）。外部thread参照は対話の段階で足す |
+| InteractionBinding / InteractionBindingRevision | Channel Plugin版、接続・Destination版、スレッド方針、返信モード、通知イベント。初期（1つのタスクに1つの対話の出口。Slackだけ）は別のModelにせず、TaskDefinitionRevisionの項目（対話の出口）にする。スレッド方針・返信モード・イベントは決まった値で、項目にしない（§4.6） |
+| ChannelConnection | 連携の接続（§4.6）。Adapter（extension_id）、名前、資格情報（Slackは Bot token・Signing secret。暗号化して保存）、確かめた接続先（Workspaceのteam ID・名前、botのuser ID）、停止 |
+| ExternalThreadBinding | Run・Conversation、対話Binding版、provider・接続・チャネル・thread参照、親message、作成操作key、状態。初期は、Run（1つに1つ）、対話の出口の版、接続、channel ID、親メッセージの `ts`、状態（作成待ち・作成済み・確認待ち） |
+| ChannelMessageReceipt | provider・接続・event／message ID、投稿者ID・表示名、thread、質問世代、本文hash、受付・適用結果。初期は、接続、種類（返信・ボタン）、重複のキー（`event_id` 等）、team ID・channel ID・スレッドの `ts`、投稿者のuser ID・表示名、本文（返信の文・選んだ値）、対象の確認、結果（回答に確定・選択を保持・受け付けない・照合できない）と理由 |
+| Destination / DestinationRevision | Adapter（extension_id。webhook・zapier・in_app、対話の出口のslack。Teams・Discordは後で足す）、使ってよい範囲（個人・部門・全社・システム。個人はYorikiが作る共通の画面の通知だけ）と部門、署名の鍵（暗号化して保存。版に入れない）、停止。版は宛先のURL（資格情報を含みうるので暗号化して保存し、画面にはホストと末尾だけを出す）、機密の結果を送ってよいか（既定は送らない。§4.4）。対話の出口の版はURLの代わりに接続とchannel ID（と選ぶための表示名）を持つ（§4.6） |
+| Delivery | Run、RunEvent（event_idはRunのIDとイベントの順序）、Destinationの版（配信キーはこの2つ）、確定内容（送る内容をRunの終わりに組み立てて保存する）、配信状態、送った回数、次回試行時刻、配信中の期限（§4.5）。対話の配信は、確認（質問の配信のキー）と外部thread参照（ExternalThreadBinding）を持つ（§4.7） |
 | DeliveryAttempt | 試行番号、受付結果（受付確認・一時的な失敗・失敗・届いたか分からない）、HTTPの状態コード、エラー（応答の本文は保存しない） |
 | FileLink / FileFetch | 出口へ渡した成果物の取得用のtoken（試行・成果物、tokenのハッシュ、期限、取得した回数）と、取得の記録（返したか、返さなかった理由、IPアドレス、User-Agent。§4.4） |
 | Notification | 画面の通知。受け手、配信、Run、タスクと送ったときのタスクの名前、イベント、既読の日時（§4.4） |
@@ -2152,3 +2172,4 @@ Sandboxイメージの定義は本体と同じリポジトリの `sandbox/` で�
 | 0.61 | 2026年11月14日 | 実行の残骸の定期の回収を決めた（§8）。Workerのホストごとにあるもの（終わったAttemptのSandboxのコンテナ・作業領域）は、Q2のScheduleがクラスタの1台でしか動かないので、管理コマンド `cleanup_worker` を各ホストのcronから1時間ごとに流す。確定する前に落ちたsnapshot・サブエージェントへのコピーの実体（記録のないobject）は、1時間ごとのSchedule `cleanup_objects`（管理コマンドでも動かせる）が消す。leaseが切れてから1時間は消さない。記録のないobjectを探すため、Storage Backendの契約に list_keys を足した（§7.8） |
 | 0.62 | 2026年11月15日 | Pythonのpackageの追加を決めた（§7.6・§7.7）。カタログ（PythonPackage）は基盤管理者が登録し、直接頼めるのは登録したものだけで、推移依存は登録したpackageの依存として許す。取得はRuntime Profileのイメージの短命の取得用コンテナ（mount・Secretなし、外へ出られる）で行い、wheelを内容のhashで保存先に置く。追加は会話のEnvironment Revisionとして引き継ぎ、Sandboxを起動するたびに入れ直す（`/packages` のmountはやめ、`/tmp` へ写して入れる）。イメージのpackageより新しい版は追加の環境で上書きしてよい。版・platformが変わったら同じ版で取り直す。サブエージェントの追加は子の環境だけ |
 | 0.63 | 2026年11月16日 | Plugin Registryの初期の実装を決めた（§3.11.1〜§3.11.4）。自社のPluginはentry points（`yoriki.plugins`）で、本体のPluginはコードで同じ型の宣言を作り、読み込む時に形を確かめ、migrateの後にDBへ登録する。有効・停止はDBに持って基盤管理者が管理画面で切り替える（自社のPluginは派生のimageで足す）。有効・停止の単位はPlugin、Connector・出口・入口はextension_idでAdapterを指す。停止はそれを使うものを停止したのと同じ扱い。契約の版の番号は持たず、インターフェースは形（基底クラス・抽象メソッド・引数）だけを確かめ、破壊的な変更は型に表れる形で行う。例外は契約の3つの型と予期しない失敗に分ける。合致度は適合テストの道具（capabilityごと）と実行時の観察で追う。deprecatedなものは新しく選べなくする。画面からの追加とマーケットプレイスは後で |
+| 0.64 | 2026年11月17日 | 対話の連携（Channel Plugin）の初期の実装を決めた（§3.11・§4.6・§4.7）。拡張種別 `channel` を足し、最初はSlackだけにする（Teams・Discordは続けて同じ契約に足す）。Slackのアプリ1つを連携の接続（ChannelConnection。連携の管理者が作り、Bot token・Signing secretを暗号化して持つ）とし、チャネルは出口の1つの種類として範囲つきで登録する。タスクの版に対話の出口を足し（InteractionBindingは別のModelにしない）、それがあるRunは答える人がいるRunとして扱う。スレッドはRunごとに最初の質問のときに作る。質問は選択肢のボタンつきで投稿し、ボタンと普通の返信の両方で回答を受け、確認ごとに1回だけ確定する（回答者はSlackのユーザーで記録し、権限は増えない）。受信はHTTP（Events APIとInteractivity）だけで、記録してすぐに200を返し、適用はqclusterで行う。完了・失敗・停止は、状態、最後の応答、Runの画面へのリンクを報告する。タスクのRunの画面からも、作業の記録を見られる人と起動した本人が回答でき、Slackとの競合は1回だけ確定する。チャネルからの起動、スレッドからの停止、起動した本人の追加指示、DM、Socket Modeは後で |

@@ -121,7 +121,11 @@ class AppSubagentViewSet(MyRunMixin, ListModelMixin, GenericViewSet):
     ordering = ("created", "pk")
 
 
-@extend_schema(description="エージェントからの確認", tags=["app/run/clarification"])
+@extend_schema(
+    description="エージェントからの確認。結果とログを見られる人と、チャットから起動した本人（対話の出口のある"
+    "タスクのRun。design.md §4.7）が見て答えられる",
+    tags=["app/run/clarification"],
+)
 class AppClarificationViewSet(MyRunMixin, ListModelMixin, RetrieveModelMixin, GenericViewSet):
     permission_classes = [AppUser]
     lookup_field = "uid"
@@ -129,6 +133,13 @@ class AppClarificationViewSet(MyRunMixin, ListModelMixin, RetrieveModelMixin, Ge
     serializer_class = ClarificationRequestSerializer
     filterset_fields = ["status"]
     ordering = ("-created", "-pk")
+
+    @cached_property
+    def run(self) -> Run:
+        # チャットから起動した本人は、結果だけを見られるRunでも、確認を見て答えられる（対話の出口のあるタスクの
+        # Run。ほかのタスクのRunには確認がない）
+        runs = Run.objects.results_visible_to(self.request.user)
+        return get_object_or_404(runs, uid=self.kwargs["run"])
 
     @extend_schema(
         description="確認に回答する。回答を受け付けるとRunが再開される",

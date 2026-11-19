@@ -1,16 +1,19 @@
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
-import { AxiosError } from 'axios'
+import { AxiosError, AxiosHeaders } from 'axios'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { TaskRunDeliveries } from '#components'
+import { TaskRunClarifications, TaskRunDeliveries } from '#components'
 
-const { list, retry, deliveries } = vi.hoisted(() => {
+const { list, retry, deliveries, clarificationList } = vi.hoisted(() => {
   const list = vi.fn()
   const retry = vi.fn()
-  return { list, retry, deliveries: vi.fn(() => ({ list, retry })) }
+  return { list, retry, deliveries: vi.fn(() => ({ list, retry })), clarificationList: vi.fn() }
 })
 
-mockNuxtImport('useAPI', () => () => ({ tasks: () => ({ deliveries }) }))
+mockNuxtImport('useAPI', () => () => ({
+  tasks: () => ({ deliveries }),
+  runs: () => ({ clarifications: () => ({ list: clarificationList, answer: vi.fn() }) }),
+}))
 mockNuxtImport('useConfirmDialog', () => () => () => Promise.resolve(true))
 
 const delivery = (id: string, status: DeliveryStatusEnum, statusDisplay: string, extra: Partial<Delivery> = {}) =>
@@ -157,6 +160,22 @@ describe('TaskRunDeliveries', () => {
     expect(wrapper.emitted('retried')).toBeUndefined()
   })
 
+  it('対話の出口への質問と回答の受付の配信にも、イベントの名前を出す', async () => {
+    list.mockResolvedValue({
+      results: [
+        delivery('a', DeliveryStatus.DELIVERED, '受付確認済み', { eventType: 'run.waiting_user' }),
+        delivery('b', DeliveryStatus.DELIVERED, '受付確認済み', { eventType: 'clarification.answered' }),
+      ],
+      next: null,
+      previous: null,
+    })
+    const wrapper = await mountSuspended(TaskRunDeliveries, { props: { taskId: 't1', runId: 'r1' } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('確認の通知')
+    expect(wrapper.text()).toContain('回答の受付の通知')
+    expect(wrapper.text()).not.toContain('run.waiting_user')
+  })
+
   it('再試行待ちの配信は、次に送る日時を過ぎたら読み直す', async () => {
     vi.useFakeTimers()
     try {
@@ -177,5 +196,100 @@ describe('TaskRunDeliveries', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+const question = (id: string, extra: Partial<Clarification> = {}): Clarification => ({
+  id,
+  run: 'r1',
+  kind: ClarificationKind.QUESTION,
+  status: ClarificationStatus.OPEN,
+  target: null,
+  questions: [
+    {
+      header: '',
+      question: '支払日はいつにしますか',
+      options: [
+        { label: '月末', description: '' },
+        { label: '翌月10日', description: '' },
+      ],
+      multiSelect: false,
+    },
+  ],
+  answers: [],
+  comment: '',
+  answeredBy: null,
+  answeredByName: '',
+  answeredVia: '',
+  answered: null,
+  expires: null,
+  created: '2026-11-01T09:00:00+09:00',
+  ...extra,
+})
+
+describe('TaskRunClarifications', () => {
+  // mockReset() は mock を返すので、波括弧で包む（返した関数は、vitest が後始末として呼ぶ）
+  beforeEach(() => {
+    clarificationList.mockReset()
+  })
+
+  it('回答待ちの確認には回答の欄を、回答済みの確認には誰がどこで答えたかを出す', async () => {
+    clarificationList.mockResolvedValue({
+      results: [
+        question('q1', {
+          status: ClarificationStatus.ANSWERED,
+          answers: [{ selected: ['月末'], text: '' }],
+          answeredByName: '佐藤',
+          answeredVia: 'slack',
+          answered: '2026-11-01T09:05:00+09:00',
+        }),
+        question('q2'),
+      ],
+      next: null,
+      previous: null,
+    })
+    const wrapper = await mountSuspended(TaskRunClarifications, { props: { runId: 'r1' } })
+    await flushPromises()
+    expect(clarificationList).toHaveBeenCalledWith({ pageSize: 50 })
+    expect(wrapper.text()).toContain('エージェントが回答を待っています')
+    expect(wrapper.findAll('button').some((b) => b.text() === '回答する')).toBe(true)
+    expect(wrapper.text()).toContain('佐藤さんがSlackで回答しました')
+    expect(wrapper.text()).toContain('月末')
+  })
+
+  it('Webで答えた確認は、Webで回答したことを出す', async () => {
+    clarificationList.mockResolvedValue({
+      results: [
+        question('q1', {
+          status: ClarificationStatus.ANSWERED,
+          answers: [{ selected: [], text: '来週で' }],
+          answeredByName: '',
+          answeredVia: 'web',
+          answered: '2026-11-01T09:05:00+09:00',
+        }),
+      ],
+      next: null,
+      previous: null,
+    })
+    const wrapper = await mountSuspended(TaskRunClarifications, { props: { runId: 'r1' } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Webで回答しました')
+    expect(wrapper.text()).toContain('来週で')
+    expect(wrapper.text()).not.toContain('回答する')
+  })
+
+  it('確認を読めない人（404）には何も出さない', async () => {
+    const notFound = new AxiosError('Not Found', '404', undefined, undefined, {
+      status: 404,
+      data: { detail: '見つかりません' },
+      statusText: 'Not Found',
+      headers: { 'content-type': 'application/json' },
+      config: { headers: new AxiosHeaders() },
+    })
+    clarificationList.mockRejectedValue(notFound)
+    const wrapper = await mountSuspended(TaskRunClarifications, { props: { runId: 'r1' } })
+    await flushPromises()
+    expect(clarificationList).toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="task-run-clarifications"]').exists()).toBe(false)
   })
 })

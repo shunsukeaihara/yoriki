@@ -363,6 +363,7 @@ REVISION_FIELDS = (
     "notify_events",
     "notify_content",
     "notification_instructions",
+    "interaction_destination",
 )
 
 
@@ -379,6 +380,8 @@ class TaskDefinitionRevision(models.Model):
       1つのタスクに1つ（design.md §4.1）。Runは受付時に出口の版を固定する
     - `notification_instructions`：通知の書き方（任意）。完了の通知に載せる文章と渡すファイルを、業務のRunの最後に
       `prepare_notification` で決めさせる手順（design.md §4.3）。空なら決まった形で送る
+    - `interaction_destination`：対話の出口（Slack等のチャネル。任意。design.md §4.6）。あれば、Runごとにスレッドを
+      作って質問し、回答を受け、完了・失敗・停止を報告する。Runは受付時に出口の版を固定する
     """
 
     uid = NanoidField(unique=True)
@@ -410,6 +413,14 @@ class TaskDefinitionRevision(models.Model):
     notify_events = ArrayField(models.CharField(max_length=30), verbose_name=_("通知するイベント"), default=list)
     notify_content = models.CharField(_("通知の内容"), max_length=30, default="status_and_result")
     notification_instructions = models.TextField(_("通知の書き方"), blank=True, default="")
+    interaction_destination = models.ForeignKey(
+        "delivery.Destination",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("対話の出口"),
+    )
     change_reason = models.CharField(_("変更理由"), max_length=500, blank=True)
     # 最後にタスクを保存した人（authorization.md §6。Runに記録する）
     created_by = models.ForeignKey(

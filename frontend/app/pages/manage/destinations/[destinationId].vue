@@ -30,8 +30,8 @@ const busy = ref(false)
 
 // 編集・停止・鍵の作り直しはサーバー側でも権限を確認し、なければ403になる
 const canChange = computed(() => hasPermission(PermissionCode.CHANGE_DESTINATION))
-// 署名の鍵は、外へ送る（送り先のURLを持つ）種類（Webhook・Zapier等）だけが持つ
-const hasSecret = computed(() => Boolean(destination.value?.isExternal))
+// 署名の鍵は、送り先のURLを持つ種類（Webhook・Zapier等）だけが使う（対話の出口は使わない）
+const hasSecret = computed(() => Boolean(destination.value?.isExternal) && !destination.value?.isChannel)
 
 const close = () => router.push('/manage/destinations')
 

@@ -9,6 +9,7 @@ export const BuiltinExtension = {
   POSTGRESQL: 'yoriki.connector.postgresql',
   MYSQL: 'yoriki.connector.mysql',
   SQLSERVER: 'yoriki.connector.sqlserver',
+  SLACK: 'yoriki.channel.slack',
 } as const
 
 // 対応能力の名前（api/src/plugin/builtin.py。意味は plugin/CONTRACT.md）
@@ -24,6 +25,9 @@ const builtinDescriptions = (t: T): Record<string, string> => ({
   [BuiltinExtension.WEBHOOK]: t('結果を署名付きのJSONで送ります。受け手は署名を確かめます'),
   [BuiltinExtension.ZAPIER]: t('ZapierのCatch HookのURLへ送ります'),
   [BuiltinExtension.IN_APP]: t('タスクを管理できる人（手動実行では実行した人）の通知欄に載せます'),
+  [BuiltinExtension.SLACK]: t(
+    'Slackのチャネルのスレッドで作業中の質問に答えてもらい、完了を報告します。タスクの対話の出口にだけ選べます',
+  ),
 })
 
 /** 選べる種別を選択肢にする */

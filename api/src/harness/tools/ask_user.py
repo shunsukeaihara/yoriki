@@ -89,7 +89,12 @@ def answer_result(
         lines.append(f'"{question["question"]}" = {value}')
     if clarification.comment:
         lines.append(f"Additional comment from the user: {clarification.comment}")
-    name = getattr(actor, "display_name", "") or getattr(actor, "email", "") or "the user"
+    name = (
+        getattr(actor, "display_name", "")
+        or getattr(actor, "email", "")
+        or (clarification.answered_external or {}).get("name", "")
+        or "the user"
+    )
     if attachments:
         lines.append(attachments_text(attachments))
     text = f"{name} answered:\n" + "\n".join(lines) + "\nContinue with these answers in mind."

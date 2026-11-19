@@ -1,10 +1,18 @@
 import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { DestinationForm, TriggerBindingForm, TriggerBindingKeyWarning, TriggerBindingPreview } from '#components'
+import {
+  ChannelConnectionForm,
+  DestinationForm,
+  TriggerBindingForm,
+  TriggerBindingKeyWarning,
+  TriggerBindingPreview,
+} from '#components'
 
-const { create, patch, triggerPatch, preview, emptyList } = vi.hoisted(() => ({
+const { create, patch, connectionCreate, connectionPatch, triggerPatch, preview, emptyList } = vi.hoisted(() => ({
   create: vi.fn(),
   patch: vi.fn(),
+  connectionCreate: vi.fn(),
+  connectionPatch: vi.fn(),
   triggerPatch: vi.fn(),
   preview: vi.fn(),
   emptyList: vi.fn().mockResolvedValue({ results: [], next: null, previous: null }),
@@ -13,6 +21,7 @@ const { create, patch, triggerPatch, preview, emptyList } = vi.hoisted(() => ({
 mockNuxtImport('useAPI', () => () => ({
   manage: {
     destinations: () => ({ create, patch, departments: emptyList }),
+    channelConnections: () => ({ create: connectionCreate, patch: connectionPatch, list: emptyList }),
   },
   tasks: () => ({ triggers: () => ({ patch: triggerPatch, preview }) }),
   pluginExtensions: {
@@ -29,22 +38,24 @@ mockNuxtImport('useAPI', () => () => ({
             { id: BuiltinExtension.ZAPIER, type, name: 'Zapier', capabilities: ['url'], configSchema: {} },
             { id: BuiltinExtension.IN_APP, type, name: '画面の通知', capabilities: ['personal'], configSchema: {} },
           ]
-        : [
-            {
-              id: BuiltinExtension.POSTGRESQL,
-              type,
-              name: 'PostgreSQL',
-              capabilities: ['schemas'],
-              configSchema: { properties: { port: { default: 5432 } } },
-            },
-            {
-              id: BuiltinExtension.MYSQL,
-              type,
-              name: 'MySQL',
-              capabilities: [],
-              configSchema: { properties: { port: { default: 3306 } } },
-            },
-          ],
+        : type === 'channel'
+          ? [{ id: BuiltinExtension.SLACK, type, name: 'Slack', capabilities: [], configSchema: {} }]
+          : [
+              {
+                id: BuiltinExtension.POSTGRESQL,
+                type,
+                name: 'PostgreSQL',
+                capabilities: ['schemas'],
+                configSchema: { properties: { port: { default: 5432 } } },
+              },
+              {
+                id: BuiltinExtension.MYSQL,
+                type,
+                name: 'MySQL',
+                capabilities: [],
+                configSchema: { properties: { port: { default: 3306 } } },
+              },
+            ],
     ),
   },
 }))
@@ -64,6 +75,11 @@ const destination: Destination = {
   suspended: false,
   version: 2,
   urlDisplay: 'hooks.zapier.com …def/',
+  isChannel: false,
+  connection: null,
+  connectionName: null,
+  channelId: '',
+  channelName: '',
   allowsSensitiveResults: false,
   secretRotated: null,
   createdBy: user,
@@ -205,6 +221,117 @@ describe('DestinationForm', () => {
       url: 'https://hooks.zapier.com/hooks/catch/1/new/',
       version: 3,
     })
+  })
+})
+
+describe('DestinationForm（対話の出口）', () => {
+  const channelDestination: Destination = {
+    ...destination,
+    extension: BuiltinExtension.SLACK,
+    extensionName: 'Slack',
+    isChannel: true,
+    urlDisplay: '',
+    connection: 'cc1',
+    connectionName: '経理のSlack',
+    channelId: 'C0123',
+    channelName: '#経理',
+  }
+
+  beforeEach(() => {
+    create.mockReset().mockResolvedValue({ ...channelDestination, signingSecret: 'whsec_x' })
+    patch.mockReset().mockResolvedValue(channelDestination)
+  })
+
+  type Form = Exposed & {
+    form: { name: string; extension: string; connection: string | null; channelId: string; url: string }
+  }
+
+  it('作成ではURLの代わりに接続とチャネルのIDを送り、両方を入れるまで保存できない', async () => {
+    const wrapper = await mountSuspended(DestinationForm, { props: { modelValue: null } })
+    const vm = wrapper.vm as unknown as Form & { form: { department: string | null } }
+    Object.assign(vm.form, { name: '経理のチャネル', extension: BuiltinExtension.SLACK, department: 'dep1' })
+    await nextTick()
+    expect(wrapper.text()).toContain('チャネルのID')
+    expect(wrapper.text()).not.toContain('送り先のURL')
+    expect(vm.canPost).toBe(false)
+    vm.form.connection = 'cc1'
+    vm.form.channelId = ' C0123 '
+    await nextTick()
+    expect(vm.canPost).toBe(true)
+    await vm.onSubmit()
+    const data = create.mock.calls[0]![0]
+    expect(data).toMatchObject({ extension: BuiltinExtension.SLACK, connection: 'cc1', channelId: 'C0123' })
+    expect(data.url).toBeUndefined()
+  })
+
+  it('更新では、接続とチャネルを変えたときだけ送る', async () => {
+    const wrapper = await mountSuspended(DestinationForm, { props: { modelValue: channelDestination } })
+    expect(wrapper.text()).toContain('#経理')
+    const vm = wrapper.vm as unknown as Form
+    await vm.onSubmit()
+    const data = patch.mock.calls[0]![0]
+    expect(data.connection).toBeUndefined()
+    expect(data.channelId).toBeUndefined()
+    expect(data.url).toBeUndefined()
+
+    vm.form.channelId = 'C0999'
+    await vm.onSubmit()
+    expect(patch.mock.calls[1]![0]).toMatchObject({ connection: 'cc1', channelId: 'C0999' })
+  })
+})
+
+describe('ChannelConnectionForm', () => {
+  const connection: ChannelConnection = {
+    id: 'cc1',
+    extension: BuiltinExtension.SLACK,
+    extensionName: 'Slack',
+    name: '経理のSlack',
+    workspaceId: 'T0123',
+    workspaceName: 'ACME',
+    botUserId: 'U0BOT',
+    suspended: false,
+    receiveUrl: 'https://yoriki.example.com/api/hooks/channels/slack/cc1/',
+    createdBy: user,
+    created: '2026-11-01T00:00:00Z',
+    updated: '2026-11-01T00:00:00Z',
+  }
+
+  beforeEach(() => {
+    connectionCreate.mockReset().mockResolvedValue(connection)
+    connectionPatch.mockReset().mockResolvedValue(connection)
+  })
+
+  type Form = Exposed & { form: { name: string; botToken: string; signingSecret: string } }
+
+  it('作成では、bot tokenとSigning secretの両方を入れるまで保存できない', async () => {
+    const wrapper = await mountSuspended(ChannelConnectionForm, { props: { modelValue: null } })
+    const vm = wrapper.vm as unknown as Form
+    vm.form.name = '経理のSlack'
+    vm.form.botToken = 'xoxb-1'
+    await nextTick()
+    expect(vm.canPost).toBe(false)
+    vm.form.signingSecret = 'secret'
+    await nextTick()
+    expect(vm.canPost).toBe(true)
+    await vm.onSubmit()
+    expect(connectionCreate).toHaveBeenCalledWith({
+      name: '経理のSlack',
+      extension: BuiltinExtension.SLACK,
+      botToken: 'xoxb-1',
+      signingSecret: 'secret',
+    })
+    // 送った資格情報は残さない
+    expect(vm.form.botToken).toBe('')
+  })
+
+  it('更新では、入力した資格情報だけを送る', async () => {
+    const wrapper = await mountSuspended(ChannelConnectionForm, { props: { modelValue: connection } })
+    expect(wrapper.text()).toContain('ACME')
+    const vm = wrapper.vm as unknown as Form
+    expect(vm.canPost).toBe(true)
+    vm.form.signingSecret = 'new-secret'
+    await vm.onSubmit()
+    expect(connectionPatch).toHaveBeenCalledWith({ name: '経理のSlack', signingSecret: 'new-secret' })
   })
 })
 

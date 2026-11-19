@@ -59,9 +59,12 @@ const schedulePoll = () => {
 watch(items, schedulePoll)
 onBeforeUnmount(() => clearTimeout(pollTimer))
 
-const eventLabels = computed(() => new Map(notifyEventItems(t).map((item) => [item.value, item.title])))
-// 外へ送る出口は送信、画面の通知等はベル
-const kindIcon = (destination: DestinationChoice) => (destination.isExternal ? 'i-lucide-send' : 'i-lucide-bell')
+const eventLabels = computed(
+  () => new Map<string, string>(deliveryEventItems(t).map((item) => [item.value, item.title])),
+)
+// 対話の出口（Slack等のチャネル）は吹き出し、外へ送る出口は送信、画面の通知等はベル
+const kindIcon = (destination: DestinationChoice) =>
+  destination.isChannel ? 'i-lucide-message-square' : destination.isExternal ? 'i-lucide-send' : 'i-lucide-bell'
 const formatPayload = (payload: unknown) => JSON.stringify(payload, null, 2)
 
 const retrying = ref<string | null>(null)

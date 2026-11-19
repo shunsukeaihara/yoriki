@@ -52,7 +52,7 @@ export type PluginListParams = ListParams & {
   deployed?: boolean
 }
 export type SelectableExtension = Api<'SelectableExtension'>
-export type ExtensionType = 'trigger' | 'notification' | 'storage' | 'connector'
+export type ExtensionType = 'trigger' | 'notification' | 'storage' | 'connector' | 'channel'
 
 export type TlsEnum = Schemas['TlsEnum']
 export type DatabaseConnection = Api<'DatabaseConnection'>
@@ -209,6 +209,8 @@ export type UserStreamEvent = Api<'UserStreamEvent'>
 export type AppNotification = Api<'Notification'>
 export type NotificationCount = Api<'NotificationCount'>
 export type NotifyEventEnum = Schemas['NotifyEventEnum']
+// 配信のイベント（結果の通知に加えて、対話の出口への質問と回答の受付。design.md §4.7）
+export type DeliveryEventTypeEnum = Schemas['DeliveryEventTypeEnum']
 export type NotificationListParams = ListParams & { unread?: boolean }
 
 // タスク（design.md §4.1、authorization.md §5.3）。中身は今の版の値を平らに持ち、保存のたびに版が増える
@@ -239,6 +241,8 @@ export type TaskListParams = ListParams & {
 }
 // 編集画面の候補（Skill・Connector・出口）を求める範囲
 export type TaskChoiceParams = ListParams & { scope: SkillScopeEnum; department?: string | null }
+// 出口の候補。channel が true なら対話の出口（Slack等のチャネル）だけ、false なら結果の通知の出口だけ
+export type DestinationChoiceParams = TaskChoiceParams & { channel?: boolean }
 export type TaskRunListParams = ListParams & { status?: RunStatusEnum; launch?: RunLaunchEnum }
 // タスクの名前は受付時のもの（部分一致）
 export type TaskRunHistoryParams = TaskRunListParams & { taskName?: string }
@@ -268,6 +272,11 @@ export type DestinationListParams = ListParams & {
   department?: string
   suspended?: boolean
 }
+// 連携の接続（Slackのアプリ等。連携の管理者。design.md §4.6）。資格情報は書くだけで返らない
+export type ChannelConnection = Api<'ChannelConnection'>
+export type ChannelConnectionWrite = Api<'ChannelConnectionRequest'>
+export type ChannelConnectionUpdate = Api<'ChannelConnectionUpdateRequest'>
+export type ChannelConnectionListParams = ListParams & { search?: string; extension?: string; suspended?: boolean }
 export type TriggerBinding = Api<'TriggerBinding'>
 export type TriggerBindingListItem = Api<'TriggerBindingList'>
 export type MinimumUser = Api<'MinimumUser'>

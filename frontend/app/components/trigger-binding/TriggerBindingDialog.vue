@@ -97,8 +97,11 @@ const openSettings = () => {
         <div class="grid gap-1 text-sm" data-testid="trigger-destination">
           <span class="text-muted">{{ $t('結果の届け先') }}</span>
           <span v-if="task.destinationInfo">{{ task.destinationInfo.name }}</span>
-          <span v-else class="text-warning">{{
-            $t('通知先がありません。Webhookで起動するタスクには、失敗を知らせる通知先が必要です')
+          <span v-if="task.interactionDestinationInfo">
+            {{ $t('対話の出口：{name}', { name: task.interactionDestinationInfo.name }) }}
+          </span>
+          <span v-if="!task.destinationInfo && !task.interactionDestinationInfo" class="text-warning">{{
+            $t('通知先がありません。Webhookで起動するタスクには、失敗を知らせる通知先か対話の出口が必要です')
           }}</span>
           <span class="text-xs text-muted">{{
             $t(

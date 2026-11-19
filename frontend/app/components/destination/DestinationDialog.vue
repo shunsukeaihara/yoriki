@@ -8,7 +8,7 @@ const { t } = useI18n()
 const dialog = ref<InstanceType<typeof DDialog> | null>(null)
 const formRef = ref<InstanceType<typeof DestinationForm> | null>(null)
 const editing = ref<Destination | null>(null)
-// 作成した後は、署名の鍵（送り先のURLを持つWebhook・Zapier。送る要求に署名を付ける）を一度だけ表示してから閉じる
+// 作成した後は、署名の鍵（送り先のURLを持つWebhook・Zapier。送る要求に署名を付ける）を一度だけ表示してから閉じる。
 const created = ref<DestinationSecret | null>(null)
 
 // 開くたびに空のフォームにし、前回の入力やエラーを残さない
@@ -21,7 +21,8 @@ const onOpen = (open: boolean) => {
 
 const onCreated = (value: DestinationSecret) => {
   emit('saved', value)
-  if (value.isExternal) created.value = value
+  // 対話の出口（Slackのチャネル）は署名を使わないので、鍵を出さずに閉じる
+  if (value.isExternal && !value.isChannel) created.value = value
   else dialog.value?.closeDialog()
 }
 </script>

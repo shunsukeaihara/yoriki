@@ -76,7 +76,7 @@ yoriki/
 | frontend | yoriki-frontend | `node .output/server/index.mjs` | edge | なし |
 | api | yoriki-api | `uvicorn app.asgi:application ...` | edge、backend、egress | objects（Local保存のとき） |
 | qcluster | yoriki-api | `python manage.py qcluster` | backend、egress | workspaces、objects（Local保存のとき）、Dockerソケット |
-| channel-listener | yoriki-api | `python manage.py run_channel_listener` | backend、egress | なし（profile `channels` のときだけ起動。Channelの受信を実装するときにComposeへ追加する） |
+| channel-listener | yoriki-api | `python manage.py run_channel_listener` | backend、egress | なし（profile `channels` のときだけ起動。Discordの対話の出口を使うときに動かす） |
 | static | yoriki-api | 静的ファイルを共有ボリュームへコピーして終わる | なし | static（nginxと共有） |
 | backup | postgres | `pg_dump` | backend | `/var/lib/yoriki/backups`（profile `tools`、cron等で実行） |
 | postgres | postgres | — | backend | DB |
@@ -134,7 +134,7 @@ networks:
 - **Dockerソケットはqclusterにだけ渡す。** apiやfrontendには渡さない（design.md §7.3）。Dockerソケットはホストのroot権限と同等なので、qclusterのコンテナには必要なもの以外をmountしない。将来は、Launcherをホスト上の専用プロセスに分けるか、rootless Dockerにする。
 - **workspacesはホストとコンテナで同じパスにする。** qclusterの中から見たパスで、ホストのdockerdにbind mountを指示するため。パスがずれると、Sandboxに空のディレクトリがmountされる。ディレクトリは、qclusterのコンテナの利用者（uid 10001）が書けるように前もって作る（§7.1。ないとDockerがrootの持ち物として作り、Workspaceを保存できない）。
 - **Sandboxはcomposeのサービスにしない。** LauncherがAttemptごとに `network_mode: none` 等の制限付きで起動する（サブエージェントがあれば1つのRunで同時に複数）（design.md §7.2）。
-- **外へ通信するサービス**：api（LLM、Connector、外部連携）、qcluster（LLM、配信、イメージのpull）、channel-listener（Slack等への常時接続）は、`backend` に加えて外へ出られる `egress` ネットワークにも参加させる。postgresは参加させない。
+- **外へ通信するサービス**：api（LLM、Connector、外部連携）、qcluster（LLM、配信、イメージのpull）、channel-listener（Discord等への常時接続）は、`backend` に加えて外へ出られる `egress` ネットワークにも参加させる。postgresは参加させない。
 - **migrateは自動で実行しない。** apiの起動時に実行すると、複数のプロセスが同時にmigrationを走らせるため。更新手順（§6）で明示的に実行する。
 
 ### 3.2 エージェントの実行を別のサーバーに出す
@@ -325,6 +325,14 @@ docker compose -f deploy/compose.yaml exec api python manage.py resume_workers
   ```
 
   接続を作る前は受け口のURLが決まらないので、最初は `settings` の `event_subscriptions`・`interactivity` を除いて作り、接続を作った後に画面で設定してもよい。
+- **対話の連携（Discord）**：スレッドへの投稿はqclusterから、返信の受信はchannel-listener（profile `channels`。`docker compose --profile channels up -d`）から行い、どちらも `discord.com`（REST）へ、channel-listenerは加えて `gateway.discord.gg` 等（Gateway。WebSocket）へのHTTPSの外向きの通信が要る。ボタンはapiの受け口で受けるので、DiscordのアプリのInteractions Endpoint URLに `https://<公開のホスト名>/api/hooks/channels/discord/<接続のID>/` を設定する（管理画面の接続の詳細に表示する。Slackと同じく認証プロキシを通さない）。channel-listenerが動いていないと、ボタンでの回答とWebでの回答はできるが、スレッドへの返信は受け付けられない（動き出した後に、確認待ちのスレッドの返信を読み直す）。接続の詳細に、受信の状態（担当のlistener、最後につないだ日時、エラー）を出す。手元では `cd api && uv run python src/manage.py run_channel_listener` で動かす（受け口はSlackと同じく一時のトンネルで確かめる）。
+  Discordのアプリは、Developer Portal（`https://discord.com/developers/applications`）で次のように作る。
+  1. アプリを作り、「General Information」の Application ID と Public Key を控える。
+  2. 「Bot」で Bot token を作り（Reset Token）、Privileged Gateway Intents の **Message Content Intent** を有効にする（ないとGatewayへつなげず、返信の本文も読めない）。100台未満のサーバーで使うなら審査は要らない。
+  3. 「OAuth2」の URL Generator で scope `bot`、権限 View Channels・Send Messages・Create Public Threads・Send Messages in Threads・Read Message History を選び、作ったURLでBotをサーバーへ追加する。
+  4. Discordの「ユーザー設定 → 詳細設定 → 開発者モード」を有効にし、サーバーとチャネルの右クリックの「IDをコピー」でguild IDとchannel IDを取る。
+  5. Yorikiの管理画面で、Bot token・Public Key・guild IDで接続を作り、表示される受け口のURLを「General Information」の Interactions Endpoint URL に設定する（保存のときにDiscordが受け口を確かめる）。
+  6. チャネルを対話の出口として登録する（Botがそのチャネルを見られて、投稿とスレッドの作成ができることを確かめる。非公開のチャネルでは、Botのロールをチャネルに追加する）。
 - **ファイルの保存先**：添付・成果物・Workspaceのsnapshot（tar）は、`YORIKI_STORAGE_BACKEND` で選んだ保存先（Localなら `/var/lib/yoriki/objects`、S3ならbucket）に置く（§7.2）。会話のワークスペースのsnapshotは、保存期限（管理画面の「基盤の設定」。初期値30日）を過ぎると1日1回の清掃（Q2のSchedule `cleanup_workspaces`）で消す。QClusterを止めている間は `python manage.py cleanup_workspaces` で同じ処理を動かせる（`--dry-run` は件数だけ）。確定する前に落ちたsnapshotの実体（記録のないobject）は、1時間ごとの清掃（Q2のSchedule `cleanup_objects`。管理コマンドも同じ名前）で消す。添付と成果物は明示的に消すまで残す（design.md §8、docs/status.md §3）。
 
 ### 7.1 Sandboxを動かすホスト
@@ -483,7 +491,7 @@ Cの構成：
 - **増やしてよいもの・1つだけにするもの**：
   - frontend、api：何台でも増やせる（状態を持たない。セッションはDB、SSEの取りこぼしはDBから読み直す）。
   - qcluster：何台でも増やせる（RunとDeliveryはDBのclaimで重複しない）。クラスタは1つで、どのqclusterもエージェントの実行と配信・Outbox・清掃を受け持つ（§3.2）。qclusterを動かすサーバーには、Dockerソケットとworkspacesの領域を用意する。
-  - channel-listener：Slack Socket Mode等の接続ごとに、受信する担当を1つにする（design.md §10。複数台で動かす場合も、DBで担当を決めて重複して受信しない）。
+  - channel-listener：何台で動かしてもよい。接続ごとにDBのリースで受信の担当を1つに決め、重複して受信しない（design.md §10）。担当の台が止まると、リースが切れた後（1分ほど）にほかの台が引き継ぐ。2台以上で動かすと、引継ぎの間だけ返信の受信が遅れる（取りこぼした返信は、つないだ後に読み直す）。
   - migrate：更新のたびに1か所から1回だけ実行する（§6）。
 - **Composeでの立て方**：どのサーバーもDocker Composeで立てる。サーバーの役割ごとにComposeファイルを分け、1台に複数の役割を重ねてよい。
 

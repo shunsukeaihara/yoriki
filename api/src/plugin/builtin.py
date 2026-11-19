@@ -14,6 +14,8 @@ FILE_FETCH_AUTH = "file_fetch_auth"
 START = "start"
 # Connector：表の名前にスキーマがある（MySQLはDB名がスキーマなので持たない）
 SCHEMAS = "schemas"
+# 対話の出口：常時接続で受ける（channel-listenerが listen を呼ぶ）
+LISTEN = "listen"
 
 WEBHOOK_TRIGGER = "yoriki.trigger.webhook"
 WEBHOOK = "yoriki.notification.webhook"
@@ -25,3 +27,4 @@ POSTGRESQL = "yoriki.connector.postgresql"
 MYSQL = "yoriki.connector.mysql"
 SQLSERVER = "yoriki.connector.sqlserver"
 SLACK = "yoriki.channel.slack"
+DISCORD = "yoriki.channel.discord"

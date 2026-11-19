@@ -2940,11 +2940,12 @@ export interface components {
             after: string | null;
         };
         /**
-         * @description 連携の接続（Slackのアプリ等。連携の管理者。design.md §4.6、authorization.md §5.5）。
+         * @description 連携の接続（Slackのアプリ、DiscordのBotとサーバー等。連携の管理者。design.md §4.6、authorization.md §5.5）。
          *
          *     資格情報は書くだけで返さない。作るときと資格情報を変えるときに接続を確かめ（Slackは `auth.test`）、Workspace等と
          *     botのユーザーIDを保存する。別のWorkspaceの資格情報への変更は断る（作ったスレッドの照合が合わなくなるため）。
-         *     `receive_url` は、チャットツールのアプリに設定する受け口（Slackでは Event Subscriptions と Interactivity）
+         *     `receive_url` は、チャットツールのアプリに設定する受け口（Slackでは Event Subscriptions と Interactivity、
+         *     Discordでは Interactions Endpoint URL）
          */
         ChannelConnection: {
             readonly id: string;
@@ -2962,6 +2963,8 @@ export interface components {
             readonly suspended: boolean;
             /** @description チャットツールのアプリに設定する受け口のURL */
             readonly receive_url: string;
+            /** @description 受信の状態（channel-listenerで受ける種類） */
+            readonly listener: components["schemas"]["ChannelListenerStatus"];
             readonly created_by: components["schemas"]["MinimumUser"];
             /** Format: date-time */
             readonly created: string;
@@ -2969,11 +2972,12 @@ export interface components {
             readonly updated: string;
         };
         /**
-         * @description 連携の接続（Slackのアプリ等。連携の管理者。design.md §4.6、authorization.md §5.5）。
+         * @description 連携の接続（Slackのアプリ、DiscordのBotとサーバー等。連携の管理者。design.md §4.6、authorization.md §5.5）。
          *
          *     資格情報は書くだけで返さない。作るときと資格情報を変えるときに接続を確かめ（Slackは `auth.test`）、Workspace等と
          *     botのユーザーIDを保存する。別のWorkspaceの資格情報への変更は断る（作ったスレッドの照合が合わなくなるため）。
-         *     `receive_url` は、チャットツールのアプリに設定する受け口（Slackでは Event Subscriptions と Interactivity）
+         *     `receive_url` は、チャットツールのアプリに設定する受け口（Slackでは Event Subscriptions と Interactivity、
+         *     Discordでは Interactions Endpoint URL）
          */
         ChannelConnectionRequest: {
             /** @description 種別（PluginのAdapterのID）。作成した後は変えられない */
@@ -2981,16 +2985,40 @@ export interface components {
             name: string;
             /** @description Bot User OAuth Token（xoxb-）。返さない */
             bot_token?: string;
-            /** @description Signing Secret。返さない */
+            /** @description Signing Secret（Slack）。返さない */
             signing_secret?: string;
+            /** @description Public Key（Discord）。返さない */
+            public_key?: string;
+            /** @description サーバーのID（Discord）。返さない */
+            guild_id?: string;
         };
         /** @description 連携の接続の変更。種類は変えられない。資格情報は送ったものだけを変える */
         ChannelConnectionUpdateRequest: {
             name?: string;
             /** @description Bot User OAuth Token（xoxb-）。返さない */
             bot_token?: string;
-            /** @description Signing Secret。返さない */
+            /** @description Signing Secret（Slack）。返さない */
             signing_secret?: string;
+            /** @description Public Key（Discord）。返さない */
+            public_key?: string;
+            /** @description サーバーのID（Discord）。返さない */
+            guild_id?: string;
+        };
+        /** @description 常時接続で受ける接続（Discord）の受信の状態（channel-listener。design.md §10） */
+        ChannelListenerStatus: {
+            /** @description channel-listenerで受ける種類か */
+            listens: boolean;
+            /** @description いずれかのlistenerが担当している（期限の中） */
+            active: boolean;
+            /** @description 担当のlistener（ホスト名:プロセス） */
+            owner: string;
+            /**
+             * Format: date-time
+             * @description 最後につないだ日時
+             */
+            connected: string | null;
+            /** @description つなげなかった理由（つないだら空） */
+            error: string;
         };
         ClarificationAnswerItem: {
             selected?: string[];
@@ -5264,8 +5292,12 @@ export interface components {
             name?: string;
             /** @description Bot User OAuth Token（xoxb-）。返さない */
             bot_token?: string;
-            /** @description Signing Secret。返さない */
+            /** @description Signing Secret（Slack）。返さない */
             signing_secret?: string;
+            /** @description Public Key（Discord）。返さない */
+            public_key?: string;
+            /** @description サーバーのID（Discord）。返さない */
+            guild_id?: string;
         };
         /** @description Connectorの更新。使うDB接続と範囲・部門は変えられないので、読み取り専用にする */
         PatchedConnectorUpdateRequest: {

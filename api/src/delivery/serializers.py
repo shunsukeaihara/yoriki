@@ -452,12 +452,27 @@ class NotificationCountSerializer(serializers.Serializer):
     unread = serializers.IntegerField(read_only=True)
 
 
+# 連携の接続の資格情報として受け取るもの。種類ごとに使うものはPluginの宣言（Extension.secrets）で決まる
+CHANNEL_SECRET_FIELDS = ("bot_token", "signing_secret", "public_key", "guild_id")
+
+
+class ChannelListenerStatusSerializer(serializers.Serializer):
+    """常時接続で受ける接続（Discord）の受信の状態（channel-listener。design.md §10）"""
+
+    listens = serializers.BooleanField(help_text=_("channel-listenerで受ける種類か"))
+    active = serializers.BooleanField(help_text=_("いずれかのlistenerが担当している（期限の中）"))
+    owner = serializers.CharField(help_text=_("担当のlistener（ホスト名:プロセス）"))
+    connected = serializers.DateTimeField(allow_null=True, help_text=_("最後につないだ日時"))
+    error = serializers.CharField(help_text=_("つなげなかった理由（つないだら空）"))
+
+
 class ChannelConnectionSerializer(serializers.ModelSerializer):
-    """連携の接続（Slackのアプリ等。連携の管理者。design.md §4.6、authorization.md §5.5）。
+    """連携の接続（Slackのアプリ、DiscordのBotとサーバー等。連携の管理者。design.md §4.6、authorization.md §5.5）。
 
     資格情報は書くだけで返さない。作るときと資格情報を変えるときに接続を確かめ（Slackは `auth.test`）、Workspace等と
     botのユーザーIDを保存する。別のWorkspaceの資格情報への変更は断る（作ったスレッドの照合が合わなくなるため）。
-    `receive_url` は、チャットツールのアプリに設定する受け口（Slackでは Event Subscriptions と Interactivity）"""
+    `receive_url` は、チャットツールのアプリに設定する受け口（Slackでは Event Subscriptions と Interactivity、
+    Discordでは Interactions Endpoint URL）"""
 
     id = serializers.CharField(source="uid", read_only=True)
     extension = ExtensionField(ExtensionType.CHANNEL)
@@ -467,8 +482,15 @@ class ChannelConnectionSerializer(serializers.ModelSerializer):
         write_only=True, required=False, allow_blank=True, help_text=_("Bot User OAuth Token（xoxb-）。返さない")
     )
     signing_secret = serializers.CharField(
-        write_only=True, required=False, allow_blank=True, help_text=_("Signing Secret。返さない")
+        write_only=True, required=False, allow_blank=True, help_text=_("Signing Secret（Slack）。返さない")
     )
+    public_key = serializers.CharField(
+        write_only=True, required=False, allow_blank=True, help_text=_("Public Key（Discord）。返さない")
+    )
+    guild_id = serializers.CharField(
+        write_only=True, required=False, allow_blank=True, help_text=_("サーバーのID（Discord）。返さない")
+    )
+    listener = serializers.SerializerMethodField(help_text=_("受信の状態（channel-listenerで受ける種類）"))
     receive_url = serializers.SerializerMethodField(help_text=_("チャットツールのアプリに設定する受け口のURL"))
     created_by = MinimumUserSerializer(read_only=True)
 
@@ -481,11 +503,14 @@ class ChannelConnectionSerializer(serializers.ModelSerializer):
             "name",
             "bot_token",
             "signing_secret",
+            "public_key",
+            "guild_id",
             "workspace_id",
             "workspace_name",
             "bot_user_id",
             "suspended",
             "receive_url",
+            "listener",
             "created_by",
             "created",
             "updated",
@@ -498,15 +523,29 @@ class ChannelConnectionSerializer(serializers.ModelSerializer):
         path = f"/api/hooks/channels/{connection.extension.rsplit('.', 1)[-1]}/{connection.uid}/"
         return (settings.YORIKI_PUBLIC_URL or "") + path
 
+    @extend_schema_field(ChannelListenerStatusSerializer)
+    def get_listener(self, connection: ChannelConnection) -> dict:
+        from django.utils import timezone  # noqa: PLC0415
+
+        return {
+            "listens": registry.has_capability(connection.extension, builtin.LISTEN),
+            "active": bool(connection.listener_until and connection.listener_until > timezone.now()),
+            "owner": connection.listener_owner,
+            "connected": connection.listener_connected,
+            "error": connection.listener_error,
+        }
+
     def validate(self, attrs):
         extension = attrs.get("extension") or (self.instance.extension if self.instance else "")
         if "name" in attrs:
             attrs["name"] = attrs["name"].strip()
         secrets = self.instance.secret_values() if self.instance else {}
+        found = registry.declared(extension)
+        accepted = set(found[0].secrets) if found is not None else set()
         changed = False
-        for key in ("bot_token", "signing_secret"):
+        for key in CHANNEL_SECRET_FIELDS:
             value = str(attrs.pop(key, "") or "").strip()
-            if value:
+            if value and key in accepted:
                 secrets[key], changed = value, True
         if self.instance is None or changed:
             from .channels.outbound import channel_adapter  # noqa: PLC0415  channelsがserializerのModelを使うため
@@ -519,7 +558,11 @@ class ChannelConnectionSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"bot_token": str(exc)}) from exc
             if self.instance is not None and info.workspace_id != self.instance.workspace_id:
                 raise serializers.ValidationError(
-                    {"bot_token": _("別のWorkspaceの資格情報です。別のWorkspaceには新しい接続を作ってください")}
+                    {
+                        "bot_token": _(
+                            "別のWorkspace・サーバーの資格情報です。別のWorkspace・サーバーには新しい接続を作ってください"
+                        )
+                    }
                 )
             attrs.update(
                 secrets=json.dumps(secrets),

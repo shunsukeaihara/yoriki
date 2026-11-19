@@ -27,7 +27,7 @@ const clearParams = () => {
 const columns: TableColumn<ChannelConnection>[] = [
   { accessorKey: 'name', header: t('名前') },
   { accessorKey: 'extensionName', header: t('種類') },
-  { accessorKey: 'workspaceName', header: t('Workspace') },
+  { accessorKey: 'workspaceName', header: t('Workspace・サーバー') },
   { accessorKey: 'suspended', header: t('状態') },
   { accessorKey: 'updated', header: t('更新日時') },
 ]
@@ -40,7 +40,7 @@ const columns: TableColumn<ChannelConnection>[] = [
         :title="$t('連携の接続')"
         :description="
           $t(
-            'Slackのアプリ（Workspace）ごとの資格情報です。エージェントには見せません。この接続の上に、質問と報告を投稿するチャネルを「出口」として登録します',
+            'SlackのアプリのWorkspace、DiscordのBotのサーバーごとの資格情報です。エージェントには見せません。この接続の上に、質問と報告を投稿するチャネルを「出口」として登録します',
           )
         "
       >

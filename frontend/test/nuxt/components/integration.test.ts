@@ -2,6 +2,7 @@ import { mockNuxtImport, mountSuspended } from '@nuxt/test-utils/runtime'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   ChannelConnectionForm,
+  ChannelConnectionListener,
   DestinationForm,
   TriggerBindingForm,
   TriggerBindingKeyWarning,
@@ -39,7 +40,10 @@ mockNuxtImport('useAPI', () => () => ({
             { id: BuiltinExtension.IN_APP, type, name: '画面の通知', capabilities: ['personal'], configSchema: {} },
           ]
         : type === 'channel'
-          ? [{ id: BuiltinExtension.SLACK, type, name: 'Slack', capabilities: [], configSchema: {} }]
+          ? [
+              { id: BuiltinExtension.SLACK, type, name: 'Slack', capabilities: [], configSchema: {} },
+              { id: BuiltinExtension.DISCORD, type, name: 'Discord', capabilities: ['listen'], configSchema: {} },
+            ]
           : [
               {
                 id: BuiltinExtension.POSTGRESQL,
@@ -291,6 +295,7 @@ describe('ChannelConnectionForm', () => {
     botUserId: 'U0BOT',
     suspended: false,
     receiveUrl: 'https://yoriki.example.com/api/hooks/channels/slack/cc1/',
+    listener: { listens: false, active: false, owner: '', connected: null, error: '' },
     createdBy: user,
     created: '2026-11-01T00:00:00Z',
     updated: '2026-11-01T00:00:00Z',
@@ -301,7 +306,16 @@ describe('ChannelConnectionForm', () => {
     connectionPatch.mockReset().mockResolvedValue(connection)
   })
 
-  type Form = Exposed & { form: { name: string; botToken: string; signingSecret: string } }
+  type Form = Exposed & {
+    form: {
+      name: string
+      extension: string
+      botToken: string
+      signingSecret: string
+      publicKey: string
+      guildId: string
+    }
+  }
 
   it('作成では、bot tokenとSigning secretの両方を入れるまで保存できない', async () => {
     const wrapper = await mountSuspended(ChannelConnectionForm, { props: { modelValue: null } })
@@ -332,6 +346,55 @@ describe('ChannelConnectionForm', () => {
     vm.form.signingSecret = 'new-secret'
     await vm.onSubmit()
     expect(connectionPatch).toHaveBeenCalledWith({ name: '経理のSlack', signingSecret: 'new-secret' })
+  })
+
+  it('Discordでは、Bot token・Public Key・サーバーのIDを入れて送る', async () => {
+    const wrapper = await mountSuspended(ChannelConnectionForm, { props: { modelValue: null } })
+    const vm = wrapper.vm as unknown as Form
+    vm.form.name = '開発のDiscord'
+    vm.form.extension = BuiltinExtension.DISCORD
+    vm.form.botToken = 'token'
+    vm.form.signingSecret = 'slack-only'
+    await nextTick()
+    expect(wrapper.text()).toContain('Public Key')
+    expect(vm.canPost).toBe(false)
+    vm.form.publicKey = 'ab'.repeat(32)
+    vm.form.guildId = '900'
+    await nextTick()
+    expect(vm.canPost).toBe(true)
+    await vm.onSubmit()
+    // Slackの資格情報は送らない
+    expect(connectionCreate).toHaveBeenCalledWith({
+      name: '開発のDiscord',
+      extension: BuiltinExtension.DISCORD,
+      botToken: 'token',
+      publicKey: 'ab'.repeat(32),
+      guildId: '900',
+    })
+  })
+})
+
+describe('ChannelConnectionListener', () => {
+  it('担当がいなければ、返信を受け付けられないことを出す', async () => {
+    const wrapper = await mountSuspended(ChannelConnectionListener, {
+      props: { listener: { listens: true, active: false, owner: '', connected: null, error: '' } },
+    })
+    expect(wrapper.text()).toContain('受信していません')
+  })
+
+  it('つなげない理由を出す', async () => {
+    const wrapper = await mountSuspended(ChannelConnectionListener, {
+      props: {
+        listener: {
+          listens: true,
+          active: true,
+          owner: 'host:1',
+          connected: '2026-11-20T00:00:00Z',
+          error: 'Message Content Intent が有効になっていません',
+        },
+      },
+    })
+    expect(wrapper.text()).toContain('Message Content Intent')
   })
 })
 

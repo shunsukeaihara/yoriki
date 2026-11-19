@@ -47,10 +47,10 @@ class ChannelConnectionFactory(DjangoModelFactory[ChannelConnection]):
 
 
 def channel_destination(connection: ChannelConnection | None = None, **kwargs) -> Destination:
-    """Slackのチャネルの対話の出口（全社。チャネルの確認はしない）"""
+    """チャネルの対話の出口（全社。既定はSlack。チャネルの確認はしない）"""
     connection = connection or ChannelConnectionFactory.create()
     kwargs.setdefault("revision__channel_id", "C001")
     kwargs.setdefault("revision__channel_name", "#経理")
     return DestinationFactory.create(
-        extension=builtin.SLACK, revision__url="", revision__connection=connection, **kwargs
+        extension=connection.extension, revision__url="", revision__connection=connection, **kwargs
     )

@@ -32,6 +32,7 @@ from delivery.channels.base import (
     ChannelAdapter,
     ChannelInfo,
     ConnectionInfo,
+    InboundEvent,
     InboundRequest,
     MessageKind,
     QuestionView,
@@ -225,6 +226,14 @@ class ChannelContract(AdapterContract):
         assert channel.verify(contract_secrets, headers, body)
         assert not channel.verify(contract_secrets, headers, body + b" ")
         assert isinstance(channel.parse(headers, body), InboundRequest)
+
+    def test_reads_replies_again(self, channel, contract_secrets, contract_channel_id):
+        """常時接続で受けるもの（capability listen）は、つなぎ直した後にスレッドの返信を読み直せる"""
+        self.requires("listen")
+        parent = channel.post(contract_secrets, contract_channel_id, ThreadMessage(MessageKind.PARENT, "parent"))
+        replies = channel.fetch_replies(contract_secrets, contract_channel_id, parent.message_ref, parent.message_ref)
+        assert isinstance(replies, list)
+        assert all(isinstance(r, InboundEvent) for r in replies)
 
 
 class ConnectorContract(AdapterContract):

@@ -2,6 +2,7 @@
 
 受け口（`POST /api/hooks/channels/<種類>/<接続のID>/`）は、接続の資格情報で要求の認証を確かめ、受信した出来事を
 ChannelMessageReceipt に記録してすぐに応答する。照合と回答の適用はqclusterで行い、HTTPの受付の中でRunの再開を待たない。
+常時接続で受けるもの（DiscordのGatewayの返信）は、channel-listener（listener.py）が同じ store_event() で記録する。
 
 照合は、接続、Workspace、チャネル、スレッドの親メッセージの組で行う。bot自身・ほかのbotの投稿は取り込まない。回答は、
 Runが確認待ちで、その確認が回答待ちのときだけ、確認ごとに1回だけ確定する（ClarificationRequest.accept_answer）。
@@ -62,15 +63,21 @@ def _receive(connection: ChannelConnection, adapter: ChannelAdapter, headers: di
         parsed = adapter.parse(headers, body)
     except PluginError:
         return HttpResponse(status=400)
-    if parsed.response is not None:
-        return JsonResponse(parsed.response)
     if not connection.suspended:  # 停止中の接続は取り込まない（送り直させないよう200を返す）
         for event in parsed.events:
-            _store(connection, event)
+            store_event(connection, event)
+    if parsed.response is not None:
+        return JsonResponse(parsed.response)
     return HttpResponse(status=200)
 
 
-def _store(connection: ChannelConnection, event: InboundEvent) -> None:
+def store_event(connection: ChannelConnection, event: InboundEvent) -> bool:
+    """受信した出来事を記録し、照合と適用をqclusterへ渡す。同じ出来事を記録済みなら False"""
+    action: dict = {}
+    if event.clarification:
+        action = {"clarification": event.clarification, "question": event.question, "option": event.option}
+    if event.reply_token:
+        action["reply_token"] = event.reply_token
     try:
         with transaction.atomic():
             receipt = ChannelMessageReceipt.objects.create(
@@ -85,15 +92,12 @@ def _store(connection: ChannelConnection, event: InboundEvent) -> None:
                 user_name=event.user_name[:200],
                 is_bot=event.is_bot,
                 text=event.text,
-                action=(
-                    {"clarification": event.clarification, "question": event.question, "option": event.option}
-                    if event.clarification
-                    else {}
-                ),
+                action=action,
             )
             transaction.on_commit(lambda: process_later(receipt.pk))
     except IntegrityError:
-        pass  # 再送（同じ出来事は1回だけ記録する）
+        return False  # 再送（同じ出来事は1回だけ記録する）
+    return True
 
 
 def process_later(receipt_id: int) -> None:
@@ -150,7 +154,9 @@ def process_receipt(receipt_id: int) -> None:
     except PluginUnavailable:
         receipt.result, receipt.reason = ReceiptResult.IGNORED, "plugin unavailable"
     receipt.processed = timezone.now()
-    receipt.save(update_fields=["run", "clarification", "user_name", "result", "reason", "processed"])
+    # 本人への知らせに使うtoken（Discordのinteraction）は、処理を終えたら残さない
+    receipt.action = {k: v for k, v in (receipt.action or {}).items() if k != "reply_token"}
+    receipt.save(update_fields=["run", "clarification", "user_name", "action", "result", "reason", "processed"])
 
 
 def _apply(receipt: ChannelMessageReceipt, thread: ExternalThreadBinding, adapter: ChannelAdapter, secrets) -> None:
@@ -267,6 +273,7 @@ def _user_name(adapter: ChannelAdapter, secrets: dict[str, str], user_id: str) -
 
 def _notify(adapter: ChannelAdapter, secrets, thread: ExternalThreadBinding, receipt, text: str) -> None:
     try:
-        adapter.notify_user(secrets, thread.channel_id, thread.thread_ref, receipt.user_id, text)
+        token = (receipt.action or {}).get("reply_token", "")
+        adapter.notify_user(secrets, thread.channel_id, thread.thread_ref, receipt.user_id, text, reply_token=token)
     except Exception:
         logger.warning("receipt %s: cannot send the notice", receipt.pk, exc_info=True)

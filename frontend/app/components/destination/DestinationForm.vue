@@ -4,7 +4,7 @@
  * 送り先のURLと「機密の結果を送ってよい」を変えて保存すると新しい版になる。URLは書くだけで、サーバーはホストと
  * 末尾の4文字しか返さないので、編集では空欄なら変えない。
  *
- * 対話の出口（Slackのチャネル。design.md §4.6）は、URLの代わりに連携の接続とチャネルのIDを持つ。サーバーは、botが
+ * 対話の出口（Slack・Discordのチャネル。design.md §4.6）は、URLの代わりに連携の接続とチャネルのIDを持つ。サーバーは、botが
  * そのチャネルに参加しているかを確かめてチャネルの名前を記録するので、接続とチャネルは変えたときだけ送る
  */
 const api = useAPI()
@@ -77,6 +77,7 @@ const find = (id: string) => notification.find(id) ?? channel.find(id)
 const isChannel = computed(() =>
   isEdit.value ? Boolean(modelValue.value?.isChannel) : find(form.value.extension)?.type === 'channel',
 )
+const isDiscord = computed(() => form.value.extension === BuiltinExtension.DISCORD)
 // 宛先のURLを持つ種類か。編集では出口の値、作成では選んだ種類の対応能力で決める
 const hasUrl = computed(() =>
   isEdit.value
@@ -107,7 +108,7 @@ const { onSubmit, loading, errors } = createSubmit({
       // 編集で空欄のURLは送らない（今の送り先のまま）。画面の通知は送り先を持たない
       url: hasUrl.value && f.url.trim() ? f.url.trim() : undefined,
     }
-    // 対話の出口の接続とチャネル。編集では変えたときだけ送る（送るとサーバーがSlackでチャネルを確かめ直す）
+    // 対話の出口の接続とチャネル。編集では変えたときだけ送る（送るとサーバーがチャットツールでチャネルを確かめ直す）
     const channelId = f.channelId.trim()
     const current = modelValue.value
     const target = !isChannel.value
@@ -227,20 +228,27 @@ defineExpose({ onSubmit, loading, canPost, reset })
           :query-params="{ extension: form.extension }"
           item-description="workspaceName"
           :initial-selected="initialConnection"
-          :hint="$t('Slackのアプリ（Workspace）。「連携の接続」で登録したものから選びます')"
+          :hint="
+            isDiscord
+              ? $t('DiscordのBotとサーバー。「連携の接続」で登録したものから選びます')
+              : $t('Slackのアプリ（Workspace）。「連携の接続」で登録したものから選びます')
+          "
           :error-messages="errors.connection"
         />
         <DTextField
           v-model="form.channelId"
           :label="$t('チャネルのID')"
           required
-          placeholder="C0123456789"
+          :placeholder="isDiscord ? '123456789012345678' : 'C0123456789'"
           :hint="
-            isEdit && modelValue?.channelName
-              ? $t('今のチャネル：{name}。Slackのチャネルの詳細の下にあるID。botをチャネルに追加してから登録します', {
-                  name: modelValue.channelName,
-                })
-              : $t('Slackのチャネルの詳細の下にあるID。botをチャネルに追加してから登録します')
+            [
+              isEdit && modelValue?.channelName ? $t('今のチャネル：{name}。', { name: modelValue.channelName }) : '',
+              isDiscord
+                ? $t(
+                    'Discordの開発者モードで、テキストチャネルの右クリックの「IDをコピー」で取れる数字。Botがチャネルを見られて、投稿とスレッドの作成ができることを確かめて登録します',
+                  )
+                : $t('Slackのチャネルの詳細の下にあるID。botをチャネルに追加してから登録します'),
+            ].join('')
           "
           :error-messages="errors.channelId"
         />

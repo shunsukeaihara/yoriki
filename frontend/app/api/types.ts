@@ -274,6 +274,7 @@ export type DestinationListParams = ListParams & {
 }
 // 連携の接続（Slackのアプリ等。連携の管理者。design.md §4.6）。資格情報は書くだけで返らない
 export type ChannelConnection = Api<'ChannelConnection'>
+export type ChannelListenerStatus = Api<'ChannelListenerStatus'>
 export type ChannelConnectionWrite = Api<'ChannelConnectionRequest'>
 export type ChannelConnectionUpdate = Api<'ChannelConnectionUpdateRequest'>
 export type ChannelConnectionListParams = ListParams & { search?: string; extension?: string; suspended?: boolean }

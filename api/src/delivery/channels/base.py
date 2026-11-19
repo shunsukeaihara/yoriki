@@ -6,12 +6,15 @@ Adapterは、チャットツールのAPIとの通信と、メッセージの見�
 
 送信の結果は通知のAdapterと同じ `Outcome`（受付確認・一時的な失敗・失敗・届いたか分からない）で返す。投稿の結果が
 分からない（送った後に応答が失われた等）ときは「届いたか分からない」にする。共通の処理は自動では送り直さない。
+
+HTTPでは受けられない出来事（DiscordのGatewayの返信）は、capability `listen` を宣言し、`listen`・`fetch_replies` を
+実装する。channel-listener（delivery/channels/listener.py）が接続ごとに担当を決めて `listen` を呼ぶ。
 """
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any
+from typing import Any, Protocol
 
 from ..adapters import Outcome
 
@@ -117,6 +120,8 @@ class InboundEvent:
     clarification: str = ""
     question: int = -1
     option: int = -1
+    # 受け付けなかったときに、本人だけへ知らせるのに使う値（Discordのinteractionのtoken等）。処理の後に消す
+    reply_token: str = ""
 
 
 @dataclass
@@ -152,9 +157,17 @@ class ChannelAdapter(ABC):
 
     @abstractmethod
     def notify_user(
-        self, secrets: dict[str, str], channel_id: str, thread_ref: str, user_id: str, text: str
+        self,
+        secrets: dict[str, str],
+        channel_id: str,
+        thread_ref: str,
+        user_id: str,
+        text: str,
+        *,
+        reply_token: str = "",
     ) -> Outcome:
-        """その人だけに見える知らせ（受け付けなかった返信・ボタン）。できなければスレッドへの投稿でよい"""
+        """その人だけに見える知らせ（受け付けなかった返信・ボタン）。できなければスレッドへの投稿でよい。
+        `reply_token` は、受信のときに読んだ値（InboundEvent.reply_token）"""
 
     @abstractmethod
     def verify(self, secrets: dict[str, str], headers: dict[str, str], body: bytes) -> bool:
@@ -167,3 +180,26 @@ class ChannelAdapter(ABC):
     def user_name(self, secrets: dict[str, str], user_id: str) -> str:
         """表示名（任意）。分からなければ空"""
         return ""
+
+    # --- 常時接続で受ける（capability listen を宣言するものだけ） ---
+
+    async def listen(self, secrets: dict[str, str], sink: "ListenSink") -> None:
+        """つないで受け続ける（取り消されるまで返さない）。資格情報・設定の誤りは PluginConfigError、それ以外の
+        例外では、channel-listenerが少し待ってつなぎ直す"""
+        raise NotImplementedError
+
+    def fetch_replies(
+        self, secrets: dict[str, str], channel_id: str, thread_ref: str, after_ref: str
+    ) -> list[InboundEvent]:
+        """スレッドの返信のうち、`after_ref`（メッセージの参照）より後のもの（古い順）。つなぎ直した後の読み直しに使う"""
+        raise NotImplementedError
+
+
+class ListenSink(Protocol):
+    """`listen` が受けたものを渡す先（channel-listener）"""
+
+    async def events(self, events: list[InboundEvent]) -> None:
+        """受けた出来事を記録する"""
+
+    async def connected(self, resumed: bool) -> None:
+        """つないだ。新しいセッション（`resumed=False`）なら、確認待ちのスレッドを読み直す"""

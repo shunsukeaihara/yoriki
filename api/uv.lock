@@ -1626,6 +1626,7 @@ dependencies = [
     { name = "python-pptx" },
     { name = "sqlglot" },
     { name = "uvicorn" },
+    { name = "websockets" },
 ]
 
 [package.dev-dependencies]
@@ -1673,6 +1674,7 @@ requires-dist = [
     { name = "python-pptx", specifier = ">=1.0.2" },
     { name = "sqlglot", specifier = ">=30.24.0" },
     { name = "uvicorn", specifier = ">=0.54.0" },
+    { name = "websockets", specifier = ">=16.1" },
 ]
 
 [package.metadata.requires-dev]

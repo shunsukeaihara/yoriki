@@ -12,10 +12,12 @@ import boto3
 import httpx
 import pytest
 from beartype.roar import BeartypeDoorHintViolation
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from moto import mock_aws
 
 from artifact.storage import LocalStorage, S3Storage, StorageBackend
 from delivery.adapters import DeliveryRequest, WebhookAdapter
+from delivery.channels.discord import DiscordAdapter
 from delivery.channels.slack import SlackAdapter
 from delivery.models import Destination
 from plugin import builtin
@@ -163,5 +165,52 @@ class TestSlackChannel(ChannelContract):
             "content-type": "application/json",
             "x-slack-request-timestamp": timestamp,
             "x-slack-signature": f"v0={digest}",
+        }
+        return headers, body
+
+
+DISCORD_KEY = Ed25519PrivateKey.generate()
+
+
+class TestDiscordChannel(ChannelContract):
+    spec = SPECS[builtin.DISCORD]
+    extension_id = builtin.DISCORD
+    builtin = True
+
+    @pytest.fixture(autouse=True)
+    def fixture_discord(self):
+        public = DISCORD_KEY.public_key().public_bytes_raw().hex()
+
+        fixed = {
+            ("GET", "users/@me"): {"id": "5"},
+            ("GET", "applications/@me"): {"verify_key": public, "flags": 1 << 18},
+            ("GET", "guilds/9"): {"id": "9", "name": "g", "owner_id": "5", "roles": []},
+            ("GET", "guilds/9/members/5"): {"roles": []},
+            ("GET", "channels/1"): {"id": "1", "type": 0, "name": "general", "guild_id": "9"},
+            ("GET", "channels/100/messages"): [],
+        }
+
+        def respond(request: httpx.Request) -> httpx.Response:
+            key = (request.method, request.url.path.removeprefix("/api/v10/"))
+            return httpx.Response(200, json=fixed.get(key, {"id": "100"}))
+
+        with mock.patch.object(DiscordAdapter, "transport", httpx.MockTransport(respond)):
+            yield
+
+    @pytest.fixture
+    def contract_secrets(self):
+        return {"bot_token": "t", "public_key": DISCORD_KEY.public_key().public_bytes_raw().hex(), "guild_id": "9"}
+
+    @pytest.fixture
+    def contract_channel_id(self):
+        return "1"
+
+    @pytest.fixture
+    def contract_signed_request(self):
+        body = json.dumps({"type": 1}).encode()
+        timestamp = str(int(time.time()))
+        headers = {
+            "x-signature-ed25519": DISCORD_KEY.sign(timestamp.encode() + body).hex(),
+            "x-signature-timestamp": timestamp,
         }
         return headers, body

@@ -91,6 +91,13 @@ class ChannelConnection(models.Model):
     bot_user_id = models.CharField(_("botのユーザーID"), max_length=100, blank=True)
     # 停止。投稿も受信もしない（まだ送っていない配信は、送る直前に取り消す）
     suspended = models.BooleanField(_("停止中"), default=False)
+    # 常時接続で受けるもの（Discord）の受信の担当（channel-listener。design.md §10）。`listener_until` を過ぎたら
+    # ほかのlistenerが引き継いでよい。担当が定期的に延長する
+    listener_owner = models.CharField(_("受信の担当"), max_length=200, blank=True)
+    listener_until = models.DateTimeField(_("受信の担当の期限"), null=True, blank=True)
+    # 最後につないだ日時と、つなげなかった理由（つないだら空にする）
+    listener_connected = models.DateTimeField(_("最後につないだ日時"), null=True, blank=True)
+    listener_error = models.CharField(_("受信のエラー"), max_length=500, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+", verbose_name=_("作成者")
     )
@@ -770,6 +777,9 @@ class ChannelMessageReceipt(models.Model):
         return f"{self.connection_id} {self.dedup_key}"
 
 
-auditlog.register(ChannelConnection, exclude_fields=["secrets", "updated"])
+auditlog.register(
+    ChannelConnection,
+    exclude_fields=["secrets", "updated", "listener_owner", "listener_until", "listener_connected", "listener_error"],
+)
 auditlog.register(Destination, exclude_fields=["signing_secret", "updated"])
 auditlog.register(DestinationRevision, exclude_fields=["url"])

@@ -38,7 +38,7 @@ const run = async (fn: () => Promise<void>) => {
 const onSuspend = async () => {
   const ok = await confirm({
     title: t('連携の接続を停止しますか？'),
-    description: t('「{name}」を使う出口へは投稿せず、Slackからの回答も受け付けません', {
+    description: t('「{name}」を使う出口へは投稿せず、チャットツールからの回答も受け付けません', {
       name: connection.value?.name ?? '',
     }),
     confirmLabel: t('停止'),
@@ -92,7 +92,8 @@ const onDelete = async () => {
           icon="i-lucide-pause"
           :title="$t('停止中です。この接続を使う出口へは投稿せず、回答も受け付けません')"
         />
-        <ChannelConnectionReceiveUrl v-if="connection" :url="connection.receiveUrl" />
+        <ChannelConnectionReceiveUrl v-if="connection" :url="connection.receiveUrl" :extension="connection.extension" />
+        <ChannelConnectionListener v-if="connection?.listener.listens" :listener="connection.listener" />
         <USeparator />
         <ChannelConnectionForm ref="formRef" v-model="connection" @updated="emit('changed')" />
       </div>

@@ -122,12 +122,10 @@ def process_receipt(receipt_id: int) -> None:
     secrets: dict[str, str] = {}
     thread: ExternalThreadBinding | None = None
     try:
-        if not connection.in_service():
-            raise _Done(ReceiptResult.IGNORED, "connection suspended")
         if receipt.workspace_id != connection.workspace_id:
             raise _Done(ReceiptResult.UNMATCHED, "workspace")
-        if receipt.is_bot or not receipt.user_id or receipt.user_id == connection.bot_user_id:
-            raise _Done(ReceiptResult.IGNORED, "bot")
+        # Runのスレッドの受信は、取り込まないもの（botの投稿等）もRunに結び付けて残す。Runに結び付かない受信は清掃で
+        # 消す（design.md §8）が、Runのスレッドの記録は読み直し（listener.after_ref）と重複の判定に使うので消さない
         thread = (
             ExternalThreadBinding.objects.select_related("run")
             .filter(
@@ -138,9 +136,14 @@ def process_receipt(receipt_id: int) -> None:
             )
             .first()
         )
+        if thread is not None:
+            receipt.run = thread.run
+        if not connection.in_service():
+            raise _Done(ReceiptResult.IGNORED, "connection suspended")
+        if receipt.is_bot or not receipt.user_id or receipt.user_id == connection.bot_user_id:
+            raise _Done(ReceiptResult.IGNORED, "bot")
         if thread is None:
             raise _Done(ReceiptResult.UNMATCHED, "thread")
-        receipt.run = thread.run
         adapter = channel_adapter(connection.extension)
         secrets = connection.secret_values()
         if not receipt.user_name:
@@ -156,7 +159,10 @@ def process_receipt(receipt_id: int) -> None:
     receipt.processed = timezone.now()
     # 本人への知らせに使うtoken（Discordのinteraction）は、処理を終えたら残さない
     receipt.action = {k: v for k, v in (receipt.action or {}).items() if k != "reply_token"}
-    receipt.save(update_fields=["run", "clarification", "user_name", "action", "result", "reason", "processed"])
+    if receipt.run_id is None:
+        # Runに結び付かない受信（Yorikiと関係のないスレッドの返信等）は、中身を残さない。行は清掃で消す
+        receipt.text, receipt.user_name, receipt.action = "", "", {}
+    receipt.save(update_fields=["run", "clarification", "user_name", "text", "action", "result", "reason", "processed"])
 
 
 def _apply(receipt: ChannelMessageReceipt, thread: ExternalThreadBinding, adapter: ChannelAdapter, secrets) -> None:

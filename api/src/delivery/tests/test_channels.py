@@ -5,17 +5,21 @@ import hashlib
 import hmac
 import json
 import time
+from datetime import timedelta
 from typing import Any
 from unittest import mock
 from urllib.parse import urlencode
 
 import httpx
 import pytest
+from django.utils import timezone
 
+from delivery import cleanup
 from delivery.channels import inbound
 from delivery.channels.slack import SlackAdapter
 from delivery.factories import ChannelConnectionFactory, DestinationFactory, channel_destination
 from delivery.models import (
+    ChannelConnection,
     ChannelEvent,
     ChannelMessageReceipt,
     Delivery,
@@ -408,6 +412,46 @@ def test_late_and_unrelated_inputs_are_not_applied(client, manager, slack):
     # 受け付けなかった人には、その人だけに見える形で知らせる
     ephemeral = [body for method, body in slack.calls if method == "chat.postEphemeral"]
     assert {b["user"] for b in ephemeral} == {"U999", "U123"}
+    # Runのスレッドの受信は、取り込まないものもRunに結び付けて残す。結び付かない受信は中身を残さない
+    bot = ChannelMessageReceipt.objects.get(dedup_key="event:Ev3")
+    assert (bot.run_id, bot.text) == (run.pk, "botの投稿")
+    unrelated = ChannelMessageReceipt.objects.get(dedup_key="event:Ev4")
+    assert (unrelated.run_id, unrelated.text, unrelated.user_name, unrelated.action) == (None, "", "", {})
+    assert unrelated.user_id == "U1"
+
+
+def test_suspended_connection_keeps_the_receipt_bound_to_the_run(client, manager, slack):
+    run = _waiting_run(manager, slack)
+    thread = ExternalThreadBinding.objects.get(run=run)
+    _reply(client, thread.connection, thread, "A社", event_id="Ev1")
+    ChannelConnection.objects.filter(pk=thread.connection_id).update(suspended=True)  # 受けた後、処理する前に停止
+    _process()
+    receipt = ChannelMessageReceipt.objects.get()
+    assert (receipt.result, receipt.run_id, receipt.text) == (ReceiptResult.IGNORED, run.pk, "A社")
+
+
+# --- 受信の記録の清掃（design.md §8） ---
+
+
+def test_cleanup_removes_only_old_unbound_receipts(client, manager, slack):
+    run = _waiting_run(manager, slack)
+    thread = ExternalThreadBinding.objects.get(run=run)
+    connection = thread.connection
+    _reply(client, connection, thread, "A社", event_id="Ev1")
+    _reply(client, connection, thread, "botの投稿", user="UBOT", event_id="Ev2")
+    other = {"type": "message", "channel": "C001", "user": "U1", "text": "x", "ts": "3.0", "thread_ts": "9.0"}
+    _post_event(client, connection, other, "Ev3")
+    _post_event(client, connection, {**other, "ts": "4.0"}, "Ev4")
+    _process()
+    _post_event(client, connection, {**other, "ts": "5.0"}, "Ev5")  # まだ処理していない
+    old = timezone.now() - timedelta(days=cleanup.UNBOUND_RECEIPT_DAYS, minutes=1)
+    ChannelMessageReceipt.objects.exclude(dedup_key="event:Ev4").update(created=old)
+
+    assert cleanup.cleanup_receipts(dry_run=True) == 1
+    assert ChannelMessageReceipt.objects.count() == 5
+    assert cleanup.cleanup_receipts() == 1
+    remaining = set(ChannelMessageReceipt.objects.values_list("dedup_key", flat=True))
+    assert remaining == {"event:Ev1", "event:Ev2", "event:Ev4", "event:Ev5"}
 
 
 def test_request_must_be_signed_and_url_verification_is_answered(client, slack):

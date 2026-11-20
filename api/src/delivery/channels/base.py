@@ -181,6 +181,10 @@ class ChannelAdapter(ABC):
         """表示名（任意）。分からなければ空"""
         return ""
 
+    def thread_url(self, secrets: dict[str, str], workspace_id: str, channel_id: str, thread_ref: str) -> str:
+        """スレッドを開くURL（任意）。Runの画面のリンクに使う。分からなければ空"""
+        return ""
+
     # --- 常時接続で受ける（capability listen を宣言するものだけ） ---
 
     async def listen(self, secrets: dict[str, str], sink: "ListenSink") -> None:

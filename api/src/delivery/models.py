@@ -694,6 +694,8 @@ class ExternalThreadBinding(models.Model):
     # 親メッセージの参照（Slackのts）。作成済みのときだけ
     thread_ref = models.CharField(_("スレッド"), max_length=100, blank=True)
     status = models.PositiveSmallIntegerField(_("状態"), choices=ThreadStatus.choices, default=ThreadStatus.PENDING)
+    # スレッドを開くURL（Runの画面のリンク。作ったときにAdapterから得る。得られなければ空）
+    thread_url = models.URLField(_("スレッドのURL"), max_length=500, blank=True)
     # ボタンで選んで、まだ確定していない選択（{"<確認のID>": [[ラベル...], ...]}）
     selections = models.JSONField(_("選んでいる選択肢"), default=dict, blank=True)
 

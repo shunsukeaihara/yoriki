@@ -238,6 +238,8 @@ def test_question_is_posted_in_a_thread_and_answered_by_a_button(client, manager
     assert parent_path == f"channels/{CHANNEL}/messages"
     thread = ExternalThreadBinding.objects.get(run=run)
     assert thread.status == ThreadStatus.CREATED
+    # Runの画面のリンクは、サーバーとスレッドのIDから組み立てる
+    assert thread.thread_url == f"https://discord.com/channels/{GUILD}/{thread.thread_ref}"
     assert (f"channels/{CHANNEL}/messages/{thread.thread_ref}/threads") in [p for p, _b in discord.requests("POST")]
     assert question_path == f"channels/{thread.thread_ref}/messages"
     assert parent["allowed_mentions"] == {"parse": []}

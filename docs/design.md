@@ -947,7 +947,7 @@ Connectorは、LLMのTool呼出しだけでなく、SkillのPythonスクリプ�
 | TriggerBinding / TriggerBindingRevision | 安定ID、入口のAdapter（extension_id）、認証参照、タスク（範囲と部門はタスクと同じ。1つの入口が起動するタスクは1つ。付け替えない。1つのタスクに複数の入口を付けられる）、名前・鍵と鍵を作った人・停止（版の外）、設定版（取り出す項目の名前とpath、イベントIDの場所、大きさの上限） |
 | TriggerReceipt | 起動Binding、外部イベントID、入力hash、対応Run・会話操作、受付時刻 |
 | NotificationBinding / NotificationBindingRevision | Plugin、通知の書き方、対象イベント、通知内容、Destination版、許可項目。初期（1つのタスクに1つの結果通知）は別のModelにせず、TaskDefinitionRevisionの項目（出口・対象イベント・通知内容・通知の書き方）にする（§4.3）。Runは受付時にDestinationの版を固定する（§4.1） |
-| InteractionBinding / InteractionBindingRevision | Channel Plugin版、接続・Destination版、スレッド方針、返信モード、通知イベント。初期（1つのタスクに1つの対話の出口。Slackだけ）は別のModelにせず、TaskDefinitionRevisionの項目（対話の出口）にする。スレッド方針・返信モード・イベントは決まった値で、項目にしない（§4.6） |
+| InteractionBinding / InteractionBindingRevision | Channel Plugin版、接続・Destination版、スレッド方針、返信モード、通知イベント。初期（1つのタスクに1つの対話の出口。SlackとDiscord）は別のModelにせず、TaskDefinitionRevisionの項目（対話の出口）にする。スレッド方針・返信モード・イベントは決まった値で、項目にしない（§4.6） |
 | ChannelConnection | 連携の接続（§4.6）。Adapter（extension_id）、名前、資格情報（Slackは Bot token・Signing secret、Discordは Bot token・Public Key・guild ID。暗号化して保存）、確かめた接続先（Workspaceのteam ID・名前、botのuser ID。Discordはguild）、停止。常時接続で受けるものは、受信の担当（listenerと期限）と最後の受信の状態（つないだ日時・エラー） |
 | ExternalThreadBinding | Run・Conversation、対話Binding版、provider・接続・チャネル・thread参照、親message、作成操作key、状態。初期は、Run（1つに1つ）、対話の出口の版、接続、channel ID、親メッセージの `ts`、状態（作成待ち・作成済み・確認待ち） |
 | ChannelMessageReceipt | provider・接続・event／message ID、投稿者ID・表示名、thread、質問世代、本文hash、受付・適用結果。初期は、接続、種類（返信・ボタン）、重複のキー（`event_id` 等）、team ID・channel ID・スレッドの `ts`、投稿者のuser ID・表示名、本文（返信の文・選んだ値）、対象の確認、結果（回答に確定・選択を保持・受け付けない・照合できない）と理由 |

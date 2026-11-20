@@ -425,7 +425,7 @@ class DiscordAdapter(ChannelAdapter):
         after = _split_ref(after_ref)[1] or thread_ref
         guild_id = secrets.get("guild_id", "")
         found: list[dict[str, Any]] = []
-        for _page in range(5):  # 1つのスレッドで読み直すのは500件まで
+        while True:  # 続きのページがなくなるまで読む（取りこぼさない）
             outcome, data = self._call(
                 "GET", f"channels/{thread_ref}/messages", secrets, params={"after": after, "limit": "100"}
             )

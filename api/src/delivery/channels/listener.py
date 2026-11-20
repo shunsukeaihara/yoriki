@@ -20,6 +20,7 @@ from datetime import datetime, timedelta
 
 from asgiref.sync import sync_to_async
 from django.db import close_old_connections
+from django.db import connection as db_connection
 from django.db.models import Q
 from django.utils import timezone
 
@@ -119,6 +120,8 @@ class _Sink:
     adapter: ChannelAdapter
     secrets: dict[str, str]
     owner: str
+    # 読み直しのtask（受信と、担当の延長（tick）を止めないよう、別のtaskと別のスレッドで動かす）
+    backfilling: asyncio.Task | None = None
 
     async def events(self, events: list[InboundEvent]) -> None:
         for event in events:
@@ -126,10 +129,23 @@ class _Sink:
 
     async def connected(self, resumed: bool) -> None:
         await sync_to_async(record)(self.connection.pk, self.owner, connected=True)
-        if not resumed:
-            count = await sync_to_async(backfill)(self.connection, self.adapter, self.secrets)
-            if count:
-                logger.info("listener: stored %s replies of %s on reconnect", count, self.connection.uid)
+        if not resumed and (self.backfilling is None or self.backfilling.done()):
+            self.backfilling = asyncio.create_task(self._backfill())
+
+    async def _backfill(self) -> None:
+        count = await sync_to_async(_backfill_in_thread, thread_sensitive=False)(
+            self.connection, self.adapter, self.secrets
+        )
+        if count:
+            logger.info("listener: stored %s replies of %s on reconnect", count, self.connection.uid)
+
+
+def _backfill_in_thread(connection: ChannelConnection, adapter: ChannelAdapter, secrets: dict[str, str]) -> int:
+    """読み直し（専用のスレッドで動かし、終わったらそのスレッドのDBの接続を閉じる）"""
+    try:
+        return backfill(connection, adapter, secrets)
+    finally:
+        db_connection.close()
 
 
 class ChannelListener:

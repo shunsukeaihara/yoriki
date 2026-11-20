@@ -3,6 +3,7 @@ URL。Ed25519）、Gatewayでの返信の受信、つなぎ直した後の読み
 
 import asyncio
 import json
+import threading
 import time
 from datetime import timedelta
 from typing import Any
@@ -584,3 +585,34 @@ def test_connection_api_accepts_discord_secrets(api_client, discord):
 
 def test_text_is_escaped():
     assert escape("@everyone <@1> **x**") == "\\@everyone \\<\\@1\\> \\*\\*x\\*\\*"
+
+
+def test_replies_are_read_again_until_the_last_page(discord):
+    discord.threads.add("7100")
+    discord.history["7100"] = [_message("7100", str(8000 + i), f"返信{i}") for i in range(1, 651)]
+    events = DiscordAdapter().fetch_replies(SECRETS, CHANNEL, "7100", "7100")
+    # 100件ずつのページを、続きがなくなるまで読む（500件で打ち切らない）
+    assert len(events) == 650
+    assert events[0].text == "返信1" and events[-1].text == "返信650"
+
+
+def test_backfill_does_not_hold_the_listener(discord):
+    connection = _connection()
+    sink = listener._Sink(connection, DiscordAdapter(), SECRETS, "me")
+    started, release = threading.Event(), threading.Event()
+
+    def slow(*_args):
+        started.set()
+        release.wait(5)
+        return 0
+
+    async def scenario():
+        with mock.patch.object(listener, "backfill", slow), mock.patch.object(listener, "record"):
+            # つないだ知らせは読み直しを待たずに返る（受信と担当の延長を止めない）
+            await asyncio.wait_for(sink.connected(False), timeout=1)
+            await asyncio.to_thread(started.wait, 5)
+            assert sink.backfilling is not None and not sink.backfilling.done()
+            release.set()
+            await sink.backfilling
+
+    asyncio.run(scenario())

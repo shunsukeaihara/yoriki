@@ -1390,15 +1390,15 @@ wheels = [
 
 [[package]]
 name = "types-boto3"
-version = "1.43.111"
+version = "1.43.123"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "botocore-stubs" },
     { name = "types-s3transfer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/e5/24/f7703f019bed654d697d5a503d9a172511a940da9ee209cdf637fd6c78ec/types_boto3-1.43.111.tar.gz", hash = "sha256:f15db367dfcaa2cc429169ff7dc98a65371c5423dd63f4739c508a2a40d5bb03", size = 105816, upload-time = "2026-10-09T21:12:23.142Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/48/5e/be06056972005c1f02beaec5a7c35b72b8f58a708dc11711c1258a8eff51/types_boto3-1.43.123.tar.gz", hash = "sha256:fda407a89df3a7daca851d01e332c80c6b778254201d8615146fc5f8e893c694", size = 105790, upload-time = "2026-10-30T21:14:35.151Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/29/9d/666a906a7748c8a8f6ddcbd8931a7b2b3413a34dfeccb1385e5dfddece84/types_boto3-1.43.111-py3-none-any.whl", hash = "sha256:2a83eb9d8a3848b816024c80935c467257ef5dbb22d514db170a220415cafe73", size = 71936, upload-time = "2026-10-09T21:12:18.515Z" },
+    { url = "https://files.pythonhosted.org/packages/24/c6/c7072cd5c20024c14ad0f2bccf8ffe75e552996c5cb60780f9212d024415/types_boto3-1.43.123-py3-none-any.whl", hash = "sha256:96657a4ca8d1731899228de1562e1cda9fa9bfc4e23fa328c76c8adc80a99b6f", size = 71906, upload-time = "2026-10-30T21:14:27.171Z" },
 ]
 
 [package.optional-dependencies]
@@ -1689,7 +1689,7 @@ dev = [
     { name = "pytest-django", specifier = ">=4.14.0" },
     { name = "pytest-xdist", specifier = ">=3.8.0" },
     { name = "ruff", specifier = ">=0.17.2" },
-    { name = "types-boto3", extras = ["s3"], specifier = ">=1.43.111" },
+    { name = "types-boto3", extras = ["s3"], specifier = ">=1.43.123" },
     { name = "types-docker", specifier = ">=7.2.0.20261006" },
     { name = "types-jsonschema", specifier = ">=4.26.0.20261006" },
     { name = "types-pymysql", specifier = ">=1.2.0.20260923" },

@@ -33,7 +33,9 @@ from ..adapters import Outcome, _retry_after
 from ..models import AttemptOutcome
 from .base import (
     ChannelAdapter,
+    ChannelChoice,
     ChannelInfo,
+    ChannelList,
     ConnectionInfo,
     InboundEvent,
     InboundKind,
@@ -190,7 +192,27 @@ class DiscordAdapter(ChannelAdapter):
             )
         return ChannelInfo(channel_id=str(channel.get("id", channel_id)), name="#" + str(channel.get("name", "")))
 
-    def _check_call(self, method: str, path: str, secrets: dict[str, str], *, missing: str = "") -> dict[str, Any]:
+    def list_channels(self, secrets: dict[str, str]) -> ChannelList:
+        """サーバーのテキストチャネルのうち、Botが見られて投稿・スレッドの作成ができるもの（権限の足りないものは出さない）"""
+        guild_id = secrets.get("guild_id", "")
+        me = self._check_call("GET", "users/@me", secrets)
+        guild = self._check_call("GET", f"guilds/{guild_id}", secrets, missing=_("Botがこのサーバーに参加していません"))
+        member = self._check_call("GET", f"guilds/{guild_id}/members/{me.get('id', '')}", secrets)
+        channels = self._check_call("GET", f"guilds/{guild_id}/channels", secrets)
+        needed = 0
+        for bit in REQUIRED_PERMISSIONS:
+            needed |= bit
+        bot_id = str(me.get("id", ""))
+        choices = [
+            ChannelChoice(channel_id=str(channel.get("id", "")), name="#" + str(channel.get("name", "")))
+            for channel in (channels if isinstance(channels, list) else [])
+            if isinstance(channel, dict)
+            and channel.get("type") == GUILD_TEXT
+            and (channel_permissions(guild, member, channel, bot_id) & needed) == needed
+        ]
+        return ChannelList(sorted(choices, key=lambda c: c.name))
+
+    def _check_call(self, method: str, path: str, secrets: dict[str, str], *, missing: str = "") -> Any:
         outcome, data = self._call(method, path, secrets, idempotent=True)
         if outcome.outcome == AttemptOutcome.ACCEPTED:
             return data

@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-11-20（対話の連携の後回しのうち、Runの画面のスレッドまで（#119）。続けて、チャネルの一覧・受信の記録の清掃・スレッドからの停止を1つずつPRにする。§4）
+- 最終更新：2026-11-20（対話の連携の後回しのうち、チャネルを一覧から選ぶ画面まで（#120）。続けて、受信の記録の清掃・スレッドからの停止を1つずつPRにする。§4）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -62,6 +62,7 @@
 | #116 | 対話の連携（Channel Plugin）の共通部分とSlack（design.md 0.64 §3.11・§4.6・§4.7、harness.md §6.2・§7.5・§10.3・§10.8、authorization.md §5.5・§11、deployment.md §7、`api/src/plugin/CONTRACT.md`）：拡張種別 `channel` と `yoriki.channel.slack`（`delivery/channels/`。Web API・署名の確かめ・Events APIとInteractivityの読み取り・Block Kit）。連携の接続（`ChannelConnection`。管理画面「連携の接続」）、出口の種類としてのチャネル（版に接続とchannel ID）、タスクの版の対話の出口（`interaction_destination`）とRunの固定（`Run.interaction_revision`）。対話の出口のあるRunは答える人がいるRunで、`ask_user` だけを出す。質問・回答の受付・完了等の報告は配信（`Delivery`）に載せ、スレッド（`ExternalThreadBinding`）は最初の投稿で作る。受け口 `/api/hooks/channels/slack/<接続>/` は記録（`ChannelMessageReceipt`）してすぐ200を返し、qclusterで照合して回答を確定する（ボタン・返信、確認ごとに1回）。タスクのRunの画面からも回答できる（チャットから起動した本人も） |
 | #117 | DiscordのChannel Pluginとchannel-listener（design.md 0.65 §3.11・§4.6・§10、deployment.md §3.1・§7、plugin/CONTRACT.md）：接続はBot＋サーバー（guild）1つ（Bot token・Public Key・guild ID。Public Keyがアプリのものか、Message Content Intent、サーバーへの参加を確かめる）。出口はテキストチャネルだけで、Botのロールとチャネルの上書きから5つの権限を計算して確かめる。親メッセージから公開スレッドを作る（スレッドを作れなければ次の投稿で作り直す）。ボタンはInteractions Endpoint URL（Ed25519）で受けて遅延の応答を返し、断ったボタンには本人だけに見える応答（interactionのtoken。処理の後に消す）。返信は常駐の `run_channel_listener`（Composeの profile `channels`）がGateway（`websockets` で自前。RESUME・心拍・致命的なclose code）で受ける。接続ごとにDBのリース（60秒、15秒ごとに延長）で担当を1つにし、新しいセッションでは確認待ちのスレッドを読み直す。接続の詳細に受信の状態。Channelの契約に capability `listen`（`listen`・`fetch_replies`）と `reply_token` を足した |
 | #119 | Runの画面の対話のスレッド（design.md 0.66 §4.7）：タスクのRunの画面に、対話の出口・チャネルの名前、スレッドの状態とリンクを出す（`task_info.thread`。Webから回答できる人と同じ人に見せ、起動した本人にも出す）。リンクはスレッドを作ったときにAdapterの任意のメソッド `thread_url` で得て `ExternalThreadBinding.thread_url` に保存する（Slackは `chat.getPermalink`、DiscordはサーバーとスレッドのIDから組み立てる。得られなければリンクなし） |
+| #120 | 対話の出口のチャネルを一覧から選ぶ（design.md 0.67 §4.6、`api/src/plugin/CONTRACT.md` §2・§2.1）：Channel Pluginの任意の能力 `list_channels`（`ChannelList`・`ChannelChoice`。選べないものは理由つき）。Slackは `conversations.list` の公開チャネル（1000件ずつ10ページまで。botが参加していない・共有チャネルは選べない）、DiscordはBotに必要な権限がそろったテキストチャネル。API `GET v1/channel_connections/<id>/channels/`（接続のview。停止中・設定の誤りは400、一時的な障害は503）。出口の登録・編集の画面は、接続を選ぶと一覧を取り、名前で絞って選ぶ（`DSelect` に `item-disabled` を足した）。IDの入力に切り替えられ、一覧を取れないときもIDの入力にする。保存のときの `check_channel` は今のまま |
 | #87 | 発言の渡し方（design.md 0.51 §5.5・§11.4、harness.md §7.5・§10.1・§10.2・§10.4）：発言の種類の選択をなくし、`/`・`@` を指定した発言も親へ渡す。Skill・Connectorの一覧を発言ごとに作り直し、`skill`・`connector` の引数を文字列にする。Runがアクセスできるものを権限モデルだけで決め、`/`・`@`、タスクの定義、Skillの宣言と `tools` は使用の指示にする（タスク・評価のRunも絞らない） |
 
 各PRの中身は、Pull Requestの説明と設計書を見る。
@@ -134,10 +135,12 @@
 
 **今の状態（2026-11-03。2026-11-11 に⑦まで進んだ）**：design.md §12の第1段階のうち、Skill（①〜⑤）と、Connector・タスク・配信（①〜⑦、Connectorの④a・④b）は終わった（#72・#73まで）。今は、業務（下の「第1段階の順番」の3）を作る前の整理を、利用者と決めた次の順で進めている。文書の整理は #74 と、その残り（design.md・harness.md の突き合わせ。#75）で、テストの高速化は #76 で行った（バックエンドのテスト全体は、手元（8コア）で約5分から約35秒に、4並列でも約45秒になった）。#74 では、status.md の終わった段階の「決めたこと・判断した点」を設計書と突き合わせ、設計書になかった今の動きに関わるものを design.md・authorization.md・harness.md・frontend-conventions.md・sandbox/CONTRACT.md へ移してから消した（経過・レビュー・確かめたことは消した。各PRの説明に残っている）。§1 はPRごとの短い一覧にした。確認用の道具は #77 で入れた（偽のLLM `fake_llm`、確認用のデータ `seed_dev`、ログイン済みのセッション `dev_session`。development.md §6）。 2026-11-06 に、agentセッションとSandboxのイメージの案を設計書へ反映した。実装は下の⑦（Sandboxのイメージ）まで済んだ。後回し：タスクの実行の論理削除の画面、物理削除の管理コマンド、監査ログの画面。
 
-**次の作業**（#119 のマージを確かめてから）：対話の連携の後回しの続き。2026-11-20 に利用者が「対話の連携の後回し」を選び、範囲を4つにして、1つの目的ごとにPRを分けた（① Runの画面のスレッド（#119。済み）→ ② チャネルを一覧から選ぶ画面 → ③ 受信の記録の保持期限と清掃 → ④ スレッドからの停止）。会話で決めた仕様（利用者が確かめた。設計書には各PRで書く）：
-- ② 対話の出口を登録・編集するとき、接続を選ぶとチャネルの一覧を取り、名前で絞って選ぶ（Slackは公開チャネルで、botが参加しているかを示す（scope `channels:read` は今もある）。Discordはサーバーのテキストチャネルのうち、Botが投稿できるもの）。一覧に出ないもののために、IDの入力も残す。登録のときの確かめ（`check_channel`）は今と同じ。
+**次の作業**（#120 のマージを確かめてから）：対話の連携の後回しの続き。2026-11-20 に利用者が「対話の連携の後回し」を選び、範囲を4つにして、1つの目的ごとにPRを分けた（① Runの画面のスレッド（#119。済み）→ ② チャネルを一覧から選ぶ画面（#120。済み）→ ③ 受信の記録の保持期限と清掃 → ④ スレッドからの停止）。会話で決めた仕様（利用者が確かめた。設計書には各PRで書く）：
+- ②（#120 で済み）対話の出口を登録・編集するとき、接続を選ぶとチャネルの一覧を取り、名前で絞って選ぶ（Slackは公開チャネルで、botが参加しているかを示す（scope `channels:read` は今もある）。Discordはサーバーのテキストチャネルのうち、Botが投稿できるもの）。一覧に出ないもののために、IDの入力も残す。登録のときの確かめ（`check_channel`）は今と同じ。
 - ③ Runに結び付かなかった受信（照合できない・取り込まない。今はYorikiと関係のないスレッドの返信まで本文つきで残っている）は、処理した時点で本文・表示名・ボタンの値を消し、30日で行を消す（1日1回のScheduleと管理コマンド）。Runに結び付いた受信とスレッドの対応は、Runの履歴と同じく自動では消さない（design.md §8 のまま）。日数は基盤の設定にせず固定。気を付けること：Discordのlistenerの読み直し（`after_ref`）は受信の記録から最後のメッセージを探すので、消した後も動くかを確かめる。
 - ④ 親メッセージに「停止」ボタンを置く（止められるのはチャネルの参加者。authorization.md §5.5 のとおり）。Slackは確認のダイアログ、Discordは押した人だけに確認のメッセージと「停止する」ボタン。押されたら共通の停止の経路で停止を依頼し、止めた人はチャットツールのuser IDと表示名で記録して、スレッドに知らせる。Runが終わったらボタンを消す。スレッドを作る前（最初の質問より前）はWebからだけ止められる（起動時にスレッドを作る設定は作らない）。接続が停止中なら受け付けない。
+
+#120 で確かめたこと：テスト（Slackのページを辿る・上限・選べない理由、Discordの種類と権限での絞り込み、APIの権限・停止中・400と503、適合テスト `test_lists_channels`）。確認用のDB `yoriki_discord` の接続（利用者のDiscordのサーバー）で、実際のDiscordから一覧（10件）を取れることをシェルで確かめ、apiと `pnpm dev` を動かして、Playwrightで、編集画面で今のチャネルが選ばれていること、名前で絞って選ぶこと、IDの入力への切り替え、新規作成で一覧から選んで保存（201、`#test`）、一覧を取れない（503に差し替え）ときのエラーとIDの入力を確かめた。試していないこと：実際のSlackでの一覧（テストだけ。scope `channels:read` は今もある）、Slackの選べないチャネルの表示（テストだけ）。確認で作った出口「一覧から選んだ出口」が `yoriki_discord` に残っている（使い捨てでよい）。
 
 #119 で確かめたこと：テスト（Slackのpermalinkの保存、得られないときもスレッドを使う、Discordのリンク、APIの `task_info.thread`、結果だけを見る人にも出す）。確認用のDB `yoriki_discord`（#117 のRunが残っている）で、apiと `pnpm dev` を動かし、Runの画面の「対話のスレッド」の欄（リンクあり・なし）をPlaywrightで確かめた（リンクは手で入れた。実際のSlack・Discordでの `thread_url` の取得は試していない）。
 

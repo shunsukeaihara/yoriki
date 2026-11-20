@@ -1,11 +1,12 @@
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
+from django.utils.translation import gettext as _
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema, extend_schema_view
 from rest_framework import mixins, status
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import APIException, NotFound, ValidationError
 from rest_framework.generics import get_object_or_404
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
@@ -13,7 +14,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet, ModelViewSet, ReadOnlyModelViewSet
 
-from plugin import registry
+from plugin import builtin, registry
+from plugin.errors import PluginError, PluginTemporaryError, PluginUnavailable
 from plugin.spec import ExtensionType
 from run.models import Run
 from task.models import SCOPE_PERMISSIONS
@@ -29,6 +31,7 @@ from .outbox import enqueue_delivery
 from .serializers import (
     ChannelConnectionSerializer,
     ChannelConnectionUpdateSerializer,
+    ChannelListSerializer,
     DeliverySerializer,
     DestinationChoiceSerializer,
     DestinationRevisionSerializer,
@@ -39,6 +42,12 @@ from .serializers import (
     NotificationCountSerializer,
     NotificationSerializer,
 )
+
+
+class ChannelServiceUnavailable(APIException):
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    default_code = "channel_unavailable"
+
 
 CONFLICT = OpenApiResponse(description="他の変更と競合した（編集を始めた後に、他の人が版を作った）")
 
@@ -163,7 +172,7 @@ class DestinationViewSet(SoftDeleteMixin, ModelViewSet):
 )
 class ChannelConnectionViewSet(SoftDeleteMixin, ModelViewSet):
     permission_classes = [ModelPermissions]
-    action_permissions = {"suspend": "change", "resume": "change"}
+    action_permissions = {"suspend": "change", "resume": "change", "channels": "view"}
     lookup_field = "uid"
     queryset = ChannelConnection.objects.alive().select_related("created_by")
     serializer_class = ChannelConnectionSerializer
@@ -197,6 +206,31 @@ class ChannelConnectionViewSet(SoftDeleteMixin, ModelViewSet):
     @action(detail=True, methods=["post"])
     def resume(self, request, *args, **kwargs):
         return self._set_suspended(False)
+
+    @extend_schema(
+        description="対話の出口の登録で選ぶチャネルの一覧を、チャットツールから取る（capability list_channels の"
+        "種類だけ。design.md §4.6）。登録するときは、選んだチャネルを改めて確かめる",
+        responses={200: ChannelListSerializer, 503: OpenApiResponse(description="チャットツールが一時的に応答しない")},
+    )
+    @action(detail=True, methods=["get"], pagination_class=None, filter_backends=[])
+    def channels(self, request, *args, **kwargs):
+        from .channels.outbound import channel_adapter  # noqa: PLC0415  channelsがserializerのModelを使うため
+
+        connection = self.get_object()
+        if not registry.has_capability(connection.extension, builtin.LIST_CHANNELS):
+            message = _("この種類はチャネルの一覧を取れません。IDを入力してください")
+            raise ValidationError({"non_field_errors": [message]})
+        if not connection.in_service():
+            raise ValidationError({"non_field_errors": [_("この接続は今は使えません（停止中等）")]})
+        try:
+            found = channel_adapter(connection.extension).list_channels(connection.secret_values())
+        except PluginUnavailable as exc:
+            raise ValidationError({"non_field_errors": [_("この種類は今は使えません（停止中等）")]}) from exc
+        except PluginTemporaryError as exc:
+            raise ChannelServiceUnavailable(str(exc)) from exc
+        except PluginError as exc:
+            raise ValidationError({"non_field_errors": [str(exc)]}) from exc
+        return Response(ChannelListSerializer(found).data)
 
     def _set_suspended(self, suspended: bool) -> Response:
         connection = self.get_object()

@@ -37,6 +37,23 @@ class ChannelInfo:
 
 
 @dataclass(frozen=True)
+class ChannelChoice:
+    """出口の登録の画面で選ぶチャネル（capability list_channels）。登録では、選んだIDを `check_channel` で確かめ直す"""
+
+    channel_id: str
+    name: str
+    # 選べない理由（botが参加していない等）。空なら選べる
+    unavailable: str = ""
+
+
+@dataclass(frozen=True)
+class ChannelList:
+    channels: list[ChannelChoice]
+    # 上限で読むのをやめた（一覧に出ないチャネルはIDで指定する）
+    truncated: bool = False
+
+
+@dataclass(frozen=True)
 class QuestionAnswer:
     """確定した回答（質問のメッセージを書き換えるときに見せる）"""
 
@@ -143,6 +160,11 @@ class ChannelAdapter(ABC):
     @abstractmethod
     def check_channel(self, secrets: dict[str, str], channel_id: str) -> ChannelInfo:
         """botがそのチャネルに参加していて投稿できるかを確かめる。対話の出口を登録・変更するときに呼ぶ"""
+
+    def list_channels(self, secrets: dict[str, str]) -> ChannelList:
+        """出口に登録できそうなチャネルの一覧（capability list_channels を宣言するものだけ）。名前の順。取れない
+        ときは確かめと同じく PluginConfigError・PluginTemporaryError"""
+        raise NotImplementedError
 
     @abstractmethod
     def post(

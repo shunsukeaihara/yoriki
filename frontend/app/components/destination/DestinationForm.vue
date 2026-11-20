@@ -4,7 +4,8 @@
  * 送り先のURLと「機密の結果を送ってよい」を変えて保存すると新しい版になる。URLは書くだけで、サーバーはホストと
  * 末尾の4文字しか返さないので、編集では空欄なら変えない。
  *
- * 対話の出口（Slack・Discordのチャネル。design.md §4.6）は、URLの代わりに連携の接続とチャネルのIDを持つ。サーバーは、botが
+ * 対話の出口（Slack・Discordのチャネル。design.md §4.6）は、URLの代わりに連携の接続とチャネルのIDを持つ。チャネルは、接続を
+ * 選ぶとチャットツールから取った一覧から名前で絞って選ぶ（一覧に出ないもののためにIDの入力も残す）。サーバーは、botが
  * そのチャネルに参加しているかを確かめてチャネルの名前を記録するので、接続とチャネルは変えたときだけ送る
  */
 const api = useAPI()
@@ -97,6 +98,55 @@ const initialConnection = computed(() =>
     ? { id: modelValue.value.connection, name: modelValue.value.connectionName ?? '' }
     : null,
 )
+
+// チャネルの一覧（capability list_channels の種類）。接続を選ぶとチャットツールから取り、名前で絞って選ぶ。一覧に出ない
+// チャネル・一覧を取れないときのために、IDの入力に切り替えられる
+const canListChannels = computed(
+  () => isChannel.value && hasCapability(channel.find(form.value.extension), Capability.LIST_CHANNELS),
+)
+const channelList = ref<ChannelList | null>(null)
+const channelListError = ref('')
+const channelListLoading = ref(false)
+const enterChannelId = ref(false)
+let channelListRequest = 0
+const loadChannels = async () => {
+  const current = ++channelListRequest
+  channelList.value = null
+  channelListError.value = ''
+  const connection = form.value.connection
+  if (!connection || !canListChannels.value) return
+  channelListLoading.value = true
+  try {
+    const found = await api.manage.channelConnections(connection).channels()
+    if (current === channelListRequest) channelList.value = found
+  } catch (err) {
+    if (current === channelListRequest) channelListError.value = makeErrorMsg(err)
+  } finally {
+    if (current === channelListRequest) channelListLoading.value = false
+  }
+}
+watch([() => form.value.connection, canListChannels], loadChannels, { immediate: true })
+const showChannelSelect = computed(() => canListChannels.value && !enterChannelId.value && !channelListError.value)
+// 選択肢。今のチャネルが一覧にない（botが外された等）ときも、選んだ状態を表示できるように足す
+const channelItems = computed(() => {
+  const items = (channelList.value?.channels ?? []).map((c) => ({
+    value: c.channelId,
+    title: c.name,
+    description: c.unavailable || undefined,
+    disabled: Boolean(c.unavailable),
+  }))
+  const channelId = form.value.channelId
+  if (channelId && !items.some((i) => i.value === channelId)) {
+    const name = channelId === modelValue.value?.channelId ? modelValue.value?.channelName : ''
+    items.unshift({
+      value: channelId,
+      title: name || channelId,
+      description: t('一覧にありません'),
+      disabled: false,
+    })
+  }
+  return items
+})
 
 const { onSubmit, loading, errors } = createSubmit({
   form,
@@ -234,8 +284,51 @@ defineExpose({ onSubmit, loading, canPost, reset })
               : $t('Slackのアプリ（Workspace）。「連携の接続」で登録したものから選びます')
           "
           :error-messages="errors.connection"
+          @update:model-value="(value) => value !== form.connection && (form.channelId = '')"
         />
+        <template v-if="showChannelSelect">
+          <DSelect
+            v-model="form.channelId"
+            :label="$t('チャネル')"
+            required
+            searchable
+            :items="channelItems"
+            item-disabled="disabled"
+            item-description="description"
+            :disabled="!form.connection"
+            :loading="channelListLoading"
+            :placeholder="form.connection ? $t('チャネルを選択してください') : $t('先に連携の接続を選んでください')"
+            :hint="
+              [
+                isDiscord
+                  ? $t('Botが見られて、投稿とスレッドの作成ができるテキストチャネルだけを出します。')
+                  : $t('公開チャネルを出します。botが参加していないものは選べません（チャネルでアプリを追加します）。'),
+                channelList?.truncated ? $t('多すぎて一部だけを出しています。') : '',
+              ].join('')
+            "
+            :error-messages="errors.channelId"
+          />
+          <div class="flex gap-2">
+            <DBtn
+              variant="link"
+              color="neutral"
+              class="px-0"
+              :label="$t('IDで入力する')"
+              @click="enterChannelId = true"
+            />
+            <DBtn
+              variant="link"
+              color="neutral"
+              class="px-0"
+              icon="i-lucide-refresh-cw"
+              :label="$t('一覧を読み直す')"
+              :disabled="!form.connection || channelListLoading"
+              @click="loadChannels"
+            />
+          </div>
+        </template>
         <DTextField
+          v-else
           v-model="form.channelId"
           :label="$t('チャネルのID')"
           required
@@ -252,6 +345,24 @@ defineExpose({ onSubmit, loading, canPost, reset })
           "
           :error-messages="errors.channelId"
         />
+        <div v-if="canListChannels && !showChannelSelect" class="flex flex-wrap items-center gap-2 text-sm">
+          <span v-if="channelListError" class="text-error">
+            {{ $t('チャネルの一覧を取れませんでした：{error}', { error: channelListError }) }}
+          </span>
+          <DBtn
+            variant="link"
+            color="neutral"
+            class="px-0"
+            :label="channelListError ? $t('もう一度読む') : $t('一覧から選ぶ')"
+            :disabled="!form.connection"
+            @click="
+              () => {
+                enterChannelId = false
+                if (channelListError) loadChannels()
+              }
+            "
+          />
+        </div>
       </template>
       <DSwitch
         v-model="form.allowsSensitiveResults"

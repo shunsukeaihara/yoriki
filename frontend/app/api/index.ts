@@ -441,6 +441,8 @@ const createAPI = () => {
           http.patch<ChannelConnection, ChannelConnection>(`v1/channel_connections/${id}/`, data),
         suspend: () => http.post<ChannelConnection, ChannelConnection>(`v1/channel_connections/${id}/suspend/`),
         resume: () => http.post<ChannelConnection, ChannelConnection>(`v1/channel_connections/${id}/resume/`),
+        // チャットツールから取るチャネルの一覧（capability list_channels の種類だけ）
+        channels: () => http.get<ChannelList, ChannelList>(`v1/channel_connections/${id}/channels/`),
       }),
       // 発行済みの入口（Webhook）の一覧（見るだけ。入口はタスクの画面で作る。authorization.md §5.5）
       triggerBindings: () => ({

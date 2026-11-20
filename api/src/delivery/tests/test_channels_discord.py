@@ -548,6 +548,25 @@ def test_channel_must_be_a_text_channel_with_the_permissions(discord):
         adapter.check_channel(SECRETS, CHANNEL)
 
 
+def test_channel_list_has_the_text_channels_the_bot_can_use(discord):
+    hidden = {"id": "77", "type": 0, "allow": "0", "deny": str(SEND_MESSAGES)}
+    discord.responses[("GET", f"guilds/{GUILD}/channels")] = [
+        httpx.Response(
+            200,
+            json=[
+                {"id": "11", "type": 0, "name": "雑談"},
+                {"id": "12", "type": 0, "name": "作業"},
+                {"id": "13", "type": 2, "name": "音声"},
+                {"id": "14", "type": 15, "name": "フォーラム"},
+                {"id": "15", "type": 0, "name": "書けない", "permission_overwrites": [hidden]},
+            ],
+        )
+    ]
+    found = DiscordAdapter().list_channels(SECRETS)
+    assert [(c.channel_id, c.name, c.unavailable) for c in found.channels] == [("12", "#作業", ""), ("11", "#雑談", "")]
+    assert found.truncated is False
+
+
 def test_channel_permissions_follow_the_overwrites():
     guild = {"id": GUILD, "owner_id": "1", "roles": [{"id": GUILD, "permissions": str(VIEW_CHANNEL | SEND_MESSAGES)}]}
     member = {"roles": ["77"]}

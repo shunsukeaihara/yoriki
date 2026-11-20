@@ -4781,6 +4781,30 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/channel_connections/{uid}/channels/:
+    get:
+      operationId: v1_channel_connections_channels_retrieve
+      description: 対話の出口の登録で選ぶチャネルの一覧を、チャットツールから取る（capability list_channels の種類だけ。design.md
+        §4.6）。登録するときは、選んだチャネルを改めて確かめる
+      parameters:
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - manage/channel_connection
+      security:
+      - cookieAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelList'
+          description: ''
+        '503':
+          description: チャットツールが一時的に応答しない
   /api/v1/channel_connections/{uid}/resume/:
     post:
       operationId: v1_channel_connections_resume_create
@@ -8344,6 +8368,25 @@ components:
       - after
       - before
       - column
+    ChannelChoice:
+      type: object
+      description: 対話の出口の登録で選ぶチャネル（チャットツールから取った一覧の1つ）
+      properties:
+        channel_id:
+          type: string
+          readOnly: true
+        name:
+          type: string
+          readOnly: true
+          description: 選ぶための表示名（#から始まる）
+        unavailable:
+          type: string
+          readOnly: true
+          description: 選べない理由（botが参加していない等）。空なら選べる
+      required:
+      - channel_id
+      - name
+      - unavailable
     ChannelConnection:
       type: object
       description: |-
@@ -8480,6 +8523,21 @@ components:
           type: string
           writeOnly: true
           description: サーバーのID（Discord）。返さない
+    ChannelList:
+      type: object
+      properties:
+        channels:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChannelChoice'
+          readOnly: true
+        truncated:
+          type: boolean
+          readOnly: true
+          description: 多すぎて途中で読むのをやめた（一覧に出ないチャネルはIDで指定する）
+      required:
+      - channels
+      - truncated
     ChannelListenerStatus:
       type: object
       description: 常時接続で受ける接続（Discord）の受信の状態（channel-listener。design.md §10）

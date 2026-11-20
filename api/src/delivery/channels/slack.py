@@ -26,7 +26,9 @@ from ..adapters import Outcome, _retry_after
 from ..models import AttemptOutcome
 from .base import (
     ChannelAdapter,
+    ChannelChoice,
     ChannelInfo,
+    ChannelList,
     ConnectionInfo,
     InboundEvent,
     InboundKind,
@@ -44,6 +46,9 @@ MAX_CLOCK_SKEW = 300
 MAX_SECTION = 2900
 # ボタンの文字の上限（Slackは75文字）
 MAX_BUTTON = 70
+# チャネルの一覧（`conversations.list`）の1回の件数と、読むページの上限（Tier 2の呼出しなので抑える）
+LIST_PAGE_SIZE = 1000
+MAX_LIST_PAGES = 10
 SELECT_PREFIX = "yoriki_select_"
 SUBMIT_ACTION = "yoriki_submit"
 # 受け付ける返信の種類（ファイルを付けた返信は文だけを使う。添付は後で。design.md §4.6）
@@ -110,6 +115,35 @@ class SlackAdapter(ChannelAdapter):
         if not channel.get("is_member"):
             raise PluginConfigError(_("botがチャネルに参加していません。チャネルでアプリを追加（/invite）してください"))
         return ChannelInfo(channel_id=channel.get("id", channel_id), name="#" + channel.get("name", channel_id))
+
+    def list_channels(self, secrets: dict[str, str]) -> ChannelList:
+        """公開チャネル（アーカイブを除く）。botが参加していないもの・共有チャネルは理由つきで返す（選べない）"""
+        choices: list[ChannelChoice] = []
+        cursor = ""
+        for _page in range(MAX_LIST_PAGES):
+            params = {"types": "public_channel", "exclude_archived": "true", "limit": str(LIST_PAGE_SIZE)}
+            if cursor:
+                params["cursor"] = cursor
+            data = self._check_call("conversations.list", secrets, params=params)
+            for channel in data.get("channels") or []:
+                if channel.get("is_archived") or channel.get("is_private"):
+                    continue
+                unavailable = ""
+                if channel.get("is_ext_shared"):
+                    unavailable = _("共有チャネルにはまだ対応していません")
+                elif not channel.get("is_member"):
+                    unavailable = _("botが参加していません（チャネルでアプリを追加してください）")
+                choices.append(
+                    ChannelChoice(
+                        channel_id=str(channel.get("id", "")),
+                        name="#" + str(channel.get("name", "")),
+                        unavailable=unavailable,
+                    )
+                )
+            cursor = str((data.get("response_metadata") or {}).get("next_cursor") or "")
+            if not cursor:
+                return ChannelList(sorted(choices, key=lambda c: c.name))
+        return ChannelList(sorted(choices, key=lambda c: c.name), truncated=True)
 
     def _check_call(self, method: str, secrets: dict[str, str], params: dict[str, str]) -> dict[str, Any]:
         outcome, data = self._call(method, secrets, params=params, idempotent=True)

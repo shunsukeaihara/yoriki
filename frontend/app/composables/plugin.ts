@@ -19,6 +19,8 @@ export const Capability = {
   URL: 'url',
   // Connector：表の名前にスキーマがある
   SCHEMAS: 'schemas',
+  // 対話の出口：接続から選べるチャネルの一覧を取れる
+  LIST_CHANNELS: 'list_channels',
 } as const
 
 /** 本体の種別の説明（自社のPluginは名前だけを出す） */

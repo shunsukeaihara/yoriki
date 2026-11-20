@@ -721,12 +721,14 @@ class ReceiptKind(models.TextChoices):
     REPLY = "reply", _("返信")
     SELECT = "select", _("選択")
     SUBMIT = "submit", _("回答の送信")
+    STOP = "stop", _("停止")
 
 
 class ReceiptResult(models.IntegerChoices):
     RECEIVED = 1, _("受付")
     APPLIED = 10, _("回答に確定")
     SELECTED = 11, _("選択を保持")
+    STOPPED = 12, _("停止を依頼")
     REJECTED = 20, _("受け付けない")
     UNMATCHED = 21, _("照合できない")
     IGNORED = 22, _("取り込まない")

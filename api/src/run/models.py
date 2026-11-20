@@ -381,8 +381,10 @@ class Run(models.Model):
         *,
         end_reason: RunEndReason | None = None,
         error: str = "",
+        external: dict[str, str] | None = None,
     ) -> "RunEvent":
-        """状態を変えてイベントを記録する。API・Worker・Runnerのどこから呼ぶ場合もこのメソッドを通す"""
+        """状態を変えてイベントを記録する。API・Worker・Runnerのどこから呼ぶ場合もこのメソッドを通す。`external` は
+        対話の出口（Slack等）のスレッドから操作した人（`actor` はNone。design.md §4.6）"""
         current = Run.locked(self.pk)
         if not current.can_transit(status):
             raise InvalidTransition(f"{current.get_status_display()} -> {RunStatus(status).label}")
@@ -407,7 +409,11 @@ class Run(models.Model):
         event = RunEvent.record(
             self,
             RunEventKind.STATUS,
-            {"status": status, "end_reason": self.end_reason if status in TERMINAL_STATUSES else None},
+            {
+                "status": status,
+                "end_reason": self.end_reason if status in TERMINAL_STATUSES else None,
+                **({"external": external} if external else {}),
+            },
             comment=comment,
             actor=actor,
         )
@@ -461,8 +467,9 @@ class Run(models.Model):
         live.update(status=SubagentStatus.CANCELLED, finished=timezone.now(), reported=True)
 
     @transaction.atomic
-    def request_cancel(self, reason: str, actor) -> "RunEvent":
-        """停止の依頼を受け付ける。実行中ならWorkerの停止確認を待つため停止中にする"""
+    def request_cancel(self, reason: str, actor, *, external: dict[str, str] | None = None) -> "RunEvent":
+        """停止の依頼を受け付ける。実行中ならWorkerの停止確認を待つため停止中にする。`external` は対話の出口の
+        スレッドから止めた人（design.md §4.6）"""
         current = Run.locked(self.pk)
         ClarificationRequest.objects.filter(run=self, status=ClarificationStatus.OPEN).update(
             status=ClarificationStatus.CANCELLED
@@ -477,8 +484,10 @@ class Run(models.Model):
             current.status in (RunStatus.WAITING_USER, RunStatus.WAITING_BACKGROUND)
             and (current.has_live_attempt() or current.has_live_subagents())
         ):
-            return self.set_status(RunStatus.CANCELLING, comment=reason, actor=actor)
-        return self.set_status(RunStatus.CANCELLED, comment=reason, actor=actor, end_reason=RunEndReason.CANCELLED)
+            return self.set_status(RunStatus.CANCELLING, comment=reason, actor=actor, external=external)
+        return self.set_status(
+            RunStatus.CANCELLED, comment=reason, actor=actor, end_reason=RunEndReason.CANCELLED, external=external
+        )
 
     @transaction.atomic
     def switch_model(self, version, effort: str, *, actor=None, trigger: str) -> "RunEvent":

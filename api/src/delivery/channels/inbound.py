@@ -6,7 +6,8 @@ ChannelMessageReceipt に記録してすぐに応答する。照合と回答の�
 
 照合は、接続、Workspace、チャネル、スレッドの親メッセージの組で行う。bot自身・ほかのbotの投稿は取り込まない。回答は、
 Runが確認待ちで、その確認が回答待ちのときだけ、確認ごとに1回だけ確定する（ClarificationRequest.accept_answer）。
-回答者はチャットツールのユーザーとして記録し、Yorikiのユーザーには結び付けない（権限は増えない）。
+親メッセージの「停止」のボタンは、Webの停止と同じ共通の経路（Run.request_cancel）で停止を依頼する。回答者・止めた人は
+チャットツールのユーザーとして記録し、Yorikiのユーザーには結び付けない（権限は増えない）。
 """
 
 import logging
@@ -21,7 +22,7 @@ from django_q.tasks import async_task
 
 from plugin.errors import PluginError, PluginUnavailable
 from run.errors import AlreadyAnswered
-from run.models import ClarificationKind, ClarificationRequest, ClarificationStatus, RunStatus
+from run.models import ClarificationKind, ClarificationRequest, ClarificationStatus, Run, RunStatus
 
 from ..models import (
     ChannelConnection,
@@ -31,7 +32,7 @@ from ..models import (
     ReceiptResult,
     ThreadStatus,
 )
-from .base import ChannelAdapter, InboundEvent
+from .base import ChannelAdapter, InboundEvent, MessageKind, ThreadMessage
 from .outbound import channel_adapter, question_message
 
 logger = logging.getLogger(__name__)
@@ -167,6 +168,9 @@ def process_receipt(receipt_id: int) -> None:
 
 def _apply(receipt: ChannelMessageReceipt, thread: ExternalThreadBinding, adapter: ChannelAdapter, secrets) -> None:
     run = thread.run
+    if receipt.kind == ReceiptKind.STOP:
+        _stop(receipt, thread, adapter, secrets)
+        return
     open_question = (
         ClarificationRequest.objects.filter(run=run, kind=ClarificationKind.QUESTION, status=ClarificationStatus.OPEN)
         .order_by("-created")
@@ -251,12 +255,38 @@ def _select(receipt, thread: ExternalThreadBinding, question: ClarificationReque
         logger.warning("receipt %s: cannot update the question message", receipt.pk, exc_info=True)
 
 
-def _answer(receipt, thread: ExternalThreadBinding, question: ClarificationRequest, answers, comment: str) -> None:
-    external = {
+def _stop(receipt, thread: ExternalThreadBinding, adapter: ChannelAdapter, secrets) -> None:
+    """親メッセージの「停止」のボタン。Webの停止と同じ経路で停止を依頼し、止めた人をスレッドに知らせる
+    （design.md §4.6）"""
+    name = receipt.user_name or receipt.user_id
+    reason = _("%(name)sさんがスレッドから停止を依頼しました。") % {"name": name}
+    with transaction.atomic():
+        run = Run.locked(thread.run_id)
+        if run.status == RunStatus.CANCELLING:
+            raise _Done(ReceiptResult.REJECTED, "cancelling", _("停止はすでに依頼されています。"))
+        if not run.is_cancellable():
+            raise _Done(ReceiptResult.REJECTED, "finished", _("この実行はもう終わっているので、停止できません。"))
+        run.request_cancel(reason, None, external=_external(receipt))
+    receipt.result = ReceiptResult.STOPPED
+    try:
+        adapter.post(
+            secrets, thread.channel_id, ThreadMessage(MessageKind.NOTICE, reason), thread_ref=thread.thread_ref
+        )
+    except Exception:
+        logger.warning("receipt %s: cannot post the stop notice", receipt.pk, exc_info=True)
+
+
+def _external(receipt) -> dict[str, str]:
+    """チャットツールのユーザー（回答者・止めた人）。Yorikiのユーザーには結び付けない"""
+    return {
         "provider": receipt.connection.extension.rsplit(".", 1)[-1],
         "user_id": receipt.user_id,
         "name": receipt.user_name or receipt.user_id,
     }
+
+
+def _answer(receipt, thread: ExternalThreadBinding, question: ClarificationRequest, answers, comment: str) -> None:
+    external = _external(receipt)
     try:
         question.accept_answer(answers, comment, None, external=external)
     except AlreadyAnswered as exc:

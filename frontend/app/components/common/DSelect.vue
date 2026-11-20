@@ -17,6 +17,8 @@ const props = withDefaults(
     itemValue?: ItemAccessor
     itemTitle?: ItemAccessor
     itemDescription?: ItemAccessor
+    /** 選べない項目か（真なら灰色で出して選べない） */
+    itemDisabled?: ItemAccessor
     multiple?: boolean
     /** 選択を外すボタンを出す */
     clearable?: boolean
@@ -44,6 +46,7 @@ const options = computed(() =>
     value: getProp(item, props.itemValue) as Value,
     label: String(getProp(item, props.itemTitle) ?? ''),
     description: props.itemDescription ? String(getProp(item, props.itemDescription) ?? '') : undefined,
+    disabled: props.itemDisabled ? Boolean(getProp(item, props.itemDisabled)) : undefined,
     raw: item,
   })),
 )

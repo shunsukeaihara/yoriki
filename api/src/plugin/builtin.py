@@ -16,6 +16,8 @@ START = "start"
 SCHEMAS = "schemas"
 # 対話の出口：常時接続で受ける（channel-listenerが listen を呼ぶ）
 LISTEN = "listen"
+# 対話の出口：接続から選べるチャネルの一覧を取れる（出口の登録の画面で選ぶ。`list_channels`）
+LIST_CHANNELS = "list_channels"
 
 WEBHOOK_TRIGGER = "yoriki.trigger.webhook"
 WEBHOOK = "yoriki.notification.webhook"

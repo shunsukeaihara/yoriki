@@ -623,6 +623,78 @@ def test_private_channel_is_refused(api_client, integrator, slack):
     assert "公開チャネル" in str(res.json()["channel_id"])
 
 
+def _channels_page(channels: list[dict[str, Any]], next_cursor: str = "") -> httpx.Response:
+    return httpx.Response(
+        200, json={"ok": True, "channels": channels, "response_metadata": {"next_cursor": next_cursor}}
+    )
+
+
+def test_channels_are_listed_with_the_reason_they_cannot_be_chosen(api_client, integrator, slack):
+    api_client.force_authenticate(integrator)
+    connection = ChannelConnectionFactory.create()
+    slack.responses["conversations.list"] = [
+        _channels_page(
+            [
+                {"id": "C3", "name": "総務", "is_member": False},
+                {"id": "C1", "name": "経理", "is_member": True},
+                {"id": "C9", "name": "取引先", "is_member": True, "is_ext_shared": True},
+            ],
+            next_cursor="next",
+        ),
+        _channels_page([{"id": "C2", "name": "営業", "is_member": True}]),
+    ]
+    res = api_client.get(f"/api/v1/channel_connections/{connection.uid}/channels/")
+    assert res.status_code == 200, res.json()
+    data = res.json()
+    assert data["truncated"] is False
+    assert [(c["channel_id"], c["name"], bool(c["unavailable"])) for c in data["channels"]] == [
+        ("C9", "#取引先", True),
+        ("C2", "#営業", False),
+        ("C1", "#経理", False),
+        ("C3", "#総務", True),
+    ]
+    assert "参加していません" in data["channels"][3]["unavailable"]
+    listed = [body for method, body in slack.calls if method == "conversations.list"]
+    assert listed[0]["types"] == "public_channel" and "cursor" not in listed[0]
+    assert listed[1]["cursor"] == "next"
+
+
+def test_channel_list_stops_at_the_page_limit(slack):
+    slack.responses["conversations.list"] = [
+        _channels_page([{"id": f"C{i}", "name": f"c{i}", "is_member": True}], next_cursor=str(i)) for i in range(20)
+    ]
+    found = SlackAdapter().list_channels({"bot_token": "xoxb-1", "signing_secret": "s"})
+    assert found.truncated is True
+    assert len(found.channels) == 10
+
+
+def test_channel_list_reports_errors(api_client, integrator, slack):
+    api_client.force_authenticate(integrator)
+    connection = ChannelConnectionFactory.create()
+    url = f"/api/v1/channel_connections/{connection.uid}/channels/"
+    slack.responses["conversations.list"] = [
+        httpx.Response(200, json={"ok": False, "error": "missing_scope"}),
+        httpx.Response(200, json={"ok": False, "error": "internal_error"}),
+    ]
+    res = api_client.get(url)
+    assert res.status_code == 400
+    assert res.json()["non_field_errors"]
+    res = api_client.get(url)
+    assert res.status_code == 503
+    connection.suspended = True
+    connection.save()
+    res = api_client.get(url)
+    assert res.status_code == 400
+    assert "使えません" in str(res.json()["non_field_errors"])
+
+
+def test_channel_list_needs_the_view_permission(api_client, slack):
+    connection = ChannelConnectionFactory.create()
+    api_client.force_authenticate(UserFactory.create())
+    res = api_client.get(f"/api/v1/channel_connections/{connection.uid}/channels/")
+    assert res.status_code == 403
+
+
 def test_file_only_reply_does_not_answer(client, manager, slack):
     run = _waiting_run(manager, slack)
     thread = ExternalThreadBinding.objects.get(run=run)

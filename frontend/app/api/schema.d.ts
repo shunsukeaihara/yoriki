@@ -1674,6 +1674,23 @@ export interface paths {
         patch: operations["v1_channel_connections_partial_update"];
         trace?: never;
     };
+    "/api/v1/channel_connections/{uid}/channels/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description 対話の出口の登録で選ぶチャネルの一覧を、チャットツールから取る（capability list_channels の種類だけ。design.md §4.6）。登録するときは、選んだチャネルを改めて確かめる */
+        get: operations["v1_channel_connections_channels_retrieve"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/channel_connections/{uid}/resume/": {
         parameters: {
             query?: never;
@@ -2939,6 +2956,14 @@ export interface components {
             before: string | null;
             after: string | null;
         };
+        /** @description 対話の出口の登録で選ぶチャネル（チャットツールから取った一覧の1つ） */
+        ChannelChoice: {
+            readonly channel_id: string;
+            /** @description 選ぶための表示名（#から始まる） */
+            readonly name: string;
+            /** @description 選べない理由（botが参加していない等）。空なら選べる */
+            readonly unavailable: string;
+        };
         /**
          * @description 連携の接続（Slackのアプリ、DiscordのBotとサーバー等。連携の管理者。design.md §4.6、authorization.md §5.5）。
          *
@@ -3003,6 +3028,11 @@ export interface components {
             public_key?: string;
             /** @description サーバーのID（Discord）。返さない */
             guild_id?: string;
+        };
+        ChannelList: {
+            readonly channels: components["schemas"]["ChannelChoice"][];
+            /** @description 多すぎて途中で読むのをやめた（一覧に出ないチャネルはIDで指定する） */
+            readonly truncated: boolean;
         };
         /** @description 常時接続で受ける接続（Discord）の受信の状態（channel-listener。design.md §10） */
         ChannelListenerStatus: {
@@ -11452,6 +11482,34 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ChannelConnection"];
                 };
+            };
+        };
+    };
+    v1_channel_connections_channels_retrieve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelList"];
+                };
+            };
+            /** @description チャットツールが一時的に応答しない */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

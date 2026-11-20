@@ -30,7 +30,9 @@ from connector.errors import ConnectorError
 from delivery.adapters import DeliveryRequest, NotificationAdapter, Outcome
 from delivery.channels.base import (
     ChannelAdapter,
+    ChannelChoice,
     ChannelInfo,
+    ChannelList,
     ConnectionInfo,
     InboundEvent,
     InboundRequest,
@@ -226,6 +228,14 @@ class ChannelContract(AdapterContract):
         assert channel.verify(contract_secrets, headers, body)
         assert not channel.verify(contract_secrets, headers, body + b" ")
         assert isinstance(channel.parse(headers, body), InboundRequest)
+
+    def test_lists_channels(self, channel, contract_secrets, contract_channel_id):
+        """チャネルの一覧を取れるもの（capability list_channels）は、投稿できるチャネルを選べるものとして返す"""
+        self.requires("list_channels")
+        found = channel.list_channels(contract_secrets)
+        assert isinstance(found, ChannelList)
+        assert all(isinstance(c, ChannelChoice) for c in found.channels)
+        assert any(c.channel_id == contract_channel_id and not c.unavailable for c in found.channels)
 
     def test_reads_replies_again(self, channel, contract_secrets, contract_channel_id):
         """常時接続で受けるもの（capability listen）は、つなぎ直した後にスレッドの返信を読み直せる"""

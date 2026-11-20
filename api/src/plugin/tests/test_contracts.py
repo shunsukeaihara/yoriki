@@ -143,6 +143,8 @@ class TestSlackChannel(ChannelContract):
             data: dict = {"ok": True, "ts": "1.0001", "team_id": "T1", "team": "t", "user_id": "UBOT"}
             if method == "conversations.info":
                 data["channel"] = {"id": "C1", "name": "general", "is_member": True}
+            if method == "conversations.list":
+                data["channels"] = [{"id": "C1", "name": "general", "is_member": True}]
             return httpx.Response(200, json=data)
 
         with mock.patch.object(SlackAdapter, "transport", httpx.MockTransport(respond)):
@@ -187,6 +189,7 @@ class TestDiscordChannel(ChannelContract):
             ("GET", "guilds/9"): {"id": "9", "name": "g", "owner_id": "5", "roles": []},
             ("GET", "guilds/9/members/5"): {"roles": []},
             ("GET", "channels/1"): {"id": "1", "type": 0, "name": "general", "guild_id": "9"},
+            ("GET", "guilds/9/channels"): [{"id": "1", "type": 0, "name": "general", "guild_id": "9"}],
             ("GET", "channels/100/messages"): [],
         }
 

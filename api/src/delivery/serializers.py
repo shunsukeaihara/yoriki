@@ -580,6 +580,23 @@ class ChannelConnectionUpdateSerializer(ChannelConnectionSerializer):
     name = serializers.CharField(max_length=100, required=False)
 
 
+class ChannelChoiceSerializer(serializers.Serializer):
+    """対話の出口の登録で選ぶチャネル（チャットツールから取った一覧の1つ）"""
+
+    channel_id = serializers.CharField(read_only=True)
+    name = serializers.CharField(read_only=True, help_text=_("選ぶための表示名（#から始まる）"))
+    unavailable = serializers.CharField(
+        read_only=True, help_text=_("選べない理由（botが参加していない等）。空なら選べる")
+    )
+
+
+class ChannelListSerializer(serializers.Serializer):
+    channels = ChannelChoiceSerializer(many=True, read_only=True)
+    truncated = serializers.BooleanField(
+        read_only=True, help_text=_("多すぎて途中で読むのをやめた（一覧に出ないチャネルはIDで指定する）")
+    )
+
+
 class ChannelConnectionChoiceSerializer(ReadOnlyModelSerializer):
     """対話の出口の作成で選ぶ接続（名前と種類とWorkspaceだけ）"""
 

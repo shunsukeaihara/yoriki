@@ -277,6 +277,9 @@ export type ChannelConnection = Api<'ChannelConnection'>
 export type ChannelListenerStatus = Api<'ChannelListenerStatus'>
 export type ChannelConnectionWrite = Api<'ChannelConnectionRequest'>
 export type ChannelConnectionUpdate = Api<'ChannelConnectionUpdateRequest'>
+// 対話の出口の登録で選ぶチャネル（チャットツールから取った一覧。unavailable が空でないものは選べない）
+export type ChannelList = Api<'ChannelList'>
+export type ChannelChoice = Api<'ChannelChoice'>
 export type ChannelConnectionListParams = ListParams & { search?: string; extension?: string; suspended?: boolean }
 export type TriggerBinding = Api<'TriggerBinding'>
 export type TriggerBindingListItem = Api<'TriggerBindingList'>

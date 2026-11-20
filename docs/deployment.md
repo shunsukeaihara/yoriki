@@ -333,7 +333,7 @@ docker compose -f deploy/compose.yaml exec api python manage.py resume_workers
   4. Discordの「ユーザー設定 → 詳細設定 → 開発者モード」を有効にし、サーバーとチャネルの右クリックの「IDをコピー」でguild IDとchannel IDを取る。
   5. Yorikiの管理画面で、Bot token・Public Key・guild IDで接続を作り、表示される受け口のURLを「General Information」の Interactions Endpoint URL に設定する（保存のときにDiscordが受け口を確かめる）。
   6. チャネルを対話の出口として登録する（Botがそのチャネルを見られて、投稿とスレッドの作成ができることを確かめる。非公開のチャネルでは、Botのロールをチャネルに追加する）。
-- **ファイルの保存先**：添付・成果物・Workspaceのsnapshot（tar）は、`YORIKI_STORAGE_BACKEND` で選んだ保存先（Localなら `/var/lib/yoriki/objects`、S3ならbucket）に置く（§7.2）。会話のワークスペースのsnapshotは、保存期限（管理画面の「基盤の設定」。初期値30日）を過ぎると1日1回の清掃（Q2のSchedule `cleanup_workspaces`）で消す。QClusterを止めている間は `python manage.py cleanup_workspaces` で同じ処理を動かせる（`--dry-run` は件数だけ）。確定する前に落ちたsnapshotの実体（記録のないobject）は、1時間ごとの清掃（Q2のSchedule `cleanup_objects`。管理コマンドも同じ名前）で消す。添付と成果物は明示的に消すまで残す（design.md §8、docs/status.md §3）。
+- **ファイルの保存先**：添付・成果物・Workspaceのsnapshot（tar）は、`YORIKI_STORAGE_BACKEND` で選んだ保存先（Localなら `/var/lib/yoriki/objects`、S3ならbucket）に置く（§7.2）。会話のワークスペースのsnapshotは、保存期限（管理画面の「基盤の設定」。初期値30日）を過ぎると1日1回の清掃（Q2のSchedule `cleanup_workspaces`）で消す。QClusterを止めている間は `python manage.py cleanup_workspaces` で同じ処理を動かせる（`--dry-run` は件数だけ）。確定する前に落ちたsnapshotの実体（記録のないobject）は、1時間ごとの清掃（Q2のSchedule `cleanup_objects`。管理コマンドも同じ名前）で消す。対話の出口で受けた、Runに結び付かなかった受信の記録は、受けてから30日で1日1回の清掃（Q2のSchedule `cleanup_channel_receipts`。管理コマンドも同じ名前）が消す。添付と成果物は明示的に消すまで残す（design.md §8、docs/status.md §3）。
 
 ### 7.1 Sandboxを動かすホスト
 

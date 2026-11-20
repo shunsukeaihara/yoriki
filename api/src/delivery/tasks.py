@@ -192,3 +192,10 @@ def _expire(delivery_id: int) -> None:
         outcome=AttemptOutcome.UNKNOWN, error=delivery.last_error
     )
     logger.warning("delivery %s: lease expired while sending", delivery.uid)
+
+
+def cleanup_receipts() -> None:
+    """Runに結び付かなかった受信の記録を、受けてから30日で消す。Q2のScheduleで1日に1回呼ぶ（design.md §8）"""
+    from .cleanup import cleanup_receipts as run_cleanup  # noqa: PLC0415
+
+    run_cleanup()

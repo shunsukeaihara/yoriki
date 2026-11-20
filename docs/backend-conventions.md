@@ -188,7 +188,7 @@ class Run(models.Model):
 
 - 作成日時と更新日時は `created = models.DateTimeField(auto_now_add=True)`、`updated = models.DateTimeField(auto_now=True)` とする。名前に `_at` を付けない。一覧で並べ替えるものは `created` に `db_index=True` を付ける。
 - 論理削除する可変のマスター（Skill、Destination等）は `deleted = models.BooleanField(default=False)` を持つ。QuerySetでは `filter(deleted=False)` を明示して書く。既定のManagerで自動的に除外する仕組みは作らない。
-- 不変オブジェクト（`*Version`、`*Revision`、`RunEvent`、`UsageLedger`、`ChannelMessageReceipt` 等の履歴・監査記録）は `deleted` を持たせず、作成後に更新・削除しない。切り戻しも新しい版を作って行う（design.md §3.2、§3.10）。
+- 不変オブジェクト（`*Version`、`*Revision`、`RunEvent`、`UsageLedger` 等の履歴・監査記録）は `deleted` を持たせず、作成後に更新・削除しない。切り戻しも新しい版を作って行う（design.md §3.2、§3.10）。受信の記録（`ChannelMessageReceipt`）は、照合の結果を書き、Runに結び付かなかったものは中身を消して清掃で消す（design.md §8）ので、ここに含めない。
 
 ### 2.3 Choicesと状態
 

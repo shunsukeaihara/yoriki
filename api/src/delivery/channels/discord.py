@@ -6,7 +6,8 @@
   IDと同じ）。スレッドの中のメッセージの参照は `<スレッドのID>/<メッセージのID>` にする（書き換えにスレッドが
   要るため）。
 - ボタン：Interactions Endpoint URL（今の受け口）で受け、Ed25519で確かめて、メッセージを変えない遅延の応答
-  （DEFERRED_UPDATE_MESSAGE）を返す。
+  （DEFERRED_UPDATE_MESSAGE）を返す。親メッセージの「停止」は、押した本人だけに確認のメッセージ（「停止する」のボタン）を
+  その場で返し、「停止する」を押したものだけを出来事にする。
 - 返信：Gateway（intent GUILDS・GUILD_MESSAGES・MESSAGE_CONTENT）で受ける（capability listen。channel-listenerが呼ぶ）。
 - 必要な権限：View Channels・Send Messages・Create Public Threads・Send Messages in Threads・Read Message History。
 
@@ -63,6 +64,9 @@ MAX_THREAD_NAME = 100
 AUTO_ARCHIVE = 10080
 SELECT_PREFIX = "yoriki:s:"
 SUBMIT_PREFIX = "yoriki:submit:"
+# 親メッセージの「停止」と、押した本人だけに見せる確認の「停止する」（親メッセージのIDを入れる）
+STOP_ID = "yoriki:stop"
+STOP_CONFIRM_PREFIX = "yoriki:stopok:"
 
 # intent：GUILDS・GUILD_MESSAGES・MESSAGE_CONTENT（特権。Developer Portalで有効にする）
 INTENTS = (1 << 0) | (1 << 9) | (1 << 15)
@@ -96,6 +100,7 @@ MESSAGE_COMPONENT = 3
 PONG = 1
 CHANNEL_MESSAGE = 4
 DEFERRED_UPDATE_MESSAGE = 6
+UPDATE_MESSAGE = 7
 EPHEMERAL = 1 << 6
 
 # Discordのエラーコード
@@ -344,7 +349,10 @@ class DiscordAdapter(ChannelAdapter):
         else:
             head = f"**{escape(message.title)}**" if message.title else ""
             content = "\n".join(v for v in (head, escape(message.text)) if v) or "\u200b"
-            components = [_row([_link_button(message.link)])] if message.link else []
+            buttons = [_stop_button()] if message.stoppable else []
+            if message.link:
+                buttons.append(_link_button(message.link))
+            components = [_row(buttons)] if buttons else []
         return {
             "content": _truncate(content, MAX_CONTENT),
             "components": components,
@@ -409,41 +417,12 @@ class DiscordAdapter(ChannelAdapter):
                     "data": {"content": _("この操作には対応していません。"), "flags": EPHEMERAL},
                 }
             )
-        component = data.get("data") or {}
-        custom_id = str(component.get("custom_id", ""))
-        acknowledged = InboundRequest(response={"type": DEFERRED_UPDATE_MESSAGE})
-        if custom_id.startswith(SUBMIT_PREFIX):
-            kind, clarification, question, option = InboundKind.SUBMIT, custom_id[len(SUBMIT_PREFIX) :], -1, -1
-        elif custom_id.startswith(SELECT_PREFIX):
-            parts = custom_id[len(SELECT_PREFIX) :].split(":")
-            if len(parts) != 3 or not parts[1].isdigit() or not parts[2].isdigit():
-                return acknowledged
-            kind, clarification, question, option = InboundKind.SELECT, parts[0], int(parts[1]), int(parts[2])
-        else:
-            return acknowledged  # Yorikiのボタンでないもの
-        channel = data.get("channel") or {}
-        thread = str(data.get("channel_id") or channel.get("id", ""))
-        member = data.get("member") or {}
-        user = member.get("user") or data.get("user") or {}
-        message = data.get("message") or {}
-        acknowledged.events.append(
-            InboundEvent(
-                kind=kind,
-                dedup_key=f"interaction:{data.get('id', '')}",
-                workspace_id=str(data.get("guild_id", "")),
-                channel_id=str(channel.get("parent_id") or ""),
-                thread_ref=thread,
-                message_ref=f"{thread}/{message.get('id', '')}",
-                user_id=str(user.get("id", "")),
-                user_name=_member_name(member, user),
-                is_bot=bool(user.get("bot")),
-                clarification=clarification,
-                question=question,
-                option=option,
-                reply_token=f"{data.get('application_id', '')}/{data.get('token', '')}",
-            )
-        )
-        return acknowledged
+        custom_id = str((data.get("data") or {}).get("custom_id", ""))
+        if custom_id == STOP_ID:
+            return _confirm_stop(data)
+        if custom_id.startswith(STOP_CONFIRM_PREFIX):
+            return _stop_event(data, custom_id[len(STOP_CONFIRM_PREFIX) :])
+        return _answer_event(data, custom_id)
 
     # --- 受信（返信。Gateway） ---
 
@@ -764,6 +743,89 @@ def _question_footer(view: QuestionView, link: str) -> tuple[list[str], list[dic
     if link:
         buttons.append(_link_button(link))
     return lines, buttons
+
+
+def _answer_event(data: dict[str, Any], custom_id: str) -> InboundRequest:
+    """質問の選択肢・「この内容で回答」のボタン。記録して「受付」（メッセージを変えない遅延の応答）を返す"""
+    acknowledged = InboundRequest(response={"type": DEFERRED_UPDATE_MESSAGE})
+    if custom_id.startswith(SUBMIT_PREFIX):
+        kind, clarification, question, option = InboundKind.SUBMIT, custom_id[len(SUBMIT_PREFIX) :], -1, -1
+    elif custom_id.startswith(SELECT_PREFIX):
+        parts = custom_id[len(SELECT_PREFIX) :].split(":")
+        if len(parts) != 3 or not parts[1].isdigit() or not parts[2].isdigit():
+            return acknowledged
+        kind, clarification, question, option = InboundKind.SELECT, parts[0], int(parts[1]), int(parts[2])
+    else:
+        return acknowledged  # Yorikiのボタンでないもの
+    channel = data.get("channel") or {}
+    thread = str(data.get("channel_id") or channel.get("id", ""))
+    member = data.get("member") or {}
+    user = member.get("user") or data.get("user") or {}
+    message = data.get("message") or {}
+    acknowledged.events.append(
+        InboundEvent(
+            kind=kind,
+            dedup_key=f"interaction:{data.get('id', '')}",
+            workspace_id=str(data.get("guild_id", "")),
+            channel_id=str(channel.get("parent_id") or ""),
+            thread_ref=thread,
+            message_ref=f"{thread}/{message.get('id', '')}",
+            user_id=str(user.get("id", "")),
+            user_name=_member_name(member, user),
+            is_bot=bool(user.get("bot")),
+            clarification=clarification,
+            question=question,
+            option=option,
+            reply_token=f"{data.get('application_id', '')}/{data.get('token', '')}",
+        )
+    )
+    return acknowledged
+
+
+def _confirm_stop(data: dict[str, Any]) -> InboundRequest:
+    """親メッセージの「停止」。押した本人だけに確認のメッセージを返す（記録しない。design.md §4.6）"""
+    message_id = str((data.get("message") or {}).get("id", ""))
+    if not _SNOWFLAKE.match(message_id):
+        return InboundRequest(response={"type": DEFERRED_UPDATE_MESSAGE})
+    button = {"type": 2, "style": 4, "label": _("停止する"), "custom_id": f"{STOP_CONFIRM_PREFIX}{message_id}"}
+    return InboundRequest(
+        response={
+            "type": CHANNEL_MESSAGE,
+            "data": {
+                "content": _("この実行を停止しますか？作業は次の区切りで止まります。"),
+                "flags": EPHEMERAL,
+                "components": [_row([button])],
+                "allowed_mentions": {"parse": []},
+            },
+        }
+    )
+
+
+def _stop_event(data: dict[str, Any], message_id: str) -> InboundRequest:
+    """確認の「停止する」。親メッセージ（親チャネルにある）とそのチャネルで照合する。確認のメッセージは受け付けた形に
+    書き換える（停止できなければ、後で本人だけへ知らせる）"""
+    if not _SNOWFLAKE.match(message_id):
+        return InboundRequest(response={"type": DEFERRED_UPDATE_MESSAGE})
+    member = data.get("member") or {}
+    user = member.get("user") or data.get("user") or {}
+    event = InboundEvent(
+        kind=InboundKind.STOP,
+        dedup_key=f"interaction:{data.get('id', '')}",
+        workspace_id=str(data.get("guild_id", "")),
+        channel_id=str(data.get("channel_id") or (data.get("channel") or {}).get("id", "")),
+        thread_ref=message_id,
+        message_ref=message_id,
+        user_id=str(user.get("id", "")),
+        user_name=_member_name(member, user),
+        is_bot=bool(user.get("bot")),
+        reply_token=f"{data.get('application_id', '')}/{data.get('token', '')}",
+    )
+    response = {"type": UPDATE_MESSAGE, "data": {"content": _("停止を受け付けました。"), "components": []}}
+    return InboundRequest(events=[event], response=response)
+
+
+def _stop_button() -> dict[str, Any]:
+    return {"type": 2, "style": 4, "label": _("停止"), "custom_id": STOP_ID}
 
 
 def _row(components: list[dict[str, Any]]) -> dict[str, Any]:

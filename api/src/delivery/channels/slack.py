@@ -51,6 +51,7 @@ LIST_PAGE_SIZE = 1000
 MAX_LIST_PAGES = 10
 SELECT_PREFIX = "yoriki_select_"
 SUBMIT_ACTION = "yoriki_submit"
+STOP_ACTION = "yoriki_stop"
 # 受け付ける返信の種類（ファイルを付けた返信は文だけを使う。添付は後で。design.md §4.6）
 REPLY_SUBTYPES = {None, "thread_broadcast", "file_share"}
 # Slackが一時的な障害として返すもの
@@ -258,6 +259,8 @@ class SlackAdapter(ChannelAdapter):
         blocks.append(_section("\n".join(v for v in (head, body) if v) or " "))
         if message.link:
             blocks.append(_context(_link(message.link)))
+        if message.stoppable:
+            blocks.append({"type": "actions", "elements": [_stop_button()]})
         return blocks
 
     def _question_blocks(self, view: QuestionView, link: str) -> list[dict[str, Any]]:
@@ -349,7 +352,12 @@ class SlackAdapter(ChannelAdapter):
         for action in actions:
             action_id = str(action.get("action_id", ""))
             value = str(action.get("value", ""))
-            if action_id == SUBMIT_ACTION:
+            thread_ref = str(message.get("thread_ts", ""))
+            if action_id == STOP_ACTION:
+                # 親メッセージのボタン（確認のダイアログで確かめたもの）。親メッセージがスレッドの親
+                kind, clarification, question, option = InboundKind.STOP, "", -1, -1
+                thread_ref = str(container.get("message_ts") or message.get("ts", ""))
+            elif action_id == SUBMIT_ACTION:
                 kind, clarification, question, option = InboundKind.SUBMIT, value, -1, -1
             elif action_id.startswith(SELECT_PREFIX):
                 parts = value.split(":")
@@ -364,10 +372,10 @@ class SlackAdapter(ChannelAdapter):
                     dedup_key=f"action:{action.get('action_ts', '')}:{user.get('id', '')}:{action_id}",
                     workspace_id=str((data.get("team") or {}).get("id", "")),
                     channel_id=str((data.get("channel") or {}).get("id", container.get("channel_id", ""))),
-                    thread_ref=str(message.get("thread_ts", "")),
+                    thread_ref=thread_ref,
                     message_ref=str(container.get("message_ts") or message.get("ts", "")),
+                    # 要求の user.name はユーザー名（表示名ではない）。返信と同じく users.info で表示名を引く
                     user_id=str(user.get("id", "")),
-                    user_name=str(user.get("name") or user.get("username") or ""),
                     clarification=clarification,
                     question=question,
                     option=option,
@@ -463,4 +471,22 @@ def _submit_button(clarification: str) -> dict[str, Any]:
         "style": "primary",
         "action_id": SUBMIT_ACTION,
         "value": clarification,
+    }
+
+
+def _stop_button() -> dict[str, Any]:
+    """親メッセージの「停止」。押すと確認のダイアログを出し、確かめたものだけが届く（design.md §4.6）"""
+    return {
+        "type": "button",
+        "text": {"type": "plain_text", "text": _("停止")},
+        "style": "danger",
+        "action_id": STOP_ACTION,
+        "value": "stop",
+        "confirm": {
+            "title": {"type": "plain_text", "text": _("この実行を停止しますか？")},
+            "text": {"type": "plain_text", "text": _("作業は次の区切りで止まります。")},
+            "confirm": {"type": "plain_text", "text": _("停止する")},
+            "deny": {"type": "plain_text", "text": _("やめる")},
+            "style": "danger",
+        },
     }

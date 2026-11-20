@@ -32,7 +32,15 @@ from delivery.tasks import send_delivery
 from harness.tests.fakes import FakeAdapter, calls, reply
 from harness.tests.test_connectors import execute
 from llm.factories import ModelProfileFactory
-from run.models import ClarificationRequest, ClarificationStatus, Run, RunLaunch, RunStatus
+from run.models import (
+    ClarificationRequest,
+    ClarificationStatus,
+    Run,
+    RunEvent,
+    RunEventKind,
+    RunLaunch,
+    RunStatus,
+)
 from task.dispatch import start_task_run
 from task.factories import TaskDefinitionFactory
 from task.models import TaskScope
@@ -428,6 +436,85 @@ def test_suspended_connection_keeps_the_receipt_bound_to_the_run(client, manager
     _process()
     receipt = ChannelMessageReceipt.objects.get()
     assert (receipt.result, receipt.run_id, receipt.text) == (ReceiptResult.IGNORED, run.pk, "A社")
+
+
+# --- スレッドからの停止（design.md §4.6） ---
+
+
+def _parent_blocks(slack, thread) -> str:
+    """親メッセージの今の見せ方（最後の書き換え、なければ投稿）"""
+    updated = [b for b in slack.updated() if b["ts"] == thread.thread_ref]
+    body = updated[-1] if updated else next(b for b in slack.posted() if "thread_ts" not in b)
+    return json.dumps(body["blocks"], ensure_ascii=False)
+
+
+def test_stop_from_the_thread(client, manager, slack):
+    run = _waiting_run(manager, slack)
+    thread = ExternalThreadBinding.objects.get(run=run)
+    # 親メッセージに、確認のダイアログつきの「停止」のボタンを置く
+    parent = json.loads(_parent_blocks(slack, thread))
+    stop = next(e for b in parent if b["type"] == "actions" for e in b["elements"])
+    assert stop["action_id"] == "yoriki_stop" and stop["style"] == "danger" and "confirm" in stop
+
+    response = _press(client, thread, thread.thread_ref, "yoriki_stop", "stop", action_ts="5")
+    assert response.status_code == 200
+    _process()
+    receipt = ChannelMessageReceipt.objects.get()
+    assert (receipt.kind, receipt.result, receipt.run_id) == ("stop", ReceiptResult.STOPPED, run.pk), receipt.reason
+    run.refresh_from_db()
+    assert run.status == RunStatus.CANCELLED  # ジョブが動いていない確認待ちは、すぐに止まる
+    assert ClarificationRequest.objects.get(run=run).status == ClarificationStatus.CANCELLED
+    # 止めた人はチャットツールのユーザーとして記録する（Yorikiのユーザーには結び付けない）
+    event = RunEvent.objects.filter(run=run, kind=RunEventKind.STATUS).order_by("-sequence").first()
+    assert event is not None and event.actor_id is None
+    assert event.data["external"] == {"provider": "slack", "user_id": "U123", "name": "佐藤"}
+    assert "佐藤さんがスレッドから停止を依頼しました" in event.comment
+    # スレッドに止めた人を知らせる
+    notice = slack.posted()[-1]
+    assert notice["thread_ts"] == thread.thread_ref and "佐藤さん" in json.dumps(notice["blocks"], ensure_ascii=False)
+
+    # 報告を送ったら、親メッセージのボタンを消す。質問のボタンも閉じる
+    _send_all(run)
+    assert "停止しました" in json.dumps(slack.posted()[-1]["blocks"], ensure_ascii=False)
+    assert "yoriki_stop" not in _parent_blocks(slack, thread)
+    assert "yoriki_select" not in json.dumps(slack.updated()[-2]["blocks"], ensure_ascii=False)
+
+
+def test_stop_is_refused_when_the_run_cannot_be_stopped(client, manager, slack):
+    run = _waiting_run(manager, slack)
+    thread = ExternalThreadBinding.objects.get(run=run)
+    Run.objects.filter(pk=run.pk).update(status=RunStatus.CANCELLING)
+    _press(client, thread, thread.thread_ref, "yoriki_stop", "stop", action_ts="1")
+    _process()
+    Run.objects.filter(pk=run.pk).update(status=RunStatus.COMPLETED)
+    _press(client, thread, thread.thread_ref, "yoriki_stop", "stop", action_ts="2")
+    _process()
+    results = list(ChannelMessageReceipt.objects.order_by("pk").values_list("result", "reason"))
+    assert results == [(ReceiptResult.REJECTED, "cancelling"), (ReceiptResult.REJECTED, "finished")]
+    # 押した本人だけに知らせ、スレッドには書かない
+    ephemeral = [body["text"] for method, body in slack.calls if method == "chat.postEphemeral"]
+    assert ephemeral == ["停止はすでに依頼されています。", "この実行はもう終わっているので、停止できません。"]
+    assert not any("停止を依頼しました" in json.dumps(b, ensure_ascii=False) for b in slack.posted())
+
+
+def test_stop_is_not_taken_while_the_connection_is_suspended(client, manager, slack):
+    run = _waiting_run(manager, slack)
+    thread = ExternalThreadBinding.objects.get(run=run)
+    _press(client, thread, thread.thread_ref, "yoriki_stop", "stop")
+    ChannelConnection.objects.filter(pk=thread.connection_id).update(suspended=True)
+    _process()
+    assert ChannelMessageReceipt.objects.get().result == ReceiptResult.IGNORED
+    run.refresh_from_db()
+    assert run.status == RunStatus.WAITING_USER
+
+
+def test_report_without_a_running_run_has_no_stop_button(manager, slack):
+    """スレッドを報告のときに作るなら、Runはもう終わっているので停止のボタンを出さない"""
+    run = start_task_run(_task(), inputs={}, actor=manager, launch=RunLaunch.MANUAL)
+    run = execute(run, FakeAdapter([reply("終わりました")]))
+    _send_all(run)
+    parent = slack.posted()[0]
+    assert "yoriki_stop" not in json.dumps(parent["blocks"])
 
 
 # --- 受信の記録の清掃（design.md §8） ---

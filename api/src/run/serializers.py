@@ -1,12 +1,14 @@
 from collections import defaultdict
 from typing import Any
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.db.models import Prefetch
 from django.utils.translation import gettext_lazy as _
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from connector.models import Operation
+from delivery.models import ThreadStatus
 from skill.serializers import AssetDiffCountSerializer, asset_diff_items
 from utils.exceptions import Conflict
 
@@ -184,6 +186,20 @@ class RunNotificationSerializer(serializers.Serializer):
     files = serializers.ListField(child=serializers.CharField(), read_only=True, required=False, allow_null=True)
 
 
+class RunThreadSerializer(serializers.Serializer):
+    """対話の出口のスレッド（design.md §4.7）"""
+
+    destination_name = serializers.CharField(read_only=True, help_text=_("対話の出口の名前"))
+    channel_name = serializers.CharField(read_only=True, help_text=_("チャネルの名前（受付時の出口の版）"))
+    extension = serializers.CharField(read_only=True, help_text=_("Channel PluginのID"))
+    status = serializers.ChoiceField(
+        choices=["none", "pending", "created", "unknown"],
+        read_only=True,
+        help_text=_("スレッドの状態（none：まだ作っていない、pending：作成中、created：作成済み、unknown：確認待ち）"),
+    )
+    url = serializers.CharField(read_only=True, help_text=_("スレッドを開くURL（分からなければ空）"))
+
+
 class RunTaskInfoSerializer(serializers.Serializer):
     """タスクのRunの、受付時のタスクと版、起動のしかた、通知（Manifestに固定したもの）"""
 
@@ -198,6 +214,9 @@ class RunTaskInfoSerializer(serializers.Serializer):
     )
     notification = RunNotificationSerializer(
         read_only=True, allow_null=True, help_text=_("通知の候補（修正チャットでは、送るはずだった内容）")
+    )
+    thread = RunThreadSerializer(
+        read_only=True, allow_null=True, help_text=_("対話の出口のスレッド（対話の出口のないRunでは空）")
     )
 
 
@@ -216,6 +235,31 @@ def task_info(run: Run) -> dict[str, Any] | None:
         "delivers": run.destination_revision_id is not None,
         "destination_name": destination.name if destination is not None else "",
         "notification": run.notification if isinstance(run.notification, dict) else None,
+        "thread": thread_info(run),
+    }
+
+
+def thread_info(run: Run) -> dict[str, Any] | None:
+    """対話の出口のスレッド。見せるのはWebから回答できる人と同じ（Runの画面を見られる人。design.md §4.7）"""
+    revision = run.interaction_revision
+    if revision is None:
+        return None
+    names = {
+        int(ThreadStatus.PENDING): "pending",
+        int(ThreadStatus.CREATED): "created",
+        int(ThreadStatus.UNKNOWN): "unknown",
+    }
+    try:
+        thread = run.external_thread
+    except ObjectDoesNotExist:
+        thread = None
+    created = thread is not None and thread.status == ThreadStatus.CREATED
+    return {
+        "destination_name": revision.destination.name,
+        "channel_name": revision.channel_name or revision.channel_id,
+        "extension": revision.destination.extension,
+        "status": names.get(thread.status, "pending") if thread is not None else "none",
+        "url": thread.thread_url if created and thread is not None else "",
     }
 
 

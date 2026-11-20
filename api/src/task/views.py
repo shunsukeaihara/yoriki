@@ -530,6 +530,8 @@ class AppTaskRunViewSet(TaskMixin, ReadOnlyModelViewSet):
         "conversation",
         "model_version__profile",
         "task_revision__destination",
+        "interaction_revision__destination",
+        "external_thread",
         "owner",
         "trigger_receipt__binding",
         "trigger_receipt__binding_revision",

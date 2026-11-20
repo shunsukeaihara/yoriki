@@ -56,6 +56,7 @@ describe('run', () => {
       delivers: false,
       destinationName: '',
       notification: null,
+      thread: null,
     }
     expect(hasWorkToShow(run({ trigger: RunTrigger.TASK, taskInfo }))).toBe(true)
   })

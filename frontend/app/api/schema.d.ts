@@ -6020,7 +6020,37 @@ export interface components {
             readonly destination_name: string;
             /** @description 通知の候補（修正チャットでは、送るはずだった内容） */
             readonly notification: components["schemas"]["RunNotification"] | null;
+            /** @description 対話の出口のスレッド（対話の出口のないRunでは空） */
+            readonly thread: components["schemas"]["RunThread"] | null;
         };
+        /** @description 対話の出口のスレッド（design.md §4.7） */
+        RunThread: {
+            /** @description 対話の出口の名前 */
+            readonly destination_name: string;
+            /** @description チャネルの名前（受付時の出口の版） */
+            readonly channel_name: string;
+            /** @description Channel PluginのID */
+            readonly extension: string;
+            /**
+             * @description スレッドの状態（none：まだ作っていない、pending：作成中、created：作成済み、unknown：確認待ち）
+             *
+             *     * `none` - none
+             *     * `pending` - pending
+             *     * `created` - created
+             *     * `unknown` - unknown
+             */
+            readonly status: components["schemas"]["RunThreadStatusEnum"];
+            /** @description スレッドを開くURL（分からなければ空） */
+            readonly url: string;
+        };
+        /**
+         * @description * `none` - none
+         *     * `pending` - pending
+         *     * `created` - created
+         *     * `unknown` - unknown
+         * @enum {string}
+         */
+        RunThreadStatusEnum: "none" | "pending" | "created" | "unknown";
         /**
          * @description * `1` - 会話
          *     * `2` - タスク

@@ -123,6 +123,20 @@ const launchedBy = computed(() => {
   return ''
 })
 
+const thread = computed(() => run.value?.taskInfo?.thread ?? null)
+const threadStatusText = computed(() => {
+  switch (thread.value?.status) {
+    case 'none':
+      return t('最初の質問（質問がなければ完了等の報告）のときに、スレッドを作ります')
+    case 'pending':
+      return t('スレッドを作っています')
+    case 'unknown':
+      return t('スレッドの親メッセージを送れたか分かりません（タスクを管理する人が、チャネルを確かめて送り直します）')
+    default:
+      return t('スレッドはありますが、リンクを得られませんでした')
+  }
+})
+
 // --- 操作 ---
 
 // 修正チャット（design.md §11.11）。タスクの今の定義（入力の項目）を読み、この実行の入力を初期値にしてダイアログを開く
@@ -314,6 +328,28 @@ const stop = async () => {
               <dt class="text-muted">{{ $t('終了') }}</dt>
               <dd>{{ run.finished ? formatDatetime(run.finished) : '—' }}</dd>
             </dl>
+          </section>
+
+          <!-- 対話の出口のスレッド（design.md §4.7）。Webから回答できる人と同じ人に見せる -->
+          <section v-if="thread" class="grid gap-2">
+            <h3 class="text-xs font-semibold text-muted">{{ $t('対話のスレッド') }}</h3>
+            <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
+              <dt class="text-muted">{{ $t('出口') }}</dt>
+              <dd class="min-w-0 break-words">{{ thread.destinationName }}</dd>
+              <dt class="text-muted">{{ $t('チャネル') }}</dt>
+              <dd class="min-w-0 break-words">{{ thread.channelName }}</dd>
+            </dl>
+            <ULink
+              v-if="thread.status === 'created' && thread.url"
+              :to="thread.url"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex items-center gap-1 text-sm"
+            >
+              <UIcon name="i-lucide-external-link" class="size-4 shrink-0" />
+              {{ $t('スレッドを開く') }}
+            </ULink>
+            <p v-else class="text-xs text-muted">{{ threadStatusText }}</p>
           </section>
 
           <section v-if="run.inputs.length" class="grid gap-2">

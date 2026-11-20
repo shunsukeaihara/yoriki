@@ -28,10 +28,11 @@ from delivery.tasks import send_delivery
 from harness.tests.fakes import FakeAdapter, calls, reply
 from harness.tests.test_connectors import execute
 from llm.factories import ModelProfileFactory
-from run.models import ClarificationRequest, ClarificationStatus, RunLaunch, RunStatus
+from run.models import ClarificationRequest, ClarificationStatus, Run, RunLaunch, RunStatus
 from task.dispatch import start_task_run
 from task.factories import TaskDefinitionFactory
 from task.models import TaskScope
+from task.serializers import TaskRunSerializer
 from user.factories import UserFactory, grant
 from utils.permissions import AppPermission
 
@@ -63,18 +64,21 @@ class FakeSlack:
             if isinstance(response, Exception):
                 raise response
             return response
+        return httpx.Response(200, json={"ok": True, **self._data(method, body)})
+
+    def _data(self, method: str, body: dict[str, Any]) -> dict[str, Any]:
         if method == "chat.postMessage":
             self.ts += 1
-            return httpx.Response(200, json={"ok": True, "ts": f"{self.ts}.0001", "channel": body["channel"]})
-        if method == "users.info":
-            return httpx.Response(200, json={"ok": True, "user": {"name": "sato", "profile": {"display_name": "佐藤"}}})
-        if method == "conversations.info":
-            return httpx.Response(
-                200, json={"ok": True, "channel": {"id": body["channel"], "name": "経理", "is_member": True}}
-            )
-        if method == "auth.test":
-            return httpx.Response(200, json={"ok": True, "team_id": "T001", "team": "テスト", "user_id": "UBOT"})
-        return httpx.Response(200, json={"ok": True})
+            return {"ts": f"{self.ts}.0001", "channel": body["channel"]}
+        if method == "chat.getPermalink":
+            ts = body["message_ts"].replace(".", "")
+            return {"permalink": f"https://test.slack.com/archives/C001/p{ts}"}
+        fixed: dict[str, dict[str, Any]] = {
+            "users.info": {"user": {"name": "sato", "profile": {"display_name": "佐藤"}}},
+            "conversations.info": {"channel": {"id": body.get("channel"), "name": "経理", "is_member": True}},
+            "auth.test": {"team_id": "T001", "team": "テスト", "user_id": "UBOT"},
+        }
+        return fixed.get(method, {})
 
     def posted(self) -> list[dict[str, Any]]:
         return [body for method, body in self.calls if method == "chat.postMessage"]
@@ -264,6 +268,55 @@ def test_report_creates_the_thread_when_there_was_no_question(manager, slack):
     assert "thread_ts" not in parent
     assert report["thread_ts"] == ExternalThreadBinding.objects.get(run=run).thread_ref
     assert "終わりました" in json.dumps(report["blocks"], ensure_ascii=False)
+
+
+# --- Runの画面のスレッド（design.md §4.7） ---
+
+
+def test_run_page_shows_the_thread(api_client, manager, slack):
+    run = start_task_run(_task(), inputs={}, actor=manager, launch=RunLaunch.MANUAL)
+    assert run.task is not None
+    url = f"/api/app/v1/tasks/{run.task.uid}/runs/{run.uid}/"
+    api_client.force_authenticate(manager)
+    thread = api_client.get(url).json()["task_info"]["thread"]
+    # スレッドは最初の質問（なければ報告）のときに作る
+    assert run.interaction_revision is not None
+    assert thread == {
+        "destination_name": run.interaction_revision.destination.name,
+        "channel_name": "#経理",
+        "extension": "yoriki.channel.slack",
+        "status": "none",
+        "url": "",
+    }
+
+    run = execute(run, FakeAdapter([calls(("q1", "ask_user", {"questions": [QUESTION]}))]))
+    _send_all(run)
+    binding = ExternalThreadBinding.objects.get(run=run)
+    permalink = f"https://test.slack.com/archives/C001/p{binding.thread_ref.replace('.', '')}"
+    assert binding.thread_url == permalink
+    thread = api_client.get(url).json()["task_info"]["thread"]
+    assert thread["status"] == "created" and thread["url"] == permalink
+
+
+def test_thread_without_a_link_is_still_used(manager, slack):
+    # リンクを得られなくてもスレッドは作れているので、質問は送る
+    slack.responses["chat.getPermalink"] = [httpx.Response(200, json={"ok": False, "error": "channel_not_found"})]
+    run = _waiting_run(manager, slack)
+    binding = ExternalThreadBinding.objects.get(run=run)
+    assert binding.status == ThreadStatus.CREATED and binding.thread_url == ""
+    question = Delivery.objects.get(run=run, event_type=ChannelEvent.QUESTION)
+    assert question.status == DeliveryStatus.DELIVERED
+
+
+def test_thread_is_shown_to_the_starter_who_cannot_see_the_logs(manager, slack):
+    run = _waiting_run(manager, slack)
+    run = Run.objects.get(pk=run.pk)
+    # チャットから起動した本人と同じ（結果だけを見る）
+    run.logs_visible = False  # type: ignore[attr-defined]
+    data = TaskRunSerializer(run).data
+    assert data["task_info"]["destination_name"] == ""
+    assert data["task_info"]["thread"]["status"] == "created"
+    assert data["task_info"]["thread"]["url"].startswith("https://test.slack.com/")
 
 
 # --- ボタン ---

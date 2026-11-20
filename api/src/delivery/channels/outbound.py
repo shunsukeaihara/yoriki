@@ -146,17 +146,33 @@ def _thread(
                 error=_("スレッドの親メッセージを送ったか分かりません。チャネルを確かめてから送り直してください"),
             )
         outcome = adapter.post(secrets, binding.channel_id, parent_message(run))
-        if outcome.outcome == AttemptOutcome.ACCEPTED and outcome.message_ref:
-            binding.thread_ref = outcome.message_ref
-            binding.status = ThreadStatus.CREATED
-            binding.save(update_fields=["thread_ref", "status", "updated"])
-            return binding
-        if outcome.outcome == AttemptOutcome.UNKNOWN:
-            binding.status = ThreadStatus.UNKNOWN
-            binding.save(update_fields=["status", "updated"])
-        outcome.error = _("スレッドを作れません：%(error)s") % {"error": outcome.error}
-        outcome.message_ref = ""
-        return outcome
+        if outcome.outcome != AttemptOutcome.ACCEPTED or not outcome.message_ref:
+            if outcome.outcome == AttemptOutcome.UNKNOWN:
+                binding.status = ThreadStatus.UNKNOWN
+                binding.save(update_fields=["status", "updated"])
+            outcome.error = _("スレッドを作れません：%(error)s") % {"error": outcome.error}
+            outcome.message_ref = ""
+            return outcome
+        binding.thread_ref = outcome.message_ref
+        binding.status = ThreadStatus.CREATED
+        binding.save(update_fields=["thread_ref", "status", "updated"])
+    # Runの画面のリンク（行のロックの外で得る。得られなくてもスレッドは使える）
+    _save_thread_url(binding, connection, adapter, secrets)
+    return binding
+
+
+def _save_thread_url(
+    binding: ExternalThreadBinding, connection: ChannelConnection, adapter: ChannelAdapter, secrets: dict[str, str]
+) -> None:
+    try:
+        url = adapter.thread_url(secrets, connection.workspace_id, binding.channel_id, binding.thread_ref)
+    except Exception:
+        logger.warning("thread %s: cannot get the url", binding.pk, exc_info=True)
+        return
+    if not url.startswith("https://") or len(url) > 500:
+        return
+    binding.thread_url = url
+    ExternalThreadBinding.objects.filter(pk=binding.pk).update(thread_url=url)
 
 
 def _update_question(delivery: Delivery, adapter: ChannelAdapter, secrets: dict[str, str]) -> Outcome:

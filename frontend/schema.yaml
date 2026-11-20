@@ -14881,6 +14881,12 @@ components:
           readOnly: true
           nullable: true
           description: 通知の候補（修正チャットでは、送るはずだった内容）
+        thread:
+          allOf:
+          - $ref: '#/components/schemas/RunThread'
+          readOnly: true
+          nullable: true
+          description: 対話の出口のスレッド（対話の出口のないRunでは空）
       required:
       - delivers
       - destination_name
@@ -14890,6 +14896,56 @@ components:
       - name
       - notification
       - number
+      - thread
+    RunThread:
+      type: object
+      description: 対話の出口のスレッド（design.md §4.7）
+      properties:
+        destination_name:
+          type: string
+          readOnly: true
+          description: 対話の出口の名前
+        channel_name:
+          type: string
+          readOnly: true
+          description: チャネルの名前（受付時の出口の版）
+        extension:
+          type: string
+          readOnly: true
+          description: Channel PluginのID
+        status:
+          allOf:
+          - $ref: '#/components/schemas/RunThreadStatusEnum'
+          readOnly: true
+          description: |-
+            スレッドの状態（none：まだ作っていない、pending：作成中、created：作成済み、unknown：確認待ち）
+
+            * `none` - none
+            * `pending` - pending
+            * `created` - created
+            * `unknown` - unknown
+        url:
+          type: string
+          readOnly: true
+          description: スレッドを開くURL（分からなければ空）
+      required:
+      - channel_name
+      - destination_name
+      - extension
+      - status
+      - url
+    RunThreadStatusEnum:
+      enum:
+      - none
+      - pending
+      - created
+      - unknown
+      type: string
+      description: |-
+        * `none` - none
+        * `pending` - pending
+        * `created` - created
+        * `unknown` - unknown
     RunTriggerEnum:
       enum:
       - 1

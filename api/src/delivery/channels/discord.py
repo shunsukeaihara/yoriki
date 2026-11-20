@@ -280,6 +280,12 @@ class DiscordAdapter(ChannelAdapter):
         outcome, _data = self._call("POST", f"channels/{thread_ref}/messages", secrets, body=body)
         return outcome
 
+    def thread_url(self, secrets: dict[str, str], workspace_id: str, channel_id: str, thread_ref: str) -> str:
+        # スレッドのIDは親メッセージのIDと同じ（メッセージから作るため）
+        if not (_SNOWFLAKE.match(workspace_id) and _SNOWFLAKE.match(thread_ref)):
+            return ""
+        return f"https://discord.com/channels/{workspace_id}/{thread_ref}"
+
     def _call(
         self,
         method: str,

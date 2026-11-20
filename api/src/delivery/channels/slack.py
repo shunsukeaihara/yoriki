@@ -172,6 +172,13 @@ class SlackAdapter(ChannelAdapter):
         profile = user.get("profile") or {}
         return profile.get("display_name") or profile.get("real_name") or user.get("name") or ""
 
+    def thread_url(self, secrets: dict[str, str], workspace_id: str, channel_id: str, thread_ref: str) -> str:
+        params = {"channel": channel_id, "message_ts": thread_ref}
+        outcome, data = self._call("chat.getPermalink", secrets, params=params, idempotent=True)
+        if outcome.outcome != AttemptOutcome.ACCEPTED:
+            return ""
+        return str(data.get("permalink", ""))
+
     def _call(
         self,
         method: str,

@@ -10,6 +10,7 @@ export const BuiltinExtension = {
   MYSQL: 'yoriki.connector.mysql',
   SQLSERVER: 'yoriki.connector.sqlserver',
   SLACK: 'yoriki.channel.slack',
+  DISCORD: 'yoriki.channel.discord',
 } as const
 
 // 対応能力の名前（api/src/plugin/builtin.py。意味は plugin/CONTRACT.md）
@@ -27,6 +28,9 @@ const builtinDescriptions = (t: T): Record<string, string> => ({
   [BuiltinExtension.IN_APP]: t('タスクを管理できる人（手動実行では実行した人）の通知欄に載せます'),
   [BuiltinExtension.SLACK]: t(
     'Slackのチャネルのスレッドで作業中の質問に答えてもらい、完了を報告します。タスクの対話の出口にだけ選べます',
+  ),
+  [BuiltinExtension.DISCORD]: t(
+    'Discordのテキストチャネルのスレッドで作業中の質問に答えてもらい、完了を報告します。返信の受信にはchannel-listenerが要ります',
   ),
 })
 

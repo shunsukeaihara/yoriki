@@ -151,7 +151,14 @@ class SlackAdapter(ChannelAdapter):
         return outcome
 
     def notify_user(
-        self, secrets: dict[str, str], channel_id: str, thread_ref: str, user_id: str, text: str
+        self,
+        secrets: dict[str, str],
+        channel_id: str,
+        thread_ref: str,
+        user_id: str,
+        text: str,
+        *,
+        reply_token: str = "",
     ) -> Outcome:
         body = {"channel": channel_id, "user": user_id, "text": text, "thread_ts": thread_ref}
         outcome, _data = self._call("chat.postEphemeral", secrets, body=body, idempotent=False)

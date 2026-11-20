@@ -12,13 +12,16 @@ from connector.adapters.mysql import MySQLAdapter
 from connector.adapters.postgresql import PostgreSQLAdapter
 from connector.adapters.sqlserver import SQLServerAdapter
 from delivery.adapters import WebhookAdapter, ZapierAdapter
+from delivery.channels.discord import DiscordAdapter
 from delivery.channels.slack import SlackAdapter
 from delivery.in_app import InAppAdapter
 from task.triggers import WebhookTrigger
 
 from .builtin import (
+    DISCORD,
     FILE_FETCH_AUTH,
     IN_APP,
+    LISTEN,
     LOCAL_STORAGE,
     MYSQL,
     PERSONAL,
@@ -76,6 +79,14 @@ def plugins() -> list[PluginSpec]:
         ),
         _single(IN_APP, "画面の通知", ExtensionType.NOTIFICATION, InAppAdapter, capabilities=frozenset({PERSONAL})),
         _single(SLACK, "Slack", ExtensionType.CHANNEL, SlackAdapter, secrets=("bot_token", "signing_secret")),
+        _single(
+            DISCORD,
+            "Discord",
+            ExtensionType.CHANNEL,
+            DiscordAdapter,
+            capabilities=frozenset({LISTEN}),
+            secrets=("bot_token", "public_key", "guild_id"),
+        ),
         _single(LOCAL_STORAGE, "ローカル", ExtensionType.STORAGE, LocalStorage),
         _single(S3_STORAGE, "S3", ExtensionType.STORAGE, S3Storage),
         _single(

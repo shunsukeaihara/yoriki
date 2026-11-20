@@ -40,9 +40,9 @@ const onCreated = (value: ChannelConnection) => {
     <template #content>
       <div v-if="created" class="grid gap-3">
         <p class="text-sm">
-          {{ $t('「{workspace}」のWorkspaceにつながりました。', { workspace: created.workspaceName }) }}
+          {{ $t('「{workspace}」につながりました。', { workspace: created.workspaceName }) }}
         </p>
-        <ChannelConnectionReceiveUrl :url="created.receiveUrl" />
+        <ChannelConnectionReceiveUrl :url="created.receiveUrl" :extension="created.extension" />
       </div>
       <ChannelConnectionForm v-else ref="formRef" v-model="editing" @created="onCreated" />
     </template>

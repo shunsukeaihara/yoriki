@@ -1,6 +1,9 @@
 <script setup lang="ts">
-/** Slackのアプリに設定する受け口のURL（Event Subscriptions と Interactivity の両方に同じURLを設定する） */
-const props = defineProps<{ url: string }>()
+/**
+ * チャットツールのアプリに設定する受け口のURL。Slackは Event Subscriptions と Interactivity の両方、Discordは
+ * Interactions Endpoint URL（ボタンだけ。返信はchannel-listenerが受ける）に設定する
+ */
+const props = defineProps<{ url: string; extension: string }>()
 const toast = useToast()
 const { t } = useI18n()
 // https でない開発時の画面（Clipboard APIを使えない）でも、古い方法でコピーする
@@ -15,7 +18,7 @@ const onCopy = async () => {
 
 <template>
   <div class="grid min-w-0 gap-2 text-sm">
-    <span class="text-muted">{{ $t('Slackのアプリに設定するURL') }}</span>
+    <span class="text-muted">{{ $t('チャットツールのアプリに設定するURL') }}</span>
     <div class="flex min-w-0 items-center gap-2">
       <code
         class="min-w-0 flex-1 rounded bg-elevated px-2 py-1.5 text-xs break-all"
@@ -26,7 +29,14 @@ const onCopy = async () => {
         {{ $t('コピー') }}
       </DBtn>
     </div>
-    <p class="text-xs text-muted">
+    <p v-if="extension === BuiltinExtension.DISCORD" class="text-xs text-muted">
+      {{
+        $t(
+          'Discordのアプリの「General Information」の Interactions Endpoint URL に、このURLを設定します（質問のボタンを受けます。スレッドへの返信はchannel-listenerが受けます）',
+        )
+      }}
+    </p>
+    <p v-else class="text-xs text-muted">
       {{
         $t(
           'Slackのアプリの「Event Subscriptions」のRequest URL（message.channels のイベントを受け取る）と、「Interactivity & Shortcuts」のRequest URLの両方に、このURLを設定します',

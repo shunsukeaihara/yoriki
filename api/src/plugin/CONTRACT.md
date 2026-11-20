@@ -16,9 +16,11 @@ Yorikiのサーバーに配備する拡張（Plugin）の作り方と、Yoriki�
 | `notification`（出口） | `delivery.adapters.NotificationAdapter` | `deliver(request) -> Outcome`、URLを持つ種類は `validate_url(url)` | 結果は `Outcome` で返す。`PluginTemporaryError` は送り直し、`PluginConfigError`・`PluginPermanentError` は失敗にする |
 | `storage`（保存先） | `artifact.storage.StorageBackend` | `put_immutable`・`open_read`・`stat`・`delete`・`list_keys` | `artifact.storage.StorageError` |
 | `connector`（Connector） | `connector.adapters.base.DatasourceAdapter` | `connect`・`open_cursor`・`translate_error` を実装し、`check`・`list_tables`・`describe`・`query` は基底クラスが行う | `connector.errors.ConnectorError`（種類つき） |
-| `channel`（対話の出口） | `delivery.channels.base.ChannelAdapter` | `check_connection`・`check_channel`・`post`・`update`・`notify_user`・`verify`・`parse`（任意で `user_name`） | 送信の結果は出口と同じ `Outcome`（投稿したメッセージの参照は `message_ref`）。確かめは `PluginConfigError`、読めない要求は `PluginPermanentError` |
+| `channel`（対話の出口） | `delivery.channels.base.ChannelAdapter` | `check_connection`・`check_channel`・`post`・`update`・`notify_user`・`verify`・`parse`（任意で `user_name`。capability `listen` を宣言するものは `listen`・`fetch_replies`） | 送信の結果は出口と同じ `Outcome`（投稿したメッセージの参照は `message_ref`）。確かめは `PluginConfigError`、読めない要求は `PluginPermanentError` |
 
-対話の出口のAdapterは、チャットツールのAPIとの通信とメッセージの見せ方（ボタン等）だけを持つ。スレッドとRunの対応、回答の確定、配信の再試行・記録はYorikiが持つ（design.md §4.7）。資格情報は連携の接続（ChannelConnection）が暗号化して持ち、呼ぶたびに `secrets` で渡す。投稿の結果が分からないとき（送った後に応答が失われた等）は「届いたか分からない」を返す（Yorikiは自動では送り直さない）。受け口は `/api/hooks/channels/<extension_idの最後の部分>/<接続のID>/` で、Yorikiが接続を引いて `verify`・`parse` を呼ぶ。
+対話の出口のAdapterは、チャットツールのAPIとの通信とメッセージの見せ方（ボタン等）だけを持つ。スレッドとRunの対応、回答の確定、配信の再試行・記録はYorikiが持つ（design.md §4.7）。資格情報は連携の接続（ChannelConnection）が暗号化して持ち、呼ぶたびに `secrets` で渡す。投稿の結果が分からないとき（送った後に応答が失われた等）は「届いたか分からない」を返す（Yorikiは自動では送り直さない）。受け口は `/api/hooks/channels/<extension_idの最後の部分>/<接続のID>/` で、Yorikiが接続を引いて `verify`・`parse` を呼ぶ。`parse` が `response` を返すと、Yorikiは出来事（`events`）を記録してから、その本文を応答にする（DiscordのPINGへの応答、ボタンへの「受付」）。受け付けなかったボタンへの知らせには、受け口で読んだ `reply_token`（Discordのinteractionのtoken等）を `notify_user` へ渡す（使えなければスレッドへの投稿でよい）。
+
+HTTPでは受けられない出来事（DiscordのGatewayの返信）は、capability `listen` を宣言して常時接続で受ける。channel-listener（`run_channel_listener`）が接続ごとに担当を決め、`async listen(secrets, sink)` を呼ぶ（取り消されるまで返さない）。Adapterは受けた出来事を `await sink.events([...])` で渡し、つないだら `await sink.connected(resumed)` を呼ぶ（新しいセッションなら `resumed=False`。Yorikiは確認待ちのスレッドを `fetch_replies(secrets, channel_id, thread_ref, after_ref)` で読み直す）。資格情報・設定の誤りは `PluginConfigError`（つなぎ直しの間隔を空け、接続の受信の状態に出す）、それ以外の例外は少し待ってつなぎ直す。
 
 保存先は環境変数で選ぶので（deployment.md §7.2）、Registryには版と状態を見せるために載せるだけで、画面からは止めない。作業ファイルの退避（file_snapshot）は、まだAdapterに分けていない。
 
@@ -31,6 +33,7 @@ Yorikiのサーバーに配備する拡張（Plugin）の作り方と、Yoriki�
 | `personal` | notification | 個人のタスクの出口に使える（Yorikiが作る共通の画面の通知） |
 | `file_fetch_auth` | notification | 渡した成果物のURLの取得に、出口の署名の鍵（`Authorization: Bearer`）を要る |
 | `schemas` | connector | 表の名前にスキーマがある（MySQLはDB名がスキーマなので持たない） |
+| `listen` | channel | 常時接続で受ける（`listen`・`fetch_replies` を持つ）。channel-listenerが接続ごとに呼ぶ |
 
 ### 2.2 設定
 

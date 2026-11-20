@@ -82,6 +82,16 @@ services:
     userns_mode: host
     stop_grace_period: 10m # 実行中のRunがCheckpointを保存するまで待つ
 
+  # Discord等の常時接続で返信を受ける（docs/deployment.md §3.1・§7）。Discordの対話の出口を使うときだけ動かす。
+  # 何台で動かしてもよい（接続ごとにDBのリースで担当を1つに決める）
+  #   docker compose -f deploy/compose.app.yaml --profile channels up -d
+  channel-listener:
+    <<: *api
+    command: python manage.py run_channel_listener
+    networks: [backend, egress]
+    profiles: [channels]
+    stop_grace_period: 30s
+
   # apiのイメージに入れた静的ファイルを、nginxが読む共有ボリュームへコピーして終わる。
   # イメージを更新すると `up -d` のたびに作り直されてコピーし直す。古い版のファイルは消さない（開いたままの画面が使う）
   static:

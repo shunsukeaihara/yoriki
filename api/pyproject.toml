@@ -22,7 +22,7 @@ dependencies = [
     "nanoid>=2.0.0",
     "openai>=3.46.0",
     "packaging>=26.3",
-    "psycopg[binary,pool]>=3.3.6",
+    "psycopg[binary,pool]>=3.3.8",
     # 1.2.1〜1.2.3は、作ったばかりのユーザーがTLSなしで初めてログインすると AttributeError になる（caching_sha2_password）
     "pymysql>=1.2.0,<1.2.1",
     "pyodbc>=5.4.0",

@@ -106,12 +106,16 @@ class ThreadMessage:
     # Runの画面へのリンク（社内の認証が要る）。なければ空
     link: str = ""
     question: QuestionView | None = None
+    # 親メッセージに「停止」のボタンを出す（Runが動いている間だけ。design.md §4.6）。押されたら、確かめてから
+    # InboundKind.STOP の出来事にする（Slackは確認のダイアログ等。確かめのしかたはAdapterが決める）
+    stoppable: bool = False
 
 
 class InboundKind(StrEnum):
     REPLY = "reply"  # スレッドへの普通の返信
     SELECT = "select"  # 選択肢のボタン
     SUBMIT = "submit"  # 「この内容で回答」のボタン
+    STOP = "stop"  # 親メッセージの「停止」のボタン（確かめた後のもの）
 
 
 @dataclass(frozen=True)
@@ -123,7 +127,7 @@ class InboundEvent:
     dedup_key: str
     workspace_id: str
     channel_id: str
-    # スレッドの親メッセージの参照（Slackでは thread_ts）
+    # スレッドの親メッセージの参照（Slackでは thread_ts。停止のボタンでは押した親メッセージ）
     thread_ref: str
     # この出来事のメッセージの参照（返信のts、ボタンを押したメッセージのts）
     message_ref: str

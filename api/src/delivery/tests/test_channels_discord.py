@@ -44,7 +44,7 @@ from harness.tests.test_connectors import execute
 from llm.factories import ModelProfileFactory
 from plugin import builtin
 from plugin.errors import PluginConfigError
-from run.models import ClarificationRequest, ClarificationStatus, RunLaunch, RunStatus
+from run.models import ClarificationRequest, ClarificationStatus, RunEvent, RunEventKind, RunLaunch, RunStatus
 from task.dispatch import start_task_run
 from task.factories import TaskDefinitionFactory
 from task.models import TaskScope
@@ -297,6 +297,70 @@ def test_refused_button_is_answered_only_to_the_person(client, manager, discord)
     assert path == f"webhooks/{APP}/token-1"
     assert body["flags"] == 64
     assert ChannelMessageReceipt.objects.get().result == ReceiptResult.REJECTED
+
+
+def _press_in_channel(client, connection, message_id: str, custom_id: str, *, id_="1"):
+    """親チャネルのメッセージ（スレッドの親メッセージ、本人だけの確認のメッセージ）のボタン。親チャネルの
+    parent_id はカテゴリ"""
+    payload = {
+        "id": id_,
+        "type": 3,
+        "application_id": APP,
+        "token": f"token-{id_}",
+        "guild_id": GUILD,
+        "channel_id": CHANNEL,
+        "channel": {"id": CHANNEL, "type": 0, "parent_id": "555"},
+        "member": {"nick": "佐藤", "user": {"id": "42", "username": "sato"}},
+        "message": {"id": message_id, "channel_id": CHANNEL},
+        "data": {"custom_id": custom_id, "component_type": 2},
+    }
+    body = json.dumps(payload).encode()
+    return client.post(f"/api/hooks/channels/discord/{connection.uid}/", data=body, **_signed(body))
+
+
+def test_stop_from_the_thread(client, manager, discord):
+    connection = _connection()
+    run = _waiting_run(manager, connection)
+    thread = ExternalThreadBinding.objects.get(run=run)
+    _path, parent = discord.requests("POST", "channels/")[0]
+    buttons = [c for row in parent["components"] for c in row["components"]]
+    assert {"type": 2, "style": 4, "label": "停止", "custom_id": "yoriki:stop"} in buttons
+
+    # 「停止」を押すと、押した本人だけに確認のメッセージを返す（まだ記録しない）
+    response = _press_in_channel(client, connection, thread.thread_ref, "yoriki:stop", id_="1")
+    confirm = response.json()
+    assert confirm["type"] == 4 and confirm["data"]["flags"] == 64
+    stop = confirm["data"]["components"][0]["components"][0]
+    assert stop["custom_id"] == f"yoriki:stopok:{thread.thread_ref}"
+    assert not ChannelMessageReceipt.objects.exists()
+
+    # 確認の「停止する」で記録し、確認のメッセージを受け付けた形に書き換える
+    response = _press_in_channel(client, connection, "9999", stop["custom_id"], id_="2")
+    assert response.json() == {"type": 7, "data": {"content": "停止を受け付けました。", "components": []}}
+    _process()
+    receipt = ChannelMessageReceipt.objects.get()
+    assert (receipt.result, receipt.run_id) == (ReceiptResult.STOPPED, run.pk), receipt.reason
+    run.refresh_from_db()
+    assert run.status == RunStatus.CANCELLED
+    event = RunEvent.objects.filter(run=run, kind=RunEventKind.STATUS).order_by("-sequence").first()
+    assert event is not None
+    assert event.data["external"] == {"provider": "discord", "user_id": "42", "name": "佐藤"}
+    path, notice = discord.requests("POST", "channels/")[-1]
+    assert path == f"channels/{thread.thread_ref}/messages" and "佐藤さん" in notice["content"]
+
+    # 報告を送ったら、親メッセージ（親チャネルにある）のボタンを消す
+    _send_all(run)
+    path, update = discord.requests("PATCH")[-1]
+    assert path == f"channels/{CHANNEL}/messages/{thread.thread_ref}"
+    assert not [c for row in update["components"] for c in row["components"] if c.get("custom_id")]
+
+    # 終わった後の「停止する」は、押した本人だけに知らせる
+    _press_in_channel(client, connection, "9999", stop["custom_id"], id_="3")
+    _process()
+    assert ChannelMessageReceipt.objects.order_by("-pk").values_list("result", flat=True)[0] == ReceiptResult.REJECTED
+    path, body = discord.requests("POST", "webhooks/")[-1]
+    assert path == f"webhooks/{APP}/token-3" and body["flags"] == 64
+    assert "停止できません" in body["content"]
 
 
 def test_thread_is_created_again_when_only_the_parent_was_posted(manager, discord):

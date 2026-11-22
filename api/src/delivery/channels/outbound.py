@@ -16,7 +16,15 @@ from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 
 from plugin import registry
-from run.models import ClarificationRequest, ClarificationStatus, Run, RunEvent, RunEventKind, RunStatus
+from run.models import (
+    CANCELLABLE_STATUSES,
+    ClarificationRequest,
+    ClarificationStatus,
+    Run,
+    RunEvent,
+    RunEventKind,
+    RunStatus,
+)
 
 from ..adapters import Outcome
 from ..models import (
@@ -114,6 +122,7 @@ def deliver_channel(delivery: Delivery, adapter: ChannelAdapter) -> Outcome:
     outcome = adapter.post(secrets, thread.channel_id, report_message(delivery.run), thread_ref=thread.thread_ref)
     if outcome.outcome == AttemptOutcome.ACCEPTED:
         _close_questions(delivery.run, adapter, secrets, thread)
+        _close_parent(delivery.run, adapter, secrets, thread)
     return outcome
 
 
@@ -212,6 +221,17 @@ def _close_questions(run: Run, adapter: ChannelAdapter, secrets: dict[str, str],
             logger.warning("run %s: cannot close the question %s", run.uid, clarification.uid, exc_info=True)
 
 
+def _close_parent(run: Run, adapter: ChannelAdapter, secrets: dict[str, str], thread: ExternalThreadBinding) -> None:
+    """Runが終わったら、親メッセージの「停止」のボタンを消す（できなくても、押されたら受け付けないと返すので記録だけ）"""
+    try:
+        outcome = adapter.update(secrets, thread.channel_id, thread.thread_ref, parent_message(run))
+    except Exception:
+        logger.warning("run %s: cannot close the parent message", run.uid, exc_info=True)
+        return
+    if outcome.outcome != AttemptOutcome.ACCEPTED:
+        logger.warning("run %s: cannot close the parent message: %s", run.uid, outcome.error)
+
+
 # --- メッセージ ---
 
 
@@ -229,11 +249,14 @@ def _task_name(run: Run) -> str:
 
 
 def parent_message(run: Run) -> ThreadMessage:
+    """スレッドの親メッセージ。Runが止められる間は「停止」のボタンを出す（design.md §4.6）"""
+    status = Run.objects.filter(pk=run.pk).values_list("status", flat=True).first()
     return ThreadMessage(
         kind=MessageKind.PARENT,
         title=_task_name(run),
         text=_("タスクの実行についての確認と報告は、このスレッドに書きます。"),
         link=run_link(run),
+        stoppable=status in CANCELLABLE_STATUSES,
     )
 
 

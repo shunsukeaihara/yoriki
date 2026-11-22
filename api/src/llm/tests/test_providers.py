@@ -596,7 +596,8 @@ class TestAnthropic:
             Completed(StopReason.TOOL_USE, "req_a"),
         ]
         request = recorder.requests[-1]
-        assert request.headers["x-api-key"] == "sk-test-0123456789abcd"
+        # SDK 2.x は API key を Authorization: Bearer で送る
+        assert request.headers["authorization"] == "Bearer sk-test-0123456789abcd"
         sent = recorder.sent
         assert sent["system"] == [{"type": "text", "text": "簡潔に答える"}]
         assert sent["max_tokens"] == 100

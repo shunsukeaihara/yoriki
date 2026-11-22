@@ -11,6 +11,10 @@ updates:
     cooldown: { default-days: 14 }
     groups:
       python: { patterns: ['*'], update-types: [minor, patch] }
+    # 1.2.1〜1.2.3は、作ったばかりのユーザーがTLSなしで初めてログインすると失敗する（api/pyproject.toml）
+    ignore:
+      - dependency-name: pymysql
+        versions: ['>=1.2.1, <1.2.4']
   # Sandboxの契約テストの依存（pytest等）。イメージの中のライブラリは requirements.lock で固定し、手で更新する
   - package-ecosystem: uv
     directory: /sandbox
@@ -27,6 +31,10 @@ updates:
     directories: [/api, /frontend, /sandbox/images/docs]
     schedule: { interval: weekly }
     cooldown: { default-days: 14 }
+    # Pythonの版は手で上げる（api は requires-python、Sandbox は requirements.lock の依存の対応を確かめてから）
+    ignore:
+      - dependency-name: python
+        versions: ['>=3.14']
   - package-ecosystem: docker-compose
     directory: /deploy
     schedule: { interval: weekly }

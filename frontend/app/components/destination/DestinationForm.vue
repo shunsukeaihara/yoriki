@@ -9,6 +9,8 @@
  * そのチャネルに参加しているかを確かめてチャネルの名前を記録するので、接続とチャネルは変えたときだけ送る
  */
 const api = useAPI()
+// テンプレートに直接書くと vue-tsc 3.3.14 が `api` を ref とみなして型エラーにするので、ここで取り出す
+const searchChannelConnections = api.manage.channelConnections().list
 const toast = useToast()
 const { t } = useI18n()
 const modelValue = defineModel<Destination | null>()
@@ -274,7 +276,7 @@ defineExpose({ onSubmit, loading, canPost, reset })
           v-model="form.connection"
           :label="$t('連携の接続')"
           required
-          :search-fn="api.manage.channelConnections().list"
+          :search-fn="searchChannelConnections"
           :query-params="{ extension: form.extension }"
           item-description="workspaceName"
           :initial-selected="initialConnection"

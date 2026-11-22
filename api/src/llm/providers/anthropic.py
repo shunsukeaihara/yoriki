@@ -144,8 +144,7 @@ def _params(request: ChatRequest) -> dict[str, Any]:
         params["tools"] = tools
         if choice := _tool_choice(request):
             params["tool_choice"] = choice
-    if request.temperature is not None:
-        params["temperature"] = request.temperature
+    # temperature は送らない。APIの版 2026-10-21（SDK 2.x の既定）では、どのモデルでも送ると400になる
     if (budget := thinking_budget(request.effort)) is not None:
         # 数字だけのeffortは、thinkingのtoken予算（budget_tokens を受け付けるモデル）。予算は最大出力tokenより小さくする
         params["thinking"] = {"type": "enabled", "budget_tokens": budget}

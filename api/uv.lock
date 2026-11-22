@@ -13,7 +13,7 @@ wheels = [
 
 [[package]]
 name = "anthropic"
-version = "2.3.0"
+version = "2.6.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -25,9 +25,9 @@ dependencies = [
     { name = "sniffio" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3e/ba/4c91947e0d0062d66d371db371597287153f7685fbed512d3294d0cde3c7/anthropic-2.3.0.tar.gz", hash = "sha256:edfdea1e3fa7b3ce25df1511953408b2f03bfa61eb6f6268f766101a9e18ad53", size = 1869656, upload-time = "2026-10-23T23:18:47.649Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4a/a8/0e50326e4c408f4b4ee3aae4c3bbd60012570b88bc5887effc8542509068/anthropic-2.6.0.tar.gz", hash = "sha256:a38d8698258a4cb33a9bc9d2f0ced1d96b71010870e5ed703807d21021a0da24", size = 1958763, upload-time = "2026-11-05T18:59:09.557Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3f/29/eb3558ab6bf252a07ac41c76ac5b0ea24a0aa0c23f87a40aaf31a5f8dba4/anthropic-2.3.0-py3-none-any.whl", hash = "sha256:aa6a3984f9276f307933d42dc6f58b6efc821a5ecafbc8d1bb5993a066767622", size = 2216980, upload-time = "2026-10-23T23:18:45.779Z" },
+    { url = "https://files.pythonhosted.org/packages/38/0b/705a05ab68558914e725cf1143d7e409fa3bb596c35bca1eceab42402abe/anthropic-2.6.0-py3-none-any.whl", hash = "sha256:4325cdf9346fa29183674b6ee6289ebad5b2b0a935758f7350fa504032da1d9b", size = 2445307, upload-time = "2026-11-05T18:59:11.474Z" },
 ]
 
 [[package]]
@@ -344,15 +344,15 @@ socialaccount = [
 
 [[package]]
 name = "django-auditlog"
-version = "3.4.1"
+version = "3.4.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "django" },
     { name = "python-dateutil" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/70/e5/2beb2b256775c4fc041ed60cb44f5d77acb6cde307f01567dcf2756721a7/django_auditlog-3.4.1.tar.gz", hash = "sha256:ad07b9db452d5fa8303822cccd78cd3fcb2c2863aeb6abe039ec45739b4d7e33", size = 91611, upload-time = "2025-12-18T08:56:35.378Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c0/59/7439889cd3ccff70436bb30b11d7d5d1297396c3a56877fa91153105b1a9/django_auditlog-3.4.2.tar.gz", hash = "sha256:c4682982f2a7e18867a0893b4242fcc1608ed8256a1ddf885b5f80120addc2a3", size = 93937, upload-time = "2026-11-08T14:55:07.21Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/91/37/3239143dddb34a3f64582c43f56587a80c9ac136cbd34fc215077f83beb9/django_auditlog-3.4.1-py3-none-any.whl", hash = "sha256:29958ecacfee00144127214f3ccef3f0c203c3659bcb6dd404a0f3d5551a10a5", size = 49541, upload-time = "2025-12-18T08:56:23.483Z" },
+    { url = "https://files.pythonhosted.org/packages/08/07/8804ebdbd476b906f18381a9d6a0c1706824064dc51550dd3c7bd1bc5c4d/django_auditlog-3.4.2-py3-none-any.whl", hash = "sha256:7fa9db632da82d617dd51060736c436aa607c5a7f8cf180fec08a17ebbefa01d", size = 52545, upload-time = "2026-11-08T14:55:05.879Z" },
 ]
 
 [[package]]
@@ -1134,19 +1134,19 @@ wheels = [
 
 [[package]]
 name = "pyodbc"
-version = "5.4.0"
+version = "5.5.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/93/83/861d67cfd83a97e39b7598b274fcc6fe523f2cca1feec6a2a05fbb0d79e9/pyodbc-5.4.0.tar.gz", hash = "sha256:0f831870ebd0978d9199999d773421938c6fc199d9049c167a0fcef504f09bbd", size = 137380, upload-time = "2026-11-05T19:00:33.376Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/fb/59/f5ccca0627e6a17de95ed7689276efa172864314ead446f1d0290bf8ef03/pyodbc-5.5.0.tar.gz", hash = "sha256:7a78873cac66b2857bf490a24a3e3aada24f839534e97c67e177f691e7d701ac", size = 158895, upload-time = "2026-11-08T01:17:15.478Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d2/73/e28af61d24cf5a96d8c29384782dc625707f9b62617ef69a91e7068c49bd/pyodbc-5.4.0-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:44a4d5ba0aecb93f8710926e3752e2afbf9af45287230f4d8e2dde6dc828c756", size = 82153, upload-time = "2026-11-05T18:59:39.324Z" },
-    { url = "https://files.pythonhosted.org/packages/b2/6d/f1de65fd27c67e760f73587e2409068c9287c890de774c30ed3a68a925da/pyodbc-5.4.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:880c64d57c095a2105d209cc7241f63fcea9b4563462a198adb5ebabee4a5543", size = 80516, upload-time = "2026-11-05T18:59:40.22Z" },
-    { url = "https://files.pythonhosted.org/packages/ac/f2/2ee4a552967562b51be75937027b8cf3b1506631978d7146a0864ff63374/pyodbc-5.4.0-cp313-cp313-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:d1e9efe0b9dcb5ebff9c021b489ca819831fcbd467e06a20526ce5d3236b7dc6", size = 383405, upload-time = "2026-11-05T18:59:41.307Z" },
-    { url = "https://files.pythonhosted.org/packages/a5/0e/74958c38bea49a491cabfa07874d8cd9b4f24103ab3197365659041613e7/pyodbc-5.4.0-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:13441f516e223ce422fad017f5883213b91379da81b50628cf24ebe136c8ece3", size = 393491, upload-time = "2026-11-05T18:59:42.489Z" },
-    { url = "https://files.pythonhosted.org/packages/64/29/06df9ec1ae315579bf5fb385b6d7f3d406e6895135acfdec87b0d1c8d699/pyodbc-5.4.0-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:19335c2bbf521f465f110c80fa60e86da55717efd469206fff0c9daeeb093c1d", size = 1346046, upload-time = "2026-11-05T18:59:43.737Z" },
-    { url = "https://files.pythonhosted.org/packages/7a/49/5f97ba7b2c5dfe804847bd1dc64b203090982b64a374765a0b5c7587da06/pyodbc-5.4.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:25584942c1d81dca5b745f9342ac2d4c1f077759ccf88f2e9f038742931df743", size = 1405644, upload-time = "2026-11-05T18:59:45.148Z" },
-    { url = "https://files.pythonhosted.org/packages/3c/2e/80c0b6af4baf46b9753f6aa8b7ea6c8d6cef10019994368a0ce1ede9c07e/pyodbc-5.4.0-cp313-cp313-win32.whl", hash = "sha256:47a1bdcabbfad2d83d74b98551a07963043eb24c8f0e526e376a7ef571b8c22e", size = 260115, upload-time = "2026-11-05T18:59:46.482Z" },
-    { url = "https://files.pythonhosted.org/packages/81/a0/ad73b04cdf7beb59dab98308b3c951c0fd3b6b9fefc88f55d0b4cd40807c/pyodbc-5.4.0-cp313-cp313-win_amd64.whl", hash = "sha256:e416400e0305648f9a073d49d05ef8a2406473a3f2cdccd7e229238152c3a137", size = 265093, upload-time = "2026-11-05T18:59:47.706Z" },
-    { url = "https://files.pythonhosted.org/packages/de/28/446e9cd206dd1e4c327feb3a11f4e6ee0bb56d4033f0340ef7204ce83d8b/pyodbc-5.4.0-cp313-cp313-win_arm64.whl", hash = "sha256:c0969abf53459bfb93e58773e77369a95695f2738ed1dce1265bc02184d7f805", size = 431717, upload-time = "2026-11-05T18:59:49.004Z" },
+    { url = "https://files.pythonhosted.org/packages/8b/ac/a626115d0b96eb56bf1e1dec1f03494379456963f8a57bb58347d358dcee/pyodbc-5.5.0-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:70033ec179c59e698e250373defaeae295f46fb36aeeea6a554d5f3bc2a659d0", size = 90064, upload-time = "2026-11-08T01:16:19.968Z" },
+    { url = "https://files.pythonhosted.org/packages/f9/1e/7585fdc8fd34abd042563b8f5ee3f4dc3aee594c400494aadb0ef7a80b97/pyodbc-5.5.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:2304500ab656e5a02a0b39f71e3985c91a207da91d2e725031ae9a6aff2f4165", size = 89322, upload-time = "2026-11-08T01:16:20.842Z" },
+    { url = "https://files.pythonhosted.org/packages/4e/e5/9ba5745f576533304a38a7a4c7d86a7817cfdb547895fc8b191bd69c3d70/pyodbc-5.5.0-cp313-cp313-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:07aebc0790fe36537dff60e178901dd3491fb8fa2cc24279ba9de4633052c1aa", size = 417471, upload-time = "2026-11-08T01:16:22.14Z" },
+    { url = "https://files.pythonhosted.org/packages/79/ac/e7e5b17ee99c6fd226a2952e8815e259717c60717b72b87ada74bbdc4e26/pyodbc-5.5.0-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:04687c8179c7e583172b1315a32957d19d9df12e8197dccc9325002a9a19f813", size = 426728, upload-time = "2026-11-08T01:16:23.211Z" },
+    { url = "https://files.pythonhosted.org/packages/16/94/40a6e1fba2d3dda2d129f6c1c84963e9e0a7634ddcce7ece9268a88e579d/pyodbc-5.5.0-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:d69c8f41bfaabd1856534843672043c64e04cbbe36033c23adb314dd2fe530d2", size = 1376982, upload-time = "2026-11-08T01:16:24.881Z" },
+    { url = "https://files.pythonhosted.org/packages/1f/d1/671ef90b8cb55d808074a0159ac737f0568f6c4bb2826109c6cfd32431db/pyodbc-5.5.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:eb5ac58938238e6759b9e5ef4b582d2bdcd360db2f33afcc777ed4f53680c7d9", size = 1438541, upload-time = "2026-11-08T01:16:26.558Z" },
+    { url = "https://files.pythonhosted.org/packages/c7/b4/62db987f7e9e6e2fc073f7a11f5ac5a1824d8a12c320eec31bcf781ab739/pyodbc-5.5.0-cp313-cp313-win32.whl", hash = "sha256:45db47ec4ec95988dbfc848c816bf601d1da8c917e612b8cc256daf4120089c2", size = 265655, upload-time = "2026-11-08T01:16:28.269Z" },
+    { url = "https://files.pythonhosted.org/packages/db/9c/5de0b5fa1bd762439034b97e886d5bde35ca54364e68f5f11418576035e9/pyodbc-5.5.0-cp313-cp313-win_amd64.whl", hash = "sha256:fd3fbf8c41aecbede38888403f24706b63dc1853bddca80fd0f11e4c608bc9ee", size = 271529, upload-time = "2026-11-08T01:16:29.453Z" },
+    { url = "https://files.pythonhosted.org/packages/80/1c/bea389f65b0774e9514f57e5bbc762903e51f71ab988063723bd1bff4645/pyodbc-5.5.0-cp313-cp313-win_arm64.whl", hash = "sha256:1faaaaed09ffcaf37277a34487583a4a0def6de7b337c4a01dc42d46dcd86cb4", size = 438180, upload-time = "2026-11-08T01:16:30.501Z" },
 ]
 
 [[package]]
@@ -1662,12 +1662,12 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anthropic", specifier = ">=2.3.0" },
+    { name = "anthropic", specifier = ">=2.6.0" },
     { name = "boto3", specifier = ">=1.43.126" },
     { name = "cryptography", specifier = ">=50.0.2" },
     { name = "django", specifier = ">=6.1.3" },
     { name = "django-allauth", extras = ["socialaccount"], specifier = ">=65.20.0" },
-    { name = "django-auditlog", specifier = ">=3.4.1" },
+    { name = "django-auditlog", specifier = ">=3.4.2" },
     { name = "django-axes", specifier = ">=9.0.0" },
     { name = "django-extensions", specifier = ">=4.1" },
     { name = "django-filter", specifier = ">=26.2" },
@@ -1683,7 +1683,7 @@ requires-dist = [
     { name = "packaging", specifier = ">=26.3" },
     { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.3.6" },
     { name = "pymysql", specifier = ">=1.2.0,<1.2.1" },
-    { name = "pyodbc", specifier = ">=5.4.0" },
+    { name = "pyodbc", specifier = ">=5.5.0" },
     { name = "python-pptx", specifier = ">=1.0.2" },
     { name = "sqlglot", specifier = ">=30.30.0" },
     { name = "uvicorn", specifier = ">=0.54.0" },

@@ -31,6 +31,10 @@ updates:
     directories: [/api, /frontend, /sandbox/images/docs]
     schedule: { interval: weekly }
     cooldown: { default-days: 14 }
+    # Pythonの版は手で上げる（api は requires-python、Sandbox は requirements.lock の依存の対応を確かめてから）
+    ignore:
+      - dependency-name: python
+        versions: ['>=3.14']
   - package-ecosystem: docker-compose
     directory: /deploy
     schedule: { interval: weekly }

@@ -162,6 +162,7 @@ services:
 - qclusterはSandboxを起動するので、どこで動かす場合もDockerソケットとworkspacesのmountを渡す。アプリサーバーでqclusterを動かさず、Workerサーバーだけで動かしてもよい（その場合、アプリサーバーにはDockerソケットが要らない）。
 - WorkerサーバーはDB・S3に直接接続するので、アプリサーバーと同じ `yoriki.env` を使い、同じ私設ネットワークに置く。ファイルの保存先はS3等の共有のものにする（Localは使えない）。
 - 台数は実行枠に合わせて増減する。RunのclaimとleaseがDBで行われるので、何台あっても同じRunを二重に実行しない。
+- LLMの接続の同時実行数の上限（管理画面の「プロバイダ接続」。既定は4）は、全Workerを通して数える。1台の既定（Attemptは3つまで）では当たりにくいが、台数や `YORIKI_RUNS_PER_QCLUSTER` を増やしたら、プロバイダの契約に合わせて上げる（足りないと、空くのを待ち、10分で失敗する。design.md §4.8）。
 - Workerサーバーでも、残ったSandboxのコンテナと作業領域を消す `cleanup_worker` をcronで流す（§7）。
 - Workerサーバーは外からの接続を受けないので、公開のホスト名やポートを用意しない。
 - WorkerサーバーのRunnerも、LLMはProvider Adapter、社内DB・SaaSはConnectorを、HTTPを介さず同じプロセスの中で通す。Bindingの確認や上限、記録はその処理の中で行い、SecretはSandboxに渡さない（design.md §4.8、§4.9、§6.2）。

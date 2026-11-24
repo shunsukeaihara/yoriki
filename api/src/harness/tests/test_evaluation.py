@@ -1,10 +1,13 @@
 """Draftの評価（design.md §3.7.1、harness.md §10.9）。評価のRun、検証と判定、公開の条件、test_skill_draft"""
 
+from datetime import timedelta
 from decimal import Decimal
+from functools import partial
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from django.utils import timezone
 
 from connector.factories import ConnectorFactory
 from connector.models import ConnectorScope
@@ -15,8 +18,9 @@ from conversation.factories import ConversationFactory
 from conversation.models import Conversation, ConversationPurpose
 from harness.runner import Runner
 from harness.tools.test_skill_draft import _case_lines
+from llm import limits
 from llm.factories import LLMConnectionFactory, ModelProfileFactory
-from llm.models import ProviderKind
+from llm.models import LLMConnection, LLMConnectionLease, ProviderKind
 from resources.factories import ResourceVersionFactory
 from run.models import (
     ClarificationKind,
@@ -41,6 +45,7 @@ from skill.models import (
     SkillDraftAsset,
     SkillEvaluation,
     SkillEvaluationCase,
+    SkillEvaluationResult,
     SkillScope,
     SkillVersion,
 )
@@ -756,3 +761,52 @@ def test_errors_of_the_evaluation_are_untrusted_in_the_result():
         'AI judge: <untrusted_content source="evaluation_judge">判定に失敗しました：overloaded</untrusted_content>'
         in text
     )
+
+
+@pytest.mark.django_db
+def test_busy_connection_leaves_the_case_without_a_verdict(app_user, model, monkeypatch):
+    skill = skill_with_draft(app_user)
+    evaluation = start_evaluation(skill, cases=[case(skill)], actor=app_user, model_version=model.current_version)
+    result = evaluation.results.get()
+    execute(result.base_run, submit(True))
+    execute(result.draft_run, submit(True))
+    adapter = judge(monkeypatch)
+    monkeypatch.setattr(limits, "MAX_WAIT_SECONDS", 0)
+    LLMConnection.objects.update(max_concurrency=1)
+    now = timezone.now()
+    LLMConnectionLease.objects.create(
+        connection=model.current_version.connection, holder="other", created=now, expires=now + timedelta(hours=1)
+    )
+
+    progress_evaluation(evaluation.pk)
+
+    result.refresh_from_db()
+    assert result.verdict is None and "判定に失敗しました" in result.judge_note
+    assert adapter.requests == []
+
+
+@pytest.mark.django_db
+def test_judge_keeps_its_claim_while_waiting_and_stops_with_the_evaluation(app_user, model, monkeypatch):
+    skill = skill_with_draft(app_user)
+    evaluation = start_evaluation(skill, cases=[case(skill)], actor=app_user, model_version=model.current_version)
+    result = evaluation.results.get()
+    old = timezone.now() - timedelta(minutes=9)
+    results = SkillEvaluationResult.objects.filter(pk=result.pk)
+    results.update(state=EvaluationResultState.JUDGING, judging_started=old)
+    now = timezone.now()
+    LLMConnection.objects.update(max_concurrency=1)
+    LLMConnectionLease.objects.create(
+        connection=model.current_version.connection, holder="other", created=now, expires=now + timedelta(hours=1)
+    )
+
+    def poll(_seconds: float) -> None:
+        result.refresh_from_db()
+        assert result.judging_started is not None and result.judging_started > old
+        results.update(state=EvaluationResultState.DONE)
+
+    monkeypatch.setattr(limits, "connection_slot", partial(limits.connection_slot, sleep=poll))
+    with (
+        pytest.raises(evaluation_module.JudgeStopped),
+        evaluation_module._judge_slot(evaluation, result, model.current_version),
+    ):
+        raise AssertionError("not reached")

@@ -43,7 +43,7 @@ class LLMConnection(models.Model):
     種別とbase URL（接続先）は作成した後は変えない（更新用のSerializerと管理画面に項目を置かない）。
     接続先ごとに接続を作り、API keyは差し替えられる。接続先を後から変えられると、登録済みのAPI keyが
     別のサーバーへ送られたり、モデル設定の版（進行中のRunが使う）の呼出し先が変わったりするため。
-    同時実行数と要求数の上限は、Runnerが守る（Runの段階で実装する）。
+    同時実行数と要求数の上限は、呼び出すときに全Workerを通して数えて守る（llm/limits.py）。
     """
 
     uid = NanoidField(unique=True)
@@ -78,6 +78,32 @@ class LLMConnection(models.Model):
     def is_in_use(self) -> bool:
         """削除されていないモデル設定の現在の版が、この接続を使っている"""
         return ModelProfile.objects.filter(deleted=False, current_version__connection=self).exists()
+
+
+class LLMConnectionLease(models.Model):
+    """LLMの呼出し1回分の枠（llm/limits.py）。`expires` より前なら呼出し中で、終われば `expires` を今にする。
+
+    1分あたりの要求数を数えるため、終わった枠も始めてから60秒は残し、次に枠を取るときに消す
+    """
+
+    connection = models.ForeignKey(
+        LLMConnection, on_delete=models.CASCADE, related_name="leases", verbose_name=_("接続先")
+    )
+    # 枠を持つもの（RunのuidとAttemptの番号等）。調べるときに使う
+    holder = models.CharField(_("保持者"), max_length=100)
+    created = models.DateTimeField(_("開始"))
+    expires = models.DateTimeField(_("期限"))
+
+    class Meta:
+        verbose_name = _("LLMの接続の枠")
+        verbose_name_plural = verbose_name
+        indexes = [
+            models.Index(fields=["connection", "expires"]),
+            models.Index(fields=["connection", "created"]),
+        ]
+
+    def __str__(self):
+        return f"{self.connection_id}:{self.holder}"
 
 
 # 版に入れる項目（モデル設定の中身）。変えると新しい版になる

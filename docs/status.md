@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-11-24（Dependabotの更新をまとめて取り込んだ（#136・#139）。次の作業は利用者と決める。§4）
+- 最終更新：2026-11-24（Dependabotの更新を取り込んだ（#136・#139・#141）。次の作業は利用者と決める。§4）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -68,6 +68,7 @@
 | #127 | 依存の更新（Dependabotの #107・#110〜#113・#118・#125・#126 をまとめた）：anthropic 2.3.0（APIの版 2026-10-21。API keyは `Authorization: Bearer` で送られる。Anthropicの接続はbase URLを持たないのでプロキシの対応は要らない。`temperature` はどのモデルでも400になるのでAnthropicのAdapterから送らない。SDKのライセンスはApache 2.0）、django-axes 9.0（新しいマイグレーションなし）、Pythonのまとめ（PyMySQLは1.2.0のまま。Dependabotで1.2.1〜1.2.3を無視する）、npmのまとめ（vue-tsc 3.3.14 の不具合で、出口の画面のテンプレートの `api.manage.channelConnections().list` が型エラーになるので、scriptの定数に移した）。Python 3.15（#123・#124）は見送り、Dependabotでpythonのベースイメージの3.14以降を無視する |
 | #136 | 依存の更新（Dependabotの #128〜#135 をまとめた）：websockets 17.4（使うのはDiscordのGatewayだけ。例外で抜けたときの閉じるコードが1011になる。断片の数の上限はDoSの修正）、django-allauth 65.21.1、anthropic 2.6.0、pyodbc 5.5.0、psycopg 3.3.8、django-auditlog 3.4.2、types-docker、@nuxt/test-utils 4.4.0、Python 3.13-slim のdigest（api・Sandbox） |
 | #139 | 依存の更新（Dependabotの #137・#138 をまとめた）：PyMySQL 1.2.4（1.2.1〜1.2.3の不具合が直ったので、1.2.0への固定とDependabotの無視の設定を外した。下限は1.2.4）、anthropic 2.7.0、openai 3.48.0、boto3 1.43.127、axios 1.21.1 |
+| #141 | 依存の更新（Dependabotの #140 を取り込んだ）：openai 3.49.0（型付きのasync function toolの追加とマイクの録音の修正だけで、使っている機能の変更はない） |
 | #87 | 発言の渡し方（design.md 0.51 §5.5・§11.4、harness.md §7.5・§10.1・§10.2・§10.4）：発言の種類の選択をなくし、`/`・`@` を指定した発言も親へ渡す。Skill・Connectorの一覧を発言ごとに作り直し、`skill`・`connector` の引数を文字列にする。Runがアクセスできるものを権限モデルだけで決め、`/`・`@`、タスクの定義、Skillの宣言と `tools` は使用の指示にする（タスク・評価のRunも絞らない） |
 
 各PRの中身は、Pull Requestの説明と設計書を見る。
@@ -140,7 +141,9 @@
 
 **今の状態（2026-11-03。2026-11-11 に⑦まで進んだ）**：design.md §12の第1段階のうち、Skill（①〜⑤）と、Connector・タスク・配信（①〜⑦、Connectorの④a・④b）は終わった（#72・#73まで）。今は、業務（下の「第1段階の順番」の3）を作る前の整理を、利用者と決めた次の順で進めている。文書の整理は #74 と、その残り（design.md・harness.md の突き合わせ。#75）で、テストの高速化は #76 で行った（バックエンドのテスト全体は、手元（8コア）で約5分から約35秒に、4並列でも約45秒になった）。#74 では、status.md の終わった段階の「決めたこと・判断した点」を設計書と突き合わせ、設計書になかった今の動きに関わるものを design.md・authorization.md・harness.md・frontend-conventions.md・sandbox/CONTRACT.md へ移してから消した（経過・レビュー・確かめたことは消した。各PRの説明に残っている）。§1 はPRごとの短い一覧にした。確認用の道具は #77 で入れた（偽のLLM `fake_llm`、確認用のデータ `seed_dev`、ログイン済みのセッション `dev_session`。development.md §6）。 2026-11-06 に、agentセッションとSandboxのイメージの案を設計書へ反映した。実装は下の⑦（Sandboxのイメージ）まで済んだ。後回し：タスクの実行の論理削除の画面、物理削除の管理コマンド、監査ログの画面。
 
-**次の作業**（#139 のマージを確かめてから）：**利用者と決める**。2026-11-24 に利用者が2回「Dependabotの更新」を選び、#136 と #139 で取り込んだ。#139 のマージの後、#137・#138 のうち自動で閉じなかったものを閉じる。候補は下の「これまでの経過（#122）」と同じ。
+**次の作業**（#141 のマージを確かめてから）：**利用者と決める**。2026-11-24 に利用者が3回「Dependabotの更新」を選び、#136・#139・#141 で取り込んだ。#141 のマージの後、DependabotのPR #140 が自動で閉じなければ閉じる（#137・#138 は閉じている）。候補は下の「これまでの経過（#122）」と同じ。
+
+#141 で確かめたこと：手元で、バックエンドのテスト全体（1511件成功、31件は飛ばした。MySQLのコンテナは起動していない）・mypy・ruff・`makemigrations --check`。DependabotのPR #140 のCIで、api-types・app-images・backend・connector-db・sandbox-runner が通った。MySQL・SQL ServerのConnectorのテストとイメージのビルドはPRのCIだけ。試していないこと：実際のOpenAIのAPIへの送信。
 
 #139 で確かめたこと：手元で、バックエンドのテスト全体（1526件成功。一時のMySQL 8.4のコンテナでMySQLのConnectorのテストも動かした）・mypy・ruff・`makemigrations --check`、フロントエンドのlint・整形・型・テスト（187件）。同じMySQL 8.4で、作ったばかりのユーザーのTLSなしの初回ログインが、PyMySQL 1.2.3 では `AttributeError` になり、1.2.4 では成功することを確かめた。SQL ServerのConnectorのテストとイメージのビルドはPRのCIだけ。試していないこと：実際のAnthropic・OpenAIのAPIへの送信。
 

@@ -3,8 +3,8 @@ name = "yoriki-api"
 version = "0.1.0"
 requires-python = "==3.13.*"
 dependencies = [
-    "anthropic>=2.6.0",
-    "boto3>=1.43.126",
+    "anthropic>=2.7.0",
+    "boto3>=1.43.127",
     "cryptography>=50.0.2",
     "django>=6.1.3",
     "django-allauth[socialaccount]>=65.21.1",
@@ -20,11 +20,10 @@ dependencies = [
     "httpx>=0.28.1",
     "jsonschema>=4.26.0",
     "nanoid>=2.0.0",
-    "openai>=3.46.0",
+    "openai>=3.48.0",
     "packaging>=26.3",
     "psycopg[binary,pool]>=3.3.8",
-    # 1.2.1〜1.2.3は、作ったばかりのユーザーがTLSなしで初めてログインすると AttributeError になる（caching_sha2_password）
-    "pymysql>=1.2.0,<1.2.1",
+    "pymysql>=1.2.4",
     "pyodbc>=5.5.0",
     "python-pptx>=1.0.2",
     "sqlglot>=30.30.0",

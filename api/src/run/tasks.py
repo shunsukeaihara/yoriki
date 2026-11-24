@@ -16,8 +16,10 @@ from utils.lock import lock
 from . import cleanup
 from .dispatch import dispatch_pending, enqueue_run, send_subagent
 from .models import (
+    CANCELLABLE_STATUSES,
     LIVE_SUBAGENT_STATUSES,
     MAX_ATTEMPTS,
+    WORKER_DRAIN_LOCK,
     ClarificationRequest,
     ClarificationStatus,
     ExecutionAttempt,
@@ -28,6 +30,7 @@ from .models import (
     RunStatus,
     Subagent,
     SubagentStatus,
+    WorkerDrain,
 )
 
 logger = logging.getLogger(__name__)
@@ -48,7 +51,9 @@ def execute_run(run_id: int) -> None:
 def claim_run(run_id: int) -> ExecutionAttempt | None:
     worker = socket.gethostname()
     # 同じqclusterのworkerが同時にclaimしても上限を超えないよう、数える前にqclusterごとに直列にする
-    with lock(f"run-claim:{worker}"):
+    with lock(WORKER_DRAIN_LOCK, shared=True), lock(f"run-claim:{worker}"):
+        if WorkerDrain.is_active():
+            return None  # 順番待ちのままにし、drainの解除の後にReconcilerが送り直す（deployment.md §6）
         if _running_here(worker) >= settings.YORIKI_RUNS_PER_QCLUSTER:
             # workerを軽い処理のために残す。Runは順番待ちのままにし、Reconcilerが送り直す（deployment.md §3.2）
             return None
@@ -85,7 +90,9 @@ def claim_subagent(subagent_id: int) -> ExecutionAttempt | None:
     from harness.subagents import discard_copy_later  # noqa: PLC0415  harnessはrunのModelを使うため
 
     worker = socket.gethostname()
-    with lock(f"run-claim:{worker}"):
+    with lock(WORKER_DRAIN_LOCK, shared=True), lock(f"run-claim:{worker}"):
+        if WorkerDrain.is_active():
+            return None  # 順番待ちのままにし、drainの解除の後にReconcilerが送り直す（deployment.md §6）
         if _running_here(worker) >= settings.YORIKI_RUNS_PER_QCLUSTER:
             return None  # 順番待ちのままにし、Reconcilerが送り直す
         run_id = Subagent.objects.filter(pk=subagent_id).values_list("run_id", flat=True).first()
@@ -100,7 +107,7 @@ def claim_subagent(subagent_id: int) -> ExecutionAttempt | None:
         )
         if subagent is None:
             return None
-        if run.status not in (RunStatus.RUNNING, RunStatus.WAITING_USER, RunStatus.WAITING_BACKGROUND):
+        if run.status not in CANCELLABLE_STATUSES:
             # 親のRunは止まっている・終わった。子は動かさない
             Subagent.objects.filter(pk=subagent.pk).update(
                 status=SubagentStatus.CANCELLED, reported=True, finished=timezone.now()
@@ -139,8 +146,10 @@ def reconcile_runs() -> None:
     for attempt_id in list(stale[:100]):
         _recover(attempt_id)
     _expire_clarifications(now)
-    _redispatch_waiting(now)
-    _redispatch_subagents(now)
+    if not WorkerDrain.is_active():
+        # drain中はどのqclusterも受け取らないので、送り直しを重ねない（deployment.md §6）
+        _redispatch_waiting(now)
+        _redispatch_subagents(now)
     _discard_subagent_copies()
     dispatch_pending()
     # Draftの評価の取りこぼした進行（design.md §3.7.1）

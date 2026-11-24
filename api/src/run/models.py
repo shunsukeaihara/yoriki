@@ -19,6 +19,7 @@ from django.utils.translation import gettext_lazy as _
 
 from artifact.storage import StorageError, get_storage
 from utils.fields import NanoidField
+from utils.lock import lock
 
 from .errors import AlreadyAnswered, InvalidTransition, LeaseLost
 
@@ -38,7 +39,8 @@ class RunStatus(models.IntegerChoices):
 
 
 ALLOWED_TRANSITIONS: dict[int, set[int]] = {
-    RunStatus.QUEUED: {RunStatus.RUNNING, RunStatus.CANCELLED},
+    # 親が順番待ちの間も、サブエージェントは動き続けるので、停止は停止中を経る（design.md §5.3）
+    RunStatus.QUEUED: {RunStatus.RUNNING, RunStatus.CANCELLING, RunStatus.CANCELLED},
     RunStatus.RUNNING: {
         RunStatus.WAITING_USER,
         RunStatus.WAITING_BACKGROUND,
@@ -65,7 +67,7 @@ ALLOWED_TRANSITIONS: dict[int, set[int]] = {
         RunStatus.CANCELLED,
         RunStatus.FAILED,
     },
-    RunStatus.RETRY_WAIT: {RunStatus.QUEUED, RunStatus.CANCELLED, RunStatus.FAILED},
+    RunStatus.RETRY_WAIT: {RunStatus.QUEUED, RunStatus.CANCELLING, RunStatus.CANCELLED, RunStatus.FAILED},
     RunStatus.CANCELLING: {RunStatus.CANCELLED, RunStatus.FAILED},
 }
 
@@ -79,6 +81,8 @@ CANCELLABLE_STATUSES = (
 ACTIVE_STATUSES = (*CANCELLABLE_STATUSES, RunStatus.CANCELLING)
 TERMINAL_STATUSES = (RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.CANCELLED)
 
+# drainの印を書く側（排他）と、claimで印を確かめる側（shared）のlockの名前
+WORKER_DRAIN_LOCK = "worker-drain"
 # Attemptがleaseを更新しないまま、これだけ経つとReconcilerが復旧の対象にする
 LEASE_SECONDS = 90
 # 障害でAttemptが終わったときに、やり直す回数の上限
@@ -478,11 +482,10 @@ class Run(models.Model):
         Subagent.objects.filter(run=self, status=SubagentStatus.QUEUED).update(
             status=SubagentStatus.CANCELLED, finished=timezone.now(), reported=True
         )
-        # 確認待ち・裏の作業の待ちでも、ジョブかサブエージェントが動いていれば、全部止まったことを確かめてから停止済みに
-        # する（design.md §5.3）
+        # 待っている間でも、ジョブかサブエージェントが動いていれば、全部止まったことを確かめてから停止済みにする
+        # （design.md §5.3）
         if current.status == RunStatus.RUNNING or (
-            current.status in (RunStatus.WAITING_USER, RunStatus.WAITING_BACKGROUND)
-            and (current.has_live_attempt() or current.has_live_subagents())
+            current.status in CANCELLABLE_STATUSES and (current.has_live_attempt() or current.has_live_subagents())
         ):
             return self.set_status(RunStatus.CANCELLING, comment=reason, actor=actor, external=external)
         return self.set_status(
@@ -670,9 +673,9 @@ class ExecutionAttempt(models.Model):
         return latest == self.number and self._alive()
 
     def _holds_subagent(self, run: Run) -> bool:
-        """子が動いていて（止められていない）、親のRunが続いている。停止中・終わったRunでは、子の操作と結果を断る
-        （design.md §5.3）"""
-        if run.status not in (RunStatus.RUNNING, RunStatus.WAITING_USER, RunStatus.WAITING_BACKGROUND):
+        """子が動いていて（止められていない）、親のRunが続いている（親が順番待ちの間も子は動く）。停止中・終わった
+        Runでは、子の操作と結果を断る（design.md §5.3）"""
+        if run.status not in CANCELLABLE_STATUSES:
             return False
         status = Subagent.objects.filter(attempts=self).values_list("status", flat=True).first()
         return status == SubagentStatus.RUNNING and self._alive()
@@ -691,6 +694,40 @@ class ExecutionAttempt(models.Model):
 
     def end(self, failure: str = "") -> None:
         ExecutionAttempt.objects.filter(pk=self.pk, ended__isnull=True).update(ended=timezone.now(), failure=failure)
+
+
+class WorkerDrain(models.Model):
+    """Workerのdrain中の印（行があればdrain中。全体で1行だけ。deployment.md §6）。すべてのqclusterが新しいAttemptを
+    始めず、動いているRunは区切りで保存してWorkerを手放す。再起動しても残り、`resume_workers` で消す"""
+
+    created = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = _("Workerのdrain")
+        verbose_name_plural = verbose_name
+        default_permissions = ()
+        constraints = [models.CheckConstraint(condition=Q(pk=1), name="worker_drain_single_row")]
+
+    def __str__(self):
+        return str(_("Workerのdrain"))
+
+    @classmethod
+    def is_active(cls) -> bool:
+        return cls.objects.exists()
+
+    @classmethod
+    def start(cls) -> bool:
+        """drainを始める。既にdrain中ならFalse。始めた後は、新しいAttemptは作られない：claimの途中のものは、ここで
+        終わるのを待つ（claimは同じ名前のshared lockの中で印を確かめる）"""
+        with lock(WORKER_DRAIN_LOCK, timeout=60):
+            _drain, created = cls.objects.get_or_create(pk=1)
+        return created
+
+    @classmethod
+    def stop(cls) -> bool:
+        """drainを解除する。drain中でなければFalse"""
+        deleted, _details = cls.objects.all().delete()
+        return bool(deleted)
 
 
 class RunEventKind(models.IntegerChoices):

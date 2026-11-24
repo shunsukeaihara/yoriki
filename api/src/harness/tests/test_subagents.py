@@ -364,6 +364,40 @@ def test_cancel_waits_for_the_running_subagent(conversation, app_user):
     assert run.status == RunStatus.CANCELLED
 
 
+def test_child_continues_and_cancel_waits_for_it_while_the_parent_is_queued(conversation, app_user):
+    """親が順番待ちに戻っている間（Attemptの上限・発言・drain）も、子は止まらず、停止は子が止まるまで待つ"""
+    run, subagent = start_and_wait(conversation)
+    child_attempt = claim_subagent(subagent.pk)
+    assert child_attempt is not None
+    post_message(conversation, body="追加で確認して", client_message_id="", actor=conversation.owner)
+    run.refresh_from_db()
+    assert run.status == RunStatus.QUEUED
+    assert child_attempt.holds(run)
+
+    run.request_cancel("停止", app_user)
+    run.refresh_from_db()
+    assert run.status == RunStatus.CANCELLING
+    assert not child_attempt.holds(run)
+    assert claim_run(run.pk) is None
+
+    SubagentRunner(
+        child_attempt,
+        adapter_factory=FakeAdapter([]),
+        sleep=lambda _s: None,
+        session_factory=cast(Any, SubagentSession),
+    ).run()
+    run.refresh_from_db()
+    assert run.status == RunStatus.CANCELLED
+
+
+def test_child_is_claimed_while_the_parent_is_queued(conversation):
+    run, subagent = start_and_wait(conversation)
+    post_message(conversation, body="追加で確認して", client_message_id="", actor=conversation.owner)
+    run.refresh_from_db()
+    assert run.status == RunStatus.QUEUED
+    assert claim_subagent(subagent.pk) is not None
+
+
 def test_cancel_with_only_a_queued_subagent_finishes_at_once(conversation, app_user):
     run, subagent = start_and_wait(conversation)
     run.request_cancel("停止", app_user)

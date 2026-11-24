@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-11-24（Dependabotの更新を取り込んだ（#136・#139・#141）。次の作業は利用者と決める。§4）
+- 最終更新：2026-11-24（Workerのdrain（`drain_workers`・`resume_workers`）を作った（#142）。次の作業は利用者と決める。§4）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -69,6 +69,7 @@
 | #136 | 依存の更新（Dependabotの #128〜#135 をまとめた）：websockets 17.4（使うのはDiscordのGatewayだけ。例外で抜けたときの閉じるコードが1011になる。断片の数の上限はDoSの修正）、django-allauth 65.21.1、anthropic 2.6.0、pyodbc 5.5.0、psycopg 3.3.8、django-auditlog 3.4.2、types-docker、@nuxt/test-utils 4.4.0、Python 3.13-slim のdigest（api・Sandbox） |
 | #139 | 依存の更新（Dependabotの #137・#138 をまとめた）：PyMySQL 1.2.4（1.2.1〜1.2.3の不具合が直ったので、1.2.0への固定とDependabotの無視の設定を外した。下限は1.2.4）、anthropic 2.7.0、openai 3.48.0、boto3 1.43.127、axios 1.21.1 |
 | #141 | 依存の更新（Dependabotの #140 を取り込んだ）：openai 3.49.0（型付きのasync function toolの追加とマイクの録音の修正だけで、使っている機能の変更はない） |
+| #142 | Workerのdrain（design.md 0.70 §5.3・§7.9、deployment.md §6、harness.md §4.4）：管理コマンド `drain_workers`（`--wait`・`--timeout`）・`resume_workers` と印の `run.WorkerDrain`。claimを止め、動いているRunはジョブのない区切りで保存して順番待ちに戻る。親が順番待ち・再試行待ちの間もサブエージェントを動かし続け、その間の停止は停止中を経る |
 | #87 | 発言の渡し方（design.md 0.51 §5.5・§11.4、harness.md §7.5・§10.1・§10.2・§10.4）：発言の種類の選択をなくし、`/`・`@` を指定した発言も親へ渡す。Skill・Connectorの一覧を発言ごとに作り直し、`skill`・`connector` の引数を文字列にする。Runがアクセスできるものを権限モデルだけで決め、`/`・`@`、タスクの定義、Skillの宣言と `tools` は使用の指示にする（タスク・評価のRunも絞らない） |
 
 各PRの中身は、Pull Requestの説明と設計書を見る。
@@ -99,7 +100,7 @@
 - フロントエンド：`app.config.ts`（テーマの色。primary / neutralを決める）、E2E（Playwright）。
 - CI：e2e、本体のイメージのレジストリへのpush（使うレジストリが未決。design.md §13）、Sandboxのイメージのmulti-arch（arm64）のビルドとDocker Hubへのpush・脆弱性スキャン（公開先のorgが未決）。
 - Compose：channel-listener（DiscordのGateway。DiscordのPRで作る）。
-- 管理コマンド：`drain_workers`・`resume_workers`（まだない。更新の手順の2と6は飛ばす。deployment.md §6）。
+- Workerのdrainで後回しにしたもの：1台だけのdrain（Workerの名前を配備で固定する仕組みも要る）、drain中であることの画面での表示（Runは「順番待ち」と出るだけ）。
 - 業務のアプリは `llm`、`conversation`、`run`、`harness`、`stream`、`usage`、`runtime`（Runtime Profile、Launcher）、`artifact`、`skill`・`resources`、`connector`、`task`、`delivery`、`plugin` まで。`worker` 等（backend-conventions.md §1.2）は、まだない。
 - 権限で後回しにしたもの：システムのSkillの詳細を管理画面の中に置く（今は `/manage/system_skills` の一覧から業務画面の `/skills/[id]` を開く）、個人Connector（会話でのConnectorの段階）、業務画面の `/connectors`、ユーザーの更新APIでの所属の書込み（今は部門の所属のAPIで付け外しする。防止策は同じ）、部門の「無効」（今は論理削除で、所属と履歴は残る）、部門のものを別の部門・全社へ移す操作（authorization.md §9）、管理画面の詳細の入力欄を見るだけの人には止める（今は保存のボタンを出さないだけ。ユーザーは止める）。
 - Connectorで後回しにしたもの：個人Connector、業務画面の `/connectors`、`datasource_*` を並べて実行する（今は同時実行の枠と記録をDBで扱うので1つずつ）、会話のConnectorの結果の件数・合計の大きさの上限（今は期限を持たず、Attemptごとに同じ会話のものをすべて置く。量が問題になったら添付とあわせて見直す。design.md §8）、Toolからの呼出しの1つのRunでの回数・頻度の上限（スクリプトからの呼出しには定数の上限がある。design.md §4.9.6）、SQL ServerのSNAPSHOT分離（DB側で有効なら使う。design.md §4.9.2）、MariaDB（MySQLの `MAX_EXECUTION_TIME` がない。試していない）、HTTP・SharePoint・Google Drive・MCPのConnector、書込みの操作。PostgreSQLの証明書の確認（`verify-full`）は、OSの証明書（`sslrootcert=system`。libpq 16以降）を使い、社内のCAの証明書を指定する項目はまだない。
@@ -141,7 +142,13 @@
 
 **今の状態（2026-11-03。2026-11-11 に⑦まで進んだ）**：design.md §12の第1段階のうち、Skill（①〜⑤）と、Connector・タスク・配信（①〜⑦、Connectorの④a・④b）は終わった（#72・#73まで）。今は、業務（下の「第1段階の順番」の3）を作る前の整理を、利用者と決めた次の順で進めている。文書の整理は #74 と、その残り（design.md・harness.md の突き合わせ。#75）で、テストの高速化は #76 で行った（バックエンドのテスト全体は、手元（8コア）で約5分から約35秒に、4並列でも約45秒になった）。#74 では、status.md の終わった段階の「決めたこと・判断した点」を設計書と突き合わせ、設計書になかった今の動きに関わるものを design.md・authorization.md・harness.md・frontend-conventions.md・sandbox/CONTRACT.md へ移してから消した（経過・レビュー・確かめたことは消した。各PRの説明に残っている）。§1 はPRごとの短い一覧にした。確認用の道具は #77 で入れた（偽のLLM `fake_llm`、確認用のデータ `seed_dev`、ログイン済みのセッション `dev_session`。development.md §6）。 2026-11-06 に、agentセッションとSandboxのイメージの案を設計書へ反映した。実装は下の⑦（Sandboxのイメージ）まで済んだ。後回し：タスクの実行の論理削除の画面、物理削除の管理コマンド、監査ログの画面。
 
-**次の作業**（#141 のマージを確かめてから）：**利用者と決める**。2026-11-24 に利用者が3回「Dependabotの更新」を選び、#136・#139・#141 で取り込んだ。#141 のマージの後、DependabotのPR #140 が自動で閉じなければ閉じる（#137・#138 は閉じている）。候補は下の「これまでの経過（#122）」と同じ。
+**次の作業**（#142 のマージを確かめてから）：**利用者と決める**。候補は、LLMの接続の同時実行数・要求数の上限を守らせる、E2E（Playwright）とCI、対話の連携の残り（下の「これまでの経過（#122）」）等。
+
+これまでの経過（#142）：2026-11-24 に利用者が選んだ。会話で決めたこと（deployment.md §6、design.md 0.70）：ジョブは止めずに終わるのを待つ（上限はAttemptの55分）、範囲は全Worker一括。実装で決めたこと：印は `run.WorkerDrain` の1行で、claimはshared、`WorkerDrain.start()` は排他のadvisory lockで直列にする（`--wait` が数える前に、途中のclaimが終わる）。drain中はReconcilerの送り直しを止める。あわせて直した不具合：親が順番待ち・再試行待ちの間に、動いているサブエージェントが断られて止まっていた（動き出す前の子も止められていた）。その間の停止は、子が止まるまで停止中にした。
+
+#142 で確かめたこと：手元で、バックエンドのテスト全体（1529件成功、31件は飛ばした）・mypy・ruff・`makemigrations --check`。使い捨てのDB・偽のLLM・qcluster・Sandbox（runc）で、Toolの途中のRunとジョブの動いているRunを `drain_workers --wait` → qclusterの入れ替え（解除まで順番待ちのまま）→ `resume_workers` で、どちらも作業ファイルを保って完了するまで通した。試していないこと：Composeの構成での更新の手順の全体、実物のSandboxで動くサブエージェントのdrain（テストだけ）、複数台のqcluster。drainのコマンドがないイメージからの最初の更新では、手順2・6を使えない（§6の契約番号が変わる更新の手順を使う）。
+
+これまでの経過（#141）：2026-11-24 に利用者が3回「Dependabotの更新」を選び、#136・#139・#141 で取り込んだ（#140 は閉じている）。
 
 #141 で確かめたこと：手元で、バックエンドのテスト全体（1511件成功、31件は飛ばした。MySQLのコンテナは起動していない）・mypy・ruff・`makemigrations --check`。DependabotのPR #140 のCIで、api-types・app-images・backend・connector-db・sandbox-runner が通った。MySQL・SQL ServerのConnectorのテストとイメージのビルドはPRのCIだけ。試していないこと：実際のOpenAIのAPIへの送信。
 

@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-11-24（Dependabotの更新をまとめて取り込んだ（#136）。次の作業は利用者と決める。§4）
+- 最終更新：2026-11-24（Dependabotの更新をまとめて取り込んだ（#136・#139）。次の作業は利用者と決める。§4）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -67,6 +67,7 @@
 | #122 | スレッドからの停止（design.md 0.69 §4.6・§4.7、authorization.md §5.5、`api/src/plugin/CONTRACT.md` §2）：親メッセージに、Runが止められる間だけ「停止」のボタン（`ThreadMessage.stoppable`）。Slackはボタンの `confirm` の確認のダイアログ、Discordは押した本人だけへの確認のメッセージ（「停止する」のボタンに親メッセージのIDを入れる。押すと確認のメッセージを「受け付けました」に書き換える）。確かめたものだけを受信（`ReceiptKind.STOP`）として記録し、照合の後に `Run.request_cancel` で停止を依頼する（結果 `STOPPED`）。止めた人は状態の記録の `external`（provider・user ID・表示名）と理由の文に残し、スレッドに知らせる。停止中・終わったRunは断って本人だけに知らせる。報告を投稿したら親メッセージを書き換えてボタンを消す。あわせて、Slackのボタンの押下でユーザー名（表示名でない）を記録していたのを、返信と同じく `users.info` の表示名にした |
 | #127 | 依存の更新（Dependabotの #107・#110〜#113・#118・#125・#126 をまとめた）：anthropic 2.3.0（APIの版 2026-10-21。API keyは `Authorization: Bearer` で送られる。Anthropicの接続はbase URLを持たないのでプロキシの対応は要らない。`temperature` はどのモデルでも400になるのでAnthropicのAdapterから送らない。SDKのライセンスはApache 2.0）、django-axes 9.0（新しいマイグレーションなし）、Pythonのまとめ（PyMySQLは1.2.0のまま。Dependabotで1.2.1〜1.2.3を無視する）、npmのまとめ（vue-tsc 3.3.14 の不具合で、出口の画面のテンプレートの `api.manage.channelConnections().list` が型エラーになるので、scriptの定数に移した）。Python 3.15（#123・#124）は見送り、Dependabotでpythonのベースイメージの3.14以降を無視する |
 | #136 | 依存の更新（Dependabotの #128〜#135 をまとめた）：websockets 17.4（使うのはDiscordのGatewayだけ。例外で抜けたときの閉じるコードが1011になる。断片の数の上限はDoSの修正）、django-allauth 65.21.1、anthropic 2.6.0、pyodbc 5.5.0、psycopg 3.3.8、django-auditlog 3.4.2、types-docker、@nuxt/test-utils 4.4.0、Python 3.13-slim のdigest（api・Sandbox） |
+| #139 | 依存の更新（Dependabotの #137・#138 をまとめた）：PyMySQL 1.2.4（1.2.1〜1.2.3の不具合が直ったので、1.2.0への固定とDependabotの無視の設定を外した。下限は1.2.4）、anthropic 2.7.0、openai 3.48.0、boto3 1.43.127、axios 1.21.1 |
 | #87 | 発言の渡し方（design.md 0.51 §5.5・§11.4、harness.md §7.5・§10.1・§10.2・§10.4）：発言の種類の選択をなくし、`/`・`@` を指定した発言も親へ渡す。Skill・Connectorの一覧を発言ごとに作り直し、`skill`・`connector` の引数を文字列にする。Runがアクセスできるものを権限モデルだけで決め、`/`・`@`、タスクの定義、Skillの宣言と `tools` は使用の指示にする（タスク・評価のRunも絞らない） |
 
 各PRの中身は、Pull Requestの説明と設計書を見る。
@@ -100,7 +101,7 @@
 - 管理コマンド：`drain_workers`・`resume_workers`（まだない。更新の手順の2と6は飛ばす。deployment.md §6）。
 - 業務のアプリは `llm`、`conversation`、`run`、`harness`、`stream`、`usage`、`runtime`（Runtime Profile、Launcher）、`artifact`、`skill`・`resources`、`connector`、`task`、`delivery`、`plugin` まで。`worker` 等（backend-conventions.md §1.2）は、まだない。
 - 権限で後回しにしたもの：システムのSkillの詳細を管理画面の中に置く（今は `/manage/system_skills` の一覧から業務画面の `/skills/[id]` を開く）、個人Connector（会話でのConnectorの段階）、業務画面の `/connectors`、ユーザーの更新APIでの所属の書込み（今は部門の所属のAPIで付け外しする。防止策は同じ）、部門の「無効」（今は論理削除で、所属と履歴は残る）、部門のものを別の部門・全社へ移す操作（authorization.md §9）、管理画面の詳細の入力欄を見るだけの人には止める（今は保存のボタンを出さないだけ。ユーザーは止める）。
-- Connectorで後回しにしたもの：個人Connector、業務画面の `/connectors`、`datasource_*` を並べて実行する（今は同時実行の枠と記録をDBで扱うので1つずつ）、会話のConnectorの結果の件数・合計の大きさの上限（今は期限を持たず、Attemptごとに同じ会話のものをすべて置く。量が問題になったら添付とあわせて見直す。design.md §8）、Toolからの呼出しの1つのRunでの回数・頻度の上限（スクリプトからの呼出しには定数の上限がある。design.md §4.9.6）、SQL ServerのSNAPSHOT分離（DB側で有効なら使う。design.md §4.9.2）、MariaDB（MySQLの `MAX_EXECUTION_TIME` がない。試していない）、HTTP・SharePoint・Google Drive・MCPのConnector、書込みの操作。PostgreSQLの証明書の確認（`verify-full`）は、OSの証明書（`sslrootcert=system`。libpq 16以降）を使い、社内のCAの証明書を指定する項目はまだない。PyMySQLは1.2.1〜1.2.3の不具合（作ったばかりのユーザーがTLSなしで初めてログインすると失敗する）を避けて1.2.0に固定している（`api/pyproject.toml`）。直った版が出たら上げる。
+- Connectorで後回しにしたもの：個人Connector、業務画面の `/connectors`、`datasource_*` を並べて実行する（今は同時実行の枠と記録をDBで扱うので1つずつ）、会話のConnectorの結果の件数・合計の大きさの上限（今は期限を持たず、Attemptごとに同じ会話のものをすべて置く。量が問題になったら添付とあわせて見直す。design.md §8）、Toolからの呼出しの1つのRunでの回数・頻度の上限（スクリプトからの呼出しには定数の上限がある。design.md §4.9.6）、SQL ServerのSNAPSHOT分離（DB側で有効なら使う。design.md §4.9.2）、MariaDB（MySQLの `MAX_EXECUTION_TIME` がない。試していない）、HTTP・SharePoint・Google Drive・MCPのConnector、書込みの操作。PostgreSQLの証明書の確認（`verify-full`）は、OSの証明書（`sslrootcert=system`。libpq 16以降）を使い、社内のCAの証明書を指定する項目はまだない。
 - Skillのスクリプトからの呼出しで後回しにしたもの（④a・④b）：実行中の画面への知らせ（今はRunが動いている間の5秒ごとの差分の読み直しで、SSEでは送らない）、実際のモデルが案内どおりにスクリプトから呼ぶかの確認（偽のLLMだけで確かめた）、モデルの応答を待つ間の要求の処理（今はジョブを待つ間とステップの区切りだけ。バックグラウンドのジョブのスクリプトは待つ）、どのジョブからの要求かの記録（今はそのときに実行していたToolの呼出しのIDだけ）、回数・頻度の上限をConnectorやRuntime Profileの設定にする（今は定数）、スクリプトから呼べる操作をSkillの宣言でさらに絞る（今はToolと同じ）、HTTP・SharePoint等のConnectorの操作（社内DBの `query`・`describe` だけ）。
 - Skillで後回しにしたもの：Resource Collection、MD・CSV・PPTX以外の形式（XLSX・DOCX・PDF等）の検証、PPTXの画像としてのプレビュー（LibreOfficeをイメージに入れた後に作れる。design.md §7.6）、本文（説明・手順・Schema）の版の差分の表示（今は変わった項目名だけ。資料の差分は #40 で表示）、公開せずに捨てたDraftの資料の原本の回収、共通Skillから個人用を派生させる操作、Draftを開いた後に別の版が公開されたときの取り込み（今は破棄して開き直す）、画面のToolの選択肢と説明（今はフロントエンドに `harness.tools.ALL_TOOLS` と同じ一覧を持つ。APIで返すようにする）。
 - SkillのConnectorの宣言で後回しにしたもの：個人Connectorの宣言、Draftだけが機密のSkillの印（一覧と詳細の「機密」は公開中の版で決める。Draftのフォームでは分かる）、Connectorの版で表の名前が変わったときに宣言を直す案内（今は画面の気になる点の知らせで分かるだけ）、宣言を加えるときの操作の既定（今は両方を選ぶので、Toolに `datasource_describe` がないと公開時に止まる）。
@@ -139,13 +140,15 @@
 
 **今の状態（2026-11-03。2026-11-11 に⑦まで進んだ）**：design.md §12の第1段階のうち、Skill（①〜⑤）と、Connector・タスク・配信（①〜⑦、Connectorの④a・④b）は終わった（#72・#73まで）。今は、業務（下の「第1段階の順番」の3）を作る前の整理を、利用者と決めた次の順で進めている。文書の整理は #74 と、その残り（design.md・harness.md の突き合わせ。#75）で、テストの高速化は #76 で行った（バックエンドのテスト全体は、手元（8コア）で約5分から約35秒に、4並列でも約45秒になった）。#74 では、status.md の終わった段階の「決めたこと・判断した点」を設計書と突き合わせ、設計書になかった今の動きに関わるものを design.md・authorization.md・harness.md・frontend-conventions.md・sandbox/CONTRACT.md へ移してから消した（経過・レビュー・確かめたことは消した。各PRの説明に残っている）。§1 はPRごとの短い一覧にした。確認用の道具は #77 で入れた（偽のLLM `fake_llm`、確認用のデータ `seed_dev`、ログイン済みのセッション `dev_session`。development.md §6）。 2026-11-06 に、agentセッションとSandboxのイメージの案を設計書へ反映した。実装は下の⑦（Sandboxのイメージ）まで済んだ。後回し：タスクの実行の論理削除の画面、物理削除の管理コマンド、監査ログの画面。
 
-**次の作業**（#136 のマージを確かめてから）：**利用者と決める**。2026-11-24 に利用者が「Dependabotの更新」を選び、#136 で取り込んだ。マージの後、#128〜#135 のうち自動で閉じなかったものを閉じる。候補は下の「これまでの経過（#122）」と同じ。
+**次の作業**（#139 のマージを確かめてから）：**利用者と決める**。2026-11-24 に利用者が2回「Dependabotの更新」を選び、#136 と #139 で取り込んだ。#139 のマージの後、#137・#138 のうち自動で閉じなかったものを閉じる。候補は下の「これまでの経過（#122）」と同じ。
+
+#139 で確かめたこと：手元で、バックエンドのテスト全体（1526件成功。一時のMySQL 8.4のコンテナでMySQLのConnectorのテストも動かした）・mypy・ruff・`makemigrations --check`、フロントエンドのlint・整形・型・テスト（187件）。同じMySQL 8.4で、作ったばかりのユーザーのTLSなしの初回ログインが、PyMySQL 1.2.3 では `AttributeError` になり、1.2.4 では成功することを確かめた。SQL ServerのConnectorのテストとイメージのビルドはPRのCIだけ。試していないこと：実際のAnthropic・OpenAIのAPIへの送信。
 
 #136 で確かめたこと：手元で、バックエンドのテスト全体（1511件）・mypy・ruff・`makemigrations --check`、フロントエンドのlint・型・テスト（187件）。websockets 17.4 は、手元の実物のサーバーとの接続で、閉じるコード（4000・4004・例外のときの1011）の扱いを確かめた。MySQL・SQL ServerのConnectorのテスト（`connector-db`）とイメージのビルドはPRのCIだけ。試していないこと：実際のDiscordのGatewayへの接続（websockets 17）、実際のAnthropicのAPIへの送信。
 
 これまでの経過（#127）：2026-11-22 に利用者が「Dependabotの更新」を選び、#127 で取り込んだ。見送った #123・#124（Python 3.15）は閉じた。
 
-#127 で確かめたこと：手元で、バックエンドのテスト全体（1511件）・mypy・ruff、フロントエンドのlint・型・テスト。MySQL・SQL ServerのConnectorのテスト（`connector-db`）はPRのCIだけ。試していないこと：実際のAnthropicのAPIへの送信（APIの版 2026-10-21 とBearerは、テストの差し替えで確かめただけ）。手順は claude-api のスキルの api-version の移行の手引きに従った（当たるものは `temperature` とテストのヘッダーだけ。`document` をassistantに置くこと・userの `citations`・Admin APIは使っていない）。後で見直すもの：vue-tsc の不具合が直った版が出たら、`DestinationForm.vue` の回避（`searchChannelConnections`）を戻してよい。Python 3.14以降に上げるときは、apiの `requires-python` とlock、Sandboxの `requirements.lock`（markitdown 0.1.9 が3.15に未対応）の依存の対応を確かめて手で上げ、`.github/dependabot.yml` の無視の設定を外す。PyMySQLの不具合が直った版（1.2.4以降）が出たら上げる。
+#127 で確かめたこと：手元で、バックエンドのテスト全体（1511件）・mypy・ruff、フロントエンドのlint・型・テスト。MySQL・SQL ServerのConnectorのテスト（`connector-db`）はPRのCIだけ。試していないこと：実際のAnthropicのAPIへの送信（APIの版 2026-10-21 とBearerは、テストの差し替えで確かめただけ）。手順は claude-api のスキルの api-version の移行の手引きに従った（当たるものは `temperature` とテストのヘッダーだけ。`document` をassistantに置くこと・userの `citations`・Admin APIは使っていない）。後で見直すもの：vue-tsc の不具合が直った版が出たら、`DestinationForm.vue` の回避（`searchChannelConnections`）を戻してよい。Python 3.14以降に上げるときは、apiの `requires-python` とlock、Sandboxの `requirements.lock`（markitdown 0.1.9 が3.15に未対応）の依存の対応を確かめて手で上げ、`.github/dependabot.yml` の無視の設定を外す。
 
 これまでの経過（#122）：**利用者と決める**。2026-11-20 に利用者が選んだ「対話の連携の後回し」の4つ（① Runの画面のスレッド（#119）→ ② チャネルを一覧から選ぶ画面（#120）→ ③ 受信の記録の保持期限と清掃（#121）→ ④ スレッドからの停止（#122））は終わった。候補は §3 の残り（Teams、チャネルの発言からの起動、起動した本人からの追加指示（YorikiのアカウントとSlack等のユーザーの対応付けが要る）、本人へのDM、回答の添付ファイル、Sandboxのイメージの Docker Hub への配布（ライセンスの判断の後）等）。
 - ④で会話で決めた仕様（利用者が確かめた。design.md 0.69）：親メッセージに「停止」のボタンを置く（止められるのはチャネルの参加者）。Slackは確認のダイアログ、Discordは押した人だけに確認のメッセージと「停止する」ボタン。押されたら共通の停止の経路で停止を依頼し、止めた人はチャットツールのuser IDと表示名で記録して、スレッドに知らせる。Runが終わったらボタンを消す。スレッドを作る前（最初の質問より前）はWebからだけ止められる（起動時にスレッドを作る設定は作らない）。接続が停止中なら受け付けない。

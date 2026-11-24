@@ -9,6 +9,7 @@ import httpx
 import pytest
 
 from devtools.fake_llm import DEFAULT_SCENARIO, FakeLLMServer, Responder, Scenario, ScenarioError, Turn
+from harness.context import STOPPED_REPLY
 from llm.models import LLMConnection, ProviderKind
 from llm.providers import get_adapter
 from llm.providers.base import (
@@ -50,6 +51,16 @@ def write_scenario(tmp_path: Path, data: dict) -> Responder:
     path = tmp_path / "scenario.json"
     path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     return Responder(path)
+
+
+def test_the_notice_of_a_stopped_reply_is_not_a_prompt():
+    messages = [
+        {"role": "user", "content": "前の依頼"},
+        {"role": "assistant", "content": "途中"},
+        {"role": "user", "content": STOPPED_REPLY},
+        {"role": "user", "content": "続きを教えて"},
+    ]
+    assert Turn.parse(body(messages)).prompt == "続きを教えて"
 
 
 def test_turn_counts_steps_after_the_last_prompt():

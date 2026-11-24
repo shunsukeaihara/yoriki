@@ -103,6 +103,7 @@ export const runStatusColor = (status: RunStatusEnum) => {
 export const RunEventKind = {
   USER_MESSAGE: 10,
   ASSISTANT_MESSAGE: 11,
+  ASSISTANT_STOPPED: 13,
   TOOL_RESULT: 21,
   JOB_FINISHED: 22,
   SUBAGENT_FINISHED: 23,
@@ -115,6 +116,7 @@ export const RunEventKind = {
 // 作業の記録に出す、そのほかの記録（run.event）。要求の中身・実行時の文脈等はモデル向けの記録なので出さない。
 // 確認への回答は、Run の状態の変更の説明（run.status の comment）に出る
 export const NOTABLE_EVENT_KINDS: RunEventKindEnum[] = [
+  RunEventKind.ASSISTANT_STOPPED,
   RunEventKind.JOB_FINISHED,
   RunEventKind.SUBAGENT_FINISHED,
   RunEventKind.COMPACTION,

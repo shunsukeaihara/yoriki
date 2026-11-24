@@ -5,6 +5,7 @@ from contextlib import contextmanager
 from typing import Any
 
 import anthropic
+import httpx2
 
 from .base import (
     ChatEvent,
@@ -23,6 +24,7 @@ from .base import (
     ToolCallRequested,
     ToolChoice,
     Usage,
+    UsageProgress,
     b64,
     connection_error,
     context_overflow_error,
@@ -201,7 +203,7 @@ class AnthropicAdapter(ProviderAdapter):
             api_key=self.connection.api_key.reveal(),
             timeout=self.connection.timeout_seconds,
             max_retries=0,  # 再試行と代替モデルへの切替えはRunnerが判断する
-            http_client=self.http_client,
+            http_client=self._http_client(anthropic.DefaultHttpxClient),
         )
 
     def stream(self, request: ChatRequest) -> Iterator[ChatEvent]:
@@ -221,6 +223,9 @@ class AnthropicAdapter(ProviderAdapter):
                         cache_write_tokens = usage.cache_creation_input_tokens or 0
                         # input_tokens はcacheから読んだ分・書いた分を含まないので、足して全体の入力にする
                         input_tokens = usage.input_tokens + cached_tokens + cache_write_tokens
+                        yield UsageProgress(
+                            Usage(input_tokens, usage.output_tokens or 0, cached_tokens, cache_write_tokens)
+                        )
                     case "content_block_start":
                         blocks.start(event.index, event.content_block)
                     case "content_block_delta":
@@ -253,6 +258,11 @@ def _errors() -> Iterator[None]:
     except anthropic.APITimeoutError as exc:
         raise timeout_error() from exc
     except anthropic.APIConnectionError as exc:
+        raise connection_error() from exc
+    # 応答の途中で切れたとき、SDKはHTTPクライアントの例外をそのまま出す
+    except httpx2.TimeoutException as exc:
+        raise timeout_error() from exc
+    except httpx2.TransportError as exc:
         raise connection_error() from exc
     except anthropic.APIStatusError as exc:
         request_id = exc.request_id or ""

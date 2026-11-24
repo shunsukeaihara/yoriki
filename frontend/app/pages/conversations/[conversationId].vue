@@ -429,7 +429,10 @@ const menuItems = computed(() => [
                   />
                 </template>
                 <template v-else-if="item?.kind === 'message'">
-                  <MarkdownContent v-if="item.message.role === MessageRole.AGENT" :text="item.message.body" />
+                  <template v-if="item.message.role === MessageRole.AGENT">
+                    <MarkdownContent :text="item.message.body" />
+                    <ConversationPartialNote v-if="item.message.isPartial" class="mt-1" />
+                  </template>
                   <!-- この会話から起動したタスクの Run -->
                   <TaskLaunchCard v-else-if="item.message.taskRun" :run="item.message.taskRun" />
                   <!-- システムのメッセージ（次の依頼を始められなかった理由等） -->

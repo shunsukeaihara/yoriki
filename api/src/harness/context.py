@@ -138,6 +138,10 @@ UNFINISHED_CALL = (
     "[The earlier request ended before this tool call finished, so its result is unknown. Check the current state "
     "before relying on it.]"
 )
+STOPPED_REPLY = (
+    "[The user stopped the response above before it was finished. Any tool calls it was about to make were not "
+    "executed.]"
+)
 
 
 def build_items(run: Run, events: Iterable[RunEvent], inherited: Iterable[Item] = ()) -> list[Item]:
@@ -215,6 +219,9 @@ def _build(key: dict[str, str], events: Iterable[RunEvent], items: list[Item]) -
                 state = data.get("provider_state") if data.get("provider") == key else None
                 message = Message("assistant", data.get("text", ""), calls, provider_state=state)
                 items.append(Item(event.sequence, event.kind, message))
+            case RunEventKind.ASSISTANT_STOPPED:
+                items.append(Item(event.sequence, event.kind, Message("assistant", data["text"])))
+                items.append(Item(event.sequence, event.kind, Message("user", STOPPED_REPLY)))
             case RunEventKind.TOOL_RESULT:
                 message = Message(
                     "tool",

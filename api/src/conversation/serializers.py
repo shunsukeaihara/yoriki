@@ -372,9 +372,10 @@ class MessageSerializer(serializers.ModelSerializer):
             "client_message_id",
             "instruction",
             "task_run",
+            "is_partial",
             "created",
         ]
-        read_only_fields = ["created"]
+        read_only_fields = ["is_partial", "created"]
 
     def get_fields(self):
         fields = super().get_fields()

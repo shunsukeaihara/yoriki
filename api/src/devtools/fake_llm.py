@@ -17,6 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from harness.context import STOPPED_REPLY
 from llm.providers.openai import TOOL_IMAGES_LABEL
 
 DEFAULT_SCENARIO = Path(__file__).with_name("scenarios") / "default.json"
@@ -121,7 +122,9 @@ def _text(content: Any) -> str:
 
 
 def _is_prompt(message: dict[str, Any]) -> bool:
-    return message.get("role") == "user" and not _text(message.get("content")).startswith(IMAGES_LABEL_PREFIX)
+    # Toolの結果の画像を移した発言と、前の応答が途中で止められた知らせは、利用者の発言ではない
+    text = _text(message.get("content"))
+    return message.get("role") == "user" and not text.startswith(IMAGES_LABEL_PREFIX) and text != STOPPED_REPLY
 
 
 def _as_list(value: Any) -> list[Any]:

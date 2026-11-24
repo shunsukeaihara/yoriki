@@ -9,7 +9,7 @@ import json
 import logging
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor, wait
 from dataclasses import dataclass, field, replace
 from datetime import timedelta
@@ -33,6 +33,7 @@ from conversation.models import (
     UserInstruction,
 )
 from delivery.channels.outbound import queue_question
+from llm import limits
 from llm.providers import get_adapter
 from llm.providers.base import (
     ChatRequest,
@@ -239,6 +240,10 @@ class ModelResponse:
     provider_state: dict[str, Any] | None = None
     usage: Usage | None = None
     completed: Completed | None = None
+
+
+class WaitInterrupted(Exception):
+    """接続の枠を待つのをやめて、区切りへ戻る（停止の依頼、Attemptの上限、Workerのdrain等。harness.md §10.8）"""
 
 
 class Runner:
@@ -524,6 +529,14 @@ class Runner:
 
     def _step(self) -> bool:
         """1ステップを進める。続けるならTrue"""
+        try:
+            return self._advance()
+        except WaitInterrupted:
+            # 待つのをやめた理由は、次の区切りで扱う。圧縮の途中だったかもしれないので、やり直せるようにする
+            self.compacted_for_overflow = False
+            return True
+
+    def _advance(self) -> bool:
         if not self._boundary():
             return False
         run = self.run_obj
@@ -994,7 +1007,7 @@ class Runner:
                 error = exc
                 if exc.context_overflow:
                     raise ContextOverflow() from exc
-                if not exc.retryable or delay is None:
+                if not exc.retryable or delay is None or isinstance(exc, limits.ConnectionBusy):
                     break
                 # 待つ前に記録する（DeepSeek Harnessの方式）。待つ間もleaseを延ばす
                 self._record(
@@ -1008,29 +1021,28 @@ class Runner:
 
     def _stream(self, adapter: ProviderAdapter, request: ChatRequest, step: int) -> ModelResponse:
         response = ModelResponse()
-        pending, last_flush, last_beat = "", time.monotonic(), time.monotonic()
+        pending, last_flush = "", time.monotonic()
         try:
-            for event in adapter.stream(request):
-                match event:
-                    case TextDelta(text=text):
-                        response.text += text
-                        pending += text
-                    case ToolCallRequested(call=call):
-                        response.calls.append(call)
-                    case ProviderState(data=data):
-                        response.provider_state = data
-                    case Usage():
-                        response.usage = event
-                    case Completed():
-                        response.completed = event
-                self._check_streaming()
-                now = time.monotonic()
-                if pending and now - last_flush >= DELTA_INTERVAL:
-                    self._notify_delta(step, pending)
-                    pending, last_flush = "", now
-                if now - last_beat >= HEARTBEAT_INTERVAL:
-                    self.attempt.heartbeat()
-                    last_beat = now
+            with self._connection_slot() as check_lease:
+                for event in adapter.stream(request):
+                    match event:
+                        case TextDelta(text=text):
+                            response.text += text
+                            pending += text
+                        case ToolCallRequested(call=call):
+                            response.calls.append(call)
+                        case ProviderState(data=data):
+                            response.provider_state = data
+                        case Usage():
+                            response.usage = event
+                        case Completed():
+                            response.completed = event
+                    check_lease()
+                    self._check_streaming()
+                    now = time.monotonic()
+                    if pending and now - last_flush >= DELTA_INTERVAL:
+                        self._notify_delta(step, pending)
+                        pending, last_flush = "", now
         except ProviderError:
             if response.text or response.calls:
                 # 途中まで届いた応答は、モデルに見せる履歴には入れない（harness.md §11.2）
@@ -1039,6 +1051,44 @@ class Runner:
         if pending:
             self._notify_delta(step, pending)
         return response
+
+    @contextlib.contextmanager
+    def _connection_slot(self) -> Iterator[Callable[[], None]]:
+        """接続の上限の中で呼び出す。枠が空くまで待ち、呼出しの間はAttemptのleaseと枠の期限を延ばす。返す関数は、
+        その間にleaseを失っていれば LeaseLost"""
+        holder = f"{self.run_obj.uid}:{self.attempt.pk}"
+        connection = self.run_obj.model_version.connection
+        with limits.connection_slot(connection, holder, sleep=self.sleep, on_wait=self._waiter()) as renew:
+
+            def beat() -> None:
+                self.attempt.heartbeat()
+                renew()
+
+            with limits.beating(beat, interval=HEARTBEAT_INTERVAL) as check:
+                yield check
+
+    def _waiter(self) -> Callable[[], None]:
+        """枠を待つ間に呼ぶ関数。待つのをやめるなら WaitInterrupted"""
+        last_beat: float | None = None
+
+        def on_wait() -> None:
+            nonlocal last_beat
+            first = last_beat is None
+            beat = last_beat is None or time.monotonic() - last_beat >= HEARTBEAT_INTERVAL
+            if beat:
+                self.attempt.heartbeat()
+                last_beat = time.monotonic()
+            # 待つ間に権限を失ったら、内容をモデルへ送らない
+            if self._stop_waiting() or (beat and self._revoked()):
+                raise WaitInterrupted()
+            if first:
+                self._record(RunEventKind.LLM_WAIT, {}, comment=_("モデルの接続が空くのを待っています。"))
+
+        return on_wait
+
+    def _stop_waiting(self) -> bool:
+        status = Run.objects.filter(pk=self.run_obj.pk).values_list("status", flat=True).first()
+        return status != RunStatus.RUNNING or self._attempt_over() or self._draining()
 
     def _check_streaming(self) -> None:
         """応答を受け取る間の確認（サブエージェントの実行時間の上限。SubagentRunner）"""
@@ -1741,6 +1791,11 @@ class Runner:
         try:
             try:
                 response = self._stream(self.adapter_factory(version.connection), request, self.run_obj.step_count)
+            except limits.ConnectionBusy as exc:
+                # 待ち直せば圧縮できるので、ほかの呼出しと同じく扱う
+                self.compacted_for_overflow = False
+                self._handle_provider_failure(exc)
+                return False
             except ProviderError as exc:
                 self._fail(RunEndReason.CONTEXT, exc.message)
                 return False

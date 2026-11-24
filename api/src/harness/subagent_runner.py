@@ -195,6 +195,11 @@ class SubagentRunner(Runner):
         current = Subagent.objects.filter(pk=self.subagent.pk).values_list("status", flat=True).first()
         return status not in ACTIVE_PARENT_STATUSES or current != SubagentStatus.RUNNING or self._timed_out()
 
+    def _stop_waiting(self) -> bool:
+        sensitive = Run.objects.select_related("conversation").get(pk=self.run_obj.pk).handles_sensitive_data
+        # 機密になった会話の内容をクラウドのモデルへ送らない（_boundary() が止める）
+        return self._interrupted() or (sensitive and not self.run_obj.model_version.is_local)
+
     def _between_calls(self, remaining) -> bool | None:
         self.attempt.heartbeat()
         run = self._refresh()

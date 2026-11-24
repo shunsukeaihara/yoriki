@@ -109,6 +109,7 @@ export const RunEventKind = {
   COMPACTION: 32,
   MODEL_SWITCHED: 40,
   LLM_RETRY: 60,
+  LLM_WAIT: 61,
 } as const satisfies Record<string, RunEventKindEnum>
 
 // 作業の記録に出す、そのほかの記録（run.event）。要求の中身・実行時の文脈等はモデル向けの記録なので出さない。
@@ -119,6 +120,7 @@ export const NOTABLE_EVENT_KINDS: RunEventKindEnum[] = [
   RunEventKind.COMPACTION,
   RunEventKind.MODEL_SWITCHED,
   RunEventKind.LLM_RETRY,
+  RunEventKind.LLM_WAIT,
 ]
 
 export const ClarificationKind = {

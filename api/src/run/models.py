@@ -747,6 +747,7 @@ class RunEventKind(models.IntegerChoices):
     CLARIFICATION_REQUESTED = 50, _("確認の質問")
     CLARIFICATION_ANSWERED = 51, _("確認への回答")
     LLM_RETRY = 60, _("モデルの再試行")
+    LLM_WAIT = 61, _("モデルの空き待ち")
     SUBAGENT_FINISHED = 23, _("サブエージェントの終了")
     RUN_FINISHED = 90, _("実行の終了")
 

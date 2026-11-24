@@ -9,6 +9,8 @@
 import contextlib
 import json
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import timedelta
 from functools import partial
 from typing import Any
@@ -23,6 +25,7 @@ from artifact.models import Artifact, ArtifactKind
 from harness.connectors import build_catalog as build_connector_catalog
 from harness.skills import evaluation_entry, manifest_entry
 from harness.untrusted import untrusted
+from llm import limits
 from llm.models import ModelProfileVersion
 from llm.providers import get_adapter
 from llm.providers.base import ChatRequest, Completed, Message, ProviderError, ToolCallRequested, ToolDefinition, Usage
@@ -72,6 +75,8 @@ NO_RESPONDER_NOTE = (
 )
 # 判定を始めてから、これだけ経っても終わらなければ、判定をやり直す（判定の処理が落ちた場合）
 JUDGE_TIMEOUT = timedelta(minutes=10)
+# 判定の間に、始めた時刻と枠の期限を延ばす間隔（秒）
+JUDGE_BEAT_SECONDS = 20
 # 判定に渡す最後の応答と業務結果の長さ（文字）
 JUDGE_TEXT_LIMIT = 6000
 JUDGE_TOOL = "report_verdict"
@@ -420,6 +425,38 @@ def match_expected(expected: Any, actual: Any, path: str = "") -> list[dict[str,
     return []
 
 
+class JudgeStopped(ProviderError):
+    """枠を待つ間に、評価が止められた"""
+
+
+@contextmanager
+def _judge_slot(
+    evaluation: SkillEvaluation, result: SkillEvaluationResult, version: ModelProfileVersion
+) -> Iterator[None]:
+    """接続の上限の中で判定する。待つ間と呼出しの間は、落ちたものとしてやり直されない（JUDGE_TIMEOUT）よう、
+    始めた時刻を今にする"""
+    judging = SkillEvaluationResult.objects.filter(
+        pk=result.pk, state=EvaluationResultState.JUDGING, evaluation__status=EvaluationStatus.RUNNING
+    )
+
+    def touch() -> bool:
+        return bool(judging.update(judging_started=timezone.now()))
+
+    def on_wait() -> None:
+        if not touch():
+            raise JudgeStopped(_("評価が止められました。"))
+
+    holder = f"evaluation:{evaluation.uid}"
+    with limits.connection_slot(version.connection, holder, on_wait=on_wait) as renew:
+
+        def beat() -> None:
+            renew()
+            touch()
+
+        with limits.beating(beat, interval=JUDGE_BEAT_SECONDS):
+            yield
+
+
 def _judge(evaluation: SkillEvaluation, result: SkillEvaluationResult) -> tuple[int | None, str, str]:
     """LLMの判定（参考。公開の条件には使わない）。判定しなければ (None, "", 理由)"""
     version = evaluation.model_version
@@ -447,14 +484,15 @@ def _judge(evaluation: SkillEvaluation, result: SkillEvaluationResult) -> tuple[
     )
     call, usage, request_id = None, None, ""
     try:
-        for event in get_adapter(version.connection).stream(request):
-            match event:
-                case ToolCallRequested(call=requested) if requested.name == JUDGE_TOOL and call is None:
-                    call = requested
-                case Usage():
-                    usage = event
-                case Completed(request_id=rid):
-                    request_id = rid
+        with _judge_slot(evaluation, result, version):
+            for event in get_adapter(version.connection).stream(request):
+                match event:
+                    case ToolCallRequested(call=requested) if requested.name == JUDGE_TOOL and call is None:
+                        call = requested
+                    case Usage():
+                        usage = event
+                    case Completed(request_id=rid):
+                        request_id = rid
     except ProviderError as exc:
         logger.warning("evaluation %s: judge failed: %s", evaluation.uid, exc.message)
         return None, "", _("判定に失敗しました：%(error)s") % {"error": exc.message}

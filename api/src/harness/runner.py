@@ -36,6 +36,7 @@ from delivery.channels.outbound import queue_question
 from llm import limits
 from llm.providers import get_adapter
 from llm.providers.base import (
+    ChatEvent,
     ChatRequest,
     Completed,
     Message,
@@ -49,7 +50,9 @@ from llm.providers.base import (
     ToolCallRequested,
     ToolChoice,
     Usage,
+    UsageProgress,
 )
+from llm.providers.cancel import StreamCanceller
 from run.dispatch import enqueue_run
 from run.errors import LeaseLost
 from run.models import (
@@ -126,6 +129,8 @@ RETRY_DELAYS = (1, 2, 4, 8, 16)
 DELTA_INTERVAL = 0.15
 # モデルの呼出しの間にleaseを延ばす間隔（秒）
 HEARTBEAT_INTERVAL = 20
+# モデルの呼出しと再試行の待ちの間に、停止を確かめる間隔（秒）
+STOP_INTERVAL = 1
 # 1つのRunの実行時間の上限（秒）。作業中の間の合計で、ステップの区切りで判定する（harness.md §4.4）
 MAX_RUN_SECONDS = 60 * 60
 # 1つのAttemptの上限（秒）。Q2のtimeout（Q_CLUSTER_TIMEOUT）で切られる前に、保存して移る（harness.md §4.4）
@@ -240,10 +245,39 @@ class ModelResponse:
     provider_state: dict[str, Any] | None = None
     usage: Usage | None = None
     completed: Completed | None = None
+    # 途中で分かった利用量。打ち切ったときだけ使う
+    progress: Usage | None = None
+
+    def add(self, event: ChatEvent) -> str:
+        """届いたものを足す。文の差分なら、その文を返す"""
+        match event:
+            case TextDelta(text=text):
+                self.text += text
+                return text
+            case ToolCallRequested(call=call):
+                self.calls.append(call)
+            case ProviderState(data=data):
+                self.provider_state = data
+            case UsageProgress(usage=usage):
+                self.progress = usage
+            case Usage():
+                self.usage = event
+            case Completed():
+                self.completed = event
+        return ""
+
+    def stopped_usage(self, input_tokens: int) -> Usage:
+        """打ち切った応答の利用量。届いた利用量がなければ、入力は要求の見積もり（`input_tokens`）、出力は届いた文の
+        長さ（1文字を1 tokenとして数える）で見積もる"""
+        if self.usage is not None:
+            return self.usage
+        usage = self.progress or Usage(input_tokens, 0)
+        return replace(usage, output_tokens=max(usage.output_tokens, len(self.text)))
 
 
 class WaitInterrupted(Exception):
-    """接続の枠を待つのをやめて、区切りへ戻る（停止の依頼、Attemptの上限、Workerのdrain等。harness.md §10.8）"""
+    """モデルの枠・再試行・応答を待つのをやめて、区切りへ戻る（停止の依頼等。枠の待ちでは、Attemptの上限・Workerの
+    drain等でも。harness.md §10.8）"""
 
 
 class Runner:
@@ -602,9 +636,8 @@ class Runner:
         """予算を予約してモデルを呼び、応答と利用量を記録して予約を精算する。応答と、最後のまとめのステップなら上限の
         種類（ステップ数・予算）を返す。応答が得られなければ、ステップを続けるかどうか"""
         version = self.run_obj.model_version
-        reserved = self._reserve_step(
-            estimate_cost(version, compaction.estimate_tokens(events, items) + len(system)), final
-        )
+        input_tokens = compaction.estimate_tokens(events, items) + len(system)
+        reserved = self._reserve_step(estimate_cost(version, input_tokens), final)
         if reserved is None:
             return False
         reservation, limit = reserved
@@ -612,7 +645,7 @@ class Runner:
             # 予算の上限の知らせを今記録したので、最後の呼出しに入れる
             items = build_items(self.run_obj, self._events(), self.inherited)
         try:
-            result = self._ask_model(system, items, final=limit is not None)
+            result = self._ask_model(system, items, input_tokens=input_tokens, final=limit is not None)
             if isinstance(result, bool):
                 return result
             self._record_response(result, UsagePurpose.STEP, images_sent=compaction.images_sent(items))
@@ -674,7 +707,7 @@ class Runner:
         self._finish_with_reply(text, RunStatus.FAILED, end_reason, error=error)
         return False
 
-    def _ask_model(self, system: str, items, *, final: bool) -> ModelResponse | bool:
+    def _ask_model(self, system: str, items, *, input_tokens: int, final: bool) -> ModelResponse | bool:
         """モデルを呼ぶ。応答が得られなければ、ステップを続けるかどうか（圧縮した・待ちや失敗にした）を返す"""
         run = self.run_obj
         version = run.model_version
@@ -689,7 +722,7 @@ class Runner:
             reasoning=version.supports_reasoning,
         )
         try:
-            response = self._call_model(request, run.step_count + 1)
+            response = self._call_model(request, run.step_count + 1, input_tokens)
         except ContextOverflow:
             if self.compacted_for_overflow:
                 self._fail(RunEndReason.CONTEXT, _("会話が長すぎて、モデルの文脈に収まりません。"))
@@ -996,13 +1029,13 @@ class Runner:
 
     # --- モデルの呼出し ---
 
-    def _call_model(self, request: ChatRequest, step: int) -> ModelResponse | None:
+    def _call_model(self, request: ChatRequest, step: int, input_tokens: int) -> ModelResponse | None:
         """同じモデルで間をおいて再試行する。続かなければ、会話では切り替えを確かめ、タスクでは失敗にする"""
         adapter = self.adapter_factory(self.run_obj.model_version.connection)
         error: ProviderError | None = None
         for attempt, delay in enumerate((*RETRY_DELAYS, None)):
             try:
-                return self._stream(adapter, request, step)
+                return self._stream(adapter, request, step, input_tokens=input_tokens)
             except ProviderError as exc:
                 error = exc
                 if exc.context_overflow:
@@ -1019,52 +1052,98 @@ class Runner:
         self._handle_provider_failure(error)
         return None
 
-    def _stream(self, adapter: ProviderAdapter, request: ChatRequest, step: int) -> ModelResponse:
+    def _stream(
+        self,
+        adapter: ProviderAdapter,
+        request: ChatRequest,
+        step: int,
+        *,
+        input_tokens: int,
+        purpose: UsagePurpose = UsagePurpose.STEP,
+    ) -> ModelResponse:
+        """モデルを1回呼ぶ。`input_tokens` は、途中で打ち切ったときの利用量の見積もりに使う。打ち切ったら
+        WaitInterrupted"""
         response = ModelResponse()
+        canceller = adapter.canceller = StreamCanceller()
         pending, last_flush = "", time.monotonic()
+        sent = False
         try:
-            with self._connection_slot() as check_lease:
+            with self._connection_slot(canceller) as check:
+                sent = True
                 for event in adapter.stream(request):
-                    match event:
-                        case TextDelta(text=text):
-                            response.text += text
-                            pending += text
-                        case ToolCallRequested(call=call):
-                            response.calls.append(call)
-                        case ProviderState(data=data):
-                            response.provider_state = data
-                        case Usage():
-                            response.usage = event
-                        case Completed():
-                            response.completed = event
-                    check_lease()
+                    pending += response.add(event)
+                    check()
                     self._check_streaming()
+                    if canceller.cancelled and response.completed is None:
+                        raise WaitInterrupted()
                     now = time.monotonic()
                     if pending and now - last_flush >= DELTA_INTERVAL:
                         self._notify_delta(step, pending)
                         pending, last_flush = "", now
-        except ProviderError:
+        except ProviderError as exc:
+            if sent and canceller.cancelled:
+                self._record_stopped(response, step, input_tokens, purpose)
+                raise WaitInterrupted() from exc
             if response.text or response.calls:
                 # 途中まで届いた応答は、モデルに見せる履歴には入れない（harness.md §11.2）
                 self._record(RunEventKind.ASSISTANT_ATTEMPT, {"step": step, "text": response.text})
             raise
+        except WaitInterrupted:
+            # 枠を待つ間にやめたときは、まだ送っていない
+            if sent:
+                self._record_stopped(response, step, input_tokens, purpose)
+            raise
+        finally:
+            adapter.canceller = None
+            canceller.close()
         if pending:
             self._notify_delta(step, pending)
         return response
 
+    def _record_stopped(self, response: ModelResponse, step: int, input_tokens: int, purpose: UsagePurpose) -> None:
+        """応答を途中で打ち切った。利用量は、書く権利を失っていても（止められたサブエージェント等）記録する。
+        途中までの文は、会話に残して次のRunの文脈にも入れる（Tool呼出しと推論の途中経過は捨てる。harness.md §11.2）"""
+        UsageLedger.record(
+            run=self.run_obj,
+            model_version=self.run_obj.model_version,
+            purpose=purpose,
+            usage=response.stopped_usage(input_tokens),
+            subagent=self.subagent,
+            is_estimated=response.usage is None,
+        )
+        if purpose != UsagePurpose.STEP or not response.text.strip():
+            return
+        with self.run_obj.fenced(self.attempt) as run:
+            RunEvent.record(
+                run,
+                RunEventKind.ASSISTANT_STOPPED,
+                {"step": step, "text": response.text},
+                comment=_("応答の途中で止めました。"),
+                subagent=self.subagent,
+            )
+            # 答える人がいるRunだけ。タスクの結果と、対話の出口の報告には、途中までの文を出さない
+            if self.subagent is None and run.is_interactive and not run.has_channel:
+                self._post_reply(run, response.text, is_partial=True)
+
     @contextlib.contextmanager
-    def _connection_slot(self) -> Iterator[Callable[[], None]]:
-        """接続の上限の中で呼び出す。枠が空くまで待ち、呼出しの間はAttemptのleaseと枠の期限を延ばす。返す関数は、
-        その間にleaseを失っていれば LeaseLost"""
+    def _connection_slot(self, canceller: StreamCanceller) -> Iterator[Callable[[], None]]:
+        """接続の上限の中で呼び出す。枠が空くまで待ち、呼出しの間はAttemptのleaseと枠の期限を延ばし、停止の依頼が
+        あれば応答を打ち切る。返す関数は、その間にleaseを失っていれば LeaseLost"""
         holder = f"{self.run_obj.uid}:{self.attempt.pk}"
         connection = self.run_obj.model_version.connection
         with limits.connection_slot(connection, holder, sleep=self.sleep, on_wait=self._waiter()) as renew:
+            last_beat = time.monotonic()
 
             def beat() -> None:
-                self.attempt.heartbeat()
-                renew()
+                nonlocal last_beat
+                if time.monotonic() - last_beat >= HEARTBEAT_INTERVAL:
+                    self.attempt.heartbeat()
+                    renew()
+                    last_beat = time.monotonic()
+                if not canceller.cancelled and self._stop_streaming():
+                    canceller.cancel()
 
-            with limits.beating(beat, interval=HEARTBEAT_INTERVAL) as check:
+            with limits.beating(beat, interval=min(STOP_INTERVAL, HEARTBEAT_INTERVAL)) as check:
                 yield check
 
     def _waiter(self) -> Callable[[], None]:
@@ -1091,18 +1170,30 @@ class Runner:
         return status != RunStatus.RUNNING or self._attempt_over() or self._draining()
 
     def _check_streaming(self) -> None:
-        """応答を受け取る間の確認（サブエージェントの実行時間の上限。SubagentRunner）"""
+        """応答が届くたびの確認（サブエージェントの実行時間の上限。SubagentRunner）"""
+
+    def _stop_streaming(self) -> bool:
+        """応答の途中で打ち切るか。停止の依頼だけで打ち切り、ほかの理由は応答を受け終えた後の区切りで扱う。
+        モデルの呼出しの間に、別のスレッドからも呼ぶ（self の状態を変えない）"""
+        status = Run.objects.filter(pk=self.run_obj.pk).values_list("status", flat=True).first()
+        return status == RunStatus.CANCELLING
 
     def _notify_delta(self, step: int, text: str) -> None:
         notify_delta(self.run_obj.uid, step, text)
 
     def _wait(self, seconds: float) -> None:
-        remaining = seconds
+        """再試行の間をおく。停止の依頼があれば、待つのをやめる"""
+        remaining, since_beat = seconds, 0.0
         while remaining > 0:
-            chunk = min(remaining, HEARTBEAT_INTERVAL)
+            chunk = min(remaining, STOP_INTERVAL)
             self.sleep(chunk)
             remaining -= chunk
-            self.attempt.heartbeat()
+            since_beat += chunk
+            if since_beat >= HEARTBEAT_INTERVAL or remaining <= 0:
+                self.attempt.heartbeat()
+                since_beat = 0.0
+            if self._stop_streaming():
+                raise WaitInterrupted()
 
     def _handle_provider_failure(self, error: ProviderError) -> None:
         # モデルの切り替えはWebの画面でだけ答えられるので、対話の出口のあるタスクのRunでは尋ねずに失敗にする
@@ -1342,11 +1433,11 @@ class Runner:
         return False
 
     @staticmethod
-    def _post_reply(run: Run, text: str) -> None:
+    def _post_reply(run: Run, text: str, *, is_partial: bool = False) -> None:
         if not text.strip():
             return
         ConversationMessage.objects.create(
-            conversation_id=run.conversation_id, run=run, role=MessageRole.AGENT, body=text
+            conversation_id=run.conversation_id, run=run, role=MessageRole.AGENT, body=text, is_partial=is_partial
         )
         type(run.conversation).objects.filter(pk=run.conversation_id).update(last_posted=timezone.now())
 
@@ -1781,7 +1872,8 @@ class Runner:
             use_cache=version.supports_prompt_caching,
             reasoning=version.supports_reasoning,
         )
-        estimate = estimate_cost(version, sum(len(m.text) for m in request.messages))
+        input_tokens = sum(len(m.text) for m in request.messages)
+        estimate = estimate_cost(version, input_tokens)
         try:
             reservation = budgets.reserve(self.run_obj, self.attempt, estimate)
         except budgets.BudgetExhausted as exc:
@@ -1790,7 +1882,13 @@ class Runner:
             return False
         try:
             try:
-                response = self._stream(self.adapter_factory(version.connection), request, self.run_obj.step_count)
+                response = self._stream(
+                    self.adapter_factory(version.connection),
+                    request,
+                    self.run_obj.step_count,
+                    input_tokens=input_tokens,
+                    purpose=UsagePurpose.COMPACTION,
+                )
             except limits.ConnectionBusy as exc:
                 # 待ち直せば圧縮できるので、ほかの呼出しと同じく扱う
                 self.compacted_for_overflow = False

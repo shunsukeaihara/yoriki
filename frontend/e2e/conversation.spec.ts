@@ -29,10 +29,12 @@ test('動いている Run を停止できる', async ({ page }) => {
   await expect(page.getByText('2行目を')).toBeVisible()
   await expect(page.getByText('長い答えの終わりです。')).toBeHidden()
   await stopButton(page).click()
-  await expect(runStatus(page)).toHaveText('停止中')
-  // 停止は区切り（応答を受け終えたところ）で効く（harness.md §4.2）
+  // 応答の途中で打ち切る（harness.md §10.8）。途中までの文は会話に残る
   await expect(runStatus(page)).toHaveText('停止済み')
   await expectFinished(page)
+  await expect(page.getByText('停止により途中まで')).toBeVisible()
+  await expect(page.getByText('2行目を')).toBeVisible()
+  await expect(page.getByText('長い答えの終わりです。')).toBeHidden()
 })
 
 test('確認に回答すると Run が再開する', async ({ page }) => {

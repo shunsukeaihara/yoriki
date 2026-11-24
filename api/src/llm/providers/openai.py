@@ -55,7 +55,7 @@ class OpenAIAdapter(ProviderAdapter):
             base_url=self.connection.base_url if local else None,
             timeout=self.connection.timeout_seconds,
             max_retries=0,  # 再試行と代替モデルへの切替えはRunnerが判断する
-            http_client=self.http_client,
+            http_client=self._http_client(openai.DefaultHttpxClient),
         )
 
     def list_models(self) -> list[str]:

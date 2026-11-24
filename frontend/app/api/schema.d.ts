@@ -4304,6 +4304,8 @@ export interface components {
             readonly instruction: components["schemas"]["InstructionInfo"] | null;
             /** @description チャットから起動したタスクのRun（カードとして出すメッセージ） */
             readonly task_run: components["schemas"]["LaunchedTaskRun"] | null;
+            /** 途中まで */
+            readonly is_partial: boolean;
             /** Format: date-time */
             readonly created: string;
         };
@@ -5875,6 +5877,7 @@ export interface components {
          *     * `10` - 利用者の発言
          *     * `11` - エージェントの応答
          *     * `12` - 失敗した応答
+         *     * `13` - 途中で止めた応答
          *     * `21` - Toolの結果
          *     * `22` - ジョブの終了
          *     * `30` - 要求の中身
@@ -5890,7 +5893,7 @@ export interface components {
          *     * `90` - 実行の終了
          * @enum {integer}
          */
-        RunEventKindEnum: 1 | 10 | 11 | 12 | 21 | 22 | 30 | 31 | 32 | 40 | 41 | 50 | 51 | 60 | 61 | 23 | 90;
+        RunEventKindEnum: 1 | 10 | 11 | 12 | 13 | 21 | 22 | 30 | 31 | 32 | 40 | 41 | 50 | 51 | 60 | 61 | 23 | 90;
         /**
          * @description * `1` - 業務
          *     * `2` - Skillの編集

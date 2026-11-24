@@ -8,7 +8,7 @@ import base64
 import json
 import re
 from abc import ABC, abstractmethod
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Literal
@@ -16,6 +16,7 @@ from typing import Any, Literal
 from django.utils.translation import gettext as _
 
 from ..models import LLMConnection
+from .cancel import StreamCanceller
 
 
 @dataclass(frozen=True)
@@ -180,13 +181,20 @@ class Usage:
 
 
 @dataclass(frozen=True)
+class UsageProgress:
+    """応答の途中で分かった利用量（最後に届いたものが正しい）。途中で打ち切ったときの見積もりにだけ使う"""
+
+    usage: Usage
+
+
+@dataclass(frozen=True)
 class Completed:
     stop_reason: StopReason
     # プロバイダの要求ID。障害の問い合わせと、利用量の照合に使う
     request_id: str = ""
 
 
-ChatEvent = TextDelta | ToolCallRequested | ProviderState | Usage | Completed
+ChatEvent = TextDelta | ToolCallRequested | ProviderState | UsageProgress | Usage | Completed
 
 
 @dataclass
@@ -209,9 +217,18 @@ class ProviderError(Exception):
 class ProviderAdapter(ABC):
     """1つのLLMConnectionでLLMを呼ぶ。`http_client` はテストで通信を差し替えるときだけ渡す"""
 
+    # 次の stream() を途中で打ち切るもの。呼出しの前に呼び出し側が入れる
+    canceller: StreamCanceller | None = None
+
     def __init__(self, connection: LLMConnection, *, http_client: Any = None):
         self.connection = connection
         self.http_client = http_client
+
+    def _http_client(self, client_class: Callable[..., Any]) -> Any:
+        """SDKに渡すHTTPクライアント。打ち切れるようにするときだけ、SDKの既定と同じもの（client_class）を作る"""
+        if self.http_client is not None or self.canceller is None:
+            return self.http_client
+        return self.canceller.client(client_class)
 
     @abstractmethod
     def stream(self, request: ChatRequest) -> Iterator[ChatEvent]:

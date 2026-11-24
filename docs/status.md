@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-11-24（E2E（Playwright）とCIを入れた（#144）。次の作業は利用者と決める。§4）
+- 最終更新：2026-11-24（モデルの応答の途中での停止を作った（#145）。次の作業は利用者と決める。§4）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -72,6 +72,7 @@
 | #142 | Workerのdrain（design.md 0.70 §5.3・§7.9、deployment.md §6、harness.md §4.4）：管理コマンド `drain_workers`（`--wait`・`--timeout`）・`resume_workers` と印の `run.WorkerDrain`。claimを止め、動いているRunはジョブのない区切りで保存して順番待ちに戻る。親が順番待ち・再試行待ちの間もサブエージェントを動かし続け、その間の停止は停止中を経る |
 | #143 | LLMの接続の上限（design.md 0.71 §4.8、harness.md §5.2・§10.8、deployment.md §3.2）：`llm/limits.py`・`LLMConnectionLease`、`llm.wait`、モデルの応答を待つ間のleaseの延長 |
 | #144 | E2E（Playwright）とCI（development.md §3.2・§4）：`frontend/e2e/`、`deploy/compose.e2e.yaml`、`e2e.yml`。`pnpm dev` の起動の不具合の修正 |
+| #145 | 応答の途中の停止：停止の依頼で、モデルの応答を途中で打ち切る（design.md 0.72 §5.3・§9.1、harness.md §4.2・§5.2・§10.6・§10.8・§11.2）：`llm/providers/cancel.py`、`message.assistant_stopped`、`ConversationMessage.is_partial`、`UsageLedger.is_estimated` |
 | #87 | 発言の渡し方（design.md 0.51 §5.5・§11.4、harness.md §7.5・§10.1・§10.2・§10.4）：発言の種類の選択をなくし、`/`・`@` を指定した発言も親へ渡す。Skill・Connectorの一覧を発言ごとに作り直し、`skill`・`connector` の引数を文字列にする。Runがアクセスできるものを権限モデルだけで決め、`/`・`@`、タスクの定義、Skillの宣言と `tools` は使用の指示にする（タスク・評価のRunも絞らない） |
 
 各PRの中身は、Pull Requestの説明と設計書を見る。
@@ -101,7 +102,7 @@
 - CSPのインラインのスクリプトを、ハッシュかnonceで絞る（deployment.md §4.1）。
 - フロントエンド：`app.config.ts`（テーマの色。primary / neutralを決める）。
 - E2Eで後回しにしたもの：タスクの手動実行、Connector、Skill、サブエージェント、管理画面（`seed_dev` にタスクがない）。
-- 停止は区切りだけで効く（harness.md §4.2）。モデルが応答している間（長い応答や黙っている間）に停止しても、応答を受け終えるまで「停止中」のまま。E2Eで約20秒の応答を止めて分かった。応答の途中で打ち切るかは未決。
+- 応答の途中の停止で後回しにしたもの：プロバイダへつなぐ途中（TCPの接続・TLSの確立）の打ち切り、Draftの評価の判定の呼出しの打ち切り、打ち切った応答の届かない推論・Tool呼出しの分の利用量、プロバイダのエラーで切れた応答の利用量の見積もり（今も数えない）、途中までの文をサブエージェントから親へ返すこと。
 - CI：本体のイメージのレジストリへのpush（使うレジストリが未決。design.md §13）、Sandboxのイメージのmulti-arch（arm64）のビルドとDocker Hubへのpush・脆弱性スキャン（公開先のorgが未決）。
 - Compose：channel-listener（DiscordのGateway。DiscordのPRで作る）。
 - Workerのdrainで後回しにしたもの：1台だけのdrain（Workerの名前を配備で固定する仕組みも要る）、drain中であることの画面での表示（Runは「順番待ち」と出るだけ）。
@@ -146,7 +147,11 @@
 
 **今の状態（2026-11-03。2026-11-11 に⑦まで進んだ）**：design.md §12の第1段階のうち、Skill（①〜⑤）と、Connector・タスク・配信（①〜⑦、Connectorの④a・④b）は終わった（#72・#73まで）。今は、業務（下の「第1段階の順番」の3）を作る前の整理を、利用者と決めた次の順で進めている。文書の整理は #74 と、その残り（design.md・harness.md の突き合わせ。#75）で、テストの高速化は #76 で行った（バックエンドのテスト全体は、手元（8コア）で約5分から約35秒に、4並列でも約45秒になった）。#74 では、status.md の終わった段階の「決めたこと・判断した点」を設計書と突き合わせ、設計書になかった今の動きに関わるものを design.md・authorization.md・harness.md・frontend-conventions.md・sandbox/CONTRACT.md へ移してから消した（経過・レビュー・確かめたことは消した。各PRの説明に残っている）。§1 はPRごとの短い一覧にした。確認用の道具は #77 で入れた（偽のLLM `fake_llm`、確認用のデータ `seed_dev`、ログイン済みのセッション `dev_session`。development.md §6）。 2026-11-06 に、agentセッションとSandboxのイメージの案を設計書へ反映した。実装は下の⑦（Sandboxのイメージ）まで済んだ。後回し：タスクの実行の論理削除の画面、物理削除の管理コマンド、監査ログの画面。
 
-**次の作業**（#144 のマージを確かめてから）：**利用者と決める**。候補は、CSPのインラインのスクリプト（E2EがCSPを通るので、絞った後の確認に使える）、応答の途中の停止（§3）、対話の連携の残り（下の「これまでの経過（#122）」）等。
+**次の作業**（#145 のマージを確かめてから）：**利用者と決める**。候補は、CSPのインラインのスクリプト（E2EがCSPを通るので、絞った後の確認に使える）、対話の連携の残り（下の「これまでの経過（#122）」）等。
+
+これまでの経過（#145）：2026-11-24 に利用者が選び、仕様の案を確かめた。会話で決めたこと：途中までの文は会話に残して次のRunの文脈にも入れる、利用量は見積もりで記録する、打ち切るのは停止の依頼だけ（サブエージェントは親が止めたときと実行時間の上限も）、圧縮と再試行の待ちも含める。実装で決めたこと：会話に残すのは会話と修正チャットだけ（ほかのタスクは作業の記録に止めたことだけ）。打ち切りはソケットの `shutdown`（`client.close()` では待っている読み取りが終わらない）で、ソケットはhttpcoreの `trace` 拡張で得る。あわせて直した不具合：anthropic 2.x は応答の途中で接続が切れるとHTTPクライアントの例外をそのまま出すので、再試行されず内部エラーになっていた。気づいたこと：Dependabotの `/sandbox` の更新（ruff 0.17.4、pytest 9.2.0）が 2026-11-24 に「その版がない」という依存の解決の失敗で終わった（原因は調べていない）。
+
+#145 で確かめたこと：macOSとLinux（コンテナ）で、平文とTLS、応答のヘッダーの前と途中、anthropic・openai・geminiのSDKの12通りで、`shutdown` の直後に読み取りが終わった（実験）。手元で、バックエンドのテスト全体（1574件成功、31件は飛ばした）・mypy・ruff・`makemigrations --check`、フロントエンドのlint・整形・型・テスト（187件）。使い捨てのDB・偽のLLM・qcluster・Sandbox（runc）でE2E 7件が成功し、Playwrightで、停止を押してから印が出るまで1.3秒、途中までの文の表示、続きの依頼の完了を確かめた。GitHub Actionsの #145 のCIは、ラベル `e2e` のE2E（Composeの構成、gVisor）を含めてすべて成功した。試していないこと：実際のプロバイダ、プロキシ経由の接続、画面での修正チャット・タスクのRunの停止（テストもない）。Codexのレビューは受けていない。
 
 これまでの経過（#144）：2026-11-24 に利用者が選んだ。会話で決めたこと：Composeを `YORIKI_DEBUG=true` で起動して `seed_dev`・`fake_llm` を使う。CIは、ラベル `e2e` のPR・`[skip ci]` のない `main` へのpush・毎週・手動。最初の範囲は、ログインとログアウト、会話の応答と続きの依頼、停止、確認への回答、Sandboxの成果物のダウンロード。決め方は development.md §3.2・§4。実装で決めたこと：Runtime Profileの登録はComposeの `registry` を読み、Sandboxは `YORIKI_SANDBOX_IMAGE_OVERRIDE` のイメージで起動する（ホストのdockerdから `registry` の名前を引けないため）。CIのgVisorは userns-remap なし。`@playwright/test` は1.65.0に固定（公開から2週間を過ぎた最新）。あわせて直した不具合：`pnpm dev` が今のNuxt CLI（4.0.1）で `options.hostname.toLowerCase is not a function` で起動しなかったので、`nuxt dev --host localhost` にした（ロックは変えていない。CLIが直ったら戻してよい）。
 

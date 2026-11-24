@@ -11460,6 +11460,10 @@ components:
           readOnly: true
           nullable: true
           description: チャットから起動したタスクのRun（カードとして出すメッセージ）
+        is_partial:
+          type: boolean
+          readOnly: true
+          title: 途中まで
         created:
           type: string
           format: date-time
@@ -11470,6 +11474,7 @@ components:
       - created
       - id
       - instruction
+      - is_partial
       - role
       - run
       - sender
@@ -14489,6 +14494,7 @@ components:
       - 10
       - 11
       - 12
+      - 13
       - 21
       - 22
       - 30
@@ -14508,6 +14514,7 @@ components:
         * `10` - 利用者の発言
         * `11` - エージェントの応答
         * `12` - 失敗した応答
+        * `13` - 途中で止めた応答
         * `21` - Toolの結果
         * `22` - ジョブの終了
         * `30` - 要求の中身

@@ -737,6 +737,7 @@ class RunEventKind(models.IntegerChoices):
     USER_MESSAGE = 10, _("利用者の発言")
     ASSISTANT_MESSAGE = 11, _("エージェントの応答")
     ASSISTANT_ATTEMPT = 12, _("失敗した応答")
+    ASSISTANT_STOPPED = 13, _("途中で止めた応答")
     TOOL_RESULT = 21, _("Toolの結果")
     JOB_FINISHED = 22, _("ジョブの終了")
     REQUEST_HEADER = 30, _("要求の中身")

@@ -3,6 +3,7 @@
 import base64
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
+from functools import partial
 from typing import Any
 
 import httpx
@@ -29,6 +30,7 @@ from .base import (
     ToolCallRequested,
     ToolChoice,
     Usage,
+    UsageProgress,
     connection_error,
     context_overflow_error,
     document_text,
@@ -257,7 +259,7 @@ class GeminiAdapter(ProviderAdapter):
             http_options=types.HttpOptions(
                 timeout=self.connection.timeout_seconds * 1000,  # ミリ秒
                 retry_options=types.HttpRetryOptions(attempts=1),  # 再試行はRunnerが判断する
-                httpx_client=self.http_client,
+                httpx_client=self._http_client(partial(httpx.Client, follow_redirects=True)),
             ),
         )
 
@@ -283,6 +285,7 @@ class GeminiAdapter(ProviderAdapter):
                         cached_input_tokens=meta.cached_content_token_count or 0,
                         reasoning_tokens=meta.thoughts_token_count or 0,
                     )
+                    yield UsageProgress(usage)
                 for candidate in chunk.candidates or []:
                     finish_reason = candidate.finish_reason or finish_reason
                     for part in (candidate.content.parts if candidate.content else None) or []:

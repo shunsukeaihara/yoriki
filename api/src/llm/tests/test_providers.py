@@ -28,6 +28,7 @@ from llm.providers.base import (
     ToolChoice,
     ToolDefinition,
     Usage,
+    UsageProgress,
     VideoPart,
     is_context_overflow,
     object_schema,
@@ -587,7 +588,9 @@ class TestAnthropic:
         recorder = Recorder(body=self.BODY, headers={"request-id": "req_a"})
         events = self._stream(REQUEST, recorder)
 
-        assert events == [
+        assert isinstance(events[0], UsageProgress)
+        assert (events[0].usage.input_tokens, events[0].usage.cached_input_tokens) == (45, 30)
+        assert events[1:] == [
             TextDelta("調べます"),
             ToolCallRequested(ToolCall("toolu_1", "get_weather", {"city": "東京"})),
             # thinkingブロックは署名ごと返し、次の要求で戻す
@@ -750,6 +753,8 @@ class TestGemini:
         recorder = Recorder(body=self.BODY)
         events = self._stream(REQUEST, recorder)
 
+        assert any(isinstance(e, UsageProgress) for e in events)
+        events = [e for e in events if not isinstance(e, UsageProgress)]
         assert events[0] == TextDelta("東京は")
         assert isinstance(events[1], ToolCallRequested)
         call = events[1].call
@@ -918,3 +923,22 @@ class TestOpenAIResponsesWithoutReasoning:
         connection = LLMConnectionFactory.create(kind=ProviderKind.OPENAI)
         list(get_adapter(connection, http_client=_httpx2(recorder)).stream(REQUEST))
         assert "include" not in recorder.sent
+
+
+@pytest.mark.django_db
+def test_anthropic_disconnection_in_the_middle_is_retryable():
+    """応答の途中で切れると、SDKはHTTPクライアントの例外をそのまま出す"""
+
+    class Broken(httpx2.SyncByteStream):
+        def __iter__(self):
+            yield b"event: ping\ndata: {}\n\n"
+            raise httpx2.ReadError("broken")
+
+    def handle(_request):
+        return httpx2.Response(200, headers={"content-type": "text/event-stream"}, stream=Broken())
+
+    client = httpx2.Client(transport=httpx2.MockTransport(handle))
+    connection = LLMConnectionFactory.create(kind=ProviderKind.ANTHROPIC)
+    with pytest.raises(ProviderError) as info:
+        list(get_adapter(connection, http_client=client).stream(REQUEST))
+    assert info.value.retryable

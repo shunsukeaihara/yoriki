@@ -153,6 +153,8 @@ class ConversationMessage(models.Model):
     )
     role = models.PositiveSmallIntegerField(_("送信元の種別"), choices=MessageRole.choices)
     body = models.TextField(_("本文"), blank=True)
+    # 停止で途中までになったエージェントの応答（harness.md §11.2）
+    is_partial = models.BooleanField(_("途中まで"), default=False)
     # 利用者が送った添付。送ったときに /workspace/input の中の名前を決める（Artifact.attach()）
     attachments = models.ManyToManyField(
         "artifact.Artifact", blank=True, related_name="messages", verbose_name=_("添付")

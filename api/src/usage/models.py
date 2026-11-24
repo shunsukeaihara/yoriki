@@ -230,6 +230,8 @@ class UsageLedger(models.Model):
     reasoning_tokens = models.PositiveIntegerField(_("推論のtoken"), default=0)  # 出力tokenに含まれる
     cost = models.DecimalField(_("金額（米ドル）"), max_digits=14, decimal_places=8)
     request_id = models.CharField(_("プロバイダの要求ID"), max_length=200, blank=True)
+    # 応答を途中で打ち切ったので、プロバイダの確定した利用量ではなく見積もりで記録した（design.md §9.1）
+    is_estimated = models.BooleanField(_("見積もり"), default=False)
 
     created = models.DateTimeField(auto_now_add=True, db_index=True)
 
@@ -243,7 +245,15 @@ class UsageLedger(models.Model):
 
     @classmethod
     def record(
-        cls, *, run, model_version, purpose: UsagePurpose, usage, request_id: str = "", subagent=None
+        cls,
+        *,
+        run,
+        model_version,
+        purpose: UsagePurpose,
+        usage,
+        request_id: str = "",
+        subagent=None,
+        is_estimated: bool = False,
     ) -> "UsageLedger":
         return cls.objects.create(
             owner_id=run.owner_id,
@@ -259,4 +269,5 @@ class UsageLedger(models.Model):
             reasoning_tokens=usage.reasoning_tokens,
             cost=usage_cost(model_version, usage),
             request_id=request_id,
+            is_estimated=is_estimated,
         )

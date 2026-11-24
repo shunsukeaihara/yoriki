@@ -273,7 +273,10 @@ const stop = async () => {
                   />
                 </template>
                 <template v-else-if="item?.kind === 'message'">
-                  <MarkdownContent v-if="item.message.role === MessageRole.AGENT" :text="item.message.body" />
+                  <template v-if="item.message.role === MessageRole.AGENT">
+                    <MarkdownContent :text="item.message.body" />
+                    <ConversationPartialNote v-if="item.message.isPartial" class="mt-1" />
+                  </template>
                   <p
                     v-else-if="item.message.role === MessageRole.SYSTEM"
                     class="flex items-start gap-2 text-sm whitespace-pre-wrap text-muted"

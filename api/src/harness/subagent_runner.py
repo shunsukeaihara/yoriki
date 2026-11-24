@@ -21,6 +21,7 @@ from run.models import (
     Run,
     RunEndReason,
     RunEventKind,
+    RunStatus,
     Subagent,
     SubagentStatus,
     ToolInvocation,
@@ -31,7 +32,7 @@ from runtime.launcher import SandboxUnavailable
 from . import subagents
 from .context import RUNTIME_CONTEXT_TAG
 from .prompts import system_prompt
-from .runner import ATTEMPT_LIMIT_SECONDS, RepeatedErrors, Runner
+from .runner import ATTEMPT_LIMIT_SECONDS, RepeatedErrors, Runner, WaitInterrupted
 from .tools.base import Tool
 
 logger = logging.getLogger(__name__)
@@ -43,10 +44,6 @@ JOBS_AT_END_NOTICE = (
     "Background jobs are still running: {jobs}. They are stopped when you write your final reply. Wait for them with "
     "job_output if you need their results, or stop them with job_kill, and then write your final reply."
 )
-
-
-class TimedOut(Exception):
-    """子の実行時間の上限を、モデルの応答を受け取る間に超えた"""
 
 
 class SubagentRunner(Runner):
@@ -76,8 +73,6 @@ class SubagentRunner(Runner):
             logger.info("subagent %s of run %s stopped", self.subagent.uid, self.run_obj.uid)
         except RepeatedErrors:
             self._end(SubagentStatus.FAILED, error="it repeated the same failing call")
-        except TimedOut:
-            self._end(SubagentStatus.FAILED, error=self._timeout_error())
         except SandboxUnavailable as exc:
             logger.warning("subagent %s: sandbox unavailable: %s", self.subagent.uid, exc)
             self._end(SubagentStatus.FAILED, error="its sandbox stopped")
@@ -182,9 +177,14 @@ class SubagentRunner(Runner):
         return f"it exceeded the time limit of {self._timeout_seconds() // 60} minutes"
 
     def _check_streaming(self) -> None:
-        """応答が届くたびに上限を確かめる（最初の応答が届くまでの待ちは、接続のtimeoutまで切れない）"""
         if self._timed_out():
-            raise TimedOut()
+            raise WaitInterrupted()
+
+    def _stop_streaming(self) -> bool:
+        """親の停止・親が止めた・実行時間の上限"""
+        status = Run.objects.filter(pk=self.run_obj.pk).values_list("status", flat=True).first()
+        current = Subagent.objects.filter(pk=self.subagent.pk).values_list("status", flat=True).first()
+        return status == RunStatus.CANCELLING or current == SubagentStatus.CANCELLED or self._timed_out()
 
     def _timed_out(self) -> bool:
         started = self.subagent.started or self.attempt.started

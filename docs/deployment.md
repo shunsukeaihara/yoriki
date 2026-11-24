@@ -21,6 +21,7 @@ yoriki/
 │   ├── compose.yaml            # 単一ホストの本番構成
 │   ├── compose.dev.yaml        # ローカル開発の補助（PostgreSQL等）
 │   ├── compose.cloudflare.yaml # Cloudflare Tunnelで公開するときに重ねる（§8.3）
+│   ├── compose.e2e.yaml       # E2Eのときだけ重ねる（development.md §3.2）
 │   ├── compose.edge.yaml       # 複数台構成のエッジ（cloudflared＋振り分け用nginx、§8.4）
 │   ├── compose.app.yaml        # 複数台構成のアプリサーバー（postgresを除く、§8.4）
 │   ├── compose.db.yaml         # 複数台構成のDBサーバー（§8.4）

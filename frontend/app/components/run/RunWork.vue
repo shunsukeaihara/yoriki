@@ -192,7 +192,7 @@ const unsentNotice = computed(() => {
 <template>
   <div class="grid gap-3">
     <div class="flex flex-wrap items-center gap-2 text-sm">
-      <RunStatusBadge :run="run" />
+      <RunStatusBadge :run="run" data-testid="run-status" />
       <UBadge v-if="run.kind === RunKind.SKILL_EDIT" color="warning" variant="subtle" icon="i-lucide-pencil">
         {{ $t('Skillの編集') }}
       </UBadge>

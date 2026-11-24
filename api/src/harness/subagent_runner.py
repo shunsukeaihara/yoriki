@@ -17,10 +17,10 @@ from django.utils import timezone
 from artifact.models import Artifact, BlobObject
 from run.errors import LeaseLost
 from run.models import (
+    CANCELLABLE_STATUSES,
     Run,
     RunEndReason,
     RunEventKind,
-    RunStatus,
     Subagent,
     SubagentStatus,
     ToolInvocation,
@@ -37,7 +37,7 @@ from .tools.base import Tool
 logger = logging.getLogger(__name__)
 
 # 子が書いてよい親のRunの状態。停止中・終わった後は書かない（design.md §5.3）
-ACTIVE_PARENT_STATUSES = (RunStatus.RUNNING, RunStatus.WAITING_USER, RunStatus.WAITING_BACKGROUND)
+ACTIVE_PARENT_STATUSES = CANCELLABLE_STATUSES
 DEFAULT_TIMEOUT_SECONDS = 1800
 JOBS_AT_END_NOTICE = (
     "Background jobs are still running: {jobs}. They are stopped when you write your final reply. Wait for them with "

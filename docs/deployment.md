@@ -258,7 +258,7 @@ SSEのパスにだけ適用する。apiのレスポンスにも `X-Accel-Bufferi
 # 1. イメージのdigestを更新する（deploy/.env の YORIKI_API_IMAGE / YORIKI_FRONTEND_IMAGE）
 docker compose -f deploy/compose.yaml pull
 
-# 2. Workerをdrainする（新しいclaimを止め、実行中のRunのCheckpoint保存を待つ）
+# 2. Workerをdrainする（新しいclaimを止め、動いているRunがCheckpointを保存してWorkerを手放すのを待つ）
 docker compose -f deploy/compose.yaml exec api python manage.py drain_workers --wait
 
 # 3. バックアップを取る（DBとファイルをセットで）
@@ -275,9 +275,15 @@ docker compose -f deploy/compose.yaml exec api python manage.py resume_workers
 ```
 
 - design.md §10の順序（イメージ → migration → 起動）に従う。
-- `drain_workers`・`resume_workers` はまだない（Workerが受け付けを止めて実行中のRunを待つ仕組みとあわせて作る）。それまでは無停止の更新はできない。手順2と6の代わりに、利用者に停止の時間を知らせ、手順1の後に `docker compose -f deploy/compose.yaml stop nginx` で新しい受付（画面・API・Webhookの入口）を止める（複数台の構成（§8.4）では、すべてのエッジのサーバーで `docker compose -f deploy/compose.edge.yaml stop edge-nginx` を実行し、Runの数の確認・migration・すべてのアプリとWorkerのサーバーの入れ替えを終えてから、エッジを戻す）。そのうえで、受け付け済みのRunが終わるのを待つ（`docker compose -f deploy/compose.yaml exec api python manage.py shell -c "from django.db.models import Q; from run.models import Run, RunStatus; print(Run.objects.filter(Q(status__in=[RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.WAITING_BACKGROUND, RunStatus.RETRY_WAIT, RunStatus.CANCELLING]) | Q(status=RunStatus.WAITING_USER, attempts__ended__isnull=True)).distinct().count())"` が0になるまで。確認待ちでも、ジョブが動いている間は終わっていないAttemptがあるので数える。サブエージェントを入れるときに、確認待ちの間に動くサブエージェントも数える。動いているもののない確認待ちのRunは待たない。ただし、Sandboxの契約番号が変わる更新では、確認待ちのRunも終えるか停止し、新しい契約のRuntime Profileを登録してからnginxを戻す。§2.1）。手順5の `up -d` でnginxも戻る（契約番号が変わる更新では、手順5でnginx以外のサービスを名前で指定して起動し、登録の後に `up -d` でnginxを戻す）。Webhookの送り元には止めている間は届かないので、送り元の再送に頼る。待てずに入れ替えたRunは、新しいqclusterが最後のCheckpointから再開する（Checkpointは今はAttemptを終えるときだけ作るので、それより後のWorkspaceの変更は失われ、モデルに知らせる。harness.md §11.1）。Workerサーバーは、手順5と同じときに入れ替え、古いイメージのqclusterを残さない。
+- **drain**：印をDBに1つ持ち、すべてのqclusterが新しいAttempt（親・サブエージェント）を始めなくなる。再起動しても残り、`resume_workers` で解除する。受付は止めない：drain中の依頼・回答・Webhookは受け付け、Runは順番待ちのまま残る。配信・清掃等の軽い処理は続く。
+  - 動いているRunは、次のステップの区切りで保存してWorkerを手放し、順番待ちに戻る（答える人がいないRunも保存する。design.md §7.9）。解除の後に続きから動く。障害ではないので、やり直しの回数に数えない。
+  - バックグラウンドのジョブが動いているRunは、ジョブを止めず、終わった後の区切りで手放す（長くてもAttemptの上限の55分。達したらジョブを止めて保存する。harness.md §4.4）。サブエージェントは途中から再開できないので、終わるまで待つ（長くても50分）。親が先に順番待ちに戻っても、子は動き続ける。
+  - `--wait` は、動いているAttemptがなくなるまで待つ（`--timeout 秒` で上限。過ぎるとエラーで終わる）。待つのをやめても、drainは続く。待てずに入れ替えたRunは、新しいqclusterが最後のCheckpointから再開し（それより後のWorkspaceの変更は失われ、モデルに知らせる。harness.md §11.1）、サブエージェントは失敗として親に伝わる。
+  - 解除すると、順番待ちのRunは1分ごとのReconcilerが送り直して動き出す。
+  - 1台だけのdrainはない（Workerを見分ける名前がコンテナのhostnameで、作り直すと変わるため）。
+- Sandboxの契約番号が変わる更新（§2.1）では、古い契約の版に固定されたRunが更新後に動けないので、drainではなく、受付を止めてRunを終わらせる。手順2の代わりに、手順1の後に `docker compose -f deploy/compose.yaml stop nginx` で新しい受付（画面・API・Webhookの入口）を止め（複数台の構成（§8.4）では、すべてのエッジのサーバーで `docker compose -f deploy/compose.edge.yaml stop edge-nginx`）、受け付け済みのRunが終わるのを待つ（`docker compose -f deploy/compose.yaml exec api python manage.py shell -c "from django.db.models import Q; from run.models import Run, RunStatus; print(Run.objects.filter(Q(status__in=[RunStatus.QUEUED, RunStatus.RUNNING, RunStatus.WAITING_BACKGROUND, RunStatus.RETRY_WAIT, RunStatus.CANCELLING]) | Q(status=RunStatus.WAITING_USER, attempts__ended__isnull=True)).distinct().count())"` が0になるまで。確認待ちでも、ジョブが動いている間は終わっていないAttemptがあるので数える）。確認待ちのRunも終えるか停止する。手順5ではnginx以外のサービスを名前で指定して起動し、新しい契約のRuntime Profileを登録してから `up -d` でnginxを戻す（手順6は要らない）。Webhookの送り元には止めている間は届かないので、送り元の再送に頼る。
 - migrationは、旧バージョンのコードでも動く形（列の追加は先、削除は次のリリース）で書き、更新中に旧apiが動いていても壊れないようにする。
-- Workerサーバー（§3.2）は、手順2のdrainの後、手順6の再開の前に同じイメージへ入れ替える（drainがない間は、受付を止めてRunの終わりを確かめた後、nginxを戻す前に入れ替える）。
+- Workerサーバー（§3.2）は、手順2のdrainの後、手順6の再開の前に同じイメージへ入れ替え、古いイメージのqclusterを残さない（契約番号が変わる更新では、Runの終わりを確かめた後、nginxを戻す前に入れ替える）。
 
 ---
 
@@ -348,7 +354,7 @@ sudo install -d -o 10001 -g 10001 -m 0700 /var/lib/yoriki/workspaces
 **ホストの更新（対策の2）**：カーネル、Docker Engine、containerd、runcの脆弱性がそのままSandboxからの脱出につながるので、更新を止めない。
 
 - Dockerは公式のaptリポジトリから入れ、`unattended-upgrades` の対象に `docker-ce`、`containerd.io` とカーネルを含める（Ubuntuの例：`/etc/apt/apt.conf.d/50unattended-upgrades` の `Origins-Pattern` に `origin=Docker` を足す）。
-- カーネルの更新は再起動するまで効かない。`/var/run/reboot-required` を見て、月に1回など決まった時間に再起動する。再起動の前にWorkerをdrainする（§6の2）。
+- カーネルの更新は再起動するまで効かない。`/var/run/reboot-required` を見て、月に1回など決まった時間に再起動する。再起動の前にWorkerをdrainし（§6の2）、起動した後に解除する（§6の6。drainはすべてのWorkerに効くので、その間はRunが順番待ちになる）。
 - Dockerを更新すると動いているコンテナが止まる（`live-restore` を使わない場合）。実行中のRunは中断され、Reconcilerが別のAttemptでやり直す。
 
 **userns-remap（対策の4）**：コンテナの中のroot（uid 0）を、ホストの権限のないuidに対応させる。Sandboxの利用者（uid 10001）も、ホストでは別のuidになる。
@@ -517,7 +523,7 @@ docker compose -f deploy/compose.db.yaml up -d
 
   - 各サーバーの `/etc/yoriki/yoriki.env` は、DBの接続先・S3の設定・Secretを同じ内容にする。サーバーごとに違うのは、Worker IDと実行枠の数だけにする。
   - 振り分け用のnginxの `upstream` に並べるアプリサーバーの一覧は、`deploy/env` 等で管理し、台数を増減したらエッジの2台で再読込（`nginx -s reload`）する。
-  - 更新は、エッジのnginxで1台ずつ振り分けから外し、§6の手順（drain → 入れ替え → 戻す）で順に行う。migrationは最初の1台でだけ実行する。drainがない間は1台ずつの更新はできず、§6の暫定の手順で、すべてのエッジの受付を止めてから全台を入れ替える。
+  - 更新は、最初にdrainし（すべてのWorkerに効く。§6）、エッジのnginxで1台ずつ振り分けから外して入れ替え、戻す。すべてのアプリとWorkerのサーバーを入れ替えた後に、1回だけdrainを解除する。migrationは最初の1台でだけ実行する。契約番号が変わる更新では、すべてのエッジの受付を止めてから全台を入れ替える（§6）。
 - **利用者のIPアドレス**：`CF-Connecting-IP` をエッジのnginxで受け取り、アプリサーバーへは `X-Forwarded-For` で渡す。アプリサーバーのnginxは、エッジのホストのIPだけを信頼する（`set_real_ip_from`）。
 
 ### 8.5 Cloudflareは無料プランを前提にする

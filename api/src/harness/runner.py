@@ -70,6 +70,7 @@ from run.models import (
     Subagent,
     ToolInvocation,
     ToolStatus,
+    WorkerDrain,
 )
 from run.tasks import CLARIFICATION_TTL
 from runtime.launcher import SandboxUnavailable
@@ -699,7 +700,7 @@ class Runner:
         self._apply_instructions()
         self._record_finished_jobs()
         self._record_finished_subagents()
-        if self._attempt_over():
+        if self._attempt_over() or self._draining():
             self._move_to_new_attempt()
             return False
         return True
@@ -707,8 +708,13 @@ class Runner:
     def _attempt_over(self) -> bool:
         return timezone.now() - self.attempt.started >= timedelta(seconds=ATTEMPT_LIMIT_SECONDS)
 
+    def _draining(self) -> bool:
+        """Workerのdrain中で、ジョブが動いていない。ジョブが動いている間は、終わるまで（長くてもAttemptの上限まで）
+        続ける（deployment.md §6）"""
+        return WorkerDrain.is_active() and not self._running_jobs()
+
     def _move_to_new_attempt(self) -> None:
-        """Attemptの上限に達した。ジョブを止めて保存し、新しいAttemptへ移る。止めたことは新しいAttemptで知らせる。
+        """Attemptの上限に達したか、Workerのdrain中。ジョブを止めて保存し、新しいAttemptへ移る。止めたことは新しいAttemptで知らせる。
         答える人がいないRunでも、続きから動けるように保存する（harness.md §4.4、design.md §7.9）"""
         self._checkpoint(snapshot=True)
         with self.run_obj.fenced(self.attempt) as run:

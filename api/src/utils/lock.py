@@ -14,18 +14,20 @@ def _lock_key(name: str) -> int:
 
 
 @contextmanager
-def lock(name: str, timeout: float = 10) -> Iterator[None]:
+def lock(name: str, timeout: float = 10, *, shared: bool = False) -> Iterator[None]:
     """PostgreSQLのadvisory lockで、同じ名前の処理を直列化する。
 
     transactionの終わりに自動で解放されるlock（`pg_advisory_xact_lock`）を使う。
+    `shared` なら、同じ名前の `shared` どうしは待たず、`shared` でないものとだけ直列化する。
     `timeout` 秒で取れなければ `Conflict`（409）を送出する。
     RunやDeliveryの実行権の獲得には使わない（claim / leaseで行う。backend-conventions.md §4.3）。
     """
+    function = "pg_advisory_xact_lock_shared" if shared else "pg_advisory_xact_lock"
     with transaction.atomic():
         with connection.cursor() as cursor:
             cursor.execute("SELECT set_config('lock_timeout', %s, true)", [f"{int(timeout * 1000)}ms"])
             try:
-                cursor.execute("SELECT pg_advisory_xact_lock(%s)", [_lock_key(name)])
+                cursor.execute(f"SELECT {function}(%s)", [_lock_key(name)])
             except OperationalError as e:
                 if isinstance(e.__cause__, LockNotAvailable):
                     raise Conflict() from e

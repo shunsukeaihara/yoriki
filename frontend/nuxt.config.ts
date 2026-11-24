@@ -10,6 +10,10 @@ export default defineNuxtConfig({
   imports: {
     dirs: ['api'],
   },
+  typescript: {
+    // E2E も型を確かめる（Nuxt の自動 import の対象にはしない）
+    nodeTsConfig: { include: ['../e2e/**/*'] },
+  },
   i18n: {
     strategy: 'no_prefix',
     defaultLocale: 'ja',

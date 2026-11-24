@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@12.13.0",
   "scripts": {
-    "dev": "nuxt dev",
+    "dev": "nuxt dev --host localhost",
     "build": "nuxt build",
     "preview": "nuxt preview",
     "postinstall": "nuxt prepare",
@@ -16,7 +16,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@internationalized/date": "^3.12.4",
@@ -37,6 +38,7 @@
   "devDependencies": {
     "@nuxt/eslint": "^1.17.0",
     "@nuxt/test-utils": "^4.4.0",
+    "@playwright/test": "1.65.0",
     "@types/markdown-it": "^14.2.0",
     "@types/node": "^26.6.6",
     "@types/qs": "^6.14.0",

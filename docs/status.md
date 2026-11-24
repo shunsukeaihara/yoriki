@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-11-24（LLMの接続の同時実行数・1分あたりの要求数の上限を守らせた（#143）。次の作業は利用者と決める。§4）
+- 最終更新：2026-11-24（E2E（Playwright）とCIを入れた（#144）。次の作業は利用者と決める。§4）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -71,6 +71,7 @@
 | #141 | 依存の更新（Dependabotの #140 を取り込んだ）：openai 3.49.0（型付きのasync function toolの追加とマイクの録音の修正だけで、使っている機能の変更はない） |
 | #142 | Workerのdrain（design.md 0.70 §5.3・§7.9、deployment.md §6、harness.md §4.4）：管理コマンド `drain_workers`（`--wait`・`--timeout`）・`resume_workers` と印の `run.WorkerDrain`。claimを止め、動いているRunはジョブのない区切りで保存して順番待ちに戻る。親が順番待ち・再試行待ちの間もサブエージェントを動かし続け、その間の停止は停止中を経る |
 | #143 | LLMの接続の上限（design.md 0.71 §4.8、harness.md §5.2・§10.8、deployment.md §3.2）：`llm/limits.py`・`LLMConnectionLease`、`llm.wait`、モデルの応答を待つ間のleaseの延長 |
+| #144 | E2E（Playwright）とCI（development.md §3.2・§4）：`frontend/e2e/`、`deploy/compose.e2e.yaml`、`e2e.yml`。`pnpm dev` の起動の不具合の修正 |
 | #87 | 発言の渡し方（design.md 0.51 §5.5・§11.4、harness.md §7.5・§10.1・§10.2・§10.4）：発言の種類の選択をなくし、`/`・`@` を指定した発言も親へ渡す。Skill・Connectorの一覧を発言ごとに作り直し、`skill`・`connector` の引数を文字列にする。Runがアクセスできるものを権限モデルだけで決め、`/`・`@`、タスクの定義、Skillの宣言と `tools` は使用の指示にする（タスク・評価のRunも絞らない） |
 
 各PRの中身は、Pull Requestの説明と設計書を見る。
@@ -79,7 +80,7 @@
 - 実際のプロバイダのLLMのAPI（接続の確認、画像の入力、Skill・Connectorの選び方、`request_skill_edit` の使い分け、Draftの評価の判定の質）。
 - 実際のIdP（Entra ID・Google Workspace）でのログイン（client IDの発行が要る）。
 - 実際の社内DBへのConnector、HTTPSの出口と実際のZapier。
-- Linuxのホスト（本番の構成のqcluster・userns-remap）でのgVisorの会話のRun、Composeの構成でのnginxの `X-Accel-Redirect`。
+- Linuxのホストでの userns-remap と併せたgVisorの会話のRun（userns-remap なしのgVisorの会話のRunと、Composeの構成での成果物のダウンロードは、#144 のE2EがCIで通す）。
 
 ## 2 実装の中で決めたこと
 
@@ -98,8 +99,10 @@
 ## 3 まだないもの・課題
 
 - CSPのインラインのスクリプトを、ハッシュかnonceで絞る（deployment.md §4.1）。
-- フロントエンド：`app.config.ts`（テーマの色。primary / neutralを決める）、E2E（Playwright）。
-- CI：e2e、本体のイメージのレジストリへのpush（使うレジストリが未決。design.md §13）、Sandboxのイメージのmulti-arch（arm64）のビルドとDocker Hubへのpush・脆弱性スキャン（公開先のorgが未決）。
+- フロントエンド：`app.config.ts`（テーマの色。primary / neutralを決める）。
+- E2Eで後回しにしたもの：タスクの手動実行、Connector、Skill、サブエージェント、管理画面（`seed_dev` にタスクがない）。
+- 停止は区切りだけで効く（harness.md §4.2）。モデルが応答している間（長い応答や黙っている間）に停止しても、応答を受け終えるまで「停止中」のまま。E2Eで約20秒の応答を止めて分かった。応答の途中で打ち切るかは未決。
+- CI：本体のイメージのレジストリへのpush（使うレジストリが未決。design.md §13）、Sandboxのイメージのmulti-arch（arm64）のビルドとDocker Hubへのpush・脆弱性スキャン（公開先のorgが未決）。
 - Compose：channel-listener（DiscordのGateway。DiscordのPRで作る）。
 - Workerのdrainで後回しにしたもの：1台だけのdrain（Workerの名前を配備で固定する仕組みも要る）、drain中であることの画面での表示（Runは「順番待ち」と出るだけ）。
 - 業務のアプリは `llm`、`conversation`、`run`、`harness`、`stream`、`usage`、`runtime`（Runtime Profile、Launcher）、`artifact`、`skill`・`resources`、`connector`、`task`、`delivery`、`plugin` まで。`worker` 等（backend-conventions.md §1.2）は、まだない。
@@ -143,7 +146,11 @@
 
 **今の状態（2026-11-03。2026-11-11 に⑦まで進んだ）**：design.md §12の第1段階のうち、Skill（①〜⑤）と、Connector・タスク・配信（①〜⑦、Connectorの④a・④b）は終わった（#72・#73まで）。今は、業務（下の「第1段階の順番」の3）を作る前の整理を、利用者と決めた次の順で進めている。文書の整理は #74 と、その残り（design.md・harness.md の突き合わせ。#75）で、テストの高速化は #76 で行った（バックエンドのテスト全体は、手元（8コア）で約5分から約35秒に、4並列でも約45秒になった）。#74 では、status.md の終わった段階の「決めたこと・判断した点」を設計書と突き合わせ、設計書になかった今の動きに関わるものを design.md・authorization.md・harness.md・frontend-conventions.md・sandbox/CONTRACT.md へ移してから消した（経過・レビュー・確かめたことは消した。各PRの説明に残っている）。§1 はPRごとの短い一覧にした。確認用の道具は #77 で入れた（偽のLLM `fake_llm`、確認用のデータ `seed_dev`、ログイン済みのセッション `dev_session`。development.md §6）。 2026-11-06 に、agentセッションとSandboxのイメージの案を設計書へ反映した。実装は下の⑦（Sandboxのイメージ）まで済んだ。後回し：タスクの実行の論理削除の画面、物理削除の管理コマンド、監査ログの画面。
 
-**次の作業**（#143 のマージを確かめてから）：**利用者と決める**。候補は、E2E（Playwright）とCI、CSPのインラインのスクリプト、対話の連携の残り（下の「これまでの経過（#122）」）等。
+**次の作業**（#144 のマージを確かめてから）：**利用者と決める**。候補は、CSPのインラインのスクリプト（E2EがCSPを通るので、絞った後の確認に使える）、応答の途中の停止（§3）、対話の連携の残り（下の「これまでの経過（#122）」）等。
+
+これまでの経過（#144）：2026-11-24 に利用者が選んだ。会話で決めたこと：Composeを `YORIKI_DEBUG=true` で起動して `seed_dev`・`fake_llm` を使う。CIは、ラベル `e2e` のPR・`[skip ci]` のない `main` へのpush・毎週・手動。最初の範囲は、ログインとログアウト、会話の応答と続きの依頼、停止、確認への回答、Sandboxの成果物のダウンロード。決め方は development.md §3.2・§4。実装で決めたこと：Runtime Profileの登録はComposeの `registry` を読み、Sandboxは `YORIKI_SANDBOX_IMAGE_OVERRIDE` のイメージで起動する（ホストのdockerdから `registry` の名前を引けないため）。CIのgVisorは userns-remap なし。`@playwright/test` は1.65.0に固定（公開から2週間を過ぎた最新）。あわせて直した不具合：`pnpm dev` が今のNuxt CLI（4.0.1）で `options.hostname.toLowerCase is not a function` で起動しなかったので、`nuxt dev --host localhost` にした（ロックは変えていない。CLIが直ったら戻してよい）。
+
+#144 で確かめたこと：手元の開発サーバーで7件（準備を含む）が2回続けて成功。`compose.yaml`＋`compose.e2e.yaml` でも7件成功（手元のDocker Desktopなので、パス・所有者とruncだけ一時の重ね合わせで差し替えた。nginx・CSP・SSE・イメージは同じ）。フロントエンドのlint・整形・型・単体テスト（187件）・ビルド、バックエンドのテスト全体（1550件成功、31件は飛ばした）・mypy・ruff・`makemigrations --check`。GitHub Actionsの `e2e.yml` は、PRにラベル `e2e` を付けて動かし、成功した（約5分）。試していないこと：毎週の定期実行・手動の実行・`main` へのpush（マージの後でないと動かない）。
 
 これまでの経過（#143）：2026-11-24 に利用者が選び、仕様の案を確かめた（design.md 0.71 §4.8、harness.md §10.8）。会話で決めたこと：待つのは10分まで（タスクはその後 `provider` で失敗）、既定の4は既存の接続にもそのまま効かせる。実装で決めたこと：1つの表 `LLMConnectionLease` で同時実行数と要求数の両方を数える（終わった枠も60秒残す）。評価の判定は、待つ間と呼出しの間に `judging_started` を更新し、10分のやり直しで二重に判定しない。あわせて直した不具合：モデルが最初のイベントまで90秒以上黙ると、leaseを失っていた（延長がイベントの届いたときだけだった。短くしたleaseのテストで再現した）。
 

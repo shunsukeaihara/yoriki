@@ -74,9 +74,12 @@ VS Codeを標準のエディタとし、リポジトリの `.vscode/settings.jso
 
 - ESLintは不具合につながる書き方の検出だけを担当し、見た目の整形はPrettierに任せる（`eslint-config-prettier` で整形系の規則を外している）。
 - `any` は使わない。どうしても必要な場合は、理由をコメントに書いて `// eslint-disable-next-line` で1行だけ外す。
-- 単体テスト（Vitest）は導入済み（書き方は frontend-conventions.md §13）。E2E（Playwright）は、最初のテストを書くときに導入する。
+- 単体テスト（Vitest）は導入済み（書き方は frontend-conventions.md §13）。E2E（Playwright）は `frontend/e2e/` に置く（設定は `frontend/playwright.config.ts`）。
 - 単体テストは、`composables/`（`createSubmit`、`getValidationError`、日付の変換等）と `D*` ラッパーの値の受け渡しを対象にする。
-- E2Eは、ログイン、会話の送信、Runの停止・回答など、主要な流れだけに絞る。APIはテスト用のバックエンドを起動して使い、モックで置き換えない。
+- E2Eは、ログイン、会話の送信、Runの停止・回答など、主要な流れだけに絞る。APIはテスト用のバックエンドを起動して使い、モックで置き換えない。モデルだけは偽のLLM（§6.2）を使う。
+- E2Eは、起動済みのYoriki（`YORIKI_E2E_BASE_URL`。既定は `http://localhost:3000`）に対して動かす。手元では、§6の手順でデータ（`seed_dev --sandbox-image ...`）を入れ、`fake_llm`・api・qcluster・`pnpm dev` を起動してから `pnpm test:e2e` を流す（ブラウザは初回に `pnpm exec playwright install --only-shell chromium`）。CIと同じ構成は `deploy/compose.e2e.yaml` と `.github/workflows/e2e.yml` を見る。
+- E2Eのデータは消さずに残る（会話等）。ほかのデータと重なっても結果が変わらないよう、依頼ごとに違う語を付けて確かめる。失敗を隠さないよう、やり直し（retries）はしない。
+- E2Eの要素は、役割・ラベル・文言で探す。それで決められないときだけ `data-testid` を付ける。
 - `D*` ラッパーを変更したら、`/dev/inputs` で通常の表示とエラーの表示も目で確認する（frontend-conventions.md §7.3）。
 
 ### 3.3 APIの型の同期
@@ -107,7 +110,7 @@ GitHub Actionsで、Pull Requestと `main` へのpushごとに実行する。変
 | frontend（`frontend.yml`） | `frontend/**` | lint、format:check、typecheck、vitest、`nuxt build` |
 | api-types（`api-types.yml`） | `api/**`、`frontend/**` | スキーマとフロントエンドの型を生成し、コミット済みのものと差分がないこと（`git diff --exit-code`） |
 | app-images（`app-images.yml`） | Dockerfile、依存のlock、`deploy/**` | 本体のイメージをビルドし、`deploy/compose.yaml` を起動して疎通を確認する（`/api/ping/`、画面、API、静的ファイル、セキュリティのヘッダー）。レジストリへのpushは、使うレジストリを決めてから追加する。コードだけの変更では動かさない |
-| e2e（未） | `api/**`、`frontend/**` | Composeでバックエンドとフロントエンドを起動し、Playwrightを実行（`main` へのpushと、ラベルを付けたPull Requestだけ） |
+| e2e（`e2e.yml`） | `api/**`、`frontend/**`、`sandbox/**`、`deploy/**`、毎週の定期実行 | `deploy/compose.yaml` に `compose.e2e.yaml` を重ね、`YORIKI_DEBUG=true` で起動し（`seed_dev`・`fake_llm`、SandboxはgVisor）、Playwrightを実行。Pull Requestではラベル `e2e` を付けたときだけ動かす。`main` へのpush（`[skip ci]` のないもの）と手動の実行（`workflow_dispatch`）でも動く |
 | sandbox | `sandbox/**`、毎週の定期実行 | lint、イメージのビルド、契約テスト。脆弱性スキャンと、`main` でのDocker Hubへの公開（deployment.md §2.1）は、公開先のorgを決めてから加える |
 
 - 依存の更新はDependabot（`.github/dependabot.yml`。GitHub Actions、uv、npm、Dockerfileのベースイメージ、Composeの公式イメージ）でPull Requestにし、CIを通してからマージする。公開から日の浅い版を避けるため、Dependabotは `cooldown` を14日にし、npmはpnpmの `minimumReleaseAge` も維持する。
@@ -137,7 +140,7 @@ CIは、変更されたディレクトリに関係するworkflowだけが動く�
 
 ## 6 確認用の道具（`api/src/devtools/`）
 
-画面やRunを手元で確かめるための管理コマンド。`YORIKI_DEBUG=true` のときだけ動く（本番の設定では止まる）。テストでは使わない（テストはfactoryと `harness.tests.fakes.FakeAdapter` を使う）。
+画面やRunを手元で確かめるための管理コマンド。`YORIKI_DEBUG=true` のときだけ動く（本番の設定では止まる）。pytestでは使わない（factoryと `harness.tests.fakes.FakeAdapter` を使う）。E2E（§3.2）では、これでデータと偽のLLMを用意する。
 
 | コマンド | 内容 |
 |---|---|
@@ -208,6 +211,7 @@ OpenAI互換の `POST /v1/chat/completions`（ストリーミングだけ）と 
 | `[notify]` | `prepare_notification` で通知を用意し、結果を答える（タスクの依頼文に書く）。業務結果のSchemaのあるタスクでは先に `submit_result` が要り、引数がSchemaで決まるので、台本を書く |
 | `[subagent]` | `subagent` で作業領域の確認を子に任せて待つ。子は2秒待ってから、5秒かかる `shell` で作業領域を一覧して報告し、親は報告を受けて答える（作業の記録の子の入れ子の確認） |
 | `[slow]` | 2秒待ってから、少しずつ答える |
+| `[long]` | 1秒ごとに少しずつ、10秒ほどかけて答える（途中の停止の確認） |
 | `[error]`・`[429]` | 同じ要求に、最初の2回は500、1回は429を返す（Runnerの再試行の確認） |
 
 台本の形：

@@ -21,6 +21,7 @@ yoriki/
 │   ├── compose.yaml            # 単一ホストの本番構成
 │   ├── compose.dev.yaml        # ローカル開発の補助（PostgreSQL等）
 │   ├── compose.cloudflare.yaml # Cloudflare Tunnelで公開するときに重ねる（§8.3）
+│   ├── compose.e2e.yaml        # E2Eのときだけ重ねる（development.md §3.2）
 │   ├── compose.edge.yaml       # 複数台構成のエッジ（cloudflared＋振り分け用nginx、§8.4）
 │   ├── compose.app.yaml        # 複数台構成のアプリサーバー（postgresを除く、§8.4）
 │   ├── compose.db.yaml         # 複数台構成のDBサーバー（§8.4）
@@ -28,7 +29,7 @@ yoriki/
 │   ├── nginx/                  # Nginxの設定（sites/：tls.conf・http.conf、snippets/、edge/）
 │   ├── env/                    # 本番の環境変数の一覧（yoriki.env・postgres.env・cloudflared.env の example）
 │   └── .env.example            # Composeファイル自体の変数（イメージ名等。秘密情報は書かない）
-├── .github/workflows/      # backend.yml、frontend.yml、api-types.yml、app-images.yml、sandbox.yml
+├── .github/workflows/      # backend.yml、frontend.yml、api-types.yml、app-images.yml、sandbox.yml、e2e.yml
 ├── mise.toml
 └── .envrc.example
 ```

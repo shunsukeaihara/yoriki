@@ -28,6 +28,14 @@
       }
     },
     {
+      "name": "長く答える",
+      "when": {"prompt": "[long]"},
+      "reply": {
+        "chunk_delay": 1,
+        "text": "1行目を10秒ほどかけて答えています。\n\n2行目を10秒ほどかけて答えています。\n\n3行目を10秒ほどかけて答えています。\n\n4行目を10秒ほどかけて答えています。\n\n5行目を10秒ほどかけて答えています。\n\n6行目を10秒ほどかけて答えています。\n\n7行目を10秒ほどかけて答えています。\n\n8行目を10秒ほどかけて答えています。\n\n長い答えの終わりです。"
+      }
+    },
+    {
       "name": "Skillを読み込む",
       "when": {"prompt": "[skill]", "tools": "skill", "step": 0},
       "reply": {"text": "Skillを読み込みます。", "tool_calls": [{"name": "skill", "arguments": {"name": "${skill}"}}]}
@@ -247,6 +255,6 @@
     }
   ],
   "default": {
-    "text": "（偽のLLM）「${prompt}」を受け取りました。発言に [skill]・[skill-edit]・[shell]・[file]・[ask]・[todo]・[query]・[script]・[notify]・[slow]・[error]・[429] を入れると、その動きをします。"
+    "text": "（偽のLLM）「${prompt}」を受け取りました。発言に [skill]・[skill-edit]・[shell]・[file]・[ask]・[todo]・[query]・[script]・[notify]・[slow]・[long]・[error]・[429] を入れると、その動きをします。"
   }
 }

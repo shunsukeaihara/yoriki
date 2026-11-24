@@ -1,0 +1,29 @@
+# E2E（docs/development.md §3.2）のための重ね合わせ。compose.yaml に重ね、確認用のデータ（seed_dev）と偽のLLM（fake_llm）を
+# 足す。どちらも YORIKI_DEBUG=true のときだけ動く。本番では使わない。
+#   docker compose -f deploy/compose.yaml -f deploy/compose.e2e.yaml up -d
+services:
+  # 偽のLLM（development.md §6.2）。qclusterから http://fake-llm:8765/v1 で呼ぶ
+  fake-llm:
+    extends: { file: compose.app.yaml, service: api }
+    command: python manage.py fake_llm --host 0.0.0.0
+    networks: !override [backend]
+    volumes: !reset []
+    healthcheck: !reset {}
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # Runtime Profileの登録（seed）が、Sandboxのイメージを確かめるために読む
+  registry:
+    image: registry:3@sha256:be9a7062dd7e3316e5c0368e42740dc991a9ceb5d382317675a8738db0112af0
+    ports: ['127.0.0.1:5001:5000']
+    networks: [backend, egress]
+
+  # 確認用のデータ（development.md §6.1）。確認用のConnectorは、E2Eで使わないので作らない
+  seed:
+    extends: { file: compose.app.yaml, service: migrate }
+    command: >-
+      python manage.py seed_dev --skip-database --llm-url http://fake-llm:8765/v1
+      --sandbox-image registry:5000/yoriki-sandbox-docs@${YORIKI_E2E_SANDBOX_DIGEST:-}
+    depends_on:
+      postgres: { condition: service_healthy }
+      registry: { condition: service_started }

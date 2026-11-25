@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-11-24（モデルの応答の途中での停止を作った（#145）。次の作業は利用者と決める。§4）
+- 最終更新：2026-11-25（CSPの `script-src` をハッシュで絞った（#146）。次の作業は利用者と決める。§4）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -73,6 +73,7 @@
 | #143 | LLMの接続の上限（design.md 0.71 §4.8、harness.md §5.2・§10.8、deployment.md §3.2）：`llm/limits.py`・`LLMConnectionLease`、`llm.wait`、モデルの応答を待つ間のleaseの延長 |
 | #144 | E2E（Playwright）とCI（development.md §3.2・§4）：`frontend/e2e/`、`deploy/compose.e2e.yaml`、`e2e.yml`。`pnpm dev` の起動の不具合の修正 |
 | #145 | 応答の途中の停止：停止の依頼で、モデルの応答を途中で打ち切る（design.md 0.72 §5.3・§9.1、harness.md §4.2・§5.2・§10.6・§10.8・§11.2）：`llm/providers/cancel.py`、`message.assistant_stopped`、`ConversationMessage.is_partial`、`UsageLedger.is_estimated` |
+| #146 | CSPの `script-src` をハッシュで絞る（deployment.md §4.1）、アイコンを自分のサーバーから返す |
 | #87 | 発言の渡し方（design.md 0.51 §5.5・§11.4、harness.md §7.5・§10.1・§10.2・§10.4）：発言の種類の選択をなくし、`/`・`@` を指定した発言も親へ渡す。Skill・Connectorの一覧を発言ごとに作り直し、`skill`・`connector` の引数を文字列にする。Runがアクセスできるものを権限モデルだけで決め、`/`・`@`、タスクの定義、Skillの宣言と `tools` は使用の指示にする（タスク・評価のRunも絞らない） |
 
 各PRの中身は、Pull Requestの説明と設計書を見る。
@@ -92,14 +93,14 @@
 - **SSOのアカウント確認**：許可したメールドメイン、Microsoftはテナントを固定、Googleは `hd` の一致が必須（未設定なら起動しない）。
 - **テスト**：ローカルでもCIでもPostgreSQLで実行する（SQLiteは使わない）。PostgreSQLが起動していなければ、pytestは起動のコマンドを案内して止まる。NOTIFY/LISTENも実際のPostgreSQLで確かめる。
 - **静的ファイル**：本番はnginxが `/api/static/` で返す（`static` サービスが共有ボリュームへコピー）。開発時はUvicornが返す。WhiteNoiseは使わない。
-- **CSP**：NuxtのSPAがインラインのスクリプトを含むため、`script-src 'unsafe-inline'` を許可している（課題。§3）。
+- **CSP**：画面のHTMLのCSPはfrontendが付け、インラインのスクリプトは返すHTMLから計算したハッシュで許可する（deployment.md §4.1）。
 - **CI**：変更したディレクトリに関係するworkflowだけを動かす。Actionはコミットのsha、公式イメージはdigestで固定し、公開から2週間以内の版は使わない。
 - **資料のアプリ名**：Pythonの標準ライブラリの `resource` と重なるので `resources` にした。
 - **マージ**：squash mergeを基本にし、コミットを残す価値があるときだけ通常のmerge。`main` に入るコミットには、条件を満たせば `[skip ci]` を付ける（development.md §1、§4.1）。
 
 ## 3 まだないもの・課題
 
-- CSPのインラインのスクリプトを、ハッシュかnonceで絞る（deployment.md §4.1）。
+- CSPの `style-src 'unsafe-inline'` はそのまま（Nuxt UIとVueがスタイルをインラインで入れるため。deployment.md §4.1）。Djangoの画面（`/api/admin/`、Swagger UI）にはCSPを付けていない。
 - フロントエンド：`app.config.ts`（テーマの色。primary / neutralを決める）。
 - E2Eで後回しにしたもの：タスクの手動実行、Connector、Skill、サブエージェント、管理画面（`seed_dev` にタスクがない）。
 - 応答の途中の停止で後回しにしたもの：プロバイダへつなぐ途中（TCPの接続・TLSの確立）の打ち切り、Draftの評価の判定の呼出しの打ち切り、打ち切った応答の届かない推論・Tool呼出しの分の利用量、プロバイダのエラーで切れた応答の利用量の見積もり（今も数えない）、途中までの文をサブエージェントから親へ返すこと。
@@ -147,7 +148,11 @@
 
 **今の状態（2026-11-03。2026-11-11 に⑦まで進んだ）**：design.md §12の第1段階のうち、Skill（①〜⑤）と、Connector・タスク・配信（①〜⑦、Connectorの④a・④b）は終わった（#72・#73まで）。今は、業務（下の「第1段階の順番」の3）を作る前の整理を、利用者と決めた次の順で進めている。文書の整理は #74 と、その残り（design.md・harness.md の突き合わせ。#75）で、テストの高速化は #76 で行った（バックエンドのテスト全体は、手元（8コア）で約5分から約35秒に、4並列でも約45秒になった）。#74 では、status.md の終わった段階の「決めたこと・判断した点」を設計書と突き合わせ、設計書になかった今の動きに関わるものを design.md・authorization.md・harness.md・frontend-conventions.md・sandbox/CONTRACT.md へ移してから消した（経過・レビュー・確かめたことは消した。各PRの説明に残っている）。§1 はPRごとの短い一覧にした。確認用の道具は #77 で入れた（偽のLLM `fake_llm`、確認用のデータ `seed_dev`、ログイン済みのセッション `dev_session`。development.md §6）。 2026-11-06 に、agentセッションとSandboxのイメージの案を設計書へ反映した。実装は下の⑦（Sandboxのイメージ）まで済んだ。後回し：タスクの実行の論理削除の画面、物理削除の管理コマンド、監査ログの画面。
 
-**次の作業**（#145 のマージを確かめてから）：**利用者と決める**。候補は、CSPのインラインのスクリプト（E2EがCSPを通るので、絞った後の確認に使える）、対話の連携の残り（下の「これまでの経過（#122）」）等。
+**次の作業**（#146 のマージを確かめてから）：**利用者と決める**。候補は、対話の連携の残り（下の「これまでの経過（#122）」）、停止・タスクの手動実行のE2Eの補強、Dependabotの `/sandbox` の失敗の調査（#145 の経過）等。
+
+これまでの経過（#146）：2026-11-25 に利用者が選び、nonceでなくハッシュにすることを確かめた。決めたこと：ビルドと起動時の環境変数（`NUXT_PUBLIC_*`）で中身が変わるので、nginxに書かず、frontendが応答のたびに計算する（`frontend/server/`）。nginxは、frontendがCSPを付けなかった応答にだけ既定のCSPを付ける。あわせて直した不具合：`ssr: false` ではアイコンの取得元の既定が外部（api.iconify.design）で、CSPの `connect-src` で止まり、本番の画面でアイコンが出なかった。`@iconify-json/lucide`（公開から2週間を過ぎた1.2.153）を入れ、frontendの `/_nuxt_icon` から返す。
+
+#146 で確かめたこと：手元で、フロントエンドのlint・整形・型・単体テスト（190件）・ビルド。実際のnginxの設定（`sites/http.conf`）・ビルドしたfrontend・使い捨てのDB・偽のLLM・qcluster・Sandbox（runc）でE2E 8件（CSPの1件を足した）が2回続けて成功。CSPの違反がないのは `/conversations`・`/skills` で確かめ、差し込んだスクリプトが止まること、環境変数で中身が変わってもハッシュが合うこと、502に既定のCSPが付くこと、開発サーバーにCSPが付かないこと、画面で使うアイコン94個がすべて返ることを確かめた。GitHub Actionsの #146 のCIは、ラベル `e2e` のE2E（`sites/tls.conf`・frontendのDockerイメージ・gVisor。8件）を含めてすべて成功した。試していないこと：Cloudflareの裏、SSOのログイン、`/conversations`・`/skills`・ログイン・会話のほかの画面でのCSPの違反、Chromium以外のブラウザ。Codexのレビューは受けていない。
 
 これまでの経過（#145）：2026-11-24 に利用者が選び、仕様の案を確かめた。会話で決めたこと：途中までの文は会話に残して次のRunの文脈にも入れる、利用量は見積もりで記録する、打ち切るのは停止の依頼だけ（サブエージェントは親が止めたときと実行時間の上限も）、圧縮と再試行の待ちも含める。実装で決めたこと：会話に残すのは会話と修正チャットだけ（ほかのタスクは作業の記録に止めたことだけ）。打ち切りはソケットの `shutdown`（`client.close()` では待っている読み取りが終わらない）で、ソケットはhttpcoreの `trace` 拡張で得る。あわせて直した不具合：anthropic 2.x は応答の途中で接続が切れるとHTTPクライアントの例外をそのまま出すので、再試行されず内部エラーになっていた。気づいたこと：Dependabotの `/sandbox` の更新（ruff 0.17.4、pytest 9.2.0）が 2026-11-24 に「その版がない」という依存の解決の失敗で終わった（原因は調べていない）。
 

@@ -36,6 +36,7 @@
     "tailwindcss": "^4.3.5"
   },
   "devDependencies": {
+    "@iconify-json/lucide": "1.2.153",
     "@nuxt/eslint": "^1.17.0",
     "@nuxt/test-utils": "^4.4.0",
     "@playwright/test": "1.65.0",

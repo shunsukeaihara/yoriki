@@ -49,7 +49,7 @@ API・認証・フォームの部品は、DRFの規約（snake_caseのJSON、カ
 | 項目 | 採用 |
 |---|---|
 | フレームワーク | Nuxt 4（`ssr: false` のSPA） |
-| UI | Nuxt UI 4（Tailwind CSS 4、Iconifyの `i-lucide-*` アイコン、日付は `@internationalized/date`） |
+| UI | Nuxt UI 4（Tailwind CSS 4、Iconifyの `i-lucide-*` アイコン（外部へ取りに行かず、`@iconify-json/lucide` のデータをfrontendの `/_nuxt_icon` から返す。ほかの集まりのアイコンは使えない）、日付は `@internationalized/date`） |
 | 多言語化 | @nuxtjs/i18n（§10） |
 | 状態 | Pinia（setup store） |
 | HTTP | axios＋qs、change-case（snake_case⇄camelCase） |
@@ -81,7 +81,8 @@ frontend/
 ├── i18n/i18n.config.ts     # vue-i18nの設定（§10）
 ├── i18n/locales/ja.json    # 日本語は空（キーがそのまま日本語の文）
 ├── vitest.config.ts        # 単体テスト（Nuxtの環境で動かす）
-├── test/nuxt/              # 単体テスト（api/、composables/、components/。§13）
+├── test/nuxt/              # 単体テスト（api/、composables/、components/、server/。§13）
+├── server/                 # 画面のHTMLに付けるCSP（deployment.md §4.1）
 └── app/                      # （未）が付いたものは、これから作る
     ├── app.vue                 # <UApp :locale="useUiLocale()"><NuxtLayout><NuxtPage /></NuxtLayout></UApp>
     ├── app.config.ts           # （未）Nuxt UIのテーマ（primary / neutralの色）

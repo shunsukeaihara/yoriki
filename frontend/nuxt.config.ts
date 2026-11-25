@@ -24,6 +24,13 @@ export default defineNuxtConfig({
       fallbackLocale: 'ja',
     },
   },
+  icon: {
+    // アイコンはこのサーバーから返し（データは @iconify-json/lucide）、外部（api.iconify.design）へ取りに行かない
+    // （ssr: false の既定は外部）。API の既定の /api/_nuxt_icon は、/api/ を Django へ転送するので使えない
+    provider: 'server',
+    localApiEndpoint: '/_nuxt_icon',
+    fallbackToApi: false,
+  },
   nitro: {
     // 開発時だけ、/api を Django（uvicorn）へ転送して画面と API を同じオリジンにする。
     // 本番は nginx が同じ役割を持つ（docs/deployment.md §4）

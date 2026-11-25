@@ -15,6 +15,7 @@ on:
       - 'frontend/package.json'
       - 'frontend/pnpm-lock.yaml'
       - 'frontend/nuxt.config.ts'
+      - 'frontend/server/**'
       - 'deploy/**'
       - '.github/workflows/app-images.yml'
   workflow_dispatch:
@@ -77,7 +78,10 @@ jobs:
           test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost/)" = 301
           # フロントエンド（SPAのHTML）とセキュリティのヘッダー
           curl -fsSk -D headers.txt -o /dev/null $base/login
-          grep -qi '^content-security-policy:' headers.txt
+          # CSPは1つだけで、インラインのスクリプトはハッシュで許可する
+          test "$(grep -ci '^content-security-policy:' headers.txt)" = 1
+          grep -qi "^content-security-policy:.*script-src 'self' 'sha256-" headers.txt
+          if grep -i '^content-security-policy:' headers.txt | grep -q "script-src[^;]*'unsafe-inline'"; then exit 1; fi
           grep -qi '^strict-transport-security:' headers.txt
           # API（未ログイン）とCSRFのCookie
           curl -fsSk -c cookies.txt $base/api/app/v1/auth/session/ | grep -q '"is_authenticated":false'

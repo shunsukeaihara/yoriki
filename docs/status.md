@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-11-25（CSPの `script-src` をハッシュで絞った（#146）。次の作業は利用者と決める。§4）
+- 最終更新：2026-11-26（Dependabotの `/sandbox` の更新の失敗を直した（#147）。次の作業は利用者と決める。§4）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -74,6 +74,7 @@
 | #144 | E2E（Playwright）とCI（development.md §3.2・§4）：`frontend/e2e/`、`deploy/compose.e2e.yaml`、`e2e.yml`。`pnpm dev` の起動の不具合の修正 |
 | #145 | 応答の途中の停止：停止の依頼で、モデルの応答を途中で打ち切る（design.md 0.72 §5.3・§9.1、harness.md §4.2・§5.2・§10.6・§10.8・§11.2）：`llm/providers/cancel.py`、`message.assistant_stopped`、`ConversationMessage.is_partial`、`UsageLedger.is_estimated` |
 | #146 | CSPの `script-src` をハッシュで絞る（deployment.md §4.1）、アイコンを自分のサーバーから返す |
+| #147 | Dependabotの `/sandbox` の更新の失敗を直した（`sandbox/pyproject.toml` の固定の `exclude-newer` をなくした） |
 | #87 | 発言の渡し方（design.md 0.51 §5.5・§11.4、harness.md §7.5・§10.1・§10.2・§10.4）：発言の種類の選択をなくし、`/`・`@` を指定した発言も親へ渡す。Skill・Connectorの一覧を発言ごとに作り直し、`skill`・`connector` の引数を文字列にする。Runがアクセスできるものを権限モデルだけで決め、`/`・`@`、タスクの定義、Skillの宣言と `tools` は使用の指示にする（タスク・評価のRunも絞らない） |
 
 各PRの中身は、Pull Requestの説明と設計書を見る。
@@ -148,13 +149,17 @@
 
 **今の状態（2026-11-03。2026-11-11 に⑦まで進んだ）**：design.md §12の第1段階のうち、Skill（①〜⑤）と、Connector・タスク・配信（①〜⑦、Connectorの④a・④b）は終わった（#72・#73まで）。今は、業務（下の「第1段階の順番」の3）を作る前の整理を、利用者と決めた次の順で進めている。文書の整理は #74 と、その残り（design.md・harness.md の突き合わせ。#75）で、テストの高速化は #76 で行った（バックエンドのテスト全体は、手元（8コア）で約5分から約35秒に、4並列でも約45秒になった）。#74 では、status.md の終わった段階の「決めたこと・判断した点」を設計書と突き合わせ、設計書になかった今の動きに関わるものを design.md・authorization.md・harness.md・frontend-conventions.md・sandbox/CONTRACT.md へ移してから消した（経過・レビュー・確かめたことは消した。各PRの説明に残っている）。§1 はPRごとの短い一覧にした。確認用の道具は #77 で入れた（偽のLLM `fake_llm`、確認用のデータ `seed_dev`、ログイン済みのセッション `dev_session`。development.md §6）。 2026-11-06 に、agentセッションとSandboxのイメージの案を設計書へ反映した。実装は下の⑦（Sandboxのイメージ）まで済んだ。後回し：タスクの実行の論理削除の画面、物理削除の管理コマンド、監査ログの画面。
 
-**次の作業**（#146 のマージを確かめてから）：**利用者と決める**。候補は、対話の連携の残り（下の「これまでの経過（#122）」）、停止・タスクの手動実行のE2Eの補強、Dependabotの `/sandbox` の失敗の調査（#145 の経過）等。
+**次の作業**（#147 のマージを確かめてから）：**利用者と決める**。候補は、対話の連携の残り（下の「これまでの経過（#122）」）、停止・タスクの手動実行のE2Eの補強、CSPの残りの画面の確認（#146 の「試していないこと」）、Dependabotの更新の取り込み（#147 のマージの後に `/sandbox` の ruff・pytest のPRができるはず）等。
+
+これまでの経過（#147）：2026-11-26 に利用者が選んだ。原因：`sandbox/pyproject.toml` の `exclude-newer = "2026-10-08T00:00:00Z"`（#26 から）で、uvがそれより後の版をないものとして扱い、Dependabotが `cooldown` で選んだ版（ruff 0.17.4、pytest 9.2.0）を解決できなかった。決めたこと：`exclude-newer` をなくし、`/api` と同じく公開直後の版を避けるのはDependabotの `cooldown` に任せる（手元の `uv lock --upgrade` では14日以内の版も入りうる）。イメージの `requirements.lock` は別の仕組みで、変えていない。
+
+#147 で確かめたこと：一時コピーで、修正前は同じ種類の失敗（pytestの版がない）、修正後は両方の更新を解決できた。lockの固定した版は変わっていない。手元で `uv sync --locked`・ruff check・ruff format --check・テストの収集（170件）。契約テストは手元では動かしておらず、PRのCI（`sandbox.yml`）で確かめる。試していないこと：実際のDependabotの実行（マージの後でないと動かない。`/sandbox` の実行が成功し、ruff・pytest のPRができるかを確かめる）、新しい版のruff・pytestでのlintとテスト、失敗した3回のうち2026-11-22 の2回のログ（読んだのは 2026-11-24 の分だけ）。Codexのレビューは受けていない。
 
 これまでの経過（#146）：2026-11-25 に利用者が選び、nonceでなくハッシュにすることを確かめた。決めたこと：ビルドと起動時の環境変数（`NUXT_PUBLIC_*`）で中身が変わるので、nginxに書かず、frontendが応答のたびに計算する（`frontend/server/`）。nginxは、frontendがCSPを付けなかった応答にだけ既定のCSPを付ける。あわせて直した不具合：`ssr: false` ではアイコンの取得元の既定が外部（api.iconify.design）で、CSPの `connect-src` で止まり、本番の画面でアイコンが出なかった。`@iconify-json/lucide`（公開から2週間を過ぎた1.2.153）を入れ、frontendの `/_nuxt_icon` から返す。
 
 #146 で確かめたこと：手元で、フロントエンドのlint・整形・型・単体テスト（190件）・ビルド。実際のnginxの設定（`sites/http.conf`）・ビルドしたfrontend・使い捨てのDB・偽のLLM・qcluster・Sandbox（runc）でE2E 8件（CSPの1件を足した）が2回続けて成功。CSPの違反がないのは `/conversations`・`/skills` で確かめ、差し込んだスクリプトが止まること、環境変数で中身が変わってもハッシュが合うこと、502に既定のCSPが付くこと、開発サーバーにCSPが付かないこと、画面で使うアイコン94個がすべて返ることを確かめた。GitHub Actionsの #146 のCIは、ラベル `e2e` のE2E（`sites/tls.conf`・frontendのDockerイメージ・gVisor。8件）を含めてすべて成功した。試していないこと：Cloudflareの裏、SSOのログイン、`/conversations`・`/skills`・ログイン・会話のほかの画面でのCSPの違反、Chromium以外のブラウザ。Codexのレビューは受けていない。
 
-これまでの経過（#145）：2026-11-24 に利用者が選び、仕様の案を確かめた。会話で決めたこと：途中までの文は会話に残して次のRunの文脈にも入れる、利用量は見積もりで記録する、打ち切るのは停止の依頼だけ（サブエージェントは親が止めたときと実行時間の上限も）、圧縮と再試行の待ちも含める。実装で決めたこと：会話に残すのは会話と修正チャットだけ（ほかのタスクは作業の記録に止めたことだけ）。打ち切りはソケットの `shutdown`（`client.close()` では待っている読み取りが終わらない）で、ソケットはhttpcoreの `trace` 拡張で得る。あわせて直した不具合：anthropic 2.x は応答の途中で接続が切れるとHTTPクライアントの例外をそのまま出すので、再試行されず内部エラーになっていた。気づいたこと：Dependabotの `/sandbox` の更新（ruff 0.17.4、pytest 9.2.0）が 2026-11-24 に「その版がない」という依存の解決の失敗で終わった（原因は調べていない）。
+これまでの経過（#145）：2026-11-24 に利用者が選び、仕様の案を確かめた。会話で決めたこと：途中までの文は会話に残して次のRunの文脈にも入れる、利用量は見積もりで記録する、打ち切るのは停止の依頼だけ（サブエージェントは親が止めたときと実行時間の上限も）、圧縮と再試行の待ちも含める。実装で決めたこと：会話に残すのは会話と修正チャットだけ（ほかのタスクは作業の記録に止めたことだけ）。打ち切りはソケットの `shutdown`（`client.close()` では待っている読み取りが終わらない）で、ソケットはhttpcoreの `trace` 拡張で得る。あわせて直した不具合：anthropic 2.x は応答の途中で接続が切れるとHTTPクライアントの例外をそのまま出すので、再試行されず内部エラーになっていた。気づいたこと：Dependabotの `/sandbox` の更新（ruff 0.17.4、pytest 9.2.0）が 2026-11-24 に「その版がない」という依存の解決の失敗で終わった（#147 で直した）。
 
 #145 で確かめたこと：macOSとLinux（コンテナ）で、平文とTLS、応答のヘッダーの前と途中、anthropic・openai・geminiのSDKの12通りで、`shutdown` の直後に読み取りが終わった（実験）。手元で、バックエンドのテスト全体（1574件成功、31件は飛ばした）・mypy・ruff・`makemigrations --check`、フロントエンドのlint・整形・型・テスト（187件）。使い捨てのDB・偽のLLM・qcluster・Sandbox（runc）でE2E 7件が成功し、Playwrightで、停止を押してから印が出るまで1.3秒、途中までの文の表示、続きの依頼の完了を確かめた。GitHub Actionsの #145 のCIは、ラベル `e2e` のE2E（Composeの構成、gVisor）を含めてすべて成功した。試していないこと：実際のプロバイダ、プロキシ経由の接続、画面での修正チャット・タスクのRunの停止（テストもない）。Codexのレビューは受けていない。
 

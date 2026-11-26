@@ -2,7 +2,7 @@
 
 作業を引き継ぐための文書。何ができていて、何が決まっていて、次に何をするかをまとめる。作業の区切りごとに更新する。
 
-- 最終更新：2026-11-26（Dependabotの `/sandbox` の更新の失敗を直した（#147）。次の作業は利用者と決める。§4）
+- 最終更新：2026-11-26（停止のE2Eの時間の余裕を直した（#148）。次の作業は利用者と決める。§4）
 - 何を作るかは [design.md](design.md)（実装の順番は §12）、どう書くかは各規約（[backend-conventions.md](backend-conventions.md)、[frontend-conventions.md](frontend-conventions.md)、[development.md](development.md)、[deployment.md](deployment.md)）を正とする。本書と食い違う場合は、それらを優先する。
 
 ---
@@ -75,6 +75,7 @@
 | #145 | 応答の途中の停止：停止の依頼で、モデルの応答を途中で打ち切る（design.md 0.72 §5.3・§9.1、harness.md §4.2・§5.2・§10.6・§10.8・§11.2）：`llm/providers/cancel.py`、`message.assistant_stopped`、`ConversationMessage.is_partial`、`UsageLedger.is_estimated` |
 | #146 | CSPの `script-src` をハッシュで絞る（deployment.md §4.1）、アイコンを自分のサーバーから返す |
 | #147 | Dependabotの `/sandbox` の更新の失敗を直した（`sandbox/pyproject.toml` の固定の `exclude-newer` をなくした） |
+| #148 | 停止のE2Eがたまに落ちるのを直した：偽のLLMの `[long]` を5秒ごとに1行、40秒ほどかけて答えるようにした（development.md §6.2） |
 | #87 | 発言の渡し方（design.md 0.51 §5.5・§11.4、harness.md §7.5・§10.1・§10.2・§10.4）：発言の種類の選択をなくし、`/`・`@` を指定した発言も親へ渡す。Skill・Connectorの一覧を発言ごとに作り直し、`skill`・`connector` の引数を文字列にする。Runがアクセスできるものを権限モデルだけで決め、`/`・`@`、タスクの定義、Skillの宣言と `tools` は使用の指示にする（タスク・評価のRunも絞らない） |
 
 各PRの中身は、Pull Requestの説明と設計書を見る。
@@ -149,7 +150,11 @@
 
 **今の状態（2026-11-03。2026-11-11 に⑦まで進んだ）**：design.md §12の第1段階のうち、Skill（①〜⑤）と、Connector・タスク・配信（①〜⑦、Connectorの④a・④b）は終わった（#72・#73まで）。今は、業務（下の「第1段階の順番」の3）を作る前の整理を、利用者と決めた次の順で進めている。文書の整理は #74 と、その残り（design.md・harness.md の突き合わせ。#75）で、テストの高速化は #76 で行った（バックエンドのテスト全体は、手元（8コア）で約5分から約35秒に、4並列でも約45秒になった）。#74 では、status.md の終わった段階の「決めたこと・判断した点」を設計書と突き合わせ、設計書になかった今の動きに関わるものを design.md・authorization.md・harness.md・frontend-conventions.md・sandbox/CONTRACT.md へ移してから消した（経過・レビュー・確かめたことは消した。各PRの説明に残っている）。§1 はPRごとの短い一覧にした。確認用の道具は #77 で入れた（偽のLLM `fake_llm`、確認用のデータ `seed_dev`、ログイン済みのセッション `dev_session`。development.md §6）。 2026-11-06 に、agentセッションとSandboxのイメージの案を設計書へ反映した。実装は下の⑦（Sandboxのイメージ）まで済んだ。後回し：タスクの実行の論理削除の画面、物理削除の管理コマンド、監査ログの画面。
 
-**次の作業**（#147 のマージを確かめてから）：**利用者と決める**。候補は、対話の連携の残り（下の「これまでの経過（#122）」）、停止・タスクの手動実行のE2Eの補強、CSPの残りの画面の確認（#146 の「試していないこと」）、Dependabotの更新の取り込み（#147 のマージの後に `/sandbox` の ruff・pytest のPRができるはず）等。
+**次の作業**（#148 のマージを確かめてから）：**利用者と決める**。候補は、対話の連携の残り（下の「これまでの経過（#122）」）、停止・タスクの手動実行のE2Eの補強、CSPの残りの画面の確認（#146 の「試していないこと」）、Dependabotの更新の取り込み（`/sandbox` は毎週の実行なので、#147 のマージ（2026-11-25）の後の最初の実行で ruff・pytest のPRができるはず。2026-11-26 の時点ではまだ動いていない）等。#148 のマージの後に、`main` へのpushのE2Eが通ることを確かめる。
+
+これまでの経過（#148）：2026-11-26 に、#147 のマージで `main` へのpushのE2E（初めての実行）が「動いている Run を停止できる」の1件だけ失敗していたのに気づき、利用者が直すことを選んだ。原因：偽のLLMの `[long]` は、文には「10秒ほどかけて」とあったが、実際は20文字を1秒ごとに送り、全体が約9秒で終わっていた。CIでは「2行目を」が見えるまでに約12秒かかり、そのときには最後の文まで届いていて、停止を押す前の「最後の文がまだない」の確認で落ちた（停止の不具合ではない。偽のLLMに停止の要求は届いていない）。決めたこと：`chunk_delay` を5にし、1行がちょうど20文字（1つの塊）になるよう文を「5秒ほどかけて」にした（最後の文は送り始めから40秒後）。テストは変えていない。
+
+#148 で確かめたこと：手元で、`devtools` のテスト（31件）。使い捨てのDB・偽のLLM・uvicorn・qcluster・`pnpm dev` で、ログイン・会話・停止のE2E（準備を含む4件）が2回続けて成功し、偽のLLMの記録で応答の途中で接続が切れたことを確かめた（停止のテストは約8秒）。手元のE2Eの起動で気づいたこと：apiは `runserver` ではSSEが届かず画面が「順番待ち」のままになる（development.md §6 のとおり uvicorn で動かす）。`seed_dev --sandbox-image` とapiには `YORIKI_SANDBOX_INSECURE_REGISTRIES=localhost:5001` が要る（Runtime Profileがないと発言の送信が400になる）。GitHub Actionsの #148 のCIは、ラベル `e2e` のE2E（8件。停止のテストは8.1秒）を含めてすべて成功した。試していないこと：マージの後の `main` へのpushでのE2E。Codexのレビューは受けていない。
 
 これまでの経過（#147）：2026-11-26 に利用者が選んだ。原因：`sandbox/pyproject.toml` の `exclude-newer = "2026-10-08T00:00:00Z"`（#26 から）で、uvがそれより後の版をないものとして扱い、Dependabotが `cooldown` で選んだ版（ruff 0.17.4、pytest 9.2.0）を解決できなかった。決めたこと：`exclude-newer` をなくし、`/api` と同じく公開直後の版を避けるのはDependabotの `cooldown` に任せる（手元の `uv lock --upgrade` では14日以内の版も入りうる）。イメージの `requirements.lock` は別の仕組みで、変えていない。
 

@@ -154,7 +154,7 @@
 
 これまでの経過（#148）：2026-11-26 に、#147 のマージで `main` へのpushのE2E（初めての実行）が「動いている Run を停止できる」の1件だけ失敗していたのに気づき、利用者が直すことを選んだ。原因：偽のLLMの `[long]` は、文には「10秒ほどかけて」とあったが、実際は20文字を1秒ごとに送り、全体が約9秒で終わっていた。CIでは「2行目を」が見えるまでに約12秒かかり、そのときには最後の文まで届いていて、停止を押す前の「最後の文がまだない」の確認で落ちた（停止の不具合ではない。偽のLLMに停止の要求は届いていない）。決めたこと：`chunk_delay` を5にし、1行がちょうど20文字（1つの塊）になるよう文を「5秒ほどかけて」にした（最後の文は送り始めから40秒後）。テストは変えていない。
 
-#148 で確かめたこと：手元で、`devtools` のテスト（31件）。使い捨てのDB・偽のLLM・uvicorn・qcluster・`pnpm dev` で、ログイン・会話・停止のE2E（準備を含む4件）が2回続けて成功し、偽のLLMの記録で応答の途中で接続が切れたことを確かめた（停止のテストは約8秒）。手元のE2Eの起動で気づいたこと：apiは `runserver` ではSSEが届かず画面が「順番待ち」のままになる（development.md §6 のとおり uvicorn で動かす）。`seed_dev --sandbox-image` とapiには `YORIKI_SANDBOX_INSECURE_REGISTRIES=localhost:5001` が要る（Runtime Profileがないと発言の送信が400になる）。試していないこと：PRのCIのE2E（ラベル `e2e` で動かす）は下に記す。Codexのレビューは受けていない。
+#148 で確かめたこと：手元で、`devtools` のテスト（31件）。使い捨てのDB・偽のLLM・uvicorn・qcluster・`pnpm dev` で、ログイン・会話・停止のE2E（準備を含む4件）が2回続けて成功し、偽のLLMの記録で応答の途中で接続が切れたことを確かめた（停止のテストは約8秒）。手元のE2Eの起動で気づいたこと：apiは `runserver` ではSSEが届かず画面が「順番待ち」のままになる（development.md §6 のとおり uvicorn で動かす）。`seed_dev --sandbox-image` とapiには `YORIKI_SANDBOX_INSECURE_REGISTRIES=localhost:5001` が要る（Runtime Profileがないと発言の送信が400になる）。GitHub Actionsの #148 のCIは、ラベル `e2e` のE2E（8件。停止のテストは8.1秒）を含めてすべて成功した。試していないこと：マージの後の `main` へのpushでのE2E。Codexのレビューは受けていない。
 
 これまでの経過（#147）：2026-11-26 に利用者が選んだ。原因：`sandbox/pyproject.toml` の `exclude-newer = "2026-10-08T00:00:00Z"`（#26 から）で、uvがそれより後の版をないものとして扱い、Dependabotが `cooldown` で選んだ版（ruff 0.17.4、pytest 9.2.0）を解決できなかった。決めたこと：`exclude-newer` をなくし、`/api` と同じく公開直後の版を避けるのはDependabotの `cooldown` に任せる（手元の `uv lock --upgrade` では14日以内の版も入りうる）。イメージの `requirements.lock` は別の仕組みで、変えていない。
 

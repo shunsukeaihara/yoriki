@@ -759,8 +759,9 @@ def _inherit_files(
 
 def receive_webhook(
     binding: TriggerBinding, *, body: bytes, content_type: str, idempotency_key: str | None
-) -> tuple[Run, bool]:
-    """Webhookの要求を受け付けて、タスクのRunを始める（design.md §4.2）。（Run、新しく作ったか）。
+) -> tuple[Run | None, bool]:
+    """Webhookの要求を受け付けて、タスクのRunを始める（design.md §4.2）。（Run、新しく作ったか）。前に受け付けた
+    要求のRunを物理削除していれば、Runは空。
 
     `binding` は認証したときに読んだ入口。タスクと入口の行をロックしてから、鍵（作り直されていないか）・停止・今の版を
     確かめ直し、重複の判定・Runの作成・TriggerReceiptの作成を同じtransactionで行う（鍵の作り直しや停止の後に、
@@ -780,8 +781,8 @@ def receive_webhook(
     with transaction.atomic():
         _lock_task(binding)
         current, revision, key = _current_binding(binding, body, payload, idempotency_key, adapter)
-        if (existing := received_run(current, key, payload, idempotency_key, adapter)) is not None:
-            return existing, False
+        if (receipt := received_run(current, key, payload, idempotency_key, adapter)) is not None:
+            return receipt.run, False
     payload_file = InputFile(payload.file_name, payload.file_bytes)
     # 保存先への書き込みは、入口とタスクの行をロックする前に行う（保存先が遅くても、同じ入口・タスクを待たせない）。
     # 受け付けなかったら、書いたものを消す
@@ -790,8 +791,8 @@ def receive_webhook(
         with transaction.atomic():
             _lock_task(binding)
             current, revision, key = _current_binding(binding, body, payload, idempotency_key, adapter)
-            existing = received_run(current, key, payload, idempotency_key, adapter)
-            if existing is None:
+            receipt = received_run(current, key, payload, idempotency_key, adapter)
+            if receipt is None:
                 run = start_task_run(
                     current.task,
                     inputs=lambda task_revision: _input_values(adapter, binding, payload, revision, task_revision),
@@ -812,10 +813,10 @@ def receive_webhook(
     except BaseException:
         discard_files(stored)
         raise
-    if existing is not None:
+    if receipt is not None:
         # 同時に届いた再送。保存先から消すのは、ロックを外した後にする（保存先が遅くても入口・タスクを待たせない）
         discard_files(stored)
-        return existing, False
+        return receipt.run, False
     return run, True
 
 
@@ -871,8 +872,8 @@ def received_run(
     payload: Payload,
     idempotency_key: str | None,
     adapter: TriggerAdapter | None = None,
-) -> Run | None:
-    """前に受け付けた同じ要求のRun。
+) -> TriggerReceipt | None:
+    """前に受け付けた同じ要求の受付（Runを物理削除していれば、受付の `run` は空。design.md §8）。
 
     今の版と前の版のイベントIDの場所で取り出したキーのどれかで、同じ入力の受付があればそのRun（イベントIDの場所を
     変えた後の再送も新しいRunにしない）。なければ、今の版のキーで違う入力の受付があるときだけ PayloadError（409）。
@@ -888,12 +889,12 @@ def received_run(
         return None
     receipt = (
         TriggerReceipt.objects.filter(binding=binding, dedup_key__in=keys, payload_sha256=payload.sha256)
-        .select_related("run")
+        .select_related("run__conversation")
         .order_by("pk")
         .first()
     )
     if receipt is not None:
-        return receipt.run
+        return receipt
     if key is not None and TriggerReceipt.objects.filter(binding=binding, dedup_key=key).exists():
         raise PayloadError("event_id_reused", _("同じイベントIDで、前と違う内容を受け取りました"), status=409)
     return None

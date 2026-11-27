@@ -5,6 +5,7 @@ import hashlib
 import importlib
 import io
 import json
+from datetime import timedelta
 from unittest import mock
 from urllib.parse import urlencode
 
@@ -12,12 +13,14 @@ import pytest
 from django.apps import apps
 from django.contrib.auth.models import Group, Permission
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.utils import timezone
 
 from artifact.models import ArtifactKind, BlobObject
 from artifact.tests.test_api import body_of
-from conversation.models import ConversationPurpose
+from conversation.models import Conversation, ConversationPurpose
 from delivery.factories import DestinationFactory
 from run.models import Run, RunEndReason, RunEvent, RunEventKind, RunLaunch, RunStatus, RunTrigger
+from run.purge import purge_deleted_sessions
 from runtime.models import RuntimeProfile
 from task.dispatch import WEBHOOK_NOTE, discard_files, receive_webhook, store_files
 from task.factories import TaskDefinitionFactory
@@ -1017,6 +1020,35 @@ def test_the_sender_sees_only_the_state_of_its_runs(api_client, manager, task, w
     # 消した実行は、ないものとして扱う（design.md §8）
     Run.objects.get(uid=run_id).conversation.close(delete=True, actor=manager)
     assert api_client.get(url, HTTP_AUTHORIZATION=f"Bearer {key}").status_code == 404
+
+
+def test_resending_a_request_whose_run_was_deleted_starts_nothing(api_client, manager, task, webhook):
+    binding, key = webhook
+    run = Run.objects.get(uid=_send(api_client, task, key, _payload()).json()["run_id"])
+    deleted = {"run_id": None, "status": "deleted", "failure_code": None, "duplicate": True}
+    receipts = f"{_bindings(task)}{binding.uid}/receipts/"
+
+    # 論理削除：消した実行の中身は返さない
+    run.conversation.close(delete=True, actor=manager)
+    res = _send(api_client, task, key, _payload())
+    assert (res.status_code, res.json()) == (200, deleted)
+    api_client.force_login(manager)
+    [receipt] = api_client.get(receipts).json()["results"]
+    assert (receipt["run"], receipt["run_status"]) == (None, None)
+    api_client.logout()
+
+    # 物理削除：受付は残るので、同じ要求の再送で新しいRunを作らない
+    Run.objects.filter(pk=run.pk).update(
+        status=RunStatus.CANCELLED, created=timezone.now() - timedelta(days=60), finished=timezone.now()
+    )
+    Conversation.objects.filter(pk=run.conversation_id).update(workspace_discarded=timezone.now() - timedelta(days=40))
+    assert purge_deleted_sessions(days=30).sessions.total() == 1
+    res = _send(api_client, task, key, _payload())
+    assert (res.status_code, res.json()) == (200, deleted)
+    assert not Run.objects.filter(task=task).exists()
+    api_client.force_login(manager)
+    [receipt] = api_client.get(receipts).json()["results"]
+    assert (receipt["dedup_key"], receipt["run"], receipt["run_status"]) == ("event:evt-1", None, None)
 
 
 def test_task_managers_see_the_receipts(api_client, app_user, manager, task, webhook):

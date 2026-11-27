@@ -656,8 +656,14 @@ class TriggerReceipt(models.Model):
     payload_sha256 = models.CharField(_("入力のハッシュ"), max_length=64)
     payload_size = models.PositiveIntegerField(_("payloadの大きさ"))
     content_type = models.CharField(_("形式"), max_length=100)
+    # Runを物理削除したら空にする（重複のキーは残し、同じ要求の再送で新しいRunを作らない。design.md §8）
     run = models.OneToOneField(
-        "run.Run", on_delete=models.PROTECT, related_name="trigger_receipt", verbose_name=_("実行")
+        "run.Run",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="trigger_receipt",
+        verbose_name=_("実行"),
     )
 
     created = models.DateTimeField(_("受付日時"), auto_now_add=True, db_index=True)

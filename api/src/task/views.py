@@ -765,7 +765,7 @@ class AppTaskTriggerRevisionViewSet(TaskTriggerMixin, ReadOnlyModelViewSet):
 @extend_schema(description="入口の受付の履歴（Runの状態まで）", tags=["app/task/trigger/receipt"])
 class AppTaskTriggerReceiptViewSet(TaskTriggerMixin, mixins.ListModelMixin, GenericViewSet):
     permission_classes = [AppUser]
-    queryset = TriggerReceipt.objects.select_related("binding_revision", "run")
+    queryset = TriggerReceipt.objects.select_related("binding_revision", "run__conversation")
     serializer_class = TriggerReceiptSerializer
     ordering = ("-created", "-pk")
 
@@ -865,7 +865,11 @@ class HookTaskViewSet(GenericViewSet):
             # 理由にはタスクの中身（Skill・Connectorの名前、上限の値等）が入るので、送り元には返さずログに残す
             logger.warning("webhook %s cannot start task %s: %s", binding.uid, binding.task.uid, exc)
             return self._cannot_run(exc)
-        data = {**HookRunSerializer(run).data, "duplicate": not created}
+        if run is None or run.conversation.deleted:
+            # 前に受け付けた要求の実行を削除した。状態を確かめる口と同じく、消した実行の中身は返さない（design.md §8）
+            data = {"run_id": None, "status": "deleted", "failure_code": None, "duplicate": True}
+        else:
+            data = {**HookRunSerializer(run).data, "duplicate": not created}
         return Response(data, status=status.HTTP_202_ACCEPTED if created else status.HTTP_200_OK)
 
     @staticmethod

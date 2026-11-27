@@ -4014,8 +4014,9 @@ export interface components {
          *     ログ由来の情報は返さない
          */
         HookReceived: {
-            run_id: string;
-            /** @description queued・running・waiting_user・retry_wait・cancelling・completed・failed・cancelled */
+            /** @description 前に受け付けた要求の実行を削除していれば空（状態は deleted） */
+            run_id: string | null;
+            /** @description queued・running・waiting_user・retry_wait・cancelling・completed・failed・cancelled・deleted（deleted は前に受け付けた要求の実行を削除した） */
             readonly status: string;
             /** @description 失敗・停止したときの終わり方（例：step_limit） */
             readonly failure_code: string | null;
@@ -7607,9 +7608,10 @@ export interface components {
             readonly payload_size: number;
             /** 形式 */
             readonly content_type: string;
-            readonly run: string;
-            readonly run_status: components["schemas"]["RunStatusEnum"];
-            readonly run_status_display: string;
+            /** @description 実行を削除していれば空（design.md §8） */
+            readonly run: string | null;
+            readonly run_status: (components["schemas"]["RunStatusEnum"] | components["schemas"]["NullEnum"]) | null;
+            readonly run_status_display: string | null;
             /**
              * 受付日時
              * Format: date-time

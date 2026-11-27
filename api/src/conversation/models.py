@@ -172,12 +172,15 @@ class ConversationMessage(models.Model):
     # Runは会話の文脈を引き継がず、このメッセージも会話のRunの文脈には入らない（文脈はRunEventから組み立てる）
     task_run = models.ForeignKey(
         "run.Run",
-        on_delete=models.PROTECT,
+        on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name="launch_messages",
         verbose_name=_("起動したタスクのRun"),
     )
+    # 起動したタスクのRunを物理削除したときに写した、カードに出す内容（{"task", "task_name", "status", "created",
+    # "finished"}。design.md §8）。カードは削除されたことだけを出す
+    purged_task_run = models.JSONField(_("物理削除した起動したタスクのRun"), default=dict, blank=True)
     # 画面が送るID。再送されたメッセージを二重に受け付けない（design.md §5.5）
     client_message_id = models.CharField(_("クライアントのメッセージID"), max_length=64, blank=True)
 

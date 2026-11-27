@@ -15,7 +15,8 @@ onMounted(async () => {
 })
 useUserEvents(
   (event) => {
-    if (event.type === 'run.status') store.refreshOne(event.conversation)
+    // 一覧に出ない会話（評価・タスクの Run の会話）は読み直さない
+    if (event.type === 'run.status' && event.listed) store.refreshOne(event.conversation)
   },
   {
     // 通知は保存しないので、切れていた間に変わった分は一覧ごと読み直す

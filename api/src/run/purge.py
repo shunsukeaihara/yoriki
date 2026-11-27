@@ -62,7 +62,8 @@ def purge_deleted_sessions(*, days: int, dry_run: bool = False) -> PurgeResult:
     result = PurgeResult()
     targets = list(_targets(cutoff).values_list("pk", "purpose"))
     if dry_run:
-        purgeable = [(pk, purpose) for pk, purpose in targets if not _blocked(pk, leftovers=True)]
+        # 消し残しは、流せば消し直してから消すので、回すものに数えない（消せなければ実際には回る）
+        purgeable = [(pk, purpose) for pk, purpose in targets if not _blocked(pk, leftovers=False)]
         result.sessions.update(purpose for _pk, purpose in purgeable)
         result.deferred = len(targets) - len(purgeable)
         blobs = _orphans(_session_blobs([pk for pk, _purpose in purgeable]), [pk for pk, _purpose in purgeable])
@@ -72,7 +73,9 @@ def purge_deleted_sessions(*, days: int, dry_run: bool = False) -> PurgeResult:
         result.remaining = reserved.count()
         return result
     for pk, purpose in targets:
-        _discard_leftovers(pk)
+        # 消し直すのは全部止まったものだけ（動いているサブエージェントのコピーを消さない）
+        if not _blocked(pk, leftovers=False):
+            _discard_leftovers(pk)
         if _purge(pk, cutoff):
             result.sessions[purpose] += 1
         else:

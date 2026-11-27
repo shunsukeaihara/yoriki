@@ -21,7 +21,7 @@ from resources.factories import ResourceVersionFactory
 from usage.models import UsageLedger, UsagePurpose
 
 from .factories import RunFactory
-from .models import Checkpoint, ExecutionAttempt, Run, RunEvent, RunEventKind, RunStatus
+from .models import Checkpoint, ExecutionAttempt, Run, RunEvent, RunEventKind, RunStatus, Subagent
 from .purge import purge_deleted_sessions
 
 pytestmark = pytest.mark.django_db
@@ -181,6 +181,8 @@ def test_leftover_snapshots_are_deleted_first_or_the_session_is_deferred():
     Checkpoint.objects.create(
         run=run, attempt=attempt, sequence=1, storage="test-main", key="snapshots/x.tar", size=1, sha256="0" * 64
     )
+    # dry-runは、消し直せば消せるものとして数える
+    assert purge_deleted_sessions(days=30, dry_run=True).sessions.total() == 1
     with mock.patch("run.models.get_storage") as storage:
         storage.return_value.delete.side_effect = StorageError("down")
         result = purge_deleted_sessions(days=30)
@@ -267,3 +269,22 @@ def test_command(capsys):
     call_command("purge_deleted_sessions", "--days", "30")
     assert "会話: 1件を消しました" in capsys.readouterr().out
     assert not Conversation.objects.filter(pk=conversation.pk).exists()
+
+
+def test_copies_of_live_subagents_are_not_deleted():
+    conversation = _deleted()
+    run = _run(conversation, status=RunStatus.CANCELLING)
+    subagent = Subagent.objects.create(
+        run=run,
+        description="調べる",
+        prompt="調べて",
+        model_version=run.model_version,
+        copy_storage="test-main",
+        copy_key="subagents/x.tar",
+    )
+    with mock.patch("harness.subagents.get_storage") as storage:
+        result = purge_deleted_sessions(days=30)
+    assert result.deferred == 1
+    storage.return_value.delete.assert_not_called()
+    subagent.refresh_from_db()
+    assert subagent.copy_key == "subagents/x.tar"

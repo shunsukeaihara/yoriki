@@ -7643,6 +7643,8 @@ export interface components {
             type: "run.status";
             run: string;
             conversation: string;
+            /** @description 会話の一覧に出る会話か（評価・タスクのRunの会話は出ない） */
+            listed: boolean;
             status: components["schemas"]["RunStatusEnum"];
             sequence: number;
         };

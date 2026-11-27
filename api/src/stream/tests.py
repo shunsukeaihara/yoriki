@@ -10,6 +10,7 @@ from django.http import StreamingHttpResponse
 from django.test import RequestFactory
 
 from conversation.factories import ConversationFactory
+from conversation.models import ConversationPurpose
 from run.factories import RunFactory
 from run.models import RunEvent, RunEventKind, RunLaunch, RunStatus
 
@@ -54,6 +55,16 @@ def test_recording_an_event_notifies_the_run_and_the_owner():
     assert payload["type"] == "run.status"
     assert payload["run"] == run.uid
     assert payload["status"] == RunStatus.RUNNING
+    assert payload["listed"] is True
+
+
+@pytest.mark.django_db(transaction=True)
+def test_owner_notification_marks_conversations_outside_the_list():
+    run = RunFactory.create(conversation=ConversationFactory.create(purpose=ConversationPurpose.TASK))
+
+    payload = asyncio.run(_receive(f"user_{run.owner.uid}", lambda: run.set_status(RunStatus.RUNNING)))
+    assert payload["type"] == "run.status"
+    assert payload["listed"] is False
 
 
 @pytest.mark.django_db(transaction=True)

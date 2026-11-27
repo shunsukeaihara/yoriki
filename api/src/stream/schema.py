@@ -13,10 +13,11 @@ USER_RUN_STATUS_EVENT = {
         "type": {"type": "string", "enum": ["run.status"]},
         "run": {"type": "string"},
         "conversation": {"type": "string"},
+        "listed": {"type": "boolean", "description": "会話の一覧に出る会話か（評価・タスクのRunの会話は出ない）"},
         "status": {"$ref": "#/components/schemas/RunStatusEnum"},
         "sequence": {"type": "integer"},
     },
-    "required": ["type", "run", "conversation", "status", "sequence"],
+    "required": ["type", "run", "conversation", "listed", "status", "sequence"],
 }
 USER_NOTIFICATION_EVENT = {
     "type": "object",

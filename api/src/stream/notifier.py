@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any
 import psycopg
 from django.db import connection
 
+from conversation.models import OWNED_PURPOSES
+
 if TYPE_CHECKING:
     from run.models import RunEvent
 
@@ -43,9 +45,13 @@ def notify_run_event(event: "RunEvent") -> None:
     run = event.run
     notify(run_channel(run.uid), {"run": run.uid, "sequence": event.sequence})
     if event.kind == RunEventKind.STATUS:
-        # ログインユーザー宛ての通知（会話の一覧の表示等）。Runの状態だけを送る
-        owner_uid, conversation_uid = (
-            type(run).objects.filter(pk=run.pk).values_list("owner__uid", "conversation__uid").get()
+        # ログインユーザー宛ての通知（会話の一覧の表示等）。Runの状態だけを送る。`listed` は会話の一覧に出る
+        # 会話か（評価・タスクのRunの会話は出ないので、一覧はその会話を読み直さない）
+        owner_uid, conversation_uid, purpose = (
+            type(run)
+            .objects.filter(pk=run.pk)
+            .values_list("owner__uid", "conversation__uid", "conversation__purpose")
+            .get()
         )
         notify(
             user_channel(owner_uid),
@@ -53,6 +59,7 @@ def notify_run_event(event: "RunEvent") -> None:
                 "type": "run.status",
                 "run": run.uid,
                 "conversation": conversation_uid,
+                "listed": purpose in OWNED_PURPOSES,
                 "status": event.data.get("status"),
                 "sequence": event.sequence,
             },

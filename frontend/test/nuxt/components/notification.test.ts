@@ -47,7 +47,9 @@ describe('NotificationBell', () => {
     expect(wrapper.text()).toContain('2')
     unreadCount.mockResolvedValue({ unread: 3 })
     // 会話の Run の状態の変更では数え直さない
-    handlers.forEach((h) => h({ type: 'run.status', run: 'r', conversation: 'c', status: 2, sequence: 1 }))
+    handlers.forEach((h) =>
+      h({ type: 'run.status', run: 'r', conversation: 'c', listed: true, status: 2, sequence: 1 }),
+    )
     await flushPromises()
     expect(unreadCount).toHaveBeenCalledTimes(1)
     handlers.forEach((h) => h({ type: 'notification' }))

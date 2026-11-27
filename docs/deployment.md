@@ -206,6 +206,7 @@ cd frontend && pnpm dev
 - 画面とAPIを同じドメインにまとめる。認証はセッションCookie（`Secure`、`HttpOnly`、`SameSite=Lax`）で行うので、CORSは使わない。
 - HTTPは443へリダイレクトし、HTTP/2を有効にする（SSEの複数の接続を1本にまとめるため）。
 - `X-Forwarded-For`、`X-Forwarded-Proto` を付けて転送する。Uvicornは `--proxy-headers` で受け取り、Djangoは `SECURE_PROXY_SSL_HEADER` を設定する。
+- `Host` は、利用者が送った値をポートごと渡す（`$http_host`。`Host` のない要求だけ `$host`）。`$host` はポートを落とすので、80・443以外のポートで公開すると、Djangoが組み立てるURL（SSOのリダイレクトURI、招待のURL）とCSRFの `Origin` の照合からポートが落ちる。値はDjangoの `ALLOWED_HOSTS` で確かめる。
 - `X-Forwarded-For` は、nginxが判定した利用者のIPアドレス（`$remote_addr`。前段がある構成では `set_real_ip_from` で解決済み）だけで上書きする。受け取った値に付け足さない（`$proxy_add_x_forwarded_for` を使わない）。付け足すと利用者が書いた値が先頭に残り、Uvicornがそれを `REMOTE_ADDR` にするので、ログインの試行回数の制限（backend-conventions.md §6.2）を逃れられる。apiのポートはnginxからしか届かないようにする（Dockerのネットワークの中だけに開く）。
 - HSTS、`X-Content-Type-Options`、`Referrer-Policy`、フロントエンド向けのCSPを付ける（`deploy/nginx/snippets/`）。HSTSはHTTPSで受けたときだけ付ける。
 - 画面のHTMLのCSPは、frontendのNodeサーバーが付ける（`frontend/server/utils/csp.ts`）。NuxtがHTMLに書くインラインのスクリプト（importmap、色モードの初期化、`window.__NUXT__` の設定）はビルドと起動時の環境変数で変わるので、返すHTMLからSHA-256のハッシュを計算して `script-src` に書き、`'unsafe-inline'` は使わない。`style-src` の `'unsafe-inline'` は、Nuxt UIとVueがスタイルをインラインで入れるので許可する。nginxは、frontendがCSPを付けなかった応答（502等）にだけ既定のCSPを付ける（`snippets/csp.conf`）。前段でHTMLを書き換える機能（Cloudflareの、スクリプトを差し込む機能等）を使うと、差し込まれたスクリプトは止まる。開発サーバーはCSPを付けない。

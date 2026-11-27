@@ -18837,6 +18837,9 @@ components:
           type: string
         conversation:
           type: string
+        listed:
+          type: boolean
+          description: 会話の一覧に出る会話か（評価・タスクのRunの会話は出ない）
         status:
           $ref: '#/components/schemas/RunStatusEnum'
         sequence:
@@ -18845,6 +18848,7 @@ components:
       - type
       - run
       - conversation
+      - listed
       - status
       - sequence
     UserNotificationEvent:

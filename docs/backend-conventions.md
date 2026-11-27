@@ -278,6 +278,7 @@ class MessageSerializer(serializers.ModelSerializer):
 
 - 項目をまたぐ検証は `validate()` で行う。エラーはフィールド名ごとに `defaultdict(list)` に集め、最後にまとめて `serializers.ValidationError(errors)` で返す。
 - 特定の項目に属さないエラーは `{"non_field_errors": _("...")}` で返す。
+- 応答のエラーは、項目ごとにメッセージの配列にする（画面の `ValidationErrors` が受ける形）。DRFは `validate()` の外（`create()`・`save()`・ビュー）で出した `{"項目": "文"}` を配列に包まないので、例外ハンドラ（`utils.handlers`）が包む。
 - エラーメッセージは `gettext_lazy` で包んだ日本語にする。
 - ネストした子を作る場合は、`create()` で子のデータを `pop` し、`transaction.atomic()` の中で親と子を保存する。
 

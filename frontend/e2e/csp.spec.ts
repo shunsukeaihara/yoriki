@@ -22,8 +22,10 @@ test('CSP が画面を妨げず、許可していないインラインのスク�
   expect(policy).not.toMatch(/script-src[^;]*'unsafe-inline'/)
 
   await expect(page.getByRole('radio', { name: '扱わない' })).toBeVisible()
-  await page.goto('/skills')
-  await expect(page.getByRole('button', { name: 'ログアウト' })).toBeVisible()
+  for (const path of ['/skills', '/tasks', '/runs', '/usage']) {
+    await page.goto(path)
+    await expect(page.getByRole('button', { name: 'ログアウト' })).toBeVisible()
+  }
   expect(violations).toEqual([])
 
   await page.evaluate(() => {

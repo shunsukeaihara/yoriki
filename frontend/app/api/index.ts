@@ -217,6 +217,8 @@ const createAPI = () => {
         }),
         // 停止。チャットから起動した人も、自分が起動したRunを止められる
         cancel: (data: RunCancel) => http.post<TaskRun, TaskRun>(`app/v1/tasks/${id}/runs/${rid}/cancel/`, data),
+        // 論理削除（ログを見られる人。動いていれば停止を依頼する。design.md §8）
+        delete: () => http.delete<undefined, undefined>(`app/v1/tasks/${id}/runs/${rid}/`),
       }),
       // Runの配信の履歴と送り直し（エージェントは動かし直さない）
       deliveries: (did?: string) => ({

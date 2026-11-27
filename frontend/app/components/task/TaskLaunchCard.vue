@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
  * 会話に出す、チャットから起動したタスクの Run のカード（authorization.md §7.1）。起動した人が見られる結果（状態と
- * 最後の応答）を出し、業務結果と成果物は Run の画面で見る。この内容は会話のモデルへは渡らない
+ * 最後の応答）を出し、業務結果と成果物は Run の画面で見る。この内容は会話のモデルへは渡らない。削除された実行は、
+ * 削除されたことだけを出す（design.md §8）
  */
 const props = defineProps<{ run: LaunchedTaskRun }>()
 
@@ -14,23 +15,24 @@ const runPath = computed(() => `/tasks/${props.run.task}/runs/${props.run.id}`)
     <div class="flex flex-wrap items-center gap-2 text-sm">
       <UIcon name="i-lucide-workflow" class="size-4 shrink-0 text-muted" />
       <span class="min-w-0 font-medium break-words">{{ $t('タスク「{name}」', { name: run.taskName }) }}</span>
-      <RunStatusBadge :run="run" />
+      <UBadge v-if="run.deleted" color="neutral" variant="subtle">{{ $t('削除されました') }}</UBadge>
+      <RunStatusBadge v-else :run="run" />
       <span
-        v-if="!failed && run.endReasonDisplay && run.endReasonDisplay !== run.statusDisplay"
+        v-if="!run.deleted && !failed && run.endReasonDisplay && run.endReasonDisplay !== run.statusDisplay"
         class="text-xs text-muted"
         >{{ run.endReasonDisplay }}</span
       >
     </div>
     <!-- 失敗の理由の本文はログなので、起動した人には終わり方だけを出す（authorization.md §7.1） -->
     <UAlert
-      v-if="failed"
+      v-if="!run.deleted && failed"
       color="error"
       variant="subtle"
       icon="i-lucide-circle-x"
       :title="run.endReasonDisplay || run.statusDisplay"
     />
     <MarkdownContent v-if="run.response" :text="run.response" />
-    <div>
+    <div v-if="!run.deleted">
       <DBtn :to="runPath" size="sm" variant="outline" color="neutral" trailing-icon="i-lucide-arrow-right">
         {{ $t('結果を開く') }}
       </DBtn>

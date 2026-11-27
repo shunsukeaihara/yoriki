@@ -3389,6 +3389,28 @@ paths:
               schema:
                 $ref: '#/components/schemas/TaskRun'
           description: ''
+    delete:
+      operationId: app_v1_tasks_runs_destroy
+      description: タスクの実行を論理削除する（その実行のログを見られる人。design.md §8）。動いていれば停止を依頼し、全部止まったらワークスペースを消す。履歴・入力・成果物は残すが、誰にも見せない。まだ送っていない配信と、出口へ渡した取得URLは使えなくなる。修正チャットの中の実行は、修正チャットの削除で消す
+      parameters:
+      - in: path
+        name: task
+        schema:
+          type: string
+          pattern: ^[^/]+$
+        required: true
+      - in: path
+        name: uid
+        schema:
+          type: string
+        required: true
+      tags:
+      - app/task/run
+      security:
+      - cookieAuth: []
+      responses:
+        '204':
+          description: No response body
   /api/app/v1/tasks/{task}/runs/{uid}/cancel/:
     post:
       operationId: app_v1_tasks_runs_cancel_create
@@ -11151,6 +11173,10 @@ components:
           type: string
           readOnly: true
           description: 受付時のタスクの名前
+        deleted:
+          type: boolean
+          readOnly: true
+          description: 実行が削除された（応答は出さない。design.md §8）
         status:
           allOf:
           - $ref: '#/components/schemas/RunStatusEnum'
@@ -11171,7 +11197,7 @@ components:
         response:
           type: string
           readOnly: true
-          description: エージェントの最後の応答（終わるまでは空）
+          description: エージェントの最後の応答（終わるまでは空。削除したら空）
         created:
           type: string
           format: date-time
@@ -11184,6 +11210,7 @@ components:
           title: 終了日時
       required:
       - created
+      - deleted
       - end_reason
       - end_reason_display
       - finished

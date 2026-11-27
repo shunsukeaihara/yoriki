@@ -518,10 +518,17 @@ class AppTaskRevisionViewSet(TaskMixin, ReadOnlyModelViewSet):
     "人も結果だけを読める（`can_view_logs` が偽。作業の計画・使ったSkill・配信は空にする）",
     tags=["app/task/run"],
 )
-class AppTaskRunViewSet(TaskMixin, ReadOnlyModelViewSet):
+@extend_schema_view(
+    destroy=extend_schema(
+        description="タスクの実行を論理削除する（その実行のログを見られる人。design.md §8）。動いていれば停止を依頼し、"
+        "全部止まったらワークスペースを消す。履歴・入力・成果物は残すが、誰にも見せない。まだ送っていない配信と、出口へ"
+        "渡した取得URLは使えなくなる。修正チャットの中の実行は、修正チャットの削除で消す",
+    ),
+)
+class AppTaskRunViewSet(TaskMixin, mixins.DestroyModelMixin, ReadOnlyModelViewSet):
     """一覧はタスクを今管理できる人（タスクの画面の実行の履歴）。1つのRunは、Runの結果を見られる人（実行した
     ときの範囲と部門で判定する。チャットから起動した人を含む。authorization.md §7.1）なら、タスクを移した・消した後も
-    読める"""
+    読める。消せるのは、ログを見られる人だけ"""
 
     permission_classes = [AppUser]
     lookup_field = "uid"
@@ -556,6 +563,13 @@ class AppTaskRunViewSet(TaskMixin, ReadOnlyModelViewSet):
         return qs.filter(
             pk__in=Run.objects.results_visible_to(user).values("pk"), task__uid=self.kwargs["task"]
         ).with_logs_visible(user)
+
+    def perform_destroy(self, instance: Run) -> None:
+        if not logs_visible(instance):
+            raise PermissionDenied(_("この実行を削除できるのは、実行のログを見られる人だけです"))
+        if instance.launch == RunLaunch.FIX:
+            raise ValidationError({"non_field_errors": [_("修正チャットの中の実行は、修正チャットを削除して消します")]})
+        instance.conversation.close(delete=True, actor=self.request.user)
 
     @extend_schema(
         description="Runの停止を依頼する（Runの結果を見られる人。チャットから起動した人も、自分が起動したRunを止められる）",
@@ -893,5 +907,5 @@ class HookTaskRunViewSet(mixins.RetrieveModelMixin, GenericViewSet):
     serializer_class = HookRunSerializer
 
     def get_queryset(self):
-        # この入口が受け付けたRunだけ
-        return super().get_queryset().filter(trigger_receipt__binding=self.request.auth)
+        # この入口が受け付けたRunだけ。消した実行は、ないものとして扱う（design.md §8）
+        return super().get_queryset().filter(trigger_receipt__binding=self.request.auth, conversation__deleted=False)

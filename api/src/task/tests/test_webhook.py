@@ -1014,6 +1014,10 @@ def test_the_sender_sees_only_the_state_of_its_runs(api_client, manager, task, w
     assert api_client.get(f"{_hook(task)}runs/{other_run}/", HTTP_AUTHORIZATION=f"Bearer {key}").status_code == 404
     assert api_client.get(url).status_code == 401
 
+    # 消した実行は、ないものとして扱う（design.md §8）
+    Run.objects.get(uid=run_id).conversation.close(delete=True, actor=manager)
+    assert api_client.get(url, HTTP_AUTHORIZATION=f"Bearer {key}").status_code == 404
+
 
 def test_task_managers_see_the_receipts(api_client, app_user, manager, task, webhook):
     binding, key = webhook

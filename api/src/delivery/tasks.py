@@ -81,7 +81,9 @@ def _claim(delivery_id: int) -> tuple[Delivery, DeliveryAttempt, str, str] | Non
     """送る番の配信を「配信中」にする。送らないなら None（送る前に出口が使えなくなっていたら取消にする）"""
     delivery = (
         Delivery.objects.select_for_update(skip_locked=True, of=("self",))
-        .select_related("destination_revision__destination", "run__task__department", "run__task__owner")
+        .select_related(
+            "destination_revision__destination", "run__conversation", "run__task__department", "run__task__owner"
+        )
         .filter(pk=delivery_id, status__in=SENDABLE_STATUSES)
         .first()
     )

@@ -41,6 +41,7 @@ def fetch_file(token: str, request) -> HttpResponse | StreamingHttpResponse:
             "artifact__blob",
             "attempt__delivery__run__task__department",
             "attempt__delivery__run__task__owner",
+            "attempt__delivery__run__conversation",
             "attempt__delivery__destination_revision__destination",
         )
         .filter(token_hash=FileLink.hash_token(token))

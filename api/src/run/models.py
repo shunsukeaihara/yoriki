@@ -139,11 +139,12 @@ class RunEndReason(models.IntegerChoices):
 def _visible_condition(user) -> Q:
     from task.models import manageable_condition  # noqa: PLC0415  taskのModelがrunを参照するため
 
-    own = Q(owner=user, conversation__owner=user, conversation__deleted=False) & ~Q(trigger=RunTrigger.TASK)
+    own = Q(owner=user, conversation__owner=user) & ~Q(trigger=RunTrigger.TASK)
     task = Q(trigger=RunTrigger.TASK) & manageable_condition(
         user, scope_field="task_scope", owner_field="owner", department_field="task_department"
     )
-    return own | task
+    # 論理削除した会話・修正チャット・タスクの実行（会話を消す）のRunは、誰にも見せない（design.md §8）
+    return (own | task) & Q(conversation__deleted=False)
 
 
 class RunQuerySet(models.QuerySet):
@@ -161,7 +162,8 @@ class RunQuerySet(models.QuerySet):
         authorization.md §7.1）"""
         if not user.is_active:
             return self.none()
-        return self.filter(_visible_condition(user) | Q(trigger=RunTrigger.TASK, launch=RunLaunch.CHAT, owner=user))
+        launched = Q(trigger=RunTrigger.TASK, launch=RunLaunch.CHAT, owner=user, conversation__deleted=False)
+        return self.filter(_visible_condition(user) | launched)
 
     def with_logs_visible(self, user) -> "RunQuerySet":
         """ログも見られるか（`logs_visible()`）を注釈する。結果だけを見られるRun（`results_visible_to()`）で使う"""

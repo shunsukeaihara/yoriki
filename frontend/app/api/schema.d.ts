@@ -1196,7 +1196,8 @@ export interface paths {
         get: operations["app_v1_tasks_runs_retrieve"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** @description タスクの実行を論理削除する（その実行のログを見られる人。design.md §8）。動いていれば停止を依頼し、全部止まったらワークスペースを消す。履歴・入力・成果物は残すが、誰にも見せない。まだ送っていない配信と、出口へ渡した取得URLは使えなくなる。修正チャットの中の実行は、修正チャットの削除で消す */
+        delete: operations["app_v1_tasks_runs_destroy"];
         options?: never;
         head?: never;
         patch?: never;
@@ -4170,11 +4171,13 @@ export interface components {
             readonly task: string;
             /** @description 受付時のタスクの名前 */
             readonly task_name: string;
+            /** @description 実行が削除された（応答は出さない。design.md §8） */
+            readonly deleted: boolean;
             readonly status: components["schemas"]["RunStatusEnum"];
             readonly status_display: string;
             readonly end_reason: (components["schemas"]["RunEndReasonEnum"] | components["schemas"]["NullEnum"]) | null;
             readonly end_reason_display: string | null;
-            /** @description エージェントの最後の応答（終わるまでは空） */
+            /** @description エージェントの最後の応答（終わるまでは空。削除したら空） */
             readonly response: string;
             /** Format: date-time */
             readonly created: string;
@@ -10294,6 +10297,27 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TaskRun"];
                 };
+            };
+        };
+    };
+    app_v1_tasks_runs_destroy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task: string;
+                uid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description No response body */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

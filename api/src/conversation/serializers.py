@@ -262,7 +262,12 @@ class LaunchedTaskRunSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     end_reason = serializers.ChoiceField(choices=RunEndReason.choices, read_only=True, allow_null=True)
     end_reason_display = serializers.CharField(source="get_end_reason_display", read_only=True, allow_null=True)
-    response = serializers.SerializerMethodField(help_text=_("エージェントの最後の応答（終わるまでは空）"))
+    response = serializers.SerializerMethodField(
+        help_text=_("エージェントの最後の応答（終わるまでは空。削除したら空）")
+    )
+    deleted = serializers.BooleanField(
+        source="conversation.deleted", read_only=True, help_text=_("実行が削除された（応答は出さない。design.md §8）")
+    )
 
     class Meta:
         model = Run
@@ -270,6 +275,7 @@ class LaunchedTaskRunSerializer(serializers.ModelSerializer):
             "id",
             "task",
             "task_name",
+            "deleted",
             "status",
             "status_display",
             "end_reason",
@@ -285,6 +291,8 @@ class LaunchedTaskRunSerializer(serializers.ModelSerializer):
         return fixed.get("name") or (obj.task.name if obj.task else "")
 
     def get_response(self, obj: Run) -> str:
+        if obj.conversation.deleted:
+            return ""
         # このRunの応答（修正チャットのように、1つの会話に複数のRunがあっても混ざらないように）
         message = obj.messages.filter(role=MessageRole.AGENT).order_by("-pk").first()
         return message.body if message else ""

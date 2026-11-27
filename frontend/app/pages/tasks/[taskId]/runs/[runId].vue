@@ -6,6 +6,8 @@
  * 保存した内容を送り直すだけで、処理はやり直さない（処理の再実行はまだない）。失敗した・出力がおかしかった実行は、
  * 「修正チャットで直す」から、この実行の入力（ファイルと入口の本文も同じもの）で修正チャットを始めて直す（ログを見られて、
  * 今のタスクも管理できる人。design.md §11.11）。
+ * ログを見られる人は、この実行を削除できる（論理削除。動いていれば停止を依頼する。消した実行は誰にも見せず、まだ送って
+ * いない通知も送らない。修正チャットの中の実行は、修正チャットの削除で消す。design.md §8）。
  *
  * チャットから起動した人は、結果（状態・自分の入力・応答・業務結果・成果物）だけを見る（`canViewLogs` が偽）。最初の
  * 依頼（タスクの依頼文から作る）、作業の記録、配信、Runのストリームはログなので出さない。
@@ -187,6 +189,31 @@ const stop = async () => {
     stopping.value = false
   }
 }
+
+const canDelete = computed(() => canViewLogs.value && run.value?.launch !== RunLaunch.FIX)
+const deleting = ref(false)
+const remove = async () => {
+  const ok = await confirm({
+    title: t('この実行を削除しますか？'),
+    description: t(
+      '実行の記録・入力・成果物は、誰からも見えなくなります。動いていれば停止し、まだ送っていない通知も送りません',
+    ),
+    confirmLabel: t('削除'),
+    color: 'error',
+  })
+  if (!ok) return
+  deleting.value = true
+  try {
+    await api.tasks(taskId).runs(runId).delete()
+    toast.add({ title: t('実行を削除しました'), color: 'success' })
+    // タスクを移した・消した後でも開ける、タスクをまたいだ実行の履歴へ戻る
+    await navigateTo('/runs')
+  } catch (err) {
+    toast.add({ title: t('削除できませんでした'), description: makeErrorMsg(err), color: 'error' })
+  } finally {
+    deleting.value = false
+  }
+}
 </script>
 
 <template>
@@ -239,6 +266,17 @@ const stop = async () => {
             @click="stop"
           >
             <span class="hidden sm:inline">{{ $t('停止') }}</span>
+          </DBtn>
+          <DBtn
+            v-if="canDelete"
+            color="error"
+            variant="ghost"
+            icon="i-lucide-trash-2"
+            :loading="deleting"
+            :aria-label="$t('削除')"
+            @click="remove"
+          >
+            <span class="hidden sm:inline">{{ $t('削除') }}</span>
           </DBtn>
         </template>
       </UDashboardNavbar>

@@ -12,8 +12,12 @@ from .models import Delivery, Destination
 
 def send_problem(delivery: Delivery) -> str:
     """この配信の中身を今出口へ出せない理由（出せれば空文字）。固定した版のURLへ送るが、停止・削除・範囲・機密は今の
-    出口の状態で見る。タスクの停止・削除・部門の無効化・持ち主の無効化も確かめる"""
+    出口の状態で見る。タスクの停止・削除・部門の無効化・持ち主の無効化と、実行の削除も確かめる"""
     run = delivery.run
+    if run.conversation.deleted:
+        return _(
+            "実行が削除されました"
+        )  # 消した実行の結果は、まだ送っていない配信・取得URLでも出さない（design.md §8）
     destination = Destination.objects.select_related("current_revision", "department").get(
         pk=delivery.destination_revision.destination_id
     )

@@ -6,7 +6,10 @@ from django.contrib.auth.models import AnonymousUser, Group, Permission
 from django.core.exceptions import ImproperlyConfigured
 from django.test import RequestFactory
 from django.urls import URLResolver, get_resolver
+from rest_framework import serializers
+from rest_framework.permissions import AllowAny
 from rest_framework.routers import APIRootView
+from rest_framework.test import APIRequestFactory
 from rest_framework.views import APIView
 
 from llm.factories import LLMConnectionFactory
@@ -175,3 +178,29 @@ def test_file_tokens_are_masked_in_access_logs():
     )
     MaskFileTokens().filter(record)
     assert record.getMessage() == '1.2.3.4 - "GET /api/files/***/?x=1 HTTP/1.1" 200'
+
+
+class TestExceptionHandler:
+    @staticmethod
+    def _response(errors):
+        class View(APIView):
+            authentication_classes = ()
+            permission_classes = (AllowAny,)
+
+            def post(self, request):
+                raise serializers.ValidationError(errors)
+
+        return View.as_view()(APIRequestFactory().post("/"))
+
+    def test_messages_outside_validate_are_wrapped_in_lists(self):
+        # validate() の外（save()・ビュー）で出した文字列のエラーも、画面が受ける配列にする
+        res = self._response({"task": "通知先が必要です", "non_field_errors": "停止できません"})
+        assert res.status_code == 400
+        assert res.data == {"task": ["通知先が必要です"], "non_field_errors": ["停止できません"]}
+
+    def test_lists_and_nested_errors_are_kept(self):
+        errors = {"name": ["必須です"], "items": {"0": {"key": ["不正です"]}}}
+        assert self._response(errors).data == errors
+
+    def test_list_errors_are_kept(self):
+        assert self._response(["受け付けません"]).data == ["受け付けません"]

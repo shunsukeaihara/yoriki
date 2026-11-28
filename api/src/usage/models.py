@@ -216,11 +216,12 @@ class UsageLedger(models.Model):
     """1回のLLM呼出しの利用量と金額。作成後に変更しない。金額は実際に使ったモデル設定の版の単価で計算する"""
 
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
-    run = models.ForeignKey("run.Run", on_delete=models.PROTECT, related_name="usages")
+    # agentセッションを物理削除したら空にする（月の利用額と予算の集計を変えないよう、行は残す。design.md §8）
+    run = models.ForeignKey("run.Run", on_delete=models.SET_NULL, null=True, blank=True, related_name="usages")
     # 予算の計上先（Runに固定したもの。design.md §9.1）
     budget = models.ForeignKey(Budget, on_delete=models.PROTECT, related_name="usages")
     # サブエージェントの呼出しなら、その子（harness.md §10.11）。合計は親のRun・agentセッションで見る
-    subagent = models.ForeignKey("run.Subagent", on_delete=models.PROTECT, null=True, blank=True, related_name="+")
+    subagent = models.ForeignKey("run.Subagent", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
     model_version = models.ForeignKey("llm.ModelProfileVersion", on_delete=models.PROTECT, related_name="+")
     purpose = models.PositiveSmallIntegerField(_("用途"), choices=UsagePurpose.choices)
     input_tokens = models.PositiveIntegerField(_("入力token"))

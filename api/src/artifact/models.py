@@ -82,6 +82,9 @@ class BlobObject(models.Model):
     uid = NanoidField(unique=True)
     sha256 = models.CharField(_("SHA-256"), max_length=64, db_index=True)
     size = models.PositiveBigIntegerField(_("大きさ"))
+    # agentセッションの物理削除で、参照がなくなったので消すと予約した日時。保存先から消せたら行を消し、消せなければ
+    # 残って次の物理削除で消し直す（design.md §8）
+    deletion_reserved = models.DateTimeField(_("削除の予約日時"), null=True, blank=True, db_index=True)
 
     created = models.DateTimeField(auto_now_add=True)
 

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * 入口の受付の履歴。受付の日時からRunの画面（結果・ログ）へ移る（authorization.md §5.5）。重複のキーは送り元の再送を
- * 見分けるのに使う
+ * 見分けるのに使う。削除した実行は開けない（design.md §8）
  */
 import type { TableColumn } from '@nuxt/ui'
 
@@ -32,9 +32,10 @@ const columns: TableColumn<TriggerReceipt>[] = [
     :params="params"
   >
     <template #created-cell="{ row }">
-      <NuxtLink :to="`/tasks/${props.taskId}/runs/${row.original.run}`" class="text-primary">
+      <NuxtLink v-if="row.original.run" :to="`/tasks/${props.taskId}/runs/${row.original.run}`" class="text-primary">
         {{ formatDatetime(row.original.created) }}
       </NuxtLink>
+      <span v-else>{{ formatDatetime(row.original.created) }}</span>
     </template>
     <template #dedupKey-cell="{ row }">
       <code v-if="row.original.dedupKey" class="font-mono text-xs break-all">{{ row.original.dedupKey }}</code>
@@ -45,9 +46,15 @@ const columns: TableColumn<TriggerReceipt>[] = [
       <div class="text-xs text-muted">{{ row.original.contentType }}</div>
     </template>
     <template #runStatus-cell="{ row }">
-      <UBadge :color="runStatusColor(row.original.runStatus)" variant="subtle" size="sm">
+      <UBadge
+        v-if="row.original.runStatus !== null"
+        :color="runStatusColor(row.original.runStatus)"
+        variant="subtle"
+        size="sm"
+      >
         {{ row.original.runStatusDisplay }}
       </UBadge>
+      <UBadge v-else color="neutral" variant="subtle" size="sm">{{ $t('削除されました') }}</UBadge>
     </template>
   </DDataTable>
 </template>

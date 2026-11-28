@@ -427,6 +427,22 @@ class MessageSerializer(serializers.ModelSerializer):
         data = super().to_representation(instance)
         if not hasattr(instance, "instruction"):
             data["instruction"] = None
+        if instance.task_run_id is None and (purged := instance.purged_task_run):
+            # 物理削除した実行のカード。論理削除と同じく、削除されたことだけを出す（design.md §8）
+            status = RunStatus(purged["status"])
+            data["task_run"] = {
+                "id": "",
+                "task": purged.get("task", ""),
+                "task_name": purged.get("task_name", ""),
+                "deleted": True,
+                "status": status.value,
+                "status_display": str(status.label),
+                "end_reason": None,
+                "end_reason_display": None,
+                "response": "",
+                "created": purged.get("created"),
+                "finished": purged.get("finished"),
+            }
         return data
 
     def validate_attachments(self, value: list[Artifact]) -> list[Artifact]:

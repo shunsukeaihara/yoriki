@@ -10778,10 +10778,13 @@ components:
       properties:
         run_id:
           type: string
+          nullable: true
+          description: 前に受け付けた要求の実行を削除していれば空（状態は deleted）
         status:
           type: string
           readOnly: true
-          description: queued・running・waiting_user・retry_wait・cancelling・completed・failed・cancelled
+          description: queued・running・waiting_user・retry_wait・cancelling・completed・failed・cancelled・deleted（deleted
+            は前に受け付けた要求の実行を削除した）
         failure_code:
           type: string
           nullable: true
@@ -18763,13 +18766,18 @@ components:
         run:
           type: string
           readOnly: true
+          nullable: true
+          description: 実行を削除していれば空（design.md §8）
         run_status:
-          allOf:
-          - $ref: '#/components/schemas/RunStatusEnum'
           readOnly: true
+          nullable: true
+          oneOf:
+          - $ref: '#/components/schemas/RunStatusEnum'
+          - $ref: '#/components/schemas/NullEnum'
         run_status_display:
           type: string
           readOnly: true
+          nullable: true
         created:
           type: string
           format: date-time

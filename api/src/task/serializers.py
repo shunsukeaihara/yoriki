@@ -1286,9 +1286,13 @@ class TriggerReceiptSerializer(ReadOnlyModelSerializer):
 
     id = serializers.CharField(source="uid", read_only=True)
     binding_version = serializers.IntegerField(source="binding_revision.number", read_only=True)
-    run = serializers.CharField(source="run.uid", read_only=True)
-    run_status = serializers.ChoiceField(source="run.status", choices=RunStatus.choices, read_only=True)
-    run_status_display = serializers.CharField(source="run.get_status_display", read_only=True)
+    run = serializers.CharField(
+        source="run.uid", read_only=True, allow_null=True, help_text=_("実行を削除していれば空（design.md §8）")
+    )
+    run_status = serializers.ChoiceField(
+        source="run.status", choices=RunStatus.choices, read_only=True, allow_null=True
+    )
+    run_status_display = serializers.CharField(source="run.get_status_display", read_only=True, allow_null=True)
 
     class Meta:
         model = TriggerReceipt
@@ -1303,6 +1307,12 @@ class TriggerReceiptSerializer(ReadOnlyModelSerializer):
             "run_status_display",
             "created",
         ]
+
+    def to_representation(self, instance):
+        if instance.run is None or instance.run.conversation.deleted:
+            # 消した実行は誰にも見せない（design.md §8）
+            return {**super().to_representation(instance), "run": None, "run_status": None, "run_status_display": None}
+        return super().to_representation(instance)
 
 
 class TaskRunReceiptSerializer(ReadOnlyModelSerializer):
@@ -1478,6 +1488,15 @@ class HookRunSerializer(serializers.Serializer):
 
 
 class HookReceivedSerializer(HookRunSerializer):
+    run_id = serializers.CharField(
+        source="uid", allow_null=True, help_text=_("前に受け付けた要求の実行を削除していれば空（状態は deleted）")
+    )
+    status = serializers.SerializerMethodField(
+        help_text=_(
+            "queued・running・waiting_user・retry_wait・cancelling・completed・failed・cancelled・deleted"
+            "（deleted は前に受け付けた要求の実行を削除した）"
+        )
+    )
     duplicate = serializers.BooleanField(help_text=_("前に受け付けた要求の再送（新しいRunは作っていない）"))
 
 
